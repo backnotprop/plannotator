@@ -3,12 +3,13 @@
  * the floating bars. It owns no document logic. Everything it does to the
  * canvas is a command to the store, the same commands an agent sends.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import type { CanvasColor } from '../model/color';
 import { boundsOf } from '../model/document';
 import { createId } from '../model/ids';
 import type { ObjectId, ReferenceObject, Snapshot } from '../model/types';
+import { type AssetPort, pictureResolver } from '../model/assets';
 import type { LinkPreviewPort } from '../model/reference';
 import { CameraController, type Size, fitRect, worldToScreen, zoomAt } from '../view/camera';
 import { indexFor } from '../view/document-index';
@@ -17,6 +18,7 @@ import { CanvasView } from './CanvasView';
 import { CANVAS_STRINGS, HistoryBar, SelectionBar, ToolDock, ZoomBar } from './chrome';
 import { EditorState } from './editor-state';
 import { GestureController } from './gestures';
+import { addPicture, looksLikePicture } from './pictures';
 import { type PlanDropTarget, beginPlanDrag } from './plan-drop';
 import { type PasteResolver, addReference, referenceFromPaste } from './references';
 
@@ -31,6 +33,12 @@ export interface CanvasEditorProps {
    */
   onAddToPlan?: (snapshot: Snapshot, drop: PlanDropTarget | null) => void;
   resolveImageSrc?: (src: string) => string;
+  /**
+   * Where pasted and picked pictures are kept (`model/assets.ts`). Absent:
+   * the picture tool is not shown, and a pasted picture gets a line saying
+   * pictures cannot be added here.
+   */
+  assets?: AssetPort | null;
   /** Fetches a pasted web address's preview. Absent: a web card shows its address. */
   linkPreview?: LinkPreviewPort;
   /** Recognises the host's own artifacts and plans in pasted text. */
@@ -52,7 +60,7 @@ export interface CanvasEditorProps {
 
 const HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
 
-export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveImageSrc, linkPreview, resolvePaste, onOpenReference, onUserCamera, keepMounted, overscan, children, chromeHidden, className }: CanvasEditorProps) {
+export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveImageSrc, assets, linkPreview, resolvePaste, onOpenReference, onUserCamera, keepMounted, overscan, children, chromeHidden, className }: CanvasEditorProps) {
   const ownCamera = useMemo(() => new CameraController(), []);
   const camera = givenCamera ?? ownCamera;
   const state = useMemo(() => new EditorState(), []);
@@ -64,6 +72,8 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
   const filePicker = useRef<HTMLInputElement>(null);
   const userCamera = useRef(onUserCamera);
   userCamera.current = onUserCamera;
+
+  const resolvePicture = useMemo(() => pictureResolver(assets, resolveImageSrc), [assets, resolveImageSrc]);
 
   const gestures = useMemo(
     () => new GestureController({ store, camera, state, root: () => root.current, onUserCamera: () => userCamera.current?.() }),
@@ -153,33 +163,22 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
 
   const viewCentre = () => ({ x: camera.get().x + size.current.w / camera.get().z / 2, y: camera.get().y + size.current.h / camera.get().z / 2 });
 
+  /** A line the person can read when something they did could not be done. It clears itself. */
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
   const addImageFile = useCallback(
     (file: File) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const src = String(reader.result);
-        const probe = new Image();
-        const add = (w: number, h: number) => {
-          // Keep it visible and grabbable whatever its shape: at most 320 on
-          // the long side, at least 24 on the short one.
-          const scale = Math.min(1, 320 / Math.max(w, h));
-          const width = Math.max(24, Math.round(w * scale));
-          const height = Math.max(24, Math.round(h * scale));
-          const centre = viewCentre();
-          const id = createId('image');
-          const result = store.dispatch({
-            type: 'add',
-            objects: [{ id, type: 'image', src, alt: file.name, x: Math.round(centre.x - width / 2), y: Math.round(centre.y - height / 2), w: width, h: height }],
-          });
-          if (result.ok) state.select([id]);
-        };
-        probe.onload = () => add(probe.naturalWidth || 160, probe.naturalHeight || 120);
-        // A file that is not a picture still lands on the board, showing its
-        // name, so the person sees that it did not work.
-        probe.onerror = () => add(160, 120);
-        probe.src = src;
-      };
-      reader.readAsDataURL(file);
+      void addPicture(store, assetsRef.current, file, viewCentre()).then((result) => {
+        if ('id' in result) state.select([result.id]);
+        else setNotice(CANVAS_STRINGS.pictureProblems[result.problem]);
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [camera, state, store],
@@ -204,7 +203,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
     const paste = (event: ClipboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (!mine || !root.current?.isConnected || target?.closest?.('input, textarea, [contenteditable]')) return;
-      const picture = [...(event.clipboardData?.files ?? [])].find((file) => file.type.startsWith('image/'));
+      const picture = [...(event.clipboardData?.files ?? [])].find(looksLikePicture);
       if (picture) {
         event.preventDefault();
         addImageFile(picture);
@@ -257,7 +256,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
       selection={ui.selection}
       editingId={ui.editingId}
       onEditEnd={onEditEnd}
-      resolveImageSrc={resolveImageSrc}
+      resolveImageSrc={resolvePicture}
       keepMounted={keepMounted}
       overscan={overscan}
       onSize={onSize}
@@ -307,13 +306,18 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
             addToPlan={addToPlan}
             onOpen={single?.type === 'reference' && (onOpenReference || single.target.kind === 'web') ? () => openReference(single) : undefined}
           />
-          <ToolDock state={state} tool={ui.tool} onPickImage={() => filePicker.current?.click()} canSnapshot={!!onAddToPlan} />
+          <ToolDock state={state} tool={ui.tool} onPickImage={assets ? () => filePicker.current?.click() : undefined} canSnapshot={!!onAddToPlan} />
           <HistoryBar store={store} />
           <ZoomBar camera={camera} onZoom={zoomBy} onFit={fit} onReset={() => zoomBy(1 / camera.get().z)} />
           {children}
         </>
       )}
-      <input ref={filePicker} type="file" accept="image/*" hidden onChange={pickImage} />
+      {notice ? (
+        <div className="pcv-notice" role="status">
+          {notice}
+        </div>
+      ) : null}
+      <input ref={filePicker} type="file" accept="image/*,.heic,.heif,.tif,.tiff,.bmp" hidden onChange={pickImage} />
     </CanvasView>
   );
 }

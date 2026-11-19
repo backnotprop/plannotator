@@ -33,14 +33,14 @@ const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof Object
   frame: ['title', 'link', 'style', 'shape'],
   image: ['src', 'alt', 'link', 'style', 'shape'],
   sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style', 'shape'],
-  html: ['html', 'link', 'style', 'shape'],
+  html: ['html', 'alt', 'link', 'style', 'shape'],
   reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style', 'shape'],
   arrow: ['from', 'to', 'label', 'link', 'style', 'routing'],
   group: ['label', 'link'],
 };
 
 /** Fields an edit removes when given `null` or an empty string. */
-const OPTIONAL_FIELDS = new Set(['link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'routing']);
+const OPTIONAL_FIELDS = new Set(['alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'routing']);
 
 /** Add the event that turns `before` into `after`, when they differ. */
 function push(events: CanvasEvent[], before: CanvasObject, after: CanvasObject): void {

@@ -76,10 +76,11 @@ const IMAGE_DATA_RE = /^data:image\/(?:png|jpeg|gif|webp|avif|svg\+xml)[;,]/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
 /**
- * Whether a picture or sprite address may be handed to an `<img>` (or a CSS
- * background): http(s), blob, an image `data:` URL, or a path with no scheme
- * (the host resolves it). Never `javascript:` or another scheme. A picture
- * element runs nothing, so any web picture is fine to show.
+ * Whether an address may be handed to an `<img>` (or a CSS background) once
+ * a reference has been resolved: http(s), blob, an image `data:` URL, or a
+ * path with no scheme. Never `javascript:` or another scheme. This is about
+ * what the browser is asked to load; what a document may store is narrower
+ * (`isPictureRef`).
  */
 export function isSafeImageSrc(src: unknown): src is string {
   if (typeof src !== 'string' || src.length === 0 || src.length > 2_000_000) return false;

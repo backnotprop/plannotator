@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { checkObject, parseDocument, serializeDocument } from './codec';
 import { isCustomColor, parseColor } from './color';
 import { boundsOf, objectBounds, resolveArrow, selectionUnit } from './document';
+import { isPictureRef, pictureResolver } from './assets';
 import { HTML_ITEM_CSP, HTML_ITEM_MAX_LENGTH, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from './html-item';
 import { CANVAS_DOCUMENT_VERSION, type CanvasDocument } from './types';
 
@@ -93,23 +94,41 @@ describe('what an object may hold', () => {
   });
 
   test('a colour is a name or a plain CSS colour, never something that can load or run', () => {
-    for (const good of ['#abc', '#A1B2C3D4', 'rgb(10 20 30 / 50%)', 'oklch(0.7 0.15 250)', 'hsl(120deg, 50%, 40%)']) expect(isCustomColor(good)).toBe(true);
-    for (const bad of ['url(https://x.test/a.png)', 'var(--x)', 'red; background: url(x)', 'rgb(1 2 3); x', 'expression(alert(1))', '#12', 'blue']) {
+    for (const good of ['#abc', '#A1B2C3D4', 'rgb(10 20 30 / 50%)', 'oklch(0.7 0.15 250)', 'hsl(120deg, 50%, 40%)', 'hwb(194 0% 0%)', 'color(display-p3 1 0.5 0)', 'color(srgb 0.2 0.4 0.6 / 0.5)', 'rebeccapurple', 'Navy', 'lightgoldenrodyellow']) expect(isCustomColor(good)).toBe(true);
+    for (const bad of ['url(https://x.test/a.png)', 'var(--x)', 'red; background: url(x)', 'rgb(1 2 3); x', 'expression(alert(1))', '#12', 'transparent', 'currentcolor', 'inherit', 'color(url(x))', 'color(display-p3 1 0 0); x', 'color-mix(in srgb, red, blue)', 'notacolour']) {
       expect(isCustomColor(bad)).toBe(false);
     }
+    // The canvas's own six names win: blue is the theme's blue. Any other CSS name is a custom colour.
     expect(parseColor('blue')).toBe('blue');
+    expect(parseColor('navy')).toEqual({ custom: 'navy' });
     expect(parseColor({ custom: 'var(--x)' })).toBeNull();
     expect(checkObject({ ...placed, type: 'note', text: '', color: 'url(x)' }).ok).toBe(false);
   });
 
-  test('a picture address is http(s), blob, an image data URL or a relative path', () => {
-    for (const good of ['https://example.test/a.png', 'blob:https://example.test/1', 'data:image/png;base64,AAAA', 'data:image/svg+xml;charset=utf-8,%3Csvg%3E', 'shots/a.png']) {
-      expect(isSafeImageSrc(good)).toBe(true);
+  test('a document holds a reference to a picture, never its bytes', () => {
+    for (const good of ['asset:sha256-9f2c1a7b', 'https://example.test/a.png', 'http://example.test/a.png', 'shots/a.png', '/chart.svg']) {
+      expect(isPictureRef(good)).toBe(true);
+      expect(checkObject({ ...placed, type: 'image', src: good, alt: 'x' }).ok).toBe(true);
     }
-    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'file:///etc/passwd', 'vbscript:x', '//example.test/a.png', '']) {
-      expect(isSafeImageSrc(bad)).toBe(false);
+    for (const bad of ['data:image/png;base64,AAAA', 'data:image/svg+xml;charset=utf-8,%3Csvg%3E', 'blob:https://example.test/1', 'javascript:alert(1)', 'data:text/html,<script>1</script>', 'file:///etc/passwd', 'vbscript:x', '//example.test/a.png', 'asset:', 'asset:../x', 'has space.png', '']) {
+      expect(isPictureRef(bad)).toBe(false);
+      expect(checkObject({ ...placed, type: 'image', src: bad, alt: 'x' }).ok).toBe(false);
+      expect(checkObject({ ...placed, type: 'reference', target: { kind: 'plan', anchor: 'A' }, image: bad || 'data:image/png;base64,AA' }).ok).toBe(false);
     }
-    expect(checkObject({ ...placed, type: 'image', src: 'javascript:alert(1)', alt: '' }).ok).toBe(false);
+  });
+
+  test('what the browser is asked to load, once a reference is resolved, is a picture address and nothing else', () => {
+    for (const good of ['https://example.test/a.png', 'blob:https://example.test/1', 'data:image/png;base64,AAAA', 'shots/a.png']) expect(isSafeImageSrc(good)).toBe(true);
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'file:///etc/passwd', '//example.test/a.png', '']) expect(isSafeImageSrc(bad)).toBe(false);
+    const resolve = pictureResolver({ put: async () => ({ refused: 'failed' }), url: (ref) => (ref === 'asset:known' ? 'blob:x' : null) }, (src) => `/files/${src}`);
+    expect(resolve('asset:known')).toBe('blob:x');
+    expect(resolve('asset:unknown')).toBe('');
+    expect(resolve('shots/a.png')).toBe('/files/shots/a.png');
+  });
+
+  test('an HTML item carries words for what it shows', () => {
+    const item = checkObject({ ...placed, type: 'html', html: '<b>1</b>', alt: 'One, in bold' });
+    expect(item.ok && item.value).toMatchObject({ alt: 'One, in bold' });
   });
 });
 

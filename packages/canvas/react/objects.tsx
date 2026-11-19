@@ -68,10 +68,12 @@ function Words({ id, text, editing, className, onEditEnd }: { id: string; text: 
 
 function Picture({ object, resolveImageSrc }: { object: ImageObject; resolveImageSrc?: (src: string) => string }) {
   const [failed, setFailed] = useState(false);
-  const src = isSafeImageSrc(object.src) ? (resolveImageSrc ? resolveImageSrc(object.src) : object.src) : null;
+  // The stored reference is resolved first; what the browser is then asked to load is checked.
+  const resolved = resolveImageSrc ? resolveImageSrc(object.src) : object.src;
+  const src = isSafeImageSrc(resolved) ? resolved : null;
   useEffect(() => setFailed(false), [src]);
   if (!src || failed) return <div className="pcv-missing">{object.alt}</div>;
-  return <img src={src} alt={object.alt} draggable={false} loading="lazy" decoding="async" onError={() => setFailed(true)} />;
+  return <img src={src} alt={object.alt} draggable={false} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
 }
 
 function spriteStyle(object: SpriteObject, resolveImageSrc?: (src: string) => string): React.CSSProperties {
@@ -99,7 +101,7 @@ function HtmlFrame({ object }: { object: HtmlObject }) {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     return () => observer.disconnect();
   }, []);
-  return <iframe ref={frame} title="" sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme)} {...HTML_ITEM_FRAME_ATTRS} />;
+  return <iframe ref={frame} title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme)} {...HTML_ITEM_FRAME_ATTRS} />;
 }
 
 /** The words a card shows for what kind of thing it points at, when the thing has no site of its own. */
@@ -114,8 +116,9 @@ const ARTIFACT_GLYPHS: Record<ArtifactKind, React.ComponentType> = { image: Imag
 function CardPicture({ src, className, resolveImageSrc }: { src: string; className: string; resolveImageSrc?: (src: string) => string }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
-  if (failed || !isSafeImageSrc(src)) return null;
-  return <img className={className} src={resolveImageSrc ? resolveImageSrc(src) : src} alt="" draggable={false} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
+  const resolved = resolveImageSrc ? resolveImageSrc(src) : src;
+  if (failed || !isSafeImageSrc(resolved)) return null;
+  return <img className={className} src={resolved} alt="" draggable={false} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
 }
 
 /**
@@ -191,7 +194,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
         </div>
       );
     case 'sprite':
-      return isSafeImageSrc(object.src) ? (
+      return isSafeImageSrc(resolveImageSrc ? resolveImageSrc(object.src) : object.src) ? (
         <div className="pcv-obj pcv-sprite" role="img" aria-label={object.alt} {...common} style={{ ...style, ...spriteStyle(object, resolveImageSrc) }} />
       ) : (
         <div className="pcv-obj pcv-sprite" {...common} style={{ ...style, animation: 'none' }}>
@@ -206,7 +209,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
       );
     case 'html':
       return (
-        <div className="pcv-obj pcv-html" {...common} style={style}>
+        <div className="pcv-obj pcv-html" role={object.alt ? 'img' : undefined} aria-label={object.alt} {...common} style={style}>
           {rich ? <HtmlFrame object={object} /> : <div className="pcv-missing" />}
         </div>
       );
@@ -231,13 +234,7 @@ export const ArrowView = memo(function ArrowView({ arrow, x1, y1, x2, y2, select
   const head = `${x2},${y2} ${x2 - HEAD * Math.cos(angle - SPREAD)},${y2 - HEAD * Math.sin(angle - SPREAD)} ${x2 - HEAD * Math.cos(angle + SPREAD)},${y2 - HEAD * Math.sin(angle + SPREAD)}`;
   const color = colorAttrs(arrow.color);
   return (
-    <g
-      className="pcv-arrow"
-      data-id={arrow.id}
-      data-color={color['data-color'] === 'custom' ? undefined : color['data-color']}
-      data-selected={selected ? '' : undefined}
-      style={typeof arrow.color === 'object' ? { color: arrow.color.custom } : undefined}
-    >
+    <g className="pcv-arrow" data-id={arrow.id} data-color={color['data-color']} data-selected={selected ? '' : undefined} style={color.style}>
       <line x1={x1} y1={y1} x2={x2 - 4 * Math.cos(angle)} y2={y2 - 4 * Math.sin(angle)} />
       <polygon points={head} />
       {arrow.label ? (

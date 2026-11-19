@@ -7,3 +7,5 @@ export * from './objects';
 export * from './references';
 export * from './link-preview';
 export * from './plan-drop';
+export * from './memory-assets';
+export * from './pictures';

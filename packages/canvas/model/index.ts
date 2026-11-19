@@ -7,3 +7,4 @@ export * from './ids';
 export * from './types';
 export * from './reference';
 export * from './capture';
+export * from './assets';

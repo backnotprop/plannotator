@@ -22,7 +22,7 @@ describe('an agent speaks the same commands as a person', () => {
       JSON.stringify({
         type: 'add',
         objects: [
-          { id: 'pic', type: 'image', x: 0, y: 0, w: 200, h: 100, src: 'data:image/png;base64,AAAA', alt: 'A chart' },
+          { id: 'pic', type: 'image', x: 0, y: 0, w: 200, h: 100, src: 'asset:sha256-9f2c1a', alt: 'A chart' },
           { id: 'spin', type: 'sprite', x: 0, y: 120, w: 24, h: 24, src: 'sprites/spin.png', alt: 'Working', frames: 8, fps: 12 },
           { id: 'table', type: 'html', x: 0, y: 160, w: 300, h: 80, html: '<table><tr><td>1</td></tr></table>' },
         ],

@@ -2,9 +2,10 @@
  * A snapshot as a still picture: one self-contained SVG, no script, no
  * outside reference. It is the fallback a plan carries for places the live
  * canvas cannot go (another Markdown viewer, an export, a canvas that cannot
- * be loaded). Simpler than the live figure on purpose: one line of text per
- * object, no embedded HTML, and a picture only when its address is a
- * `data:` URL, so the file never asks the network for anything.
+ * be loaded). Simpler than the figure on purpose: one line of text per
+ * object, no embedded HTML, and a picture is drawn as its words in a box, so
+ * the file never asks the network for anything. A host writes it to a file
+ * or an asset and puts that address in the plan, never the SVG itself.
  */
 import type { CanvasColor } from '../model/color';
 import { captureDocument } from '../model/capture';
@@ -61,8 +62,11 @@ const DARK: Palette = {
   },
 };
 
+/** Text made safe for XML: the five characters escaped, and the control characters XML forbids taken out (one of them makes the whole file fail to load). */
 const esc = (value: string): string =>
-  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const n = (value: number): string => String(Math.round(value * 100) / 100);
 
@@ -116,9 +120,6 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
     }
     case 'image':
     case 'sprite':
-      if (object.type === 'image' && /^data:image\//i.test(object.src)) {
-        return `<image ${box} href="${esc(object.src)}" preserveAspectRatio="xMidYMid meet"><title>${esc(object.alt)}</title></image>`;
-      }
       return `<rect ${box} rx="6" fill="${palette.card}" stroke="${palette.line}" stroke-dasharray="4 3"/><text x="${n(x + 8)}" y="${n(y + 20)}" font-size="12" fill="${palette.muted}">${esc(fitLine(object.alt, w - 16, 12))}</text>`;
     case 'html':
       return `<rect ${box} rx="6" fill="none" stroke="${palette.line}" stroke-dasharray="4 3"/>`;
@@ -157,11 +158,4 @@ export function snapshotToSvg(doc: CanvasDocument, id: SnapshotId, options: Snap
     arrows.join('') +
     '</svg>'
   );
-}
-
-/** The same picture as a `data:` URL, ready for an `<img>` or a Markdown image. */
-export function snapshotToDataUrl(doc: CanvasDocument, id: SnapshotId, options: SnapshotPictureOptions = {}): string | null {
-  const svg = snapshotToSvg(doc, id, options);
-  // Parentheses are legal in a URL but end a Markdown image's address.
-  return svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}` : null;
 }

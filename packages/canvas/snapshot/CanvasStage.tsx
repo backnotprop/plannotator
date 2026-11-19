@@ -43,7 +43,7 @@ import { FIGURE_MAX_ZOOM, type SnapshotOpenRequest } from './SnapshotFigure';
 import { SNAPSHOT_STRINGS } from './strings';
 import { type Spring, type TransitionEnds, frameAt, ghostOpacity, insetToClipPath, recedeAt, springAtRest, stepSpring } from './transition';
 
-export interface CanvasStageProps extends Pick<CanvasEditorProps, 'onAddToPlan' | 'resolveImageSrc' | 'linkPreview' | 'resolvePaste' | 'onOpenReference'> {
+export interface CanvasStageProps extends Pick<CanvasEditorProps, 'onAddToPlan' | 'resolveImageSrc' | 'assets' | 'linkPreview' | 'resolvePaste' | 'onOpenReference'> {
   /** What to open. Null: nothing is open. */
   request: SnapshotOpenRequest | null;
   registry?: CanvasRegistry | null;

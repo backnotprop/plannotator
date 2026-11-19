@@ -7,7 +7,8 @@
 import { parseColor } from './color';
 import { bindingFault, groupCycle, idMap, isBoundEnd } from './document';
 import { isFiniteRect } from './geometry';
-import { HTML_ITEM_MAX_LENGTH, isSafeImageSrc, isWebUrl } from './html-item';
+import { isPictureRef } from './assets';
+import { HTML_ITEM_MAX_LENGTH, isWebUrl } from './html-item';
 import { isValidId } from './ids';
 import {
   ARTIFACT_KINDS,
@@ -170,11 +171,11 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       if (!isText(value.title, LIMITS.title)) return fail(`${id}: title is missing or too long`);
       return { ok: true, value: { ...base, ...r, type, title: value.title } };
     case 'image':
-      if (!isSafeImageSrc(value.src)) return fail(`${id}: src must be http(s), blob, an image data URL or a relative path`);
+      if (!isPictureRef(value.src)) return fail(`${id}: src must be an asset reference, an http(s) address or a relative path (a picture's bytes are stored by the host, not in the document)`);
       if (!isText(value.alt, LIMITS.title)) return fail(`${id}: alt is missing or too long`);
       return { ok: true, value: { ...base, ...r, type, src: value.src, alt: value.alt } };
     case 'sprite': {
-      if (!isSafeImageSrc(value.src)) return fail(`${id}: src must be http(s), blob, an image data URL or a relative path`);
+      if (!isPictureRef(value.src)) return fail(`${id}: src must be an asset reference, an http(s) address or a relative path (a picture's bytes are stored by the host, not in the document)`);
       if (!isText(value.alt, LIMITS.title)) return fail(`${id}: alt is missing or too long`);
       const { frames, fps } = value;
       if (typeof frames !== 'number' || !Number.isInteger(frames) || frames < 1 || frames > LIMITS.spriteFrames) return fail(`${id}: frames must be a whole number from 1 to ${LIMITS.spriteFrames}`);
@@ -183,7 +184,8 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
     }
     case 'html':
       if (!isText(value.html, HTML_ITEM_MAX_LENGTH)) return fail(`${id}: html is missing or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
-      return { ok: true, value: { ...base, ...r, type, html: value.html } };
+      if (value.alt !== undefined && !isText(value.alt, LIMITS.title)) return fail(`${id}: alt is too long`);
+      return { ok: true, value: { ...base, ...r, type, html: value.html, ...(value.alt ? { alt: value.alt as string } : {}) } };
     case 'reference': {
       const target = readTarget(value.target);
       if (!target) return fail(`${id}: target must be a web address (http or https), an artifact or a place in a plan`);
@@ -197,7 +199,7 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       for (const key of ['image', 'icon'] as const) {
         const src = value[key];
         if (src === undefined || src === '') continue;
-        if (!isSafeImageSrc(src)) return fail(`${id}: ${key} must be http(s), blob, an image data URL or a relative path`);
+        if (!isPictureRef(src)) return fail(`${id}: ${key} must be an asset reference, an http(s) address or a relative path`);
         out[key] = src;
       }
       return { ok: true, value: out as unknown as CanvasObject };

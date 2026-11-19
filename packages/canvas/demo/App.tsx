@@ -14,13 +14,15 @@ import { flushSync } from 'react-dom';
 import type { CanvasStore } from '../events/store';
 import { createId } from '../model/ids';
 import type { ReferenceObject, Snapshot } from '../model/types';
+import { createMemoryAssets } from '../react/memory-assets';
 import type { PasteResolver } from '../react/references';
+import { pictureResolver } from '../model/assets';
 import { routeLinkPreview } from '../react/link-preview';
 import { CanvasEditor } from '../react/CanvasEditor';
 import { findSnapshotBlocks, insertSnapshotBlock } from '../snapshot/block';
 import { CanvasStage } from '../snapshot/CanvasStage';
 import { createSnapshotDirectiveRenderer } from '../snapshot/directive';
-import { snapshotToDataUrl } from '../snapshot/picture';
+import { snapshotToSvg } from '../snapshot/picture';
 import { behindSnapshots } from '../snapshot/resolve';
 import { SNAPSHOT_STRINGS } from '../snapshot/strings';
 import type { PlanDropTarget } from '../react/plan-drop';
@@ -35,6 +37,10 @@ const bench = params.get('bench');
 const count = Number(params.get('n')) || (bench === 'plan' ? 50 : 2000);
 
 const registry = new CanvasRegistry();
+
+// Where the demo keeps pictures: in memory, by content hash. A product host stores them itself.
+const assets = createMemoryAssets();
+const resolvePicture = pictureResolver(assets);
 
 // The demo's own dev server mounts the link preview route (demo/vite.config.ts).
 const linkPreview = routeLinkPreview('/__canvas/unfurl');
@@ -54,7 +60,7 @@ let openSnapshot: (request: SnapshotOpenRequest) => void = () => {};
 
 // The one place the canvas meets the plan renderer: a host's startup call.
 configurePlannotatorUI({
-  directiveRenderer: createSnapshotDirectiveRenderer({ registry, onOpen: (request) => openSnapshot(request) }),
+  directiveRenderer: createSnapshotDirectiveRenderer({ registry, onOpen: (request) => openSnapshot(request), resolveImageSrc: resolvePicture }),
 });
 
 function useTheme(): [boolean, () => void] {
@@ -72,7 +78,7 @@ function BenchCanvas() {
   }, [store]);
   return (
     <div style={{ height: '100%' }}>
-      <CanvasEditor store={store} />
+      <CanvasEditor store={store} assets={assets} />
     </div>
   );
 }
@@ -144,12 +150,22 @@ function PlanAndCanvas() {
       const opened = request?.origin.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
       const anchor = drop ? all.find((block) => block.id === drop.blockId) : (all.find((block) => block.id === opened) ?? blockInView());
       const afterLine = !anchor ? Number.MAX_SAFE_INTEGER : drop?.place === 'before' ? anchor.startLine - 1 : blockEndLine(anchor);
-      const fallback = snapshotToDataUrl(store.getDocument(), snapshot.id);
-      const next = insertSnapshotBlock(markdown, afterLine, {
-        canvas: canvasId,
-        snapshot: snapshot.id,
-        ...(fallback ? { fallback: { src: fallback, alt: snapshot.title } } : {}),
-      });
+      // Insert now; the still picture is stored as an asset and its reference written in when that is done.
+      // The plan's text never holds the picture itself.
+      const next = insertSnapshotBlock(markdown, afterLine, { canvas: canvasId, snapshot: snapshot.id });
+      const svg = snapshotToSvg(store.getDocument(), snapshot.id);
+      if (svg) {
+        void assets.put(new Blob([svg], { type: 'image/svg+xml' }), `${snapshot.id}.svg`).then((kept) => {
+          if (!('ref' in kept)) return;
+          setMarkdown((current) => {
+            const found = findSnapshotBlocks(current).find((block) => block.ref.snapshot === snapshot.id && !block.ref.fallback);
+            if (!found) return current;
+            const lines = current.split('\n');
+            lines.splice(found.endLine - 1, 0, `![${snapshot.title.replace(/[\[\]]/g, '')}](${kept.ref})`);
+            return lines.join('\n');
+          });
+        });
+      }
       setMarkdown(next);
       const made = findSnapshotBlocks(next).find((found) => found.ref.snapshot === snapshot.id);
       const block = made ? parseMarkdownToBlocks(next).find((candidate) => candidate.startLine === made.startLine) : undefined;
@@ -217,11 +233,11 @@ function PlanAndCanvas() {
         <div className="demo-body" data-layout={layout}>
           <PlanPane ref={plan} blocks={blocks} arrived={arrived} />
           {layout === 'split' ? (
-            <div className="demo-canvas">{available ? <CanvasEditor store={store} onAddToPlan={addToPlan} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} /> : null}</div>
+            <div className="demo-canvas">{available ? <CanvasEditor store={store} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} /> : null}</div>
           ) : null}
         </div>
       </div>
-      <CanvasStage request={request} registry={registry} recede={() => shell.current} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
+      <CanvasStage request={request} registry={registry} recede={() => shell.current} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
     </CanvasRegistryProvider>
   );
 }

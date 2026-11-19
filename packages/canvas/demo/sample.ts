@@ -11,23 +11,11 @@ import { serializeSnapshotBlock } from '../snapshot/block';
 
 const AGENT = { kind: 'agent', id: 'demo-agent' } as const;
 
-const svgUrl = (svg: string): string => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-
-/** A small chart, as a picture an agent might add. */
-export const CHART_IMAGE = svgUrl(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 140"><rect width="320" height="140" rx="8" fill="#ffffff"/>' +
-    '<g stroke="#e3e5ea"><path d="M24 24H300M24 64H300M24 104H300"/></g>' +
-    '<polyline fill="none" stroke="#8a8f9c" stroke-width="2" points="24,58 60,50 96,62 132,36 168,52 204,30 240,54 276,44 300,56"/>' +
-    '<polyline fill="none" stroke="#5b3fd6" stroke-width="2.5" points="24,108 60,109 96,107 132,108 168,105 204,108 240,107 276,108 300,107"/>' +
-    '<g font-family="system-ui,sans-serif" font-size="11" fill="#474b57"><text x="28" y="18">minutes from scan to alert</text><text x="252" y="38">sweep</text><text x="252" y="98" fill="#5b3fd6">queue</text></g></svg>',
-);
+/** A small chart, as a picture an agent might add: a file the demo serves, referenced by its path. */
+export const CHART_IMAGE = '/chart.svg';
 
 /** Four frames of a blinking dot in one row: a sprite sheet. */
-export const PULSE_SPRITE = svgUrl(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 24">' +
-    [4, 7, 10, 7].map((r, i) => `<circle cx="${12 + i * 24}" cy="12" r="${r}" fill="#2a8050"/>`).join('') +
-    '</svg>',
-);
+export const PULSE_SPRITE = '/pulse.svg';
 
 const HTML_ITEM =
   '<style>.t{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;font:12.5px/1.4 system-ui,sans-serif;padding:6px 2px}.t b{font-weight:600}.t i{font-style:normal;opacity:.65}' +
@@ -77,7 +65,7 @@ export function createSampleStore(): CanvasStore {
         { id: 'chart', type: 'image', x: 524, y: 494, w: 250, h: 110, src: CHART_IMAGE, alt: 'Minutes from scan to alert, sweep and queue' },
         { id: 'pulse', type: 'sprite', x: 790, y: 500, w: 24, h: 24, src: PULSE_SPRITE, alt: 'Shadow mode is running', frames: 4, fps: 4 },
         { id: 'pulse-label', type: 'text', x: 820, y: 502, w: 90, h: 20, text: 'shadow mode', size: 'small' },
-        { id: 'timings', type: 'html', x: 524, y: 618, w: 372, h: 84, html: HTML_ITEM },
+        { id: 'timings', type: 'html', x: 524, y: 618, w: 372, h: 84, html: HTML_ITEM, alt: 'Minutes from scan to alert: urgent 0.7, bulk 3.1, sweep 9.1' },
         { id: 'f-refs', type: 'frame', x: 1004, y: 80, w: 328, h: 640, title: 'References' },
         {
           id: 'ref-web',

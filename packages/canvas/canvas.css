@@ -82,6 +82,8 @@
   user-select: none;
   -webkit-user-select: none;
   contain: layout paint style;
+  /* The bars arrange themselves by the board's own width, not the window's: a board in a narrow pane is a narrow board. */
+  container: pcv-board / inline-size;
 }
 .pcv-root[data-interactive] {
   touch-action: none;
@@ -123,9 +125,30 @@
 .pcv-obj[data-color='amber'] { --pcv-fill: var(--pcv-amber-soft); --pcv-stroke: var(--pcv-amber); }
 .pcv-obj[data-color='red'] { --pcv-fill: var(--pcv-red-soft); --pcv-stroke: var(--pcv-red); }
 .pcv-obj[data-color='violet'] { --pcv-fill: var(--pcv-violet-soft); --pcv-stroke: var(--pcv-violet); }
-.pcv-obj[data-color='custom'] {
+/* Custom colours. Any colour may be chosen; these keep it readable.
+   --pcv-solid is the colour exactly as chosen, for a solid fill (a note).
+   --pcv-on-solid is the ink that goes on it: light on a dark colour, dark on a light one.
+   --pcv-stroke is the colour for a line or for text on the board: the same
+   hue, kept dark enough on a light board and light enough on a dark one. */
+.pcv-obj[data-color='custom'],
+.pcv-arrow[data-color='custom'] {
+  --pcv-solid: var(--pcv-custom);
+  --pcv-on-solid: var(--pcv-on-note);
   --pcv-fill: color-mix(in oklch, var(--pcv-custom) 14%, var(--pcv-card));
   --pcv-stroke: var(--pcv-custom);
+}
+@supports (color: oklch(from red l c h)) {
+  .pcv-obj[data-color='custom'],
+  .pcv-arrow[data-color='custom'] {
+    --pcv-on-solid: oklch(from var(--pcv-custom) clamp(0.16, (0.66 - l) * 1000, 0.98) 0.01 h);
+    --pcv-stroke: oklch(from var(--pcv-custom) max(l, 0.7) c h);
+  }
+  .light .pcv-obj[data-color='custom'],
+  .light .pcv-arrow[data-color='custom'],
+  .pcv[data-theme='light'] .pcv-obj[data-color='custom'],
+  .pcv[data-theme='light'] .pcv-arrow[data-color='custom'] {
+    --pcv-stroke: oklch(from var(--pcv-custom) min(l, 0.56) c h);
+  }
 }
 
 /* Selection outlines and handles live in the overlay, the one element that
@@ -191,6 +214,10 @@
 }
 .pcv-note[data-color]:not([data-color='neutral']) {
   background: var(--pcv-stroke);
+}
+.pcv-obj.pcv-note[data-color='custom'] {
+  background: var(--pcv-solid);
+  color: var(--pcv-on-solid);
 }
 
 .pcv-text {
@@ -297,6 +324,7 @@
 .pcv-arrow[data-color='amber'] { color: var(--pcv-amber); }
 .pcv-arrow[data-color='red'] { color: var(--pcv-red); }
 .pcv-arrow[data-color='violet'] { color: var(--pcv-violet); }
+.pcv-arrow[data-color='custom'] { color: var(--pcv-stroke); }
 .pcv-arrow line {
   stroke: currentColor;
   stroke-width: 1.5;
@@ -567,7 +595,7 @@
   cursor: pointer;
 }
 
-@media (max-width: 520px) {
+@container pcv-board (max-width: 640px) {
   .pcv-bar-history {
     left: 8px;
     top: calc(8px + env(safe-area-inset-top, 0px));
@@ -888,4 +916,22 @@
 .pcv-root[data-lod='far'] .pcv-card-description,
 .pcv-root[data-lod='far'] .pcv-card-source {
   display: none;
+}
+
+/* A line telling the person something they did could not be done. Calm, and gone in a few seconds. */
+.pcv-notice {
+  position: absolute;
+  left: 50%;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 10px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+  font-size: 13px;
+  line-height: 1.4;
+  z-index: 4;
 }

@@ -53,6 +53,12 @@ export const CANVAS_STRINGS = {
   delete: 'Delete',
   open: 'Open',
   customColor: 'Custom colour',
+  pictureProblems: {
+    unavailable: 'Pictures cannot be added here',
+    'too-large': 'That picture is too large to add',
+    unreadable: 'That file could not be read as a picture',
+    'not-saved': 'That picture could not be saved',
+  },
   tools: 'Tools',
   history: 'History',
   zoom: 'Zoom',

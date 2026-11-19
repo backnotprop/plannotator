@@ -91,7 +91,7 @@ export interface FrameObject extends PlacedObject {
 
 export interface ImageObject extends PlacedObject {
   type: 'image';
-  /** An http(s), blob: or data:image URL. Checked by `isSafeImageSrc`. */
+  /** An asset reference, an http(s) address or a relative path: never the bytes. See `model/assets.ts`. */
   src: string;
   alt: string;
 }
@@ -114,6 +114,8 @@ export interface SpriteObject extends PlacedObject {
 export interface HtmlObject extends PlacedObject {
   type: 'html';
   html: string;
+  /** What it shows, in words. The frame takes no focus and is not read out, so this is all a screen reader gets. */
+  alt?: string;
 }
 
 /** What kind of thing an artifact is: decides its card's glyph and how it opens. */

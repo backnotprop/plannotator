@@ -8,7 +8,7 @@ import { indexFor } from '../view/document-index';
 import { findSnapshotBlocks, insertSnapshotBlock, parseSnapshotBlock, serializeSnapshotBlock, serializeSnapshotBody } from './block';
 import { defaultSnapshotTitle, snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { createSnapshotDirectiveRenderer } from './directive';
-import { snapshotToDataUrl, snapshotToSvg } from './picture';
+import { snapshotToSvg } from './picture';
 import { nearestGap } from '../react/plan-drop';
 import { behindSnapshots, resolveSnapshot } from './resolve';
 import { frameAt, ghostOpacity, recedeAt, springAtRest, stepSpring } from './transition';
@@ -324,12 +324,20 @@ describe('the still picture fallback', () => {
     expect(snapshotToSvg(store.getDocument(), 'by-objects')).not.toContain('Why?');
   });
 
-  test('no snapshot gives no picture; a data URL survives being a Markdown image address', () => {
+  test('no snapshot gives no picture; text that XML cannot hold does not break the file', () => {
     const store = board();
-    const url = snapshotToDataUrl(store.getDocument(), 'by-frame')!;
-    expect(url).not.toMatch(/[()\s]/);
-    expect(parseSnapshotBlock(serializeSnapshotBody({ canvas: 'c', snapshot: 's', fallback: { src: url, alt: 'x' } }))?.fallback?.src).toBe(url);
     expect(snapshotToSvg(store.getDocument(), 'nope')).toBeNull();
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'be\u0007ll\u0000 ok' } });
+    store.dispatch({ type: 'update-snapshot', id: 'by-objects' });
+    const svg = snapshotToSvg(store.getDocument(), 'by-objects')!;
+    expect(svg).toContain('>bell ok<');
+    expect(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(svg)).toBe(false);
+  });
+
+  test('the plan block holds a reference to the still picture, never the picture', () => {
+    const body = serializeSnapshotBody({ canvas: 'c', snapshot: 's', fallback: { src: 'asset:sha256-9f2c1a7b', alt: 'x' } });
+    expect(body.length).toBeLessThan(80);
+    expect(parseSnapshotBlock(body)?.fallback?.src).toBe('asset:sha256-9f2c1a7b');
   });
 });
 

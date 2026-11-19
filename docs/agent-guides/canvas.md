@@ -82,9 +82,23 @@ A web card appears at once with its address and fills in from `linkPreview` (a `
 
 `createUnfurlHandler` is a `(Request) => Response`; **only the demo's dev server mounts it** (`demo/vite.config.ts`, with `allowPrivate: true`: while the demo runs, any page in the developer's browser could ask it to GET a loopback address). Making it a product endpoint means mounting it in both the Bun and the Pi server behind the usual guards, a concurrency cap, and a line in the API tables.
 
+### Pictures and the asset port
+
+A document, an event and a plan's text never hold a picture's bytes: no `data:` URL, no `blob:` URL (`isPictureRef`, `model/assets.ts`; `checkObject` refuses them). An image, a sprite, a card's picture and icon hold a reference: `asset:<name>`, an http(s) address, or a relative path. The host keeps the bytes behind an `AssetPort` (`put(file) → { ref } | { refused }`, `url(ref)`); the name is best a content hash (`asset:sha256-…`), which is how the Inbox already stores attachments. `pictureResolver(assets, other)` is the one function a view needs (`resolveImageSrc`). `createMemoryAssets` (`react/memory-assets.ts`) is the demo's and the tests' port; nothing in the product implements one yet.
+
+Pasting or picking a picture (`react/pictures.ts`): the file is decoded (anything the browser can decode; a kind it cannot show from a file, such as bmp, is redrawn as PNG), handed to the port, and an image object with the reference is added. Each way that can fail shows a line in the editor (`CANVAS_STRINGS.pictureProblems`): no port, over 25 MB, unreadable (tiff and heic where the system cannot decode them), or the host could not save it. Never silently.
+
+The still fallback of a snapshot (`snapshotToSvg`) is stored by the host as a file or an asset and the plan block names that address. Never write the SVG, or a `data:` URL of it, into the plan: a plan is agent context.
+
+Every `<img>` the package draws has `referrerPolicy="no-referrer"`. A relative `src` is a same-origin request chosen by whoever wrote the object, so a product host passes a resolver that confines it to its artifact route.
+
+### Colour
+
+Any object takes a named colour (the canvas's six, which follow the theme) or any CSS colour: hex, a CSS colour name, `rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color()`. `isCustomColor` (`model/color.ts`) is a closed grammar: nothing that can load, run or end a declaration passes. Any colour stays readable without limiting the choice: `canvas.css` ("Custom colours") takes the ink for a solid custom fill, and the shade a custom line or text is drawn in on the board, from the colour's own lightness with CSS relative colour syntax (a browser without it draws the colour as chosen).
+
 ### Custom HTML items
 
-`model/html-item.ts` is the contract and the only way `HtmlObject.html` is drawn: an iframe with an empty `sandbox`, a CSP of `default-src 'none'` with inline styles and `data:` pictures, `inert`. No script, no network, no navigation, no access to the page. Do not add a sandbox token or loosen the policy for convenience; a scripted item is an owner decision with its own review.
+`model/html-item.ts` is the contract and the only way `HtmlObject.html` is drawn (`alt` on the object is its text alternative, since the frame is inert): an iframe with an empty `sandbox`, a CSP of `default-src 'none'` with inline styles and `data:` pictures, `inert`. No script, no network, no navigation, no access to the page. Do not add a sandbox token or loosen the policy for convenience; a scripted item is an owner decision with its own review.
 
 ### Measuring
 

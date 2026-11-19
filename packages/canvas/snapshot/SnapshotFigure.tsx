@@ -145,7 +145,7 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
     return (
       <figure className="pcv pcv-figure" data-standing="missing" data-canvas={canvas} data-snapshot={id}>
         {still ? (
-          <img className="pcv-figure-still" src={resolveImageSrc ? resolveImageSrc(still.src) : still.src} alt={still.alt} loading="lazy" decoding="async" />
+          <img className="pcv-figure-still" src={resolveImageSrc ? resolveImageSrc(still.src) : still.src} alt={still.alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
         ) : (
           <div className="pcv-figure-empty">{store ? SNAPSHOT_STRINGS.noSnapshot : SNAPSHOT_STRINGS.noCanvas}</div>
         )}

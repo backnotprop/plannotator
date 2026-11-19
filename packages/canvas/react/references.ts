@@ -4,7 +4,7 @@
  * a canvas; an agent adds the same cards with the same `add` command.
  */
 import type { CanvasStore } from '../events/store';
-import { isSafeImageSrc } from '../model/html-item';
+import { isPictureRef } from '../model/assets';
 import { createId } from '../model/ids';
 import { hostOf, pastedUrl } from '../model/reference';
 import type { Point } from '../model/geometry';
@@ -55,8 +55,8 @@ export function addReference(store: CanvasStore, at: Point, reference: PastedRef
       const current = store.getDocument().objects[id];
       if (!found || !current || current.type !== 'reference') return;
       // A picture address the card may not hold is left out, not allowed to sink the rest.
-      const image = isSafeImageSrc(found.image) ? found.image : undefined;
-      const icon = isSafeImageSrc(found.icon) ? found.icon : undefined;
+      const image = isPictureRef(found.image) ? found.image : undefined;
+      const icon = isPictureRef(found.icon) ? found.icon : undefined;
       const patch = { title: found.title?.slice(0, 300), description: found.description?.slice(0, 600), site: found.site?.slice(0, 300), image, icon };
       if (!Object.values(patch).some(Boolean)) return;
       // Part of the paste, wherever that step now is; never a step of its own, never the end of a redo.
