@@ -1,0 +1,113 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+
+/* The plan pane is drawn by the product's own block renderer, so its
+   classes are scanned here. The canvas package itself uses no Tailwind. */
+@source "../../ui/components/**/*.tsx";
+@source "./*.tsx";
+
+@import "../../ui/theme.css";
+@import "../canvas.css";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  /* What shows around the plan while it stands back behind an open canvas. */
+  background: color-mix(in oklch, var(--background) 82%, black);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+}
+
+.demo-shell {
+  background: var(--background);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+}
+.demo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.demo-head h1 {
+  margin: 0 8px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.demo-head .pcv-btn {
+  height: 32px;
+  white-space: nowrap;
+}
+.demo-spacer {
+  flex: 1;
+}
+.demo-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+.demo-body[data-layout='split'] {
+  grid-template-columns: minmax(360px, 46%) minmax(0, 1fr);
+}
+.demo-plan {
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.demo-plan article {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 24px 96px;
+}
+.demo-canvas {
+  position: relative;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+}
+.demo-body[data-layout='canvas'] .demo-canvas {
+  border-left: 0;
+}
+.demo-canvas[data-handoff] > * {
+  visibility: hidden;
+}
+.demo-new {
+  animation: demo-arrive 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes demo-arrive {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 55%, transparent);
+    border-radius: 14px;
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+    border-radius: 14px;
+  }
+}
+@media (max-width: 760px) {
+  .demo-body[data-layout='split'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .demo-body[data-layout='split'] .demo-canvas {
+    display: none;
+  }
+  .demo-plan article {
+    padding: 20px 16px 96px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-new {
+    animation: none;
+  }
+}
