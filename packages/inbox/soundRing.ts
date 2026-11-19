@@ -4,7 +4,7 @@
  * Two kinds of news, with separate rules:
  * - A question (or an action item) rings unless another question came within RING_BURST_MS: questions among
  *   themselves keep the rule they had before the choice. A plain message never holds a question back.
- * - A plain agent message (a reply, a new thread that asks nothing, a failed turn's note) rings only under "for every
+ * - A plain agent message (a reply or a failed turn's note) rings only under "for every
  *   agent message", by `plainMessageRings`: the one place the owner's cadence lives.
  *
  * Either way nothing rings with the sound off or an Inbox tab in front, and a tab coming to the front ends the bursts.
@@ -32,9 +32,11 @@ export interface RingGate {
   lastRang: boolean;
   /** The bell rang for a question in the question burst `askAt` ends: a question in it is the bell's, its notice silent. */
   askRang: boolean;
+  freshAt: number | null;
+  freshRang: boolean;
 }
 
-export const QUIET_GATE: RingGate = { lastAt: null, askAt: null, lastRang: false, askRang: false };
+export const QUIET_GATE: RingGate = { lastAt: null, askAt: null, lastRang: false, askRang: false, freshAt: null, freshRang: false };
 
 /**
  * Whether news of this kind is the sound's business under the person's choice: a question always; a plain agent
@@ -62,6 +64,7 @@ export function plainMessageRings(gate: RingGate, now: number): boolean {
 export interface RingNews {
   asks: boolean;
   plain: boolean;
+  fresh?: boolean;
 }
 
 /**
@@ -71,9 +74,16 @@ export interface RingNews {
 export interface RangFor {
   asks: boolean;
   plain: boolean;
+  fresh: boolean;
 }
 
-export const RANG_FOR_NOTHING: RangFor = { asks: false, plain: false };
+export const RANG_FOR_NOTHING: RangFor = { asks: false, plain: false, fresh: false };
+
+const within = (at: number | null, now: number) => at !== null && now - at < RING_BURST_MS;
+
+export function newThreadRings(gate: RingGate, now: number): boolean {
+  return !within(gate.freshAt, now) && !within(gate.askAt, now);
+}
 
 /**
  * News arrived: ring or not, for which of it, and the bursts after. Pure.
@@ -93,28 +103,35 @@ export function decideRing(
   if (!input.enabled) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
   if (input.inFront || input.otherTabInFront) return { ring: false, rangFor: RANG_FOR_NOTHING, gate: QUIET_GATE };
   const plain = input.plain && ringsFor(input.when, false);
-  if (!input.asks && !plain) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
-  const newBurst = plainMessageRings(gate, input.now);
-  const newAskBurst = questionRings(gate, input.now);
-  const ring = input.armed !== false && ((input.asks && newAskBurst) || (plain && newBurst));
+  const fresh = input.fresh === true;
+  if (!input.asks && !plain && !fresh) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
+  const now = input.now;
+  const newBurst = plainMessageRings(gate, now);
+  const newAskBurst = questionRings(gate, now);
+  const ring = input.armed !== false && ((input.asks && newAskBurst) || (fresh && newThreadRings(gate, now)) || (plain && newBurst));
   const lastRang = ring || (!newBurst && gate.lastRang);
   const askRang = input.asks ? ring || (!newAskBurst && gate.askRang) : gate.askRang;
+  const freshHeld = (within(gate.freshAt, now) && gate.freshRang) || (within(gate.askAt, now) && gate.askRang);
+  const freshRang = fresh ? ring || freshHeld : gate.freshRang;
   return {
     ring,
-    rangFor: { asks: input.asks && askRang, plain: plain && lastRang },
-    gate: { lastAt: input.now, askAt: input.asks ? input.now : gate.askAt, lastRang, askRang },
+    rangFor: { asks: input.asks && askRang, plain: plain && lastRang, fresh: fresh && freshRang },
+    gate: { lastAt: now, askAt: input.asks ? now : gate.askAt, lastRang, askRang, freshAt: fresh ? now : gate.freshAt, freshRang },
   };
 }
 
 /** Another tab rang at `at` (for a question when `asked`): this tab is in that burst too, a burst the bell rang in. */
-export function heardRing(gate: RingGate, at: number, asked: boolean): RingGate {
+export function heardRing(gate: RingGate, at: number, asked: boolean, fresh = false): RingGate {
   const later = (mine: number | null) => (mine === null ? at : Math.max(mine, at));
   const lastAt = later(gate.lastAt);
   const askAt = asked ? later(gate.askAt) : gate.askAt;
+  const freshAt = fresh ? later(gate.freshAt) : gate.freshAt;
   return {
     lastAt,
     askAt,
     lastRang: gate.lastRang || lastAt - at < RING_BURST_MS,
     askRang: asked ? gate.askRang || (askAt ?? at) - at < RING_BURST_MS : gate.askRang,
+    freshAt,
+    freshRang: fresh ? gate.freshRang || (freshAt ?? at) - at < RING_BURST_MS : gate.freshRang,
   };
 }

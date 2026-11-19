@@ -7,7 +7,7 @@
  * When it rings (the person's choice, `InboxSoundSettings.when`; the rules are
  * soundRing.ts): "for every agent message" (the default) rings for any new
  * message from an agent (a reply, a new thread, a question); "when an agent
- * asks you" only for a new question (the same items notify.ts notifies about).
+ * asks you" for a new question or a new thread.
  * Either way only while no Inbox tab is in front. A question rings unless
  * another question came within 30 s; a plain message rings unless any news
  * came within 30 s, and never holds a question back; a tab coming to the front
@@ -16,9 +16,7 @@
  * only while it holds a short lock (a Web Lock, or localStorage without one).
  *
  * Chrome lets a page play sound only after a click or key press in that tab,
- * so the AudioContext is made and resumed on the first gesture ("armed");
- * before that a ring would be lost without an error, and the Settings line
- * and the sidebar hint say so.
+ * so the AudioContext is made and resumed on the first gesture ("armed").
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -77,6 +75,16 @@ function audioContextCtor(): AudioContextCtor | null {
   return w.AudioContext ?? w.webkitAudioContext ?? null;
 }
 
+function autoplayPolicy(): string | null {
+  if (typeof navigator === 'undefined') return null;
+  const nav = navigator as Navigator & { getAutoplayPolicy?: (type: 'audiocontext') => string };
+  try {
+    return nav.getAutoplayPolicy?.('audiocontext') ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** One AudioContext for the page, made on the first gesture (or the first Play). */
 class InboxAudio {
   private ctx: AudioContext | null = null;
@@ -86,6 +94,14 @@ class InboxAudio {
   arm(): void {
     const ctx = this.ensure();
     if (ctx && ctx.state === 'suspended') void ctx.resume().catch(() => {});
+  }
+
+  unlock(): boolean {
+    const ctx = this.ensure();
+    if (!ctx) return false;
+    const allowed = autoplayPolicy() === 'allowed';
+    if (allowed && ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    return allowed || ctx.state === 'running';
   }
 
   /** Play the sound at `volume` (10–100). Without a context yet, nothing (a ring before the first gesture is lost). */
@@ -126,7 +142,7 @@ type ChannelMessage =
   | { type: 'front'; id: string; front: boolean }
   | { type: 'bye'; id: string }
   /** `asked`: the ring was for a question (absent from a tab before the choice, whose rings always were). */
-  | { type: 'rang'; id: string; at: number; asked?: boolean };
+  | { type: 'rang'; id: string; at: number; asked?: boolean; fresh?: boolean };
 
 /** The Inbox tab is in front: visible and focused (the same test notifications use). */
 export function pageInFront(): boolean {
@@ -304,6 +320,7 @@ export function useInboxSound(options: {
     const arm = () => {
       if (!userActivated()) return;
       audio.current?.arm();
+      armedRef.current = true;
       setArmed(true);
     };
     for (const type of ARMING_EVENTS) window.addEventListener(type, arm, { capture: true });
@@ -338,7 +355,7 @@ export function useInboxSound(options: {
         }
       }
       else if (message.type === 'bye') others.current.delete(message.id);
-      else if (message.type === 'rang' && typeof message.at === 'number') gate.current = heardRing(gate.current, message.at, message.asked !== false);
+      else if (message.type === 'rang' && typeof message.at === 'number') gate.current = heardRing(gate.current, message.at, message.asked !== false, message.fresh === true);
     };
     const report = () => {
       const front = pageInFront();
@@ -401,8 +418,10 @@ export function useInboxSound(options: {
   const arrived = useCallback((news: RingNews): RangFor => {
     const now = Date.now();
     const { enabled, when } = settingsRef.current;
-    // Before the first click Chrome keeps the context suspended: the ring would be lost, so none is tried, and the
-    // burst stays one the bell never rang in (its notices keep the system's sound).
+    if (!armedRef.current && enabled && !pageInFront() && audio.current?.unlock()) {
+      armedRef.current = true;
+      setArmed(true);
+    }
     const decided = decideRing(gate.current, { now, enabled, when, armed: armedRef.current, inFront: pageInFront(), otherTabInFront: otherTabInFront(), ...news });
     gate.current = decided.gate;
     if (!decided.ring) return decided.rangFor;
@@ -410,7 +429,7 @@ export function useInboxSound(options: {
     void withRingLock(() => {
       audio.current?.play(settingsRef.current.volume, { create: true });
       try {
-        channel.current?.postMessage({ type: 'rang', id: id.current, at: now, asked: decided.rangFor.asks } satisfies ChannelMessage);
+        channel.current?.postMessage({ type: 'rang', id: id.current, at: now, asked: decided.rangFor.asks, fresh: decided.rangFor.fresh } satisfies ChannelMessage);
       } catch {
         // Closed.
       }

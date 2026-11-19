@@ -379,7 +379,7 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   await second.close();
 });
 
-test('Settings: the row, Play always plays, "when an agent asks you" quiets a plain message, and the switch off silences the next question (notifications ring the system again)', async () => {
+test('Settings: the row, Play always plays, "when an agent asks you" rings a new thread but not a plain reply, and the switch off silences the next question (notifications ring the system again)', async () => {
   await setFront(page, true, true);
   await page.getByRole('button', { name: 'Settings' }).click();
   const block = page.locator('[data-settings-notifications]');
@@ -395,19 +395,21 @@ test('Settings: the row, Play always plays, "when an agent asks you" quiets a pl
   await row.getByRole('button', { name: 'Play the sound' }).click();
   await expect.poll(() => rings(page)).toBe(before + 1);
 
-  // "When an agent asks you": a plain message rings nothing; the next question does.
   await row.getByRole('radio', { name: 'when an agent asks you' }).check();
   await expect.poll(() => config(fresh).inboxSound?.when).toBe('asks');
-  await expect(row).toContainText('When an agent asks you, while no Inbox tab is in front');
+  await expect(row).toContainText('When an agent asks you or starts a thread, while no Inbox tab is in front');
   await awayAgain(page);
   const asks = await rings(page);
-  const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
-  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${plain.thread_id}`)).status()).toBe(200);
+  const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
+  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${started.thread_id}`)).status()).toBe(200);
+  await expect.poll(() => rings(page)).toBe(asks + 1);
+  await expect.poll(() => page.evaluate(() => window.__notified.at(-1))).toMatchObject({ silent: true });
+  await fresh.agents[0]!.send({ project_path: fresh.project, body: 'And the logs too.', reply_to: started.message_id });
   await quietFor(page);
-  expect(await rings(page)).toBe(asks);
+  expect(await rings(page)).toBe(asks + 1);
   const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Keep last week’s backup too?') });
   await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${asked.thread_id}`)).status()).toBe(200);
-  await expect.poll(() => rings(page)).toBe(asks + 1);
+  await expect.poll(() => rings(page)).toBe(asks + 2);
   await setFront(page, true, true);
 
   const sw = row.getByRole('switch', { name: 'Play a sound' });

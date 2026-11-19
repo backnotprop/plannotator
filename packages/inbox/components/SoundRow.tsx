@@ -12,7 +12,7 @@ export function Switch({ on, labelledBy, label, disabled, onClick }: { on: boole
  * second is the default), each with what it rings for under the choice.
  */
 export const SOUND_WHEN_CHOICES: readonly { id: InboxSoundWhen; label: string; desc: string }[] = [
-  { id: 'asks', label: 'when an agent asks you', desc: 'When an agent asks you, while no Inbox tab is in front' },
+  { id: 'asks', label: 'when an agent asks you', desc: 'When an agent asks you or starts a thread, while no Inbox tab is in front' },
   { id: 'messages', label: 'for every agent message', desc: 'A reply, a new thread or a question, while no Inbox tab is in front' },
 ];
 
