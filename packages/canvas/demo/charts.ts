@@ -97,6 +97,29 @@ const nightRows: ChartCell[][] = [
   ['Crew', 2, 3, 'working'], ['Crew', 4.5, 10, 'working'],
 ];
 
+// Firmware health: crash reports by subsystem over six release candidates. Eight subsystems, so eight forms.
+const SUBSYSTEMS = ['audio engine', 'sequencer', 'MIDI', 'USB', 'display', 'storage', 'power', 'updater'];
+const BUILDS = ['rc1', 'rc2', 'rc3', 'rc4', 'rc5', 'rc6'];
+const crashRows: ChartCell[][] = (() => {
+  const random = seeded(2026);
+  const start = [41, 28, 19, 16, 12, 9, 7, 5];
+  return BUILDS.flatMap((build, b) => SUBSYSTEMS.map((name, s) => [build, name, Math.max(0, Math.round(start[s] * 0.72 ** b + (random() - 0.5) * 3))]));
+})();
+// DSP load: the share of one audio block the engine needs, by block size, for one to eight voices.
+const BLOCKS = [16, 32, 64, 128, 256, 512];
+const loadRows: ChartCell[][] = [1, 2, 3, 4, 5, 6, 7, 8].flatMap((voices) => BLOCKS.map((block) => [block, `${voices} ${voices === 1 ? 'voice' : 'voices'}`, Math.round((6 + voices * 9.4) * (1 + 14 / block) * 10) / 10]));
+// Round-trip latency against buffer size, measured on eight audio drivers.
+const DRIVERS = ['CoreAudio built-in output', 'CoreAudio aggregate device', 'ASIO vendor driver', 'ASIO4ALL wrapper', 'WASAPI exclusive mode', 'WASAPI shared mode', 'ALSA hw direct', 'PipeWire quantum 64'];
+const latencyRows: ChartCell[][] = (() => {
+  const random = seeded(64);
+  const floor = [2.1, 4.8, 2.6, 9.5, 3.4, 11.2, 2.9, 4.1];
+  // Each driver rounds a requested buffer to its own size, so no two sit at the same place.
+  return DRIVERS.flatMap((driver, d) => [64, 128, 256].map((buffer) => {
+    const frames = Math.round(buffer * (1 + d * 0.07));
+    return [frames, Math.round((floor[d] + (frames / 48) * 2 + random()) * 10) / 10, driver];
+  }));
+})();
+
 export const CHARTS_CANVAS_ID = 'charts';
 
 const block = (snapshot: string) => serializeSnapshotBlock({ canvas: CHARTS_CANVAS_ID, snapshot });
@@ -116,6 +139,12 @@ ${block('release')}
 Eight players, one hour each: what they touched, and when.
 
 ${block('field-test')}
+
+## Firmware health
+
+Crash reports by subsystem across six release candidates, and what the engine costs.
+
+${block('health')}
 `;
 
 const W = 520;
@@ -142,10 +171,14 @@ export function createChartsStore(): CanvasStore {
     { id: 'sessions', type: 'chart', ...at(2, 2.35), mark: 'cell', title: 'The hour, minute by minute', fields: ['minute', 'player', 'doing'], rows: sessionRows, encode: { x: 'minute', y: 'player', series: 'doing' } },
     { id: 'multiples', type: 'chart', ...at(0, 3.35), w: W + 40 + W, mark: 'bar', title: 'What each player spent the hour on', unit: 'min', fields: ['player', 'doing', 'minutes'], rows: multipleRows, encode: { x: 'doing', y: 'minutes', facet: 'player' } },
     { id: 'ideas', type: 'chart', ...at(2, 3.35), mark: 'dot', title: '28 ideas, placed by likeness, sized by votes', fields: ['x', 'y', 'cluster', 'votes'], rows: ideaRows, encode: { x: 'x', y: 'y', series: 'cluster', size: 'votes' } },
+    { id: 'f-health', type: 'frame', x: 20, y: 1720, w: 3 * (W + 40) + 40, h: H + 110, title: 'Firmware health: six release candidates' },
+    { id: 'crashes', type: 'chart', x: 60, y: 1786, w: W, h: H, mark: 'bar', title: 'Crash reports by subsystem', fields: ['build', 'subsystem', 'reports'], rows: crashRows, encode: { x: 'build', y: 'reports', series: 'subsystem' }, stack: true, color: 'amber' },
+    { id: 'load', type: 'chart', x: 60 + W + 40, y: 1786, w: W, h: H, mark: 'line', title: 'DSP load by block size', unit: '%', fields: ['block', 'voices', 'load'], rows: loadRows, encode: { x: 'block', y: 'load', series: 'voices' }, rules: [{ at: 100, label: 'one block' }] },
+    { id: 'latency', type: 'chart', x: 60 + 2 * (W + 40), y: 1786, w: W, h: H, mark: 'dot', title: 'Round trip by buffer in frames, eight drivers', unit: 'ms', fields: ['buffer', 'ms', 'driver'], rows: latencyRows, encode: { x: 'buffer', y: 'ms', series: 'driver' } },
     { id: 'a1', type: 'arrow', from: { object: 'burn' }, to: { object: 'ladder' }, label: 'why' },
   ]);
   add([{ id: 'n1', type: 'note', x: 60 + W - 150, y: 110 + H + 40 + 170, w: 200, h: 120, text: 'At this rate it lands a week late. Jack J3 is the part.', color: 'violet' }], ANA);
-  for (const [id, title, frame] of [['release', 'The release', 'f-release'], ['field-test', 'The field test', 'f-test']] as const) {
+  for (const [id, title, frame] of [['release', 'The release', 'f-release'], ['field-test', 'The field test', 'f-test'], ['health', 'Firmware health', 'f-health']] as const) {
     const result = store.dispatch({ type: 'add-snapshot', snapshot: { id, title, source: { kind: 'frame', frame } } }, { actor: AGENT });
     if (!result.ok) throw new Error(result.error);
   }
