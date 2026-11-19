@@ -211,6 +211,13 @@ describe("plannotator inbox status", () => {
       const newer = await cli(box, ["inbox", "status"], { version: "0.20.0" });
       expect(newer.code).toBe(0);
       expect(newer.stdout).toContain("plannotator inbox restart");
+
+      // Decided off with an Inbox still up (one from before the update): status says how to stop it, never restart (refused while off).
+      writeFileSync(join(box.dataDir, "state.json"), JSON.stringify({ inboxOn: { on: false, at: "2026-11-19T00:00:00.000Z", by: "update-agent-only" } }));
+      const off = await cli(box, ["inbox", "status"], { version: "0.20.0" });
+      expect(off.code).toBe(0);
+      expect(off.stdout).toContain("plannotator inbox stop stops it");
+      expect(off.stdout).not.toContain("plannotator inbox restart");
     } finally {
       stub.stop(true);
     }

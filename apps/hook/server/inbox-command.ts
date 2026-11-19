@@ -608,8 +608,9 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
   }
   for (const line of inboxOnStatusLines(dataDir)) out(line);
   out(`  data dir: ${dataDir}`);
-  if (status.state === "running" && !inboxOnStatus(dataDir).on) {
-    // An Inbox from before the update that the decision could not stop: agents are refused, so say how it ends.
+  const decided = inboxOnStatus(dataDir);
+  if (status.state === "running" && decided.by !== null && !decided.on) {
+    // Decided off with an Inbox still up (one from before the update the decision could not stop): agents are refused, so say how it ends.
     out("This Inbox still runs though the Inbox is off here: plannotator inbox stop stops it.");
   } else if (status.state === "running" && status.health.version !== cliVersion) {
     // Restart runs this binary, so it is advised only when that is an update, never a downgrade.
