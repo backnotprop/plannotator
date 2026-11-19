@@ -222,6 +222,8 @@ describe("plannotator theme", () => {
     const end = help.stdout.indexOf("\n  }\n", from) + "\n  }".length;
     const whole = help.stdout.slice(from, end);
     expect(w.run("add", w.file("whole.json", whole)).code).toBe(0);
+    // Its code colour rule is kept, inside the half where the example shows it.
+    expect(JSON.parse(readFileSync(join(w.dataDir, "themes", "harbor.json"), "utf8")).dark.syntax).toHaveLength(1);
     const darkOnly = { ...JSON.parse(whole), id: "harbor-dark", light: undefined };
     const added = w.run("add", w.file("example.json", JSON.stringify(darkOnly)));
     expect(added.code).toBe(0);
