@@ -426,8 +426,8 @@ export const AGENTS: Agent[] = [
     ],
     limits: [
       {
-        text: 'In `claude -p` and other SDK runs nothing wakes the session: Claude reads your reply when it checks the thread. The chat panel of Claude Code’s VS Code extension and Claude threads in T3 Code get the tool and the wake.',
-        src: 'docs/agent-guides/claude-code-mod.md (the session kinds: headless gets the tool with no wake; panel and t3 get both)',
+        text: 'In `claude -p` and other SDK runs nothing wakes the session: Claude reads your reply when it checks the thread. The chat panel of Claude Code’s VS Code extension, the Code tab of the Claude desktop app and Claude threads in T3 Code get the tool and the wake.',
+        src: 'docs/agent-guides/claude-code-mod.md (the session kinds: headless gets the tool with no wake; panel, desktop and t3 get both)',
       },
       { text: 'Starting Claude Code from the Inbox is off on Windows by default.', src: 'LCH:5' },
       { text: 'Claude’s own `AskUserQuestion` stays in Claude Code. Questions reach the Inbox when Claude sends them there.', src: 'LCH:84' },

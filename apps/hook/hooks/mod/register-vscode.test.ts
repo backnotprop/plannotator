@@ -1,13 +1,14 @@
 /**
  * The mod in sessions that are not interactive, through the real registered hooks on a fake `$` (the engine
  * harness in apps/hook/tests needs `claude plugin test`). The panel hosts (Claude Code's VS Code extension, #3111;
- * Orca, #3325; the Claude desktop app's Code tab, #3239) and T3 Code host Claude Code through the Agent SDK, so
+ * Orca, #3325), the Claude desktop app's Code tab (#3239) and T3 Code host Claude Code through the Agent SDK, so
  * `session.start` says `isInteractive: false` and `surface: null`; they run the CLI with `CLAUDE_CODE_ENTRYPOINT`
- * `claude-vscode`, `orca`, `claude-desktop` (`-3p`), T3 with `t3-code` and `T3CODE_THREAD_ID`.
- * What can regress: a panel host or a T3 thread left without `plannotator_inbox` or the wake; a Plannotator plan
- * review opened beside Orca's own plan card; a T3 thread filed as a
+ * `claude-vscode`, `orca`, `claude-desktop` (`claude-desktop-3p`), T3 with `t3-code` and `T3CODE_THREAD_ID`.
+ * What can regress: a panel host, the Code tab or a T3 thread left without `plannotator_inbox` or the wake; the Code
+ * tab given more than the wake (the `plannotator` tool, the commands, the Bash take-over, the reminder, the mod's
+ * plan review); a Plannotator plan review opened beside Orca's own plan card; a T3 thread filed as a
  * Claude Code session instead of the thread; any other session (`claude -p`, an Agent SDK app, Cowork, a
- * `claude -p` started from inside a panel or thread) left with no Inbox tool, or promised a wake its run may not
+ * `claude -p` started from inside a panel, a Code tab or a thread) left with no Inbox tool, or promised a wake its run may not
  * live to deliver; Plannotator's own Ask AI child or the switch turned off reaching the Inbox; and a wake the SDK
  * host refuses being lost or tried again in a loop.
  */
@@ -43,11 +44,12 @@ const REGISTRY = JSON.stringify({ v: 1, pid: 4242, port: PORT, token: 't'.repeat
 const PANEL = { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }
 /** What Orca's chat starts the CLI with (#3325). */
 const ORCA = { CLAUDE_CODE_ENTRYPOINT: 'orca' }
-/** What the Claude desktop app's Code tab starts the CLI with (read in the 4.23118 app; `-3p` with a third-party provider). */
+/** Every panel host: a person reads its chat, a plugin's turn shows there. */
+const PANEL_HOSTS = [PANEL, ORCA]
+/** What the Claude desktop app starts a Code tab session's CLI with (read in the 4.23118 app; `-3p`: a third-party inference provider). */
 const DESKTOP = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }
 const DESKTOP_3P = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop-3p' }
-/** Every panel host: a person reads its chat, a plugin's turn shows there. */
-const PANEL_HOSTS = [PANEL, ORCA, DESKTOP, DESKTOP_3P]
+const DESKTOP_HOSTS = [DESKTOP, DESKTOP_3P]
 /** What T3 Code starts a thread's Claude with (`mergeClaudeProcessEnvironment` and the thread's env, in T3's source). */
 const T3 = { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001' }
 /** How the engine raises `session.start` for an Agent SDK host, the VS Code extension's included. */
@@ -97,6 +99,8 @@ function engine(
     /** The MCP servers the context names (`$.session.usage`'s `mcpTools`), tools behind ToolSearch included. */
     servers: [] as string[],
     envSet: [] as string[],
+    /** Every slash command the mod registered. */
+    commands: [] as string[],
     fetches: [] as { path: string; body: any }[],
     submits: [] as string[],
     /** Every `$.process.run` argv (a review's launch among them). */
@@ -197,7 +201,10 @@ function engine(
           return { tool: `mcp__plugin_plannotator__${spec.name}` }
         },
       },
-      command: { list: async () => [], register: async () => undefined },
+      command: {
+        list: async () => [],
+        register: async (spec: { name: string }) => void world.commands.push(spec.name),
+      },
       ui: { log: () => undefined, status: () => undefined, toast: () => undefined },
       prompt: {
         submit: async ({ text }: { text: string }) => {
@@ -233,7 +240,7 @@ async function inboxCall(hook: Awaited<ReturnType<typeof freshHooks>>, world: Re
   return { args: call!.body.params.arguments as Record<string, unknown>, meta: call!.body.params._meta as Record<string, unknown> | undefined }
 }
 
-describe('a panel host: the VS Code extension, Orca, the Claude desktop Code tab (not interactive)', () => {
+describe('a panel host: the VS Code extension, Orca (not interactive)', () => {
   test.each(PANEL_HOSTS)('the mod runs: both tools registered, the session tagged, the Inbox polled as this session, and a reply goes in once as a turn (%j)', async (env) => {
     const { world } = await started(`panel-wake-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
 
@@ -260,7 +267,7 @@ describe('a panel host: the VS Code extension, Orca, the Claude desktop Code tab
     'the run reached its --max-turns limit',
     'the session was stopped and nobody has sent input since',
   ]) {
-    test.each([PANEL, DESKTOP])(`a wake the host refuses ("${reason}") is not lost and not tried again until the person sends input; then it goes in once (%j)`, async (env) => {
+    test.each([PANEL, ORCA])(`a wake the host refuses ("${reason}") is not lost and not tried again until the person sends input; then it goes in once (%j)`, async (env) => {
       const { hook, world } = await started(`panel-drop-${reason.length}-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
       world.answer = { drop: reason }
 
@@ -289,7 +296,7 @@ describe('a panel host: the VS Code extension, Orca, the Claude desktop Code tab
 const launched = (world: ReturnType<typeof engine>, cli: string) => world.runs.some((argv) => argv.includes('plannotator-launch') && argv.includes(cli))
 
 describe('ExitPlanMode in a panel host', () => {
-  test.each([PANEL, DESKTOP])("the mod's plan review opens (%j)", async (env) => {
+  test.each([PANEL])("the mod's plan review opens (%j)", async (env) => {
     const { hook, world } = await started(`panel-plan-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
     const below = (e: unknown) => ({ passed: e })
     const answer = await hook('tool.call')(world.$, { tool: 'ExitPlanMode', tool_use_id: 'toolu_plan', plan: '# Plan\n' }, below)
@@ -316,7 +323,9 @@ describe('ExitPlanMode in a panel host', () => {
     ['claude -p from Claude\'s Bash in an Orca session', { ...ORCA, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }, '0', OWN_MARK, {}, false],
     ['a T3 thread', T3, undefined, undefined, { listed: T3_OWN_TOOLS }, false],
     ['the VS Code panel', PANEL, undefined, undefined, {}, false],
-    ['the desktop Code tab', DESKTOP, undefined, undefined, {}, false],
+    // The Code tab keeps the classic plan hook as before #3239: nothing turns it off.
+    ["the desktop app's Code tab", DESKTOP, undefined, undefined, {}, false],
+    ["the desktop app's Code tab (third-party provider)", DESKTOP_3P, undefined, undefined, {}, false],
     ['claude -p', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, undefined, undefined, {}, false],
     ['no entrypoint', {}, undefined, undefined, {}, false],
     ['the terminal', {}, undefined, undefined, {}, true],
@@ -330,7 +339,6 @@ describe('ExitPlanMode in a panel host', () => {
   test.each<[string, Record<string, string>, typeof SDK_START | typeof TERMINAL_START]>([
     ['the terminal', {}, TERMINAL_START],
     ['the VS Code panel', PANEL, SDK_START],
-    ['the desktop Code tab', DESKTOP, SDK_START],
   ])("%s inheriting another session's marked 0: plan review on, and both variables cleared", async (name, env, start) => {
     const inherited = { ...env, PLANNOTATOR_PLAN_REVIEW: '0', PLANNOTATOR_PLAN_REVIEW_SET_BY: 'claude-code:the-orca-session' }
     const { hook, world } = await started(`plan-inherited-${name.replace(/[^a-z0-9]+/gi, '-')}`, inherited, {}, start)
@@ -391,6 +399,119 @@ describe("the person's prompt in the panel (origin sdk, the extension sends what
   })
 })
 
+/**
+ * The Claude desktop app's Code tab (#3239): a `headless` session plus the Inbox reply wake. Before, it was sorted
+ * headless: its link started without the tick, its sends went without the wake mark ("Saved for Claude Code. It sees
+ * it when it next reads this thread."), and a reply went in only once the self-heal's second look (about 60 s after
+ * the session started) armed the tick.
+ */
+describe("the desktop app's Code tab (claude-desktop, claude-desktop-3p): the reply wake, and nothing else changes", () => {
+  test.each(DESKTOP_HOSTS)('plannotator_inbox alone, the session tagged, the Inbox polled as this session from the start, and a reply goes in once as a turn (%j)', async (env) => {
+    const { world } = await started(`desktop-wake-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
+
+    // No `plannotator` tool and no slash commands: as in a headless session.
+    expect(world.tools).toEqual(['plannotator_inbox'])
+    expect(world.commands).toEqual([])
+    expect(world.env.get('PLANNOTATOR_SESSION_TAG')).toBe(`claude-code:${SESSION}`)
+
+    await world.ticks(6)
+    expect(polls(world).length).toBeGreaterThan(0)
+    expect(polls(world).every((f) => f.body.session === SESSION && f.body.host === 'claude-code')).toBe(true)
+    expect(world.submits).toHaveLength(1)
+    expect(world.submits[0]).toContain(`Plannotator Inbox: ${REPLY.subject} (${REPLY.id})`)
+    expect(world.submits[0]).toContain(REPLY.body)
+    expect(world.delivered).toEqual([REPLY.id])
+
+    await world.ticks(10)
+    expect(world.submits).toHaveLength(1)
+  })
+
+  // The send's mark is what the Inbox stores as the message's `wakes`: its line then reads "Sending to Claude Code…"
+  // instead of "Saved for Claude Code…", and the send tool tells the agent the reply arrives by itself.
+  test('the first send carries the wake mark, and a reply posted seconds after it goes in at once', async () => {
+    const shared = { ...machine(), replyWaiting: false }
+    const { hook, world } = await started('desktop-first-send', DESKTOP, { shared })
+    const calls = await inboxCall(hook, world)
+    expect(calls.args).toMatchObject({ agent_session: SESSION, agent_host: 'claude-code', agent_name: 'Claude Code' })
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+
+    await world.ticks(2)
+    expect(polls(world).length).toBeGreaterThan(0)
+    expect(world.submits).toEqual([])
+    // The person answers a few seconds after the send.
+    shared.replyWaiting = true
+    await world.ticks(3)
+    expect(world.submits).toHaveLength(1)
+    expect(world.submits[0]).toContain(REPLY.body)
+    expect(world.delivered).toEqual([REPLY.id])
+  })
+
+  test("ExitPlanMode and its permission request, the commands and Claude's Bash `plannotator review` keep the classic flows: the mod passes each on", async () => {
+    const { hook, world } = await started('desktop-classic', DESKTOP)
+    const below = (e: unknown) => ({ passed: e })
+    expect(await hook('tool.call')(world.$, { tool: 'ExitPlanMode', tool_use_id: 'toolu_plan', plan: '# Plan\n' }, below)).toMatchObject({ passed: { tool: 'ExitPlanMode' } })
+    expect(await hook('classic.PermissionRequest')(world.$, { tool_name: 'ExitPlanMode', tool_use_id: 'toolu_plan', tool_input: { plan: '# Plan\n' } }, below)).toMatchObject({ passed: { tool_name: 'ExitPlanMode' } })
+    expect(await hook('tool.call')(world.$, { tool: 'Bash', tool_use_id: 'toolu_review', command: 'plannotator review' }, below)).toMatchObject({ passed: { tool: 'Bash' } })
+    expect(await hook('command.run')(world.$, { command: 'plannotator-review', args: '' }, below)).toMatchObject({ passed: { command: 'plannotator-review' } })
+    expect(launched(world, 'claude-mod-plan')).toBe(false)
+    expect(world.runs.some((argv) => argv.includes('plannotator-launch'))).toBe(false)
+  })
+
+  test("no Inbox reminder on the conversation's first prompt (the panel, the control, gets it)", async () => {
+    const contextOf = async (name: string, env: Record<string, string>) => {
+      const { hook, world } = await started(name, env)
+      let context: unknown = null
+      await hook('prompt.submit')(world.$, { text: 'Refactor the handler.', origin: { kind: 'sdk' } }, async (e: any) => {
+        context = e?.context ?? null
+        return { text: 'Refactor the handler.' }
+      })
+      return { context, variable: world.env.get('PLANNOTATOR_INBOX_REMINDER') }
+    }
+    const panel = await contextOf('desktop-reminder-control', PANEL)
+    expect(panel.context).toEqual([expect.stringContaining('mcp__plugin_plannotator__plannotator_inbox')])
+    expect(panel.variable).toBeTruthy()
+    const tab = await contextOf('desktop-reminder', DESKTOP)
+    expect(tab.context).toBeNull()
+    expect(tab.variable).toBeFalsy()
+  })
+
+  test('a wake the desktop app refuses is not lost and not tried again until the person sends input; then it goes in once', async () => {
+    const { hook, world } = await started('desktop-drop', DESKTOP)
+    world.answer = { drop: 'the host has ended its input' }
+
+    await world.ticks(6)
+    expect(world.submits).toHaveLength(1)
+    expect(world.delivered).toEqual([])
+    await world.ticks(30)
+    expect(world.submits).toHaveLength(1)
+    expect(polls(world).at(-1)?.body.held).toBe(true)
+
+    world.answer = undefined
+    await hook('prompt.submit')(world.$, { text: 'carry on', origin: { kind: 'sdk' } }, async () => ({ text: 'carry on' }))
+    await hook('turn.start')(world.$, { turnId: 'turn-1', text: 'carry on' }, pass)
+    await hook('turn.complete')(world.$, { turnId: 'turn-1', answer: 'Done.' }, pass)
+    await world.ticks(6)
+
+    expect(world.submits).toHaveLength(2)
+    expect(world.submits[1]).toContain(REPLY.body)
+    expect(world.delivered).toEqual([REPLY.id])
+  })
+
+  test.each<[string, Record<string, string>, [string, string][]]>([
+    ['the Inbox tool turned off (PLANNOTATOR_INBOX_TOOL=0)', { ...DESKTOP, PLANNOTATOR_INBOX_TOOL: '0' }, []],
+    // #3729: the Inbox turns on only once the person ran it here.
+    ['the Inbox not turned on here (its mark says off)', DESKTOP, [[`${DATA}/inbox/turned-on`, '{"on":false}']]],
+  ])('%s: no tool, the Inbox never polled, nothing submitted', async (_name, env, files) => {
+    const shared = machine()
+    for (const [path, text] of files) shared.files.set(path, text)
+    const { world } = await started(`desktop-off-${_name.replace(/[^a-z0-9]+/gi, '-')}`, env, { shared })
+    await world.ticks(6)
+    expect(world.tools).toEqual([])
+    expect(polls(world)).toEqual([])
+    expect(world.submits).toEqual([])
+  })
+})
+
 /** What every Claude Code session that is not interactive and is neither the panel nor a T3 thread is. */
 const HEADLESS: [string, Record<string, string>][] = [
   ['an Agent SDK app (sdk-ts)', { CLAUDE_CODE_ENTRYPOINT: 'sdk-ts' }],
@@ -398,11 +519,10 @@ const HEADLESS: [string, Record<string, string>][] = [
   ['claude -p (sdk-cli)', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }],
   ['claude -p naming itself cli', { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
   ["the desktop app's Cowork (local-agent)", { CLAUDE_CODE_ENTRYPOINT: 'local-agent' }],
+  ['an entrypoint only near the Code tab one', { CLAUDE_CODE_ENTRYPOINT: 'Claude-Desktop' }],
   ['no entrypoint', {}],
   ['a child of an Orca panel', { ...ORCA, CLAUDE_CODE_CHILD_SESSION: '1' }],
   ['a different Orca session inherits a tag', { ...ORCA, PLANNOTATOR_SESSION_TAG: 'claude-code:other' }],
-  ['claude -p from Claude\'s Bash in a desktop Code tab session', { ...DESKTOP, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }],
-  ['a different desktop Code tab session inherits a tag', { ...DESKTOP, PLANNOTATOR_SESSION_TAG: 'claude-code:other' }],
   ['an entrypoint only near the panel one', { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode-insiders' }],
   ['a Claude T3 runs for no thread (t3-code, no T3CODE_THREAD_ID)', { CLAUDE_CODE_ENTRYPOINT: 't3-code' }],
   // A `claude -p` started from inside a panel session or a T3 thread inherits its entrypoint (and the thread id).
@@ -410,6 +530,11 @@ const HEADLESS: [string, Record<string, string>][] = [
   ['a nested run with CLAUDE_CODE_CHILD_SESSION only', { ...PANEL, CLAUDE_CODE_CHILD_SESSION: '1' }],
   ['a nested run with CLAUDECODE only', { ...PANEL, CLAUDECODE: '1' }],
   ['an agent job of a Plannotator CLI the panel\'s mod started (its session tag names that session)', { ...PANEL, PLANNOTATOR_SESSION_TAG: 'claude-code:the-panel-session' }],
+  // The same guards for the desktop app's Code tab (#3239): a `claude -p` from its Bash inherits `claude-desktop`.
+  ['claude -p from Claude\'s Bash in a Code tab session (CLAUDECODE, CLAUDE_CODE_CHILD_SESSION)', { ...DESKTOP, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }],
+  ['a nested run in a Code tab with CLAUDE_CODE_CHILD_SESSION only', { ...DESKTOP_3P, CLAUDE_CODE_CHILD_SESSION: '1' }],
+  ['a nested run in a Code tab with CLAUDECODE only', { ...DESKTOP, CLAUDECODE: '1' }],
+  ['an agent job of a Plannotator CLI a Code tab\'s mod started (its session tag names that session)', { ...DESKTOP, PLANNOTATOR_SESSION_TAG: 'claude-code:the-code-tab-session' }],
   ['claude -p from Claude\'s Bash in a T3 thread', { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001', CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }],
   ['an agent job of a CLI a T3 thread\'s mod started', { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001', PLANNOTATOR_SESSION_TAG: 't3:another-thread' }],
   // T3 before 0.1.7 sets no entrypoint and leaves CLAUDECODE from the shell it was started in.
@@ -435,6 +560,15 @@ describe('every other session that is not interactive (headless): the Inbox tool
     const calls = await inboxCall(hook, world)
     expect(calls.args).toMatchObject({ agent_session: SESSION, agent_host: 'claude-code', agent_name: 'Claude Code' })
     expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBeUndefined()
+  })
+
+  // The control for the Code tab's first send (#3239): a plain `claude -p` is unchanged by it.
+  test('claude -p after a send, with a reply waiting: no tick started, nothing polled or submitted', async () => {
+    const { hook, world } = await started('headless-send-then-reply', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' })
+    await inboxCall(hook, world)
+    await world.ticks(6)
+    expect(polls(world)).toEqual([])
+    expect(world.submits).toEqual([])
   })
 
   test("ExitPlanMode, the commands and Claude's Bash `plannotator review` keep the classic flows: the mod passes each on", async () => {
@@ -826,6 +960,14 @@ describe("the plugin's classic plan hook, in the environment the mod leaves the 
   // the mod's ExitPlanMode answer comes first), so the cases above are not vacuous.
   test('the VS Code panel: the same hook opens a review', async () => {
     const { world } = await started('classic-plan-vscode', PANEL)
+    const run = await classicPlanHook(world.env, 6_000)
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toContain('http://')
+  }, 30_000)
+
+  // #3239 keeps the Code tab's plan review where it was: the mod passes ExitPlanMode on, and this hook opens the review.
+  test("the desktop app's Code tab: the same hook opens a review", async () => {
+    const { world } = await started('classic-plan-desktop', DESKTOP)
     const run = await classicPlanHook(world.env, 6_000)
     expect(run.stdout).toBe('')
     expect(run.stderr).toContain('http://')

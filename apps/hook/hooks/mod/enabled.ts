@@ -221,20 +221,15 @@ export function resolveInboxReminderRules(configText: string | null | undefined)
  * host draws its own plan card):
  *
  * - `claude-vscode`: Claude Code's VS Code extension's chat panel (read in the 2.1.322 extension);
- * - `orca`: Orca's chat (#3325), which shows its own "Review proposed plan" card;
- * - `claude-desktop`, `claude-desktop-3p`: the Claude desktop app's Code tab
- *   (#3239; `-3p` with a third-party inference provider; read in the 4.23118
- *   app, which also deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`).
- *   Whether it draws its own plan card is not known yet.
+ * - `orca`: Orca's chat (#3325), which shows its own "Review proposed plan" card.
  *
- * Others: an Agent SDK app's `sdk-ts` / `sdk-py`, `claude -p`'s `sdk-cli`,
- * T3 Code's `t3-code`, the desktop app's Cowork `local-agent`.
+ * Others: the Claude desktop app's Code tab (`DESKTOP_CODE_TAB_ENTRYPOINTS`,
+ * not a panel host: the reply wake alone), an Agent SDK app's `sdk-ts` /
+ * `sdk-py`, `claude -p`'s `sdk-cli`, T3 Code's `t3-code`.
  */
 const PANEL_HOSTS: ReadonlyMap<string, { planReview: boolean }> = new Map([
   ['claude-vscode', { planReview: true }],
   ['orca', { planReview: false }],
-  ['claude-desktop', { planReview: true }],
-  ['claude-desktop-3p', { planReview: true }],
 ])
 
 export function isPanelEntrypoint(value: unknown): boolean {
@@ -312,7 +307,7 @@ const setIn = (value: unknown) => typeof value === 'string' && value !== ''
 /**
  * Whether a session that is not interactive (`session.start`'s
  * `isInteractive` false) is the chat of a panel host (`PANEL_HOSTS`: the VS
- * Code extension, Orca, the Claude desktop app's Code tab), where the mod runs
+ * Code extension, Orca), where the mod runs
  * as in the terminal (#3111). These hosts run Claude Code through the Agent
  * SDK, so their sessions are not interactive, but a person reads the chat and
  * a plugin's turn shows there ("Prompt from the <plugin> plugin" in VS Code).
@@ -321,18 +316,45 @@ const setIn = (value: unknown) => typeof value === 'string' && value !== ''
  * session (Claude's Bash, or an agent job of a Plannotator CLI the mod
  * started) keeps the host's entrypoint (Claude Code changes only `cli`). Such a
  * process is told apart by what its parent put in its environment, which the
- * host removes from the session's own (the VS Code extension and the desktop
- * app delete `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` before they spawn
- * the CLI): either Claude Code
+ * host removes from the session's own (the VS Code extension deletes
+ * `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` before it spawns the CLI):
+ * either Claude Code
  * variable, or the mod's session tag naming another session. The tag naming
  * this session is this process's own (a module reload runs `session.start`
  * again after the mod set it).
  */
 export function isPanelSession(env: PanelSessionEnv, sessionId: string): boolean {
-  if (!isPanelEntrypoint(env.entrypoint)) return false
+  return isPanelEntrypoint(env.entrypoint) && isHostOwnSession(env, sessionId)
+}
+
+/** The host's own session, not a run started inside one: no nested-run variable, no tag naming another session. */
+function isHostOwnSession(env: PanelSessionEnv, sessionId: string): boolean {
   if (setIn(env.claudecode) || setIn(env.childSession)) return false
   if (setIn(env.sessionTag) && env.sessionTag !== `claude-code:${sessionId}`) return false
   return true
+}
+
+/**
+ * The entrypoints the Claude desktop app gives a Code tab session (#3239):
+ * `claude-desktop`, or `claude-desktop-3p` with a third-party inference
+ * provider (read in the desktop app 4.23118, which also deletes `CLAUDECODE`
+ * and `CLAUDE_CODE_CHILD_SESSION` from that environment, as the VS Code
+ * extension does). Cowork sessions get `local-agent` and stay `headless`.
+ */
+const DESKTOP_CODE_TAB_ENTRYPOINTS: ReadonlySet<string> = new Set(['claude-desktop', 'claude-desktop-3p'])
+
+export function isDesktopCodeTabEntrypoint(value: unknown): boolean {
+  return typeof value === 'string' && DESKTOP_CODE_TAB_ENTRYPOINTS.has(value)
+}
+
+/**
+ * Whether a session that is not interactive is a Code tab session of the
+ * Claude desktop app, under the panel's guards (`isPanelSession`): a
+ * `claude -p` started from inside one inherits the entrypoint, and is told
+ * apart by the same variables.
+ */
+export function isDesktopCodeTabSession(env: PanelSessionEnv, sessionId: string): boolean {
+  return isDesktopCodeTabEntrypoint(env.entrypoint) && isHostOwnSession(env, sessionId)
 }
 
 /**
@@ -397,26 +419,31 @@ export function isT3ThreadOwnTools(names: readonly unknown[]): boolean {
  * Where the session runs, as the mod sorts it at `session.start`:
  *
  * - `terminal`: a person at Claude Code's own prompt (`isInteractive`);
- * - `panel`: a panel host's chat: the VS Code extension, Orca, the Claude
- *   desktop app's Code tab (`isPanelSession`; where the host draws its own
+ * - `panel`: a panel host's chat: the VS Code extension, Orca
+ *   (`isPanelSession`; where the host draws its own
  *   plan card, ExitPlanMode is left to it: `panelHostOwnsPlanMode`);
+ * - `desktop`: a Code tab session of the Claude desktop app
+ *   (`isDesktopCodeTabSession`);
  * - `t3`: a T3 Code thread (`t3ThreadOf`);
  * - `headless`: any other session that is not interactive: `claude -p`,
- *   another Agent SDK app, an unknown or missing entrypoint.
+ *   another Agent SDK app, the desktop app's Cowork, an unknown or missing entrypoint.
  *
- * The first three take a later turn from a plugin while the process lives
- * (the panel and T3 show it as a turn of the thread), so the mod runs there
- * as in the terminal. A `headless` session may be a one-shot run that exits
+ * The terminal, the panel and T3 take a later turn from a plugin while the
+ * process lives (the panel and T3 show it as a turn of the thread), so the mod
+ * runs there as in the terminal. The desktop app's Code tab does too, but
+ * there the mod adds only the Inbox reply wake: everything else stays as in a
+ * `headless` session (#3239). A `headless` session may be a one-shot run that exits
  * as its turn ends, and nothing at `session.start` says whether it is: there
  * a decision or a reply promised for later could be lost, so the flows that
  * deliver later keep the classic, blocking path and the Inbox tool sends
  * without the wake (`SESSION_KIND_FEATURES`).
  */
-export type SessionKind = 'terminal' | 'panel' | 't3' | 'headless'
+export type SessionKind = 'terminal' | 'panel' | 'desktop' | 't3' | 'headless'
 
-export function sessionKindOf(s: { isInteractive: boolean; panel: boolean; t3Thread: string | null }): SessionKind {
+export function sessionKindOf(s: { isInteractive: boolean; panel: boolean; desktop: boolean; t3Thread: string | null }): SessionKind {
   if (s.isInteractive) return 'terminal'
   if (s.panel) return 'panel'
+  if (s.desktop) return 'desktop'
   if (s.t3Thread !== null) return 't3'
   return 'headless'
 }
@@ -426,18 +453,21 @@ export function sessionKindOf(s: { isInteractive: boolean; panel: boolean; t3Thr
  * `reviews`, the non-blocking reviews (the slash commands, the `plannotator`
  * tool, the Bash take-over, Ask this session); `planReview`, ExitPlanMode
  * (T3 Code owns Plan mode: its own plan card stays); `inboxTool`, the
- * `plannotator_inbox` tool; `wake`, the Inbox reply as a later turn.
+ * `plannotator_inbox` tool; `wake`, the Inbox reply as a later turn;
+ * `reminder`, the Inbox reminder at the start of each conversation.
  */
-export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: boolean; planReview: boolean; inboxTool: boolean; wake: boolean }>> = {
-  terminal: { reviews: true, planReview: true, inboxTool: true, wake: true },
-  panel: { reviews: true, planReview: true, inboxTool: true, wake: true },
-  t3: { reviews: true, planReview: false, inboxTool: true, wake: true },
-  headless: { reviews: false, planReview: false, inboxTool: true, wake: false },
+export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: boolean; planReview: boolean; inboxTool: boolean; wake: boolean; reminder: boolean }>> = {
+  terminal: { reviews: true, planReview: true, inboxTool: true, wake: true, reminder: true },
+  panel: { reviews: true, planReview: true, inboxTool: true, wake: true, reminder: true },
+  // The Code tab: a headless session plus the reply wake (#3239).
+  desktop: { reviews: false, planReview: false, inboxTool: true, wake: true, reminder: false },
+  t3: { reviews: true, planReview: false, inboxTool: true, wake: true, reminder: true },
+  headless: { reviews: false, planReview: false, inboxTool: true, wake: false, reminder: false },
 }
 
 /**
  * A prompt's `origin.kind` as the mod reads it. In a panel session (VS Code,
- * Orca, the desktop Code tab) or a T3 Code thread the person's Enter reaches Claude Code as the SDK
+ * Orca) or a T3 Code thread the person's Enter reaches Claude Code as the SDK
  * host's own turn (`sdk`: the host sends what the person typed), so there it
  * reads as `composer`, the person's Enter in the terminal: a prompt they type
  * takes over the turn answering an "Ask this session" question and pulls the

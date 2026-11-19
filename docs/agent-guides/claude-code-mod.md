@@ -47,10 +47,11 @@ and each kind gets what works there:
 | Session | `plannotator_inbox` | Reply wake | `plannotator` tool, commands, Bash take-over | Plan review |
 | --- | --- | --- | --- | --- |
 | `terminal` (interactive) | yes | yes | yes | the mod's |
-| `panel` (VS Code chat panel, the Claude desktop app's Code tab) | yes | yes | yes | the mod's |
+| `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
 | `panel` (Orca chat) | yes | yes | yes | Orca's own plan card |
+| `desktop` (the Claude desktop app's Code tab) | yes | yes | no: the classic CLI | the classic hook |
 | `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
-| `headless` (`claude -p`, any other SDK app, the desktop app's Cowork) | yes | no | no: the classic CLI | the classic hook |
+| `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
 
 The one real barrier is that a run without a person (`claude -p`, an SDK
 script) ends when its turn ends, and at `session.start` the mod cannot tell a
@@ -151,15 +152,20 @@ plan server starts, and the debug log says the switch was set and that both
 ExitPlanMode and its permission request were passed on.
 
 **The Claude desktop app's Code tab (#3239).** The desktop app runs a Code
-tab session's CLI through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT` set to
+tab's Claude Code through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT`
 `claude-desktop` (`claude-desktop-3p` with a third-party inference provider),
-and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from that
-environment as its last step (both read in the 4.23118 app's bundle, in the
-function that builds a "Code session" environment). So it is a panel host
-with plan review on. Cowork's sessions (`local-agent`) stay `headless`. Not
-seen yet in a real session: whether the process stays alive between turns,
-whether the app shows a plugin's submitted turn, and whether the app draws
-its own plan card (then its flag turns plan review off, as Orca's does).
+and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from that environment
+(both read in the 4.23118 app; Cowork's `local-agent` stays `headless`).
+`isDesktopCodeTabSession` in `enabled.ts` applies the panel's checks, so a
+`claude -p` started inside a Code tab is `headless`. A `desktop` session is a
+`headless` one plus the reply wake: the Inbox link ticks from the start and
+its sends carry the wake mark. It gets no reminder, no `plannotator` tool, no
+commands and no Bash take-over, and ExitPlanMode goes on to the classic hook.
+Before this, a Code tab was `headless`, so its first send was stored
+without `wakes` ("Saved for Claude Code…"). Its reply then went in only when
+the self-heal's second look armed the tick (`ensureTicking`, about 60 s after
+the session started). A wake the app refuses (`{ drop }`) is held as in the
+panel.
 
 **A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
 the Agent SDK with no `settingSources`, so the user's plugins, this one
@@ -252,8 +258,8 @@ against the Inbox's, the feature table, the panel hosts and which one draws
 its own plan card), `register-vscode.test.ts` (the real
 registered hooks on a fake `$`: every panel host and a T3 thread register both tools,
 poll as their session or thread and deliver once; each refusal is held and
-goes in once after the person's prompt; the mod's plan review opens in VS Code
-and the desktop Code tab, and in Orca it does not, while Orca's code review
+goes in once after the person's prompt; the mod's plan review opens in VS Code,
+and in Orca it does not, while Orca's code review
 stays the mod's; every process with Orca's entrypoint leaves a marked
 `PLANNOTATOR_PLAN_REVIEW=0` in its environment and no other session does,
 the person's own value is never overwritten, and a terminal or panel
