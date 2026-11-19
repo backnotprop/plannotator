@@ -351,6 +351,11 @@ describe('bare text', () => {
     expect(t.h).toBeLessThan(84 * 1.5);
     expect(add('two', { text: 'Act one\nThe relay wakes', size: 'title' }).ok).toBe(true);
     expect((store.getDocument().objects.two as { h: number }).h).toBeGreaterThanOrEqual(80);
+    // Wide letters are counted wide (capitals in bold run past six-tenths of their height), and a mono face by its own measure.
+    expect(add('caps', { text: 'MOOD BOARD', size: 'display' }).ok).toBe(true);
+    expect((store.getDocument().objects.caps as { w: number }).w).toBeGreaterThan(600);
+    expect(add('thin', { text: 'illicit jiji', size: 'display', face: 'mono' }).ok).toBe(true);
+    expect((store.getDocument().objects.thin as { w: number }).w).toBeGreaterThan(12 * 84 * 0.6);
     // Small text keeps the box it always had; a given size is kept; the longest text still makes a box a file may hold.
     expect(add('s', { text: 'ferrite.' }).ok).toBe(true);
     expect(store.getDocument().objects.s).toMatchObject({ w: 200, h: 28 });
