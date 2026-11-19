@@ -37,7 +37,7 @@ export const ChartView = memo(function ChartView({ object, rich }: ChartViewProp
             className={`${shape.fill ? `pcv-ch-f-${shape.fill}` : 'pcv-ch-f-none'}${shape.stroke ? ` pcv-ch-s-${shape.stroke}` : ''}`}
             strokeWidth={shape.stroke ? (shape.width ?? 1) : undefined}
             opacity={shape.opacity !== undefined && shape.opacity < 1 ? shape.opacity : undefined}
-            strokeDasharray={shape.dash ? '4 3' : undefined}
+            strokeDasharray={shape.dash}
           />
         ),
       )}

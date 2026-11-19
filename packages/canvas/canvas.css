@@ -1582,7 +1582,10 @@
 @media (forced-colors: active) {
   .pcv-chart { border-color: CanvasText; }
   .pcv-ch-f-ink, .pcv-ch-f-muted, .pcv-ch-f-accent { fill: CanvasText; }
-  .pcv-ch-s-ink, .pcv-ch-s-muted, .pcv-ch-s-accent, .pcv-ch-s-rule { stroke: CanvasText; }
+  .pcv-ch-s-ink, .pcv-ch-s-muted, .pcv-ch-s-accent { stroke: CanvasText; }
+  /* The rules stay lighter than the marks they sit behind. */
+  .pcv-ch-s-rule { stroke: GrayText; }
+  .pcv-ch-f-rule { fill: GrayText; }
 }
 
 /* A stamp: a small token. */

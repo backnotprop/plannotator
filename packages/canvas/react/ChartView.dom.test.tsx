@@ -7,16 +7,29 @@
  *
  * Requires DOM: listed in tests/dom-test-list.txt.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { CanvasStore } from '../events/store';
 import { createDocument } from '../model/document';
 import type { CanvasObject } from '../model/types';
+import { decodeEnvelope } from '../events/wire';
 import { CameraController } from '../view/camera';
-import { CanvasEditor } from './CanvasEditor';
-import { CanvasView } from './CanvasView';
+import * as chartDrawing from '../view/chart';
+
+// Every time a chart's shapes are worked out is counted: the drawing itself is the real one.
+let drawn = 0;
+const realShapes = chartDrawing.chartShapes;
+mock.module('../view/chart', () => ({
+  ...chartDrawing,
+  chartShapes: (...args: Parameters<typeof realShapes>) => {
+    drawn += 1;
+    return realShapes(...args);
+  },
+}));
+const { CanvasEditor } = await import('./CanvasEditor');
+const { CanvasView } = await import('./CanvasView');
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -53,7 +66,7 @@ const CHART = {
   rules: [{ at: 5, label: '<b>target</b>' }],
 };
 
-async function mount(editor: boolean, extra: object = {}): Promise<{ host: HTMLElement; store: CanvasStore }> {
+async function mount(editor: boolean, extra: object = {}, zoom = 1): Promise<{ host: HTMLElement; store: CanvasStore }> {
   const store = new CanvasStore(createDocument('board', 'Board'));
   const added = store.dispatch({ type: 'add', objects: [{ ...CHART, ...extra } as unknown as CanvasObject] }, { actor: { kind: 'agent', id: 'a' } });
   if (!added.ok) throw new Error(added.error);
@@ -61,7 +74,7 @@ async function mount(editor: boolean, extra: object = {}): Promise<{ host: HTMLE
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(editor ? <CanvasEditor store={store} /> : <CanvasView store={store} camera={new CameraController()} />);
+    root!.render(editor ? <CanvasEditor store={store} /> : <CanvasView store={store} camera={new CameraController({ x: 0, y: 0, z: zoom })} />);
   });
   return { host, store };
 }
@@ -83,7 +96,7 @@ describe.skipIf(!hasDom)('a chart, mounted', () => {
     const { host } = await mount(false, { title: 'Scan to alert' });
     const chart = host.querySelector('[data-id="ch"]')!;
     expect(chart.getAttribute('role')).toBe('img');
-    expect(chart.getAttribute('aria-label')).toContain('Scan to alert. Line chart of minutes from 11.2 to 1.3 min by week: 3 rows');
+    expect(chart.getAttribute('aria-label')).toContain('Scan to alert. Line chart of minutes from 11.2 to 1.3 min, by week: 3 rows');
     expect(chart.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');
   });
 
@@ -94,22 +107,57 @@ describe.skipIf(!hasDom)('a chart, mounted', () => {
     expect(chart.getAttribute('tabindex')).not.toBeNull();
   });
 
-  test('a change to its rows redraws it; a move does not work it out again', async () => {
+  test('its shapes are worked out again only when the chart changed: not for a move, a peer\'s move or an undo', async () => {
     const { host, store } = await mount(false, { title: 'Scan to alert' });
     const line = () => host!.querySelector('[data-id="ch"] path.pcv-ch-s-accent')!;
     const before = line().getAttribute('d');
+    const atStart = drawn;
+    expect(atStart).toBeGreaterThan(0);
+    // A drag here: thirty moves.
+    for (let i = 0; i < 30; i++) {
+      await act(async () => {
+        store.dispatch({ type: 'move', ids: ['ch'], dx: 3, dy: 1 }, { gesture: 'drag' });
+      });
+    }
+    // A peer dragging it: every one of its moves is checked and rebuilt on the way in.
+    for (let i = 0; i < 30; i++) {
+      const moved = decodeEnvelope(JSON.stringify({ id: `peer-${i}`, actor: { kind: 'person', id: 'peer' }, events: [{ type: 'object-set', id: 'ch', set: { x: 200 + i, y: 90 } }] }));
+      if (!moved.ok) throw new Error(moved.error);
+      await act(async () => {
+        store.receive(moved.value);
+      });
+    }
+    expect(host.querySelector<HTMLElement>('[data-id="ch"]')!.style.transform).toBe('translate(229px, 90px)');
     await act(async () => {
-      store.dispatch({ type: 'move', ids: ['ch'], dx: 30, dy: 10 });
+      store.undo();
     });
+    expect(host.querySelector<HTMLElement>('[data-id="ch"]')!.style.transform).toBe('translate(40px, 40px)');
+    expect(drawn).toBe(atStart);
     expect(line().getAttribute('d')).toBe(before);
+    // Its rows change: once more, and the line is another line. Undone: back.
     await act(async () => {
       store.dispatch({ type: 'edit', id: 'ch', patch: { rows: [['W1', 1], ['W2', 9], ['W3', 30]] } });
     });
+    expect(drawn).toBe(atStart + 1);
     expect(line().getAttribute('d')).not.toBe(before);
     expect([...host.querySelectorAll('[data-id="ch"] text')].some((el) => el.textContent === '30')).toBe(true);
     await act(async () => {
       store.undo();
     });
     expect(line().getAttribute('d')).toBe(before);
+  });
+
+  test('too small on screen to read, it keeps its marks and draws none of its words, however few things the board holds', async () => {
+    const shown = await mount(false, { title: 'Scan to alert' }, 1);
+    expect(shown.host.querySelectorAll('[data-id="ch"] text').length).toBeGreaterThan(4);
+    act(() => root!.unmount());
+    root = null;
+    shown.host.remove();
+    // At 30% its smallest words would be under three pixels tall.
+    const far = await mount(false, { title: 'Scan to alert' }, 0.3);
+    expect(far.host.querySelectorAll('[data-id="ch"] text').length).toBe(0);
+    expect(far.host.querySelector('[data-id="ch"] path.pcv-ch-s-accent')).not.toBeNull();
+    // What it shows is still said in words to someone who cannot see it.
+    expect(far.host.querySelector('[data-id="ch"]')!.getAttribute('aria-label')).toContain('Line chart of minutes');
   });
 });
