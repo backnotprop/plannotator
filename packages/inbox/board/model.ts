@@ -38,6 +38,8 @@ import {
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
 import { projectNames } from '../search/model';
 
+export { rememberedBoardFilter } from './boardFilterMemory';
+
 export type BoardView = 'lanes' | 'done' | 'cancelled';
 
 /**
