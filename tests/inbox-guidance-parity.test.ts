@@ -37,6 +37,7 @@ import {
   INBOX_ATTACHMENTS_PICTURES_LINE,
   INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE,
   INBOX_BRIEFING_FROM_NOW_ON,
+  INBOX_CHANGE_RULE,
   INBOX_CHANNEL_RULE,
   INBOX_COMMAND_BRIEFING,
   INBOX_DELEGATED_OPTIONS_RULE,
@@ -294,6 +295,28 @@ describe("Inbox guidance parity across harnesses", () => {
     for (const [surface, text] of Object.entries(SURFACES)) {
       expect([surface, /screenshot or image usually reads fastest|short summary, files in `attachments`|put the files to read in `attachments`/.test(text)]).toEqual([surface, false]);
     }
+  });
+
+  test("a question that proposes a change shows it: every body description, --help, the skill and llms.txt carry the change rule word for word", () => {
+    // Approval "before-after" (2026-11-18): the person could not tell where a proposed change sits or what surrounds it.
+    const send = INBOX_DEFAULT_TOOLS.find((tool) => tool.name === "send_message")!;
+    const mcpBody = (send.inputSchema.properties as Record<string, { description?: string }>).body!.description!;
+    const toolBody = ((inboxAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties ?? {}) as Record<string, { description?: string }>).body!.description!;
+    const modBody = ((modAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties ?? {}) as Record<string, { description?: string }>).body!.description!;
+    const surfaces: Record<string, string> = {
+      "tool: Claude Code, Pi, OpenCode": toolBody,
+      "tool: the Claude Code mod": modBody,
+      "MCP send_message (Codex, Gemini, Cursor, MCP clients)": mcpBody,
+      "plannotator inbox --help": SURFACES["plannotator inbox --help"]!,
+      "plannotator skill": SURFACES["plannotator skill"]!,
+      "llms.txt": readFileSync(join(root, "apps/marketing/src/lib/llms.ts"), "utf8"),
+    };
+    for (const [surface, text] of Object.entries(surfaces)) {
+      const carries = surface === "llms.txt" ? text.includes("INBOX_CHANGE_RULE") : text.includes(INBOX_CHANGE_RULE);
+      expect([surface, carries]).toEqual([surface, true]);
+    }
+    // Right after the pictures rule on every body.
+    for (const body of [toolBody, modBody, mcpBody]) expect(body).toContain(`${INBOX_PICTURES_RULE}\n${INBOX_CHANGE_RULE}`);
   });
 
   test("the skill's description carries the subagent rule", () => {

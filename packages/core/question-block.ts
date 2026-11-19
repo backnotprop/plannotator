@@ -172,6 +172,53 @@ export interface QuestionChoice {
   /** `Prototype:` (or `Try:`) under a `- [ ]` choice: the page that shows
    *  this option, as `QuestionPrototype`. Option lines only. */
   prototype?: QuestionPrototype;
+  /** `Before:` indented under a `- [ ]` choice: what this choice's own change
+   *  replaces (change lines only, `ParseQuestionBlockOptions.changeLines`). */
+  before?: QuestionChangeValue;
+  /** `After:` indented under a `- [ ]` choice: this choice is its own version
+   *  or change, and this is how it reads (change lines only). With several
+   *  places, its first place's. */
+  after?: QuestionChangeValue;
+  /** Every place of a choice that names one (`Where:` under it) or has more
+   *  than one (a second `Before:` / `After:` starts the next, as at the
+   *  block's indent). A place without its own Where or Before is the
+   *  question's place in the same position. Absent otherwise. */
+  places?: QuestionChangeGroup[];
+}
+
+/**
+ * One side of a before and after (change lines): the text as written (inline
+ * markdown; a `> ` quoted value keeps its lines), one picture (`![alt](src)`,
+ * a GIF too), or nothing there (`none`).
+ */
+export type QuestionChangeValue =
+  | { kind: 'text'; text: string }
+  /** `caption`: words written after the picture on its line (what it shows, in text). */
+  | { kind: 'image'; alt: string; src: string; caption?: string }
+  | { kind: 'none' };
+
+/** One place a question changes: its own `Where:` (when the question has
+ *  several places) and its `Before:` / `After:`. */
+export interface QuestionChangeGroup {
+  where?: string;
+  before?: QuestionChangeValue;
+  after?: QuestionChangeValue;
+}
+
+/**
+ * A question that proposes a change (change lines, read only with
+ * `ParseQuestionBlockOptions.changeLines`): `Where:` what it is and where the
+ * person sees it, then `Before:` and `After:`; a second `Where:` starts another
+ * place. `Source:` is where it lives (a path or URL), for the opened picture
+ * only. Never the prompt, never context, never in the key.
+ */
+export interface QuestionChange {
+  /** The question's own `Where:` (the first, when the places below have their own). */
+  where?: string;
+  /** `Source:` — a file:line or URL, shown only with the opened place picture. */
+  source?: string;
+  /** The places, in order; empty when only choices carry a change. */
+  groups: QuestionChangeGroup[];
 }
 
 /**
@@ -254,6 +301,10 @@ export interface ParsedQuestion {
   /** `Prototype:` at the block's own indent: one page every option shows
    *  (option lines only, `ParseQuestionBlockOptions.optionLines`). */
   prototype?: QuestionPrototype;
+  /** `Where:` / `Before:` / `After:` / `Source:` at the block's own indent
+   *  (change lines only, `ParseQuestionBlockOptions.changeLines`). Absent when
+   *  the block has none of them and no choice carries a change. */
+  change?: QuestionChange;
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -755,6 +806,84 @@ export const readOptionLine = (
   return { field: name.startsWith('pro') ? 'pros' : 'cons', value: items };
 };
 
+// Change lines (`ParseQuestionBlockOptions.changeLines`): `Where:`, `Before:`,
+// `After:` and `Source:` at the block's indent, `Before:` and `After:` under a
+// `- [ ]` choice. Any case, emphasis around the label allowed.
+const CHANGE_LINE_RE = /^\s*(?:[*_]{1,2})?(where|before|after|source)(?:[*_]{1,2})?\s*:\s*(?:[*_]{1,2}(?=\s|$))?\s*(.*?)\s*$/i;
+const CHANGE_NONE_RE = /^(?:none|nothing)\.?$/i;
+// A quoted line (`> text`), the multi-line form of a value: `Before:` alone, then the lines.
+const QUOTE_LINE_RE = /^\s*>/;
+
+type ChangeField = 'where' | 'before' | 'after' | 'source';
+
+/** A change line read: its field and the value as written (empty when the
+ *  value follows as quoted lines), or null when the line is not one. */
+const readChangeLine = (line: string): { field: ChangeField; value: string } | null => {
+  const m = line.match(CHANGE_LINE_RE);
+  return m ? { field: m[1].toLowerCase() as ChangeField, value: m[2] } : null;
+};
+
+/** A `Before:` / `After:` value: `none`, one picture, or text. Null when empty. */
+const CHANGE_CAPTIONED_IMAGE_RE = /^!\[([^\]\n]*)\]\(([^)\n]+)\)\s+(\S.*)$/;
+
+const readChangeValue = (raw: string): QuestionChangeValue | null => {
+  const value = raw.trim();
+  if (!value) return null;
+  if (CHANGE_NONE_RE.test(value)) return { kind: 'none' };
+  const image = value.match(SHOWS_IMAGE_RE);
+  if (image) return { kind: 'image', alt: image[1].trim(), src: image[2] };
+  // A picture with words after it: the picture, those words its caption.
+  const captioned = value.match(CHANGE_CAPTIONED_IMAGE_RE);
+  if (captioned) return { kind: 'image', alt: captioned[1].trim(), src: captioned[2], caption: captioned[3] };
+  return { kind: 'text', text: value };
+};
+
+/** A quoted line's text: the `>` and one space after it taken off. */
+const unquote = (line: string): string => line.replace(/^\s*>\s?/, '').trimEnd();
+
+/**
+ * The places of a block's change lines, in the order written: a `Where:`
+ * after anything starts a new place, as does a `Before:` after a Before or an
+ * After, and an `After:` after an After. A first `Where:` with nothing under it
+ * before the next one is the question's own; with one place, its Where is the
+ * question's.
+ */
+const changeGroupsOf = (
+  events: ReadonlyArray<{ field: 'where'; value: string } | { field: 'before' | 'after'; value: QuestionChangeValue }>,
+): QuestionChangeGroup[] => {
+  const groups: QuestionChangeGroup[] = [];
+  for (const event of events) {
+    const current = groups[groups.length - 1];
+    if (event.field === 'where') {
+      if (!current || current.where !== undefined || current.before || current.after) groups.push({ where: event.value });
+      else current.where = event.value;
+    } else if (event.field === 'before') {
+      if (!current || current.before || current.after) groups.push({ before: event.value });
+      else current.before = event.value;
+    } else if (!current || current.after) {
+      groups.push({ after: event.value });
+    } else {
+      current.after = event.value;
+    }
+  }
+  return groups;
+};
+
+const changeOf = (
+  events: ReadonlyArray<{ field: 'where'; value: string } | { field: 'before' | 'after'; value: QuestionChangeValue }>,
+  source: string | undefined,
+): QuestionChange => {
+  const groups = changeGroupsOf(events);
+  let where: string | undefined;
+  if (groups.length > 0 && groups[0].where !== undefined && !groups[0].before && !groups[0].after) {
+    where = groups.shift()!.where;
+  } else if (groups.length === 1 && groups[0].where !== undefined) {
+    where = groups[0].where;
+    delete groups[0].where;
+  }
+  return { ...(where !== undefined ? { where } : {}), ...(source ? { source } : {}), groups };
+};
+
 /** A question's own `Prototype:` (or `Try:`) line at the block's indent:
  *  one page for every option (option lines only). */
 const readSharedPrototypeLine = (line: string): ContractValue | null => {
@@ -942,6 +1071,20 @@ export interface ParseQuestionBlockOptions {
    *  labels and answers of `- [ ]` choices are the same either way. Only the
    *  Plannotator Inbox passes true. */
   optionLines?: boolean;
+  /** Read change lines (a question that proposes a change): `Where:`,
+   *  `Before:`, `After:` and `Source:` at the block's own indent into
+   *  `change`, and `Where:` / `Before:` / `After:` indented under a `- [ ]`
+   *  choice into that choice's `before` / `after` (and `places`). A value is the rest of the line (text,
+   *  one `![alt](src)` picture, or `none`), or, with nothing after the colon,
+   *  the `> ` quoted lines right under it. Default false: every such line
+   *  stays where it always went (context, or the choice's description), as
+   *  it does in every older reader. A line is read only where the default
+   *  parse would have kept it as a context line of its own (never the
+   *  continuation of a plain bullet or a recommendation), so the prompt, the
+   *  key, the labels and the recommendation are the default parse's. Only the
+   *  Plannotator Inbox's cards pass true; its server stores the default
+   *  parse. */
+  changeLines?: boolean;
 }
 
 export const parseQuestionBlock = (
@@ -953,6 +1096,7 @@ export const parseQuestionBlock = (
   const readDecisionLines = options?.decisionLines !== false;
   const readContractLines = options?.contractLines !== false;
   const readOptionLines = options?.optionLines === true;
+  const readChangeLines = options?.changeLines === true;
   if (typeof body !== 'string') return null;
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
 
@@ -1023,8 +1167,53 @@ export const parseQuestionBlock = (
     else if (marker[0] === continuationFence[0] && marker.length >= continuationFence.length && line.trim() === marker) continuationFence = null;
   };
 
+  // Change lines (`changeLines`): the block's own, in order, and its first
+  // `Source:` (kept in the context until the end: it leaves it only when the
+  // block has a change to show it with).
+  type ChangeEvent = { field: 'where'; value: string } | { field: 'before' | 'after'; value: QuestionChangeValue };
+  const changeEvents: ChangeEvent[] = [];
+  // A choice's own lines (`Where:`, `Before:`, `After:` under it), by choice.
+  const choiceChangeEvents = new Map<number, ChangeEvent[]>();
+  const pushChoiceChange = (choice: number, event: ChangeEvent) => {
+    const list = choiceChangeEvents.get(choice) ?? [];
+    list.push(event);
+    choiceChangeEvents.set(choice, list);
+  };
+  let changeSource: { value: string; contextIndex: number } | undefined;
+  // A `Before:` / `After:` with nothing after the colon, waiting for its `> `
+  // quoted lines: at the block's indent (`choice` -1) or under a choice. One
+  // with no quoted line under it was not a value: its line goes back where
+  // the default parse put it.
+  let pendingChange: { choice: number; field: 'before' | 'after'; line: string; quoted: string[] } | null = null;
+  const settleChange = () => {
+    const pending = pendingChange;
+    if (!pending) return;
+    pendingChange = null;
+    const joined = pending.quoted.join('\n').replace(/^\n+|\n+$/g, '');
+    const value = joined ? (pending.quoted.length === 1 ? readChangeValue(joined) : { kind: 'text' as const, text: joined }) : null;
+    if (pending.choice === -1) {
+      if (value) changeEvents.push({ field: pending.field, value });
+      else pushContext(pending.line);
+      return;
+    }
+    if (value) pushChoiceChange(pending.choice, { field: pending.field, value });
+    else {
+      const c = choices[pending.choice];
+      c.description = c.description ? `${c.description} ${pending.line}` : pending.line;
+    }
+  };
+  const promptIndentOf = () => indentWidth(lines[promptLine] ?? '');
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (pendingChange) {
+      // Quoted lines continue the value: at the block's indent for the
+      // block's own, indented under the choice for a choice's.
+      const quoted = QUOTE_LINE_RE.test(line) && (pendingChange.choice === -1
+        ? indentWidth(line) <= promptIndentOf()
+        : lastChoice === pendingChange.choice && /^\s+\S/.test(line));
+      if (!quoted) settleChange();
+    }
     if (line.trim() === '') {
       lastChoice = -1;
       if (openBullet) openBullet.afterBlank = true;
@@ -1177,6 +1366,29 @@ export const parseQuestionBlock = (
         else c[optionLine.field] = optionLine.value;
         continue;
       }
+      // A choice's own `Where:` / `Before:` / `After:` (or a quoted line of
+      // one): its places, as the block's are read. Its text stays in the
+      // choice's raw text, as the default parse has it, so labels and the
+      // recommendation match.
+      if (readChangeLines && !continuationFence) {
+        if (pendingChange && pendingChange.choice === lastChoice) {
+          pendingChange.quoted.push(unquote(extra));
+          raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
+          continue;
+        }
+        const changeLine = readChangeLine(extra);
+        const text = changeLine?.value.trim() ?? '';
+        if (changeLine && (changeLine.field === 'before' || changeLine.field === 'after' || (changeLine.field === 'where' && text))) {
+          if (changeLine.field === 'where') pushChoiceChange(lastChoice, { field: 'where', value: text });
+          else {
+            const value = readChangeValue(text);
+            if (value) pushChoiceChange(lastChoice, { field: changeLine.field, value });
+            else pendingChange = { choice: lastChoice, field: changeLine.field, line: extra, quoted: [] };
+          }
+          raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
+          continue;
+        }
+      }
       if (c.description) c.description = `${c.description} ${extra}`;
       else c.description = extra;
       raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
@@ -1211,6 +1423,34 @@ export const parseQuestionBlock = (
     }
     openBullet = null;
     continuationFence = null;
+    // The block's own change lines, read only where the default parse keeps
+    // the line as a context line of its own: at the block's indent, outside
+    // a code fence, not a bullet.
+    if (readChangeLines && !bullet && !fenceBefore && !bodyFence && atBlockIndent) {
+      if (pendingChange && pendingChange.choice === -1) {
+        pendingChange.quoted.push(unquote(line));
+        continue;
+      }
+      const changeLine = readChangeLine(line);
+      if (changeLine) {
+        const text = changeLine.value.trim();
+        if (changeLine.field === 'where' && text) {
+          changeEvents.push({ field: 'where', value: text });
+          continue;
+        }
+        if (changeLine.field === 'source' && text && !changeSource) {
+          changeSource = { value: text, contextIndex: contextLines.length };
+          pushContext(line.trimEnd());
+          continue;
+        }
+        if (changeLine.field === 'before' || changeLine.field === 'after') {
+          const value = readChangeValue(text);
+          if (value) changeEvents.push({ field: changeLine.field, value });
+          else pendingChange = { choice: -1, field: changeLine.field, line: line.trimEnd(), quoted: [] };
+          continue;
+        }
+      }
+    }
     if (bullet && bullet[1].trim()) {
       plainBullets.push({ text: bullet[1].trim(), first: bullet[1].trim(), contextIndices: [contextLines.length] });
       openBullet = {
@@ -1220,6 +1460,17 @@ export const parseQuestionBlock = (
       };
     }
     pushContext(line.trimEnd());
+  }
+  settleChange();
+  // Each choice's places: its first place's Before / After on the choice,
+  // and every place in `places` when it has more than one or names one.
+  for (const [index, events] of choiceChangeEvents) {
+    const groups = changeGroupsOf(events);
+    const c = choices[index];
+    if (groups.length === 0 || !c) continue;
+    if (groups[0].before) c.before = groups[0].before;
+    if (groups[0].after) c.after = groups[0].after;
+    if (groups.length > 1 || groups.some((g) => g.where !== undefined)) c.places = groups;
   }
 
   // A label and nothing to ask: the label is the prompt, as before it was
@@ -1268,7 +1519,8 @@ export const parseQuestionBlock = (
   const labelCount = new Map<string, number>();
   for (const c of choices) labelCount.set(normalizeQuestionText(c.label), (labelCount.get(normalizeQuestionText(c.label)) ?? 0) + 1);
   choices.forEach((c, i) => {
-    if (!c.description || (labelCount.get(normalizeQuestionText(c.label)) ?? 0) < 2) return;
+    // A choice's own Before / After was description text to the default parse: it counts here too, so both read one label.
+    if (!(c.description || c.before || c.after) || (labelCount.get(normalizeQuestionText(c.label)) ?? 0) < 2) return;
     const { description: _d, ...rest } = c;
     choices[i] = { ...rest, label: raws[i]!.trim() };
   });
@@ -1276,6 +1528,13 @@ export const parseQuestionBlock = (
     choices.splice(0, choices.length, ...withPictureChoices(choices));
   }
   for (const index of recommendationWrapIndices) dropContext.add(index);
+  // The change: present when the block has a Where, a Before or an After, or
+  // a choice carries one. `Source:` alone shows nowhere, so it stays context.
+  let change: QuestionChange | undefined;
+  if (readChangeLines && (changeEvents.length > 0 || choices.some((c) => c.before || c.after))) {
+    change = changeOf(changeEvents, changeSource?.value);
+    if (changeSource) dropContext.add(changeSource.contextIndex);
+  }
   for (let i = contextLines.length - 1; i >= 0; i--) if (dropContext.has(i)) contextLines.splice(i, 1);
 
   const kind: QuestionKind = choices.length === 0 || directiveKind === 'question-text'
@@ -1365,6 +1624,7 @@ export const parseQuestionBlock = (
     ...(readContractLines && contract.why ? { why: contract.why } : {}),
     ...(readContractLines && contract.reversible ? { reversible: contract.reversible } : {}),
     ...(readOptionLines && contract.prototype ? { prototype: contract.prototype } : {}),
+    ...(change ? { change } : {}),
   };
 };
 

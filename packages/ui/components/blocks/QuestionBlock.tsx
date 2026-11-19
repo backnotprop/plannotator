@@ -13,6 +13,7 @@ import {
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { QuestionContext } from './QuestionContext';
+import { QuestionChangeGroups, QuestionChoicePictures, QuestionWhere, questionChoiceChangeText, questionChoiceHasPictures, type QuestionChangeHost } from './QuestionChange';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
@@ -513,6 +514,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const promptId = `q-prompt-${uid}`;
   const contextId = `q-context-${uid}`;
   const stakesId = `q-stakes-${uid}`;
+  const whereId = `q-where-${uid}`;
   const suggestId = `q-suggest-${uid}`;
   const noteLabelId = `q-note-${uid}`;
   // null = follow the answer (open while a note exists); a click pins it.
@@ -817,7 +819,18 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     ? (recordingOn ? 'on' : 'off')
     : undefined;
 
-  const describedBy = [question.stakes ? stakesId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
+  // A question that proposes a change (change lines): its Where, its places, and the pictures they open.
+  const change = question.change;
+  const changeHost: QuestionChangeHost | null = change || question.choices.some((c) => c.before || c.after || c.places)
+    ? { inline, pictureSrc, heldPlaceholder, failed: failedPictures, onPictureError: markPictureFailed, onOpenPicture: onImageClick }
+    : null;
+  // The `Shows:` picture is the place: with a Where it opens from "See it" there (with its `Source:`), not from the chip.
+  const firstWhere = change ? change.where ?? change.groups.find((g) => g.where !== undefined)?.where : undefined;
+  const place = firstWhere !== undefined && question.shows?.kind === 'image' && showsSrc && onImageClick
+    ? { url: showsSrc, alt: [question.shows.label || 'The place', change!.source].filter(Boolean).join(' · ') }
+    : null;
+
+  const describedBy = [question.stakes ? stakesId : null, change?.where ? whereId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
 
@@ -940,7 +953,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {inline(question.stakes)}
         </p>
       )}
-      {question.shows && (
+      {changeHost && change?.where !== undefined && <QuestionWhere id={whereId} where={change.where} host={changeHost} place={place} />}
+      {question.shows && !place && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px]" data-question-shows="">
           <span className="annotation-exclude select-none text-muted-foreground" data-pinpoint-ignore="">Shows</span>
           {question.shows.kind === 'image' ? (
@@ -1011,6 +1025,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           repoHost={repoHost}
         />
       )}
+      {/* The Where is the first thing under the prompt; the places' Now and After follow the context that explains them. */}
+      {changeHost && change && <QuestionChangeGroups question={question} host={changeHost} place={place} />}
 
       {question.kind === 'text' ? (
         <>
@@ -1063,9 +1079,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
               />
             ) : (
-              question.choices.map((choice) => {
+              question.choices.map((choice, choiceIndex) => {
                 const checked = selected.includes(choice.label);
-                return (
+                const changeText = changeHost ? questionChoiceChangeText(question, choice, choiceIndex) : null;
+                const row = (
                   <label
                     key={choice.label}
                     className={cx(
@@ -1093,9 +1110,17 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                         <span className="text-muted-foreground"> — {inline(choice.description)}</span>
                       )}
                       {choice.recommended && <> <Tag tone="rec">Recommended</Tag></>}
+                      {changeText}
                     </span>
                   </label>
                 );
+                // A choice that is its own change in pictures: the pair under its row, outside the label (each picture opens).
+                return changeHost && questionChoiceHasPictures(choice) ? (
+                  <div key={choice.label} data-question-option-with-pictures="">
+                    {row}
+                    <QuestionChoicePictures choice={choice} host={changeHost} />
+                  </div>
+                ) : row;
               })
             )}
             {suggestionRow && (
