@@ -56,7 +56,7 @@ import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { piSessionClaimFileOf, readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
-import { inboxProcessStartedAt } from "./inbox-rex-resume";
+import { inboxCommandBeforeName, inboxProcessStartedAt } from "./inbox-rex-resume";
 import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
@@ -193,7 +193,7 @@ export function piSessionProcesses(listing: string, session: string, exclude: It
     return false;
   };
   // Quoted (a terminal's `sh -c`) or not (Pi's own argv), and never a longer id that starts the same.
-  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(command);
+  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(inboxCommandBeforeName(command));
   const found = new Map<number, boolean>();
   for (const [pid, command] of rows) {
     if (!under(pid) && names(command)) found.set(pid, /--mode\s+rpc\b/.test(command));
@@ -409,7 +409,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if (looked) return;
     looked = true;
     const text = list() ?? "";
-    for (const match of text.matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    // Each process's own session only: never an id inside a thread's name (`--name`, after it on the line).
+    for (const line of text.split("\n")) {
+      for (const match of inboxCommandBeforeName(line).matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    }
     for (const claim of readPiSessionClaims(ctx.dataDir)) elsewhere.add(claim.session.toLowerCase());
   };
   /** Whether a process of no hand-off of this Inbox's still runs `session` (checked again at most every `LISTING_MS`). */
@@ -792,12 +795,16 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return out;
     },
 
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       const session = input.resume && launch.session ? launch.session : randomUUID();
       const dataDir = dataDirArg();
       const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });
       const env = ["PLANNOTATOR_INBOX_TOOL=1", ...(dataDir ? [`PLANNOTATOR_DATA_DIR=${dataDir}`] : [])];
-      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...choice].map(shellQuote).join(" ")}`;
+      // Named for its thread, as a background start is (`piArgv`): without it Pi names the session itself, and the list's
+      // row reads that name. A session started again keeps the name it has (the person may have renamed it), as Claude's.
+      // One that never took a turn (`fresh`) is named as a first start is.
+      const named = input.resume && !input.fresh ? [] : ["--name", input.name.trim() || "Inbox"];
+      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...named, ...choice].map(shellQuote).join(" ")}`;
       return { ok: true as const, session, ref: session, command };
     },
 
