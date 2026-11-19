@@ -1553,3 +1553,30 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
     expect(w.logs.filter((line) => line.startsWith('passed by: ')).sort()).toEqual(['passed by: matcher-probe tool.describe', 'passed by: plannotator tool.describe'])
   })
 })
+
+// What waits on the person where the session runs (hooks/mod/terminal-prompts.ts), for the Inbox's Agents list. The
+// mod reads it only from hooks it has anyway (tool.call, the Bash-matched tool.check, the matched tool.* run hook),
+// never with a wildcard or a hook on another tool's permission (an engine refuses two matcherless `tool.*` hooks, and
+// a hook there changes how other tools' prompts behave). The failures this guards on each engine of test.yml's
+// matrix: a question's answer, a Bash call's result or a Bash verdict reaching the caller changed (the mod only
+// watches).
+describe('watching for prompts where the session runs', () => {
+  test("an AskUserQuestion answer, a Bash result and a Bash ask verdict reach the caller unchanged", async ($: any, on: any) => {
+    world(on)
+    const called: string[] = []
+    // An ask for one command only (the call below is another): a Bash prompt as the session would raise it.
+    on('tool.check', ($: any, e: any, next: any) => (e.input?.command === 'rm -rf build' ? { decision: 'ask', reason: 'beneath' } : next(e)))
+    on('tool.call', ($: any, e: any) => {
+      called.push(e.tool)
+      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `ran ${e.command}` }
+    })
+    await $.session.start(SESSION)
+    const asked = await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which database?' }] })
+    expect(asked.result).toEqual({ answers: { 'Which database?': 'Postgres' } })
+    const ran = await $.tool.call({ tool: 'Bash', command: 'npm run build' })
+    expect(ran.result).toBe('ran npm run build')
+    expect(called).toEqual(['AskUserQuestion', 'Bash'])
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf build' } })
+    expect([verdict.decision, verdict.reason]).toEqual(['ask', 'beneath'])
+  })
+})
