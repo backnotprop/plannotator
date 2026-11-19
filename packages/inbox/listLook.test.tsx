@@ -478,7 +478,7 @@ describe('the saved look', () => {
 });
 
 describe.if(hasDom)('the ⋮ menu', () => {
-  test('five checkboxes after Refresh and the view (listView.ts), only Smaller thread names checked by default, each a menuitemcheckbox', async () => {
+  test('the agent status switch after the view, then four row checkboxes (listView.ts), only Smaller thread names checked by default, each a menuitemcheckbox', async () => {
     const el = render('narrow');
     await openMenu(el);
     const popup = document.querySelector<HTMLElement>('[data-tidy-menu-popup]')!;
@@ -489,12 +489,12 @@ describe.if(hasDom)('the ⋮ menu', () => {
       ['menuitem', 'Refresh', null],
       ['menuitemradio', 'Smart groups', 'true'],
       ['menuitemradio', 'Simple list', 'false'],
+      // The agent status switch (owner, 2026-11-18): its own item after the View group, off by default, the same as Settings' row.
+      ['menuitemcheckbox', 'Show agent status', 'false'],
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
       ['menuitemcheckbox', 'Compact rows', 'false'],
       ['menuitemcheckbox', 'Hide agent icons', 'false'],
       ['menuitemcheckbox', 'Smaller thread names', 'true'],
-      // The agent status switch (owner, 2026-11-18): off by default, the same as Settings' row.
-      ['menuitemcheckbox', 'Show agent status', 'false'],
     ]);
     expect(lookClasses(el)).toEqual(['ib-lk-small']);
   });
@@ -587,16 +587,15 @@ describe.if(hasDom)('the ⋮ menu', () => {
       ['menuitemcheckbox', 'Compact rows'],
       ['menuitemcheckbox', 'Hide agent icons'],
       ['menuitemcheckbox', 'Smaller thread names'],
-      ['menuitemcheckbox', 'Show agent status'],
       ['menuitem', 'Customize rows…'],
     ]);
     // Each checkbox: its box first (the icon's place), the only drawing a tick inside it.
-    for (const i of items.slice(0, 5)) {
+    for (const i of items.slice(0, 4)) {
       expect(i.firstElementChild!.className).toBe('ib-pmi-box');
       expect([...i.querySelectorAll('svg')].every((svg) => svg.closest('.ib-pmi-box[data-on]'))).toBe(true);
     }
-    expect(items.map((i) => i.querySelectorAll('svg').length)).toEqual([0, 0, 1, 0, 0, 0]);
-    act(() => items[5]!.click());
+    expect(items.map((i) => i.querySelectorAll('svg').length)).toEqual([0, 0, 1, 0, 0]);
+    act(() => items[4]!.click());
     await settle();
     expect(customized).toBe(1);
   });

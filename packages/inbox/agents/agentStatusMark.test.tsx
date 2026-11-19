@@ -3,7 +3,7 @@
  * owner, 2026-11-18). What this catches:
  *  - a mark drawn with the setting off (the default), or a Rex agent's mark gone with it (Rex marks shipped and show
  *    regardless);
- *  - with it on: a state drawn as another, or its words wrong; a prompt in the agent's terminal not saying so in its
+ *  - with it on: a state drawn as another, or its words wrong; a thread waiting in the Inbox drawn as a bare disc; a prompt in the agent's terminal not saying so in its
  *    label ("in its terminal", never as if it waited in the Inbox); a host that reports no turns drawn at all;
  *  - a fresh Rex record not winning;
  *  - the two switches (Settings' row, the ⋮ menu's item) disagreeing, or a press not saved as `agent_status`;
@@ -133,6 +133,9 @@ test.skipIf(!hasDom)('on: each agent its mark and words, a terminal prompt sayin
   const perm = el.querySelectorAll<HTMLElement>('.ib-mk')[4]!.querySelector<HTMLElement>('.ib-rxm')!;
   // The same jelly mark Rex draws for a blocked pane, its words as its text alternative only.
   expect([perm.dataset.rxState, perm.dataset.rxWhere, perm.getAttribute('title'), perm.hasAttribute('data-rx-wait')]).toEqual(['permission', 'terminal', 'Asking for permission in its terminal', true]);
+  // Waiting on the person in the Inbox: Rex's question jelly (the "?"), never the bare waiting disc; its own words.
+  const here = el.querySelectorAll<HTMLElement>('.ib-mk')[3]!.querySelector<HTMLElement>('.ib-rxm')!;
+  expect([here.dataset.rxState, here.getAttribute('aria-label')]).toEqual(['question', 'Waiting on you']);
   expect(el.textContent).toBe('');
 });
 

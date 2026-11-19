@@ -348,6 +348,13 @@ export function TidyMenu({
                   {showArchived && <MenuCheckbox label="Show archived" checked={showArchived.on} onChange={showArchived.onChange} data-show-archived-option="" />}
                 </>
               )}
+              {/* About the sidebar's agents, not the list's rows: its own item after the View group (owner, 2026-11-18). */}
+              {view && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <AgentStatusMenuItem />
+                </>
+              )}
               {look && onLook && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
@@ -357,7 +364,6 @@ export function TidyMenu({
                     {LIST_LOOK_OPTIONS.map((option) => (
                       <MenuCheckbox key={option.key} label={option.label} checked={look[option.key]} onChange={(on) => onLook(option.key, on)} data-list-look={option.key} />
                     ))}
-                    <AgentStatusMenuItem />
                     {tagColours && <MenuCheckbox label={SHOW_TAG_COLOURS_LABEL} checked={tagColours.on} onChange={tagColours.onChange} data-tag-colours-option="" />}
                     {onCustomize && (
                       // No icon (the owner, 2026-11-02): its words line up with the checkboxes' labels above it.

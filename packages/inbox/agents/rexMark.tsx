@@ -50,6 +50,12 @@ export const TERMINAL_MARK_WORDS: Record<'permission' | 'question', string> = {
   question: 'Asking a question in its terminal',
 };
 
+/**
+ * What a mark draws. A thread waiting on the person in the Inbox (`where: 'inbox'`, no kind) draws Rex's question
+ * jelly (the "?"), never the bare waiting disc; its words stay "Waiting on you".
+ */
+export const shownMarkKey = (mark: ShownMark): ReturnType<typeof rexMarkKey> => (mark.where === 'inbox' ? 'question' : rexMarkKey(mark));
+
 /** The state's words for a mark (a row's spoken name carries them too: the icon's own label is not always reached). */
 export const rexMarkWords = (mark: ShownMark): string =>
   mark.where === 'terminal' && (mark.kind === 'permission' || mark.kind === 'question') ? TERMINAL_MARK_WORDS[mark.kind] : REX_MARK_WORDS[rexMarkKey(mark)];
@@ -195,7 +201,7 @@ type Shown = { key: RexMarkKey; arrive: '' | 'now' | 'late'; out: RexMarkKey | n
  */
 export function RexMark({ mark, seed, size = 16, side = false }: { mark: ShownMark; seed: string; size?: RexMarkSize; side?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const key = rexMarkKey(mark);
+  const key = shownMarkKey(mark);
   const [shown, setShown] = useState<Shown>({ key, arrive: '', out: null, outHow: null, n: 0 });
   const [measured, setMeasured] = useState<RexMarkSize>(size);
   // In a row's 20 px tile the icon is its 13 px glyph, centred: the mark is placed from the tile's corner.
