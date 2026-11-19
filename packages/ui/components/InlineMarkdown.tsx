@@ -512,7 +512,7 @@ const HostResolvedMedia: React.FC<{ src: string; alt: string; media: 'audio' | '
     'aria-label': alt || undefined,
     title: alt || undefined,
     'data-inline-media': media,
-    className: 'annotation-exclude max-w-full rounded my-2',
+    className: media === 'video' ? 'annotation-exclude block max-w-full max-h-[70vh] rounded my-2' : 'annotation-exclude block max-w-full my-2',
     onError: () => setFailedSrc(src),
   } as const;
   return media === 'audio' ? <audio {...props} /> : <video {...props} playsInline />;
