@@ -135,8 +135,12 @@ struct OfferedPairingSheet: View {
   /// (`initial`), so it opens at its height and never resizes on its first frame.
   @State private var fitted: CGFloat
 
-  init(link: PairLink, initial: CGFloat) {
+  /// The width the sheet is shown at, told back so the next measure is taken at it.
+  var shownWidth: (CGFloat) -> Void = { _ in }
+
+  init(link: PairLink, initial: CGFloat, shownWidth: @escaping (CGFloat) -> Void = { _ in }) {
     self.link = link
+    self.shownWidth = shownWidth
     _fitted = State(initialValue: initial)
   }
 
@@ -148,6 +152,7 @@ struct OfferedPairingSheet: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fitted = $0 }
     }
     .scrollBounceBehavior(.basedOnSize)
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { shownWidth($0) }
     .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(fitted)])
     .presentationDragIndicator(.hidden)
     // Solid, a step lighter than the list in the dark: nothing of the list shows through the words.

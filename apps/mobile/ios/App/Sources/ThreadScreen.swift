@@ -127,12 +127,12 @@ struct ThreadScreen: View {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(shown[..<landing], id: \.id) { message in
             MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
-            Divider().overlay(Token.border).padding(.top, 18).padding(.bottom, message.id == shown[landing - 1].id ? 6 : 18)
+            Rule(key: message.id.rawValue).padding(.top, 14).padding(.bottom, message.id == shown[landing - 1].id ? 2 : 14)
           }
         }
         VStack(alignment: .leading, spacing: 0) {
           ForEach(Array(shown[landing...].enumerated()), id: \.element.id) { index, message in
-            if index > 0 { Divider().overlay(Token.border).padding(.vertical, 18) }
+            if index > 0 { Rule(key: shown[landing + index - 1].id.rawValue).padding(.vertical, 14) }
             MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
           }
           // A reply that waits for the computer is the person's own message already, said to be waiting.
@@ -227,11 +227,21 @@ struct ThreadScreen: View {
         if !scroll.landed { land(waiting, proxy) }
       }
     }
+    // Rows above the newest message keep finding their own heights for a moment after the thread opens: until the
+    // person touches or scrolls, and for its first 2 seconds, the page lands again whenever where it lands moves.
+    .onChange(of: cards[Self.landing]?.minY) { _, _ in
+      guard !scroll.landed else { return }
+      Task {
+        try? await Task.sleep(for: .milliseconds(40))
+        if !scroll.landed { land(waiting, proxy) }
+      }
+    }
     .task {
       try? await Task.sleep(for: .milliseconds(60))
       if !scroll.landed { land(waiting, proxy) }
       try? await Task.sleep(for: .milliseconds(700))
       if !scroll.landed { land(waiting, proxy) }
+      try? await Task.sleep(for: .milliseconds(1240))
       scroll.landed = true
     }
     .scrollDismissesKeyboard(.interactively)
@@ -390,6 +400,11 @@ struct ThreadScreen: View {
       // not show the way there anyway, and an animation still running would carry the page past the card.
       let message = key.split(separator: "/").dropFirst().first.map { "m/\($0)" }
       scroll.wanted = key
+      // A card that never appears (gone from the thread meanwhile) is not waited for past 2 seconds.
+      Task {
+        try? await Task.sleep(for: .seconds(2))
+        if scroll.wanted == key, cards[key] == nil { scroll.wanted = nil }
+      }
       var hop = Transaction()
       hop.disablesAnimations = true
       withTransaction(hop) { proxy.scrollTo(message ?? key, anchor: .top) }
@@ -485,6 +500,16 @@ enum TextLines {
 }
 
 /// A line inside a card, named after the card it is in.
+/// The rule between two messages, with 4 points of air each side counted as a line where the page may rest: the
+/// page's top never stops on the rule itself, leaving a sliver of it under the title bar.
+private struct Rule: View {
+  let key: String
+
+  var body: some View {
+    Divider().overlay(Token.border).padding(.vertical, 4).blockEdge("rule/\(key)")
+  }
+}
+
 private struct LineEdge: ViewModifier {
   let name: String
   @Environment(\.cardKey) private var cardKey
