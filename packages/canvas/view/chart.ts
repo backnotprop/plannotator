@@ -207,7 +207,8 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
         break;
       }
       const paint = paintOf(s);
-      out.push({ kind: 'path', d: rect(at, y + 2, 9, mark === 'line' ? 2 : 8), fill: paint.role, opacity: paint.opacity });
+      // With no words drawn its room is still kept, so the marks do not move when the detail changes.
+      if (words) out.push({ kind: 'path', d: rect(at, y + 2, 9, mark === 'line' ? 2 : 8), fill: paint.role, opacity: paint.opacity });
       text(at + 14, y + 9, label, 10, s === 0 ? 'ink' : 'muted');
       at += width;
     }

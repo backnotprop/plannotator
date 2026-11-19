@@ -331,6 +331,24 @@ describe('the still picture fallback', () => {
     expect(svg).not.toContain('Elsewhere');
   });
 
+  test('a chart is drawn in it from its rows, with its own words escaped and its colour kept', () => {
+    const store = board();
+    const chart = { id: 'ch', type: 'chart', x: 0, y: 400, w: 380, h: 240, mark: 'line', title: 'Scan <to> alert', unit: 'min', fields: ['week', 'minutes'], rows: [['W1', 11.2], ['W2', 4.1], ['W3', 1.3]], encode: { x: 'week', y: 'minutes' }, color: { custom: '#c2410c' } };
+    store.dispatch({ type: 'add', objects: [chart as unknown as CanvasObject] });
+    store.dispatch({ type: 'add-snapshot', snapshot: { id: 'chart', title: 'A chart', source: { kind: 'objects', objects: ['ch'] } } });
+    const svg = snapshotToSvg(store.getDocument(), 'chart')!;
+    expect(svg).toContain('SCAN &lt;TO&gt; ALERT');
+    // The line itself, in the object's colour, and the latest value.
+    expect(svg).toMatch(/<path d="M[^"]+L[^"]+L[^"]+" fill="none" stroke="#c2410c"/);
+    expect(svg).toContain('>1.3<');
+    expect(svg).not.toMatch(/<script|<foreignObject|href=/i);
+    // Changing the rows afterwards leaves the picture as it was, until the snapshot is taken again.
+    store.dispatch({ type: 'edit', id: 'ch', patch: { rows: [['W1', 11.2], ['W2', 4.1], ['W3', 77]] } });
+    expect(snapshotToSvg(store.getDocument(), 'chart')).toBe(svg);
+    store.dispatch({ type: 'update-snapshot', id: 'chart' });
+    expect(snapshotToSvg(store.getDocument(), 'chart')).toContain('>77<');
+  });
+
   test('it pictures the capture, not the canvas as it is now', () => {
     const store = board();
     store.dispatch({ type: 'edit', id: 'b', patch: { text: 'Changed' } });

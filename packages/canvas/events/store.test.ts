@@ -478,6 +478,9 @@ describe('the two lists of field names', () => {
       image: 'asset:pic', icon: 'asset:icon', target: { kind: 'web', url: 'https://example.test/other' }, src: 'asset:other', html: '<b>new</b>',
       size: 'large', frames: 3, fps: 9, from: { x: 1, y: 2 }, to: { x: 30, y: 40 }, link: { kind: 'plan', anchor: 'intro' },
       shape: 'container', lanes: ['one', 'two'], kind: 'ask', count: 4, routing: 'straight',
+      // A chart's fields, in the order `edit` lists them: each must be a whole chart with the ones before it.
+      mark: 'line', fields: ['week', 'minutes', 'target'], rows: [['W1', 4, 9], ['W2', 2, 8]], encode: { x: 'week', y: ['minutes', 'target'] },
+      stack: true, flip: true, dash: ['target'], rules: [{ at: 5, label: 'limit' }, { at: 'W2', on: 'x' }], unit: 'min',
     };
     const STYLES: Record<string, unknown> = { arrow: { ends: 'dot' }, default: { look: 'sketch' } };
     const objects: CanvasObject[] = [
@@ -488,6 +491,7 @@ describe('the two lists of field names', () => {
       { id: 'image', type: 'image', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '' },
       { id: 'sprite', type: 'sprite', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '', frames: 2, fps: 4 },
       { id: 'html', type: 'html', x: 0, y: 0, w: 100, h: 40, html: '<i>h</i>' },
+      { id: 'chart', type: 'chart', x: 0, y: 0, w: 100, h: 40, mark: 'bar', fields: ['week', 'minutes', 'plan'], rows: [['W1', 5, 9]], encode: { x: 'week', y: 'minutes' } },
       { id: 'reference', type: 'reference', x: 0, y: 0, w: 100, h: 40, target: { kind: 'web', url: 'https://example.test/' } },
       { id: 'stamp', type: 'stamp', x: 0, y: 0, w: 30, h: 30, kind: 'check' },
       { id: 'arrow', type: 'arrow', from: { x: 0, y: 0 }, to: { x: 9, y: 9 } },

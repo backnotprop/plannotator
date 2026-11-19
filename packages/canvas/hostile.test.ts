@@ -6,13 +6,14 @@
 import { describe, expect, test } from 'bun:test';
 import { applyEvents } from './events/reduce';
 import { CanvasStore } from './events/store';
-import { decodeCommand } from './events/wire';
+import { decodeCommand, decodeEnvelope } from './events/wire';
 import { parseSnapshotBlock } from './snapshot/block';
 import { resolveSnapshot } from './snapshot/resolve';
 import { hitTest } from './view/hit-test';
 import { routesFor } from './view/routes';
 import { indexFor } from './view/document-index';
 import { captureOf } from './model/capture';
+import { CHART_LIMITS } from './model/chart';
 import { parseDocument, serializeDocument } from './model/codec';
 import { createDocument, objectBounds, resolveArrow } from './model/document';
 import type { ArrowObject, CanvasDocument, CanvasObject } from './model/types';
@@ -263,5 +264,81 @@ describe('a change whose field name is a name on every object', () => {
       expect(Object.getPrototypeOf(changed)).toBe(Object.prototype);
       expect(parseDocument(JSON.parse(serializeDocument(mixed.doc))).ok).toBe(true);
     }
+  });
+});
+
+describe('a chart that tries to break the board', () => {
+  const GOOD = { id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, mark: 'bar', fields: ['week', 'minutes'], rows: [['W1', 11], ['W2', 4]], encode: { x: 'week', y: 'minutes' } };
+  /** Each one a table the drawing could not be trusted with. */
+  const BAD: Record<string, unknown>[] = [
+    { rows: [['W1', NaN]] },
+    { rows: [['W1', Infinity]] },
+    { rows: [['W1', '11']] },
+    { rows: [['W1', 11, 12]] },
+    { rows: [['W1']] },
+    { rows: 'W1,11' },
+    { rows: Array.from({ length: CHART_LIMITS.rows + 1 }, (_row, i) => [`W${i}`, i]) },
+    { fields: ['__proto__', 'minutes'], encode: { x: '__proto__', y: 'minutes' } },
+    { fields: ['constructor', 'minutes'], encode: { x: 'constructor', y: 'minutes' } },
+    { fields: ['<script>', 'minutes'], encode: { x: '<script>', y: 'minutes' } },
+    { encode: { x: 'week', y: 'toString' } },
+    { encode: { x: 'week', y: 'minutes', __proto__: null, series: 'hasOwnProperty' } },
+    { mark: 'span' },
+    { mark: 'pie' },
+    { rules: [{ at: 1e300 }] },
+    { color: { custom: 'url(https://x.test/)' } },
+  ];
+
+  test('the planner refuses it from an agent, as a new chart and as an edit, and the board is as it was', () => {
+    const store = board();
+    expect(store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] }, { actor: AGENT }).ok).toBe(true);
+    const before = store.getDocument();
+    for (const bad of BAD) {
+      expect(store.dispatch({ type: 'add', objects: [{ ...GOOD, id: 'c2', ...bad } as unknown as CanvasObject] }, { actor: AGENT }).ok).toBe(false);
+      const { color: _color, ...patch } = bad;
+      if (Object.keys(patch).length) expect(store.dispatch({ type: 'edit', id: 'c', patch: patch as never }, { actor: AGENT }).ok).toBe(false);
+      expect(store.getDocument()).toBe(before);
+    }
+  });
+
+  test('from a peer it is dropped: as a whole chart at the wire, as a change when it lands', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] });
+    const before = store.getDocument();
+    const actor = { kind: 'person', id: 'peer' };
+    for (const [i, bad] of BAD.entries()) {
+      // What JSON carries of it: NaN and Infinity arrive as null, which is no cell either.
+      const added = decodeEnvelope(JSON.stringify({ id: `add-${i}`, actor, events: [{ type: 'object-added', object: { ...GOOD, id: 'c2', ...bad } }] }));
+      expect(added.ok).toBe(false);
+      const { color: _color, ...set } = bad;
+      if (Object.keys(set).length === 0) continue;
+      const changed = decodeEnvelope(JSON.stringify({ id: `set-${i}`, actor, events: [{ type: 'object-set', id: 'c', set }] }));
+      expect(changed.ok).toBe(true);
+      if (changed.ok) store.receive(changed.value);
+      expect(store.getDocument().objects.c).toBe(before.objects.c);
+    }
+    // And the board still saves and loads.
+    expect(parseDocument(JSON.parse(serializeDocument(store.getDocument()))).ok).toBe(true);
+  });
+
+  test('a saved file holding one is refused, not opened', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] });
+    const saved = JSON.parse(serializeDocument(store.getDocument()));
+    expect(parseDocument(saved).ok).toBe(true);
+    for (const bad of BAD) {
+      const file = JSON.parse(JSON.stringify({ ...saved, objects: { ...saved.objects, c: { ...saved.objects.c, ...bad } } }));
+      expect(parseDocument(file).ok).toBe(false);
+    }
+  });
+
+  test('a chart is found where it is drawn: hit, bounds, and a snapshot of it', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [{ ...GOOD, x: 500, y: 300 } as unknown as CanvasObject] });
+    const doc = store.getDocument();
+    expect(objectBounds(doc, 'c')).toEqual({ x: 500, y: 300, w: 380, h: 240 });
+    expect(hitTest(doc, indexFor(store), { x: 600, y: 400 }, 6, routesFor(store))).toBe('c');
+    expect(hitTest(doc, indexFor(store), { x: 100, y: 100 }, 6, routesFor(store))).toBeNull();
+    expect(captureOf(doc, { kind: 'objects', objects: ['c'] })?.objects.map((object) => object.id)).toEqual(['c']);
   });
 });
