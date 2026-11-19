@@ -573,7 +573,7 @@ describe('the real graph', () => {
   test("the app contract's check runs for a wire change, not for the window's or the shared UI's code", () => {
     // Picked at all (a tree-scanning pick would run it on every pull request).
     const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.some((t) => t.path === 'tests/mobile-vectors.test.ts');
-    // A file the schema reaches only by `import type` too (scripts/mobile/schema.ts SCHEMA_SOURCES).
+    // A file the schema reaches only by `import type` too (SCHEMA_SOURCES, scripts/mobile/schema-sources.ts).
     for (const wire of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts']) expect(picks(wire), wire).toBe(true);
     for (const window of ['packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) expect(picks(window), window).toBe(false);
   });
