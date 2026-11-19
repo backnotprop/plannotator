@@ -8,6 +8,10 @@ declare module '../../api' {
     start_in?: 'inbox' | 'rex';
     /** Rex's app is attached on this computer now (only in this computer's own Settings answer). */
     rex_here?: boolean;
+    /** Rex on that computer is a server with no app beside it (Linux, FreeBSD): "not here" means its server is not running. */
+    rex_headless?: true;
+    /** With `rex_here` false: the Rex server there is another account's (a shared server), where agents never start. */
+    rex_shared?: true;
     /** The agents that can start in Rex. */
     rex_agents?: string[];
   }

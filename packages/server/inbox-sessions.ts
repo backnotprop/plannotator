@@ -441,7 +441,14 @@ export function createInboxLiveSessions(options: {
    * idle state ("Sending") with no event to read it again.
    */
   let deliveryChanges = 0;
+  /**
+   * The same for the Agents signature: how many times a session's busy flag or prompt kind changed. Without it, a
+   * prompt set and answered between two looks left the signature unchanged, and a window that read the list in
+   * between kept "Waiting for your permission" with no event to read it again.
+   */
+  let agentChanges = 0;
   const setDeliveryFlags = (entry: SeenSession, busy: boolean | null, sendNow: boolean) => {
+    if (entry.busy !== busy) agentChanges += 1;
     if (entry.busy !== busy || entry.sendNow !== sendNow) deliveryChanges += 1;
     entry.busy = busy;
     entry.sendNow = sendNow;
@@ -462,6 +469,7 @@ export function createInboxLiveSessions(options: {
     if (said !== null && entry.blockedSaid !== undefined && said < entry.blockedSaid) return;
     if (said !== null) entry.blockedSaid = said;
     const kind = parseInboxBlocked(body[INBOX_BLOCKED_FIELD]);
+    if ((entry.blocked?.kind ?? null) !== kind) agentChanges += 1;
     entry.blocked = kind ? { kind, at } : null;
   };
   /** What a session waits on in its terminal now: said in the last INBOX_BLOCKED_STALE_MS, else none. */
@@ -954,14 +962,15 @@ export function createInboxLiveSessions(options: {
 
   /**
    * What the Agents section reads from the sessions, as one string (`event: deliveries`' `agents`): which are listed,
-   * live, busy or idle, and where they work. Never the time they were last heard, which every poll moves, nor a label:
+   * live, busy or idle, and where they work, and how many times a busy flag or prompt changed (`agentChanges`, so a
+   * change undone between two looks still moves it). Never the time they were last heard, which every poll moves, nor a label:
    * a label's change says `labels` to the windows (which read the list for it).
    */
   const agentsSignature = (since: number): string =>
     agentSessions(since)
       // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
       .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : entry.busy === false ? "i" : "n") : "e"}${entry.blocked ? `!${entry.blocked}` : ""}:${entry.root ?? ""}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
-      .join("|") + `#${continuations.signature()}`;
+      .join("|") + `#${continuations.signature()}#k${agentChanges}`;
 
   /**
    * The agents that read the Inbox through MCP only, newest first: every

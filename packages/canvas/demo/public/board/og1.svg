@@ -1,6 +1,0 @@
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 320' font-family='Inter,system-ui,-apple-system,Segoe UI,sans-serif'>
-  <rect width='600' height='320' fill='#1b1740'/>
-  <rect x='346' y='60' width='24' height='200' rx='6' fill='#6a5cf5' fill-opacity='0.25'/><rect x='380' y='78' width='24' height='164' rx='6' fill='#6a5cf5' fill-opacity='0.33999999999999997'/><rect x='414' y='96' width='24' height='128' rx='6' fill='#ffb04a' fill-opacity='1'/><rect x='448' y='60' width='24' height='200' rx='6' fill='#6a5cf5' fill-opacity='0.52'/><rect x='482' y='78' width='24' height='164' rx='6' fill='#6a5cf5' fill-opacity='0.61'/><rect x='516' y='96' width='24' height='128' rx='6' fill='#6a5cf5' fill-opacity='0.7'/><rect x='550' y='60' width='24' height='200' rx='6' fill='#6a5cf5' fill-opacity='0.79'/>
-  <text x='40' y='140' font-size='44' font-weight='700' fill='#fff' letter-spacing='-1.200'>Queues or</text><text x='40' y='190' font-size='44' font-weight='700' fill='#fff' letter-spacing='-1.200'>a sweep?</text>
-  <text x='40' y='232' font-size='18' fill='#b9b3ee'>Timing alert pipelines</text><text x='40' y='282' font-size='15' font-weight='600' fill='#ffb04a'>Field notes</text>
-  </svg>

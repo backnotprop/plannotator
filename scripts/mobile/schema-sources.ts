@@ -47,6 +47,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/line-anchor.ts',
   'packages/core/markdown-structure.ts',
   'packages/core/open-in-apps.ts',
+  'packages/core/picture-it-page.ts',
   'packages/core/problem.ts',
   'packages/core/question-block.ts',
   'packages/core/review-threads.ts',
