@@ -2215,14 +2215,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     editedAt: shown.current ? whenTime(shown.current.mtime) : null,
   });
   const line: React.ReactNode = words && (
-    <>
+    <span className="ib-changed-b">
       <span className="ib-changed-t">{words.sentence}</span>
       {words.link && (
         <button type="button" className="ib-vlink" onClick={() => chooseVersion(words.link!.to)}>
           {words.link.label}
         </button>
       )}
-    </>
+    </span>
   );
   /**
    * The changed line, compact, for full view (which drops the line): the same
