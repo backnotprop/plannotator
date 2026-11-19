@@ -3746,9 +3746,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead) { grid-column: 1; grid-row: 2; }
   .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > .ib-rowkey { justify-self: start; }
   .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > .ib-m3 { grid-column: 2; grid-row: 2; align-self: end; min-height: 0; flex-wrap: wrap; row-gap: 2px; }
-  /* Beside the agents and the project (always one line): centred on it, and a stopped or held badge, taller than the
-     line, never pushes it down or grows the row. */
-  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > .ib-m3 { align-self: center; margin-block: -3px; }
+  /* Beside the agents and the project (always one line): on its baseline, so a stopped or held badge, taller than the
+     line, never pushes it down, and marks that wrap hang below it rather than moving it. */
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > :is(.ib-m1-lead, .ib-m3) { align-self: baseline; }
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > .ib-m3 { margin-block: -3px; }
   /* Off screen these rows are two lines: their content box, as the two-line row's (`.ib-lend`, below). */
   .ib-lbody > .ib-group > .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) { contain-intrinsic-size: auto none auto 43px; }
   .ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) { contain-intrinsic-size: auto none auto 46px; }
