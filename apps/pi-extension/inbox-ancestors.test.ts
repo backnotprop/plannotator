@@ -168,10 +168,14 @@ type BridgeCall = { path: string; session: string };
 
 /** A stand-in for the Inbox connection: records bridge calls, answers polls from the test's script. */
 function fakeConnection(dataDir: string, calls: BridgeCall[], replies: (session: string) => Array<{ type: string; id: string; thread_id: string; body: string }>) {
+	const tools = [{ name: "send_message", description: "Send a message", inputSchema: { type: "object", properties: {} } }];
 	return {
 		dataDir,
 		host: "pi",
-		tools: [{ name: "send_message", description: "Send a message", inputSchema: { type: "object", properties: {} } }],
+		tools,
+		// The poll path reads connection.options.env (agent-link.ts pendingNow);
+		// a fake without options throws there. Mirror a real connection.
+		options: { dataDir, host: "pi", agentName: "Pi", tools, env: process.env },
 		async bridge(path: string, session: string) {
 			calls.push({ path, session });
 			if (path.includes("poll")) return { status: 200, text: JSON.stringify({ commands: replies(session) }) };
