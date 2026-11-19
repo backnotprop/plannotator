@@ -1,7 +1,8 @@
 /**
  * A thread's canvas in the Inbox window: the Sketch button (the thread's
  * header and the reply box), the quiet mark a thread with a canvas carries
- * (its header button and its list row), and the layer the editor is drawn in.
+ * (on its header button only; a list row carries none), and the layer the
+ * editor is drawn in.
  *
  * The canvas takes the whole window, as Excalidraw does on its own site: its
  * tools across the top, its style panel at the left edge beside the drawing
@@ -78,23 +79,6 @@ export function SketchButton({ threadId, open, onToggle, where, size = 16 }: { t
         {mark && <span aria-hidden="true" style={{ ...DOT, background: mark.changed ? 'var(--primary)' : 'color-mix(in oklab, var(--muted-foreground) 55%, transparent)' }} />}
       </button>
     </Tip>
-  );
-}
-
-/** A list row's canvas mark, beside its other marks: a small pen, in the accent colour when an agent changed the canvas since the person looked. */
-export function RowCanvasMark({ threadId }: { threadId: string }) {
-  const mark = useCanvasMark(threadId);
-  if (!mark) return null;
-  return (
-    <span
-      role="img"
-      aria-label={mark.changed ? 'Canvas, changed by an agent' : 'Canvas'}
-      title={mark.changed ? 'Canvas, changed by an agent' : 'Canvas'}
-      data-row-canvas={mark.changed ? 'changed' : 'has'}
-      style={{ display: 'inline-flex', flex: 'none', alignItems: 'center', marginLeft: 6, color: mark.changed ? 'var(--primary)' : 'var(--muted-foreground)', opacity: mark.changed ? 1 : 0.7 }}
-    >
-      <Icon name="pen" size={13} />
-    </span>
   );
 }
 
