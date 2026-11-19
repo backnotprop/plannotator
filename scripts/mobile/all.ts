@@ -9,6 +9,7 @@
 import { generateDoor } from './door';
 import { REGENERATE, emit, type Output } from './lib';
 import { generateSchema } from './schema';
+import { generateSurface } from './surface';
 import { generateSwift } from './swift';
 import { generateTokens } from './tokens';
 import { generateWords } from './words';
@@ -20,6 +21,7 @@ export const GENERATORS: readonly (readonly [string, () => Output[] | Promise<Ou
   ['swift', generateSwift],
   ['tokens', generateTokens],
   ['words', generateWords],
+  ['surface', generateSurface],
 ];
 
 if (import.meta.main) {

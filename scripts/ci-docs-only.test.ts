@@ -254,6 +254,8 @@ describe('no code reads an allowlisted file', () => {
   // Strings that name an allowlisted path without reading it from the checkout. Add one only after checking that.
   const MENTIONS: Record<string, string> = {
     'packages/core/fixtures/inbox-relay-vectors.json': 'its "about" text cites the design doc',
+    'packages/core/fixtures/inbox-relay-push-v2-vectors.json': 'its "about" text cites the design doc',
+    'packages/core/inbox-push-vectors.ts': 'it writes the push vectors\' "about" text, which cites the design doc',
     'packages/review-editor/dock/panels/artifactDocument.test.ts': 'an <img src> string in a fixture',
     'packages/shared/inbox/search.test.ts': 'an attachment path in a fixture',
     'tests/e2e/inbox-search-world.ts': 'writes its own file at that path in a temp project',
