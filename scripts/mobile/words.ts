@@ -16,7 +16,8 @@
 import { INBOX_ACTION_LABEL } from '../../packages/core/inbox-actions';
 import { INBOX_STOPPED_REPLY_TEXT, TURN_ENDED_TEXT, autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
 import { INBOX_TURN_FAILED_WORDS } from '../../packages/core/inbox-run-line';
-import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_SECTIONS } from '../../packages/core/inbox-types';
+import { INBOX_SNOOZED_BAND } from '../../packages/core/inbox-snooze';
+import { INBOX_ACK_LABEL, INBOX_AGENT_LABELS, INBOX_PRIORITY_GROUP, INBOX_SECTIONS } from '../../packages/core/inbox-types';
 import { OUT, cli, jsonText, type Output } from './lib';
 
 /** One word: its text (`{part}` where a part goes), its parts, and where it comes from. */
@@ -40,6 +41,8 @@ const DELIVERY = 'packages/core/inbox-delivery-line.ts';
 export function buildWords(): Record<string, Word> {
   const words: Record<string, Word> = {};
   for (const { id, label } of INBOX_SECTIONS) words[`section.${id}`] = fixed(label, `packages/core/inbox-types.ts INBOX_SECTIONS ${id}`);
+  words['group.priority'] = fixed(INBOX_PRIORITY_GROUP.label, 'packages/core/inbox-types.ts INBOX_PRIORITY_GROUP');
+  words['group.snoozed'] = fixed(INBOX_SNOOZED_BAND.label, 'packages/core/inbox-snooze.ts INBOX_SNOOZED_BAND');
   for (const [id, label] of Object.entries(INBOX_AGENT_LABELS)) words[`agent.${id}`] = fixed(label, `packages/core/inbox-types.ts INBOX_AGENT_LABELS ${id}`);
   words['label.ack'] = fixed(INBOX_ACK_LABEL, 'packages/core/inbox-types.ts INBOX_ACK_LABEL');
   words['label.action_item'] = fixed(INBOX_ACTION_LABEL, 'packages/core/inbox-actions.ts INBOX_ACTION_LABEL');

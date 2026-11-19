@@ -36,7 +36,6 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 - [`inbox.md`](docs/agent-guides/inbox.md): index to the Plannotator Inbox guides (`inbox-*.md`).
 - [`server-and-storage.md`](docs/agent-guides/server-and-storage.md): archive, Server API tables and guards, plan history, feedback archive, plan diff.
 - [`guides-and-shared-ui.md`](docs/agent-guides/guides-and-shared-ui.md): portable Guided Reviews, data types, parser, annotation system, question blocks, WebMCP, shortcuts, sharing, settings, syntax highlighting.
-- [`canvas.md`](docs/agent-guides/canvas.md): the canvas package (`packages/canvas`, no product surface yet): document model, events, renderer, snapshots in a plan, reference cards.
 - [`mobile.md`](docs/agent-guides/mobile.md): the native iPhone app's contract kit (`apps/mobile/contract`, `scripts/mobile`): generators, checks, and how the app stays aligned with the window.
 
 ## Where new docs go
