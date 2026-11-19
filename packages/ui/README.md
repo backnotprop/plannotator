@@ -34,7 +34,6 @@ configurePlannotatorUI({
   mathRendererLoader,          // how KaTeX loads when no renderer is registered before first math render
   identityGenerator,           // sync generator behind the default "tater" name (no identityProvider)
   alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
-  directiveRenderer,           // (block) => ReactNode | undefined for a :::kind directive block that is not a question; undefined keeps the callout (default: none)
   fenceTheme,                  // (colorTheme, mode) => Shiki theme name | undefined for code fences (default: SHIKI_THEME_MAP, else pierre-dark/light)
   componentTooltips,           // true: ui's own hover text (components/HostTitle) draws as ui's Tooltip, not a native title (ui 0.53.0; default false)
   commentCard,                 // true or { pane, foot } (CSS selectors): the comment box is a small card by the words, "Comment" on its button, a chevron that keeps the words; import "@plannotator/ui/comment-card.css" (default false: today's popover)
@@ -628,10 +627,6 @@ The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.m
 - Never register tools inside an untrusted iframe: the raw-HTML viewer's `sandbox="allow-scripts allow-modals"` frame and the live-app frame carry no `allow="tools"`, and that is what keeps a framed page from impersonating the host's tools.
 
 The one additive data-model change that rides with it: `Annotation.inReplyTo` (threaded replies; the panel indents them under the parent, the export nests them, share links drop them).
-
-### Host-drawn directive blocks (`components/blocks/directiveRenderer`; unreleased, after ui 0.63.0)
-
-`configurePlannotatorUI({ directiveRenderer })` lets a host draw a `:::kind` directive container it owns. The renderer is asked for every directive block that is not a question and returns a node, or `undefined` to keep the callout. The node is drawn inside the block's own element (`data-block-id`, `data-block-type="directive"`, `data-directive-kind`, the source-line label), so the block stays one annotatable block. The renderer returns an element and must not call hooks itself; if it throws, or its element throws while rendering, the block falls back to the callout. Default: none, and nothing changes. The first user is `@plannotator/canvas` (`:::canvas-snapshot`), from its demo only.
 
 ### Questions in documents (`:::question`; 0.48.0, core 0.25.8)
 

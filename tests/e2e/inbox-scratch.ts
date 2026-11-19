@@ -53,6 +53,8 @@ export function inboxScratch(prefix: string): string {
  * (tests/e2e/agent-cli-stubs.ts), whose teardown fails the run, and the login shell is read too. So an e2e world
  * starts with launch off (`inboxLaunch.enabled: false`, merged into config.json); a spec about launch turns it on
  * in its own config, with its fakes on a PATH of its own. A spec that writes config.json whole keeps this key.
+ * The world is one the person turned the Inbox on in (`inbox/turned-on`, packages/shared/inbox/turned-on.ts), so a
+ * spec's `--background` start works as it does after their first `plannotator inbox`.
  */
 export function launchOff(dataDir: string): void {
   refuseRealDataDir(dataDir, 'tests/e2e/inbox-scratch.ts launchOff');
@@ -60,6 +62,8 @@ export function launchOff(dataDir: string): void {
   const file = join(dataDir, 'config.json');
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
   writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF }));
+  mkdirSync(join(dataDir, 'inbox'), { recursive: true });
+  writeFileSync(join(dataDir, 'inbox', 'turned-on'), '{"on":true,"by":"command"}\n');
 }
 
 /**
