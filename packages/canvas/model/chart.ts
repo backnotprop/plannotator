@@ -6,8 +6,12 @@
  * input: every row is as long as the list of fields, every field a mark measures holds finite numbers,
  * every name an encoding uses is a field, and the table is small enough to draw in a frame.
  *
- * What is NOT checked: whether an option means anything for the mark. `stack` on a line or `dash` on a
- * bar is kept and not drawn, so a person can change the mark without first undoing every option.
+ * An option that means nothing for the mark (`stack` on a line, `dash` on a bar) is kept and not drawn,
+ * so a person can change the mark without first undoing every option. RULES are the exception: a rule
+ * must have somewhere to be drawn, so a `cell` chart with rules is refused, and an upright rule must
+ * stand at a place its x axis has (a number on a number line, else one of the names along it). That ties
+ * the rules to the mark and to the rows: an edit that takes away the place a rule stands at is refused
+ * with the reason until the rule goes too (see "Known limits" in the canvas guide).
  */
 import { CHART_MARKS, type ChartCell, type ChartEncode, type ChartMark, type ChartObject, type ChartRule } from './types';
 

@@ -375,6 +375,28 @@ describe('a chart that tries to break the board', () => {
     expect(parseDocument(JSON.parse(serializeDocument(store.getDocument()))).ok).toBe(true);
   });
 
+  test('a peer cannot make a chart heavier than a chart may be: a table over the size in all is dropped, new or as a change', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] });
+    const before = store.getDocument();
+    // Every limit kept one by one (400 rows, 3 fields, 80 characters a cell), and 64,000 characters in all passed.
+    const heavy = { fields: ['week', 'minutes', 'note'], rows: Array.from({ length: 400 }, (_row, i) => [`${i}`.padEnd(80, 'w'), i, 'n'.repeat(80)]), mark: 'line' };
+    expect(JSON.stringify(heavy.rows).length).toBeGreaterThan(CHART_LIMITS.characters);
+    const actor = { kind: 'person', id: 'peer' };
+    const added = decodeEnvelope(JSON.stringify({ id: 'heavy-add', actor, events: [{ type: 'object-added', object: { ...GOOD, id: 'c2', ...heavy } }] }));
+    expect(added.ok).toBe(false);
+    if (!added.ok) expect(added.error).toContain('characters in all');
+    const changed = decodeEnvelope(JSON.stringify({ id: 'heavy-set', actor, events: [{ type: 'object-set', id: 'c', set: heavy }] }));
+    expect(changed.ok).toBe(true);
+    if (changed.ok) store.receive(changed.value);
+    expect(store.getDocument()).toBe(before);
+    // The same table a little under the size is a change like any other.
+    const light = { ...heavy, rows: heavy.rows.slice(0, 300) };
+    const fine = decodeEnvelope(JSON.stringify({ id: 'light-set', actor, events: [{ type: 'object-set', id: 'c', set: light }] }));
+    if (fine.ok) store.receive(fine.value);
+    expect((store.getDocument().objects.c as unknown as { rows: unknown[] }).rows).toHaveLength(300);
+  });
+
   test('a saved file holding one is refused, not opened', () => {
     const store = board();
     store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] });

@@ -440,6 +440,36 @@ describe('the still picture fallback', () => {
     expect(seen).toBeGreaterThan(200);
   });
 
+  test('the first series, in the colour, is the loudest mark on a chart: no other series stands further off the card, light or dark', () => {
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const blend = (over: string, under: string, alpha: number) => `#${[1, 3, 5].map((i) => Math.round(parseInt(over.slice(i, i + 2), 16) * alpha + parseInt(under.slice(i, i + 2), 16) * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+    const rows = Array.from({ length: 16 }, (_row, i) => [i % 2, `k${i % 8}`, i + 1]);
+    for (const mark of ['bar', 'line', 'dot', 'span', 'cell'] as const) {
+      const encode = mark === 'span' ? { x: 'v', x2: 'v', y: 'x', series: 'k' } : mark === 'cell' ? { x: 'x', y: 'k', series: 'k' } : { x: 'x', y: 'v', series: 'k' };
+      const checked = checkObject({ id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, mark, fields: ['x', 'k', 'v'], rows, encode, stack: true });
+      if (!checked.ok) throw new Error(checked.error);
+      for (const theme of ['light', 'dark'] as const) {
+        const palette = stillPalette(theme);
+        const off = (role: 'ink' | 'accent', alpha: number) => Math.abs(luminance(blend(role === 'ink' ? palette.ink : palette.accent, palette.card, alpha)) - luminance(palette.card));
+        const loudest = off('accent', 1);
+        let others = 0;
+        for (const shape of chartShapes(checked.value as ChartObject, { detail: 'marks' })) {
+          if (shape.kind !== 'path') continue;
+          const role = shape.fill ?? shape.stroke;
+          if (role !== 'ink') continue;
+          // A rule or a ground line is not a series; a series in ink never stands further off the card than the colour does.
+          if (shape.stroke && shape.width === 1 && !shape.d.includes('L') && !shape.d.includes('z')) continue;
+          if (off('ink', shape.opacity ?? 1) > loudest) throw new Error(`${theme} ${mark}: ink at ${shape.opacity ?? 1} is louder than the colour`);
+          others += 1;
+        }
+        expect(others).toBeGreaterThan(0);
+      }
+    }
+  });
+
   test('it pictures the capture, not the canvas as it is now', () => {
     const store = board();
     store.dispatch({ type: 'edit', id: 'b', patch: { text: 'Changed' } });
