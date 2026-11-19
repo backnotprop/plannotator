@@ -30,6 +30,7 @@ import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
+import type { InboxOnRecord } from './inbox/inbox-on-contract';
 import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
@@ -385,6 +386,13 @@ export interface PlannotatorConfig {
    * out): on wherever the tool is on.
    */
   inboxReminder?: boolean | Partial<Record<InboxToolHost, boolean>>;
+  /**
+   * Whether the person turned the Plannotator Inbox on on this computer
+   * (packages/shared/inbox/inbox-on-contract.ts). Machine state: saved to
+   * state.json only, and read from state.json only (`isInboxOn` in
+   * packages/shared/inbox/inbox-on.ts), never from a copy in config.json.
+   */
+  inboxOn?: InboxOnRecord;
   /**
    * The Plannotator Inbox's debug log (`inbox/debug.log` in the data dir), as
    * `PLANNOTATOR_INBOX_DEBUG=1`. Config-only, read when the Inbox starts.
@@ -1029,7 +1037,7 @@ function getStatePath(): string {
  */
 const MACHINE_STATE_KEYS = [
   "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
-  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro", "inboxOn",
 ] as const;
 type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
 /** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */

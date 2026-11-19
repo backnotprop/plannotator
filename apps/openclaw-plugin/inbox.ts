@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { isInboxOn } from "../../packages/shared/inbox/inbox-on";
 import { dirname, join } from "node:path";
 import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
@@ -93,7 +94,8 @@ export class OpenClawInbox {
   }
 
   private switchOn(): boolean {
-    return resolveInboxTool(loadConfig(), this.env, OPENCLAW_INBOX_HOST);
+    // Only once the person turned the Inbox on here (inbox-on-contract.ts), and OpenClaw's own switch allows it.
+    return resolveInboxTool(loadConfig(), this.env, OPENCLAW_INBOX_HOST) && isInboxOn(this.dataDir, this.env);
   }
 
   private say(message: string): void {

@@ -47,6 +47,7 @@
  * stdout carries JSON-RPC only; anything else goes to stderr.
  */
 
+import { INBOX_OFF_AGENT_LINE } from "@plannotator/shared/inbox/inbox-on-contract";
 import {
   INBOX_ANTIGRAVITY_HOST,
   INBOX_ANTIGRAVITY_NAME,
@@ -354,6 +355,13 @@ export interface InboxMcpShimOptions {
    * starts or reaches the Inbox.
    */
   t3EntryIdle?: boolean;
+  /**
+   * The person has not turned the Inbox on here (inbox-on-contract.ts),
+   * decided when the shim starts: it answers on its own with no tools
+   * (`toolessReply`, a call refused with INBOX_OFF_AGENT_LINE), and never
+   * starts or reaches the Inbox, not even on `initialize`.
+   */
+  inboxOff?: boolean;
   /** Default: process stdin / stdout. */
   input?: ReadableStream<Uint8Array>;
   write?: (line: string) => void;
@@ -519,8 +527,8 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       write(rpcError(null, "Parse error", -32700));
       return;
     }
-    if (options.askAiChild || options.t3EntryIdle) {
-      const reply = toolessReply(message, options.askAiChild ? INBOX_ASK_AI_CHILD_REFUSAL : INBOX_T3_ENTRY_REFUSAL);
+    if (options.askAiChild || options.t3EntryIdle || options.inboxOff) {
+      const reply = toolessReply(message, options.inboxOff ? INBOX_OFF_AGENT_LINE : options.askAiChild ? INBOX_ASK_AI_CHILD_REFUSAL : INBOX_T3_ENTRY_REFUSAL);
       if (reply) write(reply);
       return;
     }

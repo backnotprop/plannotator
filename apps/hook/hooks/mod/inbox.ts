@@ -55,6 +55,8 @@
  * (`startAskClient`).
  */
 
+import { INBOX_OFF_AGENT_LINE, isInboxOffAnswer } from './inbox-on-contract'
+import { inboxTurnedOff } from './inbox-on'
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import { isAbsolutePath } from './paths'
@@ -1505,6 +1507,8 @@ export class InboxLink {
 
   /** The running Inbox, starting a stopped one detached (no browser) first. */
   private async ensureRunning(): Promise<InboxRegistryView | { error: string }> {
+    // Turned off since this session started (inbox-on.ts): nothing is started or reached.
+    if (await inboxTurnedOff(this.host, this.options.dataDir)) return { error: INBOX_OFF_AGENT_LINE }
     const known = await this.registry()
     if (known && (await this.isRunning(known))) return known
     const started = await this.host
@@ -1513,6 +1517,7 @@ export class InboxLink {
     if (started.exitCode !== 0) {
       const why = started.stderr.trim() || started.stdout.trim() || `exit ${started.exitCode}`
       if (/unknown command/i.test(why)) return { error: 'The plannotator on PATH has no Inbox (an older version); update Plannotator.' }
+      if (isInboxOffAnswer(why)) return { error: INBOX_OFF_AGENT_LINE }
       return { error: `The Plannotator Inbox did not start: ${why}` }
     }
     this.host.debug(`inbox: started with --background (${started.stdout.trim()})`)

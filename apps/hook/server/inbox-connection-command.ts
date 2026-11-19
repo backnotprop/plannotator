@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { existsSync } from "node:fs";
 import { INBOX_HOST_NAMES } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_HOSTS, loadConfig, resolveInboxTool, type InboxToolHost } from "@plannotator/shared/config";
@@ -99,7 +100,8 @@ export async function runInboxConnectionCommand(argv: readonly string[], deps: I
     return 2;
   }
   const send = (event: Record<string, unknown>) => deps.write(`${JSON.stringify(event)}\n`);
-  const switchOn = () => resolveInboxTool(loadConfig({ quiet: true }), deps.env, options.host);
+  // The person turned the Inbox on here (inbox-on-contract.ts), and the host's own switch allows it.
+  const switchOn = () => isInboxOn(deps.dataDir, deps.env) && resolveInboxTool(loadConfig({ quiet: true }), deps.env, options.host);
   const neverRan = !existsSync(inboxRegistryFileOf(deps.dataDir));
   const tools = neverRan ? null : await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: INBOX_CONNECTION_DISCOVER_TIMEOUT_MS })))(deps.dataDir).catch(() => null);
   const spec = tools ? inboxAgentTool(tools, { wakes: options.wakes }) : null;

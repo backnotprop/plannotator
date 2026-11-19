@@ -7,6 +7,7 @@
  * bun tests drive this class with a host made of memory.
  */
 
+import { INBOX_SLASH_COMMAND_ENV } from './inbox-on-contract'
 import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
@@ -979,7 +980,8 @@ export class PlannotatorMod {
    */
   async openInbox(toolName?: string | null): Promise<{ text: string; context?: string[] }> {
     const result = await this.host
-      .run(inboxOpenArgv(), { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
+      // The person typed /plannotator-inbox: this run turns the Inbox on (inbox-on-contract.ts).
+      .run(inboxOpenArgv(), { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir, [INBOX_SLASH_COMMAND_ENV]: '1' }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
       .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
     const text = inboxOpenAnswer(result)
     return inboxOpened(result) ? { text, context: [inboxCommandBriefing(toolName ?? undefined)] } : { text }

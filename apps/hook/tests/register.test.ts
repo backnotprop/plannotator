@@ -28,7 +28,7 @@ function world(
     /** Tool names `$.tool.register` refuses, as a session without a tool registrar would. */
     refuseTools?: string[]
     /** Answers a process run itself (its result value), or undefined for the default. */
-    run?: (argv: string[], files: Map<string, string>) => { exitCode: number; stdout: string; stderr: string } | undefined
+    run?: (argv: string[], files: Map<string, string>, event: any) => { exitCode: number; stdout: string; stderr: string } | undefined
     /** What the mod's `$.store` holds at the start. */
     store?: Record<string, unknown>
     /** Prompts the bottom drops (as a settings hook's block would), by their text. */
@@ -38,9 +38,18 @@ function world(
     /** Holds every `$.tool.register` until it settles; `onRegister` runs as each one arrives. */
     toolRegistered?: Promise<void>
     onRegister?: (name: string) => void
+    /**
+     * Whether the person turned the Inbox on here (state.json's `inboxOn`, inbox-on-contract.ts): `on` by
+     * default, so the Inbox proofs below run as before; `off` (turned off), `undecided` (no record).
+     */
+    inbox?: 'on' | 'off' | 'undecided'
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
+  const STATE = '/home/me/.plannotator/state.json'
+  if (options.inbox !== 'undecided' && !files.has(STATE)) {
+    files.set(STATE, JSON.stringify({ inboxOn: { on: options.inbox !== 'off', at: '2026-11-18T00:00:00.000Z', by: options.inbox === 'off' ? 'off' : 'command' } }))
+  }
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
@@ -96,7 +105,7 @@ function world(
   on('process.run', ($: any, e: any) => {
     const argv: string[] = [...e.argv]
     runs.push(argv)
-    const answered = options.run?.(argv, files)
+    const answered = options.run?.(argv, files, e)
     if (answered) return { value: answered }
     if (argv[3] === 'plannotator-launch' && options.cliStderr !== undefined) {
       // A CLI that refuses the subcommand and exits at once.
@@ -638,6 +647,122 @@ describe('register', () => {
     expect(calls).toEqual([])
     expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+  })
+
+  // --- Whether the person turned the Inbox on here (state.json's inboxOn, inbox-on.ts) ---
+
+  const OFF_LINE = 'The Plannotator Inbox is off on this computer: ask the person in the chat instead, and do not turn the Inbox on yourself (only the person does, by running `plannotator inbox` in their own terminal).'
+  const STATE = '/home/me/.plannotator/state.json'
+  const stateWith = (on: boolean, by = on ? 'command' : 'off') => JSON.stringify({ inboxOn: { on, at: '2026-11-18T00:00:00.000Z', by } })
+
+  test('a fresh computer: no plannotator_inbox, no reminder, nothing run or written for the Inbox', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { inbox: 'undecided', fetch: inbox(TOOLS, calls) })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    await w.clock.advance(5_000)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(w.contexts).toEqual([null])
+    expect(calls).toEqual([])
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+    expect([...w.files.keys()].filter((path) => path.includes('/inbox') || path === STATE)).toEqual([])
+  })
+
+  test('turned off: no plannotator_inbox and no reminder, even with an Inbox registry on disk', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { inbox: 'off', files: withRegistry(), fetch: inbox(TOOLS, calls) })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+    await w.clock.advance(5_000)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(w.contexts).toEqual([null])
+    expect(calls).toEqual([])
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+  })
+
+  for (const decided of [true, false]) {
+    test(`an install from before the rule: the CLI decides it once (plannotator inbox migrate) and the mod follows its record (${decided ? 'on' : 'off'})`, async ($: any, on: any) => {
+      const files = withRegistry()
+      const migrations: string[][] = []
+      const w = world(on, {
+        inbox: 'undecided',
+        files,
+        fetch: inbox(TOOLS, []),
+        run: (argv, files) => {
+          if (argv.join(' ') !== 'plannotator inbox migrate') return undefined
+          migrations.push(argv)
+          files.set(STATE, stateWith(decided, decided ? 'update-ran' : 'update-agent-only'))
+          return { exitCode: 0, stdout: decided ? 'on\n' : 'off\n', stderr: '' }
+        },
+      })
+      await $.session.start(SESSION)
+      expect(migrations).toHaveLength(1)
+      expect(w.tools.map((t) => t.name).includes('plannotator_inbox')).toBe(decided)
+    })
+  }
+
+  for (const [name, config, agents, expected] of [
+    ['the window wrote its notification settings', '{"inboxNotifications":{"sound":true}}', false, true],
+    ['the person ran plannotator inbox (agents.json)', null, true, true],
+    ['only agents started it', null, false, false],
+  ] as const) {
+    test(`an install from before the rule with a plannotator older than the rule: the cheap files decide, nothing is written (${name})`, async ($: any, on: any) => {
+      const files = withRegistry()
+      if (config) files.set('/home/me/.plannotator/config.json', config)
+      if (agents) files.set('/home/me/.plannotator/inbox/agents.json', '{}')
+      const w = world(on, {
+        inbox: 'undecided',
+        files,
+        fetch: inbox(TOOLS, []),
+        run: (argv) => (argv.join(' ') === 'plannotator inbox migrate' ? { exitCode: 1, stdout: '', stderr: 'unknown command: migrate' } : undefined),
+      })
+      await $.session.start(SESSION)
+      expect(w.tools.map((t) => t.name).includes('plannotator_inbox')).toBe(expected)
+      expect(w.files.has(STATE)).toBe(false)
+    })
+  }
+
+  test('turned off during the session: a plannotator_inbox call answers the one line and starts nothing', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { fetch: inbox(TOOLS, calls) })
+    await $.session.start(SESSION)
+    expect(w.tools.map((t) => t.name)).toContain('plannotator_inbox')
+    w.files.set(STATE, stateWith(false))
+
+    const answer = await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })
+    expect(answer.deny ?? answer.result).toContain(OFF_LINE)
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+    expect(calls.filter((c) => c.body?.method === 'tools/call')).toEqual([])
+  })
+
+  test('the CLI refuses the start (turned off in another way): the call answers the one line', async ($: any, on: any) => {
+    const w = world(on, {
+      fetch: inbox(TOOLS, []),
+      run: (argv) => (argv.join(' ') === 'plannotator inbox --background' ? { exitCode: 1, stdout: '', stderr: `${OFF_LINE}\n` } : undefined),
+    })
+    await $.session.start(SESSION)
+    const answer = await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })
+    expect(answer.deny ?? answer.result).toBe(OFF_LINE)
+  })
+
+  test('/plannotator-inbox is the person typing it: its plannotator inbox --open carries the slash command marker', async ($: any, on: any) => {
+    const seen: any[] = []
+    const w = world(on, {
+      inbox: 'undecided',
+      run: (argv, _files, event) => {
+        if (argv.join(' ') !== 'plannotator inbox --open') return undefined
+        seen.push(event)
+        return { exitCode: 0, stdout: 'http://localhost:5555/\n', stderr: '' }
+      },
+    })
+    await $.session.start(SESSION)
+    await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
+    expect(seen).toHaveLength(1)
+    const env = seen[0].env ?? seen[0].init?.env
+    expect(env?.PLANNOTATOR_INBOX_SLASH_COMMAND).toBe('1')
+    expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open')).toBe(true)
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {

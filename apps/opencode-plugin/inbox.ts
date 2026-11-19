@@ -30,6 +30,7 @@
  * the other process defers while it is live.
  */
 
+import { isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -234,6 +235,8 @@ export async function findInboxConnection(): Promise<InboxAgentConnection | null
   if (!resolveInboxTool(loadConfig(), process.env, "opencode")) return null;
   const dataDir = getPlannotatorDataDir();
   if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (inbox-on-contract.ts).
+  if (!isInboxOn(dataDir)) return null;
   const tools = await discoverInboxTools(dataDir);
   return tools ? new InboxAgentConnection({ dataDir, host: OPENCODE_INBOX_HOST, agentName: OPENCODE_INBOX_AGENT_NAME, tools }) : null;
 }

@@ -50,6 +50,7 @@
     "./test-home-guard": "./test-home-guard.ts",
     "./inbox-codex-wake": "./inbox-codex-wake.ts",
     "./inbox-agent-notes": "./inbox-agent-notes.ts",
+    "./inbox-on-settle": "./inbox-on-settle.ts",
     "./inbox-launch-env": "./inbox-launch-env.ts"
   },
   "files": [

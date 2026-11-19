@@ -46,6 +46,7 @@
  * request (`InboxAgentConnection.bridge`) and never kept here.
  */
 
+import { isInboxOn } from "../../packages/shared/inbox/inbox-on";
 import { existsSync } from "node:fs";
 import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
@@ -255,6 +256,8 @@ export async function setupClineInbox(api: ClinePluginApi, ctx: ClineSetupContex
   if (!resolveInboxTool(loadConfig(), env, CLINE_INBOX_HOST)) return null;
   const dataDir = deps.dataDir ?? getPlannotatorDataDir();
   if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (inbox-on-contract.ts).
+  if (!isInboxOn(dataDir, env)) return null;
   const tools = await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: CLINE_DISCOVER_TIMEOUT_MS })))(dataDir).catch(() => null);
   if (!tools) return null;
   const connection = new InboxAgentConnection({ dataDir, host: CLINE_INBOX_HOST, agentName: CLINE_INBOX_AGENT_NAME, tools });

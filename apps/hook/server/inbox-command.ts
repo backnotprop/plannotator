@@ -18,6 +18,11 @@
  *                                   run (with any of the above; a running
  *                                   Inbox is asked to publish), for the
  *                                   Tailscale login that owns this machine
+ *   plannotator inbox on            turn the Inbox on here (the person only;
+ *                                   inbox-on-command.ts)
+ *   plannotator inbox off           turn it off: stop it, agents lose it from
+ *                                   their next session, Plannotator's own
+ *                                   untouched notes go
  *   plannotator inbox mcp           the stdio MCP entry for any agent
  *   plannotator inbox status        whether it runs, where, which pid and
  *                                   version (--json too); exit 0 running
@@ -34,8 +39,11 @@
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
  * and start paths.
  *
- * On demand never pops a tab mid-work: only a person running `plannotator
- * inbox` opens one. The Inbox never registers in `sessions/` (it would hold
+ * Nothing starts the Inbox until the person turned it on here
+ * (packages/shared/inbox/inbox-on-contract.ts): every start goes through
+ * ensureInboxRunning or the run check below, which refuse with one line while
+ * it is off. On demand never pops a tab mid-work: only a person running
+ * `plannotator inbox` opens one. The Inbox never registers in `sessions/` (it would hold
  * auto-update back forever); its own registry is `inbox/inbox.json`.
  */
 
@@ -89,6 +97,9 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
+import { assertInboxOn, inboxOffCommand, inboxOffLine, inboxOnCommand, inboxRunMayStart } from "./inbox-on-command";
+import { settleInboxOn } from "@plannotator/server/inbox-on-settle";
+import { isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
@@ -197,9 +208,13 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
 
 /**
  * The running Inbox's registry entry, starting a stopped one detached when
- * needed. Never opens a browser. Throws when it cannot be started.
+ * needed. Never opens a browser. Throws when it cannot be started, and
+ * InboxOffError (its message the one line to show) while the person has not
+ * turned the Inbox on here: then nothing is started and nothing is reached,
+ * not even an Inbox an older version left running.
  */
 export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
+  assertInboxOn(dataDir);
   const trace = inboxStartTrace(dataDir, "starter");
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
@@ -692,6 +707,10 @@ async function stopCommand(dataDir: string): Promise<number> {
  * in between waits for this start instead of racing it.
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  if (!isInboxOn(dataDir)) {
+    process.stderr.write(`${inboxOffLine(process.env)}\n`);
+    return 1;
+  }
   const unreachable = await outOfReach(await inboxStatus(dataDir));
   if (unreachable) {
     process.stderr.write(`${unreachable.error.message}\n`);
@@ -757,6 +776,27 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     if (args.length > 1) usageError(`Unknown inbox permission-hook option: ${args[1]}`);
     return runPermissionHook(dataDir);
   }
+  // An install from before the opt-in rule is decided once, and an off record's leftover notes go
+  // (inbox-on-settle.ts). Cheap once decided: one read of state.json.
+  try {
+    settleInboxOn(dataDir);
+  } catch {
+    // Never holds up a command; isInboxOn decides again where it matters.
+  }
+  if (args[0] === "on") {
+    if (args.length > 1) usageError(`Unknown inbox on option: ${args[1]}`);
+    process.exit(inboxOnCommand(dataDir, process.env, (line) => void process.stdout.write(`${line}\n`)));
+  }
+  if (args[0] === "off") {
+    if (args.length > 1) usageError(`Unknown inbox off option: ${args[1]}`);
+    process.exit(await inboxOffCommand(dataDir, (line) => void process.stdout.write(`${line}\n`)));
+  }
+  // `migrate`: not for people or agents (not in --help). The Claude Code mod runs it once when state.json has no
+  // record, so an install from before the rule is decided by the process that can read the store; prints on or off.
+  if (args[0] === "migrate") {
+    process.stdout.write(`${isInboxOn(dataDir) ? "on" : "off"}\n`);
+    process.exit(0);
+  }
   // Only a person's `plannotator inbox` connects agents, never a detached start.
   // An Inbox older than DETACHED_ENV (0.28.17 and before) spawns its detached
   // starts (its Restart into an updated binary, --background, a connection)
@@ -782,6 +822,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
       askAiChild: isAskAiChild(process.env),
       t3EntryIdle: inboxT3EntryIdle(args.includes("--t3"), process.env),
+      inboxOff: !isInboxOn(dataDir),
     });
     process.exit(0);
   }
@@ -840,6 +881,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "--notes") {
     if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
+    if (!isInboxOn(dataDir)) {
+      process.stderr.write(`${inboxOffLine(process.env)}\n`);
+      process.exit(1);
+    }
     process.exit(await writeNotes(dataDir, args[1]!));
   }
 
@@ -869,6 +914,13 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (open && (background || noOpen)) {
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
+  }
+
+  // The person's own run turns the Inbox on; any other run while it is off starts and opens nothing.
+  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background });
+  if (!mayStart.ok) {
+    process.stderr.write(`${mayStart.line}\n`);
+    process.exit(1);
   }
 
   await reportDebugNeedsStart(dataDir);

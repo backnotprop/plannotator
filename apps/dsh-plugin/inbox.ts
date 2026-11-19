@@ -38,6 +38,7 @@
  * a log line, a tool result or a message to the session.
  */
 
+import { isInboxOn } from "../../packages/shared/inbox/inbox-on";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -239,6 +240,8 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
   if (!resolveInboxTool(loadConfig(), env, DSH_INBOX_HOST)) return null;
   const dataDir = deps.dataDir ?? getPlannotatorDataDir();
   if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (inbox-on-contract.ts).
+  if (!isInboxOn(dataDir, env)) return null;
   const agents = agentsServiceOf(ctx);
   if (!agents || typeof ctx.on !== "function") {
     warn("plannotator: this DSH has no agents service; the Plannotator Inbox connection is off");

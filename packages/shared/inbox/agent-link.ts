@@ -32,6 +32,8 @@
  * resolves inside `generated/inbox/`.
  */
 
+import { INBOX_OFF_AGENT_LINE, INBOX_SLASH_COMMAND_ENV, isInboxOffAnswer } from "./inbox-on-contract";
+import { isInboxOn } from "./inbox-on";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -312,6 +314,8 @@ export class InboxAgentConnection {
 
   /** The running Inbox, starting a stopped one detached (no browser) first. */
   async ensureRunning(): Promise<InboxRegistryView | { error: string }> {
+    // Off (the person has not turned the Inbox on here, or turned it off): nothing is started or reached.
+    if (!isInboxOn(this.dataDir)) return { error: INBOX_OFF_AGENT_LINE };
     const known = readRegistry(this.dataDir);
     if (known && (await this.isRunning(known))) return known;
     const started = await this.startInbox();
@@ -323,6 +327,7 @@ export class InboxAgentConnection {
     if (started.exitCode !== 0) {
       const why = started.output.trim() || `exit ${started.exitCode}`;
       if (/unknown command/i.test(why)) return { error: "The plannotator on PATH has no Inbox (an older version); update Plannotator." };
+      if (isInboxOffAnswer(why)) return { error: INBOX_OFF_AGENT_LINE };
       return { error: `The Plannotator Inbox did not start: ${why}` };
     }
     return readRegistry(this.dataDir) ?? { error: "The Plannotator Inbox started but wrote no registry." };
@@ -424,7 +429,8 @@ function plannotatorCommands(command?: string): string[] {
 export async function openInboxInBrowser(
   options: { dataDir?: string; command?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ url: string; note?: string } | { error: string }> {
-  const env = { ...(options.env ?? process.env), ...(options.dataDir ? { PLANNOTATOR_DATA_DIR: options.dataDir } : {}) };
+  // The person typed /plannotator-inbox: the run turns the Inbox on (inbox-on-contract.ts).
+  const env = { ...(options.env ?? process.env), ...(options.dataDir ? { PLANNOTATOR_DATA_DIR: options.dataDir } : {}), [INBOX_SLASH_COMMAND_ENV]: "1" };
   for (const command of plannotatorCommands(options.command)) {
     const run = await runOnce(command, ["inbox", "--open"], env);
     if (run.missing) continue;

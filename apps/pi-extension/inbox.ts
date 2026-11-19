@@ -37,6 +37,7 @@
  * session's lease in `InboxWake`; the other process defers while it is live.
  */
 
+import { isInboxOn } from "./generated/inbox/inbox-on.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -158,6 +159,8 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	claimPiSessions(pi, dataDir);
 	const config = loadConfig();
 	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
+	// Only once the person turned the Inbox on here (inbox-on-contract.ts).
+	if (!isInboxOn(dataDir)) return undefined;
 	// Decided with the tool, once per extension instance (each session, /reload):
 	// the line (the person's own from config.json prompts.inbox, else
 	// INBOX_REMINDER_TEXT), or null when the reminder is off.

@@ -148,6 +148,7 @@ import {
 } from './inbox'
 import { inboxAgentTool, inboxPlaceFromEnv, inboxReminderFor, type InboxPlace, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
+import { inboxOnAtStart } from './inbox-on'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
 import { isAbsolutePath } from './paths'
 import { PLAN_TOOL } from './plan'
@@ -324,7 +325,7 @@ interface Allowed {
   agentTool: boolean
   /** Review ExitPlanMode (`planReview`, on by default). Off: Claude Code's own dialog. */
   planReview: boolean
-  /** Connect to the Plannotator Inbox (the inbox tool switch, on by default). */
+  /** Connect to the Plannotator Inbox: the person turned it on here (inbox-on.ts) and the inbox tool switch allows it. */
   inboxTool: boolean
   /** With the Inbox tool: the one-line reminder at the start of each conversation (`inboxReminder`, on by default). */
   inboxReminder: boolean
@@ -935,6 +936,10 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!shell) return null
   useShell(shell)
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
+  const debugPath = debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null
+  // The Inbox only once the person turned it on here (inbox-on.ts), and only where its switch allows it.
+  const inboxToolSwitch = features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText)
+  const inboxOn = inboxToolSwitch && (await inboxOnAtStart(hostOf($, debugPath), dataDir, configText).catch(() => false))
   const planSwitchValue = await $.env.get('PLANNOTATOR_PLAN_REVIEW')
   const planSwitch = planSwitchAction({
     hostPlanCard: host.hostPlanMode,
@@ -944,12 +949,12 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   })
   return {
     dataDir,
-    debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
+    debugPath,
     agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
     // Another session's `0` (its marker names that session) counts as unset here.
     planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(planSwitch === 'clear' ? undefined : planSwitchValue, configText),
-    inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
-    inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    inboxTool: inboxOn,
+    inboxReminder: features.wake && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
     panel: host.panel,

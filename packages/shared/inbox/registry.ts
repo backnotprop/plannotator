@@ -23,6 +23,7 @@
  * (auto-update skips while another live pid is registered there).
  */
 
+import { isInboxOffAnswer } from "./inbox-on-contract";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
@@ -397,6 +398,8 @@ export class InboxUnreachableError extends Error {
 /** What a command says when the Inbox it needs could not be had (its `ensureRunning` threw). */
 export function inboxEnsureFailedWords(error: unknown): string {
   if (error instanceof InboxUnreachableError) return error.message;
+  // The Inbox is off (inbox-on-contract.ts): its one line, as it is.
+  if (error instanceof Error && isInboxOffAnswer(error.message)) return error.message;
   return `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`;
 }
 

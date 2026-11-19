@@ -154,6 +154,8 @@
     "./inbox/snoozes": "./inbox/snoozes.ts",
     "./inbox/agent-faces": "./inbox/agent-faces.ts",
     "./inbox/schema": "./inbox/schema.ts",
+    "./inbox/inbox-on": "./inbox/inbox-on.ts",
+    "./inbox/inbox-on-contract": "./inbox/inbox-on-contract.ts",
     "./inbox/network-paths": "./inbox/network-paths.ts",
     "./inbox/ask": "./inbox/ask.ts",
     "./inbox/system-setup": "./inbox/system-setup.ts",
