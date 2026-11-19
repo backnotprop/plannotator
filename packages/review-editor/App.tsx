@@ -1993,10 +1993,14 @@ const ReviewApp: React.FC = () => {
   // Stitching lives here, not in the diff views: rebuilding a fragmented
   // identifier is app-only work, and both views are compiled into the portable
   // guide viewer, which must not carry it.
+  // Returns whether the token is a symbol at all, so the views paint the hover
+  // affordance only on tokens a card can open for.
   const handleTokenHoverEnter = useCallback(
-    (props: DiffTokenEventBaseProps, filePath: string) => {
+    (props: DiffTokenEventBaseProps, filePath: string): boolean => {
       const request = buildTokenHoverRequest(props, filePath);
-      if (request) startTokenHover(request, props.tokenElement);
+      if (!request) return false;
+      startTokenHover(request, props.tokenElement);
+      return true;
     },
     [startTokenHover],
   );

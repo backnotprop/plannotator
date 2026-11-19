@@ -1352,7 +1352,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: lets the save of a held switch (Shape, heldSwitch) reach the windows. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -3423,6 +3423,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Thread panes, several threads side by side (config.json `inboxSplitView`; Settings → General → Appearance, off
+   * unless the person turned it on; docs/agent-guides/inbox-window.md "Free layout"). A window preference: nothing an
+   * agent reads changes. `event: capabilities` names it only when it was the change, so every window, the one that
+   * saved it too, turns the panes on or off at once, with no reload.
+   */
+  const splitViewOn = () => loadConfig().inboxSplitView === true;
+  const saveSplitView = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "split_view: { on: boolean }.", { field: "split_view" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: splitViewOn() };
+    const was = splitViewOn();
+    saveConfig({ inboxSplitView: on });
+    if (splitViewOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("split_view");
+    return { on };
+  };
+
+  /**
    * The list's "Show archived" (approval "inbox-archived-group", off by default): one switch on every linked machine
    * (inbox-show-archived.ts). `event: show-archived` tells every window, and a linked machine that asks
    * (`show-archived=1`), which then reads this list and takes the newer switch.
@@ -4030,8 +4050,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...systemWire(),
     /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
     ...chapterDiagramsWire(),
-    /** The second thread pane's preview (config.json `inboxSplitView`): present only while on, so a window off draws nothing new. */
-    ...(loadConfig().inboxSplitView === true ? { split_view: { on: true } } : {}),
+    /** Thread panes (config.json `inboxSplitView`, Settings → General → Appearance): off unless the person turned them on. */
+    split_view: { on: splitViewOn() },
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. */
@@ -4243,10 +4263,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => {
+        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -6863,6 +6883,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.agent_status === undefined &&
           body.float_drafts === undefined &&
           body.mark_read_warning === undefined &&
+          body.split_view === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
@@ -6874,7 +6895,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -6922,6 +6943,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.agent_status !== undefined) agentStatus.save(body.agent_status, true);
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
         if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
+        if (body.split_view !== undefined) saveSplitView(body.split_view, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
@@ -6956,6 +6978,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agentStatusNow = body.agent_status === undefined ? { on: agentStatus.on() } : agentStatus.save(body.agent_status);
         const floatDrafts = body.float_drafts === undefined ? { on: floatDraftsOn() } : saveFloatDrafts(body.float_drafts);
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
+        const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
@@ -6965,7 +6988,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
