@@ -3,7 +3,8 @@
  *
  *   /                      plan and canvas side by side (a phone gets the plan)
  *   /?bench=plan&n=50      a plan with n snapshots of one 2,000-object canvas
- *   /?bench=canvas&n=2000  the editor alone on an n-object canvas (&rich: pictures, HTML items, cards, long notes)
+ *   /?bench=canvas&n=2000  the editor alone on an n-object canvas (&rich: pictures, HTML items, cards, long notes;
+ *                          &ink=600 drawn lines, &curves=400 curved connectors, &html=12 moving HTML items)
  *   /?view=split           plan and canvas side by side
  *   /?view=canvas          the canvas alone
  *   &theme=dark            start dark
@@ -22,6 +23,8 @@ import type { PasteResolver } from '../react/references';
 import { pictureResolver } from '../model/assets';
 import { routeLinkPreview } from '../react/link-preview';
 import { CanvasEditor } from '../react/CanvasEditor';
+import { HtmlItemFacesProvider } from '../react/objects';
+import type { HtmlItemFace } from '../model/html-item';
 import { findSnapshotBlocks, insertSnapshotBlock } from '../snapshot/block';
 import { CanvasStage } from '../snapshot/CanvasStage';
 import { createSnapshotDirectiveRenderer } from '../snapshot/directive';
@@ -32,10 +35,11 @@ import type { PlanDropTarget } from '../react/plan-drop';
 import { CanvasRegistry, CanvasRegistryProvider } from '../snapshot/registry';
 import type { SnapshotOpenRequest } from '../snapshot/SnapshotFigure';
 import { indexFor } from '../view/document-index';
+import { MARKS_PLAN, createMarksStore } from './marks';
 import { PlanPane } from './PlanPane';
 import { DATA_SETS, type DataSet, EMPTY_PLAN, FAR_PLAN, ONE_PLAN, STACKED_PLAN, bigPlan, createBigStore, createEmptyStore, createFarStore, createOneStore, createStackedStore, createWorstStore, worstPlan } from './worst';
 import { CHARTS_PLAN, createChartBenchStore, createChartsStore } from './charts';
-import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
+import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, addBenchMarks, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
 
 const params = new URLSearchParams(location.search);
 const bench = params.get('bench');
@@ -49,6 +53,7 @@ const chartsBoard = params.get('board') === 'charts';
 
 function storeFor(set: DataSet): CanvasStore {
   if (chartsBoard) return createChartsStore();
+  if (set === 'marks') return createMarksStore();
   if (set === 'worst') return createWorstStore();
   if (set === 'empty') return createEmptyStore();
   if (set === 'one') return createOneStore();
@@ -60,6 +65,7 @@ function storeFor(set: DataSet): CanvasStore {
 }
 function planFor(set: DataSet): string {
   if (chartsBoard) return CHARTS_PLAN;
+  if (set === 'marks') return MARKS_PLAN;
   if (set === 'worst') return worstPlan();
   if (set === 'empty') return EMPTY_PLAN;
   if (set === 'one') return ONE_PLAN;
@@ -93,8 +99,11 @@ const snapshotCount = (count: number) => (count === 1 ? '1 snapshot' : `${count}
 
 const registry = new CanvasRegistry();
 
+/** The demo's host lends its two house faces to HTML items. A product host would lend its own. */
+const HOUSE_FACES: HtmlItemFace[] = __HOUSE_FACES__;
+
 /** The demo's people: one person and one agent. A product host answers from its own accounts. */
-const people: People = (actor) => (actor.kind === 'agent' ? { name: 'Planner' } : actor.id === 'ana' ? { name: 'Ana' } : null);
+const people: People = (actor) => (actor.kind === 'agent' ? { name: 'Planner' } : actor.id === 'ana' ? { name: 'Ana', color: '#B9A6FF' } : actor.id === 'ines' ? { name: 'Ines', color: '#6d4aff' } : null);
 
 // Where the demo keeps pictures: in memory, by content hash. A product host stores them itself.
 const assets = createMemoryAssets();
@@ -131,6 +140,7 @@ function useTheme(): [boolean, () => void] {
 
 function BenchCanvas() {
   const store = useMemo(() => (params.has('charts') ? createChartBenchStore(Number(params.get('charts')) || 200) : params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
+  useMemo(() => addBenchMarks(store, { ink: Number(params.get('ink')) || 0, curves: Number(params.get('curves')) || 0, html: Number(params.get('html')) || 0 }), [store]);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };
   }, [store]);
@@ -272,6 +282,7 @@ function PlanAndCanvas() {
 
   return (
     <PeopleProvider people={people}>
+      <HtmlItemFacesProvider faces={HOUSE_FACES}>
     <CanvasRegistryProvider registry={registry}>
       <div ref={shell} className="demo-shell pcv">
         <header className="demo-head">
@@ -312,6 +323,7 @@ function PlanAndCanvas() {
       </div>
       <CanvasStage request={request} registry={registry} recede={() => shell.current} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
     </CanvasRegistryProvider>
+      </HtmlItemFacesProvider>
     </PeopleProvider>
   );
 }

@@ -19,9 +19,10 @@ import type { CanvasObject } from '../model/types';
 import { serializeSnapshotBlock } from '../snapshot/block';
 import { createLargeStore } from './sample';
 
-export type DataSet = 'demo' | 'worst' | 'empty' | 'one' | 'huge' | 'max' | 'stacked' | 'far';
+export type DataSet = 'demo' | 'marks' | 'worst' | 'empty' | 'one' | 'huge' | 'max' | 'stacked' | 'far';
 export const DATA_SETS: { id: DataSet; label: string }[] = [
   { id: 'demo', label: 'Demo data' },
+  { id: 'marks', label: 'Marks' },
   { id: 'worst', label: 'Worst case' },
   { id: 'empty', label: 'Empty' },
   { id: 'one', label: 'One' },

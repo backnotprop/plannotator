@@ -12,3 +12,4 @@ export * from './route-path';
 export * from './rough';
 export * from './guides';
 export * from './chart';
+export * from './ink-path';

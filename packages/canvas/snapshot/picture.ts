@@ -9,9 +9,10 @@
  */
 import type { CanvasColor } from '../model/color';
 import { captureDocument } from '../model/capture';
-import { arrowPoints, resolveArrow } from '../model/document';
-import type { CanvasDocument, CanvasObject, SnapshotId } from '../model/types';
-import { isPlaced } from '../model/types';
+import { arrowPoints, curveControl, curvePoint, resolveArrow } from '../model/document';
+import type { CanvasDocument, CanvasObject, SnapshotId, TextFace } from '../model/types';
+import { TEXT_SIZE_PX, isPlaced } from '../model/types';
+import { HIGHLIGHTER_OPACITY, PEN_WIDTH, inkPath } from '../view/ink-path';
 import { shapeOutline, toPath } from '../view/shape-outline';
 import { referenceAddress } from '../model/reference';
 import { chartToSvg } from '../view/chart';
@@ -64,6 +65,9 @@ const DARK: Palette = {
   },
 };
 
+/** A generic family for each face: the file names no font a reader's device may lack. */
+const TEXT_FAMILY: Record<Exclude<TextFace, 'sans'>, string> = { serif: 'Georgia, serif', mono: 'ui-monospace, Menlo, Consolas, monospace', hand: 'cursive' };
+
 /** Text made safe for XML: the five characters escaped, and the control characters XML forbids taken out (one of them makes the whole file fail to load). */
 const esc = (value: string): string =>
   value
@@ -91,12 +95,17 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
     if (!g) return '';
     const stroke = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.arrow;
     const points = arrowPoints(g);
-    const before = points[points.length - 2];
+    // A curve is drawn as its curve; its head leans the way the curve arrives.
+    const control = !g.via && object.routing === 'curve' ? curveControl(g.from, g.to) : null;
+    const before = control ? curvePoint(g.from, control, g.to, 0.94) : points[points.length - 2];
     const angle = Math.atan2(g.to.y - before.y, g.to.x - before.x);
     const head = [0.42, -0.42]
       .map((spread) => `${n(g.to.x - 10 * Math.cos(angle + spread))},${n(g.to.y - 10 * Math.sin(angle + spread))}`)
       .join(' ');
-    return `<polyline points="${points.map((p) => `${n(p.x)},${n(p.y)}`).join(' ')}" fill="none" stroke="${stroke}" stroke-width="1.5"/><polygon points="${n(g.to.x)},${n(g.to.y)} ${head}" fill="${stroke}"/>`;
+    const line = control
+      ? `<path d="M${n(g.from.x)} ${n(g.from.y)}Q${n(control.x)} ${n(control.y)} ${n(g.to.x)} ${n(g.to.y)}" fill="none" stroke="${stroke}" stroke-width="1.5"/>`
+      : `<polyline points="${points.map((p) => `${n(p.x)},${n(p.y)}`).join(' ')}" fill="none" stroke="${stroke}" stroke-width="1.5"/>`;
+    return `${line}<polygon points="${n(g.to.x)},${n(g.to.y)} ${head}" fill="${stroke}"/>`;
   }
   if (!isPlaced(object)) return '';
   const { x, y, w, h } = object;
@@ -131,15 +140,22 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
       return `<rect ${box} rx="8" fill="${fill}"/><text x="${n(x + 10)}" y="${n(y + 22)}" font-size="13" fill="${palette.onNote}">${esc(fitLine(object.text, w - 20, 13))}</text>`;
     }
     case 'text': {
-      const size = object.size === 'large' ? 22 : object.size === 'small' ? 12.5 : 15;
+      const size = TEXT_SIZE_PX[object.size ?? 'medium'];
       const fill = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.ink;
-      return `<text x="${n(x)}" y="${n(y + size)}" font-size="${size}" fill="${fill}">${esc(fitLine(object.text, w, size))}</text>`;
+      const face = object.face ? ` font-family="${TEXT_FAMILY[object.face]}"` : '';
+      const weight = size >= 40 ? ' font-weight="700"' : size >= 22 ? ' font-weight="650"' : '';
+      return `<text x="${n(x)}" y="${n(y + size)}" font-size="${size}"${weight}${face} fill="${fill}">${esc(fitLine(object.text, w, size))}</text>`;
     }
     case 'image':
     case 'sprite':
       return `<rect ${box} rx="6" fill="${palette.card}" stroke="${palette.line}" stroke-dasharray="4 3"/><text x="${n(x + 8)}" y="${n(y + 20)}" font-size="12" fill="${palette.muted}">${esc(fitLine(object.alt, w - 16, 12))}</text>`;
     case 'stamp':
       return `<circle cx="${n(x + h / 2)}" cy="${n(y + h / 2)}" r="${n(h / 2)}" fill="${palette.card}" stroke="${palette.line}"/>`;
+    case 'ink': {
+      const pen = object.pen ?? 'marker';
+      const stroke = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.ink;
+      return `<path transform="translate(${n(x)} ${n(y)})" d="${inkPath(object.points, w, h)}" fill="none" stroke="${stroke}" stroke-width="${PEN_WIDTH[pen]}" stroke-linecap="round" stroke-linejoin="round"${pen === 'highlighter' ? ` stroke-opacity="${HIGHLIGHTER_OPACITY}"` : ''}/>`;
+    }
     case 'chart': {
       // The same shapes the board draws, in plain colours. The accent is the object's colour, as on the board.
       const accent = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.named.violet.stroke;
