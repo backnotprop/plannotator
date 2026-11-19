@@ -5,6 +5,7 @@ import type { CanvasObject } from '../model/types';
 import { FIGURE_MIN, figureBox, fitName } from '../snapshot/SnapshotFigure';
 import { edgesBeyond, nearestBeyond } from './EdgeMarkers';
 import { ARROW_LABEL_MAX, shortLabel } from './objects';
+import { faceColor } from './people';
 import { addReference, previewsPending } from './references';
 
 describe('words that do not fit', () => {
@@ -73,5 +74,40 @@ describe('a pasted link while its page is looked up', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(previewsPending.has(failing)).toBe(false);
     expect(store.getDocument().objects[failing]).toBeDefined();
+  });
+});
+
+describe('the colour of a person\'s mark', () => {
+  test('is the host\'s colour when it is a colour, and nothing at all otherwise', () => {
+    expect(faceColor({ color: '#B9A6FF' })).toBe('#B9A6FF');
+    expect(faceColor({ color: ' oklch(0.7 0.1 290) ' })).toBe('oklch(0.7 0.1 290)');
+    expect(faceColor({ color: 'rebeccapurple' })).toBe('rebeccapurple');
+    expect(faceColor({})).toBeUndefined();
+    expect(faceColor(null)).toBeUndefined();
+    // Anything that could load, run, read a variable or end the declaration is not a colour.
+    for (const color of [
+      'red; background: url(https://evil.example/x)',
+      'url(javascript:alert(1))',
+      'var(--background)',
+      'rgb(0 0 0); position: fixed',
+      'color-mix(in srgb, red, blue)',
+      'rgb(calc(1 * 2) 0 0)',
+      'transparent',
+      'currentcolor',
+      'inherit',
+      '',
+      '#12',
+      'expression(alert(1))',
+      '</style><script>',
+      `#${'f'.repeat(200)}`,
+      `rgb(${'1 '.repeat(200)})`,
+      0,
+      true,
+      ['#fff'],
+      { custom: '#fff' },
+      { toString: () => '#fff' },
+    ]) {
+      expect(faceColor({ color })).toBeUndefined();
+    }
   });
 });
