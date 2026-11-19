@@ -1,15 +1,16 @@
 /**
- * Start T3 Code from compose's To (issue #3590), proved in a real browser against the compiled binary and its real
- * launch endpoint. Nothing in the Inbox is mocked; the only fake is T3 Code's `t3` launcher in the sandbox's own
- * agent home (tests/helpers/fake-t3.ts: `thread start` and `thread send` as T3's cli/thread.ts answers them). The
- * real T3 Code, the real home and the person's Inbox are never touched: PLANNOTATOR_TEST_SANDBOX, a temp HOME and
- * PLANNOTATOR_DATA_DIR, a launch PATH of the system's tools alone, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER.
+ * Start an agent in T3 Code (issue #3590): Settings → Agents' "Start new agents in" T3 Code, then New message's
+ * Claude Code, proved in a real browser against the compiled binary and its real launch endpoint. Nothing in the Inbox
+ * is mocked; the only fakes are T3 Code's `t3` launcher in the sandbox's own agent home (tests/helpers/fake-t3.ts) and
+ * Claude Code's `claude` (tests/helpers/fake-claude), for the start in the background. The real T3 Code, the real home
+ * and the person's Inbox are never touched: PLANNOTATOR_TEST_SANDBOX, a temp HOME and PLANNOTATOR_DATA_DIR, a launch
+ * PATH of the fakes and the system's tools alone, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER.
  *
- *  1. The journey: To offers T3 Code in the git repository only, and says it starts in a new worktree from the
- *     branch the project is on; Send runs one `t3 thread start . - --worktree=main …` (Default: no agent or model
- *     flag) in the project with the message on stdin; the thread says who started it and what T3 runs it on
- *     ("T3 Code (Claude Code · opus)"), has no Stop, and a reply goes into the new T3 thread once.
- *  2. T3 Code not running: the line says why in plain words and keeps the message; Try again starts it.
+ *  1. The journey: Settings → Agents offers T3 Code and saves it; New message → Claude Code in shop → Send runs one
+ *     `t3 thread start . - --title=… --provider=claudeAgent --model=opus --json` in the project (the model T3 last ran
+ *     Claude Code on there), the message on stdin; the thread says "In T3 Code · opus", has no Stop, and a reply goes
+ *     into the T3 thread once.
+ *  2. T3 Code not running: the agent starts in the background, and its line says why.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-t3.spec.ts`.
@@ -18,8 +19,10 @@ import { expect, test, type Browser, type BrowserContext, type Page } from './in
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { INBOX_T3_NOT_HERE } from '../../packages/core/inbox-run-line';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
+import { installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
 import { makeFakeT3Home, type FakeT3Home } from '../helpers/fake-t3';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
@@ -35,6 +38,7 @@ interface World {
   url: string;
   port: number;
   t3: FakeT3Home;
+  claude: FakeClaude;
   shop: string;
   context: BrowserContext;
   page: Page;
@@ -66,19 +70,14 @@ async function seed(folder: string, session: string): Promise<void> {
   await response.text();
 }
 
-/** New message → To → "T3 Code in shop" → words → Send; the thread opened. */
+/** New message → To → "Claude Code in shop" → words → Send; the thread opened. */
 async function launch(page: Page, words: string): Promise<{ threadId: string; launchId: string }> {
   await page.goto(world.url);
   await page.locator('.ib-side [data-open-compose]').click();
   const d = dialog(page);
   await expect(d).toBeVisible();
   await d.locator('[data-compose-to]').click();
-  // Only the git repository: the plain folder is no place for T3 Code's worktree.
-  await expect(d.locator('[data-compose-start="t3"]')).toHaveCount(1);
-  await expect(d.locator('[data-compose-start="t3"]')).toHaveAttribute('data-compose-start-project', 'shop');
-  await d.locator('[data-compose-start="t3"]').click();
-  await expect(d.locator('[data-compose-to="start"]')).toHaveText(/New T3 Code session/);
-  await expect(d.locator('[data-compose-status]')).toHaveText('T3 Code starts in a new worktree, from the branch shop is on now.');
+  await d.locator('[data-compose-start="claude-code"]').click();
   await d.getByRole('textbox', { name: 'Message' }).fill(words);
   const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
   await d.locator('[data-compose-send]').click();
@@ -93,7 +92,7 @@ async function launch(page: Page, words: string): Promise<{ threadId: string; la
 
 async function readThread(page: Page, threadId: string) {
   return (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as {
-    thread: { messages: { id: string; body: string; author: { kind: string }; to?: { host: string; session: string } | null; delivery?: { state: string } | null }[] };
+    thread: { messages: { id: string; body: string; author: { kind: string }; to?: { host: string; session: string } | null; delivery?: { state: string } | null; launch?: { t3?: Record<string, true> } }[] };
   };
 }
 
@@ -104,12 +103,19 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-launch-t3-e2e-');
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
-  // The projects: one git repository (on `main`), one plain folder.
+  // The project: a git repository on `main`.
   const shop = join(root, 'code', 'shop');
-  const notes = join(root, 'code', 'notes');
-  for (const dir of [shop, notes]) mkdirSync(dir, { recursive: true });
-  // T3 Code's launcher where its desktop app puts it, in the sandbox's agent home; T3 knows the repository.
-  const t3 = makeFakeT3Home(join(dataDir, 'agents-home'), {}, { projects: [realpathSync(shop)], db: false });
+  mkdirSync(shop, { recursive: true });
+  const agentsHome = join(dataDir, 'agents-home');
+  // T3 Code's launcher where its desktop app puts it, in the sandbox's agent home; T3 knows the repository, and last
+  // ran Claude Code there on opus.
+  const t3 = makeFakeT3Home(agentsHome, {}, { projects: [realpathSync(shop)], db: false, used: { [realpathSync(shop)]: [{ threadId: 'thread:project:shop:1', title: 'Totals', providerInstanceId: 'claudeAgent', model: 'opus' }] } });
+  // Claude Code, for New message's row and a start in the background: Plannotator's plugin on, the project trusted.
+  const fakes = join(root, 'fakes');
+  const claude = installFakeClaude({ bin: fakes, state: join(root, 'fake-claude') });
+  mkdirSync(join(agentsHome, '.claude'), { recursive: true });
+  writeFileSync(join(agentsHome, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
+  writeFileSync(join(agentsHome, '.claude.json'), JSON.stringify({ projects: { [realpathSync(shop)]: { hasTrustDialogAccepted: true } } }));
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true } }));
   markTourDecided(dataDir);
   const env: Record<string, string> = {
@@ -118,7 +124,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_TEST_SANDBOX: root,
-    PLANNOTATOR_TEST_LAUNCH_PATH: '/usr/bin:/bin',
+    PLANNOTATOR_TEST_LAUNCH_PATH: `${fakes}:/usr/bin:/bin`,
+    SHELL: claude.shell,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: '1',
     NO_ANON_PING: '1',
@@ -136,10 +143,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   const registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number };
-  world = { root, dataDir, env, url: started.stdout.trim(), port: registry.port, t3, shop: realpathSync(shop), context: undefined as never, page: undefined as never, errors: [] };
+  world = { root, dataDir, env, url: started.stdout.trim(), port: registry.port, t3, claude, shop: realpathSync(shop), context: undefined as never, page: undefined as never, errors: [] };
   await fetch(`http://127.0.0.1:${world.port}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
   await seed(world.shop, 'ses-seed-shop');
-  await seed(realpathSync(notes), 'ses-seed-notes');
   const context = await browser.newContext({ viewport: WIDE, deviceScaleFactor: 1, colorScheme: 'light' });
   const page = await context.newPage();
   page.on('pageerror', (error) => world.errors.push(error.message));
@@ -149,33 +155,39 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
 test.afterAll(async () => {
   try {
+    world?.claude?.stopAll();
     await world?.context?.close();
   } finally {
     await removeInboxScratch();
   }
 });
 
-test('the journey: T3 Code in the repository only, one `t3 thread start` in a new worktree from main, no Stop, a reply goes into the thread once', async () => {
+test('the journey: Settings → Agents starts new agents in T3 Code; Claude Code starts as one T3 thread on the model T3 last ran it on, no Stop, a reply goes into the thread once', async () => {
   test.setTimeout(120_000);
   const { page, t3 } = world;
+  // Settings → Agents: T3 Code is on this computer, so it is offered; the person picks it.
+  await page.goto(`${world.url}#settings/agents`);
+  const row = page.locator('[data-launch-start-in-row]');
+  await expect(row.locator('[data-launch-start-in="t3"]')).toHaveText('T3 Code');
+  await row.locator('[data-launch-start-in="t3"]').click();
+  await expect(row).toHaveAttribute('data-launch-start-in-row', 't3');
+  await expect(row.locator('[data-launch-start-in-t3]')).toContainText('In T3 Code, each new agent runs as a thread of T3 Code for its project');
+
   const { threadId } = await launch(page, 'Tighten the checkout copy. Keep the button label.');
   const p = pane(page);
-  // Default: T3 runs it on the project's own model, and the header says which once T3 said.
-  await expect(p.locator('[data-launched]')).toHaveText('You started T3 Code (Claude Code · opus) in shop', { timeout: 20_000 });
+  await expect(p.locator('[data-launched]')).toContainText('You started Claude Code in shop');
+  await expect(p.locator('[data-launch-t3]')).toHaveText('In T3 Code · opus', { timeout: 20_000 });
 
   const start = await waitFor('t3 thread start', () => t3.starts()[0]);
-  expect(start.cwd).toBe(world.shop);
-  expect(start.base).toBe('main');
+  expect(start).toMatchObject({ cwd: world.shop, base: null, provider: 'claudeAgent', model: 'opus' });
   const starts = t3.calls().filter((args) => args[0] === 'thread' && args[1] === 'start');
   expect(starts).toHaveLength(1);
-  expect(starts[0]!.slice(0, 5)).toEqual(['thread', 'start', '.', '-', '--worktree=main']);
-  expect(starts[0]![5]!.startsWith('--title=')).toBe(true);
-  expect(starts[0]!.at(-1)).toBe('--json');
-  // Default passes no agent or model.
-  expect(starts[0]!.some((arg) => arg.startsWith('--provider') || arg.startsWith('--model'))).toBe(false);
-  // The T3 wake never took the launch's placeholder for a thread.
+  expect(starts[0]!.slice(0, 4)).toEqual(['thread', 'start', '.', '-']);
+  expect(starts[0]!.slice(5)).toEqual(['--provider=claudeAgent', '--model=opus', '--json']);
+  // T3 knew the model: no token was asked for.
+  expect(t3.issued()).toEqual([]);
+  // The T3 wake never took the launch's placeholder for a thread; the message went in on stdin.
   expect(t3.calls().filter((args) => args.some((arg) => arg.startsWith('launch:')))).toEqual([]);
-  // The message went in on stdin, never on the command line.
   expect(start.text).toContain('Tighten the checkout copy.');
   expect(t3.calls().flat().join(' ')).not.toContain('Tighten');
 
@@ -201,24 +213,18 @@ test('the journey: T3 Code in the repository only, one `t3 thread start` in a ne
   expect(world.errors).toEqual([]);
 });
 
-test("T3 Code not running: the line says so in plain words, with no path, and keeps the message; Try again starts it", async () => {
+test("T3 Code not running: the agent starts in the background, and its line says why", async () => {
   test.setTimeout(120_000);
   const { page, t3 } = world;
   t3.setState('down');
   try {
     const before = t3.starts().length;
-    await launch(page, 'Rename the cart module.');
-    const p = pane(page);
-    const line = p.locator('[data-run="failed"]');
-    await expect(line).toContainText("T3 Code didn't start.", { timeout: 30_000 });
-    await expect(line).toContainText("T3 Code isn't open on this computer. Open it, then try again.");
-    await expect(line).not.toContainText('/');
-    await expect(line).toContainText('Your message is kept.');
+    const { threadId } = await launch(page, 'Rename the cart module.');
+    await expect
+      .poll(async () => (await readThread(page, threadId)).thread.messages[0]?.launch?.t3, { timeout: 30_000 })
+      .toEqual({ unavailable: true });
+    await expect(pane(page).locator('[data-run-t3-away]')).toHaveText(INBOX_T3_NOT_HERE, { timeout: 30_000 });
     expect(t3.starts()).toHaveLength(before);
-    t3.setState('up');
-    await line.locator('[data-run-retry]').click();
-    await waitFor('the thread started', () => t3.starts().length === before + 1, 30_000);
-    await expect(p.locator('[data-run="failed"]')).toHaveCount(0, { timeout: 20_000 });
   } finally {
     t3.setState('up');
   }

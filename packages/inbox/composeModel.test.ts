@@ -241,11 +241,4 @@ describe("launch: a start's status line (UX screen 13)", () => {
     expect(startStatusLine(start)).toBe('');
     expect(startStatusLine({ ...start, project: launch.projects[2]! })).not.toBe('');
   });
-
-  test('T3 Code (#3590) says it starts new work in a worktree, from the branch the project is on', () => {
-    const t3 = { agent: 't3' as const, name: 'T3 Code', project: launch.projects[1]!, worktree: true as const };
-    expect(startStatusLine(t3)).toBe('T3 Code starts in a new worktree, from the branch plannotator is on now.');
-    // A folder that is gone still says so first.
-    expect(startStatusLine({ ...t3, project: launch.projects[2]! })).toBe('Pick a folder to start in.');
-  });
 });

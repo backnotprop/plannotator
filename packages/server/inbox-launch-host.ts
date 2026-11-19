@@ -10,15 +10,16 @@
  *   inbox-launch-codex.ts              Codex (`codex app-server`, one process per thread, owned by the Inbox)
  *   inbox-launch-codex-permission.ts   Codex's approval requests on the permission card
  *   inbox-launch-opencode.ts           OpenCode 2 (`opencode2 serve`, one per session, owned by the Inbox)
- *   inbox-launch-t3.ts                 T3 Code (`t3 thread start`, a thread T3 owns, in a new worktree)
+ *   inbox-launch-t3.ts                 Any of them started in T3 Code instead (`t3 thread start`, a thread T3 owns)
  *
- * The engine holds `{ "claude-code": claude, pi, codex, opencode, t3 }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, pi, codex, opencode }`, and T3 Code's apart: it is no agent of
+ * its own, it runs a launch that asked for T3 Code ("Start new agents in"). Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
 
 import { join } from "node:path";
-import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchInner, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
+import type { INBOX_T3_HOST, InboxLaunchAgent, InboxLaunchError, InboxLaunchInner, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
@@ -142,6 +143,12 @@ export function writeLaunchNote(
 /** Why a start or a restart did not take, in words for the run line. */
 export type LaunchStartFailure = { code: InboxLaunchError["code"]; text: string };
 
+/**
+ * Why a start in T3 Code made nothing, so the agent starts in the background instead: `absent`, T3 Code isn't open on
+ * this computer (or its `t3` is not here); `refused`, T3 said no (no model for that agent, a refused start).
+ */
+export type LaunchStartAway = "absent" | "refused";
+
 /** What trusting a folder turns on, read from its files now. */
 export interface LaunchTrustReading {
   /** The run line's one plain line on what would run once trusted, or null when there is nothing to say. */
@@ -206,8 +213,6 @@ export interface LaunchHostContext {
   displayFolder: (path: string) => string;
   /** The mod's bridge poll (createInboxLaunch's `live`), for a host whose sessions connect through the mod. */
   bridge: { runStateOf(session: string): LaunchLive | null };
-  /** This computer's name as linked machines know it; null when it has none. Words every window shows name it. */
-  machineName?: () => string | null;
   /**
    * Whether an agent session is already this Inbox's: another launch started it, an agent wrote as it, or a person's
    * message went to it. A host that picks up a session a cut-short start may have made (T3 Code) never takes one of those.
@@ -254,8 +259,8 @@ export interface LaunchHostPermissions {
 }
 
 export interface LaunchHost {
-  /** `record.agent`, the root's `to.host`, its permission questions' author. */
-  readonly agent: InboxLaunchAgent;
+  /** `record.agent`, the root's `to.host`, its permission questions' author. T3 Code's (`t3`) is only ever a session's host. */
+  readonly agent: InboxLaunchAgent | typeof INBOX_T3_HOST;
   /** "Claude Code": To's row, a refusal, the questions' author. */
   readonly name: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
@@ -270,13 +275,7 @@ export interface LaunchHost {
    * scopes); not cached. None: the machine's own setup.
    */
   available(folders?: readonly string[]): Promise<LaunchAvailability>;
-  /**
-   * The model and effort lists To's menu offers. `folders`: the folders it would start in (T3 Code lists the models
-   * its threads there used when it can't read its full list); other hosts ignore them.
-   */
-  choices?(folders?: readonly string[]): Promise<Omit<InboxLaunchChoices, "last"> | null>;
-  /** Only an agent host that runs other agents (T3 Code): what the session runs, read after the start; null when it can't say. */
-  innerOf?(ref: string): Promise<InboxLaunchInner | null>;
+  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
@@ -286,19 +285,12 @@ export interface LaunchHost {
   /** The launch's folder is the file-system root, or its trust would land on a repository rooted at home: accepting the agent's own prompt there would trust all of home (or `/`), so the how-to steers away from it. */
   trustCoversHome?(target: LaunchTrustTarget): boolean;
   /**
-   * Only an agent that cannot make a session without its first message (T3 Code's `t3 thread start`): `start` gets
+   * Only a host that cannot make a session without its first message (T3 Code's `t3 thread start`): `start` gets
    * the wake text of the launched message (`firstTurn`, what the agent's own wake would send it) and puts it in as
    * the session's first turn. On success the engine records the root as delivered to the session in the same step
    * that moves it there, so no wake sends it again.
    */
   readonly startsWithTurn?: boolean;
-  /**
-   * Only an agent that starts in some folders alone (T3 Code: a git repository, in a new worktree): why it can't
-   * start in `folder`, in words for the person, or null when it can. `folder` null: a folder still to be made (a
-   * scratch folder, Create a folder, a clone). Cheap and synchronous: the launch block asks it for every project.
-   * No member: any folder.
-   */
-  startsIn?(folder: string | null): string | null;
   /**
    * Only a host whose start can't be picked up again once the Inbox stops mid-start (T3 Code): the run line's cause
    * for a launch with no session and no error that no start runs for now. Its Try again starts it again (`start`
@@ -318,17 +310,13 @@ export interface LaunchHost {
    */
   turnEnded?(ref: string): Promise<boolean | null>;
   /**
-   * The last model picked is kept only while the host's lists still hold it (T3 Code: a model T3 no longer lists
-   * would be refused). No member: kept, as a full name typed through the API is.
-   */
-  readonly lastMustBeListed?: boolean;
-  /** Every session it starts works in a new git worktree its own app makes (the launch block's `worktree`). */
-  readonly worktree?: boolean;
-  /**
    * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
    * session (`settleLaunch`) and its own channel delivers it (but see `startsWithTurn`). It writes its own start.log entries.
    */
-  start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; firstTurn?: string }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  start(
+    launch: InboxLaunchRecord,
+    input: { name: string; login: LaunchEnv; firstTurn?: string },
+  ): Promise<{ ok: true; session: string; ref: string; inner?: InboxLaunchInner } | ({ ok: false; away?: LaunchStartAway } & LaunchStartFailure)>;
   /**
    * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
    * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself

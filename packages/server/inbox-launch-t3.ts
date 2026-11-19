@@ -1,133 +1,73 @@
 /**
- * T3 Code's launch host (issue #3590): New message → To → T3 Code and a project, and the Inbox starts a new T3
- * thread there, always in a new git worktree, with the person's message as its first turn. The thread is T3's from
- * then on: its permission prompts wait in T3's own app, and the person's replies go in through the T3 wake that
- * exists already (`t3 thread send`, inbox-t3-local.ts).
- *
- * T3 runs other agents (Claude Code, Codex, …): each thread runs one provider instance's model. To's model button
- * offers them (`choices`), Default first: Default passes no flag, so T3 uses the project's own default model. The
- * lists, in this order:
- *
- *  1. a signed-in T3 (`plannotator t3 login`, the grant the T3 wake uses) whose endpoint is the T3 running here:
- *     T3's `orchestrator_capabilities` (its short list of models per provider, each model's `effort` option);
- *  2. otherwise the agent and model pairs T3 threads in the projects To offers already used (`t3 thread list
- *     --json`), with no effort (T3's list doesn't say which options a model takes);
- *  3. neither: no button.
- *
- * After the start, `t3 thread show <thread> --messages 0 --json` says which agent and model the thread runs, Default
- * included (`innerOf`): the thread's meta line and the agent row name it ("T3 Code (Claude Code · opus)").
+ * Start an agent in T3 Code (issue #3590): Settings → Agents' "Start new agents in" T3 Code, as Rex is. The person
+ * picks Claude Code (or Codex, OpenCode, Pi) in New message as always; the Inbox starts it as a new thread of T3 Code
+ * on that agent, with the person's message as its first turn. The thread is T3's from then on: its permission prompts
+ * wait in T3's own app, it has no Stop from here, and the person's replies go in through the T3 wake that exists
+ * already (`t3 thread send`, inbox-t3-local.ts). This is not a host To offers: the engine runs it for a launch that
+ * asked for T3 Code (`InboxLaunchRecord.t3`), and when T3 Code isn't open or says no, the agent's own host starts it in
+ * the background instead and the run line says why.
  *
  * The one start command, T3's documented host command for outside scripts (T3's docs/user/outside-agents.md, "Scripts
  * on the host"; the flags as T3's own `apps/server/src/cli/thread.ts` declares them):
  *
- *   t3 thread start . - --worktree=<base branch> --title=<thread name> [--provider=<instance> --model=<slug>
- *     [--option=effort=<level>]] --json
+ *   t3 thread start . - --title=<thread name> --provider=<instance> --model=<slug> --json
  *
- * run in the project's folder (`.` is the T3 project that holds it, or a git worktree of its repository), the
- * message on stdin (`-`), so no shell and no process list ever sees it. Each value goes after "=", so a thread name
- * that starts with "-" is never read as a flag (T3's CLI is Effect's: its lexer takes a `--name=value` token's value as
- * it is, and a lone `-` as a value). Its env is the T3 wake's (`t3ChildEnv`), with the person's login PATH. `--json`
- * prints `{ threadId, projectId, runId }` (T3's `ThreadLaunchResult`).
+ * run in the project's folder (`.` is the T3 project that holds it), the message on stdin (`-`), so no shell and no
+ * process list ever sees it. No `--worktree`: T3 starts the thread where its own New thread would (its project's
+ * setting). Each value goes after "=", so a thread name that starts with "-" is never read as a flag. Its env is the
+ * T3 wake's (`t3ChildEnv`), with the person's login PATH. `--json` prints `{ threadId, projectId, runId }`.
  *
- * - The base branch is the branch the project's folder has checked out now (read from its `.git`, no git run), or
- *   `HEAD` when it is detached. A repository whose top is the home folder or above it (a dotfiles repository) is not
- *   a project's: such a folder is refused.
- * - T3 picks the new worktree's branch and folder: a temporary `t3/<8 hex>` branch, renamed in the background by
- *   T3's own branch naming settings, in T3's worktrees folder.
- * - T3 must be running, and the folder must be in a project T3 knows. The Inbox makes both true by itself
- *   (inbox-launch-t3-ready.ts): T3 Code closed, it opens T3's macOS app in the background and waits for its server; a
- *   folder T3 doesn't know, it adds with `t3 project add <folder>`; then it starts again. Only when it can't (no app to
- *   open, T3 refusing to add the folder) does the run line say why in plain words, with Try again.
- * - `t3 thread start` takes no request id, so a start cut short (no answer in 30 s, an Inbox closed mid-start) may
- *   have made the thread. Each start first notes the threads of that title the project has, and then how it ended
- *   (`t3-start.json` in the launch's folder). Only after an uncertain end does a later start of the same launch take a
- *   thread of that title made since, and never one another launch or agent of this Inbox has (`t3AdoptableOf`).
- * - The run line's "not connected" (`connectWaitMs`) shows only once `t3 thread show` says the thread's run is over
- *   (`turnEnded`), so a long first turn is never called not connected; the Inbox can't start the thread again, so it
- *   offers no Try again there.
- * - No Stop, attach or terminal: T3 has no host command for them. Delete forgets the launch here; the thread stays in T3.
+ * The model. T3 needs one for a project with no default (a folder it has just added: "Pass modelSelection: the project
+ * has no default model."), and `--provider` goes only with `--model`. In this order, asking nothing of the person:
  *
- * The first turn is what the T3 wake would send the thread (the engine's `firstTurn`, inbox.ts), and the engine
- * records the root as delivered in the same write that moves it to the new thread (`startsWithTurn`). Not on Windows,
- * where the T3 wake does not run `t3` either.
+ *  1. T3 already ran this agent in the project: the model of its newest thread on that agent (`t3 thread list --json`,
+ *     which T3's own CLI answers with a short-lived session of its own).
+ *  2. Otherwise T3's own first model for that agent, from `orchestrator_capabilities`, which T3 lists only to a client
+ *     holding a token. The Inbox asks the person's own T3 for one (`t3AskModels`): a read-only MCP client session that
+ *     lives a minute (`t3 auth session issue --scope=orchestration:read --subject=mcp-client --ttl=1m --json`), held
+ *     in memory for that one call to the T3 on this computer's loopback address, then revoked (`t3 auth session
+ *     revoke`). It is never written to disk, logged, or sent anywhere else.
+ *  3. Neither: T3 can't run it, so it starts in the background.
+ *
+ * A folder T3 doesn't know is added as a T3 project first (`t3 project add`, inbox-launch-t3-ready.ts).
+ *
+ * `t3 thread start` takes no request id, so a start cut short (no answer in 30 s, an Inbox closed mid-start) may have
+ * made the thread: the line says so with Try again, which takes that thread rather than make a second. Each start
+ * notes the threads of that title the project has, and then how it ended (`t3-start.json` in the launch's folder);
+ * only after an uncertain end does a later start take a thread of that title made since, and never one another launch
+ * or agent of this Inbox has (`t3AdoptableOf`).
+ *
+ * The run line's "not connected" (`connectWaitMs`) shows only once `t3 thread show` says the thread's run is over
+ * (`turnEnded`), so a long first turn is never called not connected. Not on Windows, where the T3 wake does not run
+ * `t3` either.
  */
 
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { parseT3Capabilities, t3AgentName, t3LaunchChoiceArgs, t3ModelOf, t3ThreadRunsOf, t3UsedModels, type InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { INBOX_T3_DRIVERS, t3AgentName, t3ListedModelOf, t3NewestModelOf, type T3ModelPick } from "@plannotator/core/inbox-launch-choice";
 import { INBOX_T3_HOST, INBOX_T3_NAME, isT3ThreadId, type InboxLaunchInner, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { agentHomeAllowed, type AgentEnvironment } from "./inbox-agents";
 import { shellQuote } from "./inbox-launch-claude";
 import type { LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchLive } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchLive, LaunchStartAway } from "./inbox-launch-host";
 import { INBOX_T3_SEND_TIMEOUT_MS, t3ChildEnv, t3CommandOf, t3HomeOf, t3ServerOf } from "./inbox-t3-local";
-import { connectT3, savedT3Grants } from "./inbox-t3-wake";
-import { openT3App, T3_NO_DEFAULT_MODEL, T3_NO_PROJECT, T3_NOT_RUNNING, T3_OPEN_WAIT_MS, t3LastLine, t3ProjectAdded, t3RemedyOf, waitUntil } from "./inbox-launch-t3-ready";
+import { connectT3 } from "./inbox-t3-wake";
+import { T3_NO_PROJECT, T3_NOT_RUNNING, t3LastLine, t3ProjectAdded } from "./inbox-launch-t3-ready";
 
-/** What the person reads when T3 Code is not open on this computer (never T3's path or "server"). */
-export const T3_LAUNCH_NOT_OPEN = "T3 Code isn't open on this computer. Open it, then try again.";
-/** The same, for a launch another linked machine sent here: named as linked machines know this one, so that window reads which computer. */
-export const t3NotOpenWords = (machine: string | null | undefined): string => (machine ? `T3 Code isn't open on ${machine}. Open it there, then try again.` : T3_LAUNCH_NOT_OPEN);
-/** What the person reads when T3 needs a model for the project and the Inbox has none to offer (no sign-in, no thread used one). */
-export const T3_LAUNCH_NO_MODEL = "T3 Code has no default model for this project. Pick one with the model button in New message, or start one thread there in T3 Code, then try again.";
 /** The run line's cause for a start the Inbox closed during: its Try again takes a thread that start made. */
 export const T3_LAUNCH_INTERRUPTED = "The Inbox closed while T3 Code was starting. Try again: if T3 Code made the thread, the Inbox picks it up.";
 /** How long after the start the run line waits for the thread's agent to reach the Inbox before it says it isn't connected. */
 export const T3_CONNECT_WAIT_MS = 10 * 60_000;
-/** The most of T3's own words a failed start's line quotes. */
-const CAUSE_MAX = 300;
-/** A `t3 thread list` or `show` call may take this long. */
+/** A `t3 thread list`, `show`, `project add` or `auth session` call may take this long. */
 const T3_READ_TIMEOUT_MS = 10_000;
-/** How long a read of the model lists is believed (a new sign-in, a new model, a thread on a new agent show after it). */
-const LISTS_TTL_MS = 60_000;
-/** T3's MCP call for the lists may take this long. */
+/** T3's MCP connect and its `orchestrator_capabilities` answer share this limit. */
 const CAPABILITIES_TIMEOUT_MS = 5_000;
+/** How long the read-only token T3 issues for the model list lives (it is revoked as soon as the list is read). */
+export const T3_TOKEN_TTL = "1m";
+/** The client name the person's T3 shows for that token's session while it lives (Settings → Connections in T3). */
+export const T3_TOKEN_LABEL = "Plannotator Inbox";
 
 export const T3_LAUNCH_MISSING = "T3 Code's t3 command is not on this computer";
-/** Why a new folder (scratch, Create a folder, a clone) is refused: T3 starts only in a repository it knows. */
-export const T3_LAUNCH_NEW_FOLDER = "T3 Code starts only in a project's git repository, in a new worktree.";
-
-/** The git repository a folder is in: its top folder and its git dir (a linked worktree's `.git` file followed). Null outside one. */
-export function gitRepoOf(folder: string): { top: string; gitDir: string } | null {
-  let dir = resolve(folder);
-  for (;;) {
-    const dotGit = join(dir, ".git");
-    try {
-      const stat = statSync(dotGit);
-      if (stat.isDirectory()) return { top: dir, gitDir: dotGit };
-      if (stat.isFile()) {
-        const said = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf8"))?.[1];
-        if (said) return { top: dir, gitDir: isAbsolute(said) ? said : resolve(dir, said) };
-      }
-    } catch {
-      // Not here: one folder up.
-    }
-    const up = dirname(dir);
-    if (up === dir) return null;
-    dir = up;
-  }
-}
-
-/** A repository whose top is `home` or a folder above it (a dotfiles repository): never a project's own. */
-export function coversHome(top: string, home: string): boolean {
-  const rel = relative(resolve(top), resolve(home));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-/** The worktree's base: the branch the folder has checked out (`.git/HEAD`), `HEAD` when detached; null outside a repository. */
-export function t3BaseOf(folder: string): string | null {
-  const repo = gitRepoOf(folder);
-  if (!repo) return null;
-  let head = "";
-  try {
-    head = readFileSync(join(repo.gitDir, "HEAD"), "utf8").trim();
-  } catch {
-    return "HEAD";
-  }
-  const branch = /^ref:\s*refs\/heads\/(.+)$/.exec(head)?.[1]?.trim();
-  // A name git would take as an option is never passed (git refuses to make one).
-  return branch && !branch.startsWith("-") ? branch : "HEAD";
-}
 
 /** The thread T3 started, from `--json`'s line (`{ threadId, projectId, runId }`); null when none is there. */
 export function t3StartedThreadOf(stdout: string): string | null {
@@ -217,30 +157,6 @@ export function t3AdoptableOf(attempt: T3StartAttempt | null, title: string, lis
   return made?.threadId ?? null;
 }
 
-/** Each absolute path in T3's words cut to its last name (`/Users/me/code/shop` → `shop`): the person never reads a path. */
-export function t3WithoutPaths(text: string): string {
-  return text.replace(/(^|[\s('"`=,])(~?\/[^\s'"`()<>,]*|[A-Za-z]:\\[^\s'"`()<>,]*)/g, (_all, lead: string, path: string) => {
-    const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? "";
-    return `${lead}${name.replace(/[.,;:]+$/, "") || "a folder"}${/[.,;:]$/.test(path) ? path.slice(-1) : ""}`;
-  });
-}
-
-/**
- * Why a start failed, as the run line says it after "T3 Code didn't start.": the host's own plain sentence for what
- * it recognises (T3 not open, a folder T3 doesn't know), else T3's last line, one line, 300 characters at most, with
- * no path in it. `machine`: this computer's name for linked machines, when it has one.
- */
-export function t3StartCause(text: string, project: string, machine?: string | null): string {
-  const last = t3LastLine(text);
-  if (T3_NO_PROJECT.test(last)) return `${project} isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.`;
-  if (T3_NOT_RUNNING.test(last)) return t3NotOpenWords(machine);
-  if (T3_NO_DEFAULT_MODEL.test(last)) return T3_LAUNCH_NO_MODEL;
-  const plain = t3WithoutPaths(last);
-  const said = plain.length > CAUSE_MAX ? `${plain.slice(0, CAUSE_MAX - 1).trimEnd()}…` : plain;
-  if (!said) return "T3 Code did not say why.";
-  return /[.!?…]$/.test(said) ? said : `${said}.`;
-}
-
 /**
  * The `t3` to run, or null. A test run (PLANNOTATOR_TEST_SANDBOX) takes only one in its scratch home's temp folder,
  * never a `t3` on the person's PATH, so no test can start a thread in their real T3 Code.
@@ -251,28 +167,40 @@ export function t3For(e: AgentEnvironment): string | null {
   return agentHomeAllowed({ homeDir: command, env: e.env }) ? command : null;
 }
 
-/** The run line's cause for a `t3 thread start` that gave no thread: it timed out, said nothing usable, or refused. */
-export function t3StartFailure(result: { timedOut?: boolean; exitCode: number | null; stdout: string; stderr: string }, project: string, machine?: string | null, timeoutMs = INBOX_T3_SEND_TIMEOUT_MS): string {
+/** The run line's cause for a `t3 thread start` that may have made its thread without saying so: Try again takes it. */
+export function t3StartUncertain(result: { timedOut?: boolean }, timeoutMs = INBOX_T3_SEND_TIMEOUT_MS): string {
   if (result.timedOut) return `T3 Code didn't answer within ${Math.round(timeoutMs / 1000)} seconds. Try again: if it made the thread, the Inbox picks it up.`;
-  if (result.exitCode === 0) return "T3 Code started a thread but didn't say which. Try again: the Inbox picks it up.";
-  return t3StartCause(`${result.stdout}\n${result.stderr}`, project, machine);
+  return "T3 Code started a thread but didn't say which. Try again: the Inbox picks it up.";
 }
 
-/** The address T3's runtime file names for its server here (`server-runtime.json`'s `origin`, `port`), while it runs. */
-function t3ServerAddressOf(t3Home: string): { origin: string; port: number } | null {
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/**
+ * T3's server on this computer, from the runtime file it writes while it runs (`server-runtime.json`'s `origin`), and
+ * only on a loopback address: the token for the model list is never sent anywhere else.
+ */
+export function t3LocalOrigin(t3Home: string): URL | null {
   if (!t3ServerOf(t3Home)) return null;
   try {
-    const state = JSON.parse(readFileSync(join(t3Home, "userdata", "server-runtime.json"), "utf8")) as { origin?: unknown; port?: unknown };
-    if (typeof state.port !== "number" || typeof state.origin !== "string") return null;
-    return { origin: new URL(state.origin).origin, port: state.port };
+    const state = JSON.parse(readFileSync(join(t3Home, "userdata", "server-runtime.json"), "utf8")) as { origin?: unknown };
+    if (typeof state.origin !== "string") return null;
+    const origin = new URL(state.origin);
+    return origin.protocol === "http:" && LOOPBACK.has(origin.hostname) ? new URL(origin.origin) : null;
   } catch {
     return null;
   }
 }
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
-
-type Lists = Omit<InboxLaunchChoices, "last">;
+/** `issue --json`'s answer (T3's `formatIssuedSession`, pretty-printed): the session and its bearer token; null otherwise. */
+export function t3IssuedSessionOf(stdout: string): { sessionId: string; token: string } | null {
+  try {
+    const said = JSON.parse(stdout.trim()) as { sessionId?: unknown; token?: unknown } | null;
+    if (typeof said?.sessionId !== "string" || !/^[\w.:-]{1,200}$/.test(said.sessionId) || typeof said.token !== "string" || !said.token) return null;
+    return { sessionId: said.sessionId, token: said.token };
+  } catch {
+    return null;
+  }
+}
 
 /** `work` within `ms`, else a rejection; what it gives after that goes to `late` (a connection to close). */
 function withinMs<T>(work: Promise<T>, ms: number, late: (value: T) => void): Promise<T> {
@@ -299,49 +227,16 @@ function withinMs<T>(work: Promise<T>, ms: number, late: (value: T) => void): Pr
   });
 }
 
-/** A read kept for `ttl`: while a new read runs, the older answer is given at once, so To never waits on T3 twice. */
-function keptRead<T>(ttl: number, now: () => number) {
-  const kept = new Map<string, { at: number; value: T | null; reading: Promise<T | null> | null }>();
-  return (key: string, load: () => Promise<T | null>): Promise<T | null> => {
-    let entry = kept.get(key);
-    if (entry && now() - entry.at < ttl) return Promise.resolve(entry.value);
-    if (!entry) {
-      entry = { at: Number.NEGATIVE_INFINITY, value: null, reading: null };
-      kept.set(key, entry);
-    }
-    const held = entry;
-    held.reading ??= load()
-      .catch(() => null)
-      .then((value) => {
-        held.value = value;
-        held.at = now();
-        held.reading = null;
-        return value;
-      });
-    return held.value !== null ? Promise.resolve(held.value) : held.reading;
-  };
-}
+/** A command and its arguments as start.log shows it: quoted where a shell would need it. Never given a token. */
+const shown = (argv: readonly string[]) => ["t3", ...argv].map((arg) => (/^[\w./:@=-]+$/.test(arg) ? arg : shellQuote(arg))).join(" ");
 
-/**
- * `startTimeoutMs`: how long `t3 thread start` may take (30 s; a test makes it short). `openApp`: opens T3 Code when
- * it isn't running (default `openT3App`: its macOS app, in the background; a test stands in). `openWaitMs`: how long
- * after that a start waits for T3's server.
- */
-export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () => number; startTimeoutMs?: number; openApp?: (e: AgentEnvironment) => Promise<boolean>; openWaitMs?: number } = {}) {
-  const now = options.now ?? Date.now;
+/** `startTimeoutMs`: how long `t3 thread start` may take (30 s; a test makes it short). */
+export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeoutMs?: number } = {}) {
   const startTimeoutMs = options.startTimeoutMs ?? INBOX_T3_SEND_TIMEOUT_MS;
-  const openApp = options.openApp ?? openT3App;
-  const openWaitMs = options.openWaitMs ?? T3_OPEN_WAIT_MS;
   const nothing = (text: string): LaunchHostResult => ({ exitCode: 0, text });
-  /** Each provider instance's agent in words, as a signed-in T3 last named it. */
-  const agentNames = new Map<string, string>();
-  const agentOf = (instance: string) => agentNames.get(instance) ?? t3AgentName(instance);
-  const capabilities = keptRead<Lists>(LISTS_TTL_MS, now);
-  /** The folders To offered T3 Code in, newest first (12 at most): where a start with no model looks for one the person's T3 threads used. */
-  let offeredFolders: readonly string[] = [];
-  const used = keptRead<string>(LISTS_TTL_MS, now);
 
-  const command = async (): Promise<{ e: AgentEnvironment; t3: string } | null> => {
+  type Found = { e: AgentEnvironment; t3: string };
+  const command = async (): Promise<Found | null> => {
     if (ctx.platform === "win32") return null;
     const e = await ctx.environment();
     const t3 = t3For(e);
@@ -349,52 +244,49 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
   };
 
   /** A `t3` call in `cwd`, with the T3 wake's env (no stdin). */
-  const runT3 = (found: { e: AgentEnvironment; t3: string }, args: string[], cwd?: string) =>
-    found.e.run([found.t3, ...args], { timeoutMs: T3_READ_TIMEOUT_MS, ...(cwd ? { cwd } : {}), env: t3ChildEnv(found.e), cleanEnv: true });
+  const runT3 = (found: Found, args: string[], cwd?: string) => found.e.run([found.t3, ...args], { timeoutMs: T3_READ_TIMEOUT_MS, ...(cwd ? { cwd } : {}), env: t3ChildEnv(found.e), cleanEnv: true });
 
-  /** 1. A signed-in T3: the grant whose endpoint is the T3 server running here. */
-  const signedInLists = async (e: AgentEnvironment): Promise<Lists | null> => {
-    const address = t3ServerAddressOf(t3HomeOf(e));
-    if (!address) return null;
-    const grant = (await savedT3Grants(ctx.dataDir)).find((g) => g.endpoint.origin === address.origin || (LOOPBACK.has(g.endpoint.hostname) && Number(g.endpoint.port) === address.port));
-    if (!grant) return null;
-    return capabilities(`${grant.endpoint.href} ${grant.token() ?? ""}`, async () => {
-      // The connect and the call share one limit: a T3 that never answers can't hold the lists (and the button) forever.
+  /**
+   * T3's first model for this agent, from `orchestrator_capabilities`, under a token the person's own T3 issues for
+   * this one read: read-only (`orchestration:read`, as T3's own `mcpClientScopes("read-only")`), an MCP client's
+   * (`mcp-client`, the only subject T3's `/mcp` takes), living a minute. The token is held in this function's memory
+   * only: never on a command line, in start.log or the debug log, on disk, or sent anywhere but T3's own loopback
+   * `/mcp`. Revoked once the list is read, whatever it said. Null when T3 issued none or listed nothing for the agent.
+   */
+  const t3AskModels = async (found: Found, launchId: string, driver: string): Promise<T3ModelPick | null> => {
+    const origin = t3LocalOrigin(t3HomeOf(found.e));
+    if (!origin) return null;
+    const issueArgs = ["auth", "session", "issue", "--scope=orchestration:read", "--subject=mcp-client", `--ttl=${T3_TOKEN_TTL}`, `--label=${T3_TOKEN_LABEL}`, "--json"];
+    const issued = await runT3(found, issueArgs);
+    // Only the command and how it ended: what it printed holds the token.
+    ctx.startLog(launchId, `${shown(issueArgs)} (a read-only token for one read of T3 Code's models; never kept)\nexit ${issued.timedOut ? "timed out" : issued.exitCode}${issued.exitCode === 0 ? "" : `\n${t3LastLine(issued.stderr).slice(0, 300)}`}`);
+    const session = !issued.timedOut && issued.exitCode === 0 ? t3IssuedSessionOf(issued.stdout) : null;
+    if (!session) return null;
+    let token: string | undefined = session.token;
+    let rpc: Awaited<ReturnType<typeof connectT3>> | null = null;
+    try {
       const deadline = Date.now() + CAPABILITIES_TIMEOUT_MS;
-      const rpc = await withinMs(connectT3(grant.endpoint, grant.token), CAPABILITIES_TIMEOUT_MS, (late) => void late.close?.().catch(() => {}));
-      try {
-        const signal = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
-        const answer = await rpc.call("orchestrator_capabilities", {}, signal);
-        for (const provider of ((answer as { providers?: unknown })?.providers ?? []) as { providerInstanceId?: unknown; driverKind?: unknown; displayName?: unknown }[]) {
-          if (typeof provider?.providerInstanceId !== "string") continue;
-          agentNames.set(provider.providerInstanceId, t3AgentName(provider.providerInstanceId, typeof provider.driverKind === "string" ? provider.driverKind : null, typeof provider.displayName === "string" ? provider.displayName : null));
-        }
-        return parseT3Capabilities(answer);
-      } finally {
-        await rpc.close?.().catch(() => {});
-      }
-    });
-  };
-
-  /** 2. No sign-in: what the projects' T3 threads used (`t3 thread list --json` in each folder). */
-  const usedLists = async (found: { e: AgentEnvironment; t3: string }, folders: readonly string[]): Promise<Lists | null> => {
-    const lists = await Promise.all(
-      folders.slice(0, 12).map((folder) =>
-        used(folder, async () => {
-          const result = await runT3(found, ["thread", "list", "--json"], folder);
-          return result.exitCode === 0 && !result.timedOut ? result.stdout : null;
-        }),
-      ),
-    );
-    return t3UsedModels(lists.filter((list): list is string => list !== null), agentOf);
-  };
-
-  /** The threads of `title` T3 has in the project of `folder` now; null when T3 didn't say. */
-  const threadsTitled = async (found: { e: AgentEnvironment; t3: string }, folder: string, title: string) => {
-    const result = await runT3(found, ["thread", "list", "--json"], folder);
-    if (result.exitCode !== 0 || result.timedOut) return null;
-    const listed = t3ListedThreadsOf(result.stdout);
-    return listed ? listed.filter((t) => t.title === title) : null;
+      rpc = await withinMs(
+        connectT3(new URL("/mcp", origin), () => token),
+        CAPABILITIES_TIMEOUT_MS,
+        (late) => void late.close?.().catch(() => {}),
+      );
+      const answer = await rpc.call("orchestrator_capabilities", {}, AbortSignal.timeout(Math.max(1, deadline - Date.now())));
+      const pick = t3ListedModelOf(answer, driver);
+      ctx.startLog(launchId, pick ? `T3 Code lists ${pick.provider} · ${pick.model} first for this agent` : "T3 Code lists no model for this agent");
+      return pick;
+    } catch (error) {
+      ctx.startLog(launchId, `T3 Code's model list wasn't read: ${error instanceof Error ? error.message.slice(0, 200) : "no answer"}`);
+      return null;
+    } finally {
+      token = undefined;
+      await rpc?.close?.().catch(() => {});
+      // Revoked at once, not left to its minute. Not waited on: the start goes on meanwhile.
+      const revokeArgs = ["auth", "session", "revoke", session.sessionId];
+      void runT3(found, revokeArgs)
+        .then((result) => ctx.startLog(launchId, `${shown(revokeArgs)}\nexit ${result.timedOut ? "timed out" : result.exitCode}`))
+        .catch(() => {});
+    }
   };
 
   /** What each start of a launch noted first (its title, the threads of that title the project had then, when) and how it ended. */
@@ -418,6 +310,8 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     }
   };
 
+  const away = (why: LaunchStartAway, text: string) => ({ ok: false as const, code: "failed" as const, text, away: why });
+
   return {
     agent: INBOX_T3_HOST,
     name: INBOX_T3_NAME,
@@ -425,11 +319,8 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     connector: "Inbox MCP server",
     shellNames: [],
     startsWithTurn: true,
-    worktree: true,
     interruptedStart: T3_LAUNCH_INTERRUPTED,
     connectWaitMs: T3_CONNECT_WAIT_MS,
-    // A model T3 no longer lists is refused there: never picked again by itself.
-    lastMustBeListed: true,
 
     async available(): Promise<LaunchAvailability> {
       // Not on Windows: `t3.cmd` goes through cmd.exe, which the T3 wake does not trust with a message either.
@@ -438,23 +329,10 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
       return { ok: true, version: "" };
     },
 
-    async choices(folders: readonly string[] = []): Promise<Lists | null> {
-      if (folders.length > 0) offeredFolders = [...new Set([...folders, ...offeredFolders])].slice(0, 12);
+    /** Settings → Agents: T3 Code is on this computer (`installed`, its `t3`), and open now (its server's runtime file). */
+    async here(): Promise<{ installed: boolean; open: boolean }> {
       const found = await command();
-      // T3 not open: no lists (a start would be refused anyway).
-      if (!found || !t3ServerOf(t3HomeOf(found.e))) return null;
-      const signed = await signedInLists(found.e).catch(() => null);
-      if (signed) return signed;
-      return folders.length > 0 ? usedLists(found, folders) : null;
-    },
-
-    async innerOf(ref: string): Promise<InboxLaunchInner | null> {
-      const found = await command();
-      if (!found || !isT3ThreadId(ref)) return null;
-      const result = await runT3(found, ["thread", "show", ref, "--messages=0", "--json"]);
-      if (result.exitCode !== 0 || result.timedOut) return null;
-      const runs = t3ThreadRunsOf(result.stdout);
-      return runs ? { ...runs, agent: agentOf(runs.provider) } : null;
+      return { installed: !!found, open: !!found && t3ServerOf(t3HomeOf(found.e)) !== null };
     },
 
     /** `t3 thread show`: whether the thread's run is over (T3's `status`, `activeRunId`, `pendingRequestCount`); null when T3 can't be asked. */
@@ -466,101 +344,79 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
       return t3TurnEndedOf(result.stdout);
     },
 
-    startsIn(folder: string | null): string | null {
-      if (folder === null) return T3_LAUNCH_NEW_FOLDER;
-      const repo = gitRepoOf(folder);
-      // A repository at home or above it (dotfiles) holds every folder under it: never a project's own.
-      if (repo && !coversHome(repo.top, ctx.homeDir)) return null;
-      return `${ctx.displayFolder(folder)} isn't a git repository. T3 Code starts its work in a new worktree of one.`;
-    },
-
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
     trusts: () => true,
 
+    /**
+     * Start `launch.agent` (Claude Code, Codex, OpenCode, Pi) as a T3 thread. `away`: it didn't start there and nothing
+     * was made, so the engine starts it in the background (`absent`: T3 Code isn't open here; `refused`: T3 said no,
+     * or has no model for that agent). A failure with no `away` may have made the thread (it timed out): its Try again
+     * takes that thread.
+     */
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; firstTurn?: string }) {
-      // This machine is named only for a launch another machine sent here (its window reads which computer); one
-      // started here reads "this computer", as the engine's own not-ready line does.
-      const machine = launch.from ? (ctx.machineName?.() ?? null) : null;
       const found = await command();
-      if (!found) return { ok: false as const, code: "missing" as const, text: `${T3_LAUNCH_MISSING}.` };
-      const project = basename(launch.folder);
-      const base = t3BaseOf(launch.folder);
-      if (!base) return { ok: false as const, code: "failed" as const, text: `${ctx.displayFolder(launch.folder)} isn't a git repository any more.` };
+      if (!found) return away("absent", `${T3_LAUNCH_MISSING}.`);
+      if (!t3ServerOf(t3HomeOf(found.e))) return away("absent", "T3 Code isn't open on this computer.");
+      const driver = INBOX_T3_DRIVERS[launch.agent];
+      if (!driver) return away("refused", `T3 Code doesn't run ${launch.agent}.`);
       const message = input.firstTurn ?? "";
       if (!message.trim()) return { ok: false as const, code: "failed" as const, text: "The message is empty." };
       const title = input.name.replace(/\s+/g, " ").trim();
+      const said = (result: { stdout: string; stderr: string }) => `${result.stdout}\n${result.stderr}`;
+
+      // The project's threads (T3's own CLI reads them under a session of its own): a folder T3 doesn't know is added first.
+      let list = await runT3(found, ["thread", "list", "--json"], launch.folder);
+      if (list.exitCode !== 0 && T3_NOT_RUNNING.test(t3LastLine(said(list)))) return away("absent", "T3 Code isn't open on this computer.");
+      if (list.exitCode !== 0 && T3_NO_PROJECT.test(t3LastLine(said(list)))) {
+        const added = await runT3(found, ["project", "add", launch.folder], launch.folder);
+        ctx.startLog(launch.id, `${shown(["project", "add", launch.folder])}\nexit ${added.timedOut ? "timed out" : added.exitCode}\n${said(added).trim().slice(-2000)}`);
+        if (!t3ProjectAdded(added)) return away("refused", "T3 Code didn't add the folder as a project.");
+        list = await runT3(found, ["thread", "list", "--json"], launch.folder);
+      }
+      const listed = list.exitCode === 0 && !list.timedOut ? t3ListedThreadsOf(list.stdout) : null;
+      const titled = listed ? listed.filter((t) => t.title === title) : null;
+
       // A start before this one that ended uncertain (cut by the timeout, an answer with no thread, an Inbox that
       // closed) may have made the thread: a new thread of its title made since then, that no launch or agent here
       // has, is that one, never a second. After a plain refusal nothing was made: a new start runs.
       const before = readAttempt(launch.id);
-      const listed = await threadsTitled(found, launch.folder, title);
-      const made = t3AdoptableOf(before, title, listed, (thread) => ctx.sessionKnown?.(thread) === true);
+      const made = t3AdoptableOf(before, title, titled, (thread) => ctx.sessionKnown?.(thread) === true);
       if (made) {
         writeAttempt(launch.id, { ...before!, outcome: "started" });
         ctx.startLog(launch.id, `T3 thread ${made}, made by an earlier start of this launch: taken, no second thread`);
         return { ok: true as const, session: made, ref: made };
       }
-      // A model a signed-in T3's capabilities don't list is refused before T3 is asked, in plain words. Only that list:
-      // never the "already used" one, which holds only what ran before.
-      const listedModels = launch.model ? await signedInLists(found.e).catch(() => null) : null;
-      if (launch.model && listedModels && !listedModels.models.includes(launch.model)) {
-        const words = t3ModelOf(launch.model) ? `${agentOf(t3ModelOf(launch.model)!.provider)} · ${t3ModelOf(launch.model)!.model}` : launch.model;
-        return { ok: false as const, code: "failed" as const, text: `T3 Code doesn't list ${words}. Send it again with another model.` };
-      }
-      const argvFor = (model: string | undefined) => [found.t3, "thread", "start", ".", "-", `--worktree=${base}`, ...(title ? [`--title=${title}`] : []), ...t3LaunchChoiceArgs({ model, effort: model === launch.model ? launch.effort : undefined }), "--json"];
-      let argv = argvFor(launch.model);
+
+      // The model: the one T3 last ran this agent on in this project, else T3's own first for it (asked under a token).
+      const pick = (list.exitCode === 0 ? t3NewestModelOf(list.stdout, driver) : null) ?? (await t3AskModels(found, launch.id, driver));
+      if (!pick) return away("refused", "T3 Code has no model for this agent.");
+      const inner: InboxLaunchInner = { provider: pick.provider, model: pick.model, agent: t3AgentName(pick.provider, driver) };
+
+      const argv = [found.t3, "thread", "start", ".", "-", ...(title ? [`--title=${title}`] : []), `--provider=${pick.provider}`, `--model=${pick.model}`, "--json"];
       const env = { ...t3ChildEnv(found.e), ...(input.login.PATH ? { PATH: input.login.PATH } : {}) };
       /** One `t3 thread start`, noted before and after (`t3-start.json`), with the command and T3's words in start.log. */
-      const attempt = async (titled: typeof listed) => {
+      const attempt = async (known: typeof titled) => {
         const startedAt = Date.now();
         // T3 didn't list the title's threads first: nothing would tell a thread this start made from an older one, so
         // none is ever taken for it ("unlisted").
-        writeAttempt(launch.id, { title, before: (titled ?? []).map((t) => t.threadId), at: startedAt, outcome: titled ? "running" : "unlisted" });
+        writeAttempt(launch.id, { title, before: (known ?? []).map((t) => t.threadId), at: startedAt, outcome: known ? "running" : "unlisted" });
         const result = await found.e.run(argv, { timeoutMs: startTimeoutMs, cwd: launch.folder, env, cleanEnv: true, stdin: message });
         // The message is never written down here: only the command and what T3 said.
-        ctx.startLog(launch.id, `${["t3", ...argv.slice(1)].map((arg) => (/^[\w./:@=-]+$/.test(arg) ? arg : shellQuote(arg))).join(" ")} (in ${launch.folder}, the message on stdin)\nexit ${result.timedOut ? "timed out" : result.exitCode}\n${`${result.stdout}\n${result.stderr}`.trim().slice(-2000)}`);
+        ctx.startLog(launch.id, `${shown(argv.slice(1))} (in ${launch.folder}, the message on stdin)\nexit ${result.timedOut ? "timed out" : result.exitCode}\n${said(result).trim().slice(-2000)}`);
         const thread = !result.timedOut && result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
         // How it ended decides whether a later Try again may take a thread it made: only when T3 didn't say.
-        writeAttempt(launch.id, { title, before: (titled ?? []).map((t) => t.threadId), at: startedAt, outcome: !titled ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
+        writeAttempt(launch.id, { title, before: (known ?? []).map((t) => t.threadId), at: startedAt, outcome: !known ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
         return { result, thread };
       };
-      let { result, thread } = await attempt(listed);
-      // T3 refused for a reason the Inbox can clear by itself: T3 Code not running (open its app, wait for its server)
-      // or a folder that is no project of T3's (add it). Each at most once; what can't be cleared keeps T3's refusal.
-      const done = new Set<"open" | "add" | "model">();
-      for (let need = thread ? null : t3RemedyOf(`${result.stdout}\n${result.stderr}`); need && !done.has(need); need = thread ? null : t3RemedyOf(`${result.stdout}\n${result.stderr}`)) {
-        done.add(need);
-        if (need === "open") {
-          const opened = await openApp(found.e).catch(() => false);
-          ctx.startLog(launch.id, opened ? "T3 Code wasn't running: opened it, waiting for it" : "T3 Code isn't running, and the Inbox couldn't open it");
-          if (!opened) break;
-          const deadline = Date.now() + openWaitMs;
-          if (!(await waitUntil(() => t3ServerOf(t3HomeOf(found.e)) !== null, deadline))) break;
-          ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
-          // Its server may take a moment more to answer after it says it runs.
-          while (!thread && t3RemedyOf(`${result.stdout}\n${result.stderr}`) === "open" && Date.now() < deadline) {
-            await Bun.sleep(2_000);
-            ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
-          }
-        } else if (need === "model") {
-          // Only when the person left it on Default: a model they picked is never swapped for another.
-          if (launch.model) break;
-          const lists = (await signedInLists(found.e).catch(() => null)) ?? (await usedLists(found, [launch.folder, ...offeredFolders.filter((f) => f !== launch.folder)]).catch(() => null));
-          const model = lists?.models[0];
-          ctx.startLog(launch.id, model ? `T3 Code has no default model for this project: starting on ${model}, the first To lists` : "T3 Code has no default model for this project, and no model is listed to start on");
-          if (!model) break;
-          argv = argvFor(model);
-          ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
-        } else {
-          const added = await runT3(found, ["project", "add", launch.folder], launch.folder);
-          ctx.startLog(launch.id, `t3 project add ${/^[\w./:@=-]+$/.test(launch.folder) ? launch.folder : shellQuote(launch.folder)}\nexit ${added.timedOut ? "timed out" : added.exitCode}\n${`${added.stdout}\n${added.stderr}`.trim().slice(-2000)}`);
-          if (!t3ProjectAdded(added)) break;
-          ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
-        }
+      const { result, thread } = await attempt(titled);
+      if (thread) {
+        ctx.startLog(launch.id, `T3 thread ${thread}, on ${inner.agent} · ${inner.model}`);
+        return { ok: true as const, session: thread, ref: thread, inner };
       }
-      if (!thread) return { ok: false as const, code: "failed" as const, text: t3StartFailure(result, project, machine, startTimeoutMs) };
-      ctx.startLog(launch.id, `T3 thread ${thread}, in a new worktree from ${base}`);
-      return { ok: true as const, session: thread, ref: thread };
+      // It may have made the thread: the line says so, and its Try again takes it. Never a second start beside it.
+      if (result.timedOut || result.exitCode === 0) return { ok: false as const, code: "failed" as const, text: t3StartUncertain(result, startTimeoutMs) };
+      if (T3_NOT_RUNNING.test(t3LastLine(said(result)))) return away("absent", "T3 Code isn't open on this computer.");
+      return away("refused", "T3 Code didn't start the thread.");
     },
 
     // T3 keeps the thread: there is nothing to list, stop or start again from here.
@@ -575,11 +431,11 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     },
     resume: async (): Promise<LaunchHostResult & { failure: null }> => ({ ...nothing("T3 Code keeps its threads: a reply goes in through the T3 wake"), failure: null }),
     stop: async (): Promise<LaunchHostResult> => nothing("T3 Code has no command to stop a thread from outside: it runs in T3 Code"),
-    remove: async (): Promise<LaunchHostResult> => nothing("T3 Code keeps its threads and their worktrees"),
+    remove: async (): Promise<LaunchHostResult> => nothing("T3 Code keeps its threads"),
     purge: async (): Promise<LaunchHostResult & { skipped?: string }> => ({ exitCode: 0, text: "", skipped: "T3 Code keeps its threads in its own state" }),
     attach: (): string | null => null,
     terminal: (launch: InboxLaunchRecord): string => `cd ${shellQuote(launch.folder)}`,
     // Its prompts wait in T3's own app.
     permissions: () => ({ sweep() {}, withdrawAll() {} }),
-  } satisfies LaunchHost;
+  } satisfies LaunchHost & { here(): Promise<{ installed: boolean; open: boolean }> };
 }

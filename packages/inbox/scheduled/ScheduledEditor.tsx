@@ -7,7 +7,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { usePhone } from '../phone';
-import { INBOX_HOST_NAMES, INBOX_LAUNCH_APP_OWNED } from '@plannotator/core/inbox-types';
+import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import type { InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
 import { Icon } from '../icons';
 import { Switch } from '../components/SoundRow';
@@ -95,9 +95,7 @@ export function ScheduledEditor(props: EditorProps) {
     };
   }, [id, version]);
   const record = detail?.scheduled.id === id && (!row || detail.scheduled.updated_at >= row.updated_at) ? detail.scheduled : row;
-  // The agent started last, unless its own app runs its threads (T3 Code: not offered for routines).
-  const lastAgent = props.defaults.agent && !(INBOX_LAUNCH_APP_OWNED as readonly string[]).includes(props.defaults.agent) ? props.defaults.agent : null;
-  const firstAgent = lastAgent ?? block?.launch?.agents.find((a) => !INBOX_LAUNCH_APP_OWNED.includes(a.agent))?.agent ?? 'claude-code';
+  const firstAgent = props.defaults.agent ?? block?.launch?.agents[0]?.agent ?? 'claude-code';
   // The preview's word on each schedule: one it refused, or has not answered, is not saved yet.
   const verdicts = useRef(new Map<string, boolean>());
   const firstSchedule = useRef<string | null>(null);

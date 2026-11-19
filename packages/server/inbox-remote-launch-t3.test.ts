@@ -1,19 +1,20 @@
 /**
- * Starting T3 Code on another linked machine (issue #3590), end to end on two real Inboxes linked both ways:
- * "MacBook" (A) and "Mini" (B), each `plannotator inbox --background` in its own scratch HOME and data dir, under the
- * test sandbox (as inbox-remote-launch.test.ts runs them). Each machine has only its own fake T3 Code
- * (tests/helpers/fake-t3.ts, its `t3` launcher in the sandbox's agent home); no real T3 is ever run. Every proof runs
- * both ways (A starts on B, and B on A): no machine is special.
+ * Starting an agent in T3 Code on another linked machine (issue #3590), end to end on two real Inboxes linked both
+ * ways: "MacBook" (A) and "Mini" (B), each `plannotator inbox --background` in its own scratch HOME and data dir, under
+ * the test sandbox (as inbox-remote-launch.test.ts runs them), each with "Start new agents in" T3 Code. Each machine
+ * has only its own T3 stand-in (tests/helpers/fake-t3.ts, its `t3` launcher in the sandbox's agent home) and its own
+ * fake `claude` (tests/helpers/fake-claude); no real T3 or agent is ever run. Every proof runs both ways.
  *
- *  1. A's window reads B's T3 Code with B's own models (the agents B's T3 threads used), and a pick starts T3 on B:
- *     B's `t3 thread start` runs in B's project with that agent and model, A's T3 runs nothing, and B's thread names
- *     what T3 runs it on.
- *  2. T3 Code closed on B: the line A's window reads names B.
+ *  1. A's window starts Claude Code on B: B's `t3 thread start` runs in B's project on the model B's T3 last ran
+ *     Claude Code on, A's T3 runs nothing, and B's thread names what T3 runs it on.
+ *  2. T3 Code closed on B: B starts the agent in the background, and the line A's window reads says why.
  *  3. Stop pressed in A's window for B's T3 thread: refused in words the window shows; nothing says "stopped".
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { INBOX_RUN_IN_T3_STOP } from "@plannotator/core/inbox-run-line";
+import { installFakeClaude, type FakeClaude } from "../../tests/helpers/fake-claude";
 import { makeFakeT3Home, type FakeT3Home } from "../../tests/helpers/fake-t3";
 import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../tests/helpers/inbox-world";
 
@@ -25,14 +26,16 @@ interface Machine {
   id: string;
   calls: string;
   t3: FakeT3Home;
+  fake: FakeClaude;
   project: { id: string; root: string };
 }
 
+const agentsHome = (m: Pick<Machine, "w">) => join(m.w.dataDir, "agents-home");
 const env = (m: Pick<Machine, "w" | "name">) => ({
   ...(process.env as Record<string, string>),
   ...worldEnv(m.w),
   PLANNOTATOR_TEST_SANDBOX: m.w.root,
-  PLANNOTATOR_TEST_LAUNCH_PATH: "/usr/bin:/bin",
+  PLANNOTATOR_TEST_LAUNCH_PATH: `${join(m.w.root, "fakes")}:/usr/bin:/bin`,
   PLANNOTATOR_MACHINE_NAME: m.name,
   PLANNOTATOR_UPDATE_CHECK: "0",
   PLANNOTATOR_INBOX_NOTES: "0",
@@ -79,15 +82,15 @@ async function projectOn(m: Machine, root: string): Promise<{ id: string; root: 
   return { id: project!.id as string, root };
 }
 
-/** `to.launch` for T3 Code in a project on `there`, as compose sends it (`pick`: the model button's). */
-const launchBody = (key: string, project: string, pick: Json = {}) => ({
+/** `to.launch` for Claude Code in a project on `there`, as compose sends it. */
+const launchBody = (key: string, project: string) => ({
   idempotency_key: key,
   body: "Make the refund webhook retry a 409 three times with the same key, then alert.",
   thread_name: `Refund retries ${key}`,
-  to: { launch: { agent: "t3", project_id: project, ...pick } },
+  to: { launch: { agent: "claude-code", project_id: project } },
 });
 
-describe("T3 Code on another linked machine, on two real Inboxes linked both ways", () => {
+describe("starting an agent in T3 Code on another linked machine, on two real Inboxes linked both ways", () => {
   let stubs: string[] = [];
   let A: Machine;
   let B: Machine;
@@ -105,7 +108,7 @@ describe("T3 Code on another linked machine, on two real Inboxes linked both way
       mkdirSync(folder, { recursive: true });
       Bun.spawnSync(["/usr/bin/git", "init", "-q", "-b", "main"], { cwd: folder, env: { PATH: "/usr/bin:/bin", HOME: w.home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
       const root = realpathSync(folder);
-      // Its own T3 Code: knows the project, and its threads there used Claude Code and Codex.
+      // Its own T3 Code: knows the project, and its threads there ran Claude Code on opus and Codex on gpt-5.5.
       mkdirSync(w.dataDir, { recursive: true });
       const t3 = makeFakeT3Home(join(w.dataDir, "agents-home"), {}, {
         projects: [root],
@@ -116,8 +119,13 @@ describe("T3 Code on another linked machine, on two real Inboxes linked both way
           ],
         },
       });
-      writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
-      const m: Machine = { w, name, id: "", calls, t3, project: { id: "", root } };
+      // Its own Claude Code, for a start in the background: Plannotator's plugin on, the project trusted.
+      const fake = installFakeClaude({ bin: join(w.root, "fakes"), state: join(w.root, "fake-claude"), config: { workMs: 60_000, hold: true } });
+      mkdirSync(join(agentsHome({ w }), ".claude"), { recursive: true });
+      writeFileSync(join(agentsHome({ w }), ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
+      writeFileSync(join(agentsHome({ w }), ".claude.json"), JSON.stringify({ projects: { [root]: { hasTrustDialogAccepted: true } } }));
+      writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, startIn: "t3" } }));
+      const m: Machine = { w, name, id: "", calls, t3, fake, project: { id: "", root } };
       const started = cli(m, "--background");
       if (started.code !== 0) throw new Error(`inbox --background failed: ${started.err}`);
       m.id = (await getJson(m, "/api/inbox/health")).inbox_id as string;
@@ -133,6 +141,7 @@ describe("T3 Code on another linked machine, on two real Inboxes linked both way
   afterAll(async () => {
     for (const m of [A, B]) {
       if (!m) continue;
+      m.fake.stopAll();
       // Nothing here may change the system's Tailscale.
       expect(existsSync(m.calls)).toBe(false);
       await destroyInboxWorld(m.w);
@@ -147,26 +156,17 @@ describe("T3 Code on another linked machine, on two real Inboxes linked both way
     ] as const;
   const startsOn = (m: Machine) => m.t3.starts().length;
 
-  test("1. this window reads the other machine's T3 Code and its models, and a pick starts T3 there with that agent and model", async () => {
+  test("1. this window starts Claude Code on the other machine, and it starts there as a T3 thread on the model that machine's T3 last ran Claude Code on", async () => {
     for (const [here, there] of both()) {
-      // The other machine's own lists, read through the forward (its T3's threads, not this machine's).
-      const offered = await waitFor(`${here.name} reads ${there.name}'s T3 models`, async () => {
-        const block = (await getJson(here, `/api/inbox/m/${there.id}/sessions`)).launch as Json | undefined;
-        const t3 = (block?.agents as Json[] | undefined)?.find((a) => a.agent === "t3");
-        return t3?.choices ? t3 : null;
-      }, 20_000);
-      expect(offered.starts_in).toEqual([there.project.id]);
-      expect(offered.choices.model_labels["codex/gpt-5.5"]).toBe("Codex · gpt-5.5");
-
       const mine = startsOn(here);
       const before = startsOn(there);
-      const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-t3-${here.name}`, there.project.id, { model: "codex/gpt-5.5" }));
+      const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-t3-${here.name}`, there.project.id));
       expect(sent.status).toBe(200);
       const answer = (await sent.json()) as Json;
       await waitFor(`t3 thread start on ${there.name}`, async () => startsOn(there) === before + 1, 20_000);
       expect(startsOn(here)).toBe(mine);
       const start = there.t3.starts().at(-1)!;
-      expect(start).toMatchObject({ cwd: there.project.root, base: "main", provider: "codex", model: "gpt-5.5" });
+      expect(start).toMatchObject({ cwd: there.project.root, base: null, provider: "claudeAgent", model: "opus" });
       // The thread is the other machine's, started from this one, and names what T3 runs it on.
       const root = await waitFor(`${there.name} names what T3 runs`, async () => {
         const own = await getJson(there, `/api/inbox/threads/${answer.thread_id}`);
@@ -174,23 +174,27 @@ describe("T3 Code on another linked machine, on two real Inboxes linked both way
         return first.launch?.inner ? first : null;
       }, 20_000);
       expect(root.launch.from).toEqual({ machine: here.id, name: here.name });
-      expect(root.launch.inner).toEqual({ provider: "codex", model: "gpt-5.5", agent: "Codex" });
+      expect(root.launch.agent).toBe("claude-code");
+      expect(root.launch.t3).toEqual({});
+      expect(root.launch.inner).toEqual({ provider: "claudeAgent", model: "opus", agent: "Claude Code" });
       expect(root.to).toEqual({ host: "t3", session: start.id });
     }
   }, 90_000);
 
-  test("2. T3 Code closed on the other machine: the line this window reads names that machine", async () => {
+  test("2. T3 Code closed on the other machine: it starts the agent in the background there, and the line this window reads says why", async () => {
     for (const [here, there] of both()) {
       there.t3.setState("down");
       try {
+        const before = startsOn(there);
         const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-t3-down-${here.name}`, there.project.id));
         expect(sent.status).toBe(200);
         const { thread_id } = (await sent.json()) as Json;
-        const run = await waitFor(`${here.name} reads the failed line`, async () => {
+        const run = await waitFor(`${here.name} reads the line`, async () => {
           const read = await getJson(here, `/api/inbox/m/${there.id}/threads/${thread_id}`);
-          return read.run?.state === "failed" ? read.run : null;
+          return read.run?.t3 ? read.run : null;
         }, 20_000);
-        expect(run.cause).toBe(`T3 Code isn't open on ${there.name}. Open it there, then try again.`);
+        expect(run.t3).toEqual({ unavailable: true });
+        expect(startsOn(there)).toBe(before);
       } finally {
         there.t3.setState("up");
       }
@@ -206,7 +210,7 @@ describe("T3 Code on another linked machine, on two real Inboxes linked both way
       }, 20_000);
       const stop = await windowPost(here, `/api/inbox/m/${there.id}/launch/${sent.launch.id}/stop`, { idempotency_key: `k-t3-stop-press-${here.name}` });
       expect(stop.status).not.toBe(200);
-      expect(((await stop.json()) as Json).error).toContain("T3 Code runs this thread in its own app. Stop it in T3 Code.");
+      expect(((await stop.json()) as Json).error).toContain(INBOX_RUN_IN_T3_STOP);
       const read = await getJson(here, `/api/inbox/m/${there.id}/threads/${sent.thread_id}`);
       expect(read.run?.state ?? null).not.toBe("stopped");
     }

@@ -7514,19 +7514,13 @@ export class InboxStore {
   settleLaunch(
     messageId: string,
     outcome:
-      | { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"] }
-      | { error: InboxLaunchError | null; rex?: InboxLaunchRecord["rex"] }
+      | { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"]; inner?: InboxLaunchInner }
+      | { error: InboxLaunchError | null; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"] }
       | { deleted_at: string }
-      | { clone: InboxLaunchClone; made_inode?: string | null }
-      | { inner: InboxLaunchInner },
+      | { clone: InboxLaunchClone; made_inode?: string | null },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
-    if ("inner" in outcome) {
-      const next: InboxMessage = { ...message, launch: { ...message.launch, inner: outcome.inner } };
-      this.appendMessage(next, this.stamp());
-      return next;
-    }
     if ("to" in outcome) return this.settleLaunchStarted(message, outcome);
     // A clone's folder: a new identity when the Inbox made it again, or none (`null`) once it is gone or no longer
     // the Inbox's, so a later Cancel never removes a folder made at that path since.
@@ -7535,7 +7529,7 @@ export class InboxStore {
       "clone" in outcome
         ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
         : "error" in outcome
-          ? { ...message, launch: { ...message.launch, error: outcome.error, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
+          ? { ...message, launch: { ...message.launch, error: outcome.error, ...(outcome.rex ? { rex: outcome.rex } : {}), ...(outcome.t3 ? { t3: outcome.t3 } : {}) } }
           : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
     this.appendMessage(next, this.stamp());
     return next;
@@ -7547,7 +7541,7 @@ export class InboxStore {
    * session and undelivered, even if the Inbox stops right after. A reply the person wrote while it started was
    * addressed to the placeholder: it moves too (one snapshot each), so it goes to the session like any later reply.
    */
-  private settleLaunchStarted(message: InboxMessage, outcome: { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"] }): InboxMessage {
+  private settleLaunchStarted(message: InboxMessage, outcome: { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"]; inner?: InboxLaunchInner }): InboxMessage {
     const placeholder = message.to?.session ?? null;
     const at = this.stamp();
     const to = { host: outcome.to.host, session: outcome.to.session };
@@ -7556,7 +7550,8 @@ export class InboxStore {
     const next: InboxMessage = {
       ...(delivered ? kept : message),
       to,
-      launch: { ...message.launch!, session: outcome.to.session, session_ref: outcome.session_ref, error: null, ...(outcome.rex ? { rex: outcome.rex } : {}) },
+      // Started in T3 Code: what T3 runs it on (`inner`). Fell back to the background: why (`t3`).
+      launch: { ...message.launch!, session: outcome.to.session, session_ref: outcome.session_ref, error: null, ...(outcome.rex ? { rex: outcome.rex } : {}), ...(outcome.t3 ? { t3: outcome.t3 } : {}), ...(outcome.inner ? { inner: outcome.inner } : {}) },
       ...(delivered ? { delivery: { state: "delivered" as const, host: outcome.to.host, session: outcome.to.session, at } } : {}),
     };
     this.appendMessage(next, at);

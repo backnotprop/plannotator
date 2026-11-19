@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import type { InboxLaunchChoice, InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
 import { Icon } from '../icons';
 import { launchEffortsFor } from '@plannotator/core/inbox-launch-choice';
-import { launchChoiceButton, launchModelRows, launchModelWords, pickLaunchModel } from './launchChoice';
+import { launchChoiceButton, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
 import { filterLaunchModels, LAUNCH_MODEL_FILTER_FROM } from './modelFilter';
 
 export function LaunchChoiceButton({ choice, choices, open, onToggle, className }: { choice: InboxLaunchChoice; choices: InboxLaunchChoices; open: boolean; onToggle: () => void; className: string }) {
@@ -115,9 +115,9 @@ export function LaunchChoiceMenu({
       )}
       <div className="ib-cp-lchcols">
         {models.length >= LAUNCH_MODEL_FILTER_FROM ? (
-          <ModelFilterColumn models={models} labels={choices.model_labels} picked={choice.model ?? null} onPick={(value) => onChoice(pickLaunchModel(choice, choices, value))} />
+          <ModelFilterColumn models={models} picked={choice.model ?? null} onPick={(value) => onChoice(pickLaunchModel(choice, choices, value))} />
         ) : (
-          models.length > 0 && column('model', 'Model', models, (model) => launchModelWords(model, choices))
+          models.length > 0 && column('model', 'Model', models, shortLaunchModel)
         )}
         {efforts.length > 0 && column('effort', effortWord, efforts, (v) => v)}
         {/* OpenCode's own agents (build, plan, …), the session's from its start. */}
@@ -130,11 +130,11 @@ export function LaunchChoiceMenu({
 const providerOf = (model: string) => (model.indexOf('/') > 0 ? model.slice(0, model.indexOf('/')) : null);
 const idOf = (model: string) => (model.indexOf('/') > 0 ? model.slice(model.indexOf('/') + 1) : model);
 
-function ModelFilterColumn({ models, labels, picked, onPick }: { models: string[]; labels?: Record<string, string>; picked: string | null; onPick: (value: string | null) => void }) {
+function ModelFilterColumn({ models, picked, onPick }: { models: string[]; picked: string | null; onPick: (value: string | null) => void }) {
   const uid = useId();
   const [query, setQuery] = useState('');
   const [typing, setTyping] = useState(false);
-  const shown = query.trim() ? filterLaunchModels(models, query, labels) : models;
+  const shown = query.trim() ? filterLaunchModels(models, query) : models;
   const rows: (string | null)[] = [null, ...shown];
   const [hl, setHl] = useState(() => Math.max(0, rows.indexOf(picked)));
   const list = useRef<HTMLDivElement>(null);
@@ -143,7 +143,7 @@ function ModelFilterColumn({ models, labels, picked, onPick }: { models: string[
   }, [hl, query]);
   const onFilter = (next: string) => {
     setQuery(next);
-    const found = next.trim() ? filterLaunchModels(models, next, labels) : models;
+    const found = next.trim() ? filterLaunchModels(models, next) : models;
     setHl(next.trim() ? (found.length > 0 ? 1 : 0) : Math.max(0, [null, ...found].indexOf(picked)));
   };
   const pick = (value: string | null) => {
@@ -206,9 +206,8 @@ function ModelFilterColumn({ models, labels, picked, onPick }: { models: string[
             onClick={() => pick(value)}
           >
             <span className="ib-cp-op ib-cp-lchname">
-              {/* An agent's own words for its model (T3 Code: "Claude Code · opus") stand alone; else the id, then its provider. */}
-              <span>{value === null ? 'Default' : (labels?.[value] ?? idOf(value))}</span>
-              {value !== null && !labels?.[value] && providerOf(value) && <span className="ib-cp-lchprov">{providerOf(value)}</span>}
+              <span>{value === null ? 'Default' : idOf(value)}</span>
+              {value !== null && providerOf(value) && <span className="ib-cp-lchprov">{providerOf(value)}</span>}
             </span>
             <span className="ib-cp-check" aria-hidden="true">
               {picked === value && <Icon name="check" size={15} />}

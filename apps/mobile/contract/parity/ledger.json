@@ -20249,20 +20249,6 @@
       }
     },
     {
-      "id": "undecided-enum-inboxlaunchagent-t3",
-      "title": "enum:InboxLaunchAgent.t3",
-      "surface": [
-        "enum:InboxLaunchAgent.t3"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-19",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
       "id": "undecided-field-inboxlaunchinner-agent",
       "title": "field:InboxLaunchInner.agent",
       "surface": [
@@ -20323,6 +20309,62 @@
       "title": "field:InboxRun.no_retry",
       "surface": [
         "field:InboxRun.no_retry"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlaunchrecord-t3",
+      "title": "field:InboxLaunchRecord.t3",
+      "surface": [
+        "field:InboxLaunchRecord.t3"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-refused",
+      "title": "field:InboxLaunchT3.refused",
+      "surface": [
+        "field:InboxLaunchT3.refused"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-unavailable",
+      "title": "field:InboxLaunchT3.unavailable",
+      "surface": [
+        "field:InboxLaunchT3.unavailable"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxrun-t3",
+      "title": "field:InboxRun.t3",
+      "surface": [
+        "field:InboxRun.t3"
       ],
       "flows": [],
       "mobile": "undecided",

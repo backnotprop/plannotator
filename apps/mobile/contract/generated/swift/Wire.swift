@@ -1607,12 +1607,13 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
   public var scratch: String?
   public var inner: InboxLaunchInner?
   public var rex: Bool?
+  public var t3: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "thread_id", "started", "run", "scratch", "inner", "rex"]
+  static let knownKeys: Set<String> = ["id", "thread_id", "started", "run", "scratch", "inner", "rex", "t3"]
 
-  public init(id: String, threadId: ThreadID, started: Bool? = nil, run: InboxAgentLaunchRun? = nil, scratch: String? = nil, inner: InboxLaunchInner? = nil, rex: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, threadId: ThreadID, started: Bool? = nil, run: InboxAgentLaunchRun? = nil, scratch: String? = nil, inner: InboxLaunchInner? = nil, rex: Bool? = nil, t3: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.threadId = threadId
     self.started = started
@@ -1620,6 +1621,7 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
     self.scratch = scratch
     self.inner = inner
     self.rex = rex
+    self.t3 = t3
     self.unknownFields = unknownFields
   }
 
@@ -1632,6 +1634,7 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
     self.scratch = try c.decodeIfPresent(String.self, forKey: WireKey("scratch"))
     self.inner = try c.decodeIfPresent(InboxLaunchInner.self, forKey: WireKey("inner"))
     self.rex = try c.decodeIfPresent(Bool.self, forKey: WireKey("rex"))
+    self.t3 = try c.decodeIfPresent(Bool.self, forKey: WireKey("t3"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -1644,6 +1647,7 @@ public struct InboxAgentLaunch: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.scratch, forKey: WireKey("scratch"))
     try c.encodeIfPresent(self.inner, forKey: WireKey("inner"))
     try c.encodeIfPresent(self.rex, forKey: WireKey("rex"))
+    try c.encodeIfPresent(self.t3, forKey: WireKey("t3"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -3379,11 +3383,10 @@ public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
   case codex
   case opencode
   case pi
-  case t3
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxLaunchAgent] = [.claudeCode, .codex, .opencode, .pi, .t3]
+  public static let known: [InboxLaunchAgent] = [.claudeCode, .codex, .opencode, .pi]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -3391,7 +3394,6 @@ public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
     case "codex": self = .codex
     case "opencode": self = .opencode
     case "pi": self = .pi
-    case "t3": self = .t3
     default: self = .unknown(rawValue)
     }
   }
@@ -3402,7 +3404,6 @@ public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
     case .codex: return "codex"
     case .opencode: return "opencode"
     case .pi: return "pi"
-    case .t3: return "t3"
     case .unknown(let value): return value
     }
   }
@@ -3694,12 +3695,13 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
   public var deletedAt: String?
   public var from: InboxLaunchFrom?
   public var rex: InboxLaunchRex?
+  public var t3: InboxLaunchT3?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "agent", "session_ref", "session", "folder", "scratch", "scratch_inode", "made_folder", "made_inode", "clone", "started_at", "full_permissions", "own_mode", "bypass_available", "model", "effort", "inner", "primary_agent", "error", "deleted_at", "from", "rex"]
+  static let knownKeys: Set<String> = ["id", "agent", "session_ref", "session", "folder", "scratch", "scratch_inode", "made_folder", "made_inode", "clone", "started_at", "full_permissions", "own_mode", "bypass_available", "model", "effort", "inner", "primary_agent", "error", "deleted_at", "from", "rex", "t3"]
 
-  public init(id: String, agent: InboxLaunchAgent, sessionRef: String? = nil, session: String? = nil, folder: String, scratch: Bool, scratchInode: String? = nil, madeFolder: Bool? = nil, madeInode: String? = nil, clone: InboxLaunchClone? = nil, startedAt: String, fullPermissions: Bool? = nil, ownMode: Bool? = nil, bypassAvailable: Bool? = nil, model: String? = nil, effort: String? = nil, inner: InboxLaunchInner? = nil, primaryAgent: String? = nil, error: InboxLaunchError? = nil, deletedAt: String? = nil, from: InboxLaunchFrom? = nil, rex: InboxLaunchRex? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, agent: InboxLaunchAgent, sessionRef: String? = nil, session: String? = nil, folder: String, scratch: Bool, scratchInode: String? = nil, madeFolder: Bool? = nil, madeInode: String? = nil, clone: InboxLaunchClone? = nil, startedAt: String, fullPermissions: Bool? = nil, ownMode: Bool? = nil, bypassAvailable: Bool? = nil, model: String? = nil, effort: String? = nil, inner: InboxLaunchInner? = nil, primaryAgent: String? = nil, error: InboxLaunchError? = nil, deletedAt: String? = nil, from: InboxLaunchFrom? = nil, rex: InboxLaunchRex? = nil, t3: InboxLaunchT3? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.agent = agent
     self.sessionRef = sessionRef
@@ -3722,6 +3724,7 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
     self.deletedAt = deletedAt
     self.from = from
     self.rex = rex
+    self.t3 = t3
     self.unknownFields = unknownFields
   }
 
@@ -3749,6 +3752,7 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
     self.deletedAt = try c.decodeIfPresent(String.self, forKey: WireKey("deleted_at"))
     self.from = try c.decodeIfPresent(InboxLaunchFrom.self, forKey: WireKey("from"))
     self.rex = try c.decodeIfPresent(InboxLaunchRex.self, forKey: WireKey("rex"))
+    self.t3 = try c.decodeIfPresent(InboxLaunchT3.self, forKey: WireKey("t3"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -3776,6 +3780,7 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.deletedAt, forKey: WireKey("deleted_at"))
     try c.encodeIfPresent(self.from, forKey: WireKey("from"))
     try c.encodeIfPresent(self.rex, forKey: WireKey("rex"))
+    try c.encodeIfPresent(self.t3, forKey: WireKey("t3"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -3852,6 +3857,36 @@ public enum InboxLaunchRexWhy: Codable, Hashable, Sendable, RawRepresentable {
 
   public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxLaunchT3: Codable, Hashable, Sendable {
+  public var unavailable: Bool?
+  public var refused: Bool?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["unavailable", "refused"]
+
+  public init(unavailable: Bool? = nil, refused: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.unavailable = unavailable
+    self.refused = refused
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
+    try WireKey.write(unknownFields, to: &c)
+  }
 }
 
 /// From `packages/core/inbox-types.ts`.
@@ -6819,12 +6854,13 @@ public struct InboxRun: Codable, Hashable, Sendable {
   public var madeFolder: String?
   public var clone: InboxRunClone?
   public var rex: InboxRunRex?
+  public var t3: InboxRunT3?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["state", "launch_id", "agent", "project", "folder", "since", "again", "stopped_by_person", "cause", "untrusted", "turn_error", "no_retry", "home_folder", "trust_covers_home", "trust", "attach_command", "made_folder", "clone", "rex"]
+  static let knownKeys: Set<String> = ["state", "launch_id", "agent", "project", "folder", "since", "again", "stopped_by_person", "cause", "untrusted", "turn_error", "no_retry", "home_folder", "trust_covers_home", "trust", "attach_command", "made_folder", "clone", "rex", "t3"]
 
-  public init(state: InboxRunState, launchId: String, agent: InboxLaunchAgent, project: String, folder: String, since: String? = nil, again: Bool, stoppedByPerson: Bool, cause: String? = nil, untrusted: Bool, turnError: Bool? = nil, noRetry: Bool? = nil, homeFolder: Bool? = nil, trustCoversHome: Bool? = nil, trust: InboxRunTrust? = nil, attachCommand: String? = nil, madeFolder: String? = nil, clone: InboxRunClone? = nil, rex: InboxRunRex? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(state: InboxRunState, launchId: String, agent: InboxLaunchAgent, project: String, folder: String, since: String? = nil, again: Bool, stoppedByPerson: Bool, cause: String? = nil, untrusted: Bool, turnError: Bool? = nil, noRetry: Bool? = nil, homeFolder: Bool? = nil, trustCoversHome: Bool? = nil, trust: InboxRunTrust? = nil, attachCommand: String? = nil, madeFolder: String? = nil, clone: InboxRunClone? = nil, rex: InboxRunRex? = nil, t3: InboxRunT3? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.state = state
     self.launchId = launchId
     self.agent = agent
@@ -6844,6 +6880,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     self.madeFolder = madeFolder
     self.clone = clone
     self.rex = rex
+    self.t3 = t3
     self.unknownFields = unknownFields
   }
 
@@ -6868,6 +6905,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     self.madeFolder = try c.decodeIfPresent(String.self, forKey: WireKey("made_folder"))
     self.clone = try c.decodeIfPresent(InboxRunClone.self, forKey: WireKey("clone"))
     self.rex = try c.decodeIfPresent(InboxRunRex.self, forKey: WireKey("rex"))
+    self.t3 = try c.decodeIfPresent(InboxRunT3.self, forKey: WireKey("t3"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -6892,6 +6930,7 @@ public struct InboxRun: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.madeFolder, forKey: WireKey("made_folder"))
     try c.encodeIfPresent(self.clone, forKey: WireKey("clone"))
     try c.encodeIfPresent(self.rex, forKey: WireKey("rex"))
+    try c.encodeIfPresent(self.t3, forKey: WireKey("t3"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -7181,6 +7220,39 @@ public enum InboxRunState: Codable, Hashable, Sendable, RawRepresentable {
 
   public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public struct InboxRunT3: Codable, Hashable, Sendable {
+  public var started: Bool?
+  public var unavailable: Bool?
+  public var refused: Bool?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["started", "unavailable", "refused"]
+
+  public init(started: Bool? = nil, unavailable: Bool? = nil, refused: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.started = started
+    self.unavailable = unavailable
+    self.refused = refused
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.started = try c.decodeIfPresent(Bool.self, forKey: WireKey("started"))
+    self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encodeIfPresent(self.started, forKey: WireKey("started"))
+    try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
+    try WireKey.write(unknownFields, to: &c)
+  }
 }
 
 public struct InboxRunTrust: Codable, Hashable, Sendable {

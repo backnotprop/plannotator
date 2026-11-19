@@ -187,26 +187,55 @@ test.skipIf(!hasDom)('the header names the machine that started it, unless it wa
   expect(started()).toBe('Routine · Claude Code in billing-svc');
   act(() => root!.unmount());
   host!.remove();
-  // A T3 Code thread: the agent and model T3 runs it on, once T3 said, and the effort asked for after.
+  // Started in T3 Code: the agent the person picked, then where it runs and the model T3 runs it on (T3 picks it there,
+  // so not the model asked for).
   const t3 = threadOf(null);
-  const launch = { ...t3.messages[0]!.launch!, agent: 't3' as const, model: 'claudeAgent/opus', effort: 'high', inner: { provider: 'claudeAgent', model: 'opus', agent: 'Claude Code' } };
-  t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'ses_a' }, launch };
+  const launch = { ...t3.messages[0]!.launch!, model: 'sonnet', t3: {}, inner: { provider: 'claudeAgent', model: 'opus', agent: 'Claude Code' } };
+  t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch };
   await draw(t3, null);
-  expect(started()).toBe('You started T3 Code (Claude Code · opus) in billing-svchigh');
-  expect(host!.querySelector('[data-launch-inner]')!.textContent).toBe(' (Claude Code · opus)');
-});
-
-test.skipIf(!hasDom)("a T3 Code thread that never reached the Inbox: the line says so with no Try again (nothing here can start it again) and no Stop; another agent's same line keeps Try again", async () => {
-  const cause = "Started, but not connected to the Inbox. Is Plannotator's Inbox MCP server on in that folder?";
-  const t3 = threadOf(null);
-  t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch: { ...t3.messages[0]!.launch!, agent: 't3' as const } };
-  await draw(t3, null, { ...RUN, state: 'failed', agent: 't3', cause, attach_command: null, no_retry: true } as InboxRun);
-  expect(host!.querySelector('[data-run]')!.textContent).toContain(cause);
-  expect(host!.querySelector('[data-run-retry]')).toBeNull();
-  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  expect(started()).toBe('You started Claude Code in billing-svcIn T3 Code · opus');
+  expect(host!.querySelector('[data-launch-choice]')).toBeNull();
   act(() => root!.unmount());
   host!.remove();
-  await draw(threadOf(null), null, { ...RUN, state: 'failed', cause, attach_command: null } as InboxRun);
+  // One that fell back to the background reads as any other, with what was asked.
+  const away = threadOf(null);
+  away.messages[0] = { ...away.messages[0]!, launch: { ...away.messages[0]!.launch!, model: 'sonnet', t3: { unavailable: true } } };
+  await draw(away, null);
+  expect(started()).toBe('You started Claude Code in billing-svcsonnet');
+});
+
+test.skipIf(!hasDom)("an agent started in T3 Code: Rex's words with T3 Code's name, no Stop, no Open in Terminal, and no Try again when it never reached the Inbox", async () => {
+  const inT3 = () => {
+    const t3 = threadOf(null);
+    t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch: { ...t3.messages[0]!.launch!, t3: {} } };
+    return t3;
+  };
+  const text = () => host!.querySelector('[data-run]')!.textContent ?? '';
+  const redraw = async (thread: InboxThread, run: InboxRun) => {
+    act(() => root!.unmount());
+    host!.remove();
+    await draw(thread, null, run);
+  };
+  await draw(inT3(), null, { ...RUN, state: 'starting', t3: {}, attach_command: null } as InboxRun);
+  expect(text()).toBe('Starting Claude Code in T3 Code…');
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  await redraw(inT3(), { ...RUN, state: 'starting', t3: { started: true }, attach_command: null } as InboxRun);
+  expect(text()).toBe('Started in T3 Code');
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  await redraw(inT3(), { ...RUN, state: 'failed', t3: { started: true }, cause: 'Look at its thread there.', attach_command: null, no_retry: true } as InboxRun);
+  expect(text()).toBe("Claude Code opened in T3 Code but hasn't connected to the Inbox. Look at its thread there. Your message is kept.");
+  expect(host!.querySelector('[data-run-retry]')).toBeNull();
+  expect(host!.querySelector('[data-run-open]')).toBeNull();
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  // T3 Code not open, or it said no: in the background, with Stop, and the line says why.
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { unavailable: true } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-away]')!.textContent).toBe("T3 Code isn't open on this computer, so it started in the background.");
+  expect(host!.querySelector('[data-run-stop]')).not.toBeNull();
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't start a thread for it, so it started in the background.");
+  // Another agent's not-connected line keeps Try again.
+  const cause = "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?";
+  await redraw(threadOf(null), { ...RUN, state: 'failed', cause, attach_command: null } as InboxRun);
   expect(host!.querySelector('[data-run-retry]')).not.toBeNull();
 });
 

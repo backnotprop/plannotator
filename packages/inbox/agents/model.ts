@@ -213,7 +213,7 @@ export interface AgentFacts {
 
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
-  // An agent host (T3 Code): the agent and model its thread runs, once the host said ("T3 Code (Claude Code · opus)").
+  // An agent the Inbox started in T3 Code: the agent and model T3 runs its thread on ("T3 Code (Claude Code · opus)").
   const inner = launchInnerWords(agent.launch?.inner);
   const host = inner ? `${agentHostName(agent.host)} (${inner})` : agentHostName(agent.host);
   const sub = [host, agent.project?.name, machine?.name].filter(Boolean).join(' · ');

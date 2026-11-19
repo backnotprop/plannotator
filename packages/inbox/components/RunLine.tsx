@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { INBOX_LAUNCH_APP_OWNED, inboxRunInRex, type InboxRun } from '@plannotator/core/inbox-types';
-import { INBOX_REX_SERVER_AWAY, INBOX_REX_SHARED, INBOX_RUN_REX_NOT_CONNECTED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
+import { inboxRunInRex, inboxRunInT3, type InboxRun } from '@plannotator/core/inbox-types';
+import { INBOX_REX_SERVER_AWAY, INBOX_REX_SHARED, INBOX_RUN_REX_NOT_CONNECTED, INBOX_RUN_T3_NOT_CONNECTED, INBOX_T3_NOT_HERE, INBOX_T3_REFUSED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
@@ -119,8 +119,9 @@ export function RunLine({
     else setError('Could not copy; select the command and copy it.');
   };
 
-  // An agent whose own app runs the session (T3 Code): the Inbox has no way to stop it, so no Stop.
-  const stop = INBOX_LAUNCH_APP_OWNED.includes(run.agent) ? null : (
+  // Started in T3 Code: T3 runs its thread and has no Stop from outside, so no Stop here.
+  const inT3 = inboxRunInT3(run);
+  const stop = inT3 ? null : (
     <Tip content={STOP_TIP}>
       <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('stop')} data-run-stop="">
         Stop
@@ -159,7 +160,13 @@ export function RunLine({
   const stopHere = inRex && !run.rex!.stops ? null : stop;
   switch (run.state) {
     case 'starting':
-      text = run.again ? `Starting ${name} again…` : inRex ? (
+      text = run.again ? `Starting ${name} again…` : inT3 ? (
+        run.t3!.started ? (
+          <span data-run-t3="">Started in T3 Code</span>
+        ) : (
+          `Starting ${name} in T3 Code…`
+        )
+      ) : inRex ? (
         rexLine ? (
           <span data-run-rex="">
             Started in <bdi>{rexLine}</bdi>
@@ -383,7 +390,13 @@ export function RunLine({
       }
       text = (
         <>
-          {inRex && run.cause === INBOX_RUN_REX_NOT_CONNECTED ? <b>{name} opened in Rex but hasn't connected to the Inbox.</b> : <b>{name} didn't start.</b>} {run.cause ?? ''} Your message is kept.
+          {inRex && run.cause === INBOX_RUN_REX_NOT_CONNECTED ? (
+            <b>{name} opened in Rex but hasn't connected to the Inbox.</b>
+          ) : inT3 && run.cause === INBOX_RUN_T3_NOT_CONNECTED ? (
+            <b>{name} opened in T3 Code but hasn't connected to the Inbox.</b>
+          ) : (
+            <b>{name} didn't start.</b>
+          )} {run.cause ?? ''} Your message is kept.
           {/* Create a folder (E8): the folder the Send made is not taken away when the agent doesn't start. */}
           {run.made_folder ? (
             <span className="ib-run-sub" data-run-made-folder="">
@@ -415,8 +428,8 @@ export function RunLine({
               Trust folder
             </button>
           )}
-          {canOpen && !inRex && openTerminal}
-          {/* A session its agent's own app runs (T3 Code): the Inbox can start nothing again, so no Try again. */}
+          {canOpen && !inRex && !inT3 && openTerminal}
+          {/* An agent T3 Code runs that never connected: the Inbox can start nothing again, so no Try again. */}
           {!run.no_retry && (
             <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
               Try again
@@ -449,6 +462,16 @@ export function RunLine({
           {note && (
             <span className="ib-run-sub" data-run-note="">
               {note}
+            </span>
+          )}
+          {run.t3?.unavailable && (run.state === 'starting' || run.state === 'working') && (
+            <span className="ib-run-sub" data-run-t3-away="">
+              {INBOX_T3_NOT_HERE}
+            </span>
+          )}
+          {run.t3?.refused && (run.state === 'starting' || run.state === 'working') && (
+            <span className="ib-run-sub" data-run-t3-refused="">
+              {INBOX_T3_REFUSED}
             </span>
           )}
           {run.rex?.refused && (run.state === 'starting' || run.state === 'working') && (

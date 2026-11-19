@@ -1009,6 +1009,10 @@
             "rex": {
               "type": "boolean",
               "const": true
+            },
+            "t3": {
+              "type": "boolean",
+              "const": true
             }
           },
           "required": [
@@ -2278,8 +2282,7 @@
         "claude-code",
         "codex",
         "opencode",
-        "pi",
-        "t3"
+        "pi"
       ],
       "x-open": true,
       "x-source": "packages/core/inbox-types.ts"
@@ -2495,6 +2498,9 @@
         },
         "rex": {
           "$ref": "#/$defs/InboxLaunchRex"
+        },
+        "t3": {
+          "$ref": "#/$defs/InboxLaunchT3"
         }
       },
       "required": [
@@ -2535,6 +2541,21 @@
         },
         "block": {
           "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxLaunchT3": {
+      "type": "object",
+      "properties": {
+        "unavailable": {
+          "type": "boolean",
+          "const": true
+        },
+        "refused": {
+          "type": "boolean",
+          "const": true
         }
       },
       "additionalProperties": true,
@@ -5151,6 +5172,24 @@
           "required": [
             "line"
           ],
+          "additionalProperties": true
+        },
+        "t3": {
+          "type": "object",
+          "properties": {
+            "started": {
+              "type": "boolean",
+              "const": true
+            },
+            "unavailable": {
+              "type": "boolean",
+              "const": true
+            },
+            "refused": {
+              "type": "boolean",
+              "const": true
+            }
+          },
           "additionalProperties": true
         }
       },

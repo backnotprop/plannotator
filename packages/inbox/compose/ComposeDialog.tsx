@@ -82,6 +82,7 @@ import {
   startStatusLine,
   scratchFolderOf,
   scratchProject,
+  folderProject,
   untildePath,
   SCRATCH_PICK,
   sendThreadName,
@@ -93,9 +94,7 @@ import {
   type ComposeClone,
   type ComposeCloneRequest,
   cloneOfUrl,
-  addAgentStart,
-  agentStartsIn,
-  composeStartOf,
+  defaultStartProject,
   launchGroups,
   projectWithAgent,
   type LaunchHistory,
@@ -391,21 +390,37 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const canStart = !!startLaunch && startLaunch.agents.length > 0 && (startLaunch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
   // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
   const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
-  // The start the pick makes with its machine's block (`composeStartOf`: another folder, the scratch folder, a project).
   const start: (ComposeStart & { machine: string | null }) | null = useMemo(() => {
     if (!startPick) return null;
     const block = startPick.machine ? there.reads.get(startPick.machine)?.launch : model?.launch;
-    return composeStartOf(startPick, block, { folders: !pulls && !box, scratch: (!pulls && !box) || linkScratch, only: onlyProjects ?? null });
+    const agent = block?.agents.find((a) => a.agent === startPick.agent);
+    // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
+    if (agent && startPick.folder && !pulls && !box) {
+      return {
+        agent: agent.agent,
+        name: agent.name,
+        project: folderProject(startPick.folder.path, startPick.folder.name),
+        folder: startPick.folder.path,
+        ...(startPick.folder.create ? { create: true as const } : {}),
+        ...(startPick.folder.clone ? { clone: startPick.folder.clone } : {}),
+        machine: startPick.machine,
+      };
+    }
+    // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
+    if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && ((!pulls && !box) || linkScratch)) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
+    const project = block?.projects.find((p) => p.id === startPick.projectId && (!onlyProjects || onlyProjects.includes(p.id)));
+    return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startPick, model?.launch, there.reads, pulls, box, onlyProjects?.join(), linkScratch]);
   // Add agent: the default start, once the launch block is read, unless the person chose To already.
   const launchPicked = useRef(false);
   useEffect(() => {
     if (!request.launch || launchPicked.current || startPick || chosen || !startLaunch || !canStart) return;
-    const picked = addAgentStart(startLaunch, request.launch.agent, current);
-    if (!picked) return;
+    const project = defaultStartProject(startLaunch, current);
+    if (!project) return;
     launchPicked.current = true;
-    setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
+    const agent = startLaunch.agents.find((a) => a.agent === request.launch!.agent) ?? startLaunch.agents[0]!;
+    setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.launch, startLaunch, canStart, startPick, chosen, current]);
   // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,
@@ -413,9 +428,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   useEffect(() => {
     if (!(request.start || request.launch) || !startPick || startPick.folder) return;
     const block = blockOf(startPick.machine);
-    if (!block || block.agents.length === 0 || block.agents.some((a) => a.agent === startPick.agent && agentStartsIn(a, startPick.projectId))) return;
-    const other = block.agents.find((a) => agentStartsIn(a, startPick.projectId));
-    if (other) setStartPick({ ...startPick, agent: other.agent });
+    if (!block || block.agents.length === 0 || block.agents.some((a) => a.agent === startPick.agent)) return;
+    setStartPick({ ...startPick, agent: block.agents[0]!.agent });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.start, request.launch, startPick, model?.launch, there.reads]);
   // The linked machine To's project is on (null: this computer), its home for `~/…` paths, and whether it is asleep.
@@ -1327,8 +1341,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const pickStart = (picked: ComposeStart) => {
     setToFilled(false);
     // To offers every machine's agents: one the caption's machine doesn't have starts on a machine that has it.
-    const pickedOn = blockOf((picked.project as MachineLaunchProject).machine ?? null);
-    const lacks = (grouped && !pickedOn?.agents.some((a) => a.agent === picked.agent)) || !agentStartsIn(pickedOn?.agents.find((a) => a.agent === picked.agent), picked.project.id);
+    const lacks = grouped && !blockOf((picked.project as MachineLaunchProject).machine ?? null)?.agents.some((a) => a.agent === picked.agent);
     const project = (lacks ? projectWithAgent(groupsFor(picked.agent).groups, picked.project) : null) ?? (picked.project as MachineLaunchProject);
     setStartPick({ agent: picked.agent, projectId: project.id, machine: project.machine ?? null });
     // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
@@ -1679,14 +1692,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
       {launchChoice.menu()}
       {folderMenu && start && launch && (
         <FolderMenu
-          projects={startAgent?.starts_in ? launch.projects.filter((p) => agentStartsIn(startAgent, p.id)) : launch.projects}
+          projects={launch.projects}
           selected={start.project.id}
           selectedMachine={start.machine}
           groups={grouped ? folderGroups : null}
           drives={model?.launch?.drives ?? null}
           finder={props.localWindow === true && !phone && model?.launch?.finder === true}
           scratch={
-            launch.scratch && scratchFolder && !startAgent?.starts_in
+            launch.scratch && scratchFolder
               ? {
                   folder: tildePath(scratchFolder, home),
                   root: tildePath(launch.scratch.root, home),
@@ -1698,7 +1711,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
               : null
           }
           onFolder={
-            pulls || box || startAgent?.starts_in
+            pulls || box
               ? undefined
               : (folder, name, machine, create) => {
                   // A folder that is one of that machine's projects already is that project (its trust facts and all).
@@ -1712,7 +1725,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                 }
           }
           onClone={
-            pulls || box || startAgent?.starts_in
+            pulls || box
               ? undefined
               : (pick) => {
                   const clone: ComposeClone = { url: pick.url, host: pick.repo.host, slug: pick.repo.slug, ...(pick.repo.branch ? { branch: pick.repo.branch } : {}) };

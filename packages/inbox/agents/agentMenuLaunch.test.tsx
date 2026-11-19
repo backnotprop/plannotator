@@ -165,16 +165,6 @@ test.skipIf(!hasDom)('this Inbox: a running launch has Rename…, a separator, S
   expect(await itemsOf('ses_own')).toEqual(['Rename…']);
 });
 
-test.skipIf(!hasDom)('a T3 Code launch (#3590) never has Stop, working or not: T3 Code runs its thread; Delete stays', async () => {
-  mount([group([launched('lch_t3w', 'working', true, { host: 't3' }), launched('lch_t3r', null, true, { host: 't3' })])]);
-  await settle();
-  for (const id of ['lch_t3w', 'lch_t3r']) {
-    const items = (await itemsOf(id))!;
-    expect(items.some((item) => item.startsWith('Stop'))).toBe(false);
-    expect(items.some((item) => item.startsWith('Delete'))).toBe(true);
-  }
-});
-
 test.skipIf(!hasDom)('a launch that runs in Rex: no Stop (Rex owns it; the Inbox never stops it), Delete still', async () => {
   mount([group([launched('lch_rex', 'working', true, { launch: { id: 'lch_rex', thread_id: 'msg_lch_rex', started: true, run: 'working', rex: true } }), launched('lch_bg', 'working')])]);
   await settle();

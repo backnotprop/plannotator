@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
-import { addAgentStart, composeStartOf, defaultStartProject, launchGroups, launchHistory, projectWithAgent, SCRATCH_PICK, type LaunchMachine, type MachineLaunchRead } from './compose/model';
+import { defaultStartProject, launchGroups, launchHistory, projectWithAgent, type LaunchMachine, type MachineLaunchRead } from './compose/model';
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
@@ -183,36 +183,4 @@ test("an agent only another machine has, picked for this computer's project: it 
   // Mac mini asleep: Studio's project.
   expect(projectWithAgent(groupsFor(true), { root: '/Users/me/code/web-app', name: 'web-app' })).toMatchObject({ id: 'prj_site', machine: STUDIO });
   expect(projectWithAgent([], { root: '/Users/me/code/web-app', name: 'web-app' })).toBeNull();
-});
-
-test('T3 Code (#3590): the folder menu lists only the projects it starts in, and no scratch folder; the others keep them all', () => {
-  const withT3: InboxComposeLaunch = { ...here, agents: [...AGENTS, { agent: 't3', name: 'T3 Code', starts_in: ['prj_bill_a'], worktree: true }] };
-  const t3 = launchGroups({ agent: 't3', self: { ...self, launch: withT3 }, machines: [SELF_VIEW], reads: new Map() });
-  expect(t3.groups[0]!.projects.map((p) => p.id)).toEqual(['prj_bill_a']);
-  expect(t3.groups[0]!.scratch).toBeNull();
-  const claude = launchGroups({ agent: 'claude-code', self: { ...self, launch: withT3 }, machines: [SELF_VIEW], reads: new Map() });
-  expect(claude.groups[0]!.projects.map((p) => p.id)).toEqual(['prj_web', 'prj_bill_a']);
-  expect(claude.groups[0]!.scratch).toEqual(here.scratch!);
-});
-
-test("T3 Code (#3590): a pick starts T3 only in a project it names, in a new worktree, never in another folder or the scratch folder; Add agent's T3 starts in its own default", () => {
-  const withT3: InboxComposeLaunch = { ...here, agents: [...AGENTS, { agent: 't3', name: 'T3 Code', starts_in: ['prj_bill_a'], worktree: true }] };
-  const rules = { folders: true, scratch: true, only: null };
-  const pick = (agent: string, projectId: string, folder?: { path: string; name: string }) => composeStartOf({ agent, projectId, machine: null, ...(folder ? { folder } : {}) }, withT3, rules);
-  expect(pick('t3', 'prj_bill_a')).toMatchObject({ agent: 't3', project: { id: 'prj_bill_a' }, worktree: true });
-  expect(pick('t3', 'prj_web')).toBeNull();
-  expect(pick('t3', SCRATCH_PICK)).toBeNull();
-  expect(pick('t3', 'prj_bill_a', { path: '/Users/me/elsewhere', name: 'elsewhere' })).toBeNull();
-  // The others keep every project, the scratch folder and another folder, with no worktree.
-  expect(pick('claude-code', 'prj_web')!.worktree).toBeUndefined();
-  expect(pick('claude-code', SCRATCH_PICK)).toMatchObject({ scratch: true });
-  expect(pick('claude-code', 'prj_web', { path: '/Users/me/elsewhere', name: 'elsewhere' })).toMatchObject({ folder: '/Users/me/elsewhere' });
-  // A pull handoff or a review box: no other folder; `only` keeps To to its projects.
-  expect(composeStartOf({ agent: 'claude-code', projectId: 'prj_web', machine: null, folder: { path: '/x', name: 'x' } }, withT3, { folders: false, scratch: false, only: ['prj_web'] })).toMatchObject({ project: { id: 'prj_web' } });
-  expect(composeStartOf({ agent: 'claude-code', projectId: 'prj_bill_a', machine: null }, withT3, { folders: false, scratch: false, only: ['prj_web'] })).toBeNull();
-
-  // Looking at web-app: T3 starts in billing-svc, the one it names; with none it can start in, the first agent does.
-  expect(addAgentStart(withT3, 't3', { id: 'prj_web', root: null })).toMatchObject({ agent: 't3', project: { id: 'prj_bill_a' } });
-  const none: InboxComposeLaunch = { ...here, agents: [...AGENTS, { agent: 't3', name: 'T3 Code', starts_in: [], worktree: true }] };
-  expect(addAgentStart(none, 't3', { id: 'prj_web', root: null })).toMatchObject({ agent: 'claude-code', project: { id: 'prj_web' } });
 });

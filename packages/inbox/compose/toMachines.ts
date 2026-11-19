@@ -7,7 +7,7 @@
  */
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
-import { defaultStartProject, filterGroups, launchForAgent, pickerRows, type ComposeGroup, type ComposeStart, type MachineLaunchProject, type PickerRow } from './model';
+import { defaultStartProject, filterGroups, pickerRows, type ComposeGroup, type ComposeStart, type MachineLaunchProject, type PickerRow } from './model';
 
 /** This computer's key in the switch (a linked machine's is its id). */
 export const HERE = 'here';
@@ -85,8 +85,7 @@ export function openingMachine(machines: readonly ToMachine[], pickedOn: string 
 const words = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
 
 function startRow(m: ToMachine, agent: { agent: string; name: string }, project: MachineLaunchProject): ToItem {
-  const worktree = m.launch?.agents.find((a) => a.agent === agent.agent)?.worktree === true;
-  return { type: 'start', key: toStartKey(m.machine, agent.agent, project.id), start: { agent: agent.agent as ComposeStart['agent'], name: agent.name, project, ...(worktree ? { worktree: true as const } : {}) }, machine: m };
+  return { type: 'start', key: toStartKey(m.machine, agent.agent, project.id), start: { agent: agent.agent as ComposeStart['agent'], name: agent.name, project }, machine: m };
 }
 
 /** One machine's start rows, browsing: each kind in the machine's default project, a kind it lacks as "Not on <machine>". */
@@ -96,13 +95,9 @@ function startRows(m: ToMachine, kinds: readonly { agent: string; name: string }
   // A linked machine's projects are its own: the project this window looks at is never one of them.
   const project = defaultStartProject(launch as InboxComposeLaunch, m.self ? current : null) as MachineLaunchProject | null;
   if (!project) return [];
-  return kinds.flatMap((k): ToItem[] => {
-    if (!launch.agents.some((a) => a.agent === k.agent)) return [{ type: 'missing', key: `missing:${m.key}:${k.agent}`, agent: k.agent, name: k.name, machine: m }];
-    // An agent that starts only in some projects (T3 Code: a git repository): its own default among them, else no row.
-    const own = launchForAgent(launch, k.agent);
-    const at = own === launch ? project : (defaultStartProject(own as InboxComposeLaunch, m.self ? current : null) as MachineLaunchProject | null);
-    return at ? [startRow(m, k, at)] : [];
-  });
+  return kinds.map((k) =>
+    launch.agents.some((a) => a.agent === k.agent) ? startRow(m, k, project) : { type: 'missing' as const, key: `missing:${m.key}:${k.agent}`, agent: k.agent, name: k.name, machine: m },
+  );
 }
 
 /**
@@ -117,20 +112,18 @@ function startHits(m: ToMachine, kinds: readonly { agent: string; name: string }
     return typed.every((w) => hay.includes(w));
   };
   const machineWords = many ? m.name : '';
+  const fallback = defaultStartProject(launch as InboxComposeLaunch, m.self ? current : null) as MachineLaunchProject | null;
   const out: ToItem[] = [];
   for (const k of kinds) {
     if (!launch.agents.some((a) => a.agent === k.agent)) {
       if (many && hit(k.name, machineWords)) out.push({ type: 'missing', key: `missing:${m.key}:${k.agent}`, agent: k.agent, name: k.name, machine: m });
       continue;
     }
-    // The projects this agent starts in (all of them, unless it names some: T3 Code).
-    const own = launchForAgent(launch, k.agent);
-    const fallback = defaultStartProject(own as InboxComposeLaunch, m.self ? current : null) as MachineLaunchProject | null;
     if (fallback && hit(k.name, machineWords, 'start new')) {
       out.push(startRow(m, k, fallback));
       continue;
     }
-    for (const p of own.projects) if (hit(k.name, machineWords, p.name, p.root, 'start new')) out.push(startRow(m, k, p));
+    for (const p of launch.projects) if (hit(k.name, machineWords, p.name, p.root, 'start new')) out.push(startRow(m, k, p));
   }
   return out;
 }

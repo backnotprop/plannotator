@@ -90,8 +90,8 @@ export function t3ScopeOf(access: T3Access): string {
  *   server running, "stale" as with a runtime file whose server does not
  *   answer, "gone" as for a thread T3 deleted, "fail" with another failure,
  *   "hang" never answers.
- * - `thread start . - --worktree=<base> [--title=<t>] [--provider=<p> --model=<m>
- *   [--option=effort=<v>]] --json` (the Inbox's T3 Code launch,
+ * - `thread start . - [--title=<t>] [--provider=<p> --model=<m>
+ *   [--option=effort=<v>]] --json` (the Inbox's start in T3 Code,
  *   inbox-launch-t3.ts; each flag also as `--name value`), as T3's
  *   cli/thread.ts answers it: run in a folder inside one of `projects` (T3's
  *   projects, by folder), it makes a new thread (`thread:project:<uuid>:<uuid>`,
@@ -109,6 +109,12 @@ export function t3ScopeOf(access: T3Access): string {
  *   newest first, with their title, provider, model and `createdAt`: those
  *   `thread start` made there and `used` (threads T3 had already, by project
  *   folder). A start on the model "retired" is refused in T3's words.
+ * - `auth session issue --scope=… --subject=… --ttl=… --label=… --json`, as
+ *   T3's cli/auth.ts answers it (pretty JSON with the bearer `token`, which is
+ *   `authToken`: the token a `startFakeT3` on `port` takes), and `auth session
+ *   revoke <sessionId>`. `issued()` and `revoked()` list them; the token is
+ *   never written to any file here. `refuseAuth()` answers `issue` as a T3
+ *   with no such command does.
  *
  * `threads` maps a Codex thread to the T3 thread that runs it; `t3Threads`
  * are T3's other threads (a Claude one's id is T3's own). `db: false` makes no
@@ -145,6 +151,12 @@ export interface FakeT3Home {
   added(): string[];
   /** Make every later `t3 project add` fail. */
   refuseProjectAdd(): void;
+  /** Every `auth session issue`: the session it made and the flags asked for (never the token). */
+  issued(): { sessionId: string; scope: string | null; subject: string | null; ttl: string | null; label: string | null; json: boolean }[];
+  /** Every `auth session revoke`'s session id. */
+  revoked(): string[];
+  /** Answer every later `auth session issue` as a T3 without it does. */
+  refuseAuth(): void;
 }
 
 /** T3's state database (`userdata/statev2.sqlite`), one provider thread row per Codex thread. Bun only (`bun:sqlite`). */
@@ -186,6 +198,10 @@ export function makeFakeT3Home(
     defaultModel?: { provider: string; model: string };
     /** The port its runtime file names (a signed-in test's scripted MCP server's). */
     port?: number;
+    /** The bearer token `auth session issue` prints (default "t3-test-access", `startFakeT3`'s). */
+    authToken?: string;
+    /** The origin its runtime file names (default `http://127.0.0.1:<port>`). */
+    origin?: string;
   } = {},
 ): FakeT3Home {
   const dir = join(home, ".t3");
@@ -205,7 +221,7 @@ export function makeFakeT3Home(
     else {
       const startedAt = state === "starting" ? new Date().toISOString() : "2026-11-14T00:00:00.000Z";
       const port = options.port ?? 9;
-      writeFileSync(runtimeFile, `${JSON.stringify({ version: 1, pid: process.pid, port, origin: `http://127.0.0.1:${port}`, startedAt, serverVersion: "0.1.9" })}\n`);
+      writeFileSync(runtimeFile, `${JSON.stringify({ version: 1, pid: process.pid, port, origin: options.origin ?? `http://127.0.0.1:${port}`, startedAt, serverVersion: "0.1.9" })}\n`);
       // The file's own time is a start too: an old one stands for a server up for long.
       if (state !== "starting") utimesSync(runtimeFile, new Date("2026-11-14T00:00:00.000Z"), new Date("2026-11-14T00:00:00.000Z"));
     }
@@ -239,7 +255,17 @@ if (state === "hang") setTimeout(() => {}, 60000);
 else if (state === "down") say("No running T3 Code server uses ${dir}. Start T3 Code, then retry.", 1);
 else if (state === "stale") say("Could not reach the T3 Code server at http://127.0.0.1:9. connect ECONNREFUSED", 1);
 else if (state === "fail") say("Something went wrong.", 1);
-else if (args[0] === "project" && args[1] === "add") {
+else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
+  // T3's cli/auth.ts: a bearer session for the subject, printed as pretty JSON (formatIssuedSession). Only the
+  // session id and the flags are written down here, never the token.
+  if (fs.existsSync(${JSON.stringify(join(dir, "auth-refused"))})) say("Unknown option --subject.", 1);
+  const sessionId = "session-" + require("node:crypto").randomUUID();
+  fs.appendFileSync(${JSON.stringify(join(dir, "issued.log"))}, JSON.stringify({ sessionId, scope: flag("--scope") ?? null, subject: flag("--subject") ?? null, ttl: flag("--ttl") ?? null, label: flag("--label") ?? null, json: args.includes("--json") }) + "\\n");
+  process.stdout.write(JSON.stringify({ sessionId, token: ${JSON.stringify(options.authToken ?? "t3-test-access")}, method: "bearer-session-token", scopes: (flag("--scope") ?? "").split(" "), subject: flag("--subject") ?? "cli", client: { label: flag("--label") ?? null }, expiresAt: new Date(Date.now() + 60000).toISOString() }, null, 2) + "\\n");
+} else if (args[0] === "auth" && args[1] === "session" && args[2] === "revoke") {
+  fs.appendFileSync(${JSON.stringify(join(dir, "revoked.log"))}, args[3] + "\\n");
+  process.stdout.write("Revoked session " + args[3] + ".\\n");
+} else if (args[0] === "project" && args[1] === "add") {
   // T3's cli/project.ts: adds the folder as a project, or says it has one there already.
   if (fs.existsSync(${JSON.stringify(join(dir, "project-add-refused"))})) say("Something went wrong.", 1);
   const root = fs.realpathSync(args[2]);
@@ -311,6 +337,9 @@ else if (args[0] === "project" && args[1] === "add") {
     added: () => (existsSync(join(dir, "projects-added")) ? readFileSync(join(dir, "projects-added"), "utf8").split("\n").filter(Boolean) : []),
     /** `t3 project add` fails from now on. */
     refuseProjectAdd: () => writeFileSync(join(dir, "project-add-refused"), "1"),
+    issued: () => (existsSync(join(dir, "issued.log")) ? readFileSync(join(dir, "issued.log"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as ReturnType<FakeT3Home["issued"]>[number]) : []),
+    revoked: () => (existsSync(join(dir, "revoked.log")) ? readFileSync(join(dir, "revoked.log"), "utf8").split("\n").filter(Boolean) : []),
+    refuseAuth: () => writeFileSync(join(dir, "auth-refused"), "1"),
   };
 }
 

@@ -125,31 +125,7 @@ export function t3ModeDeniedLine(itemId: string, thread: string, code: string, m
   return `T3 refused ${itemId} for thread ${thread} (${code}): the saved grant (${mode ?? "its mode"}) cannot send into that thread. It waits in the Inbox for the agent's next read. To wake it, run \`plannotator t3 login --url ${endpoint}\` and choose a mode that covers the thread.`;
 }
 
-/** The T3 grants `plannotator t3 login` saved under `<dataDir>/t3-code/`, each with a token. */
-export async function savedT3Grants(dataDir: string): Promise<T3Credentials[]> {
-  const root = join(dataDir, "t3-code");
-  const found: T3Credentials[] = [];
-  let names: string[] = [];
-  try {
-    names = readdirSync(root).filter((name) => existsSync(join(root, name, "oauth.json")));
-  } catch {
-    return found;
-  }
-  if (names.length === 0) return found;
-  const [{ T3Credentials }] = await loadT3();
-  for (const name of names) {
-    const path = join(root, name, "oauth.json");
-    try {
-      const credentials = new T3Credentials(dataDir, new URL((JSON.parse(readFileSync(path, "utf8")) as { endpoint: string }).endpoint));
-      if (credentials.token()) found.push(credentials);
-    } catch {
-      // Not a grant this build reads.
-    }
-  }
-  return found;
-}
-
-/** T3's MCP client over HTTP with a saved grant's token (the T3 client loads only now). */
+/** T3's MCP client over HTTP with a bearer token (the T3 client loads only now). */
 export async function connectT3(endpoint: URL, token: () => string | undefined): Promise<T3Rpc & { close?(): Promise<void> }> {
   return (await loadT3())[2].T3Client.connect(endpoint, token);
 }
@@ -251,7 +227,28 @@ export function createInboxT3Wake(options: {
   const stopping = new AbortController();
 
   // ── The grants, and which one reaches a thread ──
-  const grants = () => savedT3Grants(dataDir);
+  const grants = async (): Promise<T3Credentials[]> => {
+    const root = join(dataDir, "t3-code");
+    const found: T3Credentials[] = [];
+    let names: string[] = [];
+    try {
+      names = readdirSync(root).filter((name) => existsSync(join(root, name, "oauth.json")));
+    } catch {
+      return found;
+    }
+    if (names.length === 0) return found;
+    const [{ T3Credentials }] = await loadT3();
+    for (const name of names) {
+      const path = join(root, name, "oauth.json");
+      try {
+        const credentials = new T3Credentials(dataDir, new URL((JSON.parse(readFileSync(path, "utf8")) as { endpoint: string }).endpoint));
+        if (credentials.token()) found.push(credentials);
+      } catch {
+        // Not a grant this build reads.
+      }
+    }
+    return found;
+  };
   const epochOf = (credentials: T3Credentials): string | undefined => {
     try {
       return credentials.read()?.epoch;
