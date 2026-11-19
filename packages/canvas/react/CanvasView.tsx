@@ -30,15 +30,32 @@
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
-import { resolveArrow } from '../model/document';
+import { boundsOf, isBoundEnd, resolveArrow } from '../model/document';
 import type { Rect } from '../model/geometry';
-import type { ObjectId } from '../model/types';
+import { type ArrowEnd, type ArrowObject, type CanvasDocument, type ObjectId, isPlaced } from '../model/types';
 import type { Camera, CameraController, Size } from '../view/camera';
 import { type Lod, OVERSCAN, lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
 import { indexFor } from '../view/document-index';
-import { ArrowView, ObjectView } from './objects';
+import { ArrowView, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
+
+/** What the layer of arrows is called, and how one arrow is said: its ends by their words, then its label. */
+export const ARROWS_LABEL = 'Connections';
+export const ARROW_WORDS = { arrow: 'Arrow', from: 'from', to: 'to', point: 'a point on the board' } as const;
+
+function endWords(doc: CanvasDocument, end: ArrowEnd): string {
+  if (!isBoundEnd(end)) return ARROW_WORDS.point;
+  const target = doc.objects[end.object];
+  if (!target) return ARROW_WORDS.point;
+  if (target.type === 'group') return target.label ?? ARROW_WORDS.point;
+  return isPlaced(target) ? objectLabel(target) : ARROW_WORDS.point;
+}
+
+export function arrowLabel(doc: CanvasDocument, arrow: ArrowObject): string {
+  const words = `${ARROW_WORDS.arrow} ${ARROW_WORDS.from} ${endWords(doc, arrow.from)} ${ARROW_WORDS.to} ${endWords(doc, arrow.to)}`;
+  return arrow.label ? `${words}, ${arrow.label}` : words;
+}
 
 export interface CanvasViewProps {
   store: CanvasStore;
@@ -192,7 +209,13 @@ export function CanvasView({
     if (!object) continue;
     if (object.type === 'arrow') {
       const g = resolveArrow(doc, object);
-      if (g) arrows.push(<ArrowView key={id} arrow={object} x1={g.from.x} y1={g.from.y} x2={g.to.x} y2={g.to.y} selected={selection.has(id)} />);
+      if (g) arrows.push(<ArrowView key={id} arrow={object} label={arrowLabel(doc, object)} x1={g.from.x} y1={g.from.y} x2={g.to.x} y2={g.to.y} selected={selection.has(id)} />);
+    } else if (object.type !== 'group' && lod === 'far' && editingId !== id && tabStop !== id) {
+      // Far out on a crowded board: a flat patch each. Bare text has nothing to show at this size.
+      if (object.type !== 'text') placed.push(<FlatView key={id} object={object} />);
+      if (selection.size === 1 && selection.has(id)) {
+        overlayNodes.push(<div key={id} className="pcv-outline" style={{ transform: `translate(${object.x}px, ${object.y}px)`, width: object.w, height: object.h }} />);
+      }
     } else if (object.type !== 'group') {
       placed.push(
         <ObjectView
@@ -207,11 +230,18 @@ export function CanvasView({
         />,
       );
       // The selection outline is its own element in the overlay, so its
-      // width can follow the zoom without the object reading the zoom.
-      if (selection.has(id)) {
+      // width can follow the zoom without the object reading the zoom. One
+      // object gets its own outline; several get one outline round them all
+      // (below), not a pile of overlapping ones.
+      if (selection.size === 1 && selection.has(id)) {
         overlayNodes.push(<div key={id} className="pcv-outline" style={{ transform: `translate(${object.x}px, ${object.y}px)`, width: object.w, height: object.h }} />);
       }
     }
+  }
+
+  if (selection.size > 1) {
+    const around = boundsOf(doc, selection);
+    if (around) overlayNodes.push(<div key="selection" className="pcv-outline" style={{ transform: `translate(${around.x}px, ${around.y}px)`, width: around.w, height: around.h }} />);
   }
 
   return (
@@ -219,7 +249,7 @@ export function CanvasView({
       {lead}
       <div ref={world} className="pcv-world">
         {placed}
-        <svg className="pcv-arrows" aria-hidden="true">
+        <svg className="pcv-arrows" role="group" aria-label={ARROWS_LABEL}>
           {arrows}
         </svg>
         <div ref={overlay} className="pcv-overlay">

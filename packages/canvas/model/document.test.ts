@@ -54,8 +54,15 @@ describe('saving and loading', () => {
   test('a saved document loads back equal, and saving twice gives the same text', () => {
     const text = serializeDocument(sound);
     const loaded = parseDocument(text);
-    expect(loaded.ok && loaded.value).toEqual(sound);
-    expect(loaded.ok && serializeDocument(loaded.value)).toBe(text);
+    // What loads is what was saved, with each object now carrying its place in the drawing order.
+    expect(loaded.ok && loaded.value.order).toEqual(sound.order);
+    expect(loaded.ok && Object.values(loaded.value.objects).map(({ z: _z, ...rest }) => rest)).toEqual(sound.order.map((id) => sound.objects[id]));
+    expect(loaded.ok && Object.values(loaded.value.objects).every((object) => typeof object.z === 'string')).toBe(true);
+    // Saving what was loaded, loading that and saving again gives the same text: the saved form is stable.
+    const again = loaded.ok ? serializeDocument(loaded.value) : '';
+    const reloaded = parseDocument(again);
+    expect(reloaded.ok && serializeDocument(reloaded.value)).toBe(again);
+    expect(again).not.toContain('"order"');
   });
 
   test('a document from a newer version is refused, not half-read', () => {
@@ -63,7 +70,7 @@ describe('saving and loading', () => {
     expect(newer.ok).toBe(false);
   });
 
-  test('order must hold every object exactly once', () => {
+  test('a listed order, when a file has one, must hold every object exactly once', () => {
     expect(parseDocument({ ...sound, order: ['a', 'b', 'g'] }).ok).toBe(false);
     expect(parseDocument({ ...sound, order: ['a', 'a', 'b', 'g'] }).ok).toBe(false);
     expect(parseDocument({ ...sound, order: [...sound.order, 'ghost'] }).ok).toBe(false);
@@ -79,7 +86,7 @@ describe('saving and loading', () => {
 
   test('a field this version does not know is not carried through', () => {
     const loaded = parseDocument({ ...sound, objects: { ...sound.objects, a: { ...sound.objects.a, onclick: 'alert(1)', zindex: 5 } } });
-    expect(loaded.ok && Object.keys(loaded.value.objects.a).sort()).toEqual(['group', 'h', 'id', 'text', 'type', 'w', 'x', 'y']);
+    expect(loaded.ok && Object.keys(loaded.value.objects.a).sort()).toEqual(['group', 'h', 'id', 'text', 'type', 'w', 'x', 'y', 'z']);
   });
 });
 

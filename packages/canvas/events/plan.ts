@@ -9,7 +9,9 @@ import { checkObject, checkSnapshotInput, LIMITS, type Checked } from '../model/
 import { parseColor } from '../model/color';
 import { bindingFault, groupCycle, groupMembers, isBoundEnd, resolveArrow } from '../model/document';
 import { isValidId } from '../model/ids';
+import { keyBetween } from '../model/order-key';
 import {
+  DEFAULT_SIZES,
   type Actor,
   type ArrowEnd,
   type CanvasDocument,
@@ -27,20 +29,20 @@ const done = (events: CanvasEvent[]): Checked<CanvasEvent[]> => ({ ok: true, val
 export const MIN_OBJECT_SIZE = 16;
 
 const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
-  box: ['text', 'detail', 'link', 'style', 'shape'],
-  note: ['text', 'link', 'style', 'shape'],
-  text: ['text', 'size', 'link', 'style', 'shape'],
-  frame: ['title', 'link', 'style', 'shape'],
-  image: ['src', 'alt', 'link', 'style', 'shape'],
-  sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style', 'shape'],
-  html: ['html', 'alt', 'link', 'style', 'shape'],
-  reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style', 'shape'],
+  box: ['text', 'detail', 'link', 'style', 'shape', 'lanes'],
+  note: ['text', 'link', 'style'],
+  text: ['text', 'size', 'link', 'style'],
+  frame: ['title', 'link', 'style'],
+  image: ['src', 'alt', 'link', 'style'],
+  sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style'],
+  html: ['html', 'alt', 'link', 'style'],
+  reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style'],
   arrow: ['from', 'to', 'label', 'link', 'style', 'routing'],
   group: ['label', 'link'],
 };
 
 /** Fields an edit removes when given `null` or an empty string. */
-const OPTIONAL_FIELDS = new Set(['alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'routing']);
+const OPTIONAL_FIELDS = new Set(['alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing']);
 
 /** Add the event that turns `before` into `after`, when they differ. */
 function push(events: CanvasEvent[], before: CanvasObject, after: CanvasObject): void {
@@ -52,6 +54,22 @@ function changes(pairs: [CanvasObject, CanvasObject][]): CanvasEvent[] {
   const events: CanvasEvent[] = [];
   for (const [before, after] of pairs) push(events, before, after);
   return events;
+}
+
+/** The same object with the default size for what it is, when it came with no width or no height. */
+function withDefaultSize(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
+  const object = raw as Record<string, unknown>;
+  if (object.w !== undefined && object.h !== undefined) return raw;
+  const shaped = `${String(object.type)}:${String(object.shape)}`;
+  const size = Object.hasOwn(DEFAULT_SIZES, shaped) ? DEFAULT_SIZES[shaped] : Object.hasOwn(DEFAULT_SIZES, String(object.type)) ? DEFAULT_SIZES[String(object.type)] : undefined;
+  return size ? { ...object, w: object.w ?? size.w, h: object.h ?? size.h } : raw;
+}
+
+/** The highest order key on the board, or null for an empty one. */
+function topKey(doc: CanvasDocument): string | null {
+  const last = doc.order[doc.order.length - 1];
+  return last ? (doc.objects[last].z ?? null) : null;
 }
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -69,13 +87,15 @@ function planAdd(doc: CanvasDocument, objects: readonly unknown[], actor: Actor)
   if (!Array.isArray(objects) || objects.length === 0) return fail('nothing to add');
   if (Object.keys(doc.objects).length + objects.length > LIMITS.objects) return fail(`a canvas holds at most ${LIMITS.objects} objects`);
   const incoming = new Map<ObjectId, CanvasObject>();
-  for (const raw of objects) {
-    const checked = checkObject(raw);
+  let top = topKey(doc);
+  for (const given of objects) {
+    const checked = checkObject(withDefaultSize(given));
     if (!checked.ok) return checked;
     const object = checked.value;
     if (doc.objects[object.id] || incoming.has(object.id)) return fail(`${object.id}: that id is already used`);
-    // Who added it is who is adding it, whatever the object says.
-    incoming.set(object.id, { ...object, by: actor.kind });
+    // Who added it is who is adding it, and it goes on top, whatever the object says.
+    top = keyBetween(top, null);
+    incoming.set(object.id, { ...object, by: actor, z: top });
   }
   const known = (id: ObjectId) => incoming.get(id) ?? doc.objects[id];
   for (const object of incoming.values()) {
@@ -166,7 +186,7 @@ function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectI
   if (doc.objects[groupId]) return fail(`${groupId}: that id is already used`);
   const members = uniqueKnown(doc, ids).filter((id) => id !== groupId);
   if (members.length < 2) return fail('a group needs at least two objects');
-  const group = checkObject({ id: groupId, type: 'group', by: actor.kind, ...(label ? { label } : {}) });
+  const group = checkObject({ id: groupId, type: 'group', by: actor, z: keyBetween(topKey(doc), null), ...(label ? { label } : {}) });
   if (!group.ok) return group;
   const events: CanvasEvent[] = [{ type: 'object-added', object: group.value }];
   for (const id of members) push(events, doc.objects[id], { ...doc.objects[id], group: groupId });
@@ -260,14 +280,25 @@ export function planCommand(doc: CanvasDocument, command: Command, actor: Actor)
       const wanted = new Set(uniqueKnown(doc, command.ids ?? []));
       if (wanted.size === 0) return fail('nothing to reorder');
       if (command.to !== 'front' && command.to !== 'back') return fail('reorder goes to "front" or "back"');
-      // Keep the moved objects in their own relative order.
+      // Each moved object gets a new key past the far end, keeping their own order among themselves. One
+      // field of one object each: two people reordering different things at once both keep what they did.
       const moving = doc.order.filter((id) => wanted.has(id));
-      const last = doc.order.length - 1;
-      return done(
-        command.to === 'front'
-          ? moving.map((id) => ({ type: 'object-ordered', id, at: last }))
-          : [...moving].reverse().map((id) => ({ type: 'object-ordered', id, at: 0 })),
-      );
+      const rest = doc.order.filter((id) => !wanted.has(id));
+      const events: CanvasEvent[] = [];
+      if (command.to === 'front') {
+        let key = rest.length ? (doc.objects[rest[rest.length - 1]].z ?? null) : null;
+        for (const id of moving) {
+          key = keyBetween(key, null);
+          push(events, doc.objects[id], { ...doc.objects[id], z: key });
+        }
+      } else {
+        let key = rest.length ? (doc.objects[rest[0]].z ?? null) : null;
+        for (const id of [...moving].reverse()) {
+          key = keyBetween(null, key);
+          push(events, doc.objects[id], { ...doc.objects[id], z: key });
+        }
+      }
+      return done(events);
     }
 
     case 'retitle':

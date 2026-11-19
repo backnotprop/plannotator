@@ -24,6 +24,8 @@ import type { Rect } from '../model/geometry';
 import type {
   Actor,
   ArrowEnd,
+  ArrowRouting,
+  BoxShape,
   CanvasLink,
   CanvasObject,
   ObjectId,
@@ -58,8 +60,9 @@ export interface ObjectPatch {
   link?: CanvasLink | null;
   /** How it is drawn: see `ObjectStyle`. `null` removes it. */
   style?: ObjectStyle | null;
-  shape?: string | null;
-  routing?: string | null;
+  shape?: BoxShape | null;
+  lanes?: string[] | null;
+  routing?: ArrowRouting | null;
 }
 
 export type Command =
@@ -88,8 +91,8 @@ export type CommandType = Command['type'];
 export type ObjectFields = Record<string, unknown>;
 
 export type CanvasEvent =
-  /** `at` is the place in the drawing order; absent means on top. */
-  | { type: 'object-added'; object: CanvasObject; at?: number }
+  /** The object says where it sits in the drawing order itself (`z`). */
+  | { type: 'object-added'; object: CanvasObject }
   /**
    * Some fields of one object took new values (`set`) or were taken away
    * (`unset`). Only what changed is named, so two people changing different
@@ -99,7 +102,6 @@ export type CanvasEvent =
    */
   | { type: 'object-set'; id: ObjectId; set: ObjectFields; unset?: string[] }
   | { type: 'object-removed'; id: ObjectId }
-  | { type: 'object-ordered'; id: ObjectId; at: number }
   | { type: 'snapshot-put'; snapshot: Snapshot }
   | { type: 'snapshot-removed'; id: SnapshotId }
   | { type: 'title-set'; title: string };

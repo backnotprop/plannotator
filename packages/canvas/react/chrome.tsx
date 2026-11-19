@@ -131,7 +131,10 @@ export function ZoomBar({ camera, onZoom, onFit, onReset }: { camera: CameraCont
   const label = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const write = () => {
-      if (label.current) label.current.textContent = `${Math.round(camera.get().z * 100)}%`;
+      const percent = `${Math.round(camera.get().z * 100)}%`;
+      if (label.current) label.current.textContent = percent;
+      // The button's name starts with what it shows, then says what pressing it does.
+      label.current?.parentElement?.setAttribute('aria-label', `${percent}. ${CANVAS_STRINGS.zoomReset}`);
     };
     write();
     return camera.subscribe(write);

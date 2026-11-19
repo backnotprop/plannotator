@@ -5,14 +5,23 @@
  * through. What passes here is safe to hand to the renderer.
  */
 import { parseColor } from './color';
-import { bindingFault, groupCycle, idMap, isBoundEnd } from './document';
+import { bindingFault, groupCycle, idMap, isBoundEnd, orderOf, withOrderKeys } from './document';
 import { isFiniteRect } from './geometry';
+import { isOrderKey } from './order-key';
 import { isPictureRef } from './assets';
 import { HTML_ITEM_MAX_LENGTH, isWebUrl } from './html-item';
 import { isValidId } from './ids';
 import {
+  ARROW_ROUTINGS,
   ARTIFACT_KINDS,
+  BOX_SHAPES,
   CANVAS_DOCUMENT_VERSION,
+  STYLE_ENDS,
+  STYLE_FILLS,
+  STYLE_SIDES,
+  type Actor,
+  type ArrowRouting,
+  type BoxShape,
   type ArrowEnd,
   type ArtifactKind,
   type CanvasDocument,
@@ -39,7 +48,6 @@ export const LIMITS = {
   snapshots: 2_000,
   spriteFrames: 512,
   spriteFps: 60,
-  styleKeys: 16,
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -50,21 +58,31 @@ const isText = (value: unknown, max: number): value is string => typeof value ==
 const isCoordinate = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= LIMITS.coordinate;
 
-const TOKEN_RE = /^[a-z][a-z0-9-]{0,31}$/;
-const isToken = (value: unknown): value is string => typeof value === 'string' && TOKEN_RE.test(value);
+const STYLE_READERS: Record<keyof ObjectStyle, (value: unknown) => boolean> = {
+  look: (v) => v === 'sketch',
+  fill: (v) => (STYLE_FILLS as readonly unknown[]).includes(v),
+  rough: (v) => v === 0 || v === 1 || v === 2,
+  seed: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 0xffffffff,
+  dash: (v) => v === true,
+  fromSide: (v) => (STYLE_SIDES as readonly unknown[]).includes(v),
+  toSide: (v) => (STYLE_SIDES as readonly unknown[]).includes(v),
+  labelAt: (v) => typeof v === 'number' && v >= 0 && v <= 1,
+  ends: (v) => (STYLE_ENDS as readonly unknown[]).includes(v),
+};
+const ARROW_ONLY_STYLE = new Set(['fromSide', 'toSide', 'labelAt', 'ends']);
 
-function readStyle(value: unknown): ObjectStyle | null {
+/** A style with every key and value from the closed lists, keys in a fixed order; null when anything is not. */
+function readStyle(value: unknown, arrow: boolean): ObjectStyle | null {
   if (!isRecord(value)) return null;
-  const keys = Object.keys(value);
-  if (keys.length > LIMITS.styleKeys) return null;
-  const out: ObjectStyle = {};
-  for (const key of keys.sort()) {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
     const v = value[key];
-    if (!isToken(key)) return null;
-    if (typeof v === 'string' ? v.length > 64 : typeof v === 'number' ? !Number.isFinite(v) : typeof v !== 'boolean') return null;
-    out[key] = v as string | number | boolean;
+    if (v === undefined) continue;
+    if (!Object.hasOwn(STYLE_READERS, key) || !STYLE_READERS[key as keyof ObjectStyle](v)) return null;
+    if (ARROW_ONLY_STYLE.has(key) && !arrow) return null;
+    out[key] = v;
   }
-  return out;
+  return out as ObjectStyle;
 }
 
 function readRect(value: Record<string, unknown>): { x: number; y: number; w: number; h: number } | null {
@@ -107,7 +125,7 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
   if (!isRecord(value)) return fail('an object must be a JSON object');
   if (!isValidId(value.id)) return fail('id must be 1 to 64 of a-z, 0-9, "-" and "_", starting with a letter or digit');
   const id = value.id;
-  const base: { id: string; color?: CanvasObject['color']; group?: string; link?: CanvasLink; by?: 'person' | 'agent'; style?: ObjectStyle } = { id };
+  const base: { id: string; color?: CanvasObject['color']; group?: string; link?: CanvasLink; by?: Actor; style?: ObjectStyle; z?: string } = { id };
   if (value.color !== undefined) {
     const color = parseColor(value.color);
     if (!color) return fail(`${id}: color is not a named colour or a CSS colour`);
@@ -123,20 +141,21 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
     base.link = link;
   }
   if (value.by !== undefined) {
-    if (value.by !== 'person' && value.by !== 'agent') return fail(`${id}: by must be "person" or "agent"`);
-    base.by = value.by;
+    const by = value.by;
+    if (!isRecord(by) || (by.kind !== 'person' && by.kind !== 'agent') || !isText(by.id, 128) || !by.id) return fail(`${id}: by must say who: { kind: "person" or "agent", id }`);
+    base.by = { kind: by.kind, id: by.id };
   }
   if (value.style !== undefined) {
-    const style = readStyle(value.style);
-    if (!style) return fail(`${id}: style must be up to ${LIMITS.styleKeys} named values, each text, a number or true/false`);
+    const style = readStyle(value.style, value.type === 'arrow');
+    if (!style) return fail(`${id}: style holds a name or a value that is not one of the listed ones`);
     if (Object.keys(style).length) base.style = style;
   }
-  for (const key of ['shape', 'routing'] as const) {
-    const token = value[key];
-    if (token === undefined || token === '') continue;
-    if ((key === 'routing') !== (value.type === 'arrow') || value.type === 'group' || !isToken(token)) return fail(`${id}: ${key} is not a name this object can carry`);
-    (base as Record<string, unknown>)[key] = token;
+  if (value.z !== undefined) {
+    if (!isOrderKey(value.z)) return fail(`${id}: z is not an order key`);
+    base.z = value.z;
   }
+  if (value.shape !== undefined && value.type !== 'box') return fail(`${id}: only a box has a shape`);
+  if (value.routing !== undefined && value.type !== 'arrow') return fail(`${id}: only an arrow has a routing`);
 
   const type = value.type;
   if (type === 'arrow') {
@@ -144,7 +163,8 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
     const to = readEnd(value.to);
     if (!from || !to) return fail(`${id}: an arrow needs "from" and "to", each an object id or a point`);
     if (value.label !== undefined && !isText(value.label, LIMITS.title)) return fail(`${id}: label is too long`);
-    return { ok: true, value: { ...base, type, from, to, ...(value.label ? { label: value.label as string } : {}) } };
+    if (value.routing !== undefined && !(ARROW_ROUTINGS as readonly unknown[]).includes(value.routing)) return fail(`${id}: routing must be one of ${ARROW_ROUTINGS.join(', ')}`);
+    return { ok: true, value: { ...base, type, from, to, ...(value.label ? { label: value.label as string } : {}), ...(value.routing ? { routing: value.routing as ArrowRouting } : {}) } };
   }
   if (type === 'group') {
     if (value.label !== undefined && !isText(value.label, LIMITS.title)) return fail(`${id}: label is too long`);
@@ -157,7 +177,21 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
     case 'box': {
       if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
       if (value.detail !== undefined && !isText(value.detail, LIMITS.text)) return fail(`${id}: detail is too long`);
-      return { ok: true, value: { ...base, ...r, type, text: value.text, ...(value.detail ? { detail: value.detail as string } : {}) } };
+      if (value.shape !== undefined && !(BOX_SHAPES as readonly unknown[]).includes(value.shape)) return fail(`${id}: shape must be one of ${BOX_SHAPES.join(', ')}`);
+      const lanes = value.lanes;
+      if (lanes !== undefined && (!Array.isArray(lanes) || lanes.length > 12 || !lanes.every((lane) => isText(lane, 80)) || value.shape !== 'container')) return fail(`${id}: lanes is up to 12 names, on a container`);
+      return {
+        ok: true,
+        value: {
+          ...base,
+          ...r,
+          type,
+          text: value.text,
+          ...(value.detail ? { detail: value.detail as string } : {}),
+          ...(value.shape && value.shape !== 'process' ? { shape: value.shape as BoxShape } : {}),
+          ...(Array.isArray(lanes) && lanes.length ? { lanes: [...lanes] as string[] } : {}),
+        },
+      };
     }
     case 'note':
       if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
@@ -322,15 +356,21 @@ export function parseDocument(input: unknown): Checked<CanvasDocument> {
       if (fault) return fail(`${object.id}: ${fault}`);
     }
   }
-  if (!Array.isArray(current.order)) return fail('order is missing');
-  const order: string[] = [];
-  const placed = new Set<string>();
-  for (const id of current.order) {
-    if (typeof id !== 'string' || !objects[id] || placed.has(id)) return fail('order must list each object once');
-    placed.add(id);
-    order.push(id);
+  // Drawing order is the objects' own keys. A file may still list `order` (an older writer, or a person):
+  // it is then only used to give keys to objects that have none, and must name each object once.
+  const listed: string[] = [];
+  if (current.order !== undefined) {
+    if (!Array.isArray(current.order)) return fail('order must be a list of ids');
+    const placed = new Set<string>();
+    for (const id of current.order) {
+      if (typeof id !== 'string' || !objects[id] || placed.has(id)) return fail('order must list each object once');
+      placed.add(id);
+      listed.push(id);
+    }
+    if (listed.length !== entries.length) return fail('order must list each object once');
   }
-  if (order.length !== entries.length) return fail('order must list each object once');
+  const keyed = withOrderKeys(objects, listed.length ? listed : Object.keys(objects));
+  const order = orderOf(keyed);
   const snapshots = idMap<Snapshot>();
   const rawSnapshots = current.snapshots ?? {};
   if (!isRecord(rawSnapshots) || Object.keys(rawSnapshots).length > LIMITS.snapshots) return fail('snapshots is not understood');
@@ -340,7 +380,7 @@ export function parseDocument(input: unknown): Checked<CanvasDocument> {
     if (checked.value.id !== key) return fail(`snapshot stored under ${JSON.stringify(key)} says its id is ${checked.value.id}`);
     snapshots[key] = checked.value;
   }
-  return { ok: true, value: { version: CANVAS_DOCUMENT_VERSION, id: current.id, title: current.title, objects, order, snapshots } };
+  return { ok: true, value: { version: CANVAS_DOCUMENT_VERSION, id: current.id, title: current.title, objects: keyed, order, snapshots } };
 }
 
 /** The same value with every object's keys in alphabetical order. */
@@ -362,5 +402,6 @@ export function serializeDocument(doc: CanvasDocument): string {
   for (const id of doc.order) if (doc.objects[id]) objects[id] = sorted(doc.objects[id]);
   const snapshots = idMap<unknown>();
   for (const id of Object.keys(doc.snapshots).sort()) snapshots[id] = sorted(doc.snapshots[id]);
-  return JSON.stringify({ version: doc.version, id: doc.id, title: doc.title, objects, order: doc.order, snapshots });
+  // `order` is not written: it is the objects' `z` keys, sorted.
+  return JSON.stringify({ version: doc.version, id: doc.id, title: doc.title, objects, snapshots });
 }

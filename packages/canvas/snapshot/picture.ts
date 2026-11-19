@@ -12,6 +12,7 @@ import { captureDocument } from '../model/capture';
 import { resolveArrow } from '../model/document';
 import type { CanvasDocument, CanvasObject, SnapshotId } from '../model/types';
 import { isPlaced } from '../model/types';
+import { shapeOutline, toPath } from '../view/shape-outline';
 import { referenceAddress } from '../model/reference';
 
 interface Palette {
@@ -104,6 +105,19 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
     }
     case 'box': {
       const { stroke, fill } = paint(object.color, palette);
+      if (object.shape && object.shape !== 'process') {
+        // The same outline the board draws, so the still picture shows a store as a cylinder too.
+        const made = shapeOutline(object.shape, w, h, object.lanes?.length ?? 0);
+        const [top, , bottom] = made.text;
+        const line = object.color && object.color !== 'neutral' ? stroke : palette.muted;
+        const inside = object.style?.fill === 'solid' ? line : object.style?.fill === 'none' || object.shape === 'container' ? 'none' : fill;
+        const details = made.details.map((segs) => `<path d="${toPath(segs)}" fill="none" stroke="${line}" stroke-width="1.25"/>`).join('');
+        const ty = object.shape === 'container' ? 22 : object.shape === 'actor' ? h - 8 : top + (h - top - bottom) / 2 + 5;
+        const label = object.text
+          ? `<text x="${n(object.shape === 'container' ? 14 : w / 2)}" y="${n(ty)}" font-size="14" font-weight="600" fill="${palette.ink}"${object.shape === 'container' ? '' : ' text-anchor="middle"'}>${esc(fitLine(object.text, w - 24, 14))}</text>`
+          : '';
+        return `<g transform="translate(${n(x)} ${n(y)})"><path d="${toPath(made.outline)}" fill="${inside}" stroke="${line}" stroke-width="1.25"/>${details}${label}</g>`;
+      }
       const detail = object.detail
         ? `<text x="${n(x + 14)}" y="${n(y + 42)}" font-size="12.5" fill="${palette.muted}">${esc(fitLine(object.detail, w - 28, 12.5))}</text>`
         : '';

@@ -145,11 +145,13 @@ describe('ids that are also names on Object.prototype', () => {
     expect(store.getDocument().order).not.toContain('constructor');
   });
 
-  test('a saved file may not list an id it does not hold', () => {
+  test('a file that lists an order may not list an id it does not hold', () => {
     const doc = JSON.parse(serializeDocument(board().getDocument()));
+    const order = Object.keys(doc.objects);
+    expect(parseDocument({ ...doc, order }).ok).toBe(true);
     for (const name of ['constructor', 'toString']) {
-      expect(parseDocument({ ...doc, order: [...doc.order, name] }).ok).toBe(false);
-      expect(parseDocument({ ...doc, order: [name, ...doc.order.slice(1)] }).ok).toBe(false);
+      expect(parseDocument({ ...doc, order: [...order, name] }).ok).toBe(false);
+      expect(parseDocument({ ...doc, order: [name, ...order.slice(1)] }).ok).toBe(false);
     }
   });
 

@@ -8,7 +8,8 @@ import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { CanvasColor } from '../model/color';
 import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
 import { referenceCard } from '../model/reference';
-import type { ArrowObject, ArtifactKind, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
+import type { ArrowObject, ArtifactKind, BoxObject, BoxShape, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
+import { CONTAINER_HEADER, type ShapeOutline, shapeOutline, toPath } from '../view/shape-outline';
 
 export interface ObjectViewProps {
   object: PlacedCanvasObject;
@@ -162,6 +163,68 @@ function Card({ object, resolveImageSrc }: { object: ReferenceObject; resolveIma
   );
 }
 
+/** What each box shape is called, for someone who cannot see its outline. */
+export const SHAPE_NAMES: Record<BoxShape, string> = {
+  process: 'Box',
+  decision: 'Decision',
+  database: 'Database',
+  document: 'Document',
+  queue: 'Queue',
+  actor: 'Actor',
+  cloud: 'Cloud',
+  pill: 'Start or end',
+  container: 'Container',
+};
+
+/** Outlines as path strings, kept by shape and size: a move reuses them, and so does every figure of the same object. */
+const PATHS = new Map<string, { outline: string; details: string[]; text: ShapeOutline['text'] }>();
+
+function shapePaths(shape: BoxShape, w: number, h: number, lanes: number) {
+  const key = `${shape}|${w}|${h}|${lanes}`;
+  let hit = PATHS.get(key);
+  if (!hit) {
+    const made = shapeOutline(shape, w, h, lanes);
+    hit = { outline: toPath(made.outline), details: made.details.map(toPath), text: made.text };
+    if (PATHS.size > 4000) PATHS.clear();
+    PATHS.set(key, hit);
+  }
+  return hit;
+}
+
+/**
+ * A box drawn as its shape: the outline is one small SVG, the words stay
+ * HTML on top of it, so they wrap, can be typed into and are read out.
+ */
+function ShapedBox({ object, editing, onEditEnd }: { object: BoxObject; editing: boolean; onEditEnd?: (id: string, text: string) => void }) {
+  const shape = object.shape ?? 'process';
+  const lanes = shape === 'container' ? (object.lanes ?? []) : [];
+  const paths = shapePaths(shape, object.w, object.h, lanes.length);
+  const [top, right, bottom, left] = paths.text;
+  return (
+    <>
+      <svg className="pcv-shape-svg" width={object.w} height={object.h} viewBox={`0 0 ${object.w} ${object.h}`} aria-hidden="true" focusable="false">
+        <path className="pcv-shape-fill" d={paths.outline} />
+        {paths.details.map((d, i) => (
+          <path key={i} className="pcv-shape-line" d={d} />
+        ))}
+      </svg>
+      <div className="pcv-shape-text" style={{ padding: `${top}px ${right}px ${bottom}px ${left}px` }}>
+        <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} />
+        {object.detail && !editing && shape !== 'container' && shape !== 'actor' ? <div className="pcv-words pcv-box-detail" dir="auto">{object.detail}</div> : null}
+      </div>
+      {lanes.length ? (
+        <div className="pcv-lanes" style={{ top: CONTAINER_HEADER }} aria-hidden="true">
+          {lanes.map((lane, i) => (
+            <div key={i} className="pcv-lane">
+              <span>{lane}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /** What an object is called when it has no words of its own. */
 export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card' } as const;
 
@@ -170,7 +233,9 @@ export function objectLabel(object: PlacedCanvasObject): string {
   const words =
     object.type === 'frame' ? object.title : object.type === 'reference' ? referenceCard(object).title : 'text' in object ? object.text : 'alt' in object ? (object.alt ?? '') : '';
   const line = words.split('\n')[0].trim();
-  return line ? `${OBJECT_NAMES[object.type]}: ${line}` : OBJECT_NAMES[object.type];
+  const name = object.type === 'box' && object.shape ? SHAPE_NAMES[object.shape] : OBJECT_NAMES[object.type];
+  const lanes = object.type === 'box' && object.lanes?.length ? ` (${object.lanes.join(', ')})` : '';
+  return line ? `${name}: ${line}${lanes}` : `${name}${lanes}`;
 }
 
 export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex }: ObjectViewProps) {
@@ -190,6 +255,13 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
   };
   switch (object.type) {
     case 'box':
+      if (object.shape && object.shape !== 'process') {
+        return (
+          <div className="pcv-obj pcv-shape" {...common} data-shape={object.shape} data-dash={object.style?.dash ? '' : undefined} data-fill={object.style?.fill} style={style}>
+            <ShapedBox object={object} editing={editing} onEditEnd={onEditEnd} />
+          </div>
+        );
+      }
       return (
         <div className="pcv-obj pcv-box" {...common} style={style}>
           <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} />
@@ -243,8 +315,28 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
   }
 });
 
+/**
+ * An object far away: one element, a flat patch of its colour in its place,
+ * no words and nothing inside. When a board is zoomed so far out that very
+ * many objects are on screen and none of their text could be read, this is
+ * what each one is. A fraction of the elements, so a pan stays cheap.
+ */
+export const FlatView = memo(function FlatView({ object }: { object: PlacedCanvasObject }) {
+  const color = colorAttrs(object.color);
+  return (
+    <div
+      className={`pcv-obj pcv-flat pcv-flat-${object.type}`}
+      data-id={object.id}
+      data-color={color['data-color']}
+      style={{ ...color.style, transform: `translate(${object.x}px, ${object.y}px)`, width: object.w, height: object.h }}
+    />
+  );
+});
+
 export interface ArrowViewProps {
   arrow: ArrowObject;
+  /** What a screen reader says: "Arrow from X to Y, label". */
+  label?: string;
   x1: number;
   y1: number;
   x2: number;
@@ -256,12 +348,12 @@ const HEAD = 10;
 const SPREAD = 0.42;
 
 /** An arrow: a line, a head and an optional label. Memoised on its four numbers. */
-export const ArrowView = memo(function ArrowView({ arrow, x1, y1, x2, y2, selected }: ArrowViewProps) {
+export const ArrowView = memo(function ArrowView({ arrow, label, x1, y1, x2, y2, selected }: ArrowViewProps) {
   const angle = Math.atan2(y2 - y1, x2 - x1);
   const head = `${x2},${y2} ${x2 - HEAD * Math.cos(angle - SPREAD)},${y2 - HEAD * Math.sin(angle - SPREAD)} ${x2 - HEAD * Math.cos(angle + SPREAD)},${y2 - HEAD * Math.sin(angle + SPREAD)}`;
   const color = colorAttrs(arrow.color);
   return (
-    <g className="pcv-arrow" data-id={arrow.id} data-color={color['data-color']} data-selected={selected ? '' : undefined} style={color.style}>
+    <g className="pcv-arrow" role="img" aria-label={label} data-id={arrow.id} data-color={color['data-color']} data-selected={selected ? '' : undefined} style={color.style}>
       <line x1={x1} y1={y1} x2={x2 - 4 * Math.cos(angle)} y2={y2 - 4 * Math.sin(angle)} />
       <polygon points={head} />
       {arrow.label ? (

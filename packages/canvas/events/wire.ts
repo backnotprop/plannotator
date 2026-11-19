@@ -102,8 +102,7 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
     case 'object-added': {
       const object = checkObject(value.object);
       if (!object.ok) return object;
-      if (value.at !== undefined && !isNumber(value.at)) return fail('at must be a number');
-      return { ok: true, value: { type: 'object-added', object: object.value, ...(value.at !== undefined ? { at: value.at } : {}) } };
+      return { ok: true, value: { type: 'object-added', object: object.value } };
     }
     case 'object-set': {
       // The fields are checked against the object they land on, when they are applied (`applyEvents` with `check`).
@@ -117,9 +116,6 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
     case 'object-removed':
       if (typeof value.id !== 'string') return fail('object-removed needs "id"');
       return { ok: true, value: { type: 'object-removed', id: value.id } };
-    case 'object-ordered':
-      if (typeof value.id !== 'string' || !isNumber(value.at)) return fail('object-ordered needs "id" and "at"');
-      return { ok: true, value: { type: 'object-ordered', id: value.id, at: value.at } };
     case 'snapshot-put': {
       const snapshot = checkSnapshot(value.snapshot);
       if (!snapshot.ok) return snapshot;

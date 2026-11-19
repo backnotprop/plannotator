@@ -14,6 +14,7 @@
  */
 import { LIMITS, checkObject } from '../model/codec';
 import { bindingFault, groupCycle, idMap, isBoundEnd } from '../model/document';
+import { compareOrder } from '../model/order-key';
 import type { CanvasDocument, CanvasObject, Snapshot } from '../model/types';
 import type { CanvasEvent, ObjectFields } from './types';
 
@@ -35,8 +36,17 @@ export interface ApplyOptions {
   check?: boolean;
 }
 
-const clampIndex = (at: number | undefined, length: number): number =>
-  at === undefined || !Number.isFinite(at) ? length : Math.max(0, Math.min(length, Math.trunc(at)));
+/** Put `id` into `list` (sorted back to front) where its object's order key says. */
+function place(list: string[], objects: Readonly<Record<string, CanvasObject>>, object: CanvasObject): void {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (compareOrder(objects[list[mid]] ?? { id: list[mid] }, object) < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  list.splice(lo, 0, object.id);
+}
 
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -99,10 +109,8 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
           object = rest as CanvasObject;
         }
         if (unsound(now(), object, null)) break;
-        const list = ord();
-        const at = clampIndex(event.at, list.length);
+        place(ord(), now(), object);
         objs()[object.id] = object;
-        list.splice(at, 0, object.id);
         undo.push({ type: 'object-removed', id: object.id });
         applied.push(object === event.object ? event : { ...event, object });
         break;
@@ -145,6 +153,13 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
           if (same(before, object)) break;
         }
         if (unsound(now(), object, touched)) break;
+        if (touched.includes('z')) {
+          // Its place in the drawing order changed: take it out and put it back where its new key says.
+          const list = ord();
+          const was = list.indexOf(event.id);
+          if (was !== -1) list.splice(was, 1);
+          place(list, now(), object);
+        }
         objs()[event.id] = object;
         undo.push({ type: 'object-set', id: event.id, set: back, ...(backUnset.length ? { unset: backUnset } : {}) });
         applied.push(event);
@@ -157,20 +172,7 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
         const at = list.indexOf(event.id);
         if (at !== -1) list.splice(at, 1);
         delete objs()[event.id];
-        undo.push({ type: 'object-added', object: before, at: at === -1 ? undefined : at });
-        applied.push(event);
-        break;
-      }
-      case 'object-ordered': {
-        if (!now()[event.id]) break;
-        const list = ord();
-        const from = list.indexOf(event.id);
-        if (from === -1) break;
-        list.splice(from, 1);
-        const to = clampIndex(event.at, list.length);
-        list.splice(to, 0, event.id);
-        if (from === to) break;
-        undo.push({ type: 'object-ordered', id: event.id, at: from });
+        undo.push({ type: 'object-added', object: before });
         applied.push(event);
         break;
       }

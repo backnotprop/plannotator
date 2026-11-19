@@ -202,10 +202,10 @@ function PlanAndCanvas() {
     const agent = { kind: 'agent', id: 'demo-agent' } as const;
     const id = createId('image');
     store.dispatch(
-      { type: 'add', objects: [{ id, type: 'image', x: 960, y: 120, w: 250, h: 110, src: CHART_IMAGE, alt: 'Minutes from scan to alert' }] },
+      { type: 'add', objects: [{ id, type: 'image', x: 2300, y: 120, w: 344, h: 200, src: CHART_IMAGE, alt: 'Minutes from scan to alert' }] },
       { actor: agent },
     );
-    store.dispatch({ type: 'recolor', ids: ['worker'], color: { custom: '#c2410c' } }, { actor: agent });
+    store.dispatch({ type: 'recolor', ids: ['wk'], color: { custom: '#c2410c' } }, { actor: agent });
   };
 
   return (

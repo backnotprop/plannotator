@@ -10,6 +10,7 @@ import {
   rectFromPoints,
   unionRects,
 } from './geometry';
+import { compareOrder, keyBetween } from './order-key';
 import {
   CANVAS_DOCUMENT_VERSION,
   type ArrowEnd,
@@ -34,10 +35,47 @@ export function idMap<T>(from?: Readonly<Record<string, T>>): Record<string, T> 
   return map;
 }
 
-/** The same document with its maps made prototype-free. A document that already is comes back as it was. */
+/** Every object id, back to front: sorted by order key, then id. */
+export function orderOf(objects: Readonly<Record<ObjectId, CanvasObject>>): ObjectId[] {
+  return Object.values(objects)
+    .sort(compareOrder)
+    .map((object) => object.id);
+}
+
+/**
+ * The same objects, each with an order key. An object that has none is
+ * given one, on top of those that do, in the sequence `fallback` lists
+ * them. Objects that already have keys are not touched.
+ */
+export function withOrderKeys(objects: Readonly<Record<ObjectId, CanvasObject>>, fallback: readonly ObjectId[]): Record<ObjectId, CanvasObject> {
+  let top: string | null = null;
+  let missing = false;
+  for (const object of Object.values(objects)) {
+    if (object.z === undefined) missing = true;
+    else if (top === null || object.z > top) top = object.z;
+  }
+  if (!missing) return objects as Record<ObjectId, CanvasObject>;
+  const out = idMap(objects);
+  for (const id of fallback) {
+    const object = out[id];
+    if (!object || object.z !== undefined) continue;
+    top = keyBetween(top, null);
+    out[id] = { ...object, z: top };
+  }
+  return out;
+}
+
+/**
+ * A document made safe to hold: maps with no prototype, every object with
+ * an order key, `order` worked out from the keys. A document that is
+ * already so comes back as it was. A store does this to whatever it is given.
+ */
 export function withIdMaps(doc: CanvasDocument): CanvasDocument {
-  if (Object.getPrototypeOf(doc.objects) === null && Object.getPrototypeOf(doc.snapshots) === null) return doc;
-  return { ...doc, objects: idMap(doc.objects), snapshots: idMap(doc.snapshots) };
+  const plain = Object.getPrototypeOf(doc.objects) !== null || Object.getPrototypeOf(doc.snapshots) !== null;
+  const keyed = withOrderKeys(doc.objects, doc.order.length ? doc.order : Object.keys(doc.objects));
+  if (!plain && keyed === doc.objects) return doc;
+  const objects = keyed === doc.objects ? idMap(doc.objects) : keyed;
+  return { ...doc, objects, order: orderOf(objects), snapshots: idMap(doc.snapshots) };
 }
 
 export function createDocument(id: string, title = ''): CanvasDocument {

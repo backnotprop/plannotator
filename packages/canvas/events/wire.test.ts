@@ -32,7 +32,7 @@ describe('an agent speaks the same commands as a person', () => {
     expect(agentSends(store, '{"type":"recolor","ids":["pic","spin","table"],"color":"#ff8800"}').ok).toBe(true);
     expect(agentSends(store, '{"type":"move","ids":["pic"],"dx":40,"dy":0}').ok).toBe(true);
     const doc = store.getDocument();
-    expect(doc.objects.pic).toMatchObject({ x: 40, by: 'agent', color: { custom: '#ff8800' } });
+    expect(doc.objects.pic).toMatchObject({ x: 40, by: AGENT, color: { custom: '#ff8800' } });
     expect(doc.objects.table.color).toEqual({ custom: '#ff8800' });
     // None of it is the person's to undo.
     expect(store.canUndo).toBe(false);
@@ -157,6 +157,18 @@ describe('the sync seam', () => {
     net.flush();
     expect(one.getDocument().objects.a).toMatchObject({ x: 40, text: 'Renamed', color: 'red' });
     expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('two people reordering different objects at the same moment both keep what they did', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'add', objects: [{ id: 'b', type: 'note', x: 0, y: 100, w: 100, h: 40, text: 'B' }, { id: 'c', type: 'note', x: 0, y: 200, w: 100, h: 40, text: 'C' }] });
+    net.flush();
+    expect(two.getDocument().order).toEqual(['a', 'b', 'c']);
+    one.dispatch({ type: 'reorder', ids: ['a'], to: 'front' });
+    two.dispatch({ type: 'reorder', ids: ['c'], to: 'back' });
+    net.flush();
+    expect(one.getDocument().order).toEqual(['c', 'b', 'a']);
+    expect(two.getDocument().order).toEqual(['c', 'b', 'a']);
   });
 
   test('a change to something another person deleted at the same moment is dropped, everywhere the same', () => {

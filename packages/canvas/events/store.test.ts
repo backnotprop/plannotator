@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { parseDocument, serializeDocument } from '../model/codec';
 import { createDocument } from '../model/document';
+import { keyBetween } from '../model/order-key';
 import type { CanvasDocument, CanvasObject } from '../model/types';
 import { CanvasStore } from './store';
 import type { Command } from './types';
@@ -181,7 +182,7 @@ describe('undo and redo', () => {
     store.undo();
     expect(store.getDocument().objects.a).toMatchObject({ x: 0 });
     expect(store.getDocument().objects['from-agent']).toBeDefined();
-    expect(store.getDocument().objects['from-agent'].by).toBe('agent');
+    expect(store.getDocument().objects['from-agent'].by).toEqual(AGENT);
   });
 
   test('undoing a move after someone else deleted the object does not bring it back', () => {
@@ -269,22 +270,78 @@ describe('what a move may do', () => {
 
   test('an agent cannot pass its work off as a person\'s', () => {
     const store = seeded();
-    store.dispatch({ type: 'add', objects: [{ ...box('claimed', 0, 400), by: 'person' }] }, { actor: AGENT });
-    expect(store.getDocument().objects.claimed.by).toBe('agent');
+    store.dispatch({ type: 'add', objects: [{ ...box('claimed', 0, 400), by: { kind: 'person', id: 'ana' } }] }, { actor: AGENT });
+    expect(store.getDocument().objects.claimed.by).toEqual(AGENT);
   });
 
-  test('an object carries a style, a shape and a routing name through edits, saves and undo', () => {
+  test('a shape, a routing and a style are words from short lists, kept through edits, saves and undo', () => {
     const store = seeded();
-    expect(store.dispatch({ type: 'edit', id: 'a', patch: { shape: 'diamond', style: { stroke: 'dashed', roughness: 1.5, fill: true } } }).ok).toBe(true);
-    expect(store.dispatch({ type: 'edit', id: 'ab', patch: { routing: 'elbow' } }).ok).toBe(true);
+    expect(store.dispatch({ type: 'edit', id: 'a', patch: { shape: 'database', style: { look: 'sketch', fill: 'hachure', rough: 2, seed: 7 } } }).ok).toBe(true);
+    expect(store.dispatch({ type: 'edit', id: 'ab', patch: { routing: 'elbow', style: { dash: true, fromSide: 'n', toSide: 'w', labelAt: 0.25, ends: 'dot' } } }).ok).toBe(true);
     const loaded = parseDocument(serializeDocument(store.getDocument()));
-    expect(loaded.ok && loaded.value.objects.a).toMatchObject({ shape: 'diamond', style: { stroke: 'dashed', roughness: 1.5, fill: true } });
-    expect(loaded.ok && loaded.value.objects.ab).toMatchObject({ routing: 'elbow' });
-    expect(store.dispatch({ type: 'edit', id: 'a', patch: { routing: 'elbow' } }).ok).toBe(false);
-    expect(store.dispatch({ type: 'edit', id: 'a', patch: { style: { 'Bad Key': 1 } as never } }).ok).toBe(false);
+    expect(loaded.ok && loaded.value.objects.a).toMatchObject({ shape: 'database', style: { look: 'sketch', fill: 'hachure', rough: 2, seed: 7 } });
+    expect(loaded.ok && loaded.value.objects.ab).toMatchObject({ routing: 'elbow', style: { dash: true, fromSide: 'n', toSide: 'w', labelAt: 0.25, ends: 'dot' } });
+    // Not on the lists, or on the wrong kind of object: refused.
+    for (const patch of [
+      { shape: 'hexagon' },
+      { routing: 'elbow' },
+      { style: { look: 'neon' } },
+      { style: { rough: 5 } },
+      { style: { glow: true } },
+      { style: { fromSide: 'n' } },
+      { lanes: ['a', 'b'] },
+    ]) {
+      expect(store.dispatch({ type: 'edit', id: 'a', patch: patch as never }).ok).toBe(false);
+    }
+    expect(store.dispatch({ type: 'edit', id: 'ab', patch: { shape: 'cloud' } as never }).ok).toBe(false);
+    expect(store.dispatch({ type: 'edit', id: 'ab', patch: { routing: 'zigzag' } as never }).ok).toBe(false);
+    expect(store.dispatch({ type: 'edit', id: 'b', patch: { shape: 'container', lanes: ['urgent', 'bulk'] } }).ok).toBe(true);
+    store.undo();
     store.undo();
     store.undo();
     expect('shape' in store.getDocument().objects.a).toBe(false);
+  });
+});
+
+describe('drawing order', () => {
+  test('a new object goes on top, and coming back from a delete it is where it was', () => {
+    const store = seeded();
+    expect(store.getDocument().order).toEqual(['a', 'b', 'c', 'ab']);
+    store.dispatch({ type: 'reorder', ids: ['c'], to: 'back' });
+    store.dispatch({ type: 'delete', ids: ['c'] });
+    store.dispatch({ type: 'add', objects: [box('d', 0, 300)] });
+    expect(store.getDocument().order).toEqual(['a', 'b', 'ab', 'd']);
+    store.undo();
+    store.undo();
+    expect(store.getDocument().order).toEqual(['c', 'a', 'b', 'ab']);
+  });
+
+  test('a reorder changes one field of the object moved and nothing about any other', () => {
+    const store = seeded();
+    const before = store.getDocument();
+    const result = store.dispatch({ type: 'reorder', ids: ['a'], to: 'front' });
+    expect(result.ok && result.envelope?.events.map((event) => (event.type === 'object-set' ? [event.id, Object.keys(event.set)] : event.type))).toEqual([['a', ['z']]]);
+    expect(store.getDocument().objects.b).toBe(before.objects.b);
+  });
+
+  test('there is always a key between two keys, and keys stay short for a board that is added to', () => {
+    let low = keyBetween(null, null);
+    let high = keyBetween(low, null);
+    for (let i = 0; i < 200; i++) {
+      const mid = keyBetween(low, high);
+      expect(mid > low && mid < high).toBe(true);
+      if (i % 2) low = mid;
+      else high = mid;
+    }
+    let top: string | null = null;
+    for (let i = 0; i < 10_000; i++) top = keyBetween(top, null);
+    expect(top!.length).toBe(6);
+    let bottom: string | null = keyBetween(null, null);
+    for (let i = 0; i < 5000; i++) {
+      const next: string = keyBetween(null, bottom);
+      expect(next < bottom!).toBe(true);
+      bottom = next;
+    }
   });
 });
 

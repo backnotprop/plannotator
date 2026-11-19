@@ -11,97 +11,113 @@ import { serializeSnapshotBlock } from '../snapshot/block';
 
 const AGENT = { kind: 'agent', id: 'demo-agent' } as const;
 
-/** A small chart, as a picture an agent might add: a file the demo serves, referenced by its path. */
-export const CHART_IMAGE = '/chart.svg';
+/** A chart, as a picture an agent might add: a file the demo serves, referenced by its path. */
+export const CHART_IMAGE = '/board/chart.svg';
 
 /** Four frames of a blinking dot in one row: a sprite sheet. */
 export const PULSE_SPRITE = '/pulse.svg';
 
+/**
+ * A custom HTML item on a transparent ground. No script: the sandbox does
+ * not run any, so the figures are written and only the bars move, in CSS.
+ */
 const HTML_ITEM =
-  '<style>.t{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;font:12.5px/1.4 system-ui,sans-serif;padding:6px 2px}.t b{font-weight:600}.t i{font-style:normal;opacity:.65}' +
-  '.bar{height:6px;border-radius:3px;background:#5b3fd6;align-self:center;animation:grow 1.6s ease-out both}@keyframes grow{from{transform:scaleX(0)}}.bar{transform-origin:left}</style>' +
-  '<div class="t"><b>urgent</b><span class="bar" style="width:22%"></span><i>0.7 min</i><b>bulk</b><span class="bar" style="width:58%"></span><i>3.1 min</i><b>sweep</b><span class="bar" style="width:96%"></span><i>9.1 min</i></div>';
+  '<style>.c{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;font-family:ui-monospace,SF Mono,Menlo,monospace;height:56px}' +
+  '.c small{display:block;font:12px/1.2 system-ui,sans-serif;opacity:.7;margin-bottom:4px}.c b{font-size:26px;font-weight:650;letter-spacing:.5px}.c sub{font-size:11px;opacity:.7}' +
+  '.bars{display:flex;align-items:flex-end;gap:3px;height:44px}.bars i{width:5px;border-radius:1.5px;background:currentColor;opacity:.16;animation:r 2.4s ease-in-out infinite alternate}' +
+  '.bars i:last-child{opacity:1;color:#5b3fd6}@keyframes r{from{transform:scaleY(.82)}to{transform:scaleY(1)}}.bars i{transform-origin:bottom}' +
+  '@media (prefers-reduced-motion:reduce){.bars i{animation:none}}</style>' +
+  '<div class="c"><div><small>Cutover to the queue in</small><b>12<sub>d</sub> 04:31:06</b></div><div class="bars">' +
+  [30, 62, 44, 70, 52, 80, 58, 66, 48, 74, 60, 86, 40].map((h, i) => `<i style="height:${h}%;animation-delay:${i * 90}ms"></i>`).join('') +
+  '</div></div>';
 
-const box = (id: string, x: number, y: number, text: string, detail?: string, extra: Partial<CanvasObject> = {}): CanvasObject =>
-  ({ id, type: 'box', x, y, w: 196, h: 60, text, ...(detail ? { detail } : {}), ...extra }) as CanvasObject;
-
-const arrow = (id: string, from: string, to: string, label?: string): CanvasObject => ({ id, type: 'arrow', from: { object: from }, to: { object: to }, ...(label ? { label } : {}) });
+/** Who made what on the sample board: a person and an agent, so the board shows both. */
+const ANA = { kind: 'person', id: 'ana' } as const;
 
 export const SAMPLE_CANVAS_ID = 'parcel-alerts';
 
 export const SAMPLE_SNAPSHOTS: SnapshotInput[] = [
-  { id: 'architecture', title: 'Architecture', source: { kind: 'frame', frame: 'f-arch' } },
-  { id: 'queues', title: 'Two queues', source: { kind: 'objects', objects: ['orders', 'q-urgent', 'q-bulk', 'a-orders-urgent', 'a-orders-bulk', 'why-two'] } },
-  { id: 'rollout', title: 'Rollout', source: { kind: 'frame', frame: 'f-rollout' } },
+  { id: 'architecture', title: 'Architecture', source: { kind: 'frame', frame: 'fa' } },
+  { id: 'queues', title: 'Two queues', source: { kind: 'objects', objects: ['dec', 'qs', 'qu', 'qb', 'a3', 'a4', 'n1'] } },
+  { id: 'rollout', title: 'Rollout', source: { kind: 'frame', frame: 'fr' } },
 ];
 
+type Loose = Record<string, unknown> & { id: string; type: string };
+const shape = (id: string, kind: string, x: number, y: number, w: number, h: number, text: string, extra: Record<string, unknown> = {}): Loose => ({ id, type: 'box', shape: kind, x, y, w, h, text, ...extra });
+const link = (id: string, from: string, to: string, extra: Record<string, unknown> = {}): Loose => ({ id, type: 'arrow', from: { object: from }, to: { object: to }, ...extra });
+
+/**
+ * The sample board: the same content and the same geometry as the design
+ * reference (an architecture diagram, evidence, a rollout timeline, what
+ * was measured, references), so the two can be compared side by side.
+ * Built with commands, as an agent and a person would build it.
+ */
 export function createSampleStore(): CanvasStore {
-  const store = new CanvasStore(createDocument(SAMPLE_CANVAS_ID, 'Parcel alerts'), { actor: { kind: 'person', id: 'demo-person' } });
-  const commands: Command[] = [
-    {
-      type: 'add',
-      objects: [
-        { id: 'f-arch', type: 'frame', x: 40, y: 80, w: 924, h: 300, title: 'Architecture' },
-        { id: 'f-rollout', type: 'frame', x: 40, y: 470, w: 420, h: 250, title: 'Rollout' },
-        { id: 'f-measure', type: 'frame', x: 500, y: 470, w: 464, h: 250, title: 'What we measured' },
-        box('orders', 64, 196, 'Orders API', 'emits a parcel event per scan'),
-        box('q-urgent', 300, 132, 'Queue: urgent', 'out for delivery, failed', { color: 'blue' }),
-        box('q-bulk', 300, 262, 'Queue: bulk', 'everything else', { color: 'blue' }),
-        box('worker', 524, 196, 'Notifier worker', 'decides who should hear'),
-        box('push', 744, 112, 'Push provider', undefined, { color: 'green', h: 44 } as Partial<CanvasObject>),
-        box('email', 744, 204, 'Email provider', undefined, { color: 'green', h: 44 } as Partial<CanvasObject>),
-        box('dead', 744, 292, 'Dead-letter list', 'after 3 failed tries', { color: 'amber' }),
-        arrow('a-orders-urgent', 'orders', 'q-urgent'),
-        arrow('a-orders-bulk', 'orders', 'q-bulk'),
-        arrow('a-urgent-worker', 'q-urgent', 'worker'),
-        arrow('a-bulk-worker', 'q-bulk', 'worker'),
-        arrow('a-worker-push', 'worker', 'push'),
-        arrow('a-worker-email', 'worker', 'email'),
-        arrow('a-worker-dead', 'worker', 'dead', 'fails'),
-        { id: 'why-two', type: 'note', x: 286, y: 400, w: 190, h: 64, text: 'Why two queues? One queue with a priority field would do.', by: 'person' },
-        box('r1', 64, 494, '1. Shadow mode', 'The queue runs beside the sweep. Nothing is sent.', { w: 372 } as Partial<CanvasObject>),
-        box('r2', 64, 566, '2. Five percent, one region', 'Compare the alert log with the sweep for a week.', { w: 372 } as Partial<CanvasObject>),
-        box('r3', 64, 638, '3. Everyone', 'Switch the sweep off a week later.', { w: 372 } as Partial<CanvasObject>),
-        { id: 'chart', type: 'image', x: 524, y: 494, w: 250, h: 110, src: CHART_IMAGE, alt: 'Minutes from scan to alert, sweep and queue' },
-        { id: 'pulse', type: 'sprite', x: 790, y: 500, w: 24, h: 24, src: PULSE_SPRITE, alt: 'Shadow mode is running', frames: 4, fps: 4 },
-        { id: 'pulse-label', type: 'text', x: 820, y: 502, w: 90, h: 20, text: 'shadow mode', size: 'small' },
-        { id: 'timings', type: 'html', x: 524, y: 618, w: 372, h: 84, html: HTML_ITEM, alt: 'Minutes from scan to alert: urgent 0.7, bulk 3.1, sweep 9.1' },
-        { id: 'f-refs', type: 'frame', x: 1004, y: 80, w: 328, h: 640, title: 'References' },
-        {
-          id: 'ref-web',
-          type: 'reference',
-          x: 1028,
-          y: 104,
-          w: 280,
-          h: 236,
-          target: { kind: 'web', url: 'https://example.org/notes/late-alerts' },
-          title: 'Queues or a sweep? Notes on late alerts',
-          description: 'Why a ten-minute sweep makes the median alert nine minutes late, and what a queue changes.',
-          site: 'example.org',
-          image: CHART_IMAGE,
-        },
-        {
-          id: 'ref-artifact',
-          type: 'reference',
-          x: 1028,
-          y: 364,
-          w: 280,
-          h: 196,
-          target: { kind: 'artifact', artifact: 'shots/alert-log-week-1.png', artifactKind: 'image' },
-          title: 'alert-log-week-1.png',
-          description: 'The alert log beside the sweep, first week of shadow mode.',
-          image: CHART_IMAGE,
-        },
-        { id: 'ref-plan', type: 'reference', x: 1028, y: 584, w: 280, h: 104, target: { kind: 'plan', anchor: 'Rollout' }, title: 'Rollout', description: 'Shadow mode for a week, then five percent of parcels in one region.' },
-      ],
-    },
-    ...SAMPLE_SNAPSHOTS.map((snapshot): Command => ({ type: 'add-snapshot', snapshot })),
+  const store = new CanvasStore(createDocument(SAMPLE_CANVAS_ID, 'Parcel alerts: moving off the nightly sweep'), { actor: ANA });
+  const byAgent: Loose[] = [
+    { id: 'fa', type: 'frame', x: 0, y: 0, w: 1320, h: 780, title: 'Architecture' },
+    { id: 'fe', type: 'frame', x: 1400, y: 0, w: 860, h: 780, title: 'Evidence' },
+    { id: 'fr', type: 'frame', x: 0, y: 880, w: 860, h: 340, title: 'Rollout', color: 'violet' },
+    { id: 'fm', type: 'frame', x: 920, y: 880, w: 400, h: 340, title: 'What we measured' },
+    { id: 'ff', type: 'frame', x: 1400, y: 880, w: 860, h: 340, title: 'References' },
+    shape('qs', 'container', 610, 190, 250, 390, 'Queue service', { lanes: ['urgent', 'bulk'] }),
+    shape('ac', 'actor', 36, 352, 104, 138, 'Courier app'),
+    shape('api', 'process', 190, 362, 170, 76, 'Orders API', { detail: 'emits a scan event' }),
+    shape('dec', 'decision', 420, 338, 130, 124, 'Urgent?', { color: 'amber' }),
+    shape('qu', 'queue', 662, 276, 170, 68, 'urgent', { detail: 'under 5 s', color: 'red' }),
+    shape('qb', 'queue', 662, 456, 170, 68, 'bulk', { detail: 'best effort', color: 'blue' }),
+    shape('wk', 'process', 930, 362, 170, 76, 'Notifier worker', { detail: 'picks a channel, sends', color: 'violet' }),
+    shape('cl', 'cloud', 1128, 140, 166, 112, 'Push provider', { color: 'green' }),
+    shape('db', 'database', 1150, 338, 124, 124, 'Alert log', { color: '#0e9aa7' }),
+    shape('doc', 'document', 667, 650, 160, 92, 'Dropped alerts', { detail: 'daily report' }),
+    { id: 'ct', type: 'text', x: 904, y: 520, w: 236, h: 36, size: 'small', text: 'At-least-once delivery.\nDedupe on parcel id + status.' },
+    { id: 'n2', type: 'note', x: 266, y: 92, w: 184, h: 158, color: 'violet', text: 'Bulk spikes at 09:00. In the replay a shared queue held urgent alerts for 4 min.' },
+    link('a1', 'ac', 'api', { label: 'scan' }),
+    link('a2', 'api', 'dec'),
+    link('a3', 'dec', 'qu', { label: 'yes', style: { fromSide: 'n', toSide: 'w', labelAt: 0.3 } }),
+    link('a4', 'dec', 'qb', { label: 'no', style: { fromSide: 's', toSide: 'w', labelAt: 0.3 } }),
+    link('a5', 'qu', 'wk'),
+    link('a6', 'qb', 'wk'),
+    link('a7', 'wk', 'cl', { label: 'send', color: 'green', style: { fromSide: 'n', toSide: 'w', labelAt: 0.62 } }),
+    link('a8', 'wk', 'db', { label: 'write' }),
+    link('a9', 'wk', 'qu', { label: 'retry ×3', color: 'red', style: { fromSide: 'n', toSide: 'n', dash: true } }),
+    link('a10', 'qb', 'doc', { label: 'expired', style: { fromSide: 's', toSide: 'n', labelAt: 0.72 } }),
+    link('a11', 'api', 'db', { label: 'audit', style: { fromSide: 's', toSide: 's', labelAt: 0.42 } }),
+    link('a12', 'ct', 'wk', { routing: 'straight', style: { ends: 'dot', dash: true } }),
+    { id: 'i1', type: 'image', x: 1440, y: 64, w: 500, h: 312, src: '/board/dash.svg', alt: 'Alert delay, staging dashboard' },
+    { id: 'i2', type: 'image', x: 1440, y: 432, w: 500, h: 300, src: '/board/term.svg', alt: 'Shadow run, last 24 hours' },
+    { id: 'sp', type: 'sprite', x: 2050, y: 612, w: 110, h: 110, src: '/board/sprite.svg', alt: 'A parcel on its way', frames: 6, fps: 8 },
+    shape('b1', 'pill', 40, 944, 250, 46, 'Shadow mode', { color: 'green' }),
+    shape('b2', 'pill', 290, 1002, 130, 46, '5%, one region', { color: 'blue' }),
+    shape('b3', 'pill', 420, 944, 130, 46, '50%', { color: 'amber' }),
+    shape('b4', 'pill', 550, 1002, 270, 46, 'Everyone', { color: 'violet' }),
+    { id: 'ax', type: 'arrow', from: { x: 40, y: 1084 }, to: { x: 828, y: 1084 }, routing: 'straight' },
+    ...[['2 Dec', 40], ['16 Dec', 290], ['23 Dec', 420], ['6 Jan', 550], ['20 Jan', 778]].map(([text, x], i) => ({ id: `tk${i}`, type: 'text', x, y: 1094, w: 60, h: 18, size: 'small', text })),
+    shape('m1', 'decision', 279, 1073, 22, 22, '', { color: 'red', style: { fill: 'solid' } }),
+    shape('m2', 'decision', 539, 1073, 22, 22, '', { color: 'red', style: { fill: 'solid' } }),
+    { id: 'tg', type: 'text', x: 566, y: 1056, w: 90, h: 18, size: 'small', text: 'go / no-go', color: 'red' },
+    { id: 'dm', type: 'arrow', from: { x: 40, y: 1158 }, to: { x: 820, y: 1158 }, label: '7 weeks', routing: 'straight', style: { ends: 'bar-arrow' } },
+    { id: 'i4', type: 'image', x: 948, y: 912, w: 344, h: 200, src: '/board/chart.svg', alt: 'Scan to alert, cron against queue' },
+    { id: 'hw', type: 'html', x: 948, y: 1146, w: 344, h: 60, html: HTML_ITEM, alt: 'Cutover to the queue in 12 days' },
+    { id: 'r2', type: 'reference', x: 1702, y: 930, w: 252, h: 240, target: { kind: 'web', url: 'https://runbooks.example/dead-letter-queues' }, title: 'Dead-letter queues: a runbook', description: 'What to replay, what to drop, who to wake.', site: 'runbooks.example', image: '/board/og2.svg', icon: '/board/fav2.svg' },
+    { id: 'r3', type: 'reference', x: 1974, y: 930, w: 256, h: 112, target: { kind: 'artifact', artifact: 'replay-report', artifactKind: 'html' }, title: 'Replay report', description: 'HTML, 3 charts', image: '/board/chart.svg' },
   ];
-  for (const command of commands) {
-    const result = store.dispatch(command, { actor: AGENT });
+  const byAna: Loose[] = [
+    shape('pr', 'process', 40, 612, 206, 84, 'One queue,\npriority field?', { color: 'amber', style: { look: 'sketch', fill: 'hachure' } }),
+    { id: 'n1', type: 'note', x: 52, y: 60, w: 184, h: 158, text: 'Why two queues? One queue with a priority field would do.' },
+    { id: 'i3', type: 'image', x: 1990, y: 64, w: 230, h: 488, src: '/board/phone.svg', alt: 'What the customer sees' },
+    { id: 'r1', type: 'reference', x: 1430, y: 930, w: 252, h: 240, target: { kind: 'web', url: 'https://fieldnotes.example/queues-or-a-sweep' }, title: 'Queues or a sweep? Timing alert pipelines', description: 'Why a nightly sweep ages badly once alerts matter.', site: 'fieldnotes.example', image: '/board/og1.svg', icon: '/board/fav1.svg' },
+    { id: 'r4', type: 'reference', x: 1974, y: 1058, w: 256, h: 112, target: { kind: 'plan', anchor: 'Rollout' }, title: 'Rollout, step 2', description: 'Five percent of parcels in one region for a week. Roll back if p95 passes 5 min.' },
+  ];
+  const run = (command: Command, actor: typeof AGENT | typeof ANA) => {
+    const result = store.dispatch(command, { actor });
     if (!result.ok) throw new Error(`sample canvas: ${result.error}`);
-  }
-  return store;
+  };
+  run({ type: 'add', objects: byAgent as unknown as CanvasObject[] }, AGENT);
+  run({ type: 'add', objects: byAna as unknown as CanvasObject[] }, ANA);
+  for (const snapshot of SAMPLE_SNAPSHOTS) run({ type: 'add-snapshot', snapshot }, AGENT);
+  // The board as it is handed over: nothing of the building is the person's to undo.
+  return new CanvasStore(store.getDocument(), { actor: ANA });
 }
 
 const block = (snapshot: string, title?: string) => serializeSnapshotBlock({ canvas: SAMPLE_CANVAS_ID, snapshot, ...(title ? { title } : {}) });

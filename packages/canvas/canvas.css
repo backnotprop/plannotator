@@ -134,7 +134,7 @@
 .pcv-arrow[data-color='custom'] {
   --pcv-solid: var(--pcv-custom);
   --pcv-on-solid: var(--pcv-on-note);
-  --pcv-fill: color-mix(in oklch, var(--pcv-custom) 14%, var(--pcv-card));
+  --pcv-fill: color-mix(in oklab, var(--pcv-custom) 14%, var(--pcv-card));
   --pcv-stroke: var(--pcv-custom);
 }
 @supports (color: oklch(from red l c h)) {
@@ -234,7 +234,7 @@
 }
 .pcv-frame[data-color]:not([data-color='neutral']) {
   border-color: var(--pcv-stroke);
-  background: color-mix(in oklch, var(--pcv-fill) 35%, transparent);
+  background: color-mix(in oklab, var(--pcv-fill) 35%, transparent);
 }
 .pcv-frame-title {
   position: absolute;
@@ -404,12 +404,12 @@
 }
 .pcv-marquee {
   border: 1px solid var(--pcv-accent);
-  background: color-mix(in oklch, var(--pcv-accent) 9%, transparent);
+  background: color-mix(in oklab, var(--pcv-accent) 9%, transparent);
 }
 .pcv-region {
   border: 1.5px dashed var(--pcv-accent);
   border-radius: 8px;
-  background: color-mix(in oklch, var(--pcv-accent) 6%, transparent);
+  background: color-mix(in oklab, var(--pcv-accent) 6%, transparent);
 }
 .pcv-draft-arrow {
   position: absolute;
@@ -515,7 +515,7 @@
 }
 @media (hover: hover) {
   .pcv-btn:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--pcv-ink) 7%, transparent);
+    background: color-mix(in oklab, var(--pcv-ink) 7%, transparent);
     color: var(--pcv-ink);
   }
 }
@@ -530,7 +530,7 @@
   cursor: default;
 }
 .pcv-btn[aria-pressed='true'] {
-  background: color-mix(in oklch, var(--pcv-accent) 16%, transparent);
+  background: color-mix(in oklab, var(--pcv-accent) 16%, transparent);
   color: var(--pcv-accent);
 }
 .pcv-btn-primary {
@@ -541,7 +541,7 @@
 }
 @media (hover: hover) {
   .pcv-btn.pcv-btn-primary:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--pcv-accent) 88%, var(--pcv-ink));
+    background: color-mix(in oklab, var(--pcv-accent) 88%, var(--pcv-ink));
     color: var(--pcv-on-accent);
   }
 }
@@ -574,7 +574,7 @@
   box-sizing: border-box;
   border: 2px solid var(--pcv-swatch, var(--pcv-rule));
   border-radius: 50%;
-  background: color-mix(in oklch, var(--pcv-swatch, var(--pcv-card)) 22%, var(--pcv-card));
+  background: color-mix(in oklab, var(--pcv-swatch, var(--pcv-card)) 22%, var(--pcv-card));
   transition: transform 120ms var(--pcv-ease);
 }
 @media (hover: hover) {
@@ -663,7 +663,7 @@
 }
 @media (hover: hover) {
   .pcv-figure-frame:has(.pcv-figure-hit:hover) {
-    background-color: color-mix(in oklch, var(--pcv-ink) 4%, transparent);
+    background-color: color-mix(in oklab, var(--pcv-ink) 4%, transparent);
   }
 }
 .pcv-figure-hit:focus-visible {
@@ -720,7 +720,7 @@
   font-weight: 400;
 }
 .pcv-figure-title[contenteditable]:focus-visible {
-  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px color-mix(in oklch, var(--pcv-accent) 60%, transparent);
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px color-mix(in oklab, var(--pcv-accent) 60%, transparent);
 }
 .pcv-figure-action {
   all: unset;
@@ -781,7 +781,7 @@
   /* A fine line that is the figure's own edge carried outward, a near shadow that seats it, and a wide soft
      one that puts the plan further away. */
   box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--pcv-ink) 14%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--pcv-ink) 14%, transparent),
     0 2px 6px rgb(0 0 0 / 0.1),
     0 24px 80px 8px rgb(0 0 0 / 0.3);
 }
@@ -861,7 +861,7 @@
   min-height: 0;
   width: 100%;
   object-fit: cover;
-  background: color-mix(in oklch, var(--pcv-ink) 5%, var(--pcv-card));
+  background: color-mix(in oklab, var(--pcv-ink) 5%, var(--pcv-card));
   pointer-events: none;
 }
 .pcv-card-body {
@@ -966,4 +966,154 @@
 .pcv-obj:focus-visible {
   outline: 2.5px solid var(--pcv-accent);
   outline-offset: 4px;
+}
+
+/* ── Typed shapes ──────────────────────────────────────────────────────── */
+
+/* The plain box: centred words, a fine shadow that seats it on the ground. */
+.pcv-box {
+  align-items: center;
+  border-radius: 9px;
+  text-align: center;
+  box-shadow: 0 1px 1.5px rgb(15 20 40 / 0.07);
+}
+.pcv-shape {
+  display: block;
+}
+.pcv-shape-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.pcv-shape-fill {
+  fill: var(--pcv-fill);
+  stroke: var(--pcv-stroke);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+.pcv-shape-line {
+  fill: none;
+  stroke: var(--pcv-stroke);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+.pcv-shape[data-dash] .pcv-shape-fill,
+.pcv-shape[data-dash] .pcv-shape-line {
+  stroke-dasharray: 6 4;
+}
+.pcv-shape-text {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+/* An actor's name sits under the figure; a container's title in its header, to the left. */
+.pcv-shape[data-shape='actor'] .pcv-shape-text {
+  justify-content: flex-start;
+  overflow: visible;
+}
+.pcv-shape[data-shape='actor'] .pcv-shape-fill {
+  fill: var(--pcv-card);
+}
+.pcv-shape[data-shape='container'] .pcv-shape-text {
+  align-items: flex-start;
+  text-align: left;
+}
+.pcv-shape[data-shape='container'] .pcv-shape-fill {
+  fill: color-mix(in oklab, var(--pcv-fill) 35%, transparent);
+  stroke: var(--pcv-line);
+}
+.pcv-shape[data-shape='container'][data-color]:not([data-color='neutral']) .pcv-shape-fill {
+  stroke: var(--pcv-stroke);
+}
+.pcv-shape[data-shape='container'] .pcv-shape-line {
+  stroke: var(--pcv-line);
+}
+.pcv-lanes {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+.pcv-lane {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pcv-muted);
+  font-size: 11.5px;
+}
+.pcv-lane span {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+}
+.pcv-root[data-lod='far'] .pcv-lane span {
+  visibility: hidden;
+}
+
+/* Forced colours remove box-shadow, which is how focus is drawn elsewhere: these outlines take over there. */
+@media (forced-colors: active) {
+  .pcv-btn:focus-visible,
+  .pcv-swatch:focus-visible,
+  .pcv-figure-hit:focus-visible,
+  .pcv-figure-action:focus-visible,
+  .pcv-figure-title[contenteditable]:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  .pcv-shape-fill,
+  .pcv-shape-line {
+    stroke: CanvasText;
+  }
+}
+
+/* A shape with no colour of its own is drawn in a firm neutral line, so its outline says what it is. */
+.pcv-box:not([data-color]),
+.pcv-box[data-color='neutral'],
+.pcv-shape:not([data-color]),
+.pcv-shape[data-color='neutral'] {
+  --pcv-stroke: color-mix(in oklab, var(--pcv-ink) 58%, var(--pcv-card));
+}
+/* A shape filled solid: the colour itself, with ink chosen to be read on it. */
+.pcv-shape[data-fill='solid'] .pcv-shape-fill {
+  fill: var(--pcv-stroke);
+}
+.pcv-shape[data-fill='none'] .pcv-shape-fill {
+  fill: none;
+}
+
+/* Far away on a crowded board: a flat patch of colour where each object is. */
+.pcv-flat {
+  border-radius: 6px;
+  background: var(--pcv-fill);
+  box-shadow: inset 0 0 0 1px var(--pcv-stroke);
+}
+.pcv-flat-note {
+  background: var(--pcv-note);
+  box-shadow: none;
+}
+.pcv-flat-frame {
+  background: none;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--pcv-line);
+}
+.pcv-flat-image,
+.pcv-flat-sprite,
+.pcv-flat-html,
+.pcv-flat-reference {
+  background: color-mix(in oklab, var(--pcv-ink) 8%, var(--pcv-card));
+  box-shadow: none;
 }

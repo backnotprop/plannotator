@@ -4,7 +4,9 @@ import { createDocument } from '../model/document';
 import type { CanvasObject } from '../model/types';
 import { cameraPlacing, fitRect, lerpCamera, screenToWorld, viewportRect, worldRectToScreen, worldToScreen, zoomAt } from './camera';
 import { lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from './cull';
+import { BOX_SHAPES } from '../model/types';
 import { neighbourInReadingOrder, readingOrder } from './reading-order';
+import { shapeOutline, toPath } from './shape-outline';
 import { indexFor } from './document-index';
 import { hitTest, objectsInRect, withFrameContents } from './hit-test';
 import { SpatialIndex } from './spatial-index';
@@ -190,6 +192,44 @@ describe('hit-testing', () => {
     const store = board();
     const moved = withFrameContents(store.getDocument(), indexFor(store), ['frame']);
     expect(moved.sort()).toEqual(['a', 'ab', 'b', 'frame', 'over-a']);
+  });
+});
+
+describe('box shapes', () => {
+  test('every shape has a closed outline inside its own box, and room for words', () => {
+    for (const shape of BOX_SHAPES) {
+      const made = shapeOutline(shape, 170, 120, shape === 'container' ? 2 : 0);
+      expect(made.outline[0][0]).toBe('M');
+      expect(made.outline[made.outline.length - 1][0]).toBe('Z');
+      for (const seg of [...made.outline, ...made.details.flat()]) {
+        for (let i = 1; i < seg.length; i += 2) {
+          expect(seg[i] as number).toBeGreaterThanOrEqual(-0.01);
+          expect(seg[i] as number).toBeLessThanOrEqual(170.01);
+          // A document's wave may dip a little under its box; nothing else leaves it.
+          expect(seg[i + 1] as number).toBeGreaterThanOrEqual(-12);
+          expect(seg[i + 1] as number).toBeLessThanOrEqual(120 + 14);
+        }
+      }
+      const [top, right, bottom, left] = made.text;
+      expect(top + bottom).toBeLessThan(120);
+      expect(left + right).toBeLessThan(170);
+      expect(toPath(made.outline)).toMatch(/^M[\d. -]+[LC]/);
+    }
+  });
+
+  test('a container draws one divider between each pair of lanes', () => {
+    expect(shapeOutline('container', 250, 390, 2).details).toHaveLength(3);
+    expect(shapeOutline('container', 250, 390, 0).details).toHaveLength(1);
+  });
+
+  test('an agent may leave the size out: each shape has its own', () => {
+    const store = new CanvasStore(createDocument('board'));
+    const added = store.dispatch({ type: 'add', objects: [{ id: 'db', type: 'box', shape: 'database', x: 0, y: 0, text: 'Alert log' }, { id: 'n', type: 'note', x: 300, y: 0, text: 'Hi' }, { id: 'p', type: 'box', x: 600, y: 0, text: 'Plain', h: 40 }] as never });
+    expect(added.ok).toBe(true);
+    expect(store.getDocument().objects.db).toMatchObject({ w: 124, h: 124 });
+    expect(store.getDocument().objects.n).toMatchObject({ w: 184, h: 158 });
+    expect(store.getDocument().objects.p).toMatchObject({ w: 170, h: 40 });
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'x', type: 'constructor', x: 0, y: 0 }] as never }).ok).toBe(false);
   });
 });
 

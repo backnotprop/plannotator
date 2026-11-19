@@ -44,30 +44,67 @@ interface BaseObject {
   group?: ObjectId;
   /** Where in the plan this object comes from or points to. */
   link?: CanvasLink;
-  /** Who added it. Kept so a person's work and an agent's can be told apart. */
-  by?: Actor['kind'];
   /**
-   * How it is drawn beyond its type and colour: a small bag of named values
-   * (`{ stroke: 'dashed', roughness: 1 }`). Stored, checked and carried by
-   * every event; the renderer reads what it knows and ignores the rest, so a
-   * new visual style is a renderer change, not a document migration.
+   * Its place in the drawing order: see `model/order-key.ts`. Given by the
+   * planner; an object someone hands in without one is put on top.
    */
+  z?: string;
+  /** Who added it: a person or an agent, and which. A host shows a face from it. */
+  by?: Actor;
+  /** How it is drawn beyond its type and colour. Every value is a word from a short list: see `ObjectStyle`. */
   style?: ObjectStyle;
 }
 
-export type ObjectStyle = Record<string, string | number | boolean>;
+export const STYLE_FILLS = ['tint', 'solid', 'hachure', 'cross', 'none'] as const;
+export const STYLE_SIDES = ['n', 'e', 's', 'w'] as const;
+export const STYLE_ENDS = ['arrow', 'none', 'dot', 'bar', 'bar-arrow'] as const;
+export type Side = (typeof STYLE_SIDES)[number];
+
+/**
+ * The style of one object. Closed: a key or a value that is not listed here
+ * is refused, so a style is always something every renderer understands.
+ * Nothing in it is ever needed to get a good-looking object.
+ */
+export interface ObjectStyle {
+  /** `sketch`: drawn by hand, rough and hatched. It means "proposed, not decided". Absent: clean. */
+  look?: 'sketch';
+  /** How the inside is filled. `hachure` and `cross` draw in the sketch look only. Absent: tint. */
+  fill?: (typeof STYLE_FILLS)[number];
+  /** How rough a sketch is: 0 nearly straight, 2 loose. Absent: 1. */
+  rough?: 0 | 1 | 2;
+  /** What a sketch's wobble is drawn from, so it is the same every time. Absent: a number made from the id. */
+  seed?: number;
+  /** A dashed line: an arrow, or a shape's outline. */
+  dash?: true;
+  /** Arrows: the side of the object each end leaves from. Absent: chosen from where the two objects are. */
+  fromSide?: Side;
+  toSide?: Side;
+  /** Arrows: where along the line the label sits, 0 to 1. Absent: the middle. */
+  labelAt?: number;
+  /** Arrows: what the ends look like. `bar-arrow` is a dimension line; `dot` a callout leader. Absent: arrow. */
+  ends?: (typeof STYLE_ENDS)[number];
+}
+
+/** The outlines a box can be drawn in. Absent is `process`: the plain rounded box. */
+export const BOX_SHAPES = ['process', 'decision', 'database', 'document', 'queue', 'actor', 'cloud', 'pill', 'container'] as const;
+export type BoxShape = (typeof BOX_SHAPES)[number];
+
+/** How an arrow's line runs between its ends. Absent is `elbow`: right angles round what is in the way. */
+export const ARROW_ROUTINGS = ['elbow', 'straight', 'curve'] as const;
+export type ArrowRouting = (typeof ARROW_ROUTINGS)[number];
 
 /** Objects with a place and a size of their own. */
-interface PlacedObject extends BaseObject, Rect {
-  /** The outline it is drawn in, by name (`ellipse`, `diamond`, `cylinder`). Absent: the type's own. Stored for the renderer to come. */
-  shape?: string;
-}
+interface PlacedObject extends BaseObject, Rect {}
 
 /** A card: a title line and an optional quieter second line. */
 export interface BoxObject extends PlacedObject {
   type: 'box';
   text: string;
   detail?: string;
+  /** What kind of thing it is, said by its outline: a store is a cylinder before anyone reads it. */
+  shape?: BoxShape;
+  /** The lanes of a `container`, top to bottom. */
+  lanes?: string[];
 }
 
 /** A sticky note. */
@@ -164,8 +201,7 @@ export interface ArrowObject extends BaseObject {
   from: ArrowEnd;
   to: ArrowEnd;
   label?: string;
-  /** How the line runs between its ends, by name (`straight`, `elbow`, `curved`). Absent: straight. Stored for the renderer to come. */
-  routing?: string;
+  routing?: ArrowRouting;
 }
 
 /** A set of objects that select and move as one. It has no look of its own. */
@@ -247,7 +283,34 @@ export interface CanvasDocument {
   id: string;
   title: string;
   objects: Readonly<Record<ObjectId, CanvasObject>>;
-  /** Every object id once, back to front. */
+  /**
+   * Every object id once, back to front. Worked out from the objects' `z`
+   * keys and kept by the reducer; never changed by hand and not saved.
+   */
   order: readonly ObjectId[];
   snapshots: Readonly<Record<SnapshotId, Snapshot>>;
 }
+
+/**
+ * The size an object gets when whoever adds it gives none. An agent names
+ * what a thing is and where it goes; how big it is has a sensible answer.
+ */
+export const DEFAULT_SIZES: Readonly<Record<string, { w: number; h: number }>> = {
+  box: { w: 170, h: 76 },
+  'box:process': { w: 170, h: 76 },
+  'box:decision': { w: 130, h: 124 },
+  'box:database': { w: 124, h: 124 },
+  'box:queue': { w: 170, h: 68 },
+  'box:document': { w: 160, h: 92 },
+  'box:cloud': { w: 166, h: 112 },
+  'box:actor': { w: 104, h: 138 },
+  'box:pill': { w: 170, h: 48 },
+  'box:container': { w: 300, h: 360 },
+  note: { w: 184, h: 158 },
+  text: { w: 200, h: 28 },
+  frame: { w: 640, h: 420 },
+  image: { w: 320, h: 200 },
+  sprite: { w: 48, h: 48 },
+  html: { w: 320, h: 120 },
+  reference: { w: 252, h: 240 },
+};
