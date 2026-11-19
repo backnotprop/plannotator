@@ -488,6 +488,7 @@ test.skipIf(!hasDom)('the automatic line saves what to make only when changed, k
   });
   await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'medium', make: 'guide', agent: 'codex' } }} onSaved={() => {}} onClose={() => {}} />);
   expect(document.querySelector('[data-pull-risk-auto] button')!.textContent).toContain('a guided review');
+  expect(document.querySelector('[data-pull-risk-auto] span')!.textContent).toBe('When one ranks Medium and up, make');
   const submit = async () => {
     await act(async () => {
       document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

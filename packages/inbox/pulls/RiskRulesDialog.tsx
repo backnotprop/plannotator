@@ -4,6 +4,7 @@ import { modelSelectOptions } from '@plannotator/core/model-catalog';
 import { InlinePicker } from '@plannotator/ui/components/InlinePicker';
 import { inboxApi } from '../api';
 import { Modal } from '../components/Updates';
+import { riskFilterWords } from './risk';
 
 const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user data.';
 const LOADING = [{ value: '', label: 'Loading models…' }];
@@ -133,7 +134,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           </>
         )}
         <div className="ib-riskd-row ib-riskd-auto" role="group" aria-labelledby={autoId} data-pull-risk-auto={make}>
-          <span id={autoId}>When one ranks High, make</span>
+          <span id={autoId}>When one ranks {riskFilterWords[answer.auto?.level ?? 'high']}, make</span>
           <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
         </div>
         {error && (

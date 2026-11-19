@@ -160,7 +160,7 @@ const piLog = () =>
     : [];
 const prompts = () => piLog().filter((l) => l.prompt);
 
-const VIEWPORTS = { 1440: { width: 1440, height: 900 }, 390: { width: 390, height: 844 }, 320: { width: 320, height: 568 } } as const;
+const VIEWPORTS = { 1440: { width: 1440, height: 900 }, 1280: { width: 1280, height: 900 }, 390: { width: 390, height: 844 }, 320: { width: 320, height: 568 } } as const;
 
 async function shots(name: string, widths: readonly (keyof typeof VIEWPORTS)[] = [1440, 390]): Promise<void> {
   await expect(page.getByText('Tell your agents', { exact: false })).toHaveCount(0);
@@ -318,7 +318,8 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'sonnet');
   await expect(modelList.getByRole('button').first()).toContainText('Sonnet');
   await dialog.locator('[data-pull-risk-rules-text]').fill(RULES);
-  await shots('dialog', [1440, 390, 320]);
+  await expect(dialog.locator('[data-pull-risk-auto]')).toContainText('When one ranks High, make');
+  await shots('dialog', [1440, 1280, 390, 320]);
   // A phone: the sheet takes the screen's width, the words only its inset, and every control a thumb's height.
   for (const width of [390, 320] as const) {
     await page.setViewportSize(VIEWPORTS[width]);

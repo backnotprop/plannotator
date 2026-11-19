@@ -381,6 +381,18 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
+async function widthShots(page: Page, name: string, widths: readonly number[] = [1280, 768, 390]): Promise<void> {
+  await noAgentsDialog(page);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(proofDir, `${name}-${width}-dark.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+}
+
 async function setCodeReview(on: boolean): Promise<void> {
   const response = await world.page.request.post(`${world.url}api/inbox/settings`, { data: { code_review: { on } } });
   expect(response.status()).toBe(200);
@@ -920,6 +932,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
   const page = await context.newPage();
   try {
+    if (process.env.PLANNOTATOR_E2E_POOR_LINK) await (await context.newCDPSession(page)).send('Network.emulateNetworkConditions', { offline: false, latency: 300, downloadThroughput: 125_000, uploadThroughput: 125_000 });
     await offerLaunch(page);
     await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(row)}`);
     await expect(page.locator('[data-pulls-stack]')).toBeVisible();
@@ -972,6 +985,8 @@ test('one PR with no review thread, on its launchpad: Guided review, the New rev
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await expect(pane).not.toContainText(/\bhand/i);
   await shot(page, '4-no-thread');
+  await widthShots(page, 'launchpad-a-no-thread');
+  await phoneShot(browser, LOCALE, 'phone-launchpad-a-no-thread', ['dark']);
   await primary.click();
   // The New review box, filled in: this PR, an agent of its project in To, nothing asked of the person but Start.
   const box = page.locator('[data-review-box]');
@@ -1028,6 +1043,13 @@ test('one PR with no review thread, on its launchpad: Guided review, the New rev
   await expect(stackPane.locator('[data-launch-line="thread"]')).toContainText('Open');
   await shot(page, '6a-review-arrived');
   await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
+  writeFileSync(join(world.projects.web, 'picture-it-fallback.html'), '<!doctype html><html><head><meta name="plannotator-page" content="picture-it"><title>How the English fallback works</title></head><body><h1>Fallback</h1></body></html>');
+  await world.claude.send({ project_path: world.projects.web, reply_to: String(opening.id), body: 'Here is a Picture page of the fallback.', attachments: ['picture-it-fallback.html'] });
+  await page.reload();
+  await expect(stackPane.locator('[data-launch-line="picture"]')).toContainText('How the English fallback works');
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toContainText('Open');
+  await widthShots(page, 'launchpad-b-review-and-picture');
+  await phoneShot(browser, LOCALE, 'phone-launchpad-b-review-and-picture', ['dark']);
   // The thread is named for the PR (owner, q-49bd0699 A), as the person's own name: the Inbox list shows it.
   await page.goto(world.url);
   await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
