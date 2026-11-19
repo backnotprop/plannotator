@@ -61,7 +61,8 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleCustomThemesScript, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { CUSTOM_THEMES_SCRIPT_PATH } from "@plannotator/shared/theme-files";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -959,6 +960,7 @@ export async function startPlannotatorServer(
 
           // Favicon
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript();
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {

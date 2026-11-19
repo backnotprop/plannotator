@@ -12,6 +12,8 @@ import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHead
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
+import { getPlannotatorDataDir } from "../generated/data-dir.ts";
+import { CUSTOM_THEMES_SCRIPT_HEADERS, customThemesScript } from "../generated/theme-files.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
@@ -285,6 +287,15 @@ export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
 		"Content-Type": contentType,
 		"Cache-Control": "no-cache",
 	});
+}
+
+/**
+ * `/plannotator-themes.js`: the person's own themes for the page's first
+ * frame. Mirrors packages/server/shared-handlers.ts handleCustomThemesScript()
+ * (the script itself is packages/shared/theme-files.ts, vendored).
+ */
+export function handleCustomThemesScript(res: Res): void {
+	send(res, Buffer.from(customThemesScript(getPlannotatorDataDir())), 200, CUSTOM_THEMES_SCRIPT_HEADERS);
 }
 
 /**

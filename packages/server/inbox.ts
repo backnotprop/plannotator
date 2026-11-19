@@ -226,7 +226,8 @@ import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-lin
 import { createLinearKey } from "./inbox-linear-key";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
-import { handleFavicon } from "./shared-handlers";
+import { handleCustomThemesScript, handleFavicon } from "./shared-handlers";
+import { isRegisteredThemeId } from "@plannotator/shared/theme-files";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import type { WebFraming } from "./inbox-web-prototypes";
@@ -2825,9 +2826,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           break;
         case "light":
         case "dark":
-          // A palette id (packages/ui/themes); the page resolves an unknown one to its default.
-          if (typeof value !== "string" || !THEME_ID.test(value)) {
-            throw new InboxError("validation_error", `theme.${field}: a palette id.`, { field: `theme.${field}` });
+          // A palette id: a built-in (packages/ui/themes) or a custom theme in this data dir
+          // (`plannotator theme add`, packages/shared/theme-files.ts), and nothing else.
+          if (typeof value !== "string" || !THEME_ID.test(value) || !isRegisteredThemeId(dataDir, value)) {
+            throw new InboxError("validation_error", `theme.${field}: a palette id (a built-in theme, or one added with plannotator theme add).`, { field: `theme.${field}` });
           }
           next[field] = value;
           break;
@@ -7925,6 +7927,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
+      // The person's own themes, for the window's first frame (packages/shared/theme-files.ts).
+      // A literal (CUSTOM_THEMES_SCRIPT_PATH), so the API table check reads this route.
+      if (path === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(dataDir);
       // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
       if (req.method === "GET") {
         const appIcon = inboxAppIconResponse(path, faviconState());

@@ -129,7 +129,8 @@ import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
+import { CUSTOM_THEMES_SCRIPT_PATH } from "@plannotator/shared/theme-files";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { captureReviewProgress, handleReviewProgress } from "@plannotator/shared/review-progress";
@@ -4534,6 +4535,7 @@ export async function startReviewServer(
 
           // Favicon
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript();
 
           // Code review's diagram engine, fetched by the page only for a
           // preview or guide overview that holds a diagram fence.

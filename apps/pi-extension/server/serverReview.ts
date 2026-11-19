@@ -164,6 +164,7 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleReviewDraftRequest,
+	handleCustomThemesScript,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -4096,6 +4097,9 @@ export async function startReviewServer(options: {
 			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res);
 		} else if (isDiagramEngineRequest(url.pathname)) {
 			// Code review's diagram engine, fetched by the page only for a
 			// preview or guide overview that holds a diagram fence.

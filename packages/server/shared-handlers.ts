@@ -15,6 +15,8 @@ import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "./draft";
 import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { CUSTOM_THEMES_SCRIPT_HEADERS, customThemesScript } from "@plannotator/shared/theme-files";
 import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
@@ -232,6 +234,16 @@ export function handleFavicon(pathname = "/favicon.png"): Response {
   return new Response(body, {
     headers: { "Content-Type": contentType, "Cache-Control": "no-cache" },
   });
+}
+
+/**
+ * `/plannotator-themes.js`: the person's own themes for the page's first frame
+ * (packages/shared/theme-files.ts). Every page links it in its head; it is
+ * read from the data dir on every load, so a theme added since shows on reload.
+ * Pi's servers answer the same script (apps/pi-extension/server/handlers.ts).
+ */
+export function handleCustomThemesScript(dataDir: string = getPlannotatorDataDir()): Response {
+  return new Response(customThemesScript(dataDir), { headers: CUSTOM_THEMES_SCRIPT_HEADERS });
 }
 
 interface ServerReadyOptions {

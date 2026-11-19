@@ -33,6 +33,7 @@ import { createEditorAnnotationHandler } from "./annotations.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleDraftRequest,
+	handleCustomThemesScript,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -627,6 +628,9 @@ export async function startPlanReviewServer(options: {
 			json(res, { agents: [] });
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
 			await handleSaveNotesRequest(req, res, { serverSession, notion: notionAvailable });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {

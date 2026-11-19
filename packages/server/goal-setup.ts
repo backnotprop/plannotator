@@ -23,11 +23,13 @@ import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { getRepoInfo } from "./repo";
 import {
+  handleCustomThemesScript,
   handleFavicon,
   handleImage,
   handleServerReady,
   handleUpload,
 } from "./shared-handlers";
+import { CUSTOM_THEMES_SCRIPT_PATH } from "@plannotator/shared/theme-files";
 import { detectGitUser, getServerConfig, saveConfig } from "./config";
 import { agentToolHostForServer } from "./ai-runtime";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
@@ -211,6 +213,7 @@ export async function startGoalSetupServer(
           }
 
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript();
 
           return packedAppResponse(app, req, url.pathname, isRemote);
         },

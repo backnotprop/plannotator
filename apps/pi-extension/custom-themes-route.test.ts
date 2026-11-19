@@ -1,0 +1,64 @@
+/**
+ * `/plannotator-themes.js` on the Pi (node:http) plan, review and annotate servers: the
+ * script every page links in its head, so a custom theme is in the first
+ * frame. The failures these guard: a server that answers the page for this
+ * path instead (the SPA fallback: the theme never loads), a cached answer (a
+ * theme added since would not show on reload), and a script that does not
+ * carry the theme added in the data dir.
+ * The Bun mirror is packages/server/custom-themes-route.test.ts.
+ */
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { saveCustomTheme } from "./generated/theme-files.ts";
+import { startAnnotateServer, startPlanReviewServer, startReviewServer } from "./server.ts";
+
+const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
+const PATCH = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n";
+const KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_PORT", "PLANNOTATOR_REMOTE", "PLANNOTATOR_AI"] as const;
+const saved: Record<string, string | undefined> = {};
+let dataDir: string;
+
+beforeEach(() => {
+  for (const key of KEYS) saved[key] = process.env[key];
+  dataDir = mkdtempSync(join(tmpdir(), "plannotator-pi-custom-themes-route-"));
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  process.env.PLANNOTATOR_REMOTE = "0";
+  process.env.PLANNOTATOR_AI = "disabled";
+  delete process.env.PLANNOTATOR_PORT;
+});
+
+afterEach(() => {
+  for (const key of KEYS) {
+    if (saved[key] === undefined) delete process.env[key];
+    else process.env[key] = saved[key];
+  }
+});
+
+const servers = {
+  plan: () => startPlanReviewServer({ plan: "# Plan", origin: "opencode", htmlContent: MINIMAL_HTML }),
+  review: () => startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent: MINIMAL_HTML, origin: "opencode" }),
+  annotate: () => startAnnotateServer({ markdown: "# Test", filePath: join(dataDir, "t.md"), htmlContent: MINIMAL_HTML, origin: "opencode" }),
+};
+
+describe("the custom themes script on the Pi servers", () => {
+  for (const [name, start] of Object.entries(servers)) {
+    test(`${name}: a script, never cached, carrying the themes in the data dir`, async () => {
+      const server = await start();
+      try {
+        const empty = await fetch(`${server.url}/plannotator-themes.js`);
+        expect(empty.status).toBe(200);
+        expect(empty.headers.get("content-type")).toStartWith("text/javascript");
+        expect(empty.headers.get("cache-control")).toBe("no-store");
+        expect(await empty.text()).not.toContain(".theme-");
+        saveCustomTheme(dataDir, { plannotatorTheme: 1, id: "harbor", name: "Harbor", dark: { background: "#0f1419" } });
+        const body = await (await fetch(`${server.url}/plannotator-themes.js`)).text();
+        expect(body).toContain(".theme-harbor {");
+        expect(body).toContain("--background: #0f1419;");
+      } finally {
+        server.stop();
+      }
+    });
+  }
+});

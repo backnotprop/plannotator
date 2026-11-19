@@ -1,3 +1,4 @@
+import { isCustomThemeInfo } from '@plannotator/core/theme-file';
 import { parseThemeMode, type Mode } from '../components/themeModes';
 
 export interface ThemeColors {
@@ -611,9 +612,61 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
   },
 ];
 
+// --- Custom themes ------------------------------------------------------------
+//
+// A person's own theme files (`plannotator theme add`, kept in the data dir).
+// Each server answers `/plannotator-themes.js`, a classic script in the page's
+// head that runs before this module: it adds the themes' stylesheet and leaves
+// their registry entries on `window.__PLANNOTATOR_CUSTOM_THEMES__`, read here
+// once, so the first render already knows a custom id (cookies and config.json
+// name it like any palette). Each entry is checked again: it is data from a
+// script. A host page without that script has none.
+
+declare global {
+  interface Window {
+    __PLANNOTATOR_CUSTOM_THEMES__?: unknown;
+  }
+}
+
+function toCustomThemes(list: unknown): ThemeInfo[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: ThemeInfo[] = [];
+  for (const entry of list) {
+    if (!isCustomThemeInfo(entry) || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    out.push({ id: entry.id, name: entry.name, builtIn: false, modeSupport: entry.modeSupport, colors: entry.colors });
+  }
+  return out;
+}
+
+let customThemes: ThemeInfo[] = toCustomThemes(
+  typeof window === 'undefined' ? undefined : window.__PLANNOTATOR_CUSTOM_THEMES__,
+);
+
+/** The custom themes this page was given, in the order the server listed them (by name). */
+export function getCustomThemes(): ThemeInfo[] {
+  return customThemes;
+}
+
+/** Replace the custom themes (tests; a host that loads them its own way). Entries that are not valid are dropped. */
+export function setCustomThemes(list: unknown): void {
+  customThemes = toCustomThemes(list);
+}
+
+/** Every palette a picker offers: the person's own first, then the built-ins. */
+export function getAllThemes(): ThemeInfo[] {
+  return customThemes.length === 0 ? BUILT_IN_THEMES : [...customThemes, ...BUILT_IN_THEMES];
+}
+
+/** A palette by id, custom or built-in. */
+export function findTheme(themeId: string): ThemeInfo | undefined {
+  return customThemes.find(({ id }) => id === themeId) ?? BUILT_IN_THEMES.find(({ id }) => id === themeId);
+}
+
 /** Return the explicit mode a palette cannot render, if any. */
 export function getUnsupportedMode(themeId: string): 'light' | 'dark' | null {
-  const theme = BUILT_IN_THEMES.find(({ id }) => id === themeId);
+  const theme = findTheme(themeId);
   if (theme?.modeSupport === 'dark-only') return 'light';
   if (theme?.modeSupport === 'light-only') return 'dark';
   return null;
@@ -683,7 +736,7 @@ export const DEFAULT_THEME_PAIR: ThemePair = {
 
 /** Return whether a palette is registered. */
 export function isKnownTheme(themeId: unknown): themeId is string {
-  return typeof themeId === 'string' && BUILT_IN_THEMES.some(({ id }) => id === themeId);
+  return typeof themeId === 'string' && findTheme(themeId) !== undefined;
 }
 
 /** Return whether a palette can occupy one half of the pair. */

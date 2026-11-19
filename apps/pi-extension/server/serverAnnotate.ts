@@ -56,6 +56,7 @@ import {
 } from "../generated/source-save-node.ts";
 
 import {
+	handleCustomThemesScript,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -1424,6 +1425,9 @@ export async function startAnnotateServer(options: {
 			return;
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			// Exit posts carry no body: the nonce rides the query string.
 			if (checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, serverSession) === "mismatch") {

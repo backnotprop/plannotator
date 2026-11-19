@@ -227,6 +227,7 @@ export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boole
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     ...(options.scheduled === true ? ["  plannotator routine <create|list|get|update|on|off|run|delete> ...      (plannotator routine --help)"] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
+    "  plannotator theme add <file> | use <id> [--light | --dark] | list [--json] | remove <id>",
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
@@ -904,6 +905,60 @@ export const DATA_DIR_COMMAND_USAGE = [
   "on an install that keeps its data elsewhere can hide that data.",
 ].join("\n");
 
+/**
+ * `plannotator theme …`'s usage (theme-command.ts): a person's own theme files.
+ * Agent-facing: an agent asked to "make Plannotator use my editor's theme" reads
+ * only this, so it says what the files may be, where they go, and what each line
+ * of output means.
+ */
+export const THEME_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator theme add <file> [--id <id>] [--name <name>]",
+  "  plannotator theme use <id> [--light | --dark]",
+  "  plannotator theme list [--json]",
+  "  plannotator theme remove <id>",
+  "",
+  "Add your own colour theme to Plannotator, then use it. A theme colours every",
+  "Plannotator page: plan review, code review, annotate and the Inbox.",
+  "",
+  "add     Read a theme file and keep it in the data dir (themes/<id>.json). The file",
+  "        can be a VS Code colour theme (.json, with \"colors\"), a base16 scheme",
+  "        (.yaml or .json, base00 to base0F), or a Plannotator theme (below). The format",
+  "        is detected. A VS Code or base16 theme is one half, light or dark; it is",
+  "        converted, and its id comes from its name (--id and --name override both).",
+  "        Adding an id that exists replaces that theme.",
+  "use     Use a theme (yours or a built-in) for each half it has, or only the --light",
+  "        or --dark half. Plannotator shows the light or dark half by its mode.",
+  "list    Your themes and the halves they are used for, then the built-in ids.",
+  "remove  Remove one of your themes. Its file moves to themes/removed/, and a half",
+  "        that used it goes back to Plannotator.",
+  "",
+  "A Plannotator theme file is JSON:",
+  "  {",
+  "    \"plannotatorTheme\": 1,",
+  "    \"id\": \"harbor\",",
+  "    \"name\": \"Harbor\",",
+  "    \"dark\": { \"background\": \"#0f1419\", \"foreground\": \"#d8dee6\", \"primary\": \"#5ab0f6\" },",
+  "    \"light\": { \"background\": \"#f7f9fb\", \"foreground\": \"#1b2430\", \"primary\": \"#1f6fd1\" }",
+  "  }",
+  "  id: lowercase letters, digits and dashes, not a built-in id. Either half may be",
+  "  left out. The colours each half can set: background, foreground, card,",
+  "  card-foreground, popover, popover-foreground, primary, primary-foreground,",
+  "  secondary, secondary-foreground, muted, muted-foreground, accent,",
+  "  accent-foreground, destructive, destructive-foreground, success,",
+  "  success-foreground, warning, warning-foreground, border, input, ring, code-bg,",
+  "  focus-highlight, accent-text. A colour you leave out takes Plannotator's own.",
+  "  A colour is #rgb, #rrggbb, #rrggbbaa, rgb(), hsl() or oklch(), numbers only.",
+  "",
+  "Nothing needs to be running. New pages show a change at once; open windows show",
+  "it when reloaded.",
+  "",
+  "Output: one line per result on stdout, and a Note line when something is worth",
+  "knowing (colours left out, body text under 4.5:1 contrast); a note never stops",
+  "the command. A refusal is one line on stderr, <code>: <message>, naming the field",
+  "that is wrong. Exit 0 done, 1 refused, 2 bad usage.",
+].join("\n");
+
 /** `plannotator update`'s usage; the command is update-command.ts. */
 export const UPDATE_COMMAND_USAGE = [
   "Usage:",
@@ -931,6 +986,7 @@ export const UPDATE_COMMAND_USAGE = [
 // (plannotator-skill-reference.test.ts) can diff the documented surface
 // against the real one.
 export const SUBCOMMAND_HELP: Record<string, string> = {
+  theme: THEME_COMMAND_USAGE,
   review: [
     "Usage:",
     "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [DIRECTORY | PR_URL]",

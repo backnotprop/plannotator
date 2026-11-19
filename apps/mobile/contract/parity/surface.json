@@ -387,7 +387,8 @@
       "/favicon.ico",
       "/favicon.png",
       "/manifest.webmanifest",
-      "/mcp"
+      "/mcp",
+      "/plannotator-themes.js"
     ],
     "frame": [
       "agent-faces",

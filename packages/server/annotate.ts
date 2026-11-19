@@ -21,7 +21,8 @@ import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-gu
 import { getSourceRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleCustomThemesScript, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
+import { CUSTOM_THEMES_SCRIPT_PATH } from "@plannotator/shared/theme-files";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -1674,6 +1675,7 @@ export async function startAnnotateServer(
 
           // Favicon
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
+          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript();
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {

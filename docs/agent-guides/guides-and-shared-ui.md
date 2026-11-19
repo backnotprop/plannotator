@@ -398,6 +398,53 @@ The 55 built-in themes are hand-written files, `packages/ui/themes/<id>.css` (da
 - Every other pair below 4.5:1 is pinned with its ratio in `packages/ui/utils/themeContrastAllowList.json`: a new one, or a pinned one getting worse, fails the test; one that is fixed must leave the list.
 - **`--accent-text`** is accent drawn as text on the page (`text-accent-text`). `theme.css`'s `:root` defaults it to `--accent`, and `--annotation-comment` defaults to it. A theme sets its own when its accent is a pale fill that text in it would vanish against (Simple, Neutral, Quantum Rose light).
 
+## Theme files (your own colour theme)
+
+`plannotator theme add <file>` keeps a theme of the person's own next to the 55 built-ins (`plannotator theme --help`; `apps/hook/server/theme-command.ts`). A theme sets every colour; fonts and corner radius stay Plannotator's. Bun CLI only; the pages that draw it are in both runtimes.
+
+**The format** (`packages/core/theme-file.ts`, `validateThemeFile`):
+
+```json
+{
+  "plannotatorTheme": 1,
+  "id": "harbor",
+  "name": "Harbor",
+  "dark":  { "background": "#0f1419", "foreground": "#d8dee6", "primary": "#5ab0f6" },
+  "light": { "background": "#f7f9fb", "foreground": "#1b2430", "primary": "#1f6fd1" }
+}
+```
+
+- `dark`, `light` or both. A theme with one half is offered only for that half (`modeSupport` `dark-only` / `light-only`), like a one-mode built-in.
+- Each half sets any of `THEME_TOKENS`: `background`, `foreground`, `card`, `card-foreground`, `popover`, `popover-foreground`, `primary`, `primary-foreground`, `secondary`, `secondary-foreground`, `muted`, `muted-foreground`, `accent`, `accent-foreground`, `destructive`, `destructive-foreground`, `success`, `success-foreground`, `warning`, `warning-foreground`, `border`, `input`, `ring`, `code-bg`, `focus-highlight`, plus the optional `accent-text` (see "Theme text contrast"). **A token left out takes the default theme's value for that half** (`DEFAULT_THEME_TOKENS`, a copy of `plannotator.css`; `resolveThemeHalf`). `add` names the ones left out in a Note line.
+- **Validation is closed, not a blocklist.** A colour must match one of the anchored patterns: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`/`rgba()`, `hsl()`/`hsla()` or `oklch()`, with plain numbers, percentages and spaces only, at most 64 characters (`isThemeColour`). So `url()`, `var()`, `calc()`, `;`, braces, quotes, comments and escapes can never pass. The id is `/^[a-z0-9][a-z0-9-]{0,63}$/` and never one of `BUILT_IN_THEME_IDS` (pinned against the registry and the theme files by `themeRegistry.custom.test.ts`). The name is 1 to 60 characters on one line. Unknown keys anywhere are refused, naming the field. A file is at most 16 KB, and there are at most 32 themes (`CUSTOM_THEME_LIMIT`).
+- The stylesheet (`themeFileCss`) validates again before writing anything, and emits `.theme-<id>` (the dark half, or the only half) and `.theme-<id>.light`, plus the app's fonts and radius.
+- **Contrast is a note, never a refusal:** `add` reports body text (`foreground` on `background`) under 4.5:1 (`bodyTextContrast`).
+
+**Storage:** `<data dir>/themes/<id>.json`, the validated file (`packages/shared/theme-files.ts`). A file whose name is not its id, one over 16 KB, or one that fails validation (hand-edited) is skipped with its reason (`theme list` prints them). `remove` moves the file to `themes/removed/<id>-<time>.json` and sets any config.json `theme` half that used it back to `plannotator`.
+
+**Converters** (`packages/core/theme-import.ts`, pure, no network; `importThemeText` detects the format: Plannotator's own, a base16 scheme as YAML or JSON (`base00`…`base0F`, the older flat form or the newer `palette:` form), or a VS Code colour theme (`colors`, JSON with comments and trailing commas)). A converted theme has one half, from base16's `variant` or VS Code's `type` (`light`/`hcLight` light), else from the ground's lightness. Its id is the name slugged, with `-custom` added when that is a built-in's id. Tokens the source does not name are derived from its ground and text in OKLab (`fillHalf`): card 5% of the way to the text, popover 9%, muted 8%, border 16%, muted text 62%. A fill's text is the ground or the text colour, whichever has more contrast on it.
+
+| Token | base16 | VS Code (first key present wins) |
+| --- | --- | --- |
+| background / foreground | base00 / base05 | `editor.background` / `editor.foreground`, `foreground` |
+| card | base01 | `sideBar.background`, `editorWidget.background`, `panel.background` |
+| popover | base01→base02, half way | `editorWidget.background`, `editorHoverWidget.background`, `dropdown.background`, `quickInput.background` |
+| muted, input, code-bg | base01→base02, half way | muted `tab.inactiveBackground`, `editorGroupHeader.tabsBackground`, `sideBar.background`; input `input.background`, `dropdown.background`; code-bg `textCodeBlock.background`, `editorWidget.background`, `sideBar.background` |
+| muted-foreground | base04 | `descriptionForeground`, `tab.inactiveForeground`, `editorLineNumber.activeForeground` |
+| border | base02 | `panel.border`, `sideBar.border`, `editorGroup.border`, `tab.border`, `contrastBorder` |
+| primary, ring | base0D | `button.background`, `activityBarBadge.background`, `textLink.foreground`, `focusBorder`, `terminal.ansiBlue` |
+| secondary, focus-highlight | base0C | `terminal.ansiCyan`, `textLink.activeForeground`, `textLink.foreground` |
+| accent | base09 | `terminal.ansiMagenta`, `editorCursor.foreground` |
+| destructive / success / warning | base08 / base0B / base0A | `errorForeground`…`terminal.ansiRed` / `terminal.ansiGreen`… / `editorWarning.foreground`, `terminal.ansiYellow`… |
+
+VS Code rules: only `#hex` values are read, and a translucent one is flattened over `editor.background`. The fills (primary, secondary, accent, destructive, success, warning, ring) skip a near-grey candidate (OKLCH chroma under 0.04): Monokai's grey button becomes its link blue. `button.foreground` is used only when the primary came from `button.background`. Muted, input and code-bg that come out within 0.025 OKLab lightness of the card are moved a step off it, because chips, tags, fields and code blocks are drawn on cards (the plan document is a card), and a source that paints its sidebar and widgets one colour would make them vanish. Neither converter reads syntax colours (`tokenColors`, base16's syntax roles): code keeps Plannotator's syntax themes.
+
+**First paint, every page** (the pages are packed and served as static files, so the theme comes by a request, the way `/favicon.ico` does): each page's `index.html` (`apps/hook`, `apps/review`, `apps/inbox`) loads `<script vite-ignore src="/plannotator-themes.js">` in its head, a classic script that runs before the app's module. Every server answers it from the data dir on each request (`customThemesScript`, `no-store`): it sets `window.__PLANNOTATOR_CUSTOM_THEMES__` (id, name, `modeSupport`, swatch colours) and appends `<style id="plannotator-custom-themes">`. `themeRegistry.ts` reads the list at module load (`setCustomThemes` drops anything malformed or forged), so `isKnownTheme`, `normalizeThemePair` and the first render already know the custom ids, and a cookie or config.json naming one is not normalized to the default. With no themes the script sets an empty list. A failed load is harmless (the page is the default theme).
+
+**When a change shows:** a new page shows it at once. An open window shows it on reload: windows read the themes and config.json `theme` only when they load.
+
+**The pickers:** custom themes are tiles of their own colours, first in the grid, in plan review's Settings → Theme and the Inbox's Settings → Colors (`getAllThemes`). The windows do not add or remove themes: that is the CLI's.
+
 ## Syntax Highlighting
 
 There is **one** highlighter in the app: the Shiki instance `@pierre/diffs` already runs for the code-review diff pane, driven by Shiki's **JavaScript regex engine** (`preferredHighlighter: 'shiki-js'`). `highlight.js` is gone. The wrapper is `packages/ui/utils/codeHighlight.ts`:
