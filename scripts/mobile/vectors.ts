@@ -13,8 +13,9 @@
  * suite reads with the window's own parser, so it has its own generator,
  * scripts/mobile/vectors-stream.ts.
  */
-import { createHmac } from 'node:crypto';
 import { deriveRelayKeys } from '../../packages/core/crypto';
+import { inboxPushCollapseId } from '../../packages/core/inbox-push';
+import { INBOX_PUSH_VECTOR_PAIRING as INBOX_PUSH_PAIRING, inboxPushVectorPlaintexts, inboxPushVectors } from '../../packages/core/inbox-push-vectors';
 import { autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
 import { formatCount, plural, questionCount, waitCount } from '../../packages/core/inbox-format';
 import type { InboxListRow, InboxQuestion } from '../../packages/core/inbox-types';
@@ -31,6 +32,7 @@ export const FIXTURES = {
   questions: 'apps/mobile/contract/fixtures/questions.json',
   skew: 'apps/mobile/contract/fixtures/skew.json',
   relay: 'packages/core/fixtures/inbox-relay-vectors.json',
+  push: 'packages/core/fixtures/inbox-relay-push-v2-vectors.json',
 } as const;
 
 export const VECTORS = {
@@ -40,6 +42,7 @@ export const VECTORS = {
   crypto: 'apps/mobile/contract/vectors/crypto.json',
   questions: 'apps/mobile/contract/vectors/questions.json',
   skew: 'apps/mobile/contract/vectors/skew.json',
+  push: 'apps/mobile/contract/vectors/push.json',
 } as const;
 
 const TIME_SCRIPT = 'scripts/mobile/vectors-time.ts';
@@ -129,8 +132,8 @@ export function timeVectors(): unknown {
  * The relay's collapse id for each thread of the relay vectors, under the
  * collapse key the product derives from the same all-zero inputs. The key
  * itself is not written here: the app derives it (its HKDF label is in
- * packages/core/crypto.ts) and must reach these ids. The HMAC step is the
- * Inbox's own (packages/server/inbox-relay.ts, the push's collapse id).
+ * packages/core/crypto.ts) and must reach these ids, made by the Inbox's own
+ * inboxPushCollapseId (packages/core/inbox-push.ts).
  */
 export async function cryptoVectors(): Promise<unknown> {
   const relay = JSON.parse(readRepoText(FIXTURES.relay)) as { pairing_secret: string; device_id: string; derived: Record<string, string>; envelopes: { plaintext: string }[] };
@@ -153,7 +156,7 @@ export async function cryptoVectors(): Promise<unknown> {
     collapse: {
       hkdf_info: 'plannotator-inbox relay collapse v1',
       hmac: 'sha256 over the thread id, keyed by the collapse key (base64url-decoded); hex',
-      ids: threads.map((thread_id) => ({ thread_id, collapse_id: createHmac('sha256', Buffer.from(keys.collapseKey, 'base64url')).update(thread_id).digest('hex') })),
+      ids: await Promise.all(threads.map(async (thread_id) => ({ thread_id, collapse_id: await inboxPushCollapseId(keys.collapseKey, thread_id) }))),
     },
   };
 }
@@ -216,6 +219,34 @@ export function skewVectors(): unknown {
   };
 }
 
+/**
+ * The push suite is F6a's own vectors (FIXTURES.push, made by packages/core/inbox-push-vectors.ts), never a second
+ * set: vectors/push.json points the app at them. The one command keeps that file in step too: when the push rules no
+ * longer give its plaintexts, sizes and collapse ids, it is rewritten from the rules (fresh IVs: the envelopes then
+ * change), and left as it is otherwise.
+ */
+export async function pushVectors(): Promise<Output[]> {
+  const text = readRepoText(FIXTURES.push);
+  type Push = { name: string; sealed_bytes: number; plaintext: unknown; collapse_id: string };
+  const file = JSON.parse(text) as { key: string; collapse_key: string; pushes: Push[] };
+  const keys = await deriveRelayKeys(INBOX_PUSH_PAIRING.pairing_secret, INBOX_PUSH_PAIRING.device_id);
+  const want = await Promise.all(inboxPushVectorPlaintexts().map(async (p) => ({ ...p, collapse_id: await inboxPushCollapseId(keys.collapseKey, p.plaintext.thread_id) })));
+  const have = file.pushes.map(({ name, sealed_bytes, plaintext, collapse_id }) => ({ name, sealed_bytes, plaintext, collapse_id }));
+  const fresh = file.key === keys.key && file.collapse_key === keys.collapseKey && JSON.stringify(have) === JSON.stringify(want);
+  const fixture = fresh ? text : `${JSON.stringify(await inboxPushVectors(), null, 2)}\n`;
+  return [
+    { path: FIXTURES.push, text: fixture },
+    {
+      path: VECTORS.push,
+      text: jsonText({
+        about: about('The push suite is the Inbox\'s own push vectors, in the file named in "vectors": each push\'s plaintext, its sealed envelope and size, and its collapse id, under the all-zero pairing. The app opens each envelope with "key", reads the plaintext, and derives the same collapse id from "collapse_key".', FIXTURES.push),
+        vectors: FIXTURES.push,
+        pushes: want.map((p) => p.name),
+      }),
+    },
+  ];
+}
+
 export async function generateVectors(): Promise<Output[]> {
   return [
     { path: VECTORS.list, text: jsonText(listVectors()) },
@@ -224,6 +255,7 @@ export async function generateVectors(): Promise<Output[]> {
     { path: VECTORS.crypto, text: jsonText(await cryptoVectors()) },
     { path: VECTORS.questions, text: jsonText(questionVectors()) },
     { path: VECTORS.skew, text: jsonText(skewVectors()) },
+    ...(await pushVectors()),
   ];
 }
 
