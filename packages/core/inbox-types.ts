@@ -1218,6 +1218,12 @@ export interface InboxLaunchRecord {
 export interface InboxLaunchRex {
   line?: string;
   unavailable?: true;
+  /**
+   * With `unavailable`, why, where it is not "Rex's app isn't open here" (a Mac): `server`, Rex on that computer is a
+   * server with no app (Linux, FreeBSD) and it did not answer; `shared`, the Rex server there is another account's
+   * (a shared server named by `REX_SERVER`), where the Inbox reads but never starts an agent.
+   */
+  why?: "server" | "shared";
   refused?: true;
   session?: string;
   block?: string;
@@ -1324,7 +1330,7 @@ export interface InboxRun {
    * has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own
    * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
    */
-  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
+  rex?: { line: string | null; unavailable?: true; why?: "server" | "shared"; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -3573,9 +3579,10 @@ export interface InboxComposeSession {
 
 /**
  * Where an agent lives, as this computer's Rex last confirmed it (packages/server/inbox-rex.ts): one quiet line,
- * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered (the window asking is on
- * this computer, and Rex's app here confirmed a jump in this run and has not failed one since). Additive: absent from an older Inbox,
- * and for an agent whose place Rex does not confirm.
+ * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered to the window asking: a
+ * Rex app that can go to the pane for it is attached to that Rex (this computer's own app for this computer's own
+ * window; an app attached from another computer for the tailnet's or a linked machine's) and has not failed a Show
+ * since. Additive: absent from an older Inbox, and for an agent whose place Rex does not confirm.
  */
 export interface InboxAgentPlace {
   kind: "rex";
@@ -3586,7 +3593,7 @@ export interface InboxAgentPlace {
 /** The longest place line kept from another machine's list. */
 const INBOX_AGENT_PLACE_LINE_MAX = 200;
 
-/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed (never from another machine: its Rex is not here). */
+/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed and it is exactly `true`. */
 export function inboxAgentPlaceChecked(value: unknown, options: { show: boolean }): InboxAgentPlace | undefined {
   if (!value || typeof value !== "object") return undefined;
   const place = value as Record<string, unknown>;

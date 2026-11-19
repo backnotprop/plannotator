@@ -611,6 +611,7 @@ const PARITY: { name: string; call: (w: World) => Call; world?: WorldOptions; sh
   { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }) },
   { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }) },
   { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }) },
+  { name: "settings split_view", call: () => ({ path: "/api/inbox/settings", body: { split_view: { on: true } } }) },
 ];
 
 describe("the owner over the tailnet gets what this computer gets", () => {

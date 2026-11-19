@@ -198,6 +198,7 @@ function skipQuantifier(body: string, at: number, to: number): { quantifier: str
 /** Modules inbox.ts imports that compare request paths without serving them, each with why. */
 export const NOT_ROUTE_MODULES: Record<string, string> = {
   'packages/server/inbox-perf.ts': 'sorts requests into waiting ones for the timings; serves nothing',
+  'packages/server/inbox-rex-far.ts': "reads a linked machine's answer to a forwarded Show in Rex (`/api/inbox/m/<machine>/rex/show`, which inbox-machines.ts serves); serves nothing",
   'packages/shared/star-ask.ts': "the plan, review and annotate servers' `/api/star-ask/*`; the Inbox takes only its helpers and serves `/api/inbox/star-ask`",
 };
 

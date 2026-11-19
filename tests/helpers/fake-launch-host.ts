@@ -42,7 +42,7 @@ export function fakeLaunchHost() {
       return { ok: true, session: `session-${ref}`, ref };
     },
     async rexCommand(launch, input) {
-      calls.push(`rexCommand ${input.resume ? "resume" : "new"}`);
+      calls.push(`rexCommand ${input.resume ? (input.fresh ? "fresh" : "resume") : "new"}`);
       const session = input.resume && launch.session ? launch.session : `session-r${sessions.size + 1}`;
       if (!sessions.has(session)) sessions.set(session, { ref: session, live: null, state: "running" });
       return { ok: true, session, ref: session, command: `cd '${launch.folder}' && exec fake-agent --session ${session}` };

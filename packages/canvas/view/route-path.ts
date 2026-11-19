@@ -3,6 +3,7 @@
  * another, the place for its label, and the direction of each end. Pure:
  * points in, an SVG path string and a few numbers out.
  */
+import { curveControl, curvePoint } from '../model/document';
 import type { Point } from '../model/geometry';
 
 /** How round an elbow is, and how wide a hop, in world units. */
@@ -93,6 +94,25 @@ export function routePath(points: readonly Point[], hops?: Map<number, number[]>
     }
   }
   return d;
+}
+
+/** How many straight pieces stand in for a curve where a polyline is wanted. */
+const CURVE_STEPS = 16;
+
+/**
+ * A curved connector between two points (`curveControl` says which way it
+ * bows). `d` is the curve itself; `points` is the same curve as a polyline,
+ * for everything that reads a route as points: the label's place, the
+ * direction of each end, the pointer. Two ends in one place give a line
+ * with no length, never a division by nothing.
+ */
+export function curveRoute(from: Point, to: Point): { d: string; points: Point[] } {
+  const control = curveControl(from, to);
+  if (!control) return { d: `M${n(from.x)} ${n(from.y)}L${n(to.x)} ${n(to.y)}`, points: [from, to] };
+  const points: Point[] = [from];
+  for (let i = 1; i < CURVE_STEPS; i++) points.push(curvePoint(from, control, to, i / CURVE_STEPS));
+  points.push(to);
+  return { d: `M${n(from.x)} ${n(from.y)}Q${n(control.x)} ${n(control.y)} ${n(to.x)} ${n(to.y)}`, points };
 }
 
 /** The point a share of the way along a route (0 its start, 1 its end), and whether the run there is horizontal. */

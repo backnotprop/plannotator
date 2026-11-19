@@ -5,12 +5,20 @@
  */
 import { Sparkle } from 'lucide-react';
 import React, { createContext, useContext } from 'react';
+import { isCustomColor } from '../model/color';
 import type { Actor } from '../model/types';
 
 export interface PersonLabel {
   name: string;
   /** A picture address (already resolved). Absent: the initial, or the agent's mark. */
   picture?: string;
+  /**
+   * The colour of this person's mark where no picture is shown: any CSS colour
+   * the canvas takes for an object (`isCustomColor`: hex, a colour name, one
+   * colour function). Anything else is ignored. Absent: a quiet neutral, the
+   * same for everyone. The initial on it is drawn in whichever ink is read on it.
+   */
+  color?: string;
 }
 
 export type People = (actor: Actor) => PersonLabel | null;
@@ -29,10 +37,17 @@ export function usePerson(actor: Actor | undefined): PersonLabel | null {
   return people?.(actor) ?? { name: actor.id.charAt(0).toUpperCase() + actor.id.slice(1) };
 }
 
+/** The colour a host gave for a person's mark, when it is one the canvas will put in a style; otherwise none. */
+export function faceColor(label: { color?: unknown } | null | undefined): string | undefined {
+  const color = label?.color;
+  return typeof color === 'string' && isCustomColor(color) ? color.trim() : undefined;
+}
+
 /** A small round face: a picture, an initial, or the agent's mark. Decoration; the name is said by what holds it. */
 export function Face({ actor, label }: { actor: Actor; label: PersonLabel }) {
+  const own = label.picture ? undefined : faceColor(label);
   return (
-    <span className="pcv-face" data-kind={actor.kind} aria-hidden="true">
+    <span className="pcv-face" data-kind={actor.kind} data-own={own ? '' : undefined} style={own ? ({ ['--pcv-face' as string]: own } as React.CSSProperties) : undefined} aria-hidden="true">
       {label.picture ? <img src={label.picture} alt="" draggable={false} referrerPolicy="no-referrer" /> : actor.kind === 'agent' ? <Sparkle /> : label.name.charAt(0).toUpperCase()}
     </span>
   );

@@ -28,6 +28,7 @@ import type {
   BoxShape,
   CanvasLink,
   CanvasObject,
+  InkPen,
   ObjectId,
   ObjectStyle,
   ReferenceTarget,
@@ -36,6 +37,8 @@ import type {
   SnapshotInput,
   SnapshotSource,
   StampObject,
+  TextFace,
+  TextSize,
 } from '../model/types';
 
 /** The fields `edit` may change. Which apply depends on the object's type. */
@@ -52,7 +55,13 @@ export interface ObjectPatch {
   target?: ReferenceTarget;
   src?: string;
   html?: string;
-  size?: 'small' | 'medium' | 'large';
+  size?: TextSize;
+  /** `null` or `sans` puts the board's own face back. */
+  face?: TextFace | null;
+  /** A drawn line's points: see `InkObject`. */
+  points?: number[];
+  /** `null` or `marker` puts the usual pen back. */
+  pen?: InkPen | null;
   frames?: number;
   fps?: number;
   from?: ArrowEnd;

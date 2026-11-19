@@ -349,11 +349,12 @@ export interface ReviewState {
 
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
-  /** Token hover cards. Undefined whenever the gate or the setting is off. */
+  /** Token hover cards. Undefined whenever the gate or the setting is off.
+   *  Returns false for a token that is not a symbol (no hover affordance). */
   onTokenHoverEnter?: (
     props: import('@pierre/diffs').DiffTokenEventBaseProps,
     filePath: string,
-  ) => void;
+  ) => boolean;
   onTokenHoverLeave?: () => void;
   codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
   codeNavIsLoading: boolean;
