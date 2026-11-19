@@ -30,6 +30,17 @@ describe('the mod reads the Inbox gate', () => {
     expect(JSON.parse(host.files.get(MARK)!)).toMatchObject({ on: true, by: 'update-existing' })
   })
 
+  test('a check for inbox.json that fails: on for this read, and nothing written (a fresh computer is never marked on by an error)', async () => {
+    const host = fakeHost()
+    const exists = host.exists
+    host.exists = async (path) => {
+      if (path.endsWith('/inbox/inbox.json')) throw new Error('EIO')
+      return exists(path)
+    }
+    expect(await inboxTurnedOnHere(host, DATA, false)).toBe(true)
+    expect(host.files.has(MARK)).toBe(false)
+  })
+
   test("a test run's knob counts a data dir with no mark as on", async () => {
     expect(await inboxTurnedOnHere(fakeHost(), DATA, true)).toBe(true)
   })

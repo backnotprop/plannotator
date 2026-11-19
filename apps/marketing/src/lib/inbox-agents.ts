@@ -167,7 +167,7 @@ export const INSTALL_WIN = 'irm https://plannotator.ai/install.ps1 | iex';
 export const TEST = 'Send me a test question in the Plannotator Inbox, and read my answer when I tell you I sent it.';
 const MCP_JSON = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
 
-/** The setup's turn-on step: it turns the Inbox on, starts it detached, opens it, connects the agents it finds and returns. Always before a restart, a connection or a "you should see" that needs the Inbox. */
+/** The setup's turn-on step: it turns the Inbox on, starts it detached, opens it, prints its URL, then connects the agents it finds and returns. Always before a restart, a connection or a "you should see" that needs the Inbox. */
 export const TURN_ON = INBOX_SETUP_COMMAND;
 const openInbox = (see: string): Step => ({ do: 'Open the Inbox. It connects the agents it finds on this computer.', code: TURN_ON, see });
 /**

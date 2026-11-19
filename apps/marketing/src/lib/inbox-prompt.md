@@ -34,7 +34,7 @@ Do only your host's line below, and tell the person what you install. "Before st
 
 ## 2. Start the Inbox and open it
 
-Run `{{TURN_ON}}`. It turns the Inbox on, starts it in the background (or finds the running one), opens the window in the browser, connects the agents it finds on this computer that are not connected yet, prints its URL and exits. Its stderr names them ("Connected Codex and Gemini CLI to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL it printed and tell them to open it on this machine.
+Run `{{TURN_ON}}`. It turns the Inbox on, starts it in the background (or finds the running one), opens the window in the browser, prints its URL, then connects the agents it finds on this computer that are not connected yet, and exits. Its stderr names them ("Connected Codex and Gemini CLI to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL it printed and tell them to open it on this machine.
 
 ## 3. Read the guide and connect yourself
 

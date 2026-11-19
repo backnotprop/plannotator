@@ -12,7 +12,7 @@
  * file is read.
  */
 
-import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { INBOX_TURNED_ON_FILE, inboxMarkSaysOn } from "./connection";
@@ -96,7 +96,16 @@ export function isInboxTurnedOn(dataDir: string, env: Readonly<Record<string, st
   if (mark === null) return true;
   if (mark !== undefined) return inboxMarkSaysOn(mark);
   if (testRunCountsOn(dataDir, env)) return true;
-  if (read(join(dataDir, "inbox", "inbox.json")) === undefined) return false;
+  let ran: boolean;
+  try {
+    ran = statSync(join(dataDir, "inbox", "inbox.json")).isFile();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    // It could not be checked: on for this read (never darken an Inbox), with nothing written.
+    return true;
+  }
+  if (!ran) return true;
   // An Inbox ran here before the mark (or an older plannotator started it): on, written once. Another
   // reader may have written it first; either way the mark says on.
   try {

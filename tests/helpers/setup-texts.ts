@@ -6,8 +6,8 @@
  * with the real rule).
  *
  * The rule they hold (2026-11-19, after a first setup broke): the first Inbox step is always `plannotator inbox
- * --open` (TURN_ON: it turns the Inbox on, starts it detached, opens it, connects the agents it finds, prints the
- * URL and returns, with or without a screen), before any connection, config edit, restart or "you should see". No
+ * --open` (TURN_ON: it turns the Inbox on, starts it detached, opens it, prints the URL, then connects the agents it
+ * finds and returns, with or without a screen), before any connection, config edit, restart or "you should see". No
  * setup text gives an agent `--background` (refused while the Inbox is off) or bare `plannotator inbox` (it serves
  * in the foreground when no Inbox runs, so it never returns in an agent's shell).
  */

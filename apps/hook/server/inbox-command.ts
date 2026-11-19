@@ -929,7 +929,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       process.stdout.write(`${url}\n`);
       // --open is the setup's one step: after the URL is out, it connects the agents it finds, as the person's bare
       // run does, within the wait of the callers that run it (the mod's /plannotator-inbox and Droid give the whole
-      // command 30 s). What is not done by then is done at the next run.
+      // command 30 s). The Inbox finishes a connect cut short; only this report of it is lost.
       if (open && connect) await connectRunningInbox(entry, Math.max(1_000, OPEN_DONE_WITHIN_MS - (Date.now() - startedAt)));
       process.exit(0);
     } catch (error) {

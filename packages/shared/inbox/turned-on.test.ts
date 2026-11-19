@@ -65,6 +65,13 @@ describe("a computer where an Inbox already ran (inbox/inbox.json, no mark)", ()
     expect(isInboxTurnedOn(dir, REAL)).toBe(true);
   });
 
+  test("an inbox.json that is not a file it can see: on for the read, and no mark written", () => {
+    const dir = dataDir();
+    mkdirSync(join(dir, "inbox", "inbox.json"));
+    expect(isInboxTurnedOn(dir, REAL)).toBe(true);
+    expect(readdirSync(join(dir, "inbox"))).toEqual(["inbox.json"]);
+  });
+
   test("the first writer's mark stands: a reader never replaces it", () => {
     const dir = dataDir(true);
     markInboxTurnedOn(dir);

@@ -180,7 +180,7 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
       description: "Open the Plannotator Inbox in the browser and show its address.",
     },
     async (ctx) => {
-      // Starts a stopped Inbox in the background, opens it and prints its URL; returns at once.
+      // Starts a stopped Inbox in the background, opens it and prints its URL; returns within half a minute.
       const result = await runPlannotator(amp, ctx, ["inbox", "--open"]);
       await ctx.ui.notify(inboxOpenedMessage(result));
     },

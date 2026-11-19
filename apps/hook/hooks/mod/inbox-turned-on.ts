@@ -24,7 +24,14 @@ export async function inboxTurnedOnHere(host: Host, dataDir: string, testOn: boo
   if (mark === null) return true
   if (mark !== undefined) return inboxMarkSaysOn(mark)
   if (testOn) return true
-  if ((await readOf(host, `${dataDir}/inbox/inbox.json`)) === undefined) return false
+  // Written only where inbox.json was seen to be there; a check that fails answers on and writes nothing.
+  let ran: boolean
+  try {
+    ran = await host.exists(`${dataDir}/inbox/inbox.json`)
+  } catch {
+    return true
+  }
+  if (!ran) return false
   // The host has no exclusive write; the mod only ever writes "on", so a race with another writer cannot turn it off.
   if (!(await host.exists(markPath).catch(() => true))) {
     const at = new Date(await host.now()).toISOString()
