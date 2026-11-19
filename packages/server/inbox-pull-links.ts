@@ -26,19 +26,17 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewPosted, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
-import { isInboxPullAsk, type InboxPullAsk } from "@plannotator/core/inbox-types";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
 /** At most this many PRs keep an owner: the oldest choices go first. */
 export const INBOX_PULL_LINKS_MAX = 2_000;
 
-export type { InboxPullAsk } from "@plannotator/core/inbox-types";
+export type InboxPullAsk = "guide" | "custom" | "thread";
 
 export interface InboxPullOwner {
   thread_id: string;
   at: string;
   ask?: InboxPullAsk;
-  show_me_at?: string;
   theirs?: true;
   page?: true;
 }
@@ -89,8 +87,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
           links.set(key, {
             thread_id: owner.thread_id,
             at: owner.at,
-            ...(isInboxPullAsk(owner.ask) && owner.ask !== "show_me" ? { ask: owner.ask } : {}),
-            ...(typeof owner.show_me_at === "string" ? { show_me_at: owner.show_me_at } : owner.ask === "show_me" ? { show_me_at: owner.at } : {}),
+            ...(owner.ask === "guide" || owner.ask === "custom" || owner.ask === "thread" ? { ask: owner.ask } : {}),
             ...(owner.theirs === true ? { theirs: true as const } : {}),
             ...(owner.page === true ? { page: true as const } : {}),
           });
@@ -137,13 +134,9 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       for (const key of keys) {
         // A thread started from the PR's page stays its page when that same thread is given the PR again.
         const was = map.get(key);
-        const same = was?.thread_id === threadId;
-        const page = extra.ask === "thread" || (same && was.page === true);
-        const showMe = extra.ask === "show_me";
-        const ask = showMe ? (same ? was.ask : undefined) : (extra.ask ?? undefined);
-        const showMeAt = showMe ? at : same ? was.show_me_at : undefined;
+        const page = extra.ask === "thread" || (was?.thread_id === threadId && was.page === true);
         map.delete(key);
-        map.set(key, { thread_id: threadId, at, ...(ask ? { ask } : {}), ...(showMeAt ? { show_me_at: showMeAt } : {}), ...(extra.theirs ? { theirs: true as const } : {}), ...(page ? { page: true as const } : {}) });
+        map.set(key, { thread_id: threadId, at, ...(extra.ask ? { ask: extra.ask } : {}), ...(extra.theirs ? { theirs: true as const } : {}), ...(page ? { page: true as const } : {}) });
       }
       while (map.size > INBOX_PULL_LINKS_MAX) map.delete(map.keys().next().value!);
       save(map);

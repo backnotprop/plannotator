@@ -65,7 +65,6 @@ import {
   type InboxPullHost,
   inboxPullLabel,
   inboxPullSafeBranch,
-  type InboxPullAsk,
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
@@ -2103,7 +2102,6 @@ export interface InboxPullLinkStore {
   threadsOf(projectId: string): { thread_id: string; last_at: string }[];
   threadMessageIds(threadId: string): readonly string[];
   message(id: string): InboxMessage | null;
-  messageSeq?(id: string): number | null;
   threadSubject(threadId: string): string | null;
   /** The project a thread is in (canonical id), or null when there is no such thread. */
   threadProject(threadId: string): string | null;
@@ -2166,22 +2164,13 @@ function threadFacts(store: InboxPullLinkStore, threadId: string) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
-  let showMe: InboxMessage | null = null;
-  let replied = false;
-  let showMeSeen = false;
-  for (let i = ids.length - 1; i >= 0 && (!last || !guide || !showMe); i--) {
+  for (let i = ids.length - 1; i >= 0 && (!last || !guide); i--) {
     const message = store.message(ids[i]!);
-    if (message?.author.kind === "person" && !showMe) replied = true;
     if (!message || message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
-    if (!showMe && message.show_me) {
-      showMe = message;
-      const seq = store.messageSeq?.(message.id) ?? null;
-      showMeSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
-    }
   }
-  return { last, guide, showMe, showMeSeen };
+  return { last, guide };
 }
 
 /**
@@ -2212,7 +2201,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; show_me_at?: string; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2257,7 +2246,7 @@ export function linkInboxPulls(
   }
 
   const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
-    const { last, guide, showMe, showMeSeen } = threadFacts(store, threadId);
+    const { last, guide } = threadFacts(store, threadId);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2270,7 +2259,6 @@ export function linkInboxPulls(
       guide: guide?.guide
         ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
         : null,
-      ...(showMe?.show_me ? { show_me_page: { message_id: showMe.id, title: showMe.show_me.title, at: showMe.created_at, ...(showMeSeen ? { seen: true as const } : {}) } } : {}),
     };
   };
 
@@ -2278,7 +2266,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.show_me_at ? { show_me_asked_at: owner.show_me_at } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);

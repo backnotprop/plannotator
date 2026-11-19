@@ -113,7 +113,7 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
     case 'branch_ready':
       return { status: ['Ready for review'], tone: null };
     case 'curating':
-      return { status: [row.started?.ask === 'show_me' ? 'Making a Show me page…' : 'Curating…'], tone: null };
+      return { status: ['Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
       if (verdict?.verdict !== 'changes_requested') return { status: ['You answered'], tone: null };
@@ -328,8 +328,8 @@ export function reviewViewOf(
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : row.started?.ask === 'show_me' ? 'Making a Show me page…' : 'Curating the review…',
-    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : ask === 'show_me' ? 'Show me' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
