@@ -44,6 +44,9 @@ export interface GestureHost {
   onUserCamera?: () => void;
 }
 
+/** The gesture that joins placing an object with typing its first words, so the two are one undo step. */
+export const firstEditGesture = (id: ObjectId): string => `first-${id}`;
+
 const DEFAULTS: Record<'box' | 'note' | 'text', { w: number; h: number }> = {
   box: { w: 168, h: 56 },
   note: { w: 172, h: 72 },
@@ -316,7 +319,8 @@ export class GestureController {
     const id = createId(tool);
     const base = { id, x: Math.round(at.x - size.w / 2), y: Math.round(at.y - size.h / 2), w: size.w, h: size.h, text: '' };
     const object: CanvasObject = tool === 'box' ? { ...base, type: 'box' } : tool === 'note' ? { ...base, type: 'note' } : { ...base, type: 'text' };
-    const result = store.dispatch({ type: 'add', objects: [object] });
+    // Placing it and typing its first words are one step: see `firstEditGesture`.
+    const result = store.dispatch({ type: 'add', objects: [object] }, { gesture: firstEditGesture(id) });
     state.set({ tool: 'select' });
     if (!result.ok) return;
     state.select([id]);

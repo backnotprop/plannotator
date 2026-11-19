@@ -17,7 +17,7 @@ import { snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-sour
 import { CanvasView } from './CanvasView';
 import { CANVAS_STRINGS, HistoryBar, SelectionBar, ToolDock, ZoomBar } from './chrome';
 import { EditorState } from './editor-state';
-import { GestureController } from './gestures';
+import { GestureController, firstEditGesture } from './gestures';
 import { addPicture, looksLikePicture } from './pictures';
 import { type PlanDropTarget, beginPlanDrag } from './plan-drop';
 import { type PasteResolver, addReference, referenceFromPaste } from './references';
@@ -116,16 +116,39 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
     [camera],
   );
 
+  /** A line the person can read when something they did could not be done. It clears itself. */
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   const onEditEnd = useCallback(
     (id: ObjectId, text: string) => {
       const object = store.getDocument().objects[id];
       state.set({ editingId: null });
       if (!object) return;
+      const first = firstEditGesture(id);
       if (object.type === 'frame') {
-        if (text !== object.title) store.dispatch({ type: 'edit', id, patch: { title: text } });
-      } else if ('text' in object && text !== object.text) {
-        store.dispatch({ type: 'edit', id, patch: { text } });
+        if (text !== object.title && !store.dispatch({ type: 'edit', id, patch: { title: text } }).ok) setNotice(CANVAS_STRINGS.textNotKept);
+        return;
       }
+      if (!('text' in object)) return;
+      if (text === '' && object.text === '') {
+        // Placed and left empty: it was never wanted. Gone, with no step left behind.
+        if (!store.revert(first) && object.type === 'text') store.dispatch({ type: 'delete', ids: [id] });
+        state.prune((other) => !!store.getDocument().objects[other]);
+        return;
+      }
+      if (text === '' && object.type === 'text') {
+        // Bare text with no words is nothing to see and nothing to grab: emptying it removes it.
+        store.dispatch({ type: 'delete', ids: [id] });
+        return;
+      }
+      if (text === object.text) return;
+      // The words typed straight after placing it join that step.
+      if (!store.dispatch({ type: 'edit', id, patch: { text } }, { gesture: first }).ok) setNotice(CANVAS_STRINGS.textNotKept);
     },
     [state, store],
   );
@@ -162,14 +185,6 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
     : undefined;
 
   const viewCentre = () => ({ x: camera.get().x + size.current.w / camera.get().z / 2, y: camera.get().y + size.current.h / camera.get().z / 2 });
-
-  /** A line the person can read when something they did could not be done. It clears itself. */
-  const [notice, setNotice] = useState<string | null>(null);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 6000);
-    return () => clearTimeout(timer);
-  }, [notice]);
 
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
@@ -265,6 +280,11 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
         className,
         'data-interactive': '',
         'data-tool': ui.tool,
+        // A press on the board must not move focus by itself: placing an object focuses its words in the same
+        // press, and the browser's own focus change would take that straight back. Bars and fields keep theirs.
+        onMouseDown: (event) => {
+          if (!(event.target as HTMLElement).closest?.('.pcv-bar, [contenteditable], input, button')) event.preventDefault();
+        },
         onPointerDown: gestures.onPointerDown,
         onPointerMove: gestures.onPointerMove,
         onPointerUp: gestures.onPointerUp,
@@ -275,7 +295,6 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
           if (object?.type === 'reference' && ui.tool === 'select') openReference(object);
           else gestures.onDoubleClick(event);
         },
-        onContextMenu: (event) => event.preventDefault(),
       }}
       worldOverlay={
         <>

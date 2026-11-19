@@ -193,6 +193,19 @@ describe('undo and redo', () => {
     expect(store.canRedo).toBe(false);
   });
 
+  test('an abandoned step can be taken back and forgotten: no undo, no redo left of it', () => {
+    const store = seeded();
+    while (store.canUndo) store.undo();
+    store.redo();
+    store.dispatch({ type: 'add', objects: [box('empty', 0, 300)] }, { gesture: 'first-empty' });
+    expect(store.revert('some-other')).toBeNull();
+    expect(store.revert('first-empty')).not.toBeNull();
+    expect(store.getDocument().objects.empty).toBeUndefined();
+    expect(store.canRedo).toBe(false);
+    store.undo();
+    expect(store.canUndo).toBe(false);
+  });
+
   test('a new change after an undo drops the redo', () => {
     const store = seeded();
     store.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 0 });

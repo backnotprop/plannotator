@@ -12,7 +12,7 @@ import {
   rectContainsRect,
   rectsIntersect,
 } from '../model/geometry';
-import { type CanvasDocument, type CanvasObject, type ObjectId, isPlaced } from '../model/types';
+import { type ArrowEnd, type CanvasDocument, type CanvasObject, type FrameObject, type ObjectId, isPlaced } from '../model/types';
 import type { DocumentIndex } from './document-index';
 
 /** How far inside a frame's edge still grabs the frame, in world units at zoom 1. */
@@ -45,8 +45,10 @@ function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: nu
  * a few screen pixels divided by the zoom.
  */
 export function hitTest(doc: CanvasDocument, index: DocumentIndex, p: Point, tolerance = 4): ObjectId | null {
-  const reach = Math.max(tolerance, FRAME_TITLE_HEIGHT);
-  const candidates = index.spatial.query({ x: p.x - reach, y: p.y - reach * 2, w: reach * 2, h: reach * 3 });
+  // A frame's title is drawn above the frame, so a point in it lies above the frame's own rect by up to the
+  // title strip's height: the search must reach that far down, at any zoom.
+  const strip = Math.max(FRAME_TITLE_HEIGHT, tolerance * 2);
+  const candidates = index.spatial.query({ x: p.x - tolerance, y: p.y - tolerance, w: tolerance * 2, h: tolerance * 2 + strip });
   const order = index.order(doc);
   let best: ObjectId | null = null;
   let bestRank = -1;
@@ -100,12 +102,12 @@ export function withFrameContents(doc: CanvasDocument, index: DocumentIndex, ids
       if (object.type !== 'arrow' && bounds && rectContainsRect(frame, bounds)) out.add(inside);
     }
   }
-  // An arrow goes too when both of its ends do.
+  // An arrow goes too when both of its ends do: each end either stuck to something that is going, or a free
+  // point inside a frame that is going. A free arrow drawn inside a frame is not left behind.
+  const frames = ids.map((id) => doc.objects[id]).filter((object): object is FrameObject => object?.type === 'frame');
+  const going = (end: ArrowEnd): boolean => ('object' in end ? out.has(end.object) : frames.some((frame) => rectContainsPoint(frame, end)));
   for (const object of Object.values(doc.objects)) {
-    if (object.type !== 'arrow' || out.has(object.id)) continue;
-    const from = 'object' in object.from ? out.has(object.from.object) : false;
-    const to = 'object' in object.to ? out.has(object.to.object) : false;
-    if (from && to) out.add(object.id);
+    if (object.type === 'arrow' && !out.has(object.id) && going(object.from) && going(object.to)) out.add(object.id);
   }
   return [...out];
 }

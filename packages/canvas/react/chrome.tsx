@@ -53,6 +53,7 @@ export const CANVAS_STRINGS = {
   delete: 'Delete',
   open: 'Open',
   customColor: 'Custom colour',
+  textNotKept: 'That text is too long to keep',
   pictureProblems: {
     unavailable: 'Pictures cannot be added here',
     'too-large': 'That picture is too large to add',

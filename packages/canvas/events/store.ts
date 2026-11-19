@@ -185,6 +185,23 @@ export class CanvasStore {
     return { ok: true, envelope: this.commit(result.doc, actor, 'local', result.applied, command, options.gesture) };
   }
 
+  /**
+   * Take back the newest step when it is this gesture's, and forget it: no
+   * redo. For an action the person abandoned (an object placed and left
+   * empty), which should leave no trace in history.
+   */
+  revert(gesture: string): Envelope | null {
+    const entry = this.undoStack[this.undoStack.length - 1];
+    if (!entry || entry.gesture !== gesture) return null;
+    this.undoStack.pop();
+    const result = applyEvents(this.doc, entry.undo, { check: true });
+    if (result.applied.length === 0) {
+      this.notify();
+      return null;
+    }
+    return this.commit(result.doc, this.actor, 'undo', result.applied);
+  }
+
   undo(): Envelope | null {
     return this.step(this.undoStack, this.redoStack, 'undo');
   }

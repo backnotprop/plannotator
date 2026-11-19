@@ -42,13 +42,16 @@ function Words({ id, text, editing, className, onEditEnd }: { id: string; text: 
   }, [editing]);
   if (!editing) {
     return (
-      <div className={className ? `pcv-words ${className}` : 'pcv-words'} dir="auto">
+      <div key="view" className={className ? `pcv-words ${className}` : 'pcv-words'} dir="auto">
         {text}
       </div>
     );
   }
   return (
+    // A different key from the view above: when typing ends the node is replaced, so words the document did not
+    // keep (a refused edit) are never left on screen.
     <div
+      key="edit"
       ref={ref}
       className={className ? `pcv-words ${className}` : 'pcv-words'}
       dir="auto"

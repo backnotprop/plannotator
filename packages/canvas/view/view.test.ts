@@ -157,6 +157,34 @@ describe('hit-testing', () => {
     expect(objectsInRect(doc, index, { x: -50, y: -50, w: 700, h: 500 })).toEqual(['frame', 'a', 'b', 'over-a', 'ab']);
   });
 
+  test('a free arrow drawn inside a frame goes with the frame; one that only starts there stays', () => {
+    const store = board();
+    store.dispatch({
+      type: 'add',
+      objects: [
+        { id: 'free-in', type: 'arrow', from: { x: 60, y: 300 }, to: { x: 500, y: 350 } },
+        { id: 'half-in', type: 'arrow', from: { object: 'a' }, to: { x: 500, y: 350 } },
+        { id: 'leaves', type: 'arrow', from: { x: 60, y: 300 }, to: { x: 950, y: 60 } },
+        { id: 'to-outside', type: 'arrow', from: { object: 'a' }, to: { object: 'outside' } },
+      ],
+    });
+    const moved = withFrameContents(store.getDocument(), indexFor(store), ['frame']);
+    expect(moved).toContain('free-in');
+    expect(moved).toContain('half-in');
+    expect(moved).not.toContain('leaves');
+    expect(moved).not.toContain('to-outside');
+  });
+
+  test('a frame is grabbed by its title at any zoom, far out included', () => {
+    const store = board();
+    const doc = store.getDocument();
+    // At 10% zoom five screen pixels are fifty world units, and the title strip is twice that tall.
+    for (const tolerance of [4, 12, 50]) {
+      const strip = Math.max(24, tolerance * 2);
+      expect(hitTest(doc, indexFor(store), { x: 30, y: -strip + 1 }, tolerance)).toBe('frame');
+    }
+  });
+
   test('dragging a frame carries what is inside it, and the arrows between those', () => {
     const store = board();
     const moved = withFrameContents(store.getDocument(), indexFor(store), ['frame']);
