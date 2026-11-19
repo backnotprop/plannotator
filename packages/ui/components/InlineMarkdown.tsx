@@ -496,6 +496,28 @@ const HostResolvedImage: React.FC<{
   );
 };
 
+const HostResolvedMedia: React.FC<{ src: string; alt: string; media: 'audio' | 'video' }> = ({ src, alt, media }) => {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (failedSrc === src) {
+    return (
+      <span className={`${UNAVAILABLE_IMAGE_CLASS} annotation-exclude`} title={media === 'audio' ? 'Sound could not be loaded' : 'Video could not be loaded'} data-image-unavailable="">
+        {alt || (media === 'audio' ? 'Sound' : 'Video')}
+      </span>
+    );
+  }
+  const props = {
+    src,
+    controls: true,
+    preload: 'metadata',
+    'aria-label': alt || undefined,
+    title: alt || undefined,
+    'data-inline-media': media,
+    className: 'annotation-exclude max-w-full rounded my-2',
+    onError: () => setFailedSrc(src),
+  } as const;
+  return media === 'audio' ? <audio {...props} /> : <video {...props} playsInline />;
+};
+
 /**
  * Whether a digit-only 6/8-digit `#123456` is an issue ref (when a ref link can
  * be built) rather than a hex swatch. Off by default: every host renders such
@@ -1225,7 +1247,9 @@ export const InlineMarkdown: React.FC<{
           ? src
           : getImageSrc(src, imageBaseDir);
       parts.push(
-        resolveImage ? (
+        resolvedImage?.kind === 'src' && resolvedImage.media ? (
+          <HostResolvedMedia key={key++} src={imgSrc} alt={alt} media={resolvedImage.media} />
+        ) : resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
           <HostResolvedImage key={key++} src={imgSrc} alt={alt} width={resolvedImage?.kind === 'src' ? resolvedImage.width : undefined} writtenSrc={src} onImageClick={onImageClick} />
