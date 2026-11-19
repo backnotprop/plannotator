@@ -5,6 +5,7 @@
  */
 import type { Point, Rect } from '../model/geometry';
 import type { ObjectId } from '../model/types';
+import type { Guide } from '../view/guides';
 
 export type Tool = 'select' | 'hand' | 'box' | 'note' | 'text' | 'arrow' | 'region';
 
@@ -20,12 +21,15 @@ export interface EditorSnapshot {
   draftArrow: { from: Point; to: Point } | null;
   /** The objects being dragged right now. */
   carried: ReadonlySet<ObjectId>;
+  /** The alignment guides showing for the drag under way. */
+  guides: readonly Guide[];
 }
 
 const EMPTY: ReadonlySet<ObjectId> = new Set();
+const NO_GUIDES: readonly Guide[] = [];
 
 export class EditorState {
-  private state: EditorSnapshot = { tool: 'select', selection: EMPTY, editingId: null, marquee: null, region: null, draftArrow: null, carried: EMPTY };
+  private state: EditorSnapshot = { tool: 'select', selection: EMPTY, editingId: null, marquee: null, region: null, draftArrow: null, carried: EMPTY, guides: NO_GUIDES };
   private readonly listeners = new Set<() => void>();
 
   get = (): EditorSnapshot => this.state;

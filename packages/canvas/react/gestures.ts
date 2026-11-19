@@ -9,10 +9,12 @@
  * command, and everything it does can also be done by marquee.
  */
 import type { CanvasStore } from '../events/store';
-import { selectionUnit } from '../model/document';
+import { boundsOf, selectionUnit } from '../model/document';
 import { type Point, type Rect, rectFromPoints } from '../model/geometry';
+import { snapToGuides } from '../view/guides';
+import { portPoint } from '../view/routes';
 import { createId } from '../model/ids';
-import { type CanvasObject, type ObjectId, isPlaced } from '../model/types';
+import { type CanvasObject, type ObjectId, type Side, isPlaced } from '../model/types';
 import { type CameraController, panBy, screenToWorld, zoomAt } from '../view/camera';
 import { indexFor } from '../view/document-index';
 import { hitTest, objectsInRect, withFrameContents } from '../view/hit-test';
@@ -22,6 +24,8 @@ import type { EditorState, Tool } from './editor-state';
 /** Screen pixels a pointer may wander before a press becomes a drag. */
 const SLOP = 4;
 const HIT_PX = 5;
+/** Screen pixels within which a dragged thing settles onto a guide. */
+const GUIDE_PX = 6;
 
 type Handle = 'nw' | 'ne' | 'sw' | 'se';
 
@@ -29,10 +33,10 @@ type Gesture =
   | { kind: 'pan'; last: Point }
   | { kind: 'pinch'; distance: number; center: Point }
   | { kind: 'press'; start: Point; hit: ObjectId | null; additive: boolean; wasSelected: boolean }
-  | { kind: 'move'; id: string; ids: ObjectId[]; lastWorld: Point; pending: Point | null }
+  | { kind: 'move'; id: string; ids: ObjectId[]; startWorld: Point; startBounds: Rect | null; applied: Point; pending: Point | null }
   | { kind: 'marquee'; start: Point; base: ObjectId[] }
   | { kind: 'region'; start: Point }
-  | { kind: 'arrow'; from: Point; fromId: ObjectId | null }
+  | { kind: 'arrow'; from: Point; fromId: ObjectId | null; side: Side | null }
   | { kind: 'resize'; id: string; object: ObjectId; handle: Handle; start: Rect; origin: Point };
 
 export interface GestureHost {
@@ -115,6 +119,19 @@ export class GestureController {
       return;
     }
 
+    // A press on a port draws a connector out of that side of the object.
+    const port = target.closest?.<HTMLElement>('[data-port]');
+    if (port && tool === 'select') {
+      const object = store.getDocument().objects[port.dataset.for ?? ''];
+      if (object && isPlaced(object)) {
+        const side = port.dataset.port as Side;
+        const from = portPoint(object, side);
+        this.gesture = { kind: 'arrow', from, fromId: object.id, side };
+        state.set({ draftArrow: { from, to: from } });
+        return;
+      }
+    }
+
     const handle = target.closest?.<HTMLElement>('[data-handle]');
     if (handle && tool === 'select') {
       const object = store.getDocument().objects[handle.dataset.for ?? ''];
@@ -135,7 +152,7 @@ export class GestureController {
     }
     if (tool === 'arrow') {
       const from = this.world(p);
-      this.gesture = { kind: 'arrow', from, fromId: hit && doc.objects[hit]?.type !== 'arrow' ? hit : null };
+      this.gesture = { kind: 'arrow', from, fromId: hit && doc.objects[hit]?.type !== 'arrow' ? hit : null, side: null };
       state.set({ draftArrow: { from, to: from } });
       return;
     }
@@ -180,7 +197,7 @@ export class GestureController {
         if (g.hit) {
           const doc = store.getDocument();
           const ids = withFrameContents(doc, indexFor(store), [...state.get().selection]);
-          this.gesture = { kind: 'move', id: createId('g'), ids, lastWorld: this.world(g.start), pending: null };
+          this.gesture = { kind: 'move', id: createId('g'), ids, startWorld: this.world(g.start), startBounds: boundsOf(doc, ids.filter((id) => doc.objects[id]?.type !== 'arrow')), applied: { x: 0, y: 0 }, pending: null };
           state.set({ carried: new Set(ids) });
           this.setDragging(true);
           this.onPointerMove(event);
@@ -253,7 +270,7 @@ export class GestureController {
         return;
       case 'move':
         this.flush(g);
-        state.set({ carried: new Set() });
+        state.set({ carried: new Set(), guides: [] });
         return;
       case 'marquee':
         state.set({ marquee: null });
@@ -273,7 +290,7 @@ export class GestureController {
         const id = createId('arrow');
         const result = store.dispatch({
           type: 'add',
-          objects: [{ id, type: 'arrow', from: g.fromId ? { object: g.fromId } : g.from, to: toId ? { object: toId } : to }],
+          objects: [{ id, type: 'arrow', from: g.fromId ? { object: g.fromId } : g.from, to: toId ? { object: toId } : to, ...(g.side ? { style: { fromSide: g.side } } : {}) }],
         });
         if (result.ok) state.select([id]);
         return;
@@ -287,7 +304,7 @@ export class GestureController {
     this.gesture = null;
     this.setDragging(false);
     if (g?.kind === 'move') this.flush(g);
-    this.host.state.set({ marquee: null, draftArrow: null, carried: new Set() });
+    this.host.state.set({ marquee: null, draftArrow: null, carried: new Set(), guides: [] });
   };
 
   onDoubleClick = (event: React.MouseEvent | MouseEvent): void => {
@@ -340,10 +357,33 @@ export class GestureController {
 
   private flush(g: Extract<Gesture, { kind: 'move' }>): void {
     if (!g.pending) return;
-    const dx = g.pending.x - g.lastWorld.x;
-    const dy = g.pending.y - g.lastWorld.y;
-    g.lastWorld = g.pending;
+    const { store, state, camera } = this.host;
+    // Where the pointer has carried things to, then where they settle against what is near.
+    let x = g.pending.x - g.startWorld.x;
+    let y = g.pending.y - g.startWorld.y;
     g.pending = null;
-    if (dx || dy) this.host.store.dispatch({ type: 'move', ids: g.ids, dx, dy }, { gesture: g.id });
+    if (g.startBounds) {
+      const z = camera.get().z;
+      const carried = new Set(g.ids);
+      const moving = { x: g.startBounds.x + x, y: g.startBounds.y + y, w: g.startBounds.w, h: g.startBounds.h };
+      const doc = store.getDocument();
+      // What is on screen near it, and not part of what is being carried. Frames line up by their edges too.
+      const reach = 600 / z;
+      const others: Rect[] = [];
+      for (const id of indexFor(store).spatial.query({ x: moving.x - reach, y: moving.y - reach, w: moving.w + reach * 2, h: moving.h + reach * 2 })) {
+        const object = doc.objects[id];
+        if (!object || carried.has(id) || !isPlaced(object)) continue;
+        others.push(object);
+        if (others.length >= 80) break;
+      }
+      const snap = snapToGuides(moving, others, GUIDE_PX / z);
+      x += snap.dx;
+      y += snap.dy;
+      state.set({ guides: snap.guides });
+    }
+    const dx = x - g.applied.x;
+    const dy = y - g.applied.y;
+    g.applied = { x, y };
+    if (dx || dy) store.dispatch({ type: 'move', ids: g.ids, dx, dy }, { gesture: g.id });
   }
 }

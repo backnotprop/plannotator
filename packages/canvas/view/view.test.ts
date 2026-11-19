@@ -5,6 +5,7 @@ import type { CanvasObject } from '../model/types';
 import { cameraPlacing, fitRect, lerpCamera, screenToWorld, viewportRect, worldRectToScreen, worldToScreen, zoomAt } from './camera';
 import { lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from './cull';
 import { BOX_SHAPES } from '../model/types';
+import { snapToGuides } from './guides';
 import { neighbourInReadingOrder, readingOrder } from './reading-order';
 import { shapeOutline, toPath } from './shape-outline';
 import { indexFor } from './document-index';
@@ -192,6 +193,32 @@ describe('hit-testing', () => {
     const store = board();
     const moved = withFrameContents(store.getDocument(), indexFor(store), ['frame']);
     expect(moved.sort()).toEqual(['a', 'ab', 'b', 'frame', 'over-a']);
+  });
+});
+
+describe('alignment guides', () => {
+  const other = { x: 300, y: 100, w: 100, h: 60 };
+
+  test('an edge that comes close settles on the edge it lines up with, and says how far apart the two are', () => {
+    // Its left edge 3 off the other's left edge, well below it.
+    const snap = snapToGuides({ x: 303, y: 300, w: 80, h: 40 }, [other], 6);
+    expect(snap).toMatchObject({ dx: -3, dy: 0 });
+    expect(snap.guides).toEqual([{ axis: 'x', at: 300, from: 100, to: 340, gap: { distance: 140, at: 230 } }]);
+  });
+
+  test('middles line up too, each axis by itself, and nothing moves when nothing is near', () => {
+    const both = snapToGuides({ x: 312, y: 128, w: 80, h: 6 }, [other], 6);
+    // Centre x 352 against 350; centre y 131 against 130 (nearer than its top edge is to the other's).
+    expect(both).toMatchObject({ dx: -2, dy: -1 });
+    expect(both.guides.map((guide) => guide.axis)).toEqual(['x', 'y']);
+    expect(both.guides.every((guide) => !guide.gap)).toBe(true);
+    expect(snapToGuides({ x: 600, y: 600, w: 80, h: 40 }, [other], 6)).toEqual({ dx: 0, dy: 0, guides: [] });
+    expect(snapToGuides({ x: 303, y: 300, w: 80, h: 40 }, [], 6)).toEqual({ dx: 0, dy: 0, guides: [] });
+  });
+
+  test('of several near things the closest wins', () => {
+    const snap = snapToGuides({ x: 304, y: 300, w: 80, h: 40 }, [other, { x: 303, y: 500, w: 50, h: 50 }], 6);
+    expect(snap.dx).toBe(-1);
   });
 });
 

@@ -14,6 +14,7 @@ import { type AssetPort, pictureResolver } from '../model/assets';
 import type { LinkPreviewPort } from '../model/reference';
 import { CameraController, type Size, fitRect, viewportRect, worldToScreen, zoomAt } from '../view/camera';
 import { neighbourInReadingOrder, readingOrder } from '../view/reading-order';
+import { portPoint } from '../view/routes';
 import { indexFor } from '../view/document-index';
 import { snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { CanvasView } from './CanvasView';
@@ -337,6 +338,29 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
         ))
       : null;
 
+  // Ports: a ring at the middle of each side of the one selected shape. Dragging from one draws a connector.
+  const portRings =
+    single && 'w' in single && single.type !== 'frame' && single.type !== 'stamp' && !ui.editingId && ui.carried.size === 0
+      ? (['n', 'e', 's', 'w'] as const).map((side) => {
+          const at = portPoint(single, side);
+          return <div key={side} className="pcv-port" data-port={side} data-for={single.id} style={{ transform: `translate(${at.x}px, ${at.y}px)` }} />;
+        })
+      : null;
+  const guides = ui.guides.map((guide, i) => (
+    <React.Fragment key={i}>
+      <div
+        className="pcv-guide"
+        data-axis={guide.axis}
+        style={guide.axis === 'x' ? { transform: `translate(${guide.at}px, ${guide.from}px)`, height: guide.to - guide.from } : { transform: `translate(${guide.from}px, ${guide.at}px)`, width: guide.to - guide.from }}
+      />
+      {guide.gap ? (
+        <div className="pcv-guide-badge" style={{ transform: guide.axis === 'x' ? `translate(${guide.at}px, ${guide.gap.at}px)` : `translate(${guide.gap.at}px, ${guide.at}px)` }}>
+          <span>{guide.gap.distance}</span>
+        </div>
+      ) : null}
+    </React.Fragment>
+  ));
+
   const c = camera.get();
   const regionOverlay = ui.region ? (
     <div className="pcv-region" style={{ transform: `translate(${ui.region.x}px, ${ui.region.y}px)`, width: ui.region.w, height: ui.region.h, borderWidth: 'calc(1.5px / var(--pcv-z))' }} />
@@ -388,7 +412,9 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
       worldOverlay={
         <>
           {regionOverlay}
-          {handles}
+          {guides}
+          {ui.carried.size === 0 ? handles : null}
+          {portRings}
         </>
       }
     >
@@ -406,7 +432,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
             doc={doc}
             selection={ui.selection}
             region={ui.region}
-            hidden={!!ui.marquee || !!ui.editingId || ui.tool === 'region'}
+            hidden={!!ui.marquee || !!ui.editingId || ui.tool === 'region' || ui.carried.size > 0}
             onRecolor={recolor}
             onDelete={remove}
             onGroup={group}

@@ -1184,7 +1184,8 @@
   position: absolute;
   left: 0;
   bottom: calc(100% + 8px);
-  max-width: 100%;
+  /* Never wider on screen than its frame, however much it has grown: the title is cut with an ellipsis. */
+  max-width: calc(100% / var(--pcv-chip, 1));
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1392,5 +1393,74 @@
 @media (prefers-reduced-motion: reduce) {
   .pcv-note {
     transition: none;
+  }
+}
+
+/* ── Guides, ports and handles ─────────────────────────────────────────── */
+
+.pcv-guide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  background: var(--pcv-guide, oklch(0.62 0.21 12));
+}
+.pcv-guide[data-axis='x'] {
+  width: calc(1px / var(--pcv-z));
+}
+.pcv-guide[data-axis='y'] {
+  height: calc(1px / var(--pcv-z));
+}
+.pcv-guide-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.pcv-guide-badge span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--pcv-z)));
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--pcv-guide, oklch(0.62 0.21 12));
+  color: white;
+  font: 600 11px/1.2 var(--pcv-font);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pcv-port {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(9px / var(--pcv-z));
+  height: calc(9px / var(--pcv-z));
+  margin: calc(-4.5px / var(--pcv-z)) 0 0 calc(-4.5px / var(--pcv-z));
+  box-sizing: border-box;
+  border: calc(1.5px / var(--pcv-z)) solid var(--pcv-accent);
+  border-radius: 50%;
+  background: var(--pcv-card);
+  cursor: crosshair;
+}
+.pcv-port::after {
+  /* A finger-sized target round a small ring. */
+  content: '';
+  position: absolute;
+  inset: calc(-12px / var(--pcv-z));
+}
+.pcv-handle {
+  width: calc(11px / var(--pcv-z));
+  height: calc(11px / var(--pcv-z));
+  margin: calc(-5.5px / var(--pcv-z)) 0 0 calc(-5.5px / var(--pcv-z));
+  border-radius: calc(3.5px / var(--pcv-z));
+  box-shadow: 0 calc(1px / var(--pcv-z)) calc(3px / var(--pcv-z)) rgb(0 0 0 / 0.18);
+}
+@media (pointer: coarse) {
+  .pcv-port::after,
+  .pcv-handle::after {
+    inset: calc(-17px / var(--pcv-z));
   }
 }
