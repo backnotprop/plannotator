@@ -36,9 +36,9 @@ public final class InboxSession {
   /// Threads the computer says are not there.
   public private(set) var missingThreads: Set<ThreadID> = []
   /// Why something the person did was not taken.
-  public enum Notice: Hashable, Sendable {
-    /// The Inbox's own words for its refusal.
-    case refused(String)
+  public enum Notice: Hashable, Sendable, Codable {
+    /// The Inbox's own words for its refusal, and its code.
+    case refused(String, code: String)
     /// An answer that was not the Inbox's: something between the phone and the computer refused it.
     case unreadable(status: Int)
     /// This Inbox does not offer it.
@@ -59,7 +59,8 @@ public final class InboxSession {
 
   private let app: AppIdentity
   private let connector: DoorConnector
-  private let copy: LocalCopy
+  private var copy: LocalCopy
+  private var removed = false
   private var client: DoorClient?
   private var stream: Task<Void, Never>?
   private var reload: Task<Void, Never>?
@@ -85,6 +86,12 @@ public final class InboxSession {
       listLoaded = true
     }
     held = copy.outbox()
+    // Words a refused Send handed back, and why: kept until the composer takes them.
+    let kept = copy.givenBack()
+    for (thread, back) in kept {
+      returned[ThreadID(thread)] = back.words
+      notices[ThreadID(thread)] = back.notice
+    }
     await refresh()
   }
 
@@ -193,7 +200,9 @@ public final class InboxSession {
       // The computer removed this phone: nothing of that computer stays here.
       standing = .removed
       stopListening()
+      removed = true
       copy.erase()
+      copy = LocalCopy(folder: nil)
       list = nil
       threads = [:]
       held = []
@@ -254,14 +263,24 @@ public final class InboxSession {
   /// is away stays picked.
   public func thread(_ id: ThreadID) -> ThreadModel? {
     guard var model = threads[id] else { return nil }
-    let picks = held.filter { $0.kind == .pick && $0.thread == id.rawValue }
-    if picks.isEmpty { return model }
-    for write in picks {
+    let waiting = held.filter { $0.thread == id.rawValue && $0.kind != .seen }
+    if waiting.isEmpty { return model }
+    for write in waiting where write.kind == .pick {
       guard let body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body), let message = model.thread.messages.firstIndex(where: { $0.id.rawValue == write.message }) else { continue }
       for pick in body.questions {
         guard let index = model.thread.messages[message].questions?.firstIndex(where: { $0.key == pick.key }) else { continue }
         model.thread.messages[message].questions?[index].answer = pick.answer
         model.thread.messages[message].questions?[index].state = pick.answer == nil ? .openValue : .picked
+      }
+    }
+    // A Send that waits already carries these answers: they are no longer the person's to change, and a later
+    // Send never carries them again (the Inbox refuses a reply that names a question already sent).
+    for write in waiting where write.kind == .reply {
+      guard let body = try? JSONDecoder().decode(DoorReplyBody.self, from: write.body) else { continue }
+      for pick in body.questions ?? [] {
+        let target = pick.messageId?.rawValue ?? write.message
+        guard let message = model.thread.messages.firstIndex(where: { $0.id.rawValue == target }), let index = model.thread.messages[message].questions?.firstIndex(where: { $0.key == pick.key }) else { continue }
+        model.thread.messages[message].questions?[index].state = .sent
       }
     }
     return model
@@ -280,6 +299,20 @@ public final class InboxSession {
       guard write.kind == .pick, write.message == message.rawValue, let body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body) else { return false }
       return body.questions.contains { $0.key == key }
     }
+  }
+
+  /// Whether a Send that waits for the computer carries this question's answer.
+  public func isHeldSend(message: MessageID, key: String) -> Bool {
+    held.contains { write in
+      guard write.kind == .reply, let body = try? JSONDecoder().decode(DoorReplyBody.self, from: write.body) else { return false }
+      return (body.questions ?? []).contains { $0.key == key && ($0.messageId?.rawValue ?? write.message) == message.rawValue }
+    }
+  }
+
+  private func keepGivenBack() {
+    var kept: [String: LocalCopy.GivenBack] = [:]
+    for (thread, words) in returned { kept[thread.rawValue] = LocalCopy.GivenBack(words: words, notice: notices[thread]) }
+    copy.saveGivenBack(kept)
   }
 
   private func hold(_ write: HeldWrite) {
@@ -304,6 +337,7 @@ public final class InboxSession {
       if let words = write.words, !words.isEmpty {
         returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
       }
+      keepGivenBack()
     case .seen:
       break
     }
@@ -311,7 +345,7 @@ public final class InboxSession {
 
   /// Send one held write. True when it has a definite answer (applied or refused) and left the outbox.
   private func deliver(_ write: HeldWrite) async -> Bool {
-    guard let client, let method = DoorMethod(rawValue: write.method) else { return false }
+    guard !removed, let client, let method = DoorMethod(rawValue: write.method) else { return false }
     // A route this Inbox does not list is never called, so no 404 is kept under the key.
     guard skew?.offers(write.route) ?? false else {
       settle(write.id)
@@ -320,19 +354,22 @@ public final class InboxSession {
     }
     do {
       let answer = try await client.resend(method: method, path: write.path, body: write.body)
+      if removed { return false }
       apply(write, answer)
       settle(write.id)
       return true
     } catch let failure as DoorFailure {
+      if removed { return false }
       note(failure)
       guard failure.isDefinite else { return false }
-      settle(write.id)
+      // Words first, then the outbox: a refusal never leaves the phone with neither.
       switch failure {
-      case .refused(_, let error): giveBack(write, .refused(error.error))
+      case .refused(_, let error): giveBack(write, .refused(error.error, code: error.code))
       case .unreadable(let status): giveBack(write, .unreadable(status: status))
       case .appNeedsUpdate: giveBack(write, .appNeedsUpdate)
       default: giveBack(write, .notOffered)
       }
+      settle(write.id)
       // Show what the computer has now, beside the refusal.
       if write.kind != .seen { await readThread(ThreadID(write.thread)) }
       return true
@@ -397,7 +434,7 @@ public final class InboxSession {
     pumping.insert(thread)
     defer { pumping.remove(thread) }
     if client == nil { _ = await connect() }
-    while client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread }) {
+    while !removed, client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread }) {
       if !(await deliver(next)) { break }
     }
     if held.contains(where: { $0.thread == thread }) { retryLater() }
@@ -475,6 +512,7 @@ public final class InboxSession {
     defer { sending.remove(id) }
     notices[id] = nil
     returned[id] = nil
+    keepGivenBack()
     for (index, target) in targets.enumerated() {
       let last = index == targets.count - 1
       if !last, target.questions.isEmpty, target.actions.isEmpty { continue }
@@ -502,16 +540,25 @@ public final class InboxSession {
 
   /// The words of a Send the computer refused, handed back once for the composer.
   public func takeReturnedWords(_ id: ThreadID) -> String? {
-    defer { returned[id] = nil }
+    defer {
+      returned[id] = nil
+      keepGivenBack()
+    }
     return returned[id]
   }
 
-  /// Remove this phone from the computer, then forget the computer here.
+  /// Remove this phone from the computer, then forget the computer here. From the first line on, nothing of this
+  /// computer is written again: a write still on its way cannot bring the erased copy back.
   public func removeThisPhone() async {
+    removed = true
     stop()
+    let old = copy
+    copy = LocalCopy(folder: nil)
+    held = []
+    old.erase()
     if client == nil { _ = await connect() }
     try? await client?.revoke()
-    copy.erase()
+    old.erase()
   }
 
   // MARK: Live

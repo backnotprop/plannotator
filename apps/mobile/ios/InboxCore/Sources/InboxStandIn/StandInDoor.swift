@@ -54,6 +54,10 @@ public actor StandInDoor {
   public func setOptions(_ change: @Sendable (inout Options) -> Void) { change(&options) }
   public func clearCalls() { calls = [] }
   public func thread(_ id: ThreadID) -> InboxThread? { threads.first { $0.threadId == id } }
+  /// Change a thread as the computer's own side would (an archive, a Mark read that set a question aside).
+  public func change(_ id: ThreadID, _ edit: @Sendable (inout InboxThread) -> Void) {
+    if let index = threads.firstIndex(where: { $0.threadId == id }) { edit(&threads[index]) }
+  }
 
   /// A token for a phone that is already paired: the demo and the tests skip the pairing screen with it.
   public func issueToken() -> (token: String, device: DeviceID) {
@@ -174,11 +178,11 @@ public actor StandInDoor {
     let parts = call.path.split(separator: "/").map { String($0).removingPercentEncoding ?? String($0) }
     let answer: DoorAnswerBytes
     switch (parts.first, parts.count, parts.last) {
-    case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]))
-    case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), body)
+    case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
+    case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
     case ("messages", 3, "reply"):
       if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
-      answer = reply(MessageID(parts[1]), body)
+      answer = reply(MessageID(parts[1]), fields)
     default:
       // Not on the list: answered, and never kept under the key.
       return refuse(404, "device_route_not_found", "Not a route of the door.")
@@ -187,8 +191,17 @@ public actor StandInDoor {
     return answer
   }
 
-  private func seen(_ id: ThreadID) -> DoorAnswerBytes {
-    guard threads.contains(where: { $0.threadId == id }) else { return refuse(404, "thread_not_found", "That thread is not here.") }
+  // The refusals below are the Inbox's own, in its order and with its codes and statuses, so a write the real
+  // door would refuse is refused here too: packages/server/inbox.ts (`seen`), and packages/shared/inbox/store.ts
+  // `targetMessage`, `sendMessageOf`, `planAnswers`, `savePicks` and `sendReply`.
+
+  private func seen(_ id: ThreadID, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
+    guard threads.contains(where: { $0.threadId == id }) else { return refuse(404, "thread_not_found", "No thread \(id.rawValue).") }
+    if let through = fields["through_seq"], through != .null {
+      guard case .number(let value) = through, value >= 0, value.rounded() == value else {
+        return refuse(422, "validation_error", "through_seq: a message seq (a whole number, 0 or more).", field: "through_seq")
+      }
+    }
     unread.remove(id)
     return json(200, ["ok": .bool(true)])
   }
@@ -200,67 +213,154 @@ public actor StandInDoor {
     return nil
   }
 
-  private func picks(_ message: MessageID, _ body: Data) -> DoorAnswerBytes {
-    guard let request = try? JSONDecoder().decode(DoorPicksBody.self, from: body) else { return refuse(422, "validation_error", "questions: a list is required.", field: "questions") }
-    guard let at = locate(message) else { return refuse(404, "message_not_found", "That message is not here.") }
-    var questions = threads[at.thread].messages[at.message].questions ?? []
-    for pick in request.questions {
-      guard let index = questions.firstIndex(where: { $0.key == pick.key }) else { return refuse(404, "question_not_found", "That question is not on this message.") }
-      let question = questions[index]
-      if question.state == .superseded { return refuse(422, "question_superseded", "This question was replaced by a newer one.") }
-      if question.state == .sent, request.unsentOnly == true { return refuse(409, "question_already_sent", "This answer was already sent.", key: pick.key) }
-      if question.revision != pick.revision { return refuse(409, "question_revision_conflict", "This question changed. Read it again.") }
-      questions[index].answer = pick.answer
-      questions[index].state = pick.answer == nil ? .openValue : .picked
-      questions[index].revision += 1
-      questions[index].pickedAt = pick.answer == nil ? nil : StandInData.iso(Date())
-    }
-    threads[at.thread].messages[at.message].questions = questions
-    return encode(200, DoorPicksAnswer(messageId: message, questions: questions))
+  private struct Refused: Error { let answer: DoorAnswerBytes }
+  private enum Mode { case pick(unsentOnly: Bool), send }
+  private enum Planned { case set(QuestionAnswer), clear, keep }
+
+  /// The message a write answers: there, and not closed by an archive.
+  private func target(_ message: MessageID) throws -> (thread: Int, message: Int) {
+    guard let at = locate(message) else { throw Refused(answer: refuse(404, "message_not_found", "No message \(message.rawValue).")) }
+    if threads[at.thread].resolvedAt != nil { throw Refused(answer: refuse(409, "thread_resolved", "This thread is resolved; reopen it to answer.")) }
+    return at
   }
 
-  private func reply(_ message: MessageID, _ body: Data) -> DoorAnswerBytes {
-    guard let request = try? JSONDecoder().decode(DoorReplyBody.self, from: body) else { return refuse(422, "validation_error", "The reply could not be read.") }
-    guard let at = locate(message) else { return refuse(404, "message_not_found", "That message is not here.") }
-    let asked = threads[at.thread].messages[at.message]
-    // Check every pick first: one stale question refuses the whole reply, and nothing is written.
-    var sends: [(message: Int, question: Int)] = []
-    for pick in request.questions ?? [] {
-      let target = pick.messageId ?? message
-      guard let m = threads[at.thread].messages.firstIndex(where: { $0.id == target }), let q = threads[at.thread].messages[m].questions?.firstIndex(where: { $0.key == pick.key }) else {
-        return refuse(404, "question_not_found", "That question is not on this message.")
+  /// `planAnswers`: every entry is checked before anything is written.
+  private func plan(thread t: Int, message m: Int, entries: [(index: Int, entry: JSONValue)], mode: Mode) throws -> [(question: Int, planned: Planned)] {
+    let message = threads[t].messages[m]
+    let questions = message.questions ?? []
+    let permission = message.author.kind == .agent && (message.author.session ?? "").hasPrefix("perm:")
+    var seen: Set<String> = []
+    var out: [(Int, Planned)] = []
+    for (index, entry) in entries {
+      let field = "questions[\(index)]"
+      guard case .object(let fields) = entry, case .string(let key)? = fields["key"] else { throw Refused(answer: refuse(422, "validation_error", "\(field).key: required.", field: "\(field).key")) }
+      guard seen.insert(key).inserted else { throw Refused(answer: refuse(422, "validation_error", "\(field).key: listed twice.", field: "\(field).key")) }
+      guard case .number(let number)? = fields["revision"], number >= 0, number.rounded() == number else {
+        throw Refused(answer: refuse(422, "validation_error", "\(field).revision: a non-negative integer is required.", field: "\(field).revision"))
       }
-      guard let question = threads[at.thread].messages[m].questions?[q] else { continue }
-      if question.state == .superseded { return refuse(422, "question_superseded", "This question was replaced by a newer one.") }
-      if question.revision != pick.revision { return refuse(409, "question_revision_conflict", "This question changed. Read it again.") }
-      sends.append((m, q))
+      if (message.actions ?? []).contains(where: { $0.key == key }) || questions.contains(where: { $0.key == key && $0.kind == .action }) {
+        throw Refused(answer: refuse(422, "validation_error", "\(field).key: \(key) is an action item, not a question; mark it Done or Can't do it on its card.", field: "\(field).key", key: key))
+      }
+      guard let q = questions.firstIndex(where: { $0.key == key }) else { throw Refused(answer: refuse(404, "question_not_found", "No question \(key) on message \(message.id.rawValue).", key: key)) }
+      let record = questions[q]
+      if record.supersededBy != nil || record.state == .superseded {
+        throw Refused(answer: refuse(422, "question_superseded", "Question \(key) was replaced by a newer question; it can no longer be answered.", key: key))
+      }
+      if record.setAsideAt != nil {
+        throw Refused(answer: refuse(409, "question_set_aside", "Question \(key) was closed when the thread was marked read; move the thread back to answer it.", key: key))
+      }
+      if record.revision != Int64(number) {
+        throw Refused(answer: refuse(409, "question_revision_conflict", "Question \(key) changed since you read it (revision \(record.revision)).", key: key, extra: ["current_revision": .number(Double(record.revision))]))
+      }
+      let alreadySent = record.answer != nil && record.revision > 0 && record.sentRevision == record.revision
+      let sent = Refused(answer: refuse(409, "question_already_sent", "The answer to \(key) was already sent.", key: key))
+      if case .pick(let unsentOnly) = mode, unsentOnly || permission, alreadySent { throw sent }
+      if case .send = mode, permission, alreadySent { continue }
+      switch (fields["answer"], mode) {
+      case (.null?, .send): throw Refused(answer: refuse(422, "validation_error", "\(field).answer: a Send cannot clear a pick.", field: "\(field).answer"))
+      case (.null?, .pick): out.append((q, .clear))
+      case (nil, .pick): throw Refused(answer: refuse(422, "validation_error", "\(field).answer: a pick needs an answer (or null to clear).", field: "\(field).answer"))
+      case (nil, .send):
+        if record.answer == nil { throw Refused(answer: refuse(422, "validation_error", "\(field).answer: nothing is picked for \(key).", field: "\(field).answer")) }
+        if record.sentRevision == record.revision { throw sent }
+        out.append((q, .keep))
+      case (let value?, _):
+        guard let answer = try? value.decodedAnswer(), answer.key == key else { throw Refused(answer: refuse(422, "validation_error", "\(field).answer: not an answer to \(key).", field: "\(field).answer")) }
+        out.append((q, .set(answer)))
+      }
     }
-    seq += 1
-    counter += 1
-    let replyID = MessageID("msg_STANDINREPLY\(counter)")
-    var answered: [String] = []
-    for send in sends {
-      guard var question = threads[at.thread].messages[send.message].questions?[send.question] else { continue }
-      if let pick = (request.questions ?? []).first(where: { $0.key == question.key }), let answer = pick.answer { question.answer = answer }
-      question.state = .sent
-      question.sentRevision = question.revision
-      question.sentReplyId = replyID.rawValue
-      threads[at.thread].messages[send.message].questions?[send.question] = question
-      if let answer = question.answer { answered.append(StandInData.words(of: answer)) }
+    return out
+  }
+
+  private func picks(_ message: MessageID, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
+    do {
+      let at = try target(message)
+      guard case .array(let entries)? = fields["questions"], !entries.isEmpty else { return refuse(422, "validation_error", "questions: at least one question is required.", field: "questions") }
+      let planned = try plan(thread: at.thread, message: at.message, entries: entries.enumerated().map { ($0.offset, $0.element) }, mode: .pick(unsentOnly: fields["unsent_only"] == .bool(true)))
+      var questions = threads[at.thread].messages[at.message].questions ?? []
+      for (q, change) in planned {
+        if case .set(let answer) = change { questions[q].answer = answer } else { questions[q].answer = nil }
+        questions[q].state = questions[q].answer == nil ? .openValue : .picked
+        questions[q].revision += 1
+        questions[q].pickedAt = questions[q].answer == nil ? nil : StandInData.iso(Date())
+      }
+      threads[at.thread].messages[at.message].questions = questions
+      return encode(200, DoorPicksAnswer(messageId: message, questions: questions))
+    } catch let refused as Refused {
+      return refused.answer
+    } catch {
+      return refuse(500, "internal_error", "The stand-in failed.")
     }
-    let words = request.words ?? ""
-    let now = StandInData.iso(Date())
-    let written = InboxMessageWire(
-      seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
-      body: words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, createdAt: now,
-      delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
-    threads[at.thread].messages.append(written)
-    unread.remove(asked.threadId)
-    let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(written))) ?? .null
-    let result = ReplyResult(
-      reply: wire, questions: threads[at.thread].messages[at.message].questions ?? [], replayed: false,
-      threadRead: request.withThread == true ? model(threads[at.thread]) : nil)
-    return encode(200, result)
+  }
+
+  private func reply(_ message: MessageID, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
+    do {
+      let at = try target(message)
+      let asked = threads[at.thread].messages[at.message]
+      var entries: [JSONValue] = []
+      if let listed = fields["questions"], listed != .null {
+        guard case .array(let items) = listed else { return refuse(422, "validation_error", "questions: must be a list.", field: "questions") }
+        entries = items
+      }
+      var words = ""
+      if case .string(let text)? = fields["words"] { words = text }
+      // One Send to one session is one reply: each answer is planned against its own message's questions.
+      var byMessage: [(message: Int, entries: [(index: Int, entry: JSONValue)])] = []
+      for (index, entry) in entries.enumerated() {
+        var m = at.message
+        if case .object(let object) = entry, let raw = object["message_id"] {
+          let field = "questions[\(index)].message_id"
+          guard case .string(let id) = raw else { return refuse(422, "validation_error", "\(field): a message id.", field: field) }
+          if id != message.rawValue {
+            guard let other = threads[at.thread].messages.firstIndex(where: { $0.id.rawValue == id }), threads[at.thread].messages[other].author.kind == .agent, asked.author.kind == .agent,
+              let session = asked.author.session, !session.isEmpty, threads[at.thread].messages[other].author.session == session, (threads[at.thread].messages[other].author.host ?? "") == (asked.author.host ?? "")
+            else { return refuse(422, "validation_error", "\(field): \(id) is not a message of this thread from the session the reply goes to.", field: field) }
+            m = other
+          }
+        }
+        if let known = byMessage.firstIndex(where: { $0.message == m }) { byMessage[known].entries.append((index, entry)) } else { byMessage.append((m, [(index, entry)])) }
+      }
+      var planned: [(message: Int, question: Int, planned: Planned)] = []
+      for group in byMessage {
+        planned += try plan(thread: at.thread, message: group.message, entries: group.entries, mode: .send).map { (group.message, $0.question, $0.planned) }
+      }
+      if planned.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if case .object(let first)? = entries.first, case .string(let key)? = first["key"] { return refuse(409, "question_already_sent", "The answer to \(key) was already sent.", key: key) }
+        return refuse(422, "validation_error", "words: write a reply or send at least one answer.", field: "words")
+      }
+      seq += 1
+      counter += 1
+      let replyID = MessageID("msg_STANDINREPLY\(counter)")
+      var answered: [String] = []
+      for (m, q, change) in planned {
+        guard var question = threads[at.thread].messages[m].questions?[q] else { continue }
+        if case .set(let answer) = change {
+          question.answer = answer
+          question.revision += 1
+        }
+        question.state = .sent
+        question.sentRevision = question.revision
+        question.sentReplyId = replyID.rawValue
+        threads[at.thread].messages[m].questions?[q] = question
+        if let answer = question.answer { answered.append(StandInData.words(of: answer)) }
+      }
+      let now = StandInData.iso(Date())
+      let written = InboxMessageWire(
+        seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
+        body: words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, createdAt: now,
+        delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
+      threads[at.thread].messages.append(written)
+      unread.remove(asked.threadId)
+      let wire = (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(written))) ?? .null
+      let result = ReplyResult(
+        reply: wire, questions: threads[at.thread].messages[at.message].questions ?? [], replayed: false,
+        threadRead: fields["with_thread"] == .bool(true) ? model(threads[at.thread]) : nil)
+      return encode(200, result)
+    } catch let refused as Refused {
+      return refused.answer
+    } catch {
+      return refuse(500, "internal_error", "The stand-in failed.")
+    }
   }
 
   // MARK: Answers
@@ -281,4 +381,8 @@ public struct StandInTransport: DoorTransport {
   public let door: StandInDoor
   public init(door: StandInDoor) { self.door = door }
   public func send(_ call: DoorCall) async throws -> DoorAnswerBytes { try await door.handle(call) }
+}
+
+extension JSONValue {
+  fileprivate func decodedAnswer() throws -> QuestionAnswer { try JSONDecoder().decode(QuestionAnswer.self, from: JSONEncoder().encode(self)) }
 }

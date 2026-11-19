@@ -12,6 +12,8 @@ final class CardDraft {
   var note = ""
   var otherOpen = false
   var noteOpen = false
+  /// Pick any: the person's own Other words the suggestion row replaced when ticked, put back when it is unticked.
+  var replacedOther: String?
 }
 
 /// The cards of a thread that hold typed words: Send saves them all first, so what is on screen is what is sent.
@@ -50,6 +52,13 @@ struct QuestionCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
+      if let refusal = session.refusal(message: message, key: question.key) {
+        // The Inbox's own words for why the pick was not taken, where the person reads first; it stays until
+        // they act on this question.
+        Label(PhoneWords.notice(refusal, computer: session.computer.name), systemImage: "exclamationmark.circle")
+          .font(.footnote)
+          .foregroundStyle(Token.destructive)
+      }
       Text(question.prompt)
         .font(.title3.weight(.semibold))
         .foregroundStyle(Token.foreground)
@@ -60,12 +69,14 @@ struct QuestionCard: View {
       }
       if !known {
         Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
+      } else if !live {
+        settledAnswer
       } else if question.kind == .text {
         textAnswer
       } else {
         choices
       }
-      if known, live || answer?.note != nil { footer }
+      if known, live { footer }
       status
     }
     .padding(16)
@@ -89,10 +100,10 @@ struct QuestionCard: View {
 
   /// Take the saved answer's words into the fields that are not being typed in.
   private func adopt() {
-    if focus != .other { draft.other = answer?.other ?? "" }
+    if focus != .other { draft.other = CardAnswers.suggestionPicked(question) ? "" : answer?.other ?? "" }
     if focus != .note { draft.note = answer?.note ?? "" }
     if focus != .text { draft.text = answer?.text ?? "" }
-    draft.otherOpen = draft.otherOpen || answer?.other != nil
+    draft.otherOpen = draft.otherOpen || (answer?.other != nil && !CardAnswers.suggestionPicked(question))
     draft.noteOpen = draft.noteOpen || answer?.note != nil
   }
 
@@ -137,12 +148,25 @@ struct QuestionCard: View {
           apply(CardAnswers.tap(question, label: choice.label))
         }
       }
+      if let suggestion = CardAnswers.suggestion(of: question) {
+        // The agent's own answer that is none of its choices: a row of its own, as in the window.
+        Divider().overlay(Token.border)
+        ChoiceRow(label: suggestion, detail: nil, recommended: true, multi: question.kind == .multi, selected: CardAnswers.suggestionPicked(question), enabled: enabled) {
+          let picked = CardAnswers.suggestionPicked(question)
+          if !picked {
+            let own = answer?.other ?? ""
+            draft.replacedOther = own.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : own
+          }
+          apply(CardAnswers.tapSuggestion(question, replaced: draft.replacedOther))
+          if picked { draft.replacedOther = nil }
+        }
+      }
       Divider().overlay(Token.border)
-      ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: !(answer?.other ?? "").isEmpty, enabled: enabled, value: answer?.other) {
+      ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: !(answer?.other ?? "").isEmpty && !CardAnswers.suggestionPicked(question), enabled: enabled, value: CardAnswers.suggestionPicked(question) ? nil : answer?.other) {
         draft.otherOpen = true
         focus = .other
       }
-      if draft.otherOpen, live || answer?.other != nil {
+      if draft.otherOpen {
         field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
           .padding(.leading, 40)
           .padding(.bottom, 4)
@@ -158,6 +182,26 @@ struct QuestionCard: View {
       }
       field(PhoneWords.answerHint, text: Bindable(draft).text, focus: .text)
     }
+  }
+
+  /// A card that is settled (sent, replaced, closed) shows what was answered as words, with nothing to tap.
+  private var settledAnswer: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if skipped {
+        Label(PhoneWords.skipped, systemImage: "arrow.uturn.right").foregroundStyle(Token.mutedForeground)
+      }
+      ForEach(answer?.selected ?? [], id: \.self) { label in
+        Label(label, systemImage: "checkmark").foregroundStyle(Token.foreground)
+      }
+      ForEach([answer?.other, answer?.text].compactMap { $0 }.filter { !$0.isEmpty }, id: \.self) { words in
+        Label(words, systemImage: "checkmark").foregroundStyle(Token.foreground)
+      }
+      if let note = answer?.note, !note.isEmpty {
+        Text("\(PhoneWords.note): \(note)").font(.subheadline).foregroundStyle(Token.mutedForeground)
+      }
+    }
+    .font(.body.weight(.medium))
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private func field(_ hint: String, text: Binding<String>, focus which: Field) -> some View {
@@ -190,18 +234,9 @@ struct QuestionCard: View {
         field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note)
       }
       if live {
-        HStack {
-          Button(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote) {
-            draft.noteOpen.toggle()
-            focus = draft.noteOpen ? .note : nil
-          }
-          Spacer()
-          Button(skipped ? PhoneWords.undoSkip : PhoneWords.skip) {
-            save()
-            if let now = CardSaver.current(session: session, thread: thread, message: message, key: question.key) {
-              CardSaver.apply(CardAnswers.toggleSkip(now), session: session, thread: thread, message: message, question: now)
-            }
-          }
+        ViewThatFits(in: .horizontal) {
+          HStack { footerButtons }
+          VStack(alignment: .leading, spacing: 4) { footerButtons }
         }
         .font(.subheadline.weight(.medium))
         .buttonStyle(.borderless)
@@ -211,22 +246,39 @@ struct QuestionCard: View {
     }
   }
 
-  @ViewBuilder private var status: some View {
-    if let refusal = session.refusal(message: message, key: question.key) {
-      // The Inbox's own words for why the pick was not taken; it stays until the person acts on this question.
-      Label(PhoneWords.notice(refusal, computer: session.computer.name), systemImage: "exclamationmark.circle")
-        .font(.footnote)
-        .foregroundStyle(Token.destructive)
+  @ViewBuilder private var footerButtons: some View {
+    Button(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote) {
+      draft.noteOpen.toggle()
+      focus = draft.noteOpen ? .note : nil
     }
+    Spacer(minLength: 8)
+    if CardAnswers.offersAccept(question) {
+      Button(PhoneWords.acceptRecommended) {
+        draft.replacedOther = nil
+        apply(CardAnswers.acceptRecommended(question))
+      }
+      Spacer(minLength: 8)
+    }
+    Button(skipped ? PhoneWords.undoSkip : PhoneWords.skip) {
+      save()
+      if let now = CardSaver.current(session: session, thread: thread, message: message, key: question.key) {
+        CardSaver.apply(CardAnswers.toggleSkip(now), session: session, thread: thread, message: message, question: now)
+      }
+    }
+  }
+
+  @ViewBuilder private var status: some View {
     let line: String? = {
       let held = session.isHeldPick(message: message, key: question.key)
       switch question.state {
       case .picked:
-        let words = held ? PhoneWords.pickedOnPhone : PhoneWords.picked(at: question.pickedAt.map { TimeWords().when($0) } ?? "")
+        let time = question.pickedAt.map { TimeWords().when($0) } ?? ""
+        let words = held ? PhoneWords.pickedOnPhone : pickedElsewhere ? PhoneWords.pickedElsewhere(at: time) : PhoneWords.picked(at: time)
         return skipped ? "\(PhoneWords.skipped) · \(words)" : words
       case .sent:
-        let words = PhoneWords.sent(at: sentAt.map { TimeWords().when($0) } ?? "")
-        return skipped ? "\(PhoneWords.skipped) · \(words)" : words
+        // An answer in a Send that waits for the computer is not sent yet: say what it waits for.
+        if session.isHeldSend(message: message, key: question.key) { return PhoneWords.willSendWhenBack(session.computer.name) }
+        return PhoneWords.sent(at: sentAt.map { TimeWords().when($0) } ?? "")
       case .superseded: return PhoneWords.replaced
       default: return nil
       }
@@ -234,6 +286,14 @@ struct QuestionCard: View {
     if let line {
       Text(line).font(.footnote).foregroundStyle(Token.mutedForeground)
     }
+  }
+}
+
+extension QuestionCard {
+  /// The phone's own pick was refused because the question changed: the pick shown is someone else's.
+  fileprivate var pickedElsewhere: Bool {
+    if case .refused(_, let code)? = session.refusal(message: message, key: question.key) { return code == "question_revision_conflict" }
+    return false
   }
 }
 
@@ -253,16 +313,18 @@ enum CardSaver {
   }
 
   static func save(session: InboxSession, thread: ThreadID, message: MessageID, key: String, draft: CardDraft) {
-    let trim = { (text: String) in text.trimmingCharacters(in: .whitespacesAndNewlines) }
-    guard let question = current(session: session, thread: thread, message: message, key: key) else { return }
+    // The words are stored as typed, as the window stores them.
+    guard let question = current(session: session, thread: thread, message: message, key: key), question.state == .openValue || question.state == .picked else { return }
     if question.kind == .text {
-      if trim(draft.text) != trim(question.answer?.text ?? "") { apply(CardAnswers.text(question, words: trim(draft.text)), session: session, thread: thread, message: message, question: question) }
-    } else if draft.otherOpen, trim(draft.other) != trim(question.answer?.other ?? "") {
-      apply(CardAnswers.other(question, words: trim(draft.other)), session: session, thread: thread, message: message, question: question)
+      if draft.text != question.answer?.text ?? "" { apply(CardAnswers.text(question, words: draft.text), session: session, thread: thread, message: message, question: question) }
+    } else if draft.otherOpen {
+      // The Other field's own words: the agent's suggestion, when its row is picked, is not the field's.
+      let stored = CardAnswers.suggestionPicked(question) ? "" : question.answer?.other ?? ""
+      if draft.other != stored { apply(CardAnswers.other(question, words: draft.other), session: session, thread: thread, message: message, question: question) }
     }
     // The note is read against the answer as it stands after the words above.
     guard let now = current(session: session, thread: thread, message: message, key: key) else { return }
-    if trim(draft.note) != trim(now.answer?.note ?? "") { apply(CardAnswers.note(now, words: trim(draft.note)), session: session, thread: thread, message: message, question: now) }
+    if draft.note != now.answer?.note ?? "" { apply(CardAnswers.note(now, words: draft.note), session: session, thread: thread, message: message, question: now) }
   }
 }
 

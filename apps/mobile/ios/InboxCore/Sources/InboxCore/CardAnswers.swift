@@ -49,7 +49,8 @@ public enum CardAnswers {
       next.selected = chosen.sorted { (order.firstIndex(of: $0) ?? -1) < (order.firstIndex(of: $1) ?? -1) }
       return commit(question, next)
     }
-    if current.contains(label), question.answer.map(answered) == true { return .nothing }
+    // A radio that is already checked (the person's pick, or a choice the agent marked settled) does nothing.
+    if current.contains(label) { return .nothing }
     next.other = nil
     next.selected = [label]
     return commit(question, next)
@@ -91,5 +92,73 @@ public enum CardAnswers {
       next.skipped = true
     }
     return commit(question, next)
+  }
+
+  // MARK: The agent's own suggested answer, and Accept recommended
+
+  /// The agent's recommended answer that is none of its choices: one more row after the choices
+  /// (QuestionBlock.tsx:612-635, `pickSuggestion`).
+  public static func suggestion(of question: InboxQuestion) -> String? {
+    guard question.kind != .text, let text = question.suggestedText, !text.isEmpty else { return nil }
+    return text
+  }
+
+  /// The suggestion row reads as picked when the "Other…" answer is exactly the agent's text.
+  public static func suggestionPicked(_ question: InboxQuestion) -> Bool {
+    guard let text = suggestion(of: question) else { return false }
+    return question.answer?.other == text
+  }
+
+  /// A tap on the suggestion row: it is stored as the "Other…" answer. Pick any: it toggles beside the ticks, and
+  /// unticking puts back the person's own Other words it replaced. Pick one: it takes the pick; a tap on it when
+  /// picked does nothing.
+  public static func tapSuggestion(_ question: InboxQuestion, replaced: String? = nil) -> Edit {
+    guard let text = suggestion(of: question) else { return .nothing }
+    var next = QuestionAnswers.base(question)
+    next.skipped = nil
+    let picked = suggestionPicked(question)
+    if question.kind == .multi {
+      next.selected = selected(question)
+      next.other = picked ? replaced : text
+      return commit(question, next)
+    }
+    if picked { return .nothing }
+    next.selected = []
+    next.other = text
+    return commit(question, next)
+  }
+
+  /// The answer the question's recommendation stands for (`recommendedQuestionAnswer`,
+  /// packages/core/question-block.ts:1781-1794), keeping the person's own Other words on a pick-any question.
+  public static func acceptRecommended(_ question: InboxQuestion) -> Edit {
+    var next = QuestionAnswers.base(question)
+    let kept = question.kind == .multi ? next.other : nil
+    next.skipped = nil
+    next.other = nil
+    next.text = nil
+    let labels = question.choices.filter(\.recommended).map(\.label)
+    if !labels.isEmpty {
+      next.selected = labels
+      if let kept, !QuestionAnswers.jsTrim(kept).isEmpty { next.other = kept }
+    } else if let text = question.suggestedText, !text.isEmpty {
+      next.selected = []
+      if question.kind == .text { next.text = text } else { next.other = text }
+    } else {
+      return .nothing
+    }
+    return commit(question, next)
+  }
+
+  /// Whether the card offers Accept recommended (QuestionBlock.tsx:562-580): while nothing is answered; and on a
+  /// pick-any question whose recommendation names choices, until the ticks are exactly those choices.
+  public static func offersAccept(_ question: InboxQuestion) -> Bool {
+    let labels = question.choices.filter(\.recommended).map(\.label)
+    guard !labels.isEmpty || !(question.suggestedText ?? "").isEmpty else { return false }
+    let isAnswered = question.answer.map(answered) == true
+    let settled = !isAnswered && question.answer?.skipped != true && question.choices.contains(where: \.settled)
+    if settled { return false }
+    if !isAnswered { return true }
+    guard question.kind == .multi, !labels.isEmpty, !question.choices.contains(where: \.settled) else { return false }
+    return Set(question.answer?.selected ?? []) != Set(labels)
   }
 }

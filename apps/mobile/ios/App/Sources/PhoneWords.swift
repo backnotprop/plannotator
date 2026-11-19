@@ -39,8 +39,11 @@ enum PhoneWords {
   static let pairNoCamera = "No camera on this device."
   static let pairNotSaved = "This phone could not keep the pairing. Try again."
   /// A pairing link opened from outside the app (a web page, another app, the Camera app): one sheet, two equal actions.
-  static func pairAsk(_ name: String) -> String { name.isEmpty ? "Pair with this computer?" : "Pair with \(name)?" }
-  static func pairAskDetail(_ address: String) -> String { "This phone will read and answer the Inbox at \(address)." }
+  /// The address is the one thing the phone can vouch for; the name is only what the link says.
+  static let pairAsk = "Pair with this computer?"
+  static func pairCallsItself(_ name: String) -> String { "It calls itself “\(name)”." }
+  static let pairAskDetail = "This phone will read and answer its Inbox."
+  static let pairing = "Pairing…"
   /// FLOWS 13.
   static let pairAnother = "Pair another"
   static let demoMark = "Demo"
@@ -64,7 +67,7 @@ enum PhoneWords {
   static func awayNoCopy(_ name: String) -> String { "Can't reach \(name)." }
   static let tryAgain = "Try again"
   /// FLOWS 12: "Will send when Work Mac is back".
-  static func willSendWhenBack(_ name: String) -> String { "Will send when \(name) is back" }
+  static func willSendWhenBack(_ name: String) -> String { "Will send when \(name) is back." }
   /// FLOWS 3, the row's tag.
   static let willSend = "Will send"
   static let stateHere = "Connected"
@@ -92,7 +95,7 @@ enum PhoneWords {
   /// Why something the person did was not taken: the Inbox's own words when it gave any.
   static func notice(_ notice: InboxSession.Notice, computer: String) -> String {
     switch notice {
-    case .refused(let words): return words
+    case .refused(let words, _): return words
     case .unreadable(let status): return "\(computer) did not take this (\(status))."
     case .notOffered: return "Plannotator on \(computer) cannot do this yet."
     case .appNeedsUpdate: return updatePhone
@@ -131,6 +134,11 @@ enum PhoneWords {
   static func sent(at time: String) -> String { time.isEmpty ? "Sent" : "Sent \(time)" }
   /// A pick the computer does not have yet.
   static let pickedOnPhone = "Picked · on this phone"
+  /// The pick shown is not this phone's: the phone's own was refused because the question changed elsewhere.
+  static func pickedElsewhere(at time: String) -> String { time.isEmpty ? "Picked on another device · in your draft" : "Picked on another device \(time) · in your draft" }
+  /// packages/ui/components/blocks/QuestionBlock.tsx:1302.
+  static let acceptRecommended = "Accept recommended"
+  static let markOnComputer = "Mark it on your computer"
   /// Flow check answer-12.
   static let replaced = "Replaced"
   /// Flow check answer-10.

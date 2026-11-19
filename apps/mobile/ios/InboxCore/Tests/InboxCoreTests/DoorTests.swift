@@ -237,7 +237,7 @@ final class DoorTests: XCTestCase {
     _ = try await other.picks(asked.id, body: QuestionAnswers.pickBody(key: question.key, revision: 0, answer: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""), idempotencyKey: "other-device"))
 
     await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
-    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .refused("This question changed. Read it again."))
+    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .refused("Question q_rollout changed since you read it (revision 1).", code: "question_revision_conflict"))
     XCTAssertTrue(session.held.isEmpty, "a refusal is a definite answer: the key is spent")
     XCTAssertEqual(session.thread(StandInData.retry)?.thread.messages.last?.questions?.first?.answer?.selected, ["Everyone at once"], "the other device's pick shows")
 
@@ -369,7 +369,7 @@ final class DoorTests: XCTestCase {
     _ = try await other.picks(asked.id, body: QuestionAnswers.pickBody(key: now.key, revision: now.revision, answer: QuestionAnswers.choice(now, selected: ["Everyone at once"], note: ""), idempotencyKey: "other-device"))
 
     await session.send(thread: StandInData.retry, words: "Go ahead")
-    XCTAssertEqual(session.notices[StandInData.retry], .refused("This question changed. Read it again."))
+    XCTAssertEqual(session.notices[StandInData.retry], .refused("Question q_rollout changed since you read it (revision 2).", code: "question_revision_conflict"))
     XCTAssertTrue(session.held.isEmpty)
     XCTAssertEqual(session.takeReturnedWords(StandInData.retry), "Go ahead")
     XCTAssertNil(session.takeReturnedWords(StandInData.retry), "handed back once")
@@ -397,5 +397,138 @@ final class DoorTests: XCTestCase {
     await session.send(thread: StandInData.docs, words: "Thanks, merge it.")
     let stored = await door.thread(StandInData.docs)
     XCTAssertEqual(stored?.messages.last?.body, "Thanks, merge it.")
+  }
+
+  // MARK: Second review
+
+  func testASecondSendWhileTheFirstWaitsCarriesOnlyItsOwnWords() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    await door.setOffline(true)
+    let (asked, question) = try retryThread(session)
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
+    await session.send(thread: StandInData.retry, words: "Go ahead")
+    // The card is settled while its answer waits in a Send: nothing more to pick, nothing to send twice.
+    XCTAssertEqual(try retryThread(session).1.state, .sent)
+    XCTAssertTrue(session.isHeldSend(message: asked.id, key: question.key))
+    XCTAssertFalse(session.canSend(thread: StandInData.retry, words: ""))
+    let second = await session.send(thread: StandInData.retry, words: "And tell me when it is done")
+    XCTAssertTrue(second)
+
+    await door.setOffline(false)
+    await session.refresh()
+    XCTAssertTrue(session.held.isEmpty)
+    XCTAssertNil(session.notices[StandInData.retry])
+    XCTAssertNil(session.returned[StandInData.retry])
+    let replies = await door.posts("/reply")
+    XCTAssertEqual(replies.map { body($0)["questions"]?.items.count }, [1, 0])
+    let stored = await door.thread(StandInData.retry)
+    XCTAssertEqual(stored?.messages.suffix(2).map(\.body), ["Go ahead", "And tell me when it is done"])
+  }
+
+  func testTheStandInRefusesWhatTheInboxRefuses() async throws {
+    let door = StandInDoor()
+    let issued = await door.issueToken()
+    let client = DoorClient(transport: StandInTransport(door: door), token: issued.token, app: testApp)
+    func code(_ work: () async throws -> Void) async -> String? {
+      do { try await work() } catch let failure as DoorFailure {
+        if case .refused(_, let error) = failure { return error.code }
+      } catch {}
+      return nil
+    }
+    let read = try await client.thread(StandInData.retry)
+    let asked = try XCTUnwrap(read.thread.messages.last)
+    let question = try XCTUnwrap(asked.questions?.first)
+    let choice = QuestionAnswers.choice(question, selected: ["Everyone at once"], note: "")
+    // A reply that names a question with nothing picked.
+    var refused = await code { _ = try await client.reply(asked.id, body: DoorReplyBody(idempotencyKey: "r0", words: "x", questions: [DoorQuestionPick(key: question.key, revision: 0)])) }
+    XCTAssertEqual(refused, "validation_error")
+    _ = try await client.picks(asked.id, body: QuestionAnswers.pickBody(key: question.key, revision: 0, answer: choice, idempotencyKey: "p1"))
+    _ = try await client.reply(asked.id, body: DoorReplyBody(idempotencyKey: "r1", words: "", questions: [DoorQuestionPick(key: question.key, revision: 1)]))
+    // A second reply that names the question the first already sent: the whole reply is refused.
+    refused = await code { _ = try await client.reply(asked.id, body: DoorReplyBody(idempotencyKey: "r2", words: "more words", questions: [DoorQuestionPick(key: question.key, revision: 1)])) }
+    XCTAssertEqual(refused, "question_already_sent")
+    // A pick that may not reopen a sent question.
+    refused = await code { _ = try await client.picks(asked.id, body: QuestionAnswers.pickBody(key: question.key, revision: 1, answer: choice, unsentOnly: true, idempotencyKey: "p2")) }
+    XCTAssertEqual(refused, "question_already_sent")
+    // A reply with neither words nor an answer; a look with a seq that is no whole number.
+    refused = await code { _ = try await client.reply(asked.id, body: DoorReplyBody(idempotencyKey: "r3", words: " ")) }
+    XCTAssertEqual(refused, "validation_error")
+    refused = await code { try await client.seen(StandInData.retry, throughSeq: -1, idempotencyKey: "s1") }
+    XCTAssertEqual(refused, "validation_error")
+
+    // An action item is not a question; a question a Mark read set aside; an archived thread.
+    let onboarding = try await client.thread(StandInData.onboarding)
+    let mixed = try XCTUnwrap(onboarding.thread.messages.last)
+    let tone = try XCTUnwrap(mixed.questions?.first)
+    refused = await code { _ = try await client.picks(mixed.id, body: QuestionAnswers.pickBody(key: "a_key", revision: 0, answer: QuestionAnswers.choice(tone, selected: ["Plain"], note: ""), idempotencyKey: "p3")) }
+    XCTAssertEqual(refused, "validation_error")
+    await door.change(StandInData.onboarding) { $0.messages[0].questions?[0].setAsideAt = "2026-11-18T10:00:00.000Z" }
+    refused = await code { _ = try await client.picks(mixed.id, body: QuestionAnswers.pickBody(key: tone.key, revision: 0, answer: QuestionAnswers.choice(tone, selected: ["Plain"], note: ""), idempotencyKey: "p4")) }
+    XCTAssertEqual(refused, "question_set_aside")
+    await door.change(StandInData.docs) { $0.resolvedAt = "2026-11-18T10:00:00.000Z" }
+    refused = await code { _ = try await client.reply(MessageID(StandInData.docs.rawValue), body: DoorReplyBody(idempotencyKey: "r4", words: "thanks")) }
+    XCTAssertEqual(refused, "thread_resolved")
+  }
+
+  func testWordsARefusalGaveBackSurviveARestart() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-core-tests-\(UUID().uuidString)", isDirectory: true)
+    let door = StandInDoor()
+    let issued = await door.issueToken()
+    let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
+    let connector: DoorConnector = { _ in [StandInTransport(door: door)] }
+    var session = InboxSession(computer: computer, app: testApp, copy: LocalCopy(folder: folder), connector: connector)
+    await session.start()
+    await session.open(StandInData.docs)
+    await door.setOptions { $0.proxyRefusesReplies = 413 }
+    await session.send(thread: StandInData.docs, words: "Thanks, merge it.")
+    session.stop()
+    // The app is closed before the thread is opened again.
+    session = InboxSession(computer: computer, app: testApp, copy: LocalCopy(folder: folder), connector: connector)
+    await session.start()
+    XCTAssertEqual(session.notices[StandInData.docs], .unreadable(status: 413))
+    XCTAssertEqual(session.takeReturnedWords(StandInData.docs), "Thanks, merge it.")
+    session.stop()
+    session = InboxSession(computer: computer, app: testApp, copy: LocalCopy(folder: folder), connector: connector)
+    await session.start()
+    XCTAssertNil(session.returned[StandInData.docs], "taken once, for good")
+    LocalCopy(folder: folder).erase()
+  }
+
+  func testRemovingAComputerLeavesNothingOfItEvenWithAWriteOnItsWay() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-core-tests-\(UUID().uuidString)", isDirectory: true)
+    let door = StandInDoor()
+    let issued = await door.issueToken()
+    let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
+    let session = InboxSession(computer: computer, app: testApp, copy: LocalCopy(folder: folder)) { _ in [StandInTransport(door: door)] }
+    await session.start()
+    await session.open(StandInData.retry)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+    let (asked, question) = try retryThread(session)
+    session.hold(pick: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""), thread: StandInData.retry, message: asked.id, question: question)
+    async let write: Void = session.deliverHeld(thread: StandInData.retry)
+    async let removal: Void = session.removeThisPhone()
+    _ = await (write, removal)
+    await session.open(StandInData.retry)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+  }
+
+  func testATooManyRequestsAnswerIsTriedAgainNotGivenBack() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.docs)
+    await door.setOptions { $0.proxyRefusesReplies = 429 }
+    await session.send(thread: StandInData.docs, words: "Thanks, merge it.")
+    XCTAssertEqual(session.held.map(\.kind), [.reply], "it waits, with its key")
+    XCTAssertNil(session.returned[StandInData.docs])
+    await door.setOptions { $0.proxyRefusesReplies = nil }
+    await session.refresh()
+    XCTAssertTrue(session.held.isEmpty)
+    let stored = await door.thread(StandInData.docs)
+    XCTAssertEqual(stored?.messages.last?.body, "Thanks, merge it.")
+    session.stop()
   }
 }

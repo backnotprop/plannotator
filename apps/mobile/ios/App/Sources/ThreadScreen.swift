@@ -8,6 +8,8 @@ struct ThreadScreen: View {
   let id: ThreadID
   @State private var words = ""
   @State private var drafts = ThreadDrafts()
+  @State private var tail: CGFloat = 0
+  @State private var landed = false
   @FocusState private var composing: Bool
 
   private var model: ThreadModel? { session.thread(id) }
@@ -43,34 +45,58 @@ struct ThreadScreen: View {
 
   private func messages(_ thread: InboxThread) -> some View {
     let lastPerson = thread.messages.last { $0.author.kind == .person }?.id
+    // Where the thread lands: the newest agent message, at the top of the page, with what follows it. A message
+    // is never cut in half by the title bar: it starts whole, as a page does.
+    let landing = thread.messages.lastIndex { $0.author.kind == .agent } ?? 0
+    let replyTime = { (reply: String) in thread.messages.first { $0.id.rawValue == reply }?.createdAt }
     return ScrollViewReader { proxy in
     ScrollView {
       VStack(alignment: .leading, spacing: 0) {
-        ForEach(Array(thread.messages.enumerated()), id: \.element.id) { index, message in
-          if index > 0 { Divider().overlay(Token.border).padding(.vertical, 18) }
-          MessageView(session: session, thread: id, message: message, showsDelivery: message.id == lastPerson, drafts: drafts) { reply in
-            thread.messages.first { $0.id.rawValue == reply }?.createdAt
+        ForEach(thread.messages[..<landing], id: \.id) { message in
+          MessageView(session: session, thread: id, message: message, showsDelivery: message.id == lastPerson, drafts: drafts, replyTime: replyTime)
+          Divider().overlay(Token.border).padding(.top, 18).padding(.bottom, message.id == thread.messages[landing - 1].id ? 6 : 18)
+        }
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(Array(thread.messages[landing...].enumerated()), id: \.element.id) { index, message in
+            if index > 0 { Divider().overlay(Token.border).padding(.vertical, 18) }
+            MessageView(session: session, thread: id, message: message, showsDelivery: message.id == lastPerson, drafts: drafts, replyTime: replyTime)
           }
         }
+        .padding(.top, 12)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tail = $0 }
+        .id(Self.landing)
+        // Room under a short last message, so it can still start at the top.
+        Color.clear.containerRelativeFrame(.vertical) { length, _ in max(0, length - tail) }
       }
       .padding(.horizontal, 20)
-      .padding(.top, 12)
       .padding(.bottom, 20)
       Color.clear.frame(height: 1).id(Self.end)
     }
-    // A long thread opens on its newest message; a short one still starts under the title.
-    .defaultScrollAnchor(.bottom, for: .initialOffset)
-    .defaultScrollAnchor(.top, for: .alignment)
     // The title bar is a hard edge: no message runs under the title or the status bar.
     .scrollEdgeEffectStyle(.hard, for: .top)
     .toolbarBackground(Token.background, for: .navigationBar)
     .toolbarBackgroundVisibility(.visible, for: .navigationBar)
-    // Land at the newest message, and follow a new one in.
-    .onChange(of: thread.messages.count) { _, _ in withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) } }
-    // A thread already on the phone is laid out before it is on screen: land once it is.
+    // A new message from an agent lands the same way; the person's own Send is followed to the end.
+    .onChange(of: thread.messages.count) { _, _ in
+      withAnimation {
+        if thread.messages.last?.author.kind == .person { proxy.scrollTo(Self.end, anchor: .bottom) } else { proxy.scrollTo(Self.landing, anchor: .top) }
+      }
+    }
+    // Land once the page is measured (a thread already on the phone is laid out before it is on screen).
+    .onChange(of: tail) { _, _ in
+      guard !landed else { return }
+      // After the room under the last message is laid out, not before.
+      Task {
+        try? await Task.sleep(for: .milliseconds(40))
+        if !landed { proxy.scrollTo(Self.landing, anchor: .top) }
+      }
+    }
     .task {
-      try? await Task.sleep(for: .milliseconds(50))
-      proxy.scrollTo(Self.end, anchor: .bottom)
+      try? await Task.sleep(for: .milliseconds(60))
+      proxy.scrollTo(Self.landing, anchor: .top)
+      try? await Task.sleep(for: .milliseconds(700))
+      proxy.scrollTo(Self.landing, anchor: .top)
+      landed = true
     }
     .scrollDismissesKeyboard(.interactively)
     .refreshable { await session.refresh() }
@@ -86,6 +112,7 @@ struct ThreadScreen: View {
   }
 
   private static let end = "end"
+  private static let landing = "landing"
 }
 
 /// One message: plain text on the page, never a bubble; the person's own in the same column.
@@ -96,7 +123,7 @@ struct MessageView: View {
   let showsDelivery: Bool
   let drafts: ThreadDrafts
   /// When a reply was written, by its id.
-  let replyTime: (String) -> String?
+  var replyTime: (String) -> String? = { _ in nil }
 
   private var actions: [InboxQuestion] { (message.actions ?? (message.questions ?? []).filter { $0.kind == .action }).sorted { $0.position < $1.position } }
   private var questions: [InboxQuestion] { (message.questions ?? []).filter { $0.kind != .action }.sorted { $0.position < $1.position } }
@@ -120,7 +147,7 @@ struct MessageView: View {
         VStack(alignment: .leading, spacing: 6) {
           Text(Words.labelActionItem).font(.subheadline).foregroundStyle(Token.mutedForeground)
           Text(action.prompt).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true)
-          Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
+          Label(PhoneWords.markOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,7 +190,9 @@ struct Composer: View {
     if session.hasHeldReply(id), words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
     return session.canSend(thread: id, words: words) && !session.sending.contains(id)
   }
-  private var hint: String { hasPicks ? PhoneWords.noteOrSend : PhoneWords.reply }
+  @Environment(\.dynamicTypeSize) private var typeSize
+  /// At the largest text sizes the longer hint would be cut: the short one says enough.
+  private var hint: String { hasPicks && !typeSize.isAccessibilitySize ? PhoneWords.noteOrSend : PhoneWords.reply }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -186,7 +215,7 @@ struct Composer: View {
             .font(.footnote)
             .foregroundStyle(Token.mutedForeground)
           ForEach(heldWords, id: \.self) { text in
-            Text(text).font(.subheadline).foregroundStyle(Token.foreground).lineLimit(3).padding(.leading, 26)
+            Label { Text(text).font(.subheadline).foregroundStyle(Token.foreground).lineLimit(3) } icon: { Image(systemName: "clock").hidden() }.font(.footnote)
           }
         }
         .padding(.horizontal, 6)

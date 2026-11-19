@@ -30,15 +30,13 @@ struct AgentMark: View {
   var size: CGFloat = 36
   @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
-  /// The agent ids that have a mark in the catalog.
-  static let known: Set<String> = ["claude-code", "codex", "gemini", "amp", "kiro", "opencode", "pi"]
-
   var body: some View {
     let side = min(size * scale, size * 1.5)
     let shape = RoundedRectangle(cornerRadius: side * 0.26, style: .continuous)
     Group {
-      if let host = author.host, Self.known.contains(host) {
-        Image("agent-\(host)")
+      // The catalog itself says which agents have a mark: no second list to keep in step.
+      if let host = author.host, let mark = UIImage(named: "agent-\(host)") {
+        Image(uiImage: mark)
           .resizable()
           .scaledToFit()
           .padding(side * 0.18)

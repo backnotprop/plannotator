@@ -128,31 +128,57 @@ struct PairingScreen: View {
 struct OfferedPairingSheet: View {
   let link: PairLink
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
+
+  private var working: Bool { model.pairing == .working }
 
   var body: some View {
-    VStack(spacing: 20) {
-      Image(systemName: "desktopcomputer").font(.system(size: 44)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
-      VStack(spacing: 8) {
-        Text(PhoneWords.pairAsk(link.name)).font(.title2.bold()).multilineTextAlignment(.center).foregroundStyle(Token.foreground)
-        Text(PhoneWords.pairAskDetail(link.addresses.map(\.hostPort).joined(separator: ", ")))
-          .font(.callout)
+    VStack(spacing: 18) {
+      VStack(spacing: 10) {
+        Text(PhoneWords.pairAsk).font(.headline).foregroundStyle(Token.mutedForeground)
+        // What the phone can vouch for: where the link leads.
+        Text(link.addresses.map(\.hostPort).joined(separator: "\n"))
+          .font(.title3.weight(.semibold))
           .multilineTextAlignment(.center)
-          .foregroundStyle(Token.mutedForeground)
-      }
-      HStack(spacing: 12) {
-        Button(PhoneWords.cancel) {
-          model.offered = nil
-          dismiss()
+          .foregroundStyle(Token.foreground)
+          .textSelection(.enabled)
+        VStack(spacing: 2) {
+          // What the link says of itself: not checked by anything until the computer answers.
+          if !link.name.isEmpty { Text(PhoneWords.pairCallsItself(link.name)) }
+          Text(PhoneWords.pairAskDetail)
         }
-        Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }
+        .font(.callout)
+        .multilineTextAlignment(.center)
+        .foregroundStyle(Token.mutedForeground)
       }
-      .buttonStyle(EqualChoice())
+      if working {
+        HStack(spacing: 10) {
+          ProgressView()
+          Text(PhoneWords.pairing).font(.callout).foregroundStyle(Token.mutedForeground)
+        }
+        .frame(minHeight: 50)
+        .accessibilityElement(children: .combine)
+      } else {
+        if case .failed(let lines) = model.pairing {
+          VStack(spacing: 4) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+              Text(line).font(.callout.weight(index == 0 ? .semibold : .regular)).foregroundStyle(index == 0 ? Token.destructive : Token.mutedForeground).multilineTextAlignment(.center)
+            }
+          }
+          .accessibilityElement(children: .combine)
+        }
+        HStack(spacing: 12) {
+          Button(PhoneWords.cancel) { model.declineOffered() }
+          Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }
+        }
+        .buttonStyle(EqualChoice())
+      }
     }
     .padding(24)
     .frame(maxWidth: .infinity)
-    .presentationDetents([.height(340)])
+    .presentationDetents([.medium])
     .presentationBackground(Token.background)
+    // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
+    .interactiveDismissDisabled(working)
   }
 }
 

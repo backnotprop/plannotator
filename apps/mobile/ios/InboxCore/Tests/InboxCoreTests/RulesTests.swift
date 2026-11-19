@@ -147,11 +147,22 @@ final class SendPlanTests: XCTestCase {
     XCTAssertEqual(targets[0].questions.map(\.key), ["allow"])
   }
 
-  func testAThreadHandedToAnotherSessionIsAnsweredOnTheComputer() {
+  func testOnlyAHandOffThatStillStandsIsAnsweredOnTheComputer() {
     var handed = message("m2", InboxAuthor(kind: .person))
     handed.handoff = InboxHandoff(at: "2026-11-18T10:00:00.000Z")
+    handed.to = InboxAddressee(host: "codex", session: "B")
     XCTAssertTrue(SendPlan.needsComputer(thread([message("m1", a), handed])))
     XCTAssertFalse(SendPlan.needsComputer(thread([message("m1", a)])))
+    // Undone: the phone sends as usual.
+    var undone = handed
+    undone.handoff?.undoneAt = "2026-11-18T10:01:00.000Z"
+    XCTAssertFalse(SendPlan.needsComputer(thread([message("m1", a), undone])))
+    // A reply that took over holds the thread only until an agent writes again.
+    var took = message("m3", InboxAuthor(kind: .person))
+    took.tookOver = true
+    took.to = InboxAddressee(host: "codex", session: "B")
+    XCTAssertTrue(SendPlan.needsComputer(thread([message("m1", a), handed, took])))
+    XCTAssertFalse(SendPlan.needsComputer(thread([message("m1", a), handed, took, message("m4", b)])))
   }
 }
 
@@ -204,6 +215,59 @@ final class CardAnswerTests: XCTestCase {
     // With no note, Unskip leaves nothing worth keeping: the answer is taken back.
     let bare = saved(CardAnswers.toggleSkip(question(.single)))
     XCTAssertEqual(CardAnswers.toggleSkip(question(.single, answer: bare)), .save(nil))
+  }
+
+  func testATapOnAChoiceTheAgentMarkedSettledDoesNothingOnAPickOneQuestion() {
+    var q = question(.single)
+    q.choices[1].settled = true
+    XCTAssertEqual(CardAnswers.selected(q), ["B"])
+    XCTAssertEqual(CardAnswers.tap(q, label: "B"), .nothing)
+    XCTAssertEqual(saved(CardAnswers.tap(q, label: "A"))?.selected, ["A"])
+    XCTAssertFalse(CardAnswers.offersAccept(q))
+  }
+
+  func testTheAgentsOwnSuggestionIsARowStoredAsTheOtherAnswer() {
+    var single = question(.single)
+    single.suggestedText = "Neither: wait a week"
+    let picked = saved(CardAnswers.tapSuggestion(single))
+    XCTAssertEqual(picked?.other, "Neither: wait a week")
+    XCTAssertEqual(picked?.selected, [])
+    single.answer = picked
+    XCTAssertTrue(CardAnswers.suggestionPicked(single))
+    XCTAssertEqual(CardAnswers.tapSuggestion(single), .nothing)
+    // Pick any: it toggles beside the ticks, and unticking puts back the words it replaced.
+    var multi = question(.multi, answer: saved(CardAnswers.other(question(.multi, answer: saved(CardAnswers.tap(question(.multi), label: "A"))), words: "mine")))
+    multi.suggestedText = "All three, later"
+    let on = saved(CardAnswers.tapSuggestion(multi))
+    XCTAssertEqual(on?.selected, ["A"])
+    XCTAssertEqual(on?.other, "All three, later")
+    multi.answer = on
+    XCTAssertEqual(saved(CardAnswers.tapSuggestion(multi, replaced: "mine"))?.other, "mine")
+    var text = question(.text)
+    text.suggestedText = "Pay now"
+    XCTAssertNil(CardAnswers.suggestion(of: text), "a free-text question has no row: Accept recommended fills the field")
+  }
+
+  func testAcceptRecommendedTicksTheRecommendedChoicesAndIsOfferedUntilTheyAreTicked() {
+    var q = question(.multi)
+    q.choices[0].recommended = true
+    q.choices[2].recommended = true
+    XCTAssertTrue(CardAnswers.offersAccept(q))
+    q.answer = saved(CardAnswers.other(question(.multi, answer: saved(CardAnswers.tap(q, label: "A"))), words: "and mine"))
+    XCTAssertTrue(CardAnswers.offersAccept(q), "one tick must not take away the one tap that ticks the rest")
+    let accepted = saved(CardAnswers.acceptRecommended(q))
+    XCTAssertEqual(accepted?.selected, ["A", "C"])
+    XCTAssertEqual(accepted?.other, "and mine")
+    q.answer = accepted
+    XCTAssertFalse(CardAnswers.offersAccept(q))
+    var text = question(.text)
+    text.suggestedText = "Pay now"
+    XCTAssertEqual(saved(CardAnswers.acceptRecommended(text))?.text, "Pay now")
+    XCTAssertFalse(CardAnswers.offersAccept(question(.single)), "nothing recommended, nothing to accept")
+    var one = question(.single)
+    one.choices[0].recommended = true
+    one.answer = saved(CardAnswers.tap(one, label: "B"))
+    XCTAssertFalse(CardAnswers.offersAccept(one), "a pick-one question answered any way offers it no more")
   }
 
   func testTypingTheSameWordsAgainWritesNothing() {

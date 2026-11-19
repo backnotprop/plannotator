@@ -51,6 +51,24 @@ public struct LocalCopy: Sendable {
   public func saveOutbox(_ writes: [HeldWrite]) { if let data = try? JSONEncoder().encode(writes) { write(data, to: "outbox.json") } }
   public func outbox() -> [HeldWrite] { read("outbox.json").flatMap { try? JSONDecoder().decode([HeldWrite].self, from: $0) } ?? [] }
 
+  /// Words a refused Send gave back to the person, and why, by thread: kept until the composer takes them.
+  public struct GivenBack: Codable, Hashable, Sendable {
+    public var words: String
+    public var notice: InboxSession.Notice?
+  }
+
+  public func saveGivenBack(_ kept: [String: GivenBack]) { if let data = try? JSONEncoder().encode(kept) { write(data, to: "given-back.json") } }
+  public func givenBack() -> [String: GivenBack] { read("given-back.json").flatMap { try? JSONDecoder().decode([String: GivenBack].self, from: $0) } ?? [:] }
+
+  /// Erase the copies of computers this phone is no longer paired with (a removal that was cut short).
+  public static func sweep(root: URL, keeping ids: [String]) {
+    let folder = root.appendingPathComponent("computers", isDirectory: true)
+    let keep = Set(ids.map(name))
+    for item in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] where !keep.contains(item.lastPathComponent) {
+      try? FileManager.default.removeItem(at: item)
+    }
+  }
+
   /// Remove this computer: its copy goes with its Keychain item.
   public func erase() {
     guard let folder else { return }

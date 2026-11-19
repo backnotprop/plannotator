@@ -34,10 +34,29 @@ public enum SendPlan {
     return !note.isEmpty && action.state == .closed && !(action.revision > 0 && action.sentRevision == action.revision)
   }
 
-  /// The window answers these threads by rules this slice does not carry: the reply is made on the computer.
-  public static func needsComputer(_ thread: InboxThread) -> Bool {
-    thread.messages.contains { $0.tookOver == true || ($0.author.kind == .person && $0.handoff != nil) }
+  /// A hand-off that still stands (`activeHandoff`, packages/inbox/tags.ts:221-229): the latest reply that handed
+  /// the thread on and was not undone, unless a later reply took over from a session that ended.
+  static func activeHandoff(_ thread: InboxThread) -> Bool {
+    for message in thread.messages.reversed() {
+      if message.author.kind == .person, let handoff = message.handoff, handoff.undoneAt == nil, message.to != nil { return true }
+      if message.tookOver == true { return false }
+    }
+    return false
   }
+
+  /// A reply that took over from a session that ended still holds the thread, until an agent writes again
+  /// (`tookOverReply`, packages/inbox/sendTargets.ts:124-136).
+  static func tookOver(_ thread: InboxThread) -> Bool {
+    for message in thread.messages.reversed() {
+      if message.author.kind == .agent, !(message.author.session ?? "").hasPrefix(permissionSessionPrefix), message.scheduledChange == nil { return false }
+      if message.tookOver == true, message.to != nil { return true }
+    }
+    return false
+  }
+
+  /// While either stands, the window addresses the reply by rules this slice does not carry: it is made on the
+  /// computer. Once it no longer stands, the phone sends as usual.
+  public static func needsComputer(_ thread: InboxThread) -> Bool { activeHandoff(thread) || tookOver(thread) }
 
   /// The message the person's words answer: the latest agent message that is not a permission prompt's and not
   /// a routine's change line (`wordsMessage`, sendTargets.ts:155).

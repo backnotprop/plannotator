@@ -48,6 +48,8 @@ final class AppModel {
     defer { booted = true }
     let launch = LaunchOptions()
     computers = (try? credentials.all()) ?? []
+    // A removal that was cut short leaves no copy behind.
+    if let known = try? credentials.all() { LocalCopy.sweep(root: copyRoot, keeping: known.map(\.id)) }
     if launch.standIn || (defaults.bool(forKey: Self.demoKey) && computers.isEmpty) {
       await startDemo(launch)
       if let link = launch.pairLink { offer(link: link) }
@@ -77,6 +79,9 @@ final class AppModel {
   /// A pairing link from outside the app: a web page, another app, the Camera app. It is shown, never redeemed,
   /// until the person says Pair.
   func offer(link text: String) {
+    // One at a time: a link that arrives while another pairs waits for nothing and changes nothing.
+    guard pairing != .working else { return }
+    clearPairingFailure()
     do {
       offered = try PairLink(text)
     } catch {
@@ -84,10 +89,16 @@ final class AppModel {
     }
   }
 
+  /// The sheet stays up while this runs, with its progress, and after a failure, with its words.
   func acceptOffered() async {
-    guard let link = offered else { return }
+    guard let link = offered, pairing != .working else { return }
+    if await redeem(addresses: link.addresses, secret: link.secret, code: nil), offered == link { offered = nil }
+  }
+
+  func declineOffered() {
+    guard pairing != .working else { return }
     offered = nil
-    await redeem(addresses: link.addresses, secret: link.secret, code: nil)
+    clearPairingFailure()
   }
 
   /// A code scanned by the app's own camera: the person aimed the phone at their computer, so it pairs in one step.
@@ -103,11 +114,14 @@ final class AppModel {
 
   /// The address and the six digits, typed: the tailnet only.
   func pair(address: String, code: String) async {
+    guard pairing != .working else { return }
     let hostPort = address.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "https://", with: "")
     await redeem(addresses: [.tailnet(hostPort: hostPort.hasSuffix("/") ? String(hostPort.dropLast()) : hostPort)], secret: nil, code: code.trimmingCharacters(in: .whitespaces))
   }
 
-  private func redeem(addresses: [DoorAddress], secret: String?, code: String?) async {
+  @discardableResult
+  private func redeem(addresses: [DoorAddress], secret: String?, code: String?) async -> Bool {
+    guard pairing != .working else { return false }
     pairing = .working
     var tried: [String] = []
     for address in addresses {
@@ -128,12 +142,12 @@ final class AppModel {
             id: answer.device.id.rawValue, name: answer.computer.name, token: answer.token, secret: answer.secret, addresses: reach, relayURL: answer.relay?.url, mailboxID: answer.relay?.mailboxId)
           do { try credentials.save(computer) } catch {
             pairing = .failed([PhoneWords.pairNotSaved])
-            return
+            return false
           }
           computers = (try? credentials.all()) ?? computers + [computer]
           pairing = .idle
           use(computer)
-          return
+          return true
         } catch let failure as DoorFailure {
           switch failure {
           case .unreachable, .unreadable:
@@ -152,7 +166,7 @@ final class AppModel {
           case .notOffered:
             pairing = .failed([PhoneWords.updateComputer(address.hostPort)])
           }
-          return
+          return false
         } catch {
           tried.append(PhoneWords.pairNoAnswer(address.hostPort))
           break attempts
@@ -160,6 +174,7 @@ final class AppModel {
       }
     }
     pairing = .failed(tried)
+    return false
   }
 
   func clearPairingFailure() { if case .failed = pairing { pairing = .idle } }

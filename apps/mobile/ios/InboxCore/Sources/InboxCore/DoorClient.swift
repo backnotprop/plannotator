@@ -22,10 +22,11 @@ public enum DoorFailure: Error, Sendable {
   /// A definite answer: the write was applied or refused, so its idempotency key is spent.
   public var isDefinite: Bool {
     switch self {
-    case .refused(let status, _): return status < 500
+    case .refused(let status, _): return status < 500 && status != 408 && status != 429
     case .appNeedsUpdate, .notOffered: return true
     // A 4xx that is not the Inbox's JSON (a proxy's page): still a refusal, never retried for ever.
-    case .unreadable(let status): return (400..<500).contains(status)
+    // 408 and 429 are not: whatever stands in front asked for another try.
+    case .unreadable(let status): return (400..<500).contains(status) && status != 408 && status != 429
     case .unreachable: return false
     }
   }
