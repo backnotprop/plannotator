@@ -2318,8 +2318,12 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-vhead .ib-fn { font-weight: 600; font-size: var(--ib-fs-14, 14px); white-space: nowrap; min-width: 0; overflow: hidden; }
 .ib-vhead .ib-from { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-vhead .ib-sp { flex: 1; }
-.ib-changed { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
-.ib-changed .ib-ic { color: var(--warning); }
+.ib-changed { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 8px; padding: 8px 18px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
+.ib-changed .ib-ic { color: var(--warning); margin-top: calc((1lh - 14px) / 2); }
+/* Icon | words: the sentence wraps in its own box, and the link follows it or takes the next row under the sentence, never under the icon. */
+.ib-changed-b { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.ib-changed-t { flex: 0 1 auto; min-width: 0; max-width: 100%; text-wrap: pretty; }
+.ib-changed .ib-vlink { flex: none; white-space: nowrap; }
 .pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; }
 .ib-vbody { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }

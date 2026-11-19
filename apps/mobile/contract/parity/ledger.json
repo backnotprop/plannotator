@@ -7531,7 +7531,7 @@
     },
     {
       "id": "files-027",
-      "title": "Changed chip: \"Changed since sent · Open the version it sent\" / \"Showing the sent version\" / \"The file is gone; showing the sent copy\"",
+      "title": "Changed chip: \"Changed since sent · View sent version\" / \"Showing the sent version · View current file\" / \"The file is gone; showing the sent copy\"",
       "surface": [],
       "flows": [],
       "mobile": "v1",
