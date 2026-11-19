@@ -113,7 +113,8 @@ export function shortNumber(given: number): string {
   if (abs >= 1e9) return `${n(value / 1e9)}B`;
   if (abs >= 1e6) return `${n(value / 1e6)}M`;
   if (abs >= 1e4) return `${n(value / 1e3)}k`;
-  if (Number.isInteger(value)) return value.toLocaleString('en-US');
+  // Thousands are grouped by hand: asking the locale for it is slow enough to show in a frame of 200 charts.
+  if (Number.isInteger(value)) return abs < 1000 ? String(value) : `${value < 0 ? '-' : ''}${Math.floor(abs / 1000)},${String(abs % 1000).padStart(3, '0')}`;
   if (abs < 0.001) return String(Number(value.toPrecision(2)));
   return abs < 1 ? String(Math.round(value * 1000) / 1000) : String(Math.round(value * 10) / 10);
 }
@@ -506,7 +507,10 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
   const biggest = Math.max(0, ...all.map((point) => point.size));
   /** The words at each line's end: its last value, and its name when there is more than one line. */
   const endWords = (s: number, value: number) => `${shortNumber(value)}${series.length > 1 ? ` ${cut(series[s], 14)}` : ''}`;
-  const endRoom = ends ? Math.min(w * 0.36, Math.max(36, ...all.map((point) => mono(endWords(point.s, point.y), 10))) + 12) : 0;
+  // Room for those words: measured from each line's last point only (writing a number out is the slow part of a chart).
+  const lasts = new Map<number, number>();
+  if (ends) for (const point of all) lasts.set(point.s, point.y);
+  const endRoom = ends ? Math.min(w * 0.36, Math.max(36, ...[...lasts].map(([s, value]) => mono(endWords(s, value), 10))) + 12) : 0;
 
   const columns = faceted ? Math.min(facets.length, Math.max(1, Math.round(Math.sqrt((facets.length * w) / Math.max(1, h))))) : 1;
   const lines = Math.ceil(facets.length / columns);
