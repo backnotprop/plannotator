@@ -486,8 +486,9 @@ test.skipIf(!hasDom)('the automatic line saves what to make only when changed, k
     saves.push(input);
     return JUDGED;
   });
-  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'medium', make: 'guide', agent: 'codex' } }} onSaved={() => {}} onClose={() => {}} />);
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'medium', make: 'guide', agent: 'codex' }, auto_agent: { agent: 'codex', name: 'Codex' } }} onSaved={() => {}} onClose={() => {}} />);
   expect(document.querySelector('[data-pull-risk-auto] button')!.textContent).toContain('a guided review');
+  expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toMatch(/^with\s+Codex$/);
   expect(document.querySelector('[data-pull-risk-auto] span')!.textContent).toBe('When one ranks Medium and up, make');
   const submit = async () => {
     await act(async () => {
@@ -499,6 +500,7 @@ test.skipIf(!hasDom)('the automatic line saves what to make only when changed, k
   await pick('auto', 'a Picture page');
   await submit();
   await pick('auto', 'nothing');
+  expect(document.querySelector('[data-pull-risk-auto-agent]')).toBeNull();
   await submit();
   expect(saves.map((save) => ('auto' in save ? save.auto : 'kept'))).toEqual(['kept', { level: 'medium', make: 'picture_it', agent: 'codex' }, null]);
 });

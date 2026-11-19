@@ -3,6 +3,7 @@ import type { InboxPullRiskAnswer, InboxPullRiskAuto, InboxPullRiskModels } from
 import { modelSelectOptions } from '@plannotator/core/model-catalog';
 import { InlinePicker } from '@plannotator/ui/components/InlinePicker';
 import { inboxApi } from '../api';
+import { HostMark } from '../icons';
 import { Modal } from '../components/Updates';
 import { riskFilterWords } from './risk';
 
@@ -136,6 +137,17 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
         <div className="ib-riskd-row ib-riskd-auto" role="group" aria-labelledby={autoId} data-pull-risk-auto={make}>
           <span id={autoId}>When one ranks {riskFilterWords[answer.auto?.level ?? 'high']}, make</span>
           <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
+          {make && (
+            <span className="ib-riskd-with" data-pull-risk-auto-agent={answer.auto_agent?.agent ?? ''}>
+              {answer.auto_agent ? (
+                <>
+                  with <HostMark host={answer.auto_agent.agent} /> {answer.auto_agent.name}
+                </>
+              ) : (
+                'No agent can be started here.'
+              )}
+            </span>
+          )}
         </div>
         {error && (
           <p className="ib-error" role="alert">

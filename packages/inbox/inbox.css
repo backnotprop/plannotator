@@ -10366,6 +10366,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
 .ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .ib-riskd-auto { align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.ib-riskd-with { display: inline-flex; align-items: center; gap: 6px; }
 .ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* A sheet at the bottom of the screen, as the feedback dialog (its rule is above): the list opens upward, inside it, and the sheet can still scroll. */
@@ -10378,12 +10379,15 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
   /* A short phone keeps Save and Cancel on screen: the box gives up its height first. */
   .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(72px, 13dvh, 140px); }
-  .ib-riskd-auto { flex-wrap: nowrap; margin-top: 10px; padding-top: 10px; }
-  .ib-riskd-auto > div { width: auto; flex: 1; min-width: 0; }
+  .ib-riskd-auto { margin-top: 10px; padding-top: 10px; row-gap: 2px; }
+  .ib-riskd-auto > div { width: auto; flex: 1 1 0; min-width: 0; }
+  .ib-riskd-with { flex-basis: 100%; line-height: 20px; }
   .ib-riskd-acts { margin-top: 12px; }
 }
 @media (max-width: 767px) and (max-height: 600px) {
   .ib-riskd-t { height: 56px; }
+  .ib-riskd:has(.ib-riskd-with) .ib-riskd-t { height: 40px; }
+  .ib-riskd:has(.ib-riskd-with) .ib-riskd-acts { margin-top: 6px; }
 }
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
