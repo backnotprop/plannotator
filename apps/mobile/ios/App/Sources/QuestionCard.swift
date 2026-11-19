@@ -73,12 +73,15 @@ struct QuestionCard: View {
         Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
       } else if !live {
         settledAnswer
+      } else if permission {
+        permissionAnswers
       } else if question.kind == .text {
         textAnswer
       } else {
         choices
       }
-      if known, live { footer }
+      // A permission prompt has its answers and nothing else, as the window's card has (no Other, note or Skip).
+      if known, live, !permission { footer }
       status
     }
     .padding(16)
@@ -130,7 +133,7 @@ struct QuestionCard: View {
   }
 
   @ViewBuilder private var kindText: some View {
-    if let kind = PhoneWords.kind(question.kind) { Text(kind) }
+    if !permission, let kind = PhoneWords.kind(question.kind) { Text(kind) }
   }
 
   @ViewBuilder private var marks: some View {
@@ -146,13 +149,8 @@ struct QuestionCard: View {
     VStack(spacing: 0) {
       ForEach(Array(question.choices.enumerated()), id: \.element.label) { index, choice in
         if index > 0 { Divider().overlay(Token.border) }
-        if permission, choice.label == SendPlan.permissionFull {
-          // The Inbox takes this one only with its own window's confirmation: shown, never offered to tap.
-          ChoiceRow(label: choice.label, detail: PhoneWords.answerOnComputer, recommended: false, multi: false, selected: picked.contains(choice.label), enabled: false, onComputer: true) {}
-        } else {
-          ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
-            apply(CardAnswers.tap(question, label: choice.label))
-          }
+        ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
+          apply(CardAnswers.tap(question, label: choice.label))
         }
       }
       if let suggestion = CardAnswers.suggestion(of: question) {
@@ -177,6 +175,25 @@ struct QuestionCard: View {
         field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
           .padding(.leading, 40)
           .padding(.bottom, 4)
+      }
+    }
+  }
+
+  /// A started agent's permission prompt (packages/inbox/components/PermissionCard.tsx): each answer is the
+  /// question's own choice, picked and sent at once, as the window does: the agent is waiting on it. Full
+  /// permissions needs the window's own confirmation, so it is shown and answered on the computer.
+  private var permissionAnswers: some View {
+    VStack(spacing: 0) {
+      ForEach(Array(question.choices.enumerated()), id: \.element.label) { index, choice in
+        if index > 0 { Divider().overlay(Token.border) }
+        if choice.label == SendPlan.permissionFull {
+          ChoiceRow(label: choice.label, detail: PhoneWords.answerOnComputer, recommended: false, multi: false, selected: false, enabled: false, onComputer: true) {}
+        } else {
+          ChoiceRow(label: choice.label, detail: choice.description, recommended: false, multi: false, selected: picked.contains(choice.label), enabled: enabled && !session.sending.contains(thread)) {
+            guard case .save(let answer) = CardAnswers.tap(question, label: choice.label), session.hold(pick: answer, thread: thread, message: message, question: question) else { return }
+            Task { await session.send(thread: thread, words: "") }
+          }
+        }
       }
     }
   }
@@ -259,7 +276,7 @@ struct QuestionCard: View {
       focus = draft.noteOpen ? .note : nil
     }
     Spacer(minLength: 8)
-    if CardAnswers.offersAccept(question), !(permission && question.choices.contains { $0.recommended && $0.label == SendPlan.permissionFull }) {
+    if CardAnswers.offersAccept(question) {
       Button(PhoneWords.acceptRecommended) {
         draft.replacedOther = nil
         apply(CardAnswers.acceptRecommended(question))

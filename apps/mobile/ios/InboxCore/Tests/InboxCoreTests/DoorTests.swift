@@ -576,4 +576,53 @@ final class DoorTests: XCTestCase {
     XCTAssertEqual(stored?.messages.last?.body, "Thanks, merge it.")
     session.stop()
   }
+
+  func testAPermissionAnswerIsPickedAndSentAtOnceAsOneReplyToThePrompt() async throws {
+    let door = StandInDoor()
+    await door.add(StandInData.permissionThread(now: Date()))
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.permission)
+    let asked = try XCTUnwrap(session.thread(StandInData.permission)?.thread.messages.last)
+    let question = try XCTUnwrap(asked.questions?.first)
+    guard case .save(let answer) = CardAnswers.tap(question, label: "Allow once") else { return XCTFail("a tap picks") }
+    session.hold(pick: answer, thread: StandInData.permission, message: asked.id, question: question)
+    let sent = await session.send(thread: StandInData.permission, words: "")
+    XCTAssertTrue(sent)
+    XCTAssertNil(session.notices[StandInData.permission])
+    let replies = await door.posts("/reply")
+    XCTAssertEqual(replies.map(\.path), ["messages/\(asked.id.rawValue)/reply"])
+    let stored = await door.thread(StandInData.permission)?.messages.first?.questions?.first
+    XCTAssertEqual(stored?.state, .sent)
+    XCTAssertEqual(stored?.answer?.selected, ["Allow once"])
+  }
+
+  func testWithNoWordsTheAgentThatAskedNothingGetsNoEmptyReply() async throws {
+    // Two agents in one thread: the first asked, the second wrote last. Send with no words answers the first only.
+    let door = StandInDoor()
+    await door.change(StandInData.retry) { thread in
+      var later = thread.messages[0]
+      later.id = MessageID("msg_STANDINLATER")
+      later.author = InboxAuthor(kind: .agent, host: "codex", session: "ses_other")
+      later.questions = nil
+      later.seq = 950
+      later.body = "I am on the tests meanwhile."
+      thread.messages.append(later)
+    }
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    let asked = try XCTUnwrap(session.thread(StandInData.retry)?.thread.messages.first { $0.questions != nil })
+    let question = try XCTUnwrap(asked.questions?.first)
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""))
+    await session.send(thread: StandInData.retry, words: "")
+    XCTAssertNil(session.notices[StandInData.retry], "no reply was made that the Inbox refuses")
+    var replies = await door.posts("/reply")
+    XCTAssertEqual(replies.map(\.path), ["messages/\(asked.id.rawValue)/reply"])
+    // With words, they go to the agent that wrote last.
+    await session.send(thread: StandInData.retry, words: "Thanks both")
+    replies = await door.posts("/reply")
+    XCTAssertEqual(replies.last?.path, "messages/msg_STANDINLATER/reply")
+    XCTAssertEqual(body(replies.last!)["words"], .string("Thanks both"))
+  }
 }

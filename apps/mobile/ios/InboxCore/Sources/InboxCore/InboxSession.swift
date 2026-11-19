@@ -517,12 +517,16 @@ public final class InboxSession {
     notices[id] = nil
     returned[id] = nil
     keepGivenBack()
-    for (index, target) in targets.enumerated() {
-      let last = index == targets.count - 1
-      if !last, target.questions.isEmpty, target.actions.isEmpty { continue }
+    // A reply with neither an answer nor words is never made: the Inbox refuses one ("write a reply or send at
+    // least one answer"). So with no words, the agent that wrote last and asked nothing gets no reply.
+    let carrying = targets.enumerated().filter { index, target in !target.questions.isEmpty || !target.actions.isEmpty || (index == targets.count - 1 && !text.isEmpty) }.map(\.element)
+    for (index, target) in carrying.enumerated() {
+      let last = index == carrying.count - 1
       let key = UUID().uuidString
-      let body = DoorReplyBody(idempotencyKey: key, words: last ? text : "", questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
-      enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: last ? text : nil)
+      // The words ride the reply to the agent that wrote last, when that reply is made at all.
+      let words = target.message == targets.last?.message ? text : ""
+      let body = DoorReplyBody(idempotencyKey: key, words: words, questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
+      enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: words.isEmpty ? nil : words)
     }
     await pump(id.rawValue)
     if client != nil { await readList() }
