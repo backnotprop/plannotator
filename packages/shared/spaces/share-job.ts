@@ -167,6 +167,8 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       link,
       shared_once: !!record?.shared_at,
       kept: !!record?.kept && signedIn,
+      // Said as the space is: only a space the space itself calls private is "only you".
+      access: !record ? (signedIn ? "private" : "edit") : record.kept ? (record.visibility === "private" ? "private" : "comment") : record.created ? "edit" : signedIn ? "private" : "edit",
       signed_in: signedIn,
       who: signedIn ? (credential.name ?? (record?.kept ? record.owner : null)) : null,
       keep: live.keep,
@@ -268,6 +270,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       record.kept = true;
       record.owner = space.owner_name ?? record.owner;
       record.share_url = space.share_url ?? record.share_url;
+      record.visibility = space.visibility ?? record.visibility ?? null;
     } catch (error) {
       if (spaceKeptByAnother(error, "claim")) record.refused = true;
       else {

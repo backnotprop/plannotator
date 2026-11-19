@@ -44,6 +44,8 @@ export interface SpacesSpace {
   owner_name: string | null;
   /** The caller owns it (`access: "owner"`). */
   owned: boolean;
+  /** Who can open it (`private`, `link_edit`, …), when the answer says. */
+  visibility: string | null;
   documents: { id: string; doc_path: string; version: string | null }[];
 }
 
@@ -84,6 +86,7 @@ function spaceOf(value: Record<string, unknown>): SpacesSpace {
     share_url: text(value.share_url),
     owner_name: text(value.owner_name),
     owned: value.access === "owner",
+    visibility: text(value.visibility),
     documents: documents.filter(isObject).map((d) => ({ id: text(d.id) ?? "", doc_path: text(d.doc_path) ?? "", version: text(d.version) })),
   };
 }

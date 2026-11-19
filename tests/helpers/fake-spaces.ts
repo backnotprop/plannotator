@@ -60,6 +60,8 @@ export interface FakeSpace {
   id: string;
   name: string;
   owner: string | null;
+  /** `private` when made signed in; a space made without an account, kept or not, stays `link_edit`. */
+  visibility: string;
   share_url: string;
   documents: FakeDoc[];
   assets: FakeAsset[];
@@ -130,7 +132,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     owner_name: space.owner,
     slug: space.id.slice(3, 13).toLowerCase(),
     share_url: space.share_url,
-    visibility: space.owner ? "private" : "link_edit",
+    visibility: space.visibility,
     documents: space.documents.map((d) => docWire(space, d)),
     assets: space.assets.map((a) => ({ id: a.id, path: a.path, content_type: a.content_type, size: a.size, content_hash: a.hashes[a.hashes.length - 1] })),
   });
@@ -215,7 +217,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!/^ws_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) return fail(422, "validation_error", { fields: ["id"] });
       const existing = spaces.get(id);
       if (existing) return existing.createBody === raw && !existing.deleted ? json(201, existing.createAnswer) : fail(409, "workspace_id_conflict");
-      const space: FakeSpace = { id, name: typeof body.name === "string" ? body.name.slice(0, 120) : "Untitled", owner: user, share_url: `${origin}/s/${id.slice(3, 15).toLowerCase()}`, documents: [], assets: [], comments: [], approvals: [], deleted: false, createBody: raw, createAnswer: null };
+      const space: FakeSpace = { id, name: typeof body.name === "string" ? body.name.slice(0, 120) : "Untitled", owner: user, visibility: user ? "private" : "link_edit", share_url: `${origin}/s/${id.slice(3, 15).toLowerCase()}`, documents: [], assets: [], comments: [], approvals: [], deleted: false, createBody: raw, createAnswer: null };
       let first: FakeDoc | null = null;
       if (body.document !== null) {
         const d = (body.document ?? {}) as Record<string, unknown>;

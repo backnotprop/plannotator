@@ -31,7 +31,7 @@ afterEach(() => {
 
 const LINK = 'https://spaces.example/s/rate-limiting-7f3k9q';
 const details: SpaceShareDetails = { pages: 4, files: 3, comments: 1, approval: 4, not: { sent_comments: 3, pictures: 2, original_dates: true, files_over: 0, pages_over: 0, long_comments: 0, older_approvals: 0 } };
-const status = (more: Partial<SpaceShareStatus> = {}): SpaceShareStatus => ({ phase: 'none', progress: null, waiting: null, link: null, shared_once: false, kept: false, signed_in: false, who: null, keep: null, mode: 'all', versions: 4, changes: 0, stopped_pages: [], details: { all: details, newest: details }, ...more });
+const status = (more: Partial<SpaceShareStatus> = {}): SpaceShareStatus => ({ phase: 'none', progress: null, waiting: null, link: null, shared_once: false, kept: false, access: 'edit', signed_in: false, who: null, keep: null, mode: 'all', versions: 4, changes: 0, stopped_pages: [], details: { all: details, newest: details }, ...more });
 const shared = (more: Partial<SpaceShareStatus> = {}) => status({ phase: 'shared', link: LINK, shared_once: true, ...more });
 
 function panel(s: SpaceShareStatus, view: View = 'main') {
@@ -72,19 +72,20 @@ function panel(s: SpaceShareStatus, view: View = 'main') {
  */
 const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; info?: boolean; details?: boolean; who?: boolean }][] = [
   ['first share, not signed in', status(), 'main', ['share'], { switch: true, details: true }],
-  ['first share, signed in', status({ signed_in: true, who: 'Maya Chen' }), 'main', ['share'], { switch: true, details: true, who: true }],
+  ['first share, signed in', status({ signed_in: true, who: 'Maya Chen', access: 'private' }), 'main', ['share'], { switch: true, details: true, who: true }],
   ['first share, one version', status({ versions: 1 }), 'main', ['share'], { details: true }],
-  ['first share, one version, signed in', status({ versions: 1, signed_in: true, who: 'Maya Chen' }), 'main', ['share'], { details: true, who: true }],
+  ['first share, one version, signed in', status({ versions: 1, signed_in: true, who: 'Maya Chen', access: 'private' }), 'main', ['share'], { details: true, who: true }],
   ['uploading', status({ phase: 'sharing', progress: { done: 12, total: 40 }, link: LINK }), 'main', ['copy', 'open', 'stop'], {}],
   ['uploading, before the link', status({ phase: 'sharing', progress: { done: 0, total: 40 } }), 'main', ['stop'], {}],
   ['uploading, waiting', status({ phase: 'sharing', progress: { done: 120, total: 200 }, waiting: 8, link: LINK }), 'main', ['copy', 'open', 'stop'], {}],
   ['too many new spaces in a minute', status({ phase: 'sharing', progress: { done: 0, total: 9 }, waiting: 40 }), 'main', ['sign-in'], {}],
   ['shared, not signed in', shared(), 'main', ['copy', 'open', 'keep'], { info: true, details: true }],
-  ['shared, signed in', shared({ kept: true, signed_in: true, who: 'Maya Chen' }), 'main', ['copy', 'open', 'invite'], { details: true }],
+  ['shared, then kept', shared({ kept: true, access: 'comment', signed_in: true, who: 'Maya Chen' }), 'main', ['copy', 'open', 'invite'], { details: true }],
+  ['shared, made signed in', shared({ kept: true, access: 'private', signed_in: true, who: 'Maya Chen' }), 'main', ['copy', 'open', 'invite'], { details: true }],
   ['keep this space', shared({ keep: 'waiting' }), 'main', ['keep-cancel', 'keep-again'], {}],
   ['keep, from a remote window', shared({ keep: 'remote' }), 'main', ['keep-close'], {}],
   ['update, not signed in', shared({ changes: 2 }), 'main', ['copy', 'open', 'update'], {}],
-  ['update, signed in', shared({ changes: 1, kept: true, signed_in: true }), 'main', ['copy', 'open', 'invite', 'update'], {}],
+  ['update, signed in', shared({ changes: 1, kept: true, access: 'comment', signed_in: true }), 'main', ['copy', 'open', 'invite', 'update'], {}],
   ['update stopped for a page', shared({ stopped_pages: [{ title: 'Rollout checklist', url: `${LINK}/Rollout%20checklist.md` }] }), 'main', ['copy', 'open', 'open-page'], {}],
   ['someone else kept it', status({ phase: 'refused', link: LINK, shared_once: true }), 'main', ['open-space', 'share-new'], {}],
   ['over the limit', status({ phase: 'over_limit', progress: { done: 3, total: 9 } }), 'main', ['sign-in'], {}],
@@ -140,6 +141,21 @@ describe.if(hasDom)('the panel, state by state', () => {
     const one = rowsOf({ pages: 4, files: 3, comments: 1, approval: 4, not: { sent_comments: 3, pictures: 2, original_dates: true, files_over: 1, pages_over: 0, long_comments: 1, older_approvals: 3 } });
     expect(one.words).toBeLessThanOrEqual(20);
     expect(one.rows.filter((r) => / over /.test(r!))).toHaveLength(1);
+  });
+
+  test('the access line says what is true: a lock only for a space made signed in; a space kept after it was shared is still open to its link, and says so', () => {
+    const lineOf = (s: SpaceShareStatus) => {
+      const p = panel(s);
+      const row = p.host.querySelector<HTMLElement>('.ib-shr-arow')!;
+      return { mark: row.dataset.shareRowMark, words: row.querySelector('.ib-shr-atext')!.textContent };
+    };
+    const open = lineOf(shared());
+    const keptAfter = lineOf(shared({ kept: true, access: 'comment', signed_in: true }));
+    const madeSignedIn = lineOf(shared({ kept: true, access: 'private', signed_in: true }));
+    expect([open.mark, keptAfter.mark, madeSignedIn.mark]).toEqual(['globe', 'globe', 'lock']);
+    // Three states, three different lines: a kept space never borrows the private one's words.
+    expect(new Set([open.words, keptAfter.words, madeSignedIn.words]).size).toBe(3);
+    expect(lineOf(status({ signed_in: true, access: 'private' })).mark).toBe('lock');
   });
 
   test('Keep waits while a claim is going', () => {

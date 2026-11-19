@@ -153,6 +153,8 @@ export interface SpaceShareRecord {
   mode: SpaceShareMode;
   /** The space is the person's own (made signed in, or kept later). */
   kept: boolean;
+  /** Who can open it, as the space said last (`private`, `link_edit`, …); null when it has not said. */
+  visibility?: string | null;
   owner: string | null;
   /** A write was refused after the space had been made here without sign-in: someone else kept it. */
   refused: boolean;
@@ -493,6 +495,12 @@ export interface SpaceShareStatus {
   /** A share of this plan finished at least once. */
   shared_once: boolean;
   kept: boolean;
+  /**
+   * What the access line says, as is true of the space: `edit` (nobody kept it: anyone with the link can edit),
+   * `comment` (kept after it was shared: holders of the link still read and comment) or `private` (made signed in:
+   * only the person).
+   */
+  access: "edit" | "comment" | "private";
   signed_in: boolean;
   /** The signed-in person's name, when the space told it. */
   who: string | null;

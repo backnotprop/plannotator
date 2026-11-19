@@ -158,7 +158,7 @@ describe("the steps", () => {
 });
 
 describe("the button", () => {
-  const status = (more: Partial<SpaceShareStatus>): SpaceShareStatus => ({ phase: "none", progress: null, waiting: null, link: null, shared_once: false, kept: false, signed_in: false, who: null, keep: null, mode: "all", versions: 1, changes: 0, stopped_pages: [], details: {} as SpaceShareStatus["details"], ...more });
+  const status = (more: Partial<SpaceShareStatus>): SpaceShareStatus => ({ phase: "none", progress: null, waiting: null, link: null, shared_once: false, kept: false, access: "edit", signed_in: false, who: null, keep: null, mode: "all", versions: 1, changes: 0, stopped_pages: [], details: {} as SpaceShareStatus["details"], ...more });
   test("reads Share, Sharing, Shared or Update, with a mark when it needs a look", () => {
     expect(spaceShareButton(null)).toEqual({ label: "Share", state: "idle" });
     expect(spaceShareButton(status({ phase: "sharing" }))).toEqual({ label: "Sharing", state: "busy" });

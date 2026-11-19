@@ -27,6 +27,7 @@ export const SHARE_WORDS = {
   newest: 'Newest',
   anyone: 'Anyone with the link can edit',
   onlyYou: 'Only you',
+  anyoneComment: 'Anyone with the link can comment',
   details: 'Details',
   waiting: 'Waiting…',
   copy: 'Copy link',
@@ -139,7 +140,7 @@ function LinkRow({ link, primary }: { link: string; primary: boolean }) {
 
 function Row({ mark, children, right, warn }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean }) {
   return (
-    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}`}>
+    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}`} data-share-row-mark={mark}>
       <span className="ib-shr-disc">
         <Mark name={mark} />
       </span>
@@ -383,10 +384,17 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
     );
   }
 
+  // The access line says what is true of the space: private only when it was made signed in; a space kept after
+  // it was shared still lets holders of its link read and comment.
+  const invite = status.kept && status.phase !== 'none' && link ? <LinkBtn href={link} name="invite">{SHARE_WORDS.invite}</LinkBtn> : undefined;
   const access = (right?: ReactNode) =>
-    status.kept || (status.phase === 'none' && status.signed_in) ? (
-      <Row mark="lock" right={status.phase !== 'none' && link ? <LinkBtn href={link} name="invite">{SHARE_WORDS.invite}</LinkBtn> : undefined}>
+    status.access === 'private' ? (
+      <Row mark="lock" right={invite}>
         {SHARE_WORDS.onlyYou}
+      </Row>
+    ) : status.access === 'comment' ? (
+      <Row mark="globe" right={invite}>
+        {SHARE_WORDS.anyoneComment}
       </Row>
     ) : (
       <Row mark="globe" right={right}>

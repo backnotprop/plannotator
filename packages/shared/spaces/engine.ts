@@ -140,6 +140,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     record.created = true;
     record.share_url = space.share_url ?? record.share_url;
     record.owner = space.owner_name ?? record.owner;
+    record.visibility = space.visibility ?? record.visibility ?? null;
     record.kept = client.signedIn && space.owned;
     if (!client.signedIn || space.owned) return;
     // Signed in, and the space has no owner (it was made before the sign-in and its answer was lost): keep it now.
@@ -147,6 +148,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
       const mine = await client.claim(record.space_id);
       record.kept = true;
       record.owner = mine.owner_name ?? record.owner;
+      record.visibility = mine.visibility ?? record.visibility ?? null;
     } catch (error) {
       if (!spaceKeptByAnother(error, "claim")) throw error;
       record.refused = true;

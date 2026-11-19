@@ -72,7 +72,7 @@ describe("the status", () => {
   test("never shared, sharing, shared with its link, then Update only when something is new", async () => {
     const s = setup();
     const id = s.world.plan;
-    expect(s.jobs.status(id)).toMatchObject({ phase: "none", link: null, versions: 4, signed_in: false, kept: false, changes: 0 });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "none", link: null, versions: 4, signed_in: false, kept: false, access: "edit", changes: 0 });
     expect(s.jobs.status(id)!.details.all).toEqual({ pages: 4, files: 3, comments: 1, approval: null, not: { sent_comments: 3, pictures: 2, original_dates: true, files_over: 0, pages_over: 0, long_comments: 0, older_approvals: 0 } });
     expect(s.jobs.share(id, { mode: "all" })).toMatchObject({ phase: "sharing" });
     await s.settle();
@@ -152,7 +152,8 @@ describe("Keep this space", () => {
     expect(statSync(spacesCredentialPath(s.dataDir)).mode & 0o777).toBe(0o600);
     expect(statSync(join(s.dataDir, "secrets")).mode & 0o777).toBe(0o700);
     const status = s.jobs.status(id)!;
-    expect(status).toMatchObject({ phase: "shared", kept: true, signed_in: true, who: "Maya Chen", keep: null });
+    // Kept after it was shared: holders of the link still read and comment, and the status says so.
+    expect(status).toMatchObject({ phase: "shared", kept: true, access: "comment", signed_in: true, who: "Maya Chen", keep: null });
     // The token is in no answer to the page, no record and no address.
     expect(JSON.stringify(status)).not.toContain(credential.token);
     expect(readFileSync(join(s.dataDir, "plan-library", id, "share.json"), "utf8")).not.toContain(credential.token);
@@ -194,11 +195,12 @@ describe("Keep this space", () => {
     const s = setup();
     const token = s.spaces.issueToken("Maya Chen");
     saveSpacesCredential(s.dataDir, HOST, { token, name: "Maya Chen" });
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "none", signed_in: true, who: "Maya Chen" });
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "none", signed_in: true, who: "Maya Chen", access: "private" });
     s.jobs.share(s.world.plan, {});
     await s.settle();
     expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Maya Chen");
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: true });
+    // Made signed in: the space itself says private, and only then is it "only you".
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: true, access: "private" });
     s.spaces.revoke(token);
     s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# v5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     s.jobs.share(s.world.plan, {});
