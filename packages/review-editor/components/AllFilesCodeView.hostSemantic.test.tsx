@@ -690,6 +690,41 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.held()).toBe('800px');
   });
 
+  async function settled(page: { held: () => string }, content: () => number) {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return content() + (parseFloat(this.style.paddingBottom) || 0);
+      },
+    });
+    return async () => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      });
+      return page.held();
+    };
+  }
+
+  test.skipIf(!hasDom)('two quick taps at the end of the page settle back to the length the page had before the first', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts', 'b.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('b.ts');
+    await page.tap('a.ts');
+    content = 9_400;
+    expect(await settle()).toBe('600px');
+  });
+
+  test.skipIf(!hasDom)('a fling into the padding right after a tap is not pulled back up when the hold settles', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('a.ts');
+    content = 9_700;
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: 9_400 });
+    expect(await settle()).toBe('400px');
+  });
+
   test.skipIf(!hasDom)('a file taller than what is left below the window holds the page even with more than a screen left', async () => {
     const page = await atTheEnd(['a.ts'], 10_000 - 700 - 900);
     page.resize('a.ts', 3000);

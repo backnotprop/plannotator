@@ -2182,15 +2182,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
-  const heldLengthRef = useRef<((keep?: boolean) => number) | null>(null);
+  const heldLengthRef = useRef<((keep?: boolean) => { px: number; height: number }) | null>(null);
   const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
     const root = scrollRef.current;
     const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
     const node = itemNodeRef.current.get(itemId);
     const most = page ? Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight) : 0;
-    if (root && page && page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most) {
-      const height = page.scrollHeight;
-      let px = (heldLengthRef.current?.(true) ?? 0) + most;
+    if (root && page && (heldLengthRef.current || (page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most))) {
+      const held = heldLengthRef.current?.(true);
+      const height = held?.height ?? page.scrollHeight;
+      let px = (held?.px ?? 0) + most;
       root.style.paddingBottom = `${px}px`;
       let settled = false;
       let calm = 0;
@@ -2204,7 +2205,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           frame = requestAnimationFrame(settle);
           return;
         }
-        px = Math.min(px, Math.max(0, height - natural));
+        px = Math.min(px, Math.max(0, Math.max(height, page.scrollTop + page.clientHeight) - natural));
         root.style.paddingBottom = px > 0 ? `${px}px` : '';
         settled = true;
       };
@@ -2225,7 +2226,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
         if (!keep) root.style.paddingBottom = '';
         heldLengthRef.current = null;
-        return px;
+        return { px, height };
       };
     }
     showSemantic(itemId, on);
