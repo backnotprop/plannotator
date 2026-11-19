@@ -311,6 +311,13 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "description": "The canvas action: read only this frame (its id or title). With only thread_id the action answers the thread's canvas (the drawing the person sketches on) as text, one line per thing, and its rev.",
           "type": "string"
         },
+        "things": {
+          "description": "Read exactly these things, by id (a refusal that could not list every thing gives this call).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "after_thing": {
           "description": "Continue a long reading of the canvas after this thing id (a cut reading ends with the exact call).",
           "type": "string"
