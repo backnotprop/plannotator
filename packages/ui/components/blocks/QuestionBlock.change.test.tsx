@@ -260,6 +260,28 @@ Recommended: Sync with team
   });
 });
 
+describe('new strings', () => {
+  test.skipIf(!hasDom)('each place leads with its own pin and reads New with its words plain, never dimmed like a neighbour line', async () => {
+    const el = await mount(<Harness markdown={`:::question
+Use these strings for Shared folders?
+
+Where: The Shared page, under its title, when nothing is shared yet
+Before: none
+After: Nothing shared yet.
+Where: The toast after a folder is shared
+Before: none
+After: Folder shared.
+
+- [ ] Use both
+- [ ] Change some
+:::`} />);
+    const groups = [...el.querySelectorAll('[data-question-change-group]')];
+    expect(groups.map((g) => text(g.querySelector('[data-question-part="where"]')))).toEqual(['Where: The Shared page, under its title, when nothing is shared yet', 'Where: The toast after a folder is shared']);
+    expect(groups.map((g) => text(g.querySelector('.qc-k')))).toEqual(['New', 'New']);
+    expect(el.querySelectorAll('[data-question-change-after] .qc-dim')).toHaveLength(0);
+  });
+});
+
 describe('an Inbox that does not read change lines', () => {
   test.skipIf(!hasDom)('shows every line as text: the place, the Before, and the choice\'s After in its description', async () => {
     const el = await mount(<Harness markdown={AGENT_LINE} changeLines={false} />);

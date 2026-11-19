@@ -231,12 +231,14 @@ function SideView({ rows, side, mode, marks }: { rows: readonly QuestionChangeRo
   });
   // Nothing changed on this side: show it whole.
   if (mode === 'changed' && keep.size === 0) rows.forEach((_r, i) => keep.add(i));
+  // Unchanged lines are dimmed only beside a change (a new value, or a whole text with nothing to compare, reads plain).
+  const anyChange = rows.some(changed);
   const out: React.ReactNode[] = [];
   rows.forEach((r, i) => {
     if (!keep.has(i) || !own(r)) return;
     if (r.type === 'same') {
       const line = side === 'before' ? r.before : r.after;
-      out.push(<LineView key={i} line={line} dim={mode !== 'changed'}>{line.tokens.map(tokenNode)}</LineView>);
+      out.push(<LineView key={i} line={line} dim={anyChange && mode !== 'changed'}>{line.tokens.map(tokenNode)}</LineView>);
     } else if (r.type === 'mod') {
       const line = side === 'before' ? r.before : r.after;
       const tokens = side === 'before' ? r.beforeTokens : r.afterTokens;

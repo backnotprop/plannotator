@@ -557,7 +557,7 @@ export const INBOX_PICTURES_RULE =
  * pictures rule.
  */
 export const INBOX_CHANGE_RULE =
-  'A question that proposes a change (words, a screen, code, a setting) shows it: `Where: <what it is and where the person sees it>`, then `Before:` and `After:`, each the whole sentence, paragraph or screenshot it sits in (the card marks the change; `Before: none` when nothing is there). Several places: repeat the three lines per place. A choice that is its own version or change gets its own `After:` (and `Before:`) under it. A new feature or a prototype skips these (send pictures), and so does a choice the person never sees, such as a library.'
+  'A question that proposes a change (words, a screen, code, a setting) shows it: `Where: <what it is and where the person sees it>`, then `Before:` and `After:`, each the whole sentence, paragraph or screenshot it sits in (the card marks the change; `Before: none` when nothing is there). Several places: repeat the three lines per place. A choice that is its own version or change gets its own `After:` (and `Before:`) under it. A new feature or a prototype skips these (send pictures), and so does a choice the person never sees, such as a library. More forms (several places, pictures, a version per choice): `plannotator inbox --help before-after`.'
 
 /**
  * Options another agent designs (the owner approved these words 2026-11-11, from the clean-room eval of picture

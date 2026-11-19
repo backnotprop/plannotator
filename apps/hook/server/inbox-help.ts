@@ -37,6 +37,7 @@ import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/confi
 import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-reports";
+import { INBOX_HELP_TOPICS_LINES } from "./inbox-help-before-after";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
@@ -136,7 +137,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread, `reply_to`, `supersedes` or `done` is refused.",
       `- ${INBOX_SHOWING_RULE}`,
       `- Pictures: ${INBOX_PICTURES_RULE}`,
-      `- Before and after: ${INBOX_CHANGE_RULE} (See "Before and after".)`,
+      `- Before and after: ${INBOX_CHANGE_RULE}`,
       `- ${INBOX_DELEGATED_OPTIONS_RULE}`,
       "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show; copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
       "- Fenced blocks in `body` that draw: a block fenced as `mermaid` or `dot` draws as a diagram, and one fenced as `html` draws as a live page in the message (a chart, an SVG drawing, a small mock). The page runs in a sandbox: its scripts run and it may load libraries, data, images and fonts over https, but it cannot reach the Inbox, the person's files or a path beside you (give images as https or data: URLs). Leave its background transparent so it sits in the message, and use the theme's variables: `var(--foreground)`, `var(--muted-foreground)`, `var(--border)`, `var(--chart-1)` to `var(--chart-5)`, `var(--font-sans)`. Let content set its height: do not use vh units or `height:100%` on html or body (the frame takes the page's height, so the page would grow without end). It shows up to 480 px tall, then Show more; the person can open it full screen or read its code. A block fenced as `svg` shows as an image.",
@@ -531,16 +532,11 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "When a question proposes a change (wording, a screen, code, a setting, a behaviour), show it. Most questions need none of this; a new feature or a prototype has no before: send pictures instead.",
     "",
-    "- `Where: <one or two sentences>`: what the thing is and where the person sees it, in their words (\"the line above a file you open from a thread, when the file changed after it was sent\"), never a file path. Shown first, under the question, with a pin.",
-    "- `Before:` and `After:`: the whole sentence, paragraph, list, dialog or screenshot it sits in, not only the changed words; the card marks the words that changed (removed words struck through in Now, added words marked in After). One line, or `Before:` alone on its line followed by `> ` quoted lines (a paragraph or a list). A picture: `Before: ![alt](path)` (a clip: a GIF). `Before: none` when nothing is there yet; for an added line, give the block without it as the Before, so the new line shows where it goes.",
-    "- Several places: repeat `Where:`, `Before:` and `After:` per place. A first `Where:` with nothing under it before the next one says what all of them are.",
-    "- Several versions to pick from: give each `- [ ]` choice its own `After:` indented under it; the one choice without one (leave it) then shows today's words. With several places, a choice gives one `After:` per place in the same order, or its own `Where:`, `Before:` and `After:` per place under it. A picture with words after it on its line (`Before: ![alt](path) Button \"Sync\"`) shows the words under the picture. Choices that are each their own change (pick any) get their own `Before:` and `After:` under them.",
-    "- `Shows: ![alt](path)` (above) is a picture of the place as it is today; \"See it\" beside the Where opens it. `Source: <file:line or URL>` is optional and shows only with that picture.",
-    "- Each line is read once where it is, is never context and does not change the question's key; an Inbox without this shows the lines as plain text.",
-    "",
     "```markdown",
     INBOX_BEFORE_AFTER_EXAMPLE,
     "```",
+    "",
+    "Every form (several places, a version per choice, pictures and clips, new or removed), each with what the person sees: `plannotator inbox --help before-after`.",
     "",
     "### Trade-offs and prototypes",
     "",
@@ -636,6 +632,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- `plannotator uninstall` keeps the data. `plannotator uninstall --purge` stops a running Inbox, then deletes it (if it cannot stop it, it says so and keeps the data).",
     "- Both remove the `plannotator-inbox` MCP entries `plannotator inbox` added to the agents on this computer (`plannotator uninstall --dry-run` lists them); an entry changed by hand to run something else is left.",
     "- Never run uninstall, delete threads or projects, or edit these files for the person.",
+    "",
+    ...INBOX_HELP_TOPICS_LINES,
     "",
   ].join("\n");
 }
