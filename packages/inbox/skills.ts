@@ -88,7 +88,7 @@ export function setReviewSkillsDiagrams(on: boolean): void {
 
 /**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
- * Inbox lists while Code review is on, `/shape` while Shape is on, `/create-routine` while Routines are on, and `/show-me` always), from the window's own text, never read
+ * Inbox lists while Code review is on, `/shape` while Shape is on, `/create-routine` while Routines are on, and `/picture-it` always), from the window's own text, never read
  * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch), and its
  * chapter diagram lines `diagrams` (Chapter diagrams).
  */

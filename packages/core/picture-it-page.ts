@@ -1,16 +1,16 @@
-export interface InboxShowMePage {
+export interface InboxPictureItPage {
   attachment_id: string;
   title: string;
 }
 
-export const SHOW_ME_PAGE_TITLE_MAX = 200;
-export const SHOW_ME_HEAD_MAX = 256 * 1024;
+export const PICTURE_IT_PAGE_TITLE_MAX = 200;
+export const PICTURE_IT_HEAD_MAX = 256 * 1024;
 
 const TAG_MAX = 4096;
 const RAW_BLOCKS = ["script", "style", "template"] as const;
 
 const NAME = /(?<![-\w])name\s*=\s*["']?plannotator-page["']?(?=[\s/>])/i;
-const CONTENT = /(?<![-\w])content\s*=\s*["']?show-me["']?(?=[\s/>])/i;
+const CONTENT = /(?<![-\w])content\s*=\s*["']?picture-it["']?(?=[\s/>])/i;
 
 function opens(lower: string, at: number, name: string): boolean {
   if (!lower.startsWith(name, at + 1)) return false;
@@ -19,7 +19,7 @@ function opens(lower: string, at: number, name: string): boolean {
 }
 
 function readHead(html: string): { marked: boolean; title: string | null } {
-  const text = html.length > SHOW_ME_HEAD_MAX ? html.slice(0, SHOW_ME_HEAD_MAX) : html;
+  const text = html.length > PICTURE_IT_HEAD_MAX ? html.slice(0, PICTURE_IT_HEAD_MAX) : html;
   const lower = text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
   let marked = false;
   let title: string | null = null;
@@ -58,12 +58,12 @@ function readHead(html: string): { marked: boolean; title: string | null } {
   return { marked, title };
 }
 
-export function isShowMePage(html: string): boolean {
+export function isPictureItPage(html: string): boolean {
   return readHead(html).marked;
 }
 
-export function showMePageTitle(html: string): string {
+export function pictureItPageTitle(html: string): string {
   const line = (readHead(html).title ?? "").slice(0, TAG_MAX).replace(/\s+/g, " ").trim();
   const chars = Array.from(line);
-  return chars.length > SHOW_ME_PAGE_TITLE_MAX ? `${chars.slice(0, SHOW_ME_PAGE_TITLE_MAX - 1).join("").trimEnd()}…` : line;
+  return chars.length > PICTURE_IT_PAGE_TITLE_MAX ? `${chars.slice(0, PICTURE_IT_PAGE_TITLE_MAX - 1).join("").trimEnd()}…` : line;
 }

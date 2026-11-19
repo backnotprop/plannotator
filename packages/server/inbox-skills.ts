@@ -24,7 +24,7 @@
 import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
-import { SHOW_ME_SKILL } from "@plannotator/core/show-me-skill";
+import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
 import type { SkillCatalogEntry } from "@plannotator/core/skill-references-render";
 import { listReferenceSkills } from "./review-skill-loader";
 import { handleReferenceSkillContent } from "./shared-handlers";
@@ -47,7 +47,7 @@ function noStore(res: Response): Response {
  * folder (the window carries their text, `@plannotator/core/inbox-review`).
  * A skill of the person's own with the same name wins: the built-in is left
  * out. Off, the catalog is exactly the discovered skills. `/shape` the same way while Shape is on, and
- * `/create-routine` while Routines are on. `/show-me` always, first.
+ * `/create-routine` while Routines are on. `/picture-it` always, first.
  */
 export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, shape = false, routines = false): Response {
   return Response.json({ skills: inboxSkillEntries(codeReview, discovered, shape, routines) });
@@ -63,7 +63,7 @@ function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typ
   const own = new Set(skills.map((skill) => skill.name));
   // Shape's `/shape` (approval "shape-living-board") while Shape is on, beside the review skills while Code review is.
   // `/create-routine` (packages/core/create-routine-skill.ts) while Routines are on.
-  const offered = [SHOW_ME_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
+  const offered = [PICTURE_IT_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT as SkillCatalogEntry["root"],

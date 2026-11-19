@@ -231,7 +231,7 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   // A bare `/` at the start of a word opens the whole catalog, nothing active.
   await type(box, '/');
   await until(() => menu() !== null, 'the picker');
-  expect(rows()).toEqual(['show-me', 'readback', 'write-better']);
+  expect(rows()).toEqual(['picture-it', 'readback', 'write-better']);
   expect(document.querySelector('[data-skill-item-active]')).toBeNull();
   // Not at the start of a word: no menu (`and/or`).
   await type(box, 'and/');
@@ -379,7 +379,7 @@ test.skipIf(!hasDom)('a comment on an attached file: its skill rides the one blo
   const el = await renderApp(`#thread=${world.filed}`);
   // The window's own catalog is this computer's skills (the comment composers' picker reads it too).
   const { fetchSkillCatalog } = await import('@plannotator/ui/utils/skillCatalog');
-  expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['show-me', 'readback', 'write-better']);
+  expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['picture-it', 'readback', 'write-better']);
   // The comment waits to be sent: the foot offers "Edit draft".
   await until(() => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Edit draft'), 'the waiting comment');
   act(() => button(el, 'Edit draft').click());

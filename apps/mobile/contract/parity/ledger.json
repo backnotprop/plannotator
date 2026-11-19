@@ -20108,10 +20108,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxmessagewire-show-me",
-      "title": "field:InboxMessageWire.show_me",
+      "id": "undecided-field-inboxmessagewire-picture-it",
+      "title": "field:InboxMessageWire.picture_it",
       "surface": [
-        "field:InboxMessageWire.show_me"
+        "field:InboxMessageWire.picture_it"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -20122,10 +20122,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxshowmepage-attachment-id",
-      "title": "field:InboxShowMePage.attachment_id",
+      "id": "undecided-field-inboxpictureitpage-attachment-id",
+      "title": "field:InboxPictureItPage.attachment_id",
       "surface": [
-        "field:InboxShowMePage.attachment_id"
+        "field:InboxPictureItPage.attachment_id"
       ],
       "flows": [],
       "mobile": "undecided",
@@ -20136,10 +20136,10 @@
       }
     },
     {
-      "id": "undecided-field-inboxshowmepage-title",
-      "title": "field:InboxShowMePage.title",
+      "id": "undecided-field-inboxpictureitpage-title",
+      "title": "field:InboxPictureItPage.title",
       "surface": [
-        "field:InboxShowMePage.title"
+        "field:InboxPictureItPage.title"
       ],
       "flows": [],
       "mobile": "undecided",

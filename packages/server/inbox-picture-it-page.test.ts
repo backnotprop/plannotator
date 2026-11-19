@@ -29,7 +29,7 @@ afterEach(async () => {
 const page = (head: string) => `<!doctype html><html><head>${head}</head><body><h1>Retries</h1></body></html>`;
 
 async function world(files: Record<string, string>) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-show-me-page-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-picture-it-page-")));
   roots.push(root);
   const project = join(root, "billing");
   mkdirSync(project, { recursive: true });
@@ -38,7 +38,7 @@ async function world(files: Record<string, string>) {
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const server = await startInboxServer({ dataDir, phones: false });
   servers.push(server);
-  const client = new Client({ name: "inbox-show-me-page-test", version: "1.0.0" });
+  const client = new Client({ name: "inbox-picture-it-page-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
   const send = async (attachments: string[]) => {
@@ -50,23 +50,23 @@ async function world(files: Record<string, string>) {
   return { send };
 }
 
-test("an attached page with the show-me meta marks the message with that attachment and its title", async () => {
+test("an attached page with the picture-it meta marks the message with that attachment and its title", async () => {
   const w = await world({
     "notes.md": "# Notes\n",
-    "show-me-retries.html": page('<meta charset="utf-8"><meta content="show-me" name="plannotator-page"><title>  How retries\n wait  </title>'),
+    "picture-it-retries.html": page('<meta charset="utf-8"><meta content="picture-it" name="plannotator-page"><title>  How retries\n wait  </title>'),
   });
-  const message = await w.send(["notes.md", "show-me-retries.html"]);
-  const html = message.attachments.find((a: any) => a.name === "show-me-retries.html");
-  expect(message.show_me).toEqual({ attachment_id: html.id, title: "How retries wait" });
+  const message = await w.send(["notes.md", "picture-it-retries.html"]);
+  const html = message.attachments.find((a: any) => a.name === "picture-it-retries.html");
+  expect(message.picture_it).toEqual({ attachment_id: html.id, title: "How retries wait" });
 });
 
 test("a page with no title is named by its file; a page without the meta, or another meta's word, marks nothing", async () => {
   const w = await world({
-    "untitled.html": page('<meta name="plannotator-page" content="show-me">'),
+    "untitled.html": page('<meta name="plannotator-page" content="picture-it">'),
     "plain.html": page('<meta name="plannotator-theme" content="host"><title>Plain</title>'),
-    "near.html": page('<meta name="plannotator-page" content="show-me-later"><title>Near</title>'),
-    "in-body.html": '<html><head><title>Body</title></head><body><meta name="plannotator-page" content="show-me"></body></html>',
+    "near.html": page('<meta name="plannotator-page" content="picture-it-later"><title>Near</title>'),
+    "in-body.html": '<html><head><title>Body</title></head><body><meta name="plannotator-page" content="picture-it"></body></html>',
   });
-  expect((await w.send(["untitled.html"])).show_me).toMatchObject({ title: "untitled.html" });
-  for (const name of ["plain.html", "near.html", "in-body.html"]) expect((await w.send([name])).show_me).toBeUndefined();
+  expect((await w.send(["untitled.html"])).picture_it).toMatchObject({ title: "untitled.html" });
+  for (const name of ["plain.html", "near.html", "in-body.html"]) expect((await w.send([name])).picture_it).toBeUndefined();
 });

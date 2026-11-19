@@ -410,6 +410,10 @@
       "id",
       "name"
     ],
+    "InboxPictureItPage": [
+      "attachment_id",
+      "title"
+    ],
     "InboxProject": [
       "created_at",
       "id",
@@ -617,10 +621,6 @@
       "owner",
       "session",
       "wakes"
-    ],
-    "InboxShowMePage": [
-      "attachment_id",
-      "title"
     ],
     "InboxSupersededBy": [
       "key",
