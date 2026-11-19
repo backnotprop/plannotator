@@ -1,6 +1,8 @@
 /**
- * When the Inbox's sound rings (soundRing.ts `decideRing`, re-exported by
- * sound.ts): only while no Inbox tab is in front, never with the sound off.
+ * When the Inbox's sound rings, and which (soundRing.ts `decideRing`,
+ * re-exported by sound.ts: the Ding-dong for a question or a new thread, the
+ * Felt note for a plain reply, one per list read): only while no Inbox tab is
+ * in front, never with the sound off.
  * Questions among themselves keep the rule from before the choice (one ring
  * per burst of questions less than 30 s apart); a plain agent message rings
  * by `plainMessageRings` (unless any news came within 30 s) and never holds a
@@ -44,7 +46,7 @@ describe('decideRing', () => {
   test('this tab or another Inbox tab in front: no ring, and the burst ends', () => {
     let gate = decideRing(QUIET_GATE, { ...away, now: 0, ...QUESTION }).gate;
     const front = decideRing(gate, { ...away, now: 1000, inFront: true, ...REPLY });
-    expect(front).toEqual({ ring: false, rangFor: { asks: false, plain: false, fresh: false }, gate: QUIET_GATE });
+    expect(front).toEqual({ ring: false, sound: null, rangFor: { asks: false, plain: false, fresh: false }, gate: QUIET_GATE });
     expect(decideRing(gate, { ...away, now: 1000, otherTabInFront: true, ...QUESTION }).gate).toEqual(QUIET_GATE);
     // Away again a moment later: the next news starts a new burst and rings.
     gate = front.gate;
@@ -54,7 +56,7 @@ describe('decideRing', () => {
 
   test('sound off: never rings, and leaves the bursts as they were', () => {
     const gate: RingGate = { ...QUIET_GATE, lastAt: 5, askAt: 5, lastRang: true, askRang: true };
-    expect(decideRing(gate, { ...away, now: 10, enabled: false, ...QUESTION })).toEqual({ ring: false, rangFor: { asks: false, plain: false, fresh: false }, gate });
+    expect(decideRing(gate, { ...away, now: 10, enabled: false, ...QUESTION })).toEqual({ ring: false, sound: null, rangFor: { asks: false, plain: false, fresh: false }, gate });
     expect(decideRing(QUIET_GATE, { ...away, now: 10, enabled: false, ...REPLY }).ring).toBe(false);
   });
 
@@ -161,6 +163,25 @@ describe('every new thread rings the Ding-dong', () => {
   });
 });
 
+describe('which sound: the Ding-dong for a question or a new thread, the Felt note for a plain reply', () => {
+  test('"for every agent message": a plain reply plays the note, not the bell, and its notice is the note\'s (silent)', () => {
+    for (const when of ['messages', undefined] as const) {
+      expect(decideRing(QUIET_GATE, { ...away, now: 0, when, ...REPLY })).toMatchObject({ ring: true, sound: 'note', rangFor: { plain: true } });
+    }
+  });
+
+  test('a question or a new thread with a plain reply in one list read: the bell only', () => {
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, asks: true, plain: true }).sound).toBe('bell');
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, asks: false, plain: true, fresh: true }).sound).toBe('bell');
+  });
+
+  test('"when an agent asks you or starts a thread": a plain reply plays nothing; a new thread or a question rings the bell', () => {
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...REPLY }).sound).toBeNull();
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...NEW_THREAD }).sound).toBe('bell');
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...QUESTION }).sound).toBe('bell');
+  });
+});
+
 describe("soundFromFrame: another window's save (event: sound)", () => {
   test('the settings it carries, an unknown choice read as the default; anything that is not settings is ignored', () => {
     expect(soundFromFrame({ enabled: false, volume: 30, when: 'asks', dialog_shown_for: null, dialog_due: true })).toEqual({ enabled: false, volume: 30, when: 'asks', dialog_shown_for: null, dialog_due: true });
@@ -181,7 +202,7 @@ describe('plainMessageRings: the owner\'s cadence ("Every message, as picked")',
 
   test('"when an agent asks you": a plain message neither rings nor starts or extends a burst', () => {
     expect(rings([0, 10_000], QUIET_GATE, [REPLY, QUESTION], 'asks')).toEqual([false, true]);
-    expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...REPLY })).toEqual({ ring: false, rangFor: { asks: false, plain: false, fresh: false }, gate: QUIET_GATE });
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...REPLY })).toEqual({ ring: false, sound: null, rangFor: { asks: false, plain: false, fresh: false }, gate: QUIET_GATE });
   });
 });
 

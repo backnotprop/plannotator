@@ -1,15 +1,17 @@
 /**
- * When the Inbox's sound rings: pure rules, no timers and no DOM (sound.ts runs them).
+ * When the Inbox's sound rings, and which sound: pure rules, no timers and no DOM (sound.ts runs them).
  *
- * Two kinds of news, with separate rules:
- * - A question (or an action item) rings unless another question came within RING_BURST_MS: questions among
+ * Two sounds: the Ding-dong (`bell`) for a question or a new thread, the quiet Felt note (`note`) for a plain reply.
+ * - A question (or an action item) rings the bell unless another question came within RING_BURST_MS: questions among
  *   themselves keep the rule they had before the choice. A plain message never holds a question back.
- * - A plain agent message (a reply or a failed turn's note) rings only under "for every
+ * - A new thread rings the bell unless another new thread or a question came within RING_BURST_MS.
+ * - A plain agent message (a reply or a failed turn's note) plays the note only under "for every
  *   agent message", by `plainMessageRings`: the one place the owner's cadence lives.
+ * - One list read plays one sound: with a question or a new thread in it, the bell, never the note too.
  *
  * Either way nothing rings with the sound off or an Inbox tab in front, and a tab coming to the front ends the bursts.
- * A notice about news is silent when the bell rang in that news's burst (now, or earlier in it): one sound per burst,
- * the bell's, as before the choice; a burst the bell never rang in (the tab not armed yet) keeps the system's.
+ * A notice about news is silent when a sound played in that news's burst (now, or earlier in it): one sound per burst,
+ * as before the choice; a burst nothing played in (the tab not armed yet) keeps the system's.
  */
 
 import { inboxSoundWhen, type InboxSoundWhen } from '@plannotator/core/inbox-types';
@@ -35,6 +37,9 @@ export interface RingGate {
   freshAt: number | null;
   freshRang: boolean;
 }
+
+/** The Ding-dong (a question or a new thread) or the quiet Felt note (a plain reply). */
+export type RingSound = 'bell' | 'note';
 
 export const QUIET_GATE: RingGate = { lastAt: null, askAt: null, lastRang: false, askRang: false, freshAt: null, freshRang: false };
 
@@ -91,30 +96,34 @@ export function newThreadRings(gate: RingGate, now: number): boolean {
  * - Sound off: nothing, and the bursts are left as they were.
  * - An Inbox tab in front (this one or another): nothing; the person sees the list, so the bursts end.
  * - Plain news under "when an agent asks you" is not the sound's: it neither rings nor moves a burst.
- * - Otherwise a question rings by `questionRings`, plain news by `plainMessageRings`; either ringing is one sound,
- *   and it is for every piece of this news that is the sound's.
+ * - Otherwise a question rings the bell by `questionRings`, a new thread by `newThreadRings`, plain news the note by
+ *   `plainMessageRings`; the bell wins over the note, so it is one sound, for every piece of this news that is the sound's.
  * - `armed` false (the browser would not play it yet): nothing rings, and the burst is not marked as rung.
  * - `rangFor`: what of this news is the bell's, rung now or earlier in its burst.
  */
 export function decideRing(
   gate: RingGate,
   input: { now: number; enabled: boolean; inFront: boolean; otherTabInFront: boolean; when?: InboxSoundWhen; armed?: boolean } & RingNews,
-): { ring: boolean; rangFor: RangFor; gate: RingGate } {
-  if (!input.enabled) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
-  if (input.inFront || input.otherTabInFront) return { ring: false, rangFor: RANG_FOR_NOTHING, gate: QUIET_GATE };
+): { ring: boolean; sound: RingSound | null; rangFor: RangFor; gate: RingGate } {
+  if (!input.enabled) return { ring: false, sound: null, rangFor: RANG_FOR_NOTHING, gate };
+  if (input.inFront || input.otherTabInFront) return { ring: false, sound: null, rangFor: RANG_FOR_NOTHING, gate: QUIET_GATE };
   const plain = input.plain && ringsFor(input.when, false);
   const fresh = input.fresh === true;
-  if (!input.asks && !plain && !fresh) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
+  if (!input.asks && !plain && !fresh) return { ring: false, sound: null, rangFor: RANG_FOR_NOTHING, gate };
   const now = input.now;
   const newBurst = plainMessageRings(gate, now);
   const newAskBurst = questionRings(gate, now);
-  const ring = input.armed !== false && ((input.asks && newAskBurst) || (fresh && newThreadRings(gate, now)) || (plain && newBurst));
+  const armed = input.armed !== false;
+  const bell = armed && ((input.asks && newAskBurst) || (fresh && newThreadRings(gate, now)));
+  const sound: RingSound | null = bell ? 'bell' : armed && plain && newBurst ? 'note' : null;
+  const ring = sound !== null;
   const lastRang = ring || (!newBurst && gate.lastRang);
   const askRang = input.asks ? ring || (!newAskBurst && gate.askRang) : gate.askRang;
   const freshHeld = (within(gate.freshAt, now) && gate.freshRang) || (within(gate.askAt, now) && gate.askRang);
   const freshRang = fresh ? ring || freshHeld : gate.freshRang;
   return {
     ring,
+    sound,
     rangFor: { asks: input.asks && askRang, plain: plain && lastRang, fresh: fresh && freshRang },
     gate: { lastAt: now, askAt: input.asks ? now : gate.askAt, lastRang, askRang, freshAt: fresh ? now : gate.freshAt, freshRang },
   };
