@@ -92,7 +92,8 @@ export function isSafeImageSrc(src: unknown): src is string {
   const value = src.trim();
   if (IMAGE_DATA_RE.test(value)) return true;
   if (/^https?:\/\//i.test(value) || /^blob:/i.test(value)) return true;
-  return !SCHEME_RE.test(value) && !value.startsWith('//');
+  // A backslash is read as a slash by browsers, so `/\\host` would be another site, not a path.
+  return !SCHEME_RE.test(value) && !value.startsWith('//') && !value.includes('\\');
 }
 
 /** A web address a reference card may point at: http or https, nothing else. */

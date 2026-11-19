@@ -191,6 +191,36 @@ function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectI
   if (!group.ok) return group;
   const events: CanvasEvent[] = [{ type: 'object-added', object: group.value }];
   for (const id of members) push(events, doc.objects[id], { ...doc.objects[id], group: groupId });
+  // A group all of whose members have just gone into the new one holds nothing: it goes, and so does a
+  // group left holding only that one. (Arrows stuck to it get a free end, as when anything is deleted.)
+  const moved = new Set(members);
+  const left = new Map<ObjectId, number>();
+  for (const object of Object.values(doc.objects)) {
+    if (object.group && object.group !== groupId && !moved.has(object.id)) left.set(object.group, (left.get(object.group) ?? 0) + 1);
+  }
+  const emptied: ObjectId[] = [];
+  for (const id of members) {
+    let old = doc.objects[id].group;
+    while (old && old !== groupId && doc.objects[old] && !emptied.includes(old) && !left.get(old) && !moved.has(old)) {
+      emptied.push(old);
+      const parent: ObjectId | undefined = doc.objects[old].group;
+      if (parent) left.set(parent, (left.get(parent) ?? 1) - 1);
+      old = parent;
+    }
+  }
+  if (emptied.length) {
+    const gone = new Set(emptied);
+    for (const object of Object.values(doc.objects)) {
+      if (object.type !== 'arrow') continue;
+      const fromLost = isBoundEnd(object.from) && gone.has(object.from.object);
+      const toLost = isBoundEnd(object.to) && gone.has(object.to.object);
+      if (!fromLost && !toLost) continue;
+      const geometry = resolveArrow(doc, object);
+      if (geometry) push(events, object, { ...object, from: fromLost ? geometry.from : object.from, to: toLost ? geometry.to : object.to });
+      else events.push({ type: 'object-removed', id: object.id });
+    }
+    for (const id of emptied) events.push({ type: 'object-removed', id });
+  }
   return done(events);
 }
 

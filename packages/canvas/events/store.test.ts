@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { parseDocument, serializeDocument } from '../model/codec';
 import { createDocument } from '../model/document';
-import { keyBetween } from '../model/order-key';
+import { isOrderKey, keyBetween } from '../model/order-key';
 import type { CanvasDocument, CanvasObject } from '../model/types';
 import { CanvasStore } from './store';
 import type { Command } from './types';
@@ -334,6 +334,36 @@ describe('drawing order', () => {
     const result = store.dispatch({ type: 'reorder', ids: ['a'], to: 'front' });
     expect(result.ok && result.envelope?.events.map((event) => (event.type === 'object-set' ? [event.id, Object.keys(event.set)] : event.type))).toEqual([['a', ['z']]]);
     expect(store.getDocument().objects.b).toBe(before.objects.b);
+  });
+
+  test('whatever is put wherever, in any order, every new key lies strictly between its neighbours', () => {
+    // A small generator with a fixed seed, so a failure can be run again.
+    let seed = 0x2f6e2b1;
+    const random = (n: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed % n;
+    };
+    for (let round = 0; round < 40; round++) {
+      // Some rounds start from keys another program made: one digit, low ones, long ones.
+      const keys: string[] = round % 4 === 0 ? ['1', '2'] : round % 4 === 1 ? ['01', '1'] : round % 4 === 2 ? ['zzzzzy', 'zzzzzz'] : [keyBetween(null, null)];
+      for (let i = 0; i < 400; i++) {
+        const at = random(keys.length + 1);
+        const below = at > 0 ? keys[at - 1] : null;
+        const above = at < keys.length ? keys[at] : null;
+        const key = keyBetween(below, above);
+        if (below !== null && !(key > below)) throw new Error(`${key} is not above ${below} (under ${above})`);
+        if (above !== null && !(key < above)) throw new Error(`${key} is not below ${above} (over ${below})`);
+        if (!isOrderKey(key)) throw new Error(`${key} is not a key`);
+        keys.splice(at, 0, key);
+      }
+    }
+    // A key ending in the lowest digit is not a key: nothing could be put just under it.
+    expect(isOrderKey('A0')).toBe(false);
+    expect(isOrderKey('0')).toBe(false);
+    expect(isOrderKey('A1')).toBe(true);
+    // Two neighbours with the same key: the new one goes above both, and is a key.
+    const twin = keyBetween('V', 'V');
+    expect(twin > 'V' && isOrderKey(twin)).toBe(true);
   });
 
   test('there is always a key between two keys, and keys stay short for a board that is added to', () => {

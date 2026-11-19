@@ -6,7 +6,7 @@
  * applied without planning. An envelope going out needs no encoder: it is
  * already plain JSON.
  */
-import { checkObject, checkSnapshot, checkSnapshotInput, type Checked } from '../model/codec';
+import { OBJECT_FIELDS, checkObject, checkSnapshot, checkSnapshotInput, type Checked } from '../model/codec';
 import { isValidId } from '../model/ids';
 import type { Actor } from '../model/types';
 import type { CanvasEvent, Command, Envelope } from './types';
@@ -109,9 +109,14 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
       if (typeof value.id !== 'string' || !isRecord(value.set)) return fail('object-set needs "id" and "set"');
       const names = Object.keys(value.set);
       if (names.length > 32 || names.includes('id') || names.includes('type')) return fail('object-set may not set that');
+      // Only names an object can have are carried on, each copied by name: `__proto__` and any other name
+      // that is not a field is dropped here and never reaches an object.
+      const set: Record<string, unknown> = {};
+      for (const name of names) if (OBJECT_FIELDS.has(name)) set[name] = (value.set as Record<string, unknown>)[name];
       const unset = value.unset;
       if (unset !== undefined && (!Array.isArray(unset) || unset.length > 32 || !unset.every((key) => typeof key === 'string' && key.length <= 32))) return fail('unset must be a list of field names');
-      return { ok: true, value: { type: 'object-set', id: value.id, set: { ...value.set }, ...(unset?.length ? { unset: unset as string[] } : {}) } };
+      const cleared = (unset as string[] | undefined)?.filter((key) => OBJECT_FIELDS.has(key));
+      return { ok: true, value: { type: 'object-set', id: value.id, set, ...(cleared?.length ? { unset: cleared } : {}) } };
     }
     case 'object-removed':
       if (typeof value.id !== 'string') return fail('object-removed needs "id"');

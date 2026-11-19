@@ -42,7 +42,8 @@ export function isPictureRef(value: unknown): value is string {
   if (src !== value) return false;
   if (isAssetRef(src)) return true;
   if (/^https?:\/\/[^\s]+$/i.test(src)) return true;
-  return !SCHEME_RE.test(src) && !src.startsWith('//') && !/\s/.test(src);
+  // A backslash is read as a slash by browsers, so `/\\host` would be another site, not a path.
+  return !SCHEME_RE.test(src) && !src.startsWith('//') && !src.includes('\\') && !/\s/.test(src);
 }
 
 /**

@@ -40,10 +40,14 @@ function decodeLabel(label: string): string | null {
   return String.fromCodePoint(...out);
 }
 
+/** Scripts whose letters pass for Latin ones: Greek, Cyrillic, Armenian, Cherokee and their extensions. */
+const LOOKALIKE_RE = /[\u0370-\u03ff\u0400-\u052f\u0530-\u058f\u13a0-\u13ff\u1c80-\u1c8f\u1f00-\u1fff\u2de0-\u2dff\ua640-\ua69f\uab70-\uabbf]/;
+
 /**
- * A host name as a person would write it: `xn--mnchen-3ya.example` as `münchen.example`. A label that mixes
- * Latin letters with Greek or Cyrillic ones stays as it was sent, because that mix is how one name is made to
- * look like another.
+ * A host name as a person would write it: `xn--mnchen-3ya.example` as `münchen.example`. A label with any
+ * letter from a script whose letters pass for Latin ones stays as it was sent (`xn--…`), whether it mixes
+ * scripts or is written wholly in one: that is how a name is made to look like another, and a card must
+ * never read as a site it does not open.
  */
 export function readableHost(host: string): string {
   return host
@@ -51,7 +55,7 @@ export function readableHost(host: string): string {
     .map((label) => {
       if (!/^xn--/i.test(label)) return label;
       const decoded = decodeLabel(label.toLowerCase());
-      if (!decoded || (/[a-z]/i.test(decoded) && /[\u0370-\u03ff\u0400-\u052f]/.test(decoded))) return label;
+      if (!decoded || LOOKALIKE_RE.test(decoded)) return label;
       return decoded;
     })
     .join('.');
@@ -96,7 +100,8 @@ export function referenceCard(object: ReferenceObject): { title: string; descrip
   return {
     title: object.title || referenceAddress(target),
     description: object.description ?? '',
-    site: object.site || (target.kind === 'web' ? hostOf(target.url) : ''),
+    // A web card names the site it opens, read from its address: never a name the page or an agent gave it.
+    site: target.kind === 'web' ? hostOf(target.url) : (object.site ?? ''),
     image: object.image ?? null,
     icon: object.icon ?? null,
   };

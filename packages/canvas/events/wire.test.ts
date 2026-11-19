@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createDocument } from '../model/document';
+import { parseDocument, serializeDocument } from '../model/codec';
 import { CanvasStore } from './store';
 import { type SyncPort, connectSync } from './sync';
 import type { Envelope } from './types';
@@ -136,6 +137,56 @@ describe('the sync seam', () => {
     net.flush();
     return { net, one, two, stopOne };
   };
+
+  const reloads = (store: CanvasStore) => parseDocument(JSON.parse(serializeDocument(store.getDocument()))).ok;
+
+  test('a group undone after someone else put an object in it lets go of that object, and every canvas still loads', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'add', objects: [{ id: 'x', type: 'box', x: 0, y: 100, w: 100, h: 40, text: 'X' }, { id: 'y', type: 'box', x: 0, y: 200, w: 100, h: 40, text: 'Y' }] });
+    one.dispatch({ type: 'group', id: 'g', ids: ['x', 'y'] });
+    net.flush();
+    // The other one adds an object straight into that group.
+    expect(two.dispatch({ type: 'add', objects: [{ id: 'z', type: 'box', x: 0, y: 300, w: 100, h: 40, text: 'Z', group: 'g' }] }).ok).toBe(true);
+    net.flush();
+    expect(one.getDocument().objects.z.group).toBe('g');
+    // The first takes the grouping back.
+    one.undo();
+    net.flush();
+    for (const store of [one, two]) {
+      expect(store.getDocument().objects.g).toBeUndefined();
+      expect(store.getDocument().objects.z.group).toBeUndefined();
+      expect(reloads(store)).toBe(true);
+    }
+    expect(two.getDocument()).toEqual(one.getDocument());
+    // Putting the group back puts everything that was in it back.
+    one.redo();
+    net.flush();
+    expect(one.getDocument().objects.z.group).toBe('g');
+    expect(two.getDocument()).toEqual(one.getDocument());
+    expect(reloads(two)).toBe(true);
+  });
+
+  test('a change whose field is named __proto__, constructor or prototype sets nothing, and every canvas still loads', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'add', objects: [{ id: 'n1', type: 'note', x: 0, y: 100, w: 100, h: 60, text: 'N' }, { id: 'a1', type: 'arrow', from: { object: 'a' }, to: { object: 'n1' } }] });
+    net.flush();
+    const before = one.getDocument();
+    // As text, the way it comes off a wire: parsed, `__proto__` is a field of its own.
+    for (const set of ['{"__proto__":{"group":"a1"}}', '{"constructor":{"prototype":{"group":"a1"}}}', '{"prototype":{"group":"a1"}}', '{"__proto__":{"group":"a1"},"text":"kept"}']) {
+      net.inject(`{"id":"evil-${set.length}","actor":{"kind":"person","id":"mallory"},"events":[{"type":"object-set","id":"n1","set":${set}}]}`);
+    }
+    for (const store of [one, two]) {
+      const note = store.getDocument().objects.n1 as unknown as Record<string, unknown>;
+      expect(note.group).toBeUndefined();
+      expect(Object.getPrototypeOf(note)).toBe(Object.prototype);
+      expect(Object.keys(note).sort()).toEqual(Object.keys(before.objects.n1).sort());
+      // The honest field beside the hostile one was applied.
+      expect(note.text).toBe('kept');
+      expect(reloads(store)).toBe(true);
+    }
+    expect(two.getDocument()).toEqual(one.getDocument());
+    expect(({} as Record<string, unknown>).group).toBeUndefined();
+  });
 
   test('two people setting the same field at the same moment both end on the one the backend ordered last', () => {
     const { net, one, two } = pair();

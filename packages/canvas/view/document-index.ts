@@ -43,6 +43,18 @@ export class DocumentIndex {
     for (const event of events) {
       if (event.type === 'object-added') this.refresh(doc, event.object.id);
       else if (event.type === 'object-set' || event.type === 'object-removed') this.refresh(doc, event.id);
+      // An object that changed group left one group's outline and joined another's. Which one it left is
+      // not in the event, so every connector stuck to a group is placed again: few, and group changes are rare.
+      if (event.type === 'object-set' && (Object.hasOwn(event.set, 'group') || event.unset?.includes('group'))) {
+        // Gathered first: placing an arrow rewrites the very map being read.
+        const again = new Set<ObjectId>();
+        for (const [target, arrows] of this.dependents) {
+          const object = doc.objects[target];
+          if (object && object.type !== 'group') continue;
+          for (const arrow of arrows) again.add(arrow);
+        }
+        for (const arrow of again) this.place(doc, arrow);
+      }
     }
   }
 

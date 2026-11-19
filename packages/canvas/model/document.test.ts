@@ -3,7 +3,7 @@ import { checkObject, parseDocument, serializeDocument } from './codec';
 import { isCustomColor, parseColor } from './color';
 import { boundsOf, objectBounds, resolveArrow, selectionUnit } from './document';
 import { isPictureRef, pictureResolver } from './assets';
-import { displayUrl, readableHost, shortName } from './reference';
+import { displayUrl, readableHost, referenceCard, shortName } from './reference';
 import { HTML_ITEM_CSP, HTML_ITEM_MAX_LENGTH, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from './html-item';
 import { CANVAS_DOCUMENT_VERSION, type CanvasDocument } from './types';
 
@@ -173,11 +173,28 @@ describe('the sandbox contract for custom HTML', () => {
 describe('what a card shows for where it points', () => {
   test('a host is shown in its own letters, unless they are mixed to look like other letters', () => {
     expect(readableHost('xn--mnchen-3ya.example')).toBe('münchen.example');
-    expect(readableHost('xn--80ak6aa92e.example')).toBe('аррӏе.example');
+    // Written wholly in letters that pass for Latin ones (this one reads as a well-known name): left as it was sent.
+    expect(readableHost('xn--80ak6aa92e.example')).toBe('xn--80ak6aa92e.example');
     // Latin mixed with Cyrillic: left as it was sent.
     expect(readableHost('xn--pple-43d.example')).toBe('xn--pple-43d.example');
+    // A script with no such letters is shown as written.
+    expect(readableHost('xn--wgv71a119e.example')).toBe('日本語.example');
     expect(readableHost('xn--!!.example')).toBe('xn--!!.example');
     expect(displayUrl('https://www.xn--mnchen-3ya.example/a/')).toBe('münchen.example/a');
+  });
+
+  test('a web card names the site it opens, whatever name it was given', () => {
+    const card = referenceCard({ id: 'c', type: 'reference', x: 0, y: 0, w: 280, h: 84, target: { kind: 'web', url: 'https://evil.example/login' }, site: 'github.com', title: 'Sign in' });
+    expect(card.site).toBe('evil.example');
+    // A card for one of the person's own things keeps the name its host gave it.
+    expect(referenceCard({ id: 'p', type: 'reference', x: 0, y: 0, w: 280, h: 84, target: { kind: 'plan', document: 'plan-1', anchor: 'Rollout' }, site: 'Plan' }).site).toBe('Plan');
+  });
+
+  test('an address with a backslash is not a path on this site', () => {
+    expect(isPictureRef('/\\evil.example/x.png')).toBe(false);
+    expect(isSafeImageSrc('/\\evil.example/x.png')).toBe(false);
+    expect(isSafeImageSrc('\\\\evil.example\\x.png')).toBe(false);
+    expect(isPictureRef('/board/x.png')).toBe(true);
   });
 
   test('a long file name is cut in the middle, so its version and its type stay', () => {

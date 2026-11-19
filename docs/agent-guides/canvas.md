@@ -22,11 +22,11 @@ Each layer imports only the ones above it, and `layers.test.ts` fails on any imp
 `command → planCommand → events → applyEvents → document`, and every commit is an `Envelope` (`id`, `actor`, `origin`, `gesture`, the command, the events). A person's drag and an agent's "add image" are the same commands through the same `dispatch`; the actor is the only difference (`by` on a new object is always the actor's kind).
 
 - **Events are field-level.** `object-added` and `object-removed` carry or name a whole object; every change to one is `object-set { id, set, unset }` naming only the fields that changed (`setEvent`, `events/reduce.ts`). The planner still builds and checks the whole next object (`checkObject`, `move` included, so nothing it makes fails to save and load), then emits the difference. This was whole-object events until the review; it was changed before any document or log existed because it decides undo, sync and the size of a hand-over.
-- **Drawing order is a key on each object** (`z`, `model/order-key.ts`), not a position in a list. A reorder is `object-set { z }` on the objects moved, so two people reordering different things at once both keep what they did. `doc.order` is worked out from the keys by the reducer and is not saved. The planner gives a new object a key on top.
+- **Drawing order is a key on each object** (`z`, `model/order-key.ts`), not a position in a list. A key never ends in `0`, so there is always a key between any two. A reorder is `object-set { z }` on the objects moved, so two people reordering different things at once both keep what they did. `doc.order` is worked out from the keys by the reducer and is not saved. The planner gives a new object a key on top.
 - **Undo and redo** are the inverse events, committed as an ordinary envelope. Because they are field-level, undoing a move restores `x` and `y` and leaves alone what an agent or a peer did to the same object since. Only the local person's commands go on the stack. Commands sharing a `gesture` id are one step (a drag; one pick in the colour well). `dispatch(…, { gesture, amend: true })` folds a late change into that gesture's step wherever it now is and leaves redo alone (a link's preview arriving).
 - **The log** keeps one entry per gesture (`foldEnvelope`), so a hand-over reads a drag as one `move` with the whole distance.
 - **Agents** send JSON through `decodeCommand` and receive envelopes from `onCommit`. For a hand-over they keep `store.cursor()` and later ask `store.since(cursor)`. A cursor names the store (`epoch`) as well as the place, because commit numbers start again with every store; a cursor from another store, ahead of this one, older than the log, or taken in the middle of a gesture answers `{ kind: 'resync', document }`, never "nothing changed".
-- **Sync** (seam only; no backend): `SyncPort` + `connectSync` (`events/sync.ts`). The backend's whole job is one order of envelopes, delivered to every peer including the sender. Each store applies them in that order to the document all peers agree on and shows its own unconfirmed changes on top (`CanvasStore.receive`), so peers converge: different fields of one object both survive, the same field ends on the one ordered last. `connectSync` decodes every envelope (`decodeEnvelope`); the reducer checks each changed object (`applyEvents(…, { check: true })`). Drawing order is still positions in a list: it converges under the one order, but two reorders made at once do not both hold; a per-object order key would fix that and is not built. Presence would travel beside the port.
+- **Sync** (seam only; no backend): `SyncPort` + `connectSync` (`events/sync.ts`). The backend's whole job is one order of envelopes, delivered to every peer including the sender. Each store applies them in that order to the document all peers agree on and shows its own unconfirmed changes on top (`CanvasStore.receive`), so peers converge: different fields of one object both survive, the same field ends on the one ordered last. `connectSync` decodes every envelope (`decodeEnvelope`); the reducer checks each changed object (`applyEvents(…, { check: true })`). Presence would travel beside the port.
 - **Comments** (not built) will anchor with `CanvasAnchor`.
 
 **Untrusted ids and references.** Every `objects` and `snapshots` map has no prototype (`idMap`, `model/document.ts`; made by `createDocument`, the reducer, the codec and `CanvasStore`'s constructor), so `doc.objects[id]` is the stored value or undefined even for `constructor`. An arrow's end sticks to a placed object or to a group the arrow is not inside (`bindingFault`); a group is never inside itself (`groupCycle`). The planner and `parseDocument` refuse anything else, the reducer drops a peer's event that would break it, and `resolveArrow` measures a group by its placed members only, so it cannot recurse whatever a document holds. `hostile.test.ts` covers each door.
@@ -144,7 +144,7 @@ Any object takes a named colour (the canvas's six, which follow the theme) or an
 
 What holds, and where:
 
-- **What saves, loads.** A snapshot's rectangle, asked for or captured, has one bound (`readArea` in `model/codec.ts`, `LIMITS.area`): anywhere objects can be, as large as all of them. `hostile.test.ts` saves and loads a board at its limits.
+- **What saves, loads.** Removing a group lets go of whatever is still in it (the reducer, so it holds for a peer's change and for an undo). A change names only fields an object can have (`OBJECT_FIELDS`): `__proto__` and the like are dropped at the wire and never assigned. A snapshot's rectangle, asked for or captured, has one bound (`readArea` in `model/codec.ts`, `LIMITS.area`): anywhere objects can be, as large as all of them. `hostile.test.ts` saves and loads a board at its limits.
 - **Words that do not fit are cut at the end, with an ellipsis.** A box's title wraps to the lines its box has room for, three at most (`titleLines` sets `--pcv-lines`); its detail is one line; a lane's name is as long as its lane is tall; a frame's title is one line. A box title, a frame title and an arrow label that were cut show all of themselves on hover (`title`), and are whole in the object's accessible name. An arrow label is 40 characters at most and fewer on a short line (`shortLabel`). A card's file name is cut in the middle (`shortName`). Text objects grow to fit when typing ends.
 - **Any colour, always readable.** Ink on a solid fill is white or black by the fill's relative luminance against 0.18, where both pass 4.5 to 1 (`--pcv-on-solid` in `canvas.css`); a see-through colour is weighed with the board behind it (`--pcv-ground-y`). Lines and ink are always opaque.
 - **An arrow from an object to itself is a loop** (`selfLoop` in `model/document.ts`), for the board, the still picture and hit-testing.
@@ -155,6 +155,33 @@ What holds, and where:
 - **A link being looked up** dims its title until the answer or the timeout (`previewsPending`, not part of the document).
 - **An empty board** shows one line; **a board wider than the furthest zoom** (5%) shows a mark on each edge with more beyond it, which goes to the nearest thing that way (`EdgeMarkers`).
 - **Opening a snapshot of more than 1,500 objects** does not draw the capture a second time over the canvas (`GHOST_MAX_OBJECTS`).
+
+### Known limits
+
+What is known not to hold yet. Read this before putting the canvas in front of anyone.
+
+Measured (headed benchmark, `bun run --cwd packages/canvas bench --headed`):
+
+- Three rows are not met. A figure on screen with nothing drawn yet while scrolling at 12,000 px/s: 1 of 480 frames. Zooming through every level of detail with a third of the shapes sketched: worst frame 58 ms. Panning 10,000 objects with all of them mounted: worst frame 158 ms.
+- Opening a snapshot of a 10,000-object board has a 248 ms worst frame.
+- A figure of more than 4,000 objects draws flat patches with no words (the one exception to "a figure always has its words").
+
+Not drawn:
+
+- `curve` connectors are accepted and drawn as straight lines.
+- The still picture of a snapshot (`snapshotToSvg`) draws connectors straight and sketched shapes clean.
+- The fade at the foot of an HTML item that holds more than its box shows depends on `animation-timeline`: a browser without it shows no fade.
+
+Not checked:
+
+- WebKit, Firefox and phones. Everything was looked at and measured in Chromium on a desktop.
+- The TLS pin in `unfurl/fetch.ts` has not been tried against a real site.
+
+For whichever product wires the canvas in:
+
+- **SVG assets must be served sandboxed.** A pasted SVG is stored as it is. Inside `<img>` it is inert; opened by itself (open image in new tab) it would run script in the asset route's origin. The product's `AssetPort` must serve SVG with `Content-Security-Policy: sandbox` (or as an attachment, or redraw it as PNG).
+- **Unfurl pinning only holds under Bun**, and only when no `fetch` is passed. Under Node, or with a custom `fetch`, the request goes by name after the check, so a name that answers with a public address when checked and a private one when connected gets past `allowPrivate: false`.
+- **Sync** trusts the `actor` and `by` a peer sends, and remembers the last 5,000 envelope ids: a backend must stamp the actor itself and must not redeliver from further back than that.
 
 ### Measuring
 

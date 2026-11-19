@@ -18,6 +18,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import { LIMITS } from '../model/codec';
+import { isSafeImageSrc } from '../model/html-item';
 import type { CanvasDocument, SnapshotCapture } from '../model/types';
 import { CanvasView } from '../react/CanvasView';
 import { CameraController, type Size, fitRect } from '../view/camera';
@@ -182,7 +183,9 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
     [near, store, doc, snapshot],
   );
 
-  const still = !store && fallback ? fallback : null;
+  // The still picture is an address written in a plan: loaded only if it is a picture address.
+  const stillSrc = !store && fallback ? (resolveImageSrc ? resolveImageSrc(fallback.src) : fallback.src) : null;
+  const still = fallback && isSafeImageSrc(stillSrc) ? { src: stillSrc, alt: fallback.alt } : null;
   const canOpen = !!onOpen && !!store && !!capture;
   const name = title ?? snapshot?.title ?? '';
 
@@ -190,7 +193,7 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
     return (
       <figure className="pcv pcv-figure" data-standing="missing" data-canvas={canvas} data-snapshot={id}>
         {still ? (
-          <img className="pcv-figure-still" src={resolveImageSrc ? resolveImageSrc(still.src) : still.src} alt={still.alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+          <img className="pcv-figure-still" src={still.src} alt={still.alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
         ) : (
           <div className="pcv-figure-empty">{store ? SNAPSHOT_STRINGS.noSnapshot : SNAPSHOT_STRINGS.noCanvas}</div>
         )}

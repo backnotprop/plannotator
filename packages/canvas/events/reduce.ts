@@ -12,7 +12,7 @@
  * one copy per frame, and every object the batch did not touch keeps its
  * identity (the renderer skips those with a reference check).
  */
-import { LIMITS, checkObject } from '../model/codec';
+import { LIMITS, OBJECT_FIELDS, checkObject } from '../model/codec';
 import { bindingFault, groupCycle, idMap, isBoundEnd } from '../model/document';
 import { compareOrder } from '../model/order-key';
 import type { CanvasDocument, CanvasObject, Snapshot } from '../model/types';
@@ -119,13 +119,15 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
         const before = now()[event.id];
         if (!before) break;
         const from = before as unknown as ObjectFields;
-        const next: ObjectFields = { ...from };
+        // Built from the object's own fields onto nothing: no name in a change can reach a prototype.
+        const next: ObjectFields = Object.assign(Object.create(null), from);
         const back: ObjectFields = {};
         const backUnset: string[] = [];
         const touched: string[] = [];
         const take = (key: string, value: unknown, present: boolean) => {
-          if (key === 'id' || key === 'type') return;
-          const had = key in from;
+          // Only a field an object can have, and never one that is a name on every object (`__proto__`).
+          if (key === 'id' || key === 'type' || !OBJECT_FIELDS.has(key)) return;
+          const had = Object.hasOwn(from, key);
           if (present ? had && same(from[key], value) : !had) return;
           if (had) back[key] = from[key];
           else backUnset.push(key);
@@ -134,17 +136,17 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
           touched.push(key);
         };
         for (const key of Object.keys(event.set)) take(key, event.set[key], true);
-        for (const key of event.unset ?? []) if (!(key in event.set)) take(key, undefined, false);
+        for (const key of event.unset ?? []) if (!Object.hasOwn(event.set, key)) take(key, undefined, false);
         if (typeof next.group === 'string' && now()[next.group]?.type !== 'group' && touched.includes('group')) {
           // Put back into a group that has since gone: stay out of it.
           delete next.group;
-          if (!('group' in from)) {
+          if (!Object.hasOwn(from, 'group')) {
             touched.splice(touched.indexOf('group'), 1);
             backUnset.splice(backUnset.indexOf('group'), 1);
           }
         }
         if (touched.length === 0) break;
-        let object = next as unknown as CanvasObject;
+        let object = { ...next } as unknown as CanvasObject;
         if (options.check) {
           const checked = checkObject(next);
           if (!checked.ok) break;
@@ -172,6 +174,19 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
         const at = list.indexOf(event.id);
         if (at !== -1) list.splice(at, 1);
         delete objs()[event.id];
+        if (before.type === 'group') {
+          // A group that goes lets go of whatever is still in it: something another person or an agent put
+          // there after the one who is taking the group away last looked. Without this an object would name
+          // a group that is not there, and the saved canvas would be refused when loaded. Undone in turn
+          // (after the group is back, so these come first here: the inverse is this list reversed).
+          const all = objs();
+          for (const member of Object.values(all)) {
+            if (member.group !== event.id) continue;
+            const { group: _gone, ...free } = member;
+            all[member.id] = free as CanvasObject;
+            undo.push({ type: 'object-set', id: member.id, set: { group: event.id } });
+          }
+        }
         undo.push({ type: 'object-added', object: before });
         applied.push(event);
         break;

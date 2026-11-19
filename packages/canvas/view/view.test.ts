@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { CanvasStore } from '../events/store';
-import { createDocument } from '../model/document';
-import type { CanvasObject } from '../model/types';
+import { createDocument, resolveArrow } from '../model/document';
+import { parseDocument, serializeDocument } from '../model/codec';
+import type { ArrowObject, CanvasObject } from '../model/types';
 import { cameraPlacing, fitRect, lerpCamera, screenToWorld, viewportRect, worldRectToScreen, worldToScreen, zoomAt } from './camera';
 import { lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from './cull';
 import { BOX_SHAPES } from '../model/types';
@@ -326,5 +327,43 @@ describe('culling and level of detail', () => {
     // A figure in a narrow column, a phone looking at one frame: small on screen, but everything is drawn.
     expect(lodFor(0.1, 40)).toBe('full');
     expect(lodFor(0.31, 150)).toBe('full');
+  });
+});
+
+describe('groups that lose their members', () => {
+  const box = (id: string, x: number, y: number): CanvasObject => ({ id, type: 'box', x, y, w: 100, h: 40, text: id });
+
+  test('grouping everything out of a group removes the group it emptied, and frees a connector stuck to it', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [box('x', 0, 0), box('y', 0, 100), box('t', 600, 0)] });
+    store.dispatch({ type: 'group', id: 'old', ids: ['x', 'y'] });
+    store.dispatch({ type: 'add', objects: [{ id: 'link', type: 'arrow', from: { object: 'old' }, to: { object: 't' } }] });
+    expect(store.dispatch({ type: 'group', id: 'new', ids: ['x', 'y', 't'] }).ok).toBe(true);
+    const doc = store.getDocument();
+    expect(doc.objects.old).toBeUndefined();
+    expect(doc.objects.x.group).toBe('new');
+    const link = doc.objects.link;
+    expect(link.type === 'arrow' && 'x' in link.from).toBe(true);
+    expect(parseDocument(JSON.parse(serializeDocument(doc))).ok).toBe(true);
+    // One step takes all of it back.
+    store.undo();
+    expect(store.getDocument().objects.old).toBeDefined();
+    expect(store.getDocument().objects.x.group).toBe('old');
+  });
+
+  test('a connector stuck to a group is found where it now runs after a member leaves the group', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [box('x', 0, 0), box('z', 1000, 0), box('q', 1000, 300), box('t', 2000, 600)] });
+    store.dispatch({ type: 'group', id: 'g', ids: ['x', 'z'] });
+    store.dispatch({ type: 'add', objects: [{ id: 'link', type: 'arrow', routing: 'straight', from: { object: 'g' }, to: { object: 't' } }] });
+    const index = indexFor(store);
+    // z leaves for another group: g is now x alone, far to the left, and the connector starts there.
+    store.dispatch({ type: 'group', id: 'h', ids: ['z', 'q'] });
+    const doc = store.getDocument();
+    expect(doc.objects.g).toBeDefined();
+    const line = resolveArrow(doc, doc.objects.link as ArrowObject)!;
+    expect(line.from.x).toBeLessThan(200);
+    const near = { x: line.from.x + (line.to.x - line.from.x) * 0.15, y: line.from.y + (line.to.y - line.from.y) * 0.15 };
+    expect(hitTest(doc, index, near, 4)).toBe('link');
   });
 });

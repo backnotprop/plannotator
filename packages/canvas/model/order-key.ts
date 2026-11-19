@@ -22,7 +22,11 @@ const MAX = BASE ** WIDTH - 1;
 /** Room left between two objects added one after the other. */
 const STEP = 4096;
 
-export const ORDER_KEY_RE = /^[0-9A-Za-z]{1,96}$/;
+/**
+ * A key never ends in the lowest digit. Between `A` and `A0` there is no string at all, so a key ending in
+ * `0` could leave no room under it; with none allowed there is always a key between any two.
+ */
+export const ORDER_KEY_RE = /^[0-9A-Za-z]{0,95}[1-9A-Za-z]$/;
 export const isOrderKey = (value: unknown): value is string => typeof value === 'string' && ORDER_KEY_RE.test(value);
 
 function toInt(key: string): number {
@@ -32,6 +36,8 @@ function toInt(key: string): number {
 }
 
 function fromInt(n: number): string {
+  // Never a key ending in the lowest digit (see `ORDER_KEY_RE`): the next number up is as good.
+  if (n % BASE === 0) n += 1;
   let out = '';
   for (let i = 0; i < WIDTH; i++) {
     out = DIGITS[n % BASE] + out;
@@ -60,18 +66,24 @@ function midpoint(a: string, b: string | null): string {
  */
 export function keyBetween(below: string | null, above: string | null): string {
   if (below === null && above === null) return fromInt(Math.floor(MAX / 2));
+  // Two neighbours with the same key (two people who each put something on top at the same moment) have
+  // nothing between them: the new key goes just above both, and the ids settle the rest.
+  if (below !== null && above !== null && below >= above) return midpoint(below, null);
+  let key: string;
   if (above === null) {
     const next = toInt(below!) + STEP;
-    return next <= MAX ? fromInt(next) : midpoint(below!, null);
-  }
-  if (below === null) {
+    key = next < MAX ? fromInt(next) : midpoint(below!, null);
+  } else if (below === null) {
     const next = toInt(above) - STEP;
-    return next > 0 ? fromInt(next) : midpoint('', above);
+    key = next > 0 ? fromInt(next) : midpoint('', above);
+  } else {
+    const lo = toInt(below);
+    const hi = toInt(above);
+    key = hi - lo > 2 ? fromInt(Math.floor((lo + hi) / 2)) : midpoint(below, above);
   }
-  const lo = toInt(below);
-  const hi = toInt(above);
-  if (hi - lo > 1) return fromInt(Math.floor((lo + hi) / 2));
-  return midpoint(below, above);
+  // The quick paths work on the first six digits; a key that did not land strictly between is worked out in full.
+  if ((below !== null && key <= below) || (above !== null && key >= above)) key = midpoint(below ?? '', above);
+  return key;
 }
 
 /** How two objects compare in drawing order: by key, then by id. An object with no key sorts first. */
