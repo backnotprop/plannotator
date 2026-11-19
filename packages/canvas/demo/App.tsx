@@ -3,7 +3,8 @@
  *
  *   /                      plan and canvas side by side (a phone gets the plan)
  *   /?bench=plan&n=50      a plan with n snapshots of one 2,000-object canvas
- *   /?bench=canvas&n=2000  the editor alone on an n-object canvas (&rich: pictures, HTML items, cards, long notes)
+ *   /?bench=canvas&n=2000  the editor alone on an n-object canvas (&rich: pictures, HTML items, cards, long notes;
+ *                          &ink=600 drawn lines, &curves=400 curved connectors, &html=12 moving HTML items)
  *   /?view=split           plan and canvas side by side
  *   /?view=canvas          the canvas alone
  *   &theme=dark            start dark
@@ -37,7 +38,7 @@ import { indexFor } from '../view/document-index';
 import { MARKS_PLAN, createMarksStore } from './marks';
 import { PlanPane } from './PlanPane';
 import { DATA_SETS, type DataSet, EMPTY_PLAN, FAR_PLAN, ONE_PLAN, STACKED_PLAN, bigPlan, createBigStore, createEmptyStore, createFarStore, createOneStore, createStackedStore, createWorstStore, worstPlan } from './worst';
-import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
+import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, addBenchMarks, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
 
 const params = new URLSearchParams(location.search);
 const bench = params.get('bench');
@@ -133,6 +134,7 @@ function useTheme(): [boolean, () => void] {
 
 function BenchCanvas() {
   const store = useMemo(() => (params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
+  useMemo(() => addBenchMarks(store, { ink: Number(params.get('ink')) || 0, curves: Number(params.get('curves')) || 0, html: Number(params.get('html')) || 0 }), [store]);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };
   }, [store]);
