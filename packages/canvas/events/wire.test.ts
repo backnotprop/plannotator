@@ -585,7 +585,7 @@ describe('the sync seam', () => {
     expect(ana.getDocument().objects.n).toMatchObject({ x: 125 });
     // Whatever two objects differ in, the change between them never names who added it.
     const note = ana.getDocument().objects.n;
-    expect(setEvent({ ...note, by: user } as never, { ...note, x: 500 })).toEqual({ type: 'object-set', id: 'n', set: { x: 500 } });
+    expect(setEvent({ ...note, by: user } as never, { ...note, x: 500 } as never)).toEqual({ type: 'object-set', id: 'n', set: { x: 500 } });
     expect(setEvent({ ...note, by: user } as never, note)).toBeNull();
     const { by: _by, ...unsigned } = note;
     expect(setEvent(note, unsigned as never)).toBeNull();
