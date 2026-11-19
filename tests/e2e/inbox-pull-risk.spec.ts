@@ -437,6 +437,63 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   expect(readFileSync(join(dataDir, 'inbox', 'pull-risk.json'), 'utf8')).not.toContain('Anything in billing');
 });
 
+test('the automatic run off, picking what to make names the agent it would start, read once, and the sheet still fits a phone', async () => {
+  mkdirSync(join(env.HOME, '.pi', 'agent'), { recursive: true });
+  writeFileSync(join(env.HOME, '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
+  const reads: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/inbox/pulls/risk?auto_agent=1')) reads.push(request.url());
+  });
+  await page.locator('[data-pulls-risk-chip]').click();
+  await page.locator('[data-pulls-risk-rules]').click();
+  const dialog = page.locator('[data-dialog="pull-risk-rules"]');
+  const auto = dialog.locator('[data-pull-risk-auto]');
+  const withAgent = dialog.locator('[data-pull-risk-auto-agent]');
+  const pickMake = async (name: string) => {
+    await auto.getByRole('button').first().click();
+    await auto.getByRole('button', { name, exact: true }).click();
+  };
+  await expect(auto).toHaveAttribute('data-pull-risk-auto', '');
+  await expect(withAgent).toHaveCount(0);
+  expect(reads).toEqual([]);
+  await pickMake('a Picture page');
+  await expect(withAgent).toHaveAttribute('data-pull-risk-auto-agent', 'pi');
+  await expect(withAgent).toHaveText(/^with\s+Pi$/);
+  await pickMake('a guided review');
+  await expect(auto).toHaveAttribute('data-pull-risk-auto', 'guide');
+  await expect(withAgent).toHaveText(/^with\s+Pi$/);
+  expect(reads).toHaveLength(1);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  for (const width of [1280, 390, 320] as const) {
+    const size = { width, height: width === 1280 ? 800 : VIEWPORTS[width].height };
+    await page.setViewportSize(size);
+    await page.waitForTimeout(350);
+    await expect(withAgent).toBeVisible();
+    await expect(withAgent).toBeInViewport({ ratio: 1 });
+    for (const name of ['Cancel', 'Save']) {
+      const button = dialog.getByRole('button', { name, exact: true });
+      await expect(button).toBeInViewport({ ratio: 1 });
+      await button.click({ trial: true });
+    }
+    const sideways = await dialog.evaluate((el) =>
+      [el, ...el.querySelectorAll('*')]
+        .filter((node) => node.scrollWidth > node.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(node).overflowX))
+        .map((node) => `${node.tagName}.${node.className}`),
+    );
+    expect(sideways).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    expect((await dialog.boundingBox())!.x + (await dialog.boundingBox())!.width).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: join(proofDir, `dialog-with-agent-${width}.png`) });
+  }
+  await page.setViewportSize(VIEWPORTS[1440]);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await pickMake('nothing');
+  await expect(auto).toHaveAttribute('data-pull-risk-auto', '');
+  await expect(withAgent).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test('the filter: High, Medium and up, remembered; under High what it could not place is one quiet count that shows it', async () => {
   const pick = async (option: string) => {
     await page.locator('[data-pulls-risk-chip]').click();
