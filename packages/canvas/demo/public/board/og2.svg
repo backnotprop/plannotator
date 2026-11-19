@@ -1,0 +1,7 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 320' font-family='Inter,system-ui,-apple-system,Segoe UI,sans-serif'>
+  <rect width='600' height='320' fill='#f3ecdf'/>
+  <circle cx='470' cy='160' r='118' fill='none' stroke='#1f6f5c' stroke-width='2'/><circle cx='470' cy='160' r='78' fill='none' stroke='#1f6f5c' stroke-width='2'/><circle cx='470' cy='160' r='38' fill='#1f6f5c'/>
+  <path d='M470 42v-22M470 300v-22M352 160h-22M610 160h-22' stroke='#1f6f5c' stroke-width='2'/><circle cx='548' cy='160' r='9' fill='#e2572b'/><circle cx='414.800' cy='104.800' r='9' fill='#e2572b'/>
+  <text x='40' y='136' font-size='40' font-weight='700' fill='#1b2a26' letter-spacing='-1'>Dead-letter</text><text x='40' y='182' font-size='40' font-weight='700' fill='#1b2a26' letter-spacing='-1'>queues</text>
+  <text x='40' y='224' font-size='18' fill='#4d5e59'>A runbook for the 3 a.m. page</text><text x='40' y='282' font-size='15' font-weight='600' fill='#1f6f5c'>Runbooks</text>
+  </svg>
