@@ -314,7 +314,7 @@ describe('register', () => {
     }
     // /plannotator-inbox opens the Inbox (plannotator inbox --open) and answers with its address.
     const inboxAnswer = await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
-    expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open')).toBe(true)
+    expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open --from-slash-command')).toBe(true)
     expect(inboxAnswer.text).toContain('http://localhost:5555/')
     // Opened: the model gets the Inbox briefing as the answer's hidden context (no turn).
     expect(inboxAnswer.context?.[0]).toContain('plannotator inbox --help')

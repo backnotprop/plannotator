@@ -33,7 +33,7 @@ test("one POST turns it off: record off, the untouched note gone, then the Inbox
   expect(homedir().startsWith(realpathSync(tmpdir())) || homedir().startsWith(tmpdir())).toBe(true);
   turnInboxOn("command", dataDir);
   expect(addInboxNote("claude-code", dataDir, createAgentEnvironment())).toMatchObject({ ok: true });
-  const note = join(homedir(), ".claude", "rules", "plannotator-inbox.md");
+  const note = join(createAgentEnvironment().homeDir, ".claude", "rules", "plannotator-inbox.md");
   expect(existsSync(note)).toBe(true);
 
   let stopRequested = false;

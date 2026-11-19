@@ -162,7 +162,7 @@ describe("the Inbox off, from a process", () => {
     const live = inboxEntryOf(box.dataDir);
     if (live) started.push({ entry: live, root: box.root });
     expect(run.code).toBe(0);
-    expect(run.stdout).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
+    expect(run.stdout).toMatch(/^http:\/\/(?:localhost|127\.0\.0\.1):\d+\//);
     expect(recordOf(box)).toMatchObject({ on: true, by: "slash-command" });
   });
 });
