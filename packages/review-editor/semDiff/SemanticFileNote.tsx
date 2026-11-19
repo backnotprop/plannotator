@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ReviewSummary } from '@plannotator/sem-jiff/summary';
+import { NOTE_NARROW, NOTE_WIDE } from '../components/FileHeader';
 
 export type SemanticFileState =
   | { status: 'working' }
@@ -48,10 +49,11 @@ export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: ()
       }}
       className={`flex-none whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded transition-colors hover:bg-muted ${on ? 'text-muted-foreground' : 'text-muted-foreground/50 line-through'}`}
       title={title}
-      aria-label={title}
+      aria-label={all}
       aria-pressed={on}
     >
-      {semanticNoteLabel(state.summary)}
+      <span className={NOTE_WIDE}>{semanticNoteLabel(state.summary)}</span>
+      <span className={NOTE_NARROW}>{KINDS.reduce((sum, [kind]) => sum + (state.summary.counts[kind as keyof typeof state.summary.counts] ?? 0), 0)}</span>
     </button>
   );
 };

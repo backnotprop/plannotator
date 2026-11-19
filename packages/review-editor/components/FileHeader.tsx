@@ -114,6 +114,23 @@ const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
 const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
 const ACTIONS_FOLD_WIDTH = 360;
 const ACTIONS_FOLD = '@max-[359px]/file-header:hidden';
+export const NOTE_WIDE = '@max-[339px]/file-header:hidden';
+export const NOTE_NARROW = 'hidden @max-[339px]/file-header:inline';
+
+function reachNote(node: HTMLSpanElement | null) {
+  node?.addEventListener('click', (event) => {
+    if (event.target === node) node.querySelector('button')?.click();
+  });
+}
+
+function NoteReach({ touch, children }: { touch: boolean; children: React.ReactNode }) {
+  if (!children) return null;
+  return (
+    <span ref={reachNote} className={`flex flex-none items-center ${touch ? '-my-2 py-2' : '[@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:py-2'}`}>
+      {children}
+    </span>
+  );
+}
 
 const FileHeaderView: React.FC<FileHeaderProps> = ({
   filePath,
@@ -237,7 +254,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
         <SemanticFileBadge filePath={filePath} />
-        {semanticNote}
+        <NoteReach touch={false}>{semanticNote}</NoteReach>
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -361,7 +378,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
       </div>}
-      {isCompactTouchLayout && semanticNote}
+      {isCompactTouchLayout && <NoteReach touch>{semanticNote}</NoteReach>}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (
         <CompactFileActions
