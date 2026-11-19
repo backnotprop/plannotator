@@ -473,11 +473,14 @@ test('the automatic run off, picking what to make names the agent it would start
     const size = { width, height: width === 1280 ? 800 : VIEWPORTS[width].height };
     await page.setViewportSize(size);
     await page.waitForTimeout(350);
+    await page.screenshot({ path: join(proofDir, `dialog-with-agent-${width}.png`) });
     await expect(withAgent).toBeVisible();
     await expect(withAgent).toBeInViewport({ ratio: 1 });
     for (const name of ['Cancel', 'Save']) {
       const button = dialog.getByRole('button', { name, exact: true });
       await expect(button).toBeInViewport({ ratio: 1 });
+      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(width === 1280 ? 0 : 44);
+      expect(await button.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       await button.click({ trial: true });
     }
     const sideways = await dialog.evaluate((el) =>
@@ -488,7 +491,6 @@ test('the automatic run off, picking what to make names the agent it would start
     expect(sideways).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     expect((await dialog.boundingBox())!.x + (await dialog.boundingBox())!.width).toBeLessThanOrEqual(width);
-    await page.screenshot({ path: join(proofDir, `dialog-with-agent-${width}.png`) });
   }
   await page.setViewportSize(VIEWPORTS[1440]);
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
