@@ -47,4 +47,28 @@ describe('the stylesheet and the code agree', () => {
       }
     }
   });
+
+  test('a person\'s mark with no colour from the host is read at 4.5 to 1 or better in both themes', () => {
+    // The disc is the ink mixed into the card; the initial is the board's ground. All four are greys, and for a
+    // grey in oklab the share of light it gives back is its lightness cubed.
+    const share = Number(/\.pcv-face \{[^}]*color-mix\(in oklab, var\(--pcv-ink\) (\d+)%, var\(--pcv-card\)\)/.exec(css)![1]) / 100;
+    const lightness = (name: string): number => Number(new RegExp(`\n  ${name}: (?:var\\([a-z-]+, )?oklch\\(([0-9.]+) `).exec(css)![1]);
+    const contrast = (a: number, b: number) => (Math.max(a, b) ** 3 + 0.05) / (Math.min(a, b) ** 3 + 0.05);
+    const themes = { dark: { ink: lightness('--pcv-ink-d'), card: 0.295, stage: lightness('--pcv-stage-d') }, light: { ink: lightness('--pcv-ink-l'), card: 1, stage: lightness('--pcv-stage-l') } };
+    // The card's lightness is written where each theme sets it.
+    expect(css).toContain('--pcv-card: var(--card, oklch(0.295 0.006 286));');
+    expect(css).toContain('--pcv-card: var(--card, oklch(1 0 0));');
+    for (const theme of Object.values(themes)) {
+      const disc = theme.ink * share + theme.card * (1 - share);
+      expect(contrast(disc, theme.stage)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('a custom colour is exact over a picture only when the picture was looked at', () => {
+    const at = css.indexOf("--pcv-stroke: var(--pcv-custom);\n}", css.indexOf('/* Over a picture.'));
+    const selectors = css.slice(css.lastIndexOf('*/', at) + 2, css.lastIndexOf('{', at));
+    expect(selectors.match(/data-ground='(light|dark)'/g)?.length).toBe(4);
+    expect(selectors).not.toContain('[data-ground]');
+    expect(selectors).not.toContain("'picture'");
+  });
 });

@@ -353,6 +353,13 @@
   }
 }
 
+.pcv-html-frame {
+  width: 100%;
+  height: 100%;
+}
+.pcv-html-frame[hidden] {
+  display: none;
+}
 .pcv-html iframe {
   display: block;
   width: 100%;
@@ -1374,8 +1381,9 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  /* With no colour from the host: a quiet neutral, the same for everyone, that follows the theme. */
-  background: color-mix(in oklab, var(--pcv-ink) 52%, var(--pcv-card));
+  /* With no colour from the host: a quiet neutral, the same for everyone, that follows the theme. Dark enough
+     on a light board, and light enough on a dark one, for the initial on it to be read at 4.5 to 1 or better. */
+  background: color-mix(in oklab, var(--pcv-ink) 66%, var(--pcv-card));
   color: var(--pcv-stage);
   font: 600 9.5px/1 var(--pcv-font);
   overflow: hidden;
@@ -1494,7 +1502,8 @@
    which is the same in both themes, not against the board (`data-ground`, `react/picture-look.ts`):
    - with no colour or a named one, it takes the ink and line colours for a light ground or a dark one, by how
      light the picture is under it (when the picture could not be looked at, the board's theme, as before);
-   - a custom colour is drawn exactly as chosen: whoever chose it chose it against that picture. */
+   - a custom colour is drawn exactly as chosen: whoever chose it chose it against that picture. Only when the
+     picture was looked at; otherwise the board's rule holds. */
 .pcv-obj[data-ground='light'],
 .pcv-arrow[data-ground='light'] {
   --pcv-ink: var(--pcv-ink-l);
@@ -1528,8 +1537,12 @@
 .pcv .pcv-text[data-ground][data-color]:not([data-color='neutral']) {
   color: var(--pcv-stroke);
 }
-.pcv .pcv-obj[data-ground][data-color='custom'],
-.pcv .pcv-arrow[data-ground][data-color='custom'] {
+/* Exactly as chosen only over a picture that was looked at. One that is still loading, failed to load or
+   cannot be read gives no ground (`data-ground='picture'`): the board's own rule stays, so the mark is seen. */
+.pcv .pcv-obj[data-ground='light'][data-color='custom'],
+.pcv .pcv-obj[data-ground='dark'][data-color='custom'],
+.pcv .pcv-arrow[data-ground='light'][data-color='custom'],
+.pcv .pcv-arrow[data-ground='dark'][data-color='custom'] {
   --pcv-stroke: var(--pcv-custom);
 }
 

@@ -25,28 +25,52 @@ export interface PictureLook {
 }
 
 const LOOKS = new Map<string, PictureLook | null>();
-const listeners = new Set<() => void>();
-let version = 0;
-let telling = false;
+/** How many pictures' looks are remembered. Past this the one looked at longest ago is forgotten, never all of them at once. */
+const LOOKS_MAX = 2000;
+/** Who is waiting to hear about which picture: only what lies over a picture hears that it has been looked at. */
+const waiting = new Map<string, Set<() => void>>();
+const fresh = new Set<string>();
+let scheduled = false;
 
-/** Heard when something new is known about any picture. Many pictures loading together are told of once. */
+/** The looks that are known, and a way to hear when one picture's becomes known. */
 export const pictureLooks = {
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
+  /** Hear when `src` has been looked at. Nothing else hears it: a board of pictures with nothing lying on them tells no one. */
+  subscribe(src: string, listener: () => void): () => void {
+    let set = waiting.get(src);
+    if (!set) waiting.set(src, (set = new Set()));
+    set.add(listener);
+    return () => {
+      set.delete(listener);
+      if (set.size === 0 && waiting.get(src) === set) waiting.delete(src);
+    };
   },
-  getVersion: (): number => version,
   get: (src: string): PictureLook | null | undefined => LOOKS.get(src),
 };
 
-function tell(): void {
-  if (telling) return;
-  telling = true;
-  queueMicrotask(() => {
-    telling = false;
-    version += 1;
-    for (const listener of [...listeners]) listener();
-  });
+/** Tell those waiting on the pictures looked at since the last frame, once, before the next one is drawn. */
+function flush(): void {
+  scheduled = false;
+  const told = [...fresh];
+  fresh.clear();
+  for (const src of told) for (const listener of [...(waiting.get(src) ?? [])]) listener();
+}
+
+function tell(src: string): void {
+  if (!waiting.has(src)) return;
+  fresh.add(src);
+  if (scheduled) return;
+  scheduled = true;
+  // Pictures finish loading one task each: gathered into one telling a frame, not one each.
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(flush);
+  else queueMicrotask(flush);
+}
+
+/** Remember a picture's look (what `lookAtPicture` does once it has looked). */
+export function rememberLook(src: string, look: PictureLook | null): void {
+  LOOKS.delete(src);
+  LOOKS.set(src, look);
+  if (LOOKS.size > LOOKS_MAX) LOOKS.delete(LOOKS.keys().next().value as string);
+  tell(src);
 }
 
 /** sRGB channel (0 to 255) to linear light (0 to 1). */
@@ -88,9 +112,7 @@ export function lookAtPicture(src: string, image: CanvasImageSource & { naturalW
   } catch {
     look = null;
   }
-  if (LOOKS.size > 2000) LOOKS.clear();
-  LOOKS.set(src, look);
-  tell();
+  rememberLook(src, look);
   return look;
 }
 

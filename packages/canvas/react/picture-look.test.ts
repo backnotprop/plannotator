@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { groundUnder, lookOfPixels } from './picture-look';
+import { groundUnder, lookOfPixels, pictureLooks, rememberLook } from './picture-look';
 
 /** A 24 by 24 picture from a rule for each cell: [r, g, b, a]. */
 function pixels(at: (col: number, row: number) => [number, number, number, number]): number[] {
@@ -55,5 +55,44 @@ describe('what words and lines over a picture are read against', () => {
     expect(groundUnder(look, { x: 0, y: 0, w: 0, h: 0 }, box)).toBe('light');
     expect(groundUnder(lookOfPixels([], 1), box, box)).toBe('dark');
     expect(groundUnder(lookOfPixels(pixels(() => BLACK), 0), box, { x: 1e9, y: -1e9, w: Number.NaN, h: 1 })).toBe('dark');
+  });
+});
+
+describe('hearing that a picture has been looked at', () => {
+  const look = lookOfPixels(pixels(() => WHITE), 1);
+  const settle = () => new Promise<void>((resolve) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => resolve()) : queueMicrotask(resolve)));
+
+  test('only what waits on that picture hears, once, however many pictures load together', async () => {
+    let mine = 0;
+    let other = 0;
+    const stop = pictureLooks.subscribe('look-test/a.png', () => (mine += 1));
+    const stopOther = pictureLooks.subscribe('look-test/never.png', () => (other += 1));
+    // A hundred pictures finish loading, each in a task of its own; one of them is the one waited on, told twice.
+    for (let i = 0; i < 100; i++) rememberLook(`look-test/p${i}.png`, look);
+    rememberLook('look-test/a.png', look);
+    rememberLook('look-test/a.png', look);
+    expect(mine).toBe(0);
+    await settle();
+    expect(mine).toBe(1);
+    expect(other).toBe(0);
+    expect(pictureLooks.get('look-test/a.png')).toBe(look);
+    stop();
+    stopOther();
+    rememberLook('look-test/a.png', null);
+    await settle();
+    expect(mine).toBe(1);
+  });
+
+  test('past what is remembered, the picture looked at longest ago is forgotten, never the ones just seen', () => {
+    rememberLook('look-test/first.png', look);
+    for (let i = 0; i < 2100; i++) rememberLook(`look-test/many${i}.png`, look);
+    expect(pictureLooks.get('look-test/first.png')).toBeUndefined();
+    expect(pictureLooks.get('look-test/many2099.png')).toBe(look);
+    expect(pictureLooks.get('look-test/many500.png')).toBe(look);
+    // Looked at again, it is among the newest.
+    rememberLook('look-test/many101.png', look);
+    for (let i = 0; i < 1900; i++) rememberLook(`look-test/more${i}.png`, look);
+    expect(pictureLooks.get('look-test/many101.png')).toBe(look);
+    expect(pictureLooks.get('look-test/many500.png')).toBeUndefined();
   });
 });

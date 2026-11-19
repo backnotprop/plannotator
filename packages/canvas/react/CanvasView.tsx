@@ -31,19 +31,19 @@
 import React, { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import { arrowPoints, boundsOf, isBoundEnd, resolveArrow } from '../model/document';
-import { type Point, type Rect, rectContainsPoint, rectFromPoints } from '../model/geometry';
+import { type Point, type Rect, rectContainsPoint, rectsIntersect } from '../model/geometry';
 import { isSafeImageSrc } from '../model/html-item';
 import { type ArrowEnd, type ArrowObject, type CanvasDocument, type ImageObject, type ObjectId, isPlaced } from '../model/types';
-import type { Camera, CameraController, Size } from '../view/camera';
+import { type Camera, type CameraController, type Size, viewportRect } from '../view/camera';
 import { type Lod, OVERSCAN, lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
 import { indexFor } from '../view/document-index';
 import { curveRoute, endAngles, findHops, pointAlong, routePath } from '../view/route-path';
 import { roughLine, seedOf } from '../view/rough';
 import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
 import { ArrowView, type EditEnd, FlatView, ObjectView, objectLabel } from './objects';
-import { type Ground, groundUnder, pictureLooks } from './picture-look';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
+const NO_PICTURE: { over?: ImageObject; overSrc?: string | null } = {};
 /** Bare text in a size a board is read by from far off: it stays words at every level of detail. */
 const isHeading = (size: string | undefined): boolean => size === 'title' || size === 'display';
 /**
@@ -53,17 +53,17 @@ const isHeading = (size: string | undefined): boolean => size === 'title' || siz
  */
 const FLAT_ABOVE = 4000;
 /**
- * How many HTML items a view draws as themselves below full detail. An item runs no script, so its frame is a
- * still picture of itself, and a view with few of them keeps every frame at every zoom. But each frame is a
- * document of its own, and many in view cost frames when the whole board moves. Measured, headed, panning 2,000
- * objects at 12% with the board's HTML items in view: none drawn 118 fps; 12 drawn 80 fps with 3 of 322 frames
- * slow (inside the 60 fps budget, barely); 42 drawn 71 fps with 45 of 286 slow (outside it). Giving each frame
- * a layer of its own made it worse (61 fps). So up to this many are drawn, and a view holding more shows each
- * item's words (`alt`) in its box until it is zoomed in. All or none, so a board never shows a mix.
+ * How many HTML items on screen are drawn as themselves below full detail. An item runs no script, so its frame
+ * is a still picture of itself, and a view with few of them keeps every frame at every zoom. But each frame is
+ * a document of its own, and many on screen cost frames when the whole board moves (the numbers are in the
+ * guide, "Custom HTML items"). So frames are dropped when more than `HTML_FRAMES_DROP` items are on screen, and
+ * come back when `HTML_FRAMES_MAX` or fewer are: the gap between the two keeps one item at the edge of the
+ * screen from turning every item over and back. All or none, so a board never shows a mix.
  */
 export const HTML_FRAMES_MAX = 8;
-/** Whether a view at this detail, holding this many HTML items, draws them as themselves. */
-export const htmlFramesKept = (lod: Lod, items: number): boolean => lod === 'full' || items <= HTML_FRAMES_MAX;
+export const HTML_FRAMES_DROP = 10;
+/** Whether HTML items are drawn as themselves, given whether they were a moment ago, the detail, and how many are on screen. */
+export const htmlFramesNext = (kept: boolean, lod: Lod, onScreen: number): boolean => lod === 'full' || (kept ? onScreen <= HTML_FRAMES_DROP : onScreen <= HTML_FRAMES_MAX);
 /** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
 const CROWDED = 500;
 
@@ -179,8 +179,6 @@ export function CanvasView({
   const router = routesFor(store);
   // Draw again when routes that were waiting have been finished.
   useSyncExternalStore(router.subscribe, router.getVersion, router.getVersion);
-  // And when a picture has been looked at: what lies over it takes its ink from it.
-  useSyncExternalStore(pictureLooks.subscribe, pictureLooks.getVersion, pictureLooks.getVersion);
   const root = useRef<HTMLDivElement | null>(null);
   const world = useRef<HTMLDivElement | null>(null);
   const overlay = useRef<HTMLDivElement | null>(null);
@@ -195,6 +193,7 @@ export function CanvasView({
   // The detail the zoom alone would ask for; how many objects are mounted has the last word (`lodFor`).
   const [zoomLod, setZoomLod] = useState<Lod>(() => lodForZoom(camera.get().z));
   const lodRef = useRef(zoomLod);
+  const framesKeptRef = useRef(true);
   const onSizeRef = useRef(onSize);
   onSizeRef.current = onSize;
 
@@ -299,25 +298,33 @@ export function CanvasView({
     }
   }
 
-  // HTML items stay drawn at low detail unless the view holds too many of them at once (`HTML_FRAMES_MAX`).
-  let frames = 0;
-  if (lod !== 'full') for (const id of mounted) if (doc.objects[id]?.type === 'html' && ++frames > HTML_FRAMES_MAX) break;
-  const framesKept = htmlFramesKept(lod, frames);
+  // HTML items stay drawn at low detail unless too many of them are on screen at once (`htmlFramesNext`). Counted
+  // in the view itself, not in the wider window that is kept mounted round it.
+  let onScreen = 0;
+  if (lod !== 'full' && size.current.w > 0) {
+    const view = viewportRect(camera.get(), size.current);
+    for (const id of mounted) {
+      const object = doc.objects[id];
+      if (object?.type === 'html' && rectsIntersect(view, object) && ++onScreen > HTML_FRAMES_DROP) break;
+    }
+  }
+  framesKeptRef.current = htmlFramesNext(framesKeptRef.current, lod, onScreen);
+  const framesKept = framesKeptRef.current;
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
   const lines: { arrow: ArrowObject; points: Point[]; d?: string }[] = [];
   // The pictures drawn so far, back to front. Words and lines that lie on one (half of them or more) are read
-  // against it, not against the board (`groundUnder`). Nothing is looked for on a board with no picture in view.
+  // against it, not against the board: each is handed its picture and waits by itself to hear how light that
+  // picture is (`useGround`), so a picture loading draws nothing else again.
   const pictures: ImageObject[] = [];
-  const groundOf = (area: Rect, whole: (picture: ImageObject) => boolean): Ground | undefined => {
+  const pictureUnder = (whole: (picture: ImageObject) => boolean): { over?: ImageObject; overSrc?: string | null } => {
     for (let i = pictures.length - 1; i >= 0; i--) {
-      const picture = pictures[i];
-      if (!whole(picture)) continue;
-      const src = resolveImageSrc ? resolveImageSrc(picture.src) : picture.src;
-      return groundUnder(isSafeImageSrc(src) ? pictureLooks.get(src) : null, picture, area);
+      if (!whole(pictures[i])) continue;
+      const src = resolveImageSrc ? resolveImageSrc(pictures[i].src) : pictures[i].src;
+      return { over: pictures[i], overSrc: isSafeImageSrc(src) ? src : null };
     }
-    return undefined;
+    return NO_PICTURE;
   };
   // Routes that are stale are worked out as they are drawn, for a few milliseconds; the rest keep their last
   // shape and are finished next frame (the router says when).
@@ -337,16 +344,16 @@ export function CanvasView({
         if (g && !g.via && object.routing === 'curve') lines.push({ arrow: object, ...curveRoute(g.from, g.to) });
         else if (g) lines.push({ arrow: object, points: arrowPoints(g) });
       }
-    } else if (object.type !== 'group' && flat && editingId !== id && tabStop !== id && !(object.type === 'text' && isHeading(object.size)) && object.type !== 'ink') {
-      // Far out on a crowded board: a flat patch each. Small bare text has nothing to show at this size (a
-      // title still does, and a drawn line is one path already: both are drawn as themselves, below).
+    } else if (object.type !== 'group' && flat && editingId !== id && tabStop !== id && !(object.type === 'text' && isHeading(object.size)) && object.type !== 'ink' && object.type !== 'frame') {
+      // Far out on a crowded board: a flat patch each. Small bare text has nothing to show at this size. What a
+      // board is found by is drawn as itself, below: a heading, a frame with its title, a drawn line (one path).
       if (object.type !== 'text') placed.push(<FlatView key={id} object={object} />);
       if (selection.size === 1 && selection.has(id)) {
         overlayNodes.push(<div key={id} className="pcv-outline" style={{ transform: `translate(${object.x}px, ${object.y}px)`, width: object.w, height: object.h }} />);
       }
     } else if (object.type !== 'group') {
       if (object.type === 'image') pictures.push(object);
-      const ground = (object.type === 'text' || object.type === 'ink') && pictures.length ? groundOf(object, (picture) => mostlyOn(picture, object)) : undefined;
+      const under = (object.type === 'text' || object.type === 'ink') && pictures.length ? pictureUnder((picture) => mostlyOn(picture, object)) : NO_PICTURE;
       placed.push(
         <ObjectView
           key={id}
@@ -359,7 +366,8 @@ export function CanvasView({
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}
           carried={carried?.has(id) ?? false}
           buried={buried.has(id)}
-          ground={ground}
+          over={under.over}
+          overSrc={under.overSrc}
         />,
       );
       // The selection outline is its own element in the overlay, so its
@@ -394,7 +402,7 @@ export function CanvasView({
         lx={at.x}
         ly={at.horizontal ? at.y : at.y}
         selected={selection.has(arrow.id)}
-        ground={pictures.length ? groundOf(rectFromPoints(points[0], last), (picture) => rectContainsPoint(picture, points[0]) && rectContainsPoint(picture, last)) : undefined}
+        {...(pictures.length ? pictureUnder((picture) => rectContainsPoint(picture, points[0]) && rectContainsPoint(picture, last)) : NO_PICTURE)}
       />,
     );
   });

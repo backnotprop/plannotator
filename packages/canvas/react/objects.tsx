@@ -10,8 +10,9 @@ import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, type HtmlItemFace, checkHtmlI
 import { referenceCard } from '../model/reference';
 import { seedOf, seeded } from '../view/rough';
 import { Face, usePerson } from './people';
-import { type Ground, lookAtPicture, pictureLooks } from './picture-look';
+import { type Ground, groundUnder, lookAtPicture, pictureLooks } from './picture-look';
 import { previewsPending } from './references';
+import type { Rect } from '../model/geometry';
 import type { ArrowObject, ArtifactKind, BoxObject, BoxShape, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
 import { inkPath } from '../view/ink-path';
 import { flatten, hachure, roughStrokes } from '../view/rough';
@@ -35,8 +36,25 @@ export interface ObjectViewProps {
   buried?: boolean;
   /** Being dragged right now: a note lifts off the board while it is carried. */
   carried?: boolean;
-  /** Bare text or a drawn line lying over a picture: what its ink is read against (`picture-look.ts`). Absent: the board. */
-  ground?: Ground;
+  /** Bare text or a drawn line lying over a picture: the picture, and the address it is loaded from (null: one that cannot be loaded). Absent: it lies on the board. */
+  over?: ImageObject;
+  overSrc?: string | null;
+}
+
+const noLook = () => undefined;
+const never = () => () => {};
+
+/**
+ * What a mark lying over a picture is read against (`picture-look.ts`). Only the mark itself waits to hear that
+ * its picture has been looked at: nothing else on the board is drawn again when a picture loads.
+ */
+function useGround(over: Rect | undefined, src: string | null | undefined, area: Rect): Ground | undefined {
+  const look = useSyncExternalStore(
+    over && src ? (listener) => pictureLooks.subscribe(src, listener) : never,
+    over && src ? () => pictureLooks.get(src) : noLook,
+    noLook,
+  );
+  return over ? groundUnder(look, over, area) : undefined;
 }
 
 /** Typing into an object's words has ended. `words` is the element typed into, still laid out, for measuring. */
@@ -255,8 +273,10 @@ export function HtmlItemFacesProvider({ faces, children }: { faces: readonly Htm
 /** The only way custom HTML is ever drawn. See `model/html-item.ts`. */
 function HtmlFrame({ object }: { object: HtmlObject }) {
   const faces = useContext(HtmlItemFacesContext);
-  const probe = useRef<HTMLSpanElement>(null);
   const [scheme, setScheme] = useState<'light' | 'dark' | null | undefined>(undefined);
+  // The item's document is made once for what it is made from, not on every draw (a drag draws it every frame).
+  const srcDoc = useMemo(() => (scheme === undefined ? '' : htmlItemSrcdoc(object.html, scheme, faces)), [object.html, scheme, faces]);
+  const probe = useRef<HTMLSpanElement>(null);
   // The item is told the theme it sits in, and told again when it changes.
   useLayoutEffect(() => {
     const read = () => {
@@ -272,7 +292,27 @@ function HtmlFrame({ object }: { object: HtmlObject }) {
   return (
     <>
       <span ref={probe} hidden />
-      {scheme !== undefined ? <iframe title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme, faces)} {...HTML_ITEM_FRAME_ATTRS} /> : null}
+      {scheme !== undefined ? <iframe title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={srcDoc} {...HTML_ITEM_FRAME_ATTRS} /> : null}
+    </>
+  );
+}
+
+/**
+ * An HTML item on the board. `shown` false: a view zoomed out with many items in it, where each shows its words
+ * instead of itself (`htmlFramesNext`). Once an item's frame has been drawn it stays mounted, hidden, so going
+ * back and forth never loads the item again or flashes it empty. An item with no words says what it is and how big.
+ */
+function HtmlItem({ object, shown }: { object: HtmlObject; shown: boolean }) {
+  const drawn = useRef(shown);
+  if (shown) drawn.current = true;
+  return (
+    <>
+      {drawn.current ? (
+        <div className="pcv-html-frame" hidden={!shown}>
+          <HtmlFrame object={object} />
+        </div>
+      ) : null}
+      {shown ? null : <div className="pcv-missing">{object.alt || `${OBJECT_NAMES.html}, ${Math.round(object.w)} × ${Math.round(object.h)}`}</div>}
     </>
   );
 }
@@ -496,7 +536,8 @@ function ByBadge({ actor }: { actor: PlacedCanvasObject['by'] }) {
 
 const STAMP_GLYPHS = { check: Check, thumb: ThumbsUp, ask: CircleHelp } as const;
 
-export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex, carried, buried, ground }: ObjectViewProps) {
+export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex, carried, buried, over, overSrc }: ObjectViewProps) {
+  const ground = useGround(over, overSrc, object);
   const color = colorAttrs(object.color);
   const style: React.CSSProperties = {
     ...color.style,
@@ -585,7 +626,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
     case 'html':
       return (
         <div className="pcv-obj pcv-html" {...common} {...(tabIndex === undefined && object.alt ? { role: 'img', 'aria-label': object.alt } : {})} style={style}>
-          {rich ? <HtmlFrame object={object} /> : <div className="pcv-missing">{object.alt}</div>}
+          <HtmlItem object={object} shown={rich} />
         </div>
       );
   }
@@ -628,8 +669,9 @@ export interface ArrowViewProps {
   lx: number;
   ly: number;
   selected: boolean;
-  /** Both ends lie on one picture: what the line and its label are read against. Absent: the board. */
-  ground?: Ground;
+  /** Both ends lie on one picture: that picture and the address it is loaded from. Absent: the line lies on the board. */
+  over?: ImageObject;
+  overSrc?: string | null;
 }
 
 /** About how many characters of a label fit on a line between two things without lying over them. */
@@ -662,7 +704,8 @@ function bar(x: number, y: number, angle: number): { x1: number; y1: number; x2:
 }
 
 /** A connector: its line, what its ends look like, and its label on the line. Memoised on its path and numbers. */
-export const ArrowView = memo(function ArrowView({ arrow, label, d, x1, y1, a1, x2, y2, a2, lx, ly, room, selected, ground }: ArrowViewProps) {
+export const ArrowView = memo(function ArrowView({ arrow, label, d, x1, y1, a1, x2, y2, a2, lx, ly, room, selected, over, overSrc }: ArrowViewProps) {
+  const ground = useGround(over, overSrc, { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) });
   const shown = arrow.label ? shortLabel(arrow.label, room) : '';
   const color = colorAttrs(arrow.color);
   const ends = arrow.style?.ends ?? 'arrow';

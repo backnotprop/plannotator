@@ -3,7 +3,7 @@ import { createDocument } from '../model/document';
 import { CanvasStore } from '../events/store';
 import type { CanvasObject } from '../model/types';
 import { FIGURE_MIN, figureBox, fitName } from '../snapshot/SnapshotFigure';
-import { HTML_FRAMES_MAX, htmlFramesKept } from './CanvasView';
+import { HTML_FRAMES_DROP, HTML_FRAMES_MAX, htmlFramesNext } from './CanvasView';
 import { edgesBeyond, nearestBeyond } from './EdgeMarkers';
 import { ARROW_LABEL_MAX, shortLabel } from './objects';
 import { faceColor } from './people';
@@ -114,15 +114,14 @@ describe('the colour of a person\'s mark', () => {
 });
 
 describe('HTML items when the board is zoomed out', () => {
-  test('a view with a few of them draws them at every detail; only one crowded with them falls back to their words', () => {
-    for (const lod of ['full', 'plain', 'far'] as const) {
-      expect(htmlFramesKept(lod, 0)).toBe(true);
-      expect(htmlFramesKept(lod, 1)).toBe(true);
-      expect(htmlFramesKept(lod, HTML_FRAMES_MAX)).toBe(true);
-    }
-    expect(htmlFramesKept('plain', HTML_FRAMES_MAX + 1)).toBe(false);
-    expect(htmlFramesKept('far', 500)).toBe(false);
+  test('frames are dropped past ten on screen and come back at eight, so one item at the edge does not turn them all over', () => {
     // Close up, every item is itself however many there are.
-    expect(htmlFramesKept('full', 500)).toBe(true);
+    expect(htmlFramesNext(false, 'full', 500)).toBe(true);
+    // Walking the count up and down, as a pan across a board with items along it does.
+    let kept = true;
+    const seen: boolean[] = [];
+    for (const onScreen of [3, 8, 9, 10, 11, 10, 9, 10, 9, 8, 9, 10, 11]) seen.push((kept = htmlFramesNext(kept, 'plain', onScreen)));
+    expect(seen).toEqual([true, true, true, true, false, false, false, false, false, true, true, true, false]);
+    expect(HTML_FRAMES_MAX).toBeLessThan(HTML_FRAMES_DROP);
   });
 });
