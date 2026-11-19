@@ -2,19 +2,25 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { configStore, useConfigValue } from '../../config';
 import { AnalysisLayerToggle } from '../AnalysisLayerToggle';
 
-type Provider = 'jev' | 'clef';
 type Failure = 'missing' | 'refused' | 'noCredit' | 'noAnswer';
 type Check = { kind: 'idle' } | { kind: 'checking' } | { kind: 'ok'; ms: number } | { kind: 'error'; failure: Failure };
 
 const ROUTE = '/api/sem-diff/opinion/settings';
 export const POWER_UP_CHANGED_EVENT = 'plannotator:power-up-changed';
-const PROVIDER_NAME: Record<Provider, string> = { jev: 'Jev', clef: 'Clef' };
-const ADD_KEY: Record<Provider, string> = { jev: 'Paste the key from your TypeSafe account', clef: 'Your Cloudflare account ID and a Workers AI token' };
+export const POWER_UP_PROVIDER_NAMES = { jev: 'Jev', clef: 'Clef', openai: 'OpenAI Decisions' } as const;
+export type PowerUpProvider = keyof typeof POWER_UP_PROVIDER_NAMES;
+type Provider = PowerUpProvider;
+const PROVIDER_NAME = POWER_UP_PROVIDER_NAMES;
+const PROVIDER_SETTINGS = {
+  jev: { title: 'Jev key', credential: 'a Jev key', label: 'TypeSafe API key', hint: 'Paste the key from your TypeSafe account', modelHint: 'Jev runs on your TypeSafe account.' },
+  clef: { title: 'Workers AI', credential: 'a Clef token', label: 'Workers AI token', hint: 'Your Cloudflare account ID and a Workers AI token', modelHint: 'Clef runs on your Cloudflare account.' },
+  openai: { title: 'OpenAI key', credential: 'an OpenAI API key', label: 'OpenAI API key', hint: 'Paste an OpenAI project API key', modelHint: 'OpenAI Decisions runs on your OpenAI API project.' },
+} satisfies Record<Provider, { title: string; credential: string; label: string; hint: string; modelHint: string }>;
 
 function failureText(provider: Provider, failure: Failure): string {
   const name = PROVIDER_NAME[provider];
-  if (failure === 'missing') return provider === 'jev' ? 'Add your TypeSafe key' : 'Add your account ID and token';
-  if (failure === 'refused') return provider === 'jev' ? 'Jev refused this key' : 'Clef refused this token';
+  if (failure === 'missing') return `Add your ${PROVIDER_SETTINGS[provider].label}`;
+  if (failure === 'refused') return `${name} refused this ${provider === 'clef' ? 'token' : 'key'}`;
   if (failure === 'noCredit') return `No credit left on this ${name} account`;
   return `${name} did not answer. Try again in a moment.`;
 }
@@ -100,6 +106,8 @@ export function SemanticDiffsTab() {
   const [accountId, setAccountId] = useState('');
   const [apiToken, setApiToken] = useState('');
   const [check, setCheck] = useState<Check>({ kind: 'idle' });
+  const fields = PROVIDER_SETTINGS[provider];
+  const usesToken = provider === 'clef';
 
   const load = useCallback(async () => {
     try {
@@ -123,7 +131,7 @@ export function SemanticDiffsTab() {
 
   const save = async () => {
     setCheck({ kind: 'checking' });
-    const body = provider === 'jev' ? { provider, apiKey } : { provider, accountId, apiToken };
+    const body = usesToken ? { provider, accountId, apiToken } : { provider, apiKey };
     try {
       const res = await fetch(ROUTE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const reply = (await res.json()) as { ok: true; ms: number } | { ok: false; failure?: Failure };
@@ -146,7 +154,13 @@ export function SemanticDiffsTab() {
   };
 
   const remove = async () => {
-    await fetch(ROUTE, { method: 'DELETE' }).catch(() => {});
+    try {
+      const res = await fetch(ROUTE, { method: 'DELETE' });
+      if (!res.ok || !(await res.json()).ok) throw new Error('Could not remove key');
+    } catch {
+      setCheck({ kind: 'error', failure: 'noAnswer' });
+      return;
+    }
     setConfigured(false);
     setSavedProvider(null);
     setEditing(true);
@@ -154,19 +168,19 @@ export function SemanticDiffsTab() {
     changed();
   };
 
-  const saved = configured && savedProvider === provider && (!editing || (provider === 'jev' ? !apiKey : !accountId && !apiToken));
+  const saved = configured && savedProvider === provider && (!editing || (usesToken ? !accountId && !apiToken : !apiKey));
   const failure = check.kind === 'error' ? check.failure : null;
   const fieldMessage =
     failure === 'refused' || failure === 'noCredit'
       ? failureText(provider, failure)
       : failure === 'missing'
-        ? provider === 'jev'
-          ? 'Add your TypeSafe key'
+        ? !usesToken
+          ? failureText(provider, failure)
           : !accountId
             ? 'Add your account ID'
             : 'Add your token'
         : null;
-  const complete = provider === 'jev' ? apiKey.trim() !== '' : accountId.trim() !== '' && apiToken.trim() !== '';
+  const complete = usesToken ? accountId.trim() !== '' && apiToken.trim() !== '' : apiKey.trim() !== '';
   return (
     <div className="space-y-4" data-semantic-diffs-settings="">
       <div>
@@ -187,10 +201,7 @@ export function SemanticDiffsTab() {
           <AnalysisLayerToggle
             checked={powerUp && configured}
             disabled={!configured || !semantic || !semanticDiffEnabled}
-            onChange={(on) => {
-              configStore.set('diffPowerUp', on);
-              changed();
-            }}
+            onChange={(on) => configStore.set('diffPowerUp', on)}
             label="Power Up"
             description={
               configured
@@ -207,25 +218,27 @@ export function SemanticDiffsTab() {
               title="Model"
               hint={
                 configured && savedProvider && savedProvider !== provider
-                  ? `${PROVIDER_NAME[savedProvider]} keeps powering up until ${provider === 'clef' ? 'a Clef token' : 'a Jev key'} works.`
-                  : provider === 'jev'
-                    ? 'Jev is the faster one, about 0.2 s a file.'
-                    : 'Clef runs on your Cloudflare account.'
+                  ? `${PROVIDER_NAME[savedProvider]} keeps powering up until ${fields.credential} works.`
+                  : fields.modelHint
               }
             >
               <Segmented
                 label="Model"
                 value={provider}
-                options={[['jev', 'Jev'], ['clef', 'Clef']]}
+                options={[['jev', PROVIDER_NAME.jev], ['clef', PROVIDER_NAME.clef], ['openai', PROVIDER_NAME.openai]]}
                 onChange={(v) => {
+                  if (v === provider || check.kind === 'checking') return;
                   setProvider(v);
+                  setApiKey('');
+                  setAccountId('');
+                  setApiToken('');
                   setEditing(true);
                   setCheck({ kind: 'idle' });
                 }}
               />
             </Row>
             <Row
-              title={provider === 'jev' ? 'Jev key' : 'Workers AI'}
+              title={fields.title}
               hint={
                 check.kind === 'ok' ? (
                   `✓ Key works · ${check.ms} ms`
@@ -236,32 +249,33 @@ export function SemanticDiffsTab() {
                 ) : saved ? (
                   'Kept on this computer'
                 ) : (
-                  ADD_KEY[provider]
+                  fields.hint
                 )
               }
             >
               <form
-                className={`flex flex-col gap-1 ${provider === 'jev' ? 'w-[280px]' : 'w-[340px]'}`}
+                className={`flex flex-col gap-1 ${usesToken ? 'w-[340px]' : 'w-[280px]'}`}
                 data-power-up-key-set={saved ? '' : undefined}
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (check.kind === 'checking') return;
                   if (complete) void save();
                   else setCheck({ kind: 'error', failure: 'missing' });
                 }}
                 onBlur={(e) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node | null) && complete && check.kind !== 'checking') void save();
+                  if (provider !== 'openai' && !e.currentTarget.contains(e.relatedTarget as Node | null) && complete && check.kind !== 'checking') void save();
                 }}
               >
                 <span className="flex items-start gap-1.5">
-                  {provider === 'jev' ? (
+                  {!usesToken ? (
                     <KeyField
                       className="w-full"
-                      label="TypeSafe API key"
+                      label={fields.label}
                       value={apiKey}
                       onChange={setApiKey}
                       secret
                       flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey)}
-                      message={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey) ? failureText('jev', failure) : undefined}
+                      message={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey) ? failureText(provider, failure) : undefined}
                       saved={saved}
                       onFocus={() => setEditing(true)}
                     />
@@ -294,7 +308,7 @@ export function SemanticDiffsTab() {
                     </>
                   )}
                   <span className="flex shrink-0 flex-col gap-1">
-                    {provider === 'clef' && <span aria-hidden="true" className="invisible text-xs font-medium">Token</span>}
+                    {usesToken && <span aria-hidden="true" className="invisible text-xs font-medium">Token</span>}
                     <button
                       type="submit"
                       className="h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
@@ -326,7 +340,7 @@ export function SemanticDiffsTab() {
               <Segmented label="Motion" value={motion} options={[['still', 'Still'], ['stream', 'Stream']]} onChange={(v) => configStore.set('diffPowerUpMotion', v)} />
             </Row>
             <p className="pt-1 text-xs text-muted-foreground">
-              Your key, your account; code is sent to {PROVIDER_NAME[provider]}. Only the functions the engine asks about are sent, never the rest of the repository.
+              Your key, your account; code is sent to {PROVIDER_NAME[savedProvider ?? provider]}. Only the functions the engine asks about are sent, never the rest of the repository.
             </p>
           </>
         )}
