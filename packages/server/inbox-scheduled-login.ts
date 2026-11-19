@@ -10,7 +10,6 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_LOGIN_ITEM_ENV } from "@plannotator/shared/inbox/turned-on";
 
 export const INBOX_LOGIN_LABEL = "ai.plannotator.inbox";
 export const INBOX_LOGIN_UNIT = "plannotator-inbox.service";
@@ -48,7 +47,6 @@ export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; l
     "  <key>EnvironmentVariables</key>",
     "  <dict>",
     `    <key>PLANNOTATOR_DATA_DIR</key>${string(o.dataDir)}`,
-    `    <key>${INBOX_LOGIN_ITEM_ENV}</key>${string("1")}`,
     "  </dict>",
     "  <key>RunAtLoad</key><true/>",
     "  <key>ProcessType</key><string>Background</string>",
@@ -68,7 +66,6 @@ export function inboxLoginUnit(o: { argv: readonly string[]; dataDir: string }):
     "[Service]",
     `ExecStart=${[...o.argv, "inbox", "--no-open"].map(unitArg).join(" ")}`,
     `Environment=${unitArg(`PLANNOTATOR_DATA_DIR=${o.dataDir}`)}`,
-    `Environment=${unitArg(`${INBOX_LOGIN_ITEM_ENV}=1`)}`,
     "",
     "[Install]",
     "WantedBy=default.target",

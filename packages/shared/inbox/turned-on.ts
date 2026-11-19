@@ -17,9 +17,6 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { INBOX_TURNED_ON_FILE, inboxMarkSaysOn } from "./connection";
 
-/** Set on the start at login's run (packages/server/inbox-scheduled-login.ts): one of Plannotator's own starts, which never turns the Inbox on. */
-export const INBOX_LOGIN_ITEM_ENV = "PLANNOTATOR_INBOX_LOGIN_ITEM";
-
 export function inboxTurnedOnPath(dataDir: string): string {
   return join(dataDir, "inbox", INBOX_TURNED_ON_FILE);
 }

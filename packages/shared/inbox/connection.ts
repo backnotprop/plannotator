@@ -2252,7 +2252,7 @@ export const INBOX_BLOCKED_STALE_MS = 45_000
  * commands run `--open`). Until it says on, no host registers the agents' tool
  * or its reminder, and nothing Plannotator starts by itself (`--background`, a
  * detached start, `restart`, the MCP server, `inbox call` and the other
- * commands that start the Inbox, the start at login) starts it. Where an
+ * commands that start the Inbox) starts it. Where an
  * Inbox already ran (`inbox/inbox.json`, from before the mark or from an older
  * `plannotator`), the first reader writes the mark on. Its text is
  * `{"on":true,"by":...,"at":...}`; only `"on":false` reads off, so a mark that

@@ -51,7 +51,7 @@ import { isAskAiChild } from "@plannotator/shared/child-env";
 import { isNewerStableVersion } from "@plannotator/shared/update-check";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_OFF_LINE } from "@plannotator/shared/inbox/connection";
-import { INBOX_LOGIN_ITEM_ENV, isInboxTurnedOn, markInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
+import { isInboxTurnedOn, markInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import {
   acquireInboxStartLock,
   inboxStartLockStale,
@@ -888,12 +888,11 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   }
 
   // A person's run (bare, --no-open, --open) turns the Inbox on here; Plannotator's own
-  // starts (--background, a detached start, the start at login) never do, and start
-  // nothing until the person has (turned-on.ts). Where it is on already (every existing
-  // install) a run does what it did before the mark.
-  const loginItem = process.env[INBOX_LOGIN_ITEM_ENV] === "1";
-  delete process.env[INBOX_LOGIN_ITEM_ENV];
-  const personRun = !detached && !loginItem && !background;
+  // starts (--background, a detached start) never do, and start nothing until the person
+  // has (turned-on.ts). Where it is on already (every existing install) a run does what it
+  // did before the mark. The start at login runs --no-open, as before: a login item exists
+  // only where the Inbox ran, so it is on there.
+  const personRun = !detached && !background;
   const turnsOnNow = !isInboxTurnedOn(dataDir);
   if (turnsOnNow && !personRun) {
     process.stderr.write(`${INBOX_OFF_LINE}\n`);

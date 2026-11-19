@@ -10,7 +10,7 @@ import { expect, test } from './inbox-test';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { LISTED_AGENTS } from '../../apps/marketing/src/lib/inbox-agents';
-import { agentSetup, bareCommand, forbiddenCommand, llmsInboxSetup, promptSetup, setupCommands, TURN_ON, type SetupText } from '../helpers/setup-texts';
+import { agentSetup, bareCommand, forbiddenCommand, llmsInboxSetup, OPEN_INBOX, promptSetup, setupCommands, TURN_ON, type SetupText } from '../helpers/setup-texts';
 import { INBOX_OFF_LINE } from '../../packages/shared/inbox/connection';
 
 const repo = resolve(__dirname, '../..');
@@ -48,8 +48,7 @@ export function turnedOnCases(binary: string): void {
         [['inbox', '--background'], {}],
         [['inbox', 'restart'], {}],
         [['inbox', 'call', 'send_message', '{"body":"Ship it?"}'], {}],
-        // The start at login, and a detached start (an older Inbox's Restart spawns one), are Plannotator's own.
-        [['inbox', '--no-open'], { PLANNOTATOR_INBOX_LOGIN_ITEM: '1' }],
+        // A detached start (an older Inbox's Restart spawns one) is Plannotator's own.
         [['inbox', '--no-open'], { PLANNOTATOR_INBOX_DETACHED: '1' }],
       ];
       for (const [args, extra] of refused) {
@@ -213,24 +212,41 @@ export function turnedOnCases(binary: string): void {
    * (setup-order.test.ts keeps bare `plannotator inbox` and `--background` out of every page), and once the turn-on
    * has run, `plannotator inbox mcp` lists the tools and the script's first message is sent.
    */
+  // The agent's texts (the script, the llms page) are run as an agent runs them: each command returns. The Claude Code
+  // and Codex pages are a person's: their bare `plannotator inbox` serves in the foreground while the rest runs.
   test('First setup: the setup script, the llms page, the Claude Code and Codex pages run in order: never off, each returns, tools after the turn-on', async () => {
     const promptSource = readFileSync(join(repo, 'apps/marketing/src/lib/inbox-prompt.md'), 'utf8');
     const agent = (slug: string) => agentSetup(LISTED_AGENTS.find((a) => a.slug === slug)!);
     const pages: SetupText[] = [promptSetup(promptSource), llmsInboxSetup(), agent('claude-code'), agent('codex')];
     const RETURNS_WITHIN_MS = 30_000;
     /** What an agent runs from a page: the read-only commands, the turn-on and the MCP server. */
-    const runnable = (command: string) => /^plannotator (?:--version|--help|inbox --help|inbox call --help|inbox --open|inbox mcp)(?:\s|$)/.test(bareCommand(command));
+    const runnable = (command: string) => /^plannotator (?:--version|--help|inbox --help|inbox call --help|inbox --open|inbox mcp)(?:\s|$)/.test(bareCommand(command)) || bareCommand(command) === OPEN_INBOX;
     for (const page of pages) {
       for (const ssh of [false, true]) {
         const where = `${page.name}${ssh ? ' over SSH' : ''}`;
         const root = inboxScratch('plannotator-inbox-setup-walk-e2e-');
+        let served: ReturnType<typeof spawn> | null = null;
         try {
           const env = realRuleEnv(root, ssh ? SSH : {});
           const commands = setupCommands(page.text).filter(runnable);
-          expect([where, commands.includes(TURN_ON)]).toEqual([where, true]);
+          expect([where, commands.includes(page.by === 'agent' ? TURN_ON : OPEN_INBOX)]).toEqual([where, true]);
           let on = false;
           for (const command of commands) {
-            expect([where, command, forbiddenCommand(command)]).toEqual([where, command, null]);
+            expect([where, command, forbiddenCommand(command, page.by)]).toEqual([where, command, null]);
+            if (bareCommand(command) === OPEN_INBOX && served) {
+              // Again, with the Inbox running: it opens a tab, connects and exits.
+              const again = spawnSync(binary, ['inbox'], { env, encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
+              expect([where, command, again.status]).toEqual([where, command, 0]);
+              continue;
+            }
+            if (bareCommand(command) === OPEN_INBOX) {
+              // The person's own run, in their terminal: it turns the Inbox on and serves it.
+              served = spawn(binary, ['inbox'], { env, stdio: 'ignore' });
+              await expect.poll(() => ran(env.PLANNOTATOR_DATA_DIR), { timeout: 60_000 }).toBe(true);
+              expect(markIn(env.PLANNOTATOR_DATA_DIR)).toMatchObject({ on: true, by: 'command' });
+              on = true;
+              continue;
+            }
             const assignments = Object.fromEntries([...command.slice(0, command.length - bareCommand(command).length).matchAll(/([A-Z_]+)=(\S+)/g)].map((m) => [m[1]!, m[2]!]));
             const args = bareCommand(command).replace(/\s*<.*$/, '').split(/\s+/).slice(1);
             let input: string | undefined;
@@ -257,6 +273,12 @@ export function turnedOnCases(binary: string): void {
             }
           }
         } finally {
+          if (served) {
+            const child = served;
+            const gone = new Promise<void>((done) => (child.exitCode !== null || child.signalCode !== null ? done() : child.once('exit', () => done())));
+            child.kill('SIGTERM');
+            await Promise.race([gone, new Promise((done) => setTimeout(done, 30_000))]);
+          }
           await removeInboxScratch(root);
         }
       }

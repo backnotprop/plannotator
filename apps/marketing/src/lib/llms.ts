@@ -262,7 +262,7 @@ export function buildLlmsInbox(): string {
     `4. Connect yourself: find your agent under Agents below and follow its steps. If step 3 connected you, or your config already has a \`plannotator-inbox\` server that runs the \`plannotator\` binary, skip this. A connection takes effect in the next session, never in the one already running; until then you can send through \`plannotator inbox mcp\` directly (step 4 of [the setup script](${url('/inbox/prompt.md')}) shows how).`,
     `5. Test it: send the person one message with a question, end your turn, and read their answer when it comes back. The person can also ask you this: "${TEST}"`,
     '',
-    `Agents with a Plannotator plugin (${list(plugins.map((a) => a.name))}) get the ${code(INBOX_TOOL_NAME)} tool. Once the Inbox is on, it is on by default in Claude Code and off at first in the others, because they send every tool with each request. ${code(TURN_ON)} turns it on when it finds the plugin. It can also be turned on with the switch in the Inbox's Settings → Agents, or by merging \`{ "inboxTool": { "<host>": true } }\` into \`config.json\` in the data folder, keeping its other keys. Tell the person before you turn it on.`,
+    `Agents with a Plannotator plugin (${list(plugins.map((a) => a.name))}) get the ${code(INBOX_TOOL_NAME)} tool. Once the Inbox is on, it is on by default in Claude Code and off at first in the others, because they send every tool with each request. Step 3 turns it on when it finds the plugin, the first time, and so does the person's own \`plannotator inbox\` later. It can also be turned on with the switch in the Inbox's Settings → Agents, or by merging \`{ "inboxTool": { "<host>": true } }\` into \`config.json\` in the data folder, keeping its other keys. Tell the person before you turn it on.`,
     '',
     '## Agents',
     '',
@@ -350,8 +350,6 @@ export function buildLlmsAgent(agent: Agent): string {
   ];
   if (agent.other.length > 0) {
     lines.push('## Other ways', '');
-    // A way that adds the Inbox by hand still needs it on: its tool and MCP server answer only then.
-    if (agent.setup.some((step) => step.code === TURN_ON)) lines.push(`Every other way on this page needs the Inbox on: run ${code(TURN_ON)} first.`, '');
     for (const other of agent.other) lines.push(`### ${other.title}`, '', ...stepLines(other.steps), '');
   }
   lines.push('## Check that it works', '', ...stepLines([agent.check]), '');
@@ -391,11 +389,11 @@ function beforeStep(step: Step): string {
   return `${step.file ? `In ${code(step.file)}: ` : ''}${step.code.split('\n').map(code).join(' then ')}.`;
 }
 
-/** The words of a step after `plannotator inbox --open`, less a sentence about what that command did, and its code unless they quote it. */
+/** The words of a step after `plannotator inbox --open`, less a sentence about what `plannotator inbox` did, and its code unless they quote it. */
 function afterStep(step: Step): string {
   const words = step.do
     .split(/(?<=\.) (?=[A-Z`])/)
-    .filter((s) => !s.startsWith(`\`${TURN_ON}\``))
+    .filter((s) => !s.startsWith('`plannotator inbox`'))
     .join(' ');
   const shown = (step.code?.split('\n') ?? []).filter((line) => !words.includes(code(line)));
   return shown.length ? `${sentence(words)} ${shown.map(code).join(' then ')}.` : sentence(words);
