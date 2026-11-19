@@ -55,7 +55,8 @@ import { repoLabel } from '@plannotator/ui/utils/repoLabel';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFontFamily';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
@@ -1536,6 +1537,7 @@ const ReviewApp: React.FC = () => {
   }, [guideOpen, guideHintActive]);
   const agentTool = useAgentToolSetting();
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'review'),
     patch: diffData?.rawPatch ?? '',
     diffType,
     base: committedBase,

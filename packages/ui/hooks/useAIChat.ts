@@ -3,6 +3,7 @@ import type { AIContext } from '@plannotator/core';
 import type { AIQuestion, AIResponse } from '../types';
 import { generateId } from '../utils/generateId';
 import { SESSION_ASK_ERROR_CODES } from '../utils/aiProvider';
+import { readAIChatSnapshot, writeAIChatSnapshot, type AIChatSnapshot } from '../utils/aiChatPersistence';
 
 export interface AIChatEntry {
   question: AIQuestion;
@@ -107,6 +108,9 @@ interface UseAIChatOptions {
   reasoningEffort?: string | null;
   buildPrompt?: (params: AskAIParams) => string;
   threadTitle?: string;
+  /** Opt into tab-scoped reload persistence. Pass null until the server's
+   * identity is known; hosts that omit it keep the in-memory chat behavior. */
+  storageKey?: string | null;
 }
 
 /** `line 41` / `lines 41–44` (the export's spelling) for a selection's
@@ -270,8 +274,14 @@ export function useAIChat({
   reasoningEffort,
   buildPrompt = buildDefaultPrompt,
   threadTitle = 'Chat',
+  storageKey = null,
 }: UseAIChatOptions) {
-  const [thread, setThread] = useState<AIChatThread>(() => createThread(threadTitle));
+  const restoredRef = useRef<AIChatSnapshot | null>(null);
+  const [thread, setThread] = useState<AIChatThread>(() => {
+    restoredRef.current = readAIChatSnapshot(storageKey);
+    return restoredRef.current?.thread ?? createThread(threadTitle);
+  });
+  const [hydratedKey, setHydratedKey] = useState(storageKey);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -351,7 +361,7 @@ export function useAIChat({
 
   // The params each question was asked with, so a busy answer can be
   // re-asked ("Ask when it finishes", "Interrupt and ask now").
-  const paramsByQuestionRef = useRef(new Map<string, AskAIParams>());
+  const paramsByQuestionRef = useRef(new Map<string, AskAIParams>(restoredRef.current?.paramsByQuestion));
   // The draft list the agent session last RECEIVED, so an unchanged list is
   // not pasted into it again on every question. Kept for the page, not per
   // Plannotator AI session: every Ask AI session (a new thread, a document
@@ -359,9 +369,10 @@ export function useAIChat({
   // the bridge, which keeps what it already read. Per AI session, a new thread
   // re-sent the whole list, and drafts cleared after one never reached the
   // session as cleared.
-  const deliveredDraftsRef = useRef<{ sessionId: string; text: string } | null>(null);
+  const deliveredDraftsRef = useRef<{ sessionId: string; text: string } | null>(restoredRef.current?.deliveredDrafts ?? null);
 
   const ask = useCallback(async (params: AskAIParams, askOptions?: { providerId?: string }) => {
+    const epoch = sessionEpochRef.current;
     const previous = abortRef.current;
     if (previous) {
       supersededRef.current.add(previous);
@@ -373,11 +384,11 @@ export function useAIChat({
       await pendingAbortRef.current;
       pendingAbortRef.current = null;
     }
+    if (epoch !== sessionEpochRef.current) return;
     previous?.abort();
 
     const controller = new AbortController();
     abortRef.current = controller;
-    const epoch = sessionEpochRef.current;
     setError(null);
 
     const questionId = generateId('ai-question');
@@ -454,7 +465,9 @@ export function useAIChat({
 
       while (true) {
         const { done, value } = await reader.read();
-        if (supersededRef.current.has(controller)) throw createAbortError('AI question was superseded');
+        if (controller.signal.aborted || supersededRef.current.has(controller) || epoch !== sessionEpochRef.current) {
+          throw createAbortError('AI question was superseded');
+        }
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
@@ -575,7 +588,8 @@ export function useAIChat({
         )
       );
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
+      if (epoch !== sessionEpochRef.current) return;
+      if (controller.signal.aborted || supersededRef.current.has(controller) || (err instanceof Error && err.name === 'AbortError')) {
         updateMessages(prev =>
           prev.map(m =>
             m.question.id === questionId
@@ -694,6 +708,26 @@ export function useAIChat({
     resetThread();
     return true;
   }, [resetThread]);
+
+  useEffect(() => {
+    if (hydratedKey === storageKey) return;
+    resetSession();
+    const saved = readAIChatSnapshot(storageKey);
+    const restored = saved?.thread ?? createThread(threadTitle);
+    paramsByQuestionRef.current = new Map(saved?.paramsByQuestion);
+    deliveredDraftsRef.current = saved?.deliveredDrafts ?? null;
+    sessionIdRef.current = restored.sessionId;
+    setThread(restored);
+    setError(null);
+    setHydratedKey(storageKey);
+  }, [storageKey, hydratedKey, resetSession, threadTitle]);
+
+  useEffect(() => {
+    // /api/plan and /api/diff arrive after the first render. Never save the
+    // initial empty thread over the snapshot we are about to hydrate.
+    if (hydratedKey !== storageKey) return;
+    writeAIChatSnapshot(storageKey, thread, paramsByQuestionRef.current, deliveredDraftsRef.current);
+  }, [storageKey, hydratedKey, thread]);
 
   useEffect(() => {
     return () => {
