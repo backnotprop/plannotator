@@ -361,6 +361,11 @@ export function useTokenHover(
     (request: CodeNavRequest, tokenElement: HTMLElement) => {
       // Recorded before the gate, so a later key press has a token to act on.
       lastEnterRef.current = { request, element: tokenElement };
+      // The pointer is on a token, so it is not in the card. This also clears
+      // the flag when the card went away under the pointer without a leave
+      // event, which would otherwise stop every later token leave from
+      // closing a card.
+      pointerInCardRef.current = false;
       // The gate sits HERE, ahead of the dwell timer, the cache read and every
       // piece of state: in modifier mode with the key up, a hover costs one
       // boolean read and nothing else.
@@ -383,6 +388,13 @@ export function useTokenHover(
     // re-entry inside the grace window still lands its own answer.
     lastEnterRef.current = null;
     clearDwell();
+    // The pointer went from the code straight into the card. The two events
+    // arrive in the wrong order: the card's React onPointerEnter comes from
+    // the native pointerout, and Pierre reports the token leave from the
+    // native pointerleave on its <pre>, which the browser fires after it. A
+    // leave that arrives once the pointer is in the card must not start the
+    // close: leaving the card starts it instead.
+    if (pointerInCardRef.current) return;
     startGrace();
   }, [clearDwell, startGrace]);
 
