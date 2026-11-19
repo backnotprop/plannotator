@@ -126,7 +126,8 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
         const touched: string[] = [];
         const take = (key: string, value: unknown, present: boolean) => {
           // Only a field an object can have, and never one that is a name on every object (`__proto__`).
-          if (key === 'id' || key === 'type' || !OBJECT_FIELDS.has(key)) return;
+          // Not `by` either: who added an object is said once, when it is added, and no change rewrites it.
+          if (key === 'id' || key === 'type' || key === 'by' || !OBJECT_FIELDS.has(key)) return;
           const had = Object.hasOwn(from, key);
           if (present ? had && same(from[key], value) : !had) return;
           if (had) back[key] = from[key];

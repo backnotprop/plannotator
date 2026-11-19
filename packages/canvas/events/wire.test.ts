@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createDocument } from '../model/document';
 import { parseDocument, serializeDocument } from '../model/codec';
+import { applyEvents } from './reduce';
 import { CanvasStore } from './store';
 import { type SyncPort, connectSync } from './sync';
+import type { Actor } from '../model/types';
 import type { Envelope } from './types';
-import { decodeCommand, decodeEnvelope } from './wire';
+import { decodeCommand, decodeDelivery, decodeEnvelope } from './wire';
 
 const AGENT = { kind: 'agent', id: 'agent-1' } as const;
 
@@ -97,42 +99,62 @@ describe('an agent hears what a person does', () => {
 
 describe('the sync seam', () => {
   /**
-   * A backend as the seam asks for one: it puts every envelope in one order
-   * and hands each, as JSON, to every peer, the sender included. `flush`
-   * delivers what has been published; until then peers have not heard each
-   * other, which is how two people change something "at the same moment".
+   * A backend as the seam asks for one: it puts every envelope in one
+   * order, counts them from 1, says who sent each from the connection it
+   * came in on (never from what the envelope claims), and hands each, as
+   * JSON, to every peer, the sender included. `flush` delivers what has
+   * been published; until then peers have not heard each other, which is
+   * how two people change something "at the same moment".
    */
   function backend() {
-    const peers: ((envelope: unknown) => void)[] = [];
-    const queue: string[] = [];
+    const peers: ((delivery: unknown) => void)[] = [];
+    const queue: { actor: Actor; envelope: unknown }[] = [];
+    /** Every delivery made so far, in order: what a backend replays from. */
+    const log: string[] = [];
+    const deliver = (actor: Actor, envelope: unknown, twice = false) => {
+      const json = JSON.stringify({ order: log.length + 1, actor, envelope });
+      log.push(json);
+      for (const peer of [...peers]) {
+        peer(json);
+        if (twice) peer(JSON.parse(json));
+      }
+    };
     return {
-      port: (): SyncPort => ({
-        publish: (envelope) => void queue.push(JSON.stringify(envelope)),
-        subscribe: (onEnvelope) => {
-          peers.push(onEnvelope);
-          return () => void peers.splice(peers.indexOf(onEnvelope), 1);
+      log,
+      port: (actor: Actor): SyncPort => ({
+        publish: (envelope) => void queue.push({ actor, envelope: JSON.parse(JSON.stringify(envelope)) }),
+        subscribe: (onDelivery, after) => {
+          for (const json of log.slice(after)) onDelivery(json);
+          peers.push(onDelivery);
+          return () => void peers.splice(peers.indexOf(onDelivery), 1);
         },
       }),
       /** Deliver everything published so far. `twice`: each envelope is handed over two times. */
       flush(twice = false) {
         while (queue.length) {
-          const json = queue.shift()!;
-          for (const peer of [...peers]) {
-            peer(json);
-            if (twice) peer(JSON.parse(json));
-          }
+          const { actor, envelope } = queue.shift()!;
+          deliver(actor, envelope, twice);
         }
       },
-      inject: (raw: unknown) => peers.forEach((peer) => peer(raw)),
+      /** Something a peer signed in as `actor` sent: ordered, counted and delivered like anything else. */
+      inject: (envelope: unknown, actor: Actor = MALLORY) => deliver(actor, envelope),
+      /** Hand every peer the whole history again, from the first envelope. */
+      replay: () => log.forEach((json) => [...peers].forEach((peer) => peer(json))),
+      /** Hand a peer something as it is, outside the order (a broken or lying backend). */
+      raw: (delivery: unknown) => [...peers].forEach((peer) => peer(delivery)),
     };
   }
 
+  const ONE = { kind: 'person', id: 'one' } as const;
+  const TWO = { kind: 'person', id: 'two' } as const;
+  const MALLORY = { kind: 'person', id: 'mallory' } as const;
+
   const pair = () => {
     const net = backend();
-    const one = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'one' } });
-    const two = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'two' } });
-    const stopOne = connectSync(one, net.port());
-    connectSync(two, net.port());
+    const one = new CanvasStore(createDocument('board'), { actor: ONE });
+    const two = new CanvasStore(createDocument('board'), { actor: TWO });
+    const stopOne = connectSync(one, net.port(ONE));
+    connectSync(two, net.port(TWO));
     one.dispatch({ type: 'add', objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' }] });
     net.flush();
     return { net, one, two, stopOne };
@@ -173,7 +195,7 @@ describe('the sync seam', () => {
     const before = one.getDocument();
     // As text, the way it comes off a wire: parsed, `__proto__` is a field of its own.
     for (const set of ['{"__proto__":{"group":"a1"}}', '{"constructor":{"prototype":{"group":"a1"}}}', '{"prototype":{"group":"a1"}}', '{"__proto__":{"group":"a1"},"text":"kept"}']) {
-      net.inject(`{"id":"evil-${set.length}","actor":{"kind":"person","id":"mallory"},"events":[{"type":"object-set","id":"n1","set":${set}}]}`);
+      net.inject(`{"id":"evil-${set.length}","events":[{"type":"object-set","id":"n1","set":${set}}]}`);
     }
     for (const store of [one, two]) {
       const note = store.getDocument().objects.n1 as unknown as Record<string, unknown>;
@@ -272,16 +294,113 @@ describe('the sync seam', () => {
     expect(one.getDocument().objects.c).toBeUndefined();
   });
 
-  test('what comes off the wire is decoded: an envelope that does not pass is dropped whole', () => {
-    const { net, one } = pair();
+  test('what comes off the wire is decoded: an envelope that does not pass is dropped whole, and what follows it still arrives', () => {
+    const { net, one, two } = pair();
     const before = one.getDocument();
     net.inject('not json');
-    net.inject({ id: 'x1', actor: { kind: 'agent', id: 'z' }, events: [{ type: 'object-added', object: { id: 'p', type: 'image', x: 0, y: 0, w: 9, h: 9, src: 'javascript:1', alt: '' } }] });
-    net.inject({ id: 'x2', actor: { kind: 'root', id: 'z' }, events: [] });
+    net.inject({ id: 'x1', events: [{ type: 'object-added', object: { id: 'p', type: 'image', x: 0, y: 0, w: 9, h: 9, src: 'javascript:1', alt: '' } }] });
+    net.inject({ events: [] });
     // Passes the decoder, but the field is not one a box can hold: dropped when applied.
-    net.inject({ id: 'x3', actor: { kind: 'agent', id: 'z' }, events: [{ type: 'object-set', id: 'a', set: { w: -5 } }, { type: 'object-set', id: 'a', set: { html: '<script>' } }] });
+    net.inject({ id: 'x3', events: [{ type: 'object-set', id: 'a', set: { w: -5 } }, { type: 'object-set', id: 'a', set: { html: '<script>' } }] });
     expect(one.getDocument()).toBe(before);
-    net.inject({ id: 'x4', actor: { kind: 'agent', id: 'z' }, events: [{ type: 'object-set', id: 'a', set: { text: 'ok' } }] });
+    // The backend counted each of those. Every peer counted them too, so the next change is the next in line, not a gap.
+    net.inject({ id: 'x4', events: [{ type: 'object-set', id: 'a', set: { text: 'ok' } }] });
     expect(one.getDocument().objects.a).toMatchObject({ text: 'ok' });
+    expect(two.getDocument()).toEqual(one.getDocument());
+    expect(one.syncedTo).toBe(net.log.length);
+  });
+
+  test('a deleted object does not come back when the backend delivers again from the very beginning', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'delete', ids: ['a'] });
+    net.flush();
+    // More envelopes than any window of remembered ids would hold, then the whole history again.
+    for (let i = 0; i < 5200; i++) two.dispatch({ type: 'retitle', title: `t${i}` });
+    net.flush();
+    const settled = one.getDocument();
+    net.replay();
+    expect(one.getDocument()).toBe(settled);
+    expect(one.getDocument().objects.a).toBeUndefined();
+    expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('a delivery that skips ahead is not applied: the host is told once per hole, and nothing later is applied on top of it', () => {
+    const net = backend();
+    const one = new CanvasStore(createDocument('board'), { actor: ONE });
+    const gaps: { have: number; got: number }[] = [];
+    connectSync(one, net.port(ONE), { onGap: (gap) => gaps.push(gap) });
+    const add = (id: string) => ({ id: `e-${id}`, events: [{ type: 'object-added', object: { id, type: 'note', x: 0, y: 0, w: 10, h: 10, text: '' } }] });
+    net.raw({ order: 1, actor: TWO, envelope: add('first') });
+    net.raw({ order: 3, actor: TWO, envelope: add('third') });
+    net.raw({ order: 4, actor: TWO, envelope: add('fourth') });
+    expect(Object.keys(one.getDocument().objects)).toEqual(['first']);
+    expect(gaps).toEqual([{ have: 1, got: 3 }]);
+    expect(one.syncedTo).toBe(1);
+    // The missing one arriving late puts things right, and what follows is taken again.
+    net.raw({ order: 2, actor: TWO, envelope: add('second') });
+    net.raw({ order: 3, actor: TWO, envelope: add('third') });
+    expect(Object.keys(one.getDocument().objects)).toEqual(['first', 'second', 'third']);
+    // A second hole is told of too.
+    net.raw({ order: 9, actor: TWO, envelope: add('ninth') });
+    expect(gaps).toEqual([{ have: 1, got: 3 }, { have: 3, got: 9 }]);
+    // No count, or one that is not a whole number from 1, is not a delivery at all.
+    for (const order of [undefined, 0, -1, 4.5, '4', Number.MAX_SAFE_INTEGER + 1]) net.raw({ order, actor: TWO, envelope: add('never') });
+    expect(one.getDocument().objects.never).toBeUndefined();
+  });
+
+  test('a store that connects later catches up from the count that came with its document', () => {
+    const { net, one } = pair();
+    one.dispatch({ type: 'move', ids: ['a'], dx: 30, dy: 0 });
+    net.flush();
+    // A copy of the canvas as saved now, with the backend's count for it.
+    const saved = parseDocument(JSON.parse(serializeDocument(one.getDocument())));
+    if (!saved.ok) throw new Error(saved.error);
+    const at = net.log.length;
+    one.dispatch({ type: 'recolor', ids: ['a'], color: 'green' });
+    net.flush();
+    const late = new CanvasStore(saved.value, { actor: { kind: 'person', id: 'late' } });
+    connectSync(late, net.port({ kind: 'person', id: 'late' }), { at });
+    expect(late.getDocument()).toEqual(one.getDocument());
+    // And one that starts from nothing takes the whole history.
+    const fresh = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'fresh' } });
+    connectSync(fresh, net.port({ kind: 'person', id: 'fresh' }));
+    expect(fresh.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('who sent a change is what the backend says, whatever the envelope claims', () => {
+    const { net, one } = pair();
+    const heard: Envelope[] = [];
+    one.onCommit((envelope) => heard.push(envelope));
+    net.inject({ id: 'liar', actor: ONE, events: [{ type: 'object-set', id: 'a', set: { text: 'Not by one' } }] }, MALLORY);
+    expect(heard).toHaveLength(1);
+    expect(heard[0].actor).toEqual(MALLORY);
+    // A delivery the backend did not sign is not one.
+    expect(decodeDelivery({ order: 1, envelope: { id: 'e', actor: ONE, events: [] } }).ok).toBe(false);
+    expect(decodeDelivery({ order: 1, actor: { kind: 'root', id: 'x' }, envelope: { id: 'e', events: [] } }).ok).toBe(false);
+  });
+
+  test('who added an object cannot be rewritten by a later change, from a peer or from anywhere', () => {
+    const { net, one, two } = pair();
+    expect(one.getDocument().objects.a.by).toEqual(ONE);
+    net.inject({ id: 'f1', events: [{ type: 'object-set', id: 'a', set: { by: { kind: 'person', id: 'mallory' } } }] });
+    net.inject({ id: 'f2', events: [{ type: 'object-set', id: 'a', set: {}, unset: ['by'] }] });
+    // An honest field in the same envelope does not carry the forged one through.
+    net.inject({ id: 'f3', events: [{ type: 'object-set', id: 'a', set: { text: 'kept?', by: { kind: 'agent', id: 'x' } } }] });
+    for (const store of [one, two]) expect(store.getDocument().objects.a).toMatchObject({ by: ONE, text: 'A' });
+    // The reducer holds it too, for events that never crossed the wire's decoder.
+    const direct = applyEvents(one.getDocument(), [{ type: 'object-set', id: 'a', set: { by: { kind: 'agent', id: 'x' }, text: 'B' }, unset: ['by'] }]);
+    expect(direct.doc.objects.a).toMatchObject({ by: ONE, text: 'B' });
+  });
+
+  test("a peer cannot confirm away a change made here by sending something under that change's id", () => {
+    const { net, one, two } = pair();
+    const mine = one.dispatch({ type: 'move', ids: ['a'], dx: 70, dy: 0 });
+    if (!mine.ok || !mine.envelope) throw new Error('no envelope');
+    // Before the backend hands it back, someone else sends an envelope with the same id.
+    net.inject({ id: mine.envelope.id, events: [{ type: 'object-set', id: 'a', set: { text: 'hijack' } }] });
+    expect(one.getDocument().objects.a).toMatchObject({ x: 70, text: 'hijack' });
+    net.flush();
+    expect(one.getDocument().objects.a).toMatchObject({ x: 70, text: 'hijack' });
+    expect(two.getDocument()).toEqual(one.getDocument());
   });
 });

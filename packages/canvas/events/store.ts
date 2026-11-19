@@ -73,13 +73,20 @@ export interface CanvasStoreOptions {
   logLimit?: number;
 }
 
-/** What `receive` takes: a change made elsewhere, already decoded (`decodeEnvelope`). */
+/** What `receive` takes: a change made elsewhere, already decoded (`decodeEnvelope`, `decodeDelivery`). */
 export type RemoteEnvelope = Pick<Envelope, 'id' | 'actor' | 'events'> & Partial<Pick<Envelope, 'command' | 'gesture'>>;
 
 const sameActor = (a: Actor, b: Actor): boolean => a.kind === b.kind && a.id === b.id;
 
-/** How many envelope ids are remembered to spot a repeat. */
+/**
+ * How many envelope ids a store that is NOT syncing remembers to spot a
+ * repeat. A syncing store does not use it: there a repeat is told by the
+ * backend's own count (`receive`), which has no window to fall out of.
+ */
 const SEEN_LIMIT = 5000;
+
+/** A backend's count of an envelope: a whole number from 1. */
+const isOrder = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 
 /** Two commits of one gesture as one: the same effect, the newest's number. */
 function foldEnvelope(into: Envelope, next: Envelope): Envelope {
@@ -110,6 +117,8 @@ export class CanvasStore {
   private agreed: CanvasDocument | null = null;
   /** While syncing: this store's own commits the backend has not yet handed back, oldest first. */
   private readonly pending: Envelope[] = [];
+  /** While syncing: the backend's count of the last envelope applied to `agreed`. */
+  private agreedAt = 0;
 
   constructor(doc: CanvasDocument, options: CanvasStoreOptions = {}) {
     this.doc = withIdMaps(doc);
@@ -213,22 +222,45 @@ export class CanvasStore {
   /**
    * Start keeping in step with a backend (`connectSync` calls this). From
    * here on `receive` expects every envelope in the backend's one order,
-   * this store's own included.
+   * this store's own included, each with the backend's count of it. `at` is
+   * that count for the document this store holds now: 0 for a canvas nobody
+   * has changed yet, otherwise the number the backend gave with the document.
    */
-  beginSync(): void {
+  beginSync(at = 0): void {
     this.agreed = this.doc;
+    this.agreedAt = isOrder(at) ? at : 0;
     this.pending.length = 0;
   }
 
   endSync(): void {
     this.agreed = null;
+    this.agreedAt = 0;
     this.pending.length = 0;
   }
 
   /**
+   * While syncing: the backend's count of the last envelope this store has
+   * applied, so the next one it can take is this plus one. Null when not
+   * syncing.
+   */
+  get syncedTo(): number | null {
+    return this.agreed ? this.agreedAt : null;
+  }
+
+  /**
    * A change made elsewhere. Its events are applied as they are, never
-   * planned again, each object checked, and never join the undo stack. An
-   * envelope already applied is ignored, so a backend may deliver twice.
+   * planned again, each object checked, and never join the undo stack.
+   *
+   * `order` is the backend's count of this envelope in its one order (1, 2,
+   * 3, with no gaps). While syncing it is required, and it is how a repeat
+   * is told: an envelope at or below the count already reached has been
+   * applied and is ignored, however long ago that was, so a backend may
+   * deliver again from any point. One that skips ahead is not applied
+   * either (what lies between is missing, and applying out of order would
+   * part this store from its peers): `connectSync` reports it (`onGap`) and
+   * the host fetches the document again. A store that is not syncing takes
+   * envelopes as they come and spots a repeat by its id, among the last
+   * few thousand.
    *
    * While syncing, peers converge like this. The backend puts every
    * envelope in one order and hands all of them to every peer, the sender
@@ -240,8 +272,8 @@ export class CanvasStore {
    * is simply confirmed. Two people who set one field at the same moment
    * both end on the value the backend ordered last.
    */
-  receive(envelope: RemoteEnvelope): Envelope | null {
-    if (this.agreed) return this.receiveOrdered(envelope);
+  receive(envelope: RemoteEnvelope, order?: number): Envelope | null {
+    if (this.agreed) return isOrder(order) && order === this.agreedAt + 1 ? this.receiveOrdered(envelope, order) : null;
     if (this.seen.has(envelope.id)) return null;
     const result = applyEvents(this.doc, envelope.events, { check: true });
     this.remembered(envelope.id);
@@ -249,13 +281,14 @@ export class CanvasStore {
     return this.commit(result.doc, envelope.actor, 'remote', result.applied, envelope.command, envelope.gesture, envelope.id);
   }
 
-  private receiveOrdered(envelope: RemoteEnvelope): Envelope | null {
-    const mine = this.pending.findIndex((own) => own.id === envelope.id);
-    if (mine === -1 && this.seen.has(envelope.id)) return null;
-    this.remembered(envelope.id);
+  private receiveOrdered(envelope: RemoteEnvelope, order: number): Envelope | null {
+    // One of this store's own, come back: the same id, from the same actor. The actor is the backend's word
+    // (`connectSync`), so a peer cannot confirm away a change made here by sending something under its id.
+    const mine = sameActor(envelope.actor, this.actor) ? this.pending.findIndex((own) => own.id === envelope.id) : -1;
     const before = this.agreed!;
     const agreedNow = applyEvents(before, envelope.events, { check: true });
     this.agreed = agreedNow.doc;
+    this.agreedAt = order;
     if (mine !== -1) this.pending.splice(mine, 1);
     // The common cases need no second look: an own envelope confirmed in turn, or a peer's with nothing of ours waiting.
     if (mine === 0) return null;
@@ -263,6 +296,8 @@ export class CanvasStore {
       if (agreedNow.applied.length === 0) return null;
       return this.commit(this.agreed, envelope.actor, 'remote', agreedNow.applied, envelope.command, envelope.gesture, envelope.id);
     }
+    // Nothing all peers agree on changed (a repeat of what is already so, or an envelope that was refused): neither did the screen.
+    if (mine === -1 && agreedNow.applied.length === 0) return null;
     let doc = this.agreed;
     for (const own of this.pending) doc = applyEvents(doc, own.events, { check: true }).doc;
     if (doc === this.doc) return null;
@@ -291,7 +326,9 @@ export class CanvasStore {
   private amend(undo: CanvasEvent[], redo: CanvasEvent[], gesture: string | undefined): void {
     const entry = gesture ? this.undoStack.find((candidate) => candidate.gesture === gesture) : undefined;
     if (!entry) return;
-    entry.undo = [...entry.undo, ...undo];
+    // Undo runs down its list and the late change is the newest, so its reversal goes first: a field the
+    // step and the late change both set ends on what it was before the step. Redo runs oldest first.
+    entry.undo = [...undo, ...entry.undo];
     entry.redo = [...entry.redo, ...redo];
   }
 
@@ -324,8 +361,9 @@ export class CanvasStore {
     this.doc = doc;
     this.seq += 1;
     const envelope: Envelope = { id, seq: this.seq, actor, origin, events, ...(command ? { command } : {}), ...(gesture ? { gesture } : {}), ...(rebased ? { rebased } : {}) };
-    this.remembered(id);
-    if (origin !== 'remote' && this.agreed) this.pending.push(envelope);
+    if (this.agreed) {
+      if (origin !== 'remote') this.pending.push(envelope);
+    } else this.remembered(id);
     this.record(envelope);
     for (const listener of [...this.commitListeners]) listener(envelope, doc, before);
     this.notify();
