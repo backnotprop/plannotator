@@ -4,7 +4,9 @@ import { useVoiceSession, useVoiceShown } from '../voice';
 import { textareaField } from '../voiceField';
 import { VoiceMicButton, VoiceNote, VoiceStatusLine } from './VoiceMic';
 
-export const QuestionVoiceBusy = createContext<((id: string, busy: boolean) => void) | null>(null);
+const QuestionVoiceBusy = createContext<((id: string, busy: boolean) => void) | null>(null);
+
+export const QuestionVoiceBusyProvider = QuestionVoiceBusy.Provider;
 
 type Props = { textareaRef: RefObject<HTMLTextAreaElement | null>; onBusyChange?: (busy: boolean) => void };
 
@@ -27,9 +29,11 @@ function AttachedVoice({ textareaRef, onBusyChange }: Props) {
     report?.(id, true);
     return () => { onBusyChange?.(false); report?.(id, false); };
   }, [voice.busy, onBusyChange, report, id]);
-  return <span className="ib-field-voice" data-field-voice="">
-    <VoiceStatusLine voice={voice} phone={phone} />
-    <VoiceNote voice={voice} />
-    <VoiceMicButton voice={voice} phone={phone} />
-  </span>;
+  return (
+    <span className="ib-field-voice" data-field-voice="">
+      <VoiceStatusLine voice={voice} phone={phone} />
+      <VoiceNote voice={voice} />
+      <VoiceMicButton voice={voice} phone={phone} />
+    </span>
+  );
 }

@@ -52,7 +52,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart } from '../lazyParts';
-import { LineFeedbackToolsContext } from '@plannotator/review-editor/components/LineFeedbackTools';
+import { LineFeedbackToolsProvider } from '@plannotator/review-editor/components/LineFeedbackTools';
 import { FieldVoice } from './FieldVoice';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
@@ -1276,33 +1276,33 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
             )}
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
-              <ContextNotesProvider api={noteRows.api}>
-              <LineFeedbackToolsContext.Provider value={message.guide && !isReview ? FieldVoice : null}>
-              <GuideReader
-                snapshot={readerSnapshot!}
-                reviewed={reviewed}
-                onReviewedChange={changeReviewed}
-                chapterTicks={!walkthrough}
-                comments={readerComments}
-                mode={mode}
-                reveal={reveal}
-                viewed={viewedProp}
-                fileContents={fileContents}
-                {...(codeReview ? { fileOpenIn } : {})}
-                {...(selectionActions ? { selectionActions } : {})}
-                renderOverviewDiagram={renderOverviewDiagram}
-                renderChapterDiagram={renderChapterDiagram}
-                {...(chapterDiagrams ? {} : { chapterDiagramsFolded: true })}
-                renderHeadActions={renderHeadActions}
-                highlight={highlight}
-                threadHeading
-                signComments={isReview}
-                hostDiffControls
-                {...(collapseAll ? { collapseAll } : {})}
-                {...(noteRows.anchors.length > 0 ? { contextNotes: noteRows.anchors, renderContextNote: noteRows.renderContextNote } : {})}
-              />
-              </LineFeedbackToolsContext.Provider>
-              </ContextNotesProvider>
+                <ContextNotesProvider api={noteRows.api}>
+                  <LineFeedbackToolsProvider value={message.guide && !isReview ? FieldVoice : null}>
+                    <GuideReader
+                      snapshot={readerSnapshot!}
+                      reviewed={reviewed}
+                      onReviewedChange={changeReviewed}
+                      chapterTicks={!walkthrough}
+                      comments={readerComments}
+                      mode={mode}
+                      reveal={reveal}
+                      viewed={viewedProp}
+                      fileContents={fileContents}
+                      {...(codeReview ? { fileOpenIn } : {})}
+                      {...(selectionActions ? { selectionActions } : {})}
+                      renderOverviewDiagram={renderOverviewDiagram}
+                      renderChapterDiagram={renderChapterDiagram}
+                      {...(chapterDiagrams ? {} : { chapterDiagramsFolded: true })}
+                      renderHeadActions={renderHeadActions}
+                      highlight={highlight}
+                      threadHeading
+                      signComments={isReview}
+                      hostDiffControls
+                      {...(collapseAll ? { collapseAll } : {})}
+                      {...(noteRows.anchors.length > 0 ? { contextNotes: noteRows.anchors, renderContextNote: noteRows.renderContextNote } : {})}
+                    />
+                  </LineFeedbackToolsProvider>
+                </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>
             </div>

@@ -203,7 +203,8 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
   return (
     <>
       {toolbar.toolbarState && !toolbar.showCodeModal && (askOnly || !toolbar.showCommentModal) && (
-        <AnnotationToolbar voiceTarget={fieldKey ?? undefined}
+        <AnnotationToolbar
+          voiceTarget={fieldKey ?? undefined}
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
           commentText={toolbar.commentText}
@@ -237,7 +238,8 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
       )}
 
       {toolbar.toolbarState && toolbar.showCommentModal && !askOnly && (
-        <ExpandedCommentDialog voiceTarget={fieldKey ?? undefined}
+        <ExpandedCommentDialog
+          voiceTarget={fieldKey ?? undefined}
           title={expandedCommentTitle}
           commentText={toolbar.commentText}
           setCommentText={toolbar.setCommentText}

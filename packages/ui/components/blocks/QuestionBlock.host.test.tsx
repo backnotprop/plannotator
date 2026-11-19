@@ -18,7 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { indexQuestionBlocks, type IndexedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { parseMarkdownToBlocks } from '../../utils/parser';
 import { BlockRenderer } from '../BlockRenderer';
-import { QuestionOtherToolsContext } from '../QuestionOtherTools';
+import { QuestionOtherToolsProvider } from '../QuestionOtherTools';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -142,7 +142,11 @@ async function click(el: Element) {
 
 test.skipIf(!hasDom)('only an opted-in, editable Other field gets host tools', async () => {
   const Tool = () => <button data-test-other-tool>Dictate</button>;
-  const view = (readOnly: boolean) => <QuestionOtherToolsContext.Provider value={Tool}><Harness readOnly={readOnly} save={() => {}} /></QuestionOtherToolsContext.Provider>;
+  const view = (readOnly: boolean) => (
+    <QuestionOtherToolsProvider value={Tool}>
+      <Harness readOnly={readOnly} save={() => {}} />
+    </QuestionOtherToolsProvider>
+  );
   const el = await mount(<Harness save={() => {}} />);
   expect(el.querySelector('[data-test-other-tool]')).toBeNull();
   await act(async () => root!.render(view(false)));

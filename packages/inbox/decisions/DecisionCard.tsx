@@ -751,7 +751,8 @@ export function DecisionCard(props: DecisionCardProps) {
                 <label className="ib-dm-flabel" htmlFor={`${promptId}-other`}>
                   Your own answer
                 </label>
-                <div className="ib-other-input"><textarea ref={otherRef} id={`${promptId}-other`} className="ib-dm-ta" rows={2} value={other} onChange={(event) => setOther(event.target.value)} autoFocus />
+                <div className="ib-other-input">
+                  <textarea ref={otherRef} id={`${promptId}-other`} className="ib-dm-ta" rows={2} value={other} onChange={(event) => setOther(event.target.value)} autoFocus />
                   <FieldVoice textareaRef={otherRef} onBusyChange={setVoiceBusy} />
                 </div>
                 <button type="button" className="ib-btn ib-pri ib-sm" data-decision-other-answer="" disabled={voiceBusy || !other.trim()} onClick={() => request(otherAnswer(q, other, note))}>

@@ -414,7 +414,11 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             )}
 
             {/* Add Comment button — right side */}
-            {FeedbackTools && <span className="ml-auto"><FeedbackTools key={voiceTarget} textareaRef={commentRef} onBusyChange={setVoiceBusy} /></span>}
+            {FeedbackTools && (
+              <span className="ml-auto">
+                <FeedbackTools key={voiceTarget} textareaRef={commentRef} onBusyChange={setVoiceBusy} />
+              </span>
+            )}
             <button
               onClick={submitWithTags}
               disabled={voiceBusy || (!commentText.trim() && !suggestedCode.trim())}

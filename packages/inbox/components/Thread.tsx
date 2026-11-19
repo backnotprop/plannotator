@@ -93,8 +93,8 @@ import { usePickSave } from '../data/actions/picks';
 import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
 import { drawMessageHead } from '../parts/MessageHead';
-import { QuestionOtherToolsContext } from '@plannotator/ui/components/QuestionOtherTools';
-import { FieldVoice, QuestionVoiceBusy } from './FieldVoice';
+import { QuestionOtherToolsProvider } from '@plannotator/ui/components/QuestionOtherTools';
+import { FieldVoice, QuestionVoiceBusyProvider } from './FieldVoice';
 import { drawMessageBody } from '../parts/MessageBodyView';
 import type { MessageActs } from '../parts/messageActs';
 import { useSendReply } from '../data/actions/send';
@@ -5259,45 +5259,47 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     picks={thread.messages.reduce((n, m) => n + (m.questions ?? []).filter((q) => q.sent_reply_id === message.id).length, 0)}
                   />
                 ) : (
-                <>
-                {reviewView?.asked && message.id === thread.messages[0]?.id && <p className="ib-rvasked" data-review-asked="">{reviewView.asked}</p>}
-                {message.author.kind === 'person' && message.quote && (
-                  <SentQuoteLine message={thread.messages.find((m) => m.id === message.quote!.of)} words={message.quote.words} phone={phone} onJump={() => jumpToQuote(message.quote!)} />
-                )}
-                <QuestionVoiceBusy.Provider value={reportOtherBusy}><QuestionOtherToolsContext.Provider value={parked ? null : FieldVoice}>
-                <MessageView
-                  data={{
-                    message,
-                    answers: answersOf(message),
-                    footers: questions.map((q) => footerFor(message)(q.key)),
-                    replaced: questions.map((q) => {
-                      const key = `${message.id}/${q.key}`;
-                      return [replacementOf(thread.messages, q), pending.has(key) ? (pending.get(key) ?? null) : undefined, q.message_id ? replacedBy(thread.messages, q) : NO_QUESTIONS] as const;
-                    }),
-                    readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
-                    live: liveMessage(message),
-                    sentAnswers: message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined,
-                    sentActions: message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined,
-                    files: message.author.kind === 'person' ? allFiles : null,
-                    personMessageIds: message.author.kind === 'person' ? personMessageIds : null,
-                    root: thread.project.root,
-                    repo: thread.project.repo ?? null,
-                    codeReview,
-                    notes: codeReview && isAgent && hasReview ? reviewOfNote.has(message.id) : null,
-                    refRepo: threadRefRepo,
-                    name,
-                    comments: (isAgent || !isInboxNote(message)) && liveMessage(message) ? (messageComments.get(message.id) ?? NO_ANNOTATIONS) : null,
-                    openComment: commentsList?.at ?? null,
-                    revealedComment,
-                    side: !!onSide,
-                    farMachine: machine?.name ?? null,
-                    fileRefs: !!onOpenNamedFile && fileRefsHere,
-                    acts,
-                  }}
-                  draw={drawMessageBody}
-                />
-                </QuestionOtherToolsContext.Provider></QuestionVoiceBusy.Provider>
-                </>
+                  <>
+                    {reviewView?.asked && message.id === thread.messages[0]?.id && <p className="ib-rvasked" data-review-asked="">{reviewView.asked}</p>}
+                    {message.author.kind === 'person' && message.quote && (
+                      <SentQuoteLine message={thread.messages.find((m) => m.id === message.quote!.of)} words={message.quote.words} phone={phone} onJump={() => jumpToQuote(message.quote!)} />
+                    )}
+                    <QuestionVoiceBusyProvider value={reportOtherBusy}>
+                      <QuestionOtherToolsProvider value={parked ? null : FieldVoice}>
+                        <MessageView
+                          data={{
+                            message,
+                            answers: answersOf(message),
+                            footers: questions.map((q) => footerFor(message)(q.key)),
+                            replaced: questions.map((q) => {
+                              const key = `${message.id}/${q.key}`;
+                              return [replacementOf(thread.messages, q), pending.has(key) ? (pending.get(key) ?? null) : undefined, q.message_id ? replacedBy(thread.messages, q) : NO_QUESTIONS] as const;
+                            }),
+                            readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
+                            live: liveMessage(message),
+                            sentAnswers: message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined,
+                            sentActions: message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined,
+                            files: message.author.kind === 'person' ? allFiles : null,
+                            personMessageIds: message.author.kind === 'person' ? personMessageIds : null,
+                            root: thread.project.root,
+                            repo: thread.project.repo ?? null,
+                            codeReview,
+                            notes: codeReview && isAgent && hasReview ? reviewOfNote.has(message.id) : null,
+                            refRepo: threadRefRepo,
+                            name,
+                            comments: (isAgent || !isInboxNote(message)) && liveMessage(message) ? (messageComments.get(message.id) ?? NO_ANNOTATIONS) : null,
+                            openComment: commentsList?.at ?? null,
+                            revealedComment,
+                            side: !!onSide,
+                            farMachine: machine?.name ?? null,
+                            fileRefs: !!onOpenNamedFile && fileRefsHere,
+                            acts,
+                          }}
+                          draw={drawMessageBody}
+                        />
+                      </QuestionOtherToolsProvider>
+                    </QuestionVoiceBusyProvider>
+                  </>
                 )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
                 {(message.attachments?.length ?? 0) > 0 && (
