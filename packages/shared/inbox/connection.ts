@@ -2186,3 +2186,52 @@ export const INBOX_SESSION_LIVE_MS = 30_000
  * reads it as stuck once that session is gone too.
  */
 export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+
+/**
+ * "Stuck on a prompt in its terminal" (owner, 2026-11-18): the poll and
+ * `state` field by which a connection says its session waits on the person
+ * in its own terminal right now, `{ kind: 'permission' | 'question' }`. The
+ * kind only: never the prompt's words, its command or its title. Sent by the
+ * Claude Code mod (`tool.check` answered `ask`, `AskUserQuestion`), the
+ * OpenCode 2 plugin (`permission.asked`/`replied`, `form.created`) and Pi /
+ * Oh My Pi (`ui_prompt_start`/`end`) on every poll and `state` event while
+ * the prompt is up, and left out once it is answered or the turn ends. The
+ * Inbox keeps the latest word (a poll or `state` event without it clears it)
+ * and drops one not said again within INBOX_BLOCKED_STALE_MS. Only the
+ * Agents list's status mark reads it. An older Inbox ignores it; an older
+ * connection never sends it.
+ *
+ * With it (or without it), a connection sends INBOX_BLOCKED_AT_FIELD: when,
+ * by its own clock, its word last changed. A body whose word is older than
+ * the one the Inbox holds (a poll built before the `state` event that
+ * cleared it, arriving after) changes nothing. A body without it (an older
+ * connection) is taken as the latest, as before.
+ */
+export const INBOX_BLOCKED_FIELD = 'blocked'
+
+/** When the connection's `blocked` word last changed, in ms by its own clock (see INBOX_BLOCKED_FIELD). */
+export const INBOX_BLOCKED_AT_FIELD = 'blocked_at'
+
+/** What a session waits on in its terminal (INBOX_BLOCKED_FIELD). */
+export type InboxBlockedKind = 'permission' | 'question'
+
+/** A `blocked` as a poll or `state` event carried it: a known kind, else null (none). */
+export function parseInboxBlocked(value: unknown): InboxBlockedKind | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const kind = (value as Record<string, unknown>).kind
+  return kind === 'permission' || kind === 'question' ? kind : null
+}
+
+/**
+ * The fields for a poll or `state` body: `{ blocked: { kind } }` while blocked, else nothing (which clears it), and
+ * `blocked_at`, when that word last changed (`at`, the connection's own clock), so an older body never undoes a newer one.
+ */
+export function inboxBlockedField(kind: InboxBlockedKind | null, at?: number): { blocked?: { kind: InboxBlockedKind }; blocked_at?: number } {
+  return { ...(kind ? { [INBOX_BLOCKED_FIELD]: { kind } } : {}), ...(typeof at === 'number' && Number.isFinite(at) ? { [INBOX_BLOCKED_AT_FIELD]: at } : {}) }
+}
+
+/**
+ * A `blocked` not said again for this long is dropped: a connection polls
+ * again at most 25 s after its last poll, and says a change at once.
+ */
+export const INBOX_BLOCKED_STALE_MS = 45_000
