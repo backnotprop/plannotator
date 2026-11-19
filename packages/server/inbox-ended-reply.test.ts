@@ -897,3 +897,67 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     expect(taken.took_over).toBe(true);
   });
 });
+
+describe("a reply to a sender nothing wakes (a script's `plannotator inbox call`, a raw MCP call)", () => {
+  /** The session's own tool: a waking connection, as the Claude Code mod sends. */
+  const tool = async (client: Client, project: string, session: string, body: string) =>
+    (await client.callTool({ name: "send_message", arguments: { body, project_path: project, agent_session: session, agent_host: "claude-code", agent_name: "Claude Code" }, _meta: { [INBOX_WAKES_META_KEY]: true } }))
+      .structuredContent as { message_id: string; thread_id: string };
+  /** A shell with no session: no host, no session, nothing that wakes. */
+  const script = async (client: Client, project: string, body: string, replyTo: string) =>
+    (await client.callTool({ name: "send_message", arguments: { body, project_path: project, reply_to: replyTo } })).structuredContent as { message_id: string; thread_id: string };
+  const listRow = async (server: InboxServer, threadId: string) =>
+    ((await (await fetch(`${base(server)}/api/inbox/threads`)).json()) as { sections: { threads: InboxListRow[] }[] }).sections.flatMap((s) => s.threads).find((r) => r.thread_id === threadId)!;
+
+  test("the owner's sequence: the person's reply with nothing aimed goes to the live session that wrote in the thread, and its poll is handed it", async () => {
+    const { server, client, project } = await setup();
+    const first = await tool(client, project, "ses-ops", "The nightly sync is green.");
+    await poll(server, "ses-ops", project);
+    const asked = await script(client, project, "Disk at 91% on node 3.", first.message_id);
+    expect((await thread(server, first.thread_id)).messages.at(-1)!.author).toMatchObject({ kind: "agent", host: null, session: null });
+
+    // The window reads where it goes before the Send.
+    const model = (await (await fetch(`${base(server)}/api/inbox/threads/${first.thread_id}/sessions?answers=${asked.message_id}`)).json()) as { answers?: unknown };
+    expect(model.answers).toEqual({ message_id: asked.message_id, live: false, taker: { host: "claude-code", session: "ses-ops" } });
+
+    const response = await reply(server, asked.message_id, { idempotency_key: "k1", words: "Clear the old snapshots." });
+    expect(response.status).toBe(200);
+    const sent = ((await response.json()) as { reply: { id: string; to?: unknown; reply_to: string } }).reply;
+    expect(sent).toMatchObject({ reply_to: asked.message_id, to: { host: "claude-code", session: "ses-ops" } });
+    const commands = await poll(server, "ses-ops", project);
+    expect(commands.map((c) => c.id)).toEqual([sent.id]);
+    expect(commands[0]).toMatchObject({ type: "reply", reply_to: asked.message_id, redirected_from: "agent" });
+    // A replay answers what it wrote.
+    const replay = (await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "Clear the old snapshots." })).json()) as { replayed: boolean; reply: { id: string } };
+    expect(replay).toMatchObject({ replayed: true, reply: { id: sent.id } });
+
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-ops", host: "claude-code", type: "delivered", id: sent.id });
+    expect((await listRow(server, first.thread_id)).delivery).toMatchObject({ state: "delivered", host: "claude-code" });
+    expect(await poll(server, "ses-ops", project)).toEqual([]);
+  });
+
+  test("an aimed reply, and a reply to the session's own message, are as before", async () => {
+    const { server, client, project } = await setup();
+    const first = await tool(client, project, "ses-ops", "Started.");
+    await poll(server, "ses-ops", project);
+    await poll(server, "ses-other", project);
+    const asked = await script(client, project, "Check it.", first.message_id);
+    const aimed = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "One.", to: { session: "ses-other" } })).json()) as { reply: { to: unknown } }).reply;
+    expect(aimed.to).toEqual({ host: "claude-code", session: "ses-other" });
+    const own = ((await (await reply(server, first.message_id, { idempotency_key: "k2", words: "Two." })).json()) as { reply: { id: string; to?: unknown } }).reply;
+    expect(own.to).toBeUndefined();
+    expect((await poll(server, "ses-ops", project)).map((c) => c.id)).toEqual([own.id]);
+  });
+
+  test("a reply left for the script (nothing was live) is settled by the session's read_thread, and the row says who read it", async () => {
+    const { server, client, project } = await setup();
+    const first = await tool(client, project, "ses-ops", "Started.");
+    const asked = await script(client, project, "Disk at 91%.", first.message_id);
+    const sent = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "Clear it." })).json()) as { reply: { to?: unknown } }).reply;
+    expect(sent.to).toBeUndefined();
+    expect((await listRow(server, first.thread_id)).delivery).toMatchObject({ state: "saved", reason: "ended" });
+    await poll(server, "ses-ops", project);
+    await client.callTool({ name: "read_thread", arguments: { thread_id: first.thread_id, agent_session: "ses-ops", agent_host: "claude-code" } });
+    expect((await listRow(server, first.thread_id)).delivery).toMatchObject({ state: "delivered", read_by: "claude-code" });
+  });
+});

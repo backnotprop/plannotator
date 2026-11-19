@@ -4988,6 +4988,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     waitOf: live.waitOf,
     // A reply to a T3 thread or a cloud agent waits for it, against other agents' reads, until that wake knows it gone.
     wakeGone: (session) => t3Wake.gone(session) || cloudWake.status(session) === "dead",
+    // A reply to a sender nothing wakes (a script, a raw MCP call): the live session that takes it, if any.
+    unwakeable: live.unwakeableReply,
   });
   // A session's turn starting or ending, its connection going away, or an asker grace running out moves a
   // row's delivery without writing a store line. The sessions' delivery signature is compared on a short
@@ -7773,7 +7775,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
             const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null) : null;
             const asked = body.to === undefined || startsSession ? undefined : store.message(messageId);
-            const to = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
+            const named = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
+            // A reply the window aimed nowhere, to a sender nothing wakes (a script, a raw MCP call) that is not there:
+            // the live session that wrote in the thread takes it (`unwakeableReply`), as if it answered its own message.
+            // A replay answers what it wrote; a hand-off names its own session.
+            const unaimed = body.to === undefined && !launching && !(typeof body.idempotency_key === "string" && store.replyByKey(messageId, body.idempotency_key.trim()));
+            const taker = unaimed ? (live.unwakeableReply(messageId)?.taker ?? null) : null;
+            // `named` null: the session the person picked is not live (the store refuses it, nothing written).
+            const to = named !== undefined ? named : (taker ?? undefined);
             // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live
             // with a connection that understands tags, or an MCP agent the Inbox knows; any other
             // is refused before anything is written. A replay answers what it wrote, as it was.

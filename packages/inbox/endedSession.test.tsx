@@ -122,6 +122,8 @@ let moveRefusal: string | null = null;
 let holdAsker: { session: string; held: (() => void)[] } | null = null;
 /** The machine's launch block on New message's read (`GET /api/inbox/sessions`): what the reply's start row offers. */
 let launchBlock: Record<string, unknown> | null = null;
+/** The server's answer to `?answers=<message id>` (a sender nothing wakes): null, none (an older Inbox). */
+let unwakeable: { live: boolean; taker: { host: string; session: string } | null } | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -132,6 +134,7 @@ beforeEach(() => {
   moveRefusal = null;
   holdAsker = null;
   launchBlock = null;
+  unwakeable = null;
   annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -152,7 +155,9 @@ beforeEach(() => {
       }
       const asker = liveness && asked ? { session: asked, live: liveness[asked] ?? false } : sessions.asker;
       const launch = launchBlock && path.startsWith('/api/inbox/sessions') ? { launch: launchBlock } : {};
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}), ...launch });
+      const answersId = new URL(path, 'http://inbox.test').searchParams.get('answers');
+      const answers = answersId && unwakeable ? { answers: { message_id: answersId, ...unwakeable } } : {};
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}), ...launch, ...answers });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -1265,4 +1270,72 @@ test.skipIf(!hasDom)('on a phone: the sheet ends with the start row, "in ledger"
   act(() => button(el, 'Send').click());
   await settle();
   expect(replies().map((r) => r.body.to)).toEqual([{ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } }]);
+});
+
+// A sender nothing wakes (the owner's thread, 2026-11-19): a script's `plannotator inbox call`, no host, no session,
+// wrote after the session's own message. The server says where a reply to it goes (`?answers=`). The failures these
+// catch: the window naming "An agent" for a reply a live session takes, never calling it ended when nothing will
+// take it (so no choice of another session), or calling it ended while the server routes it.
+const M2 = 'msg_01M4H7SCR1PTSCR1PTSCR1PT00';
+const SCRIPT = { kind: 'agent' as const, host: null, session: null, name: null };
+function scripted(): InboxMessageWire {
+  return { ...asking(), id: M2, reply_to: M1, author: SCRIPT, subject: null, body: 'Disk at 91% on node 3.', created_at: '2026-10-11T10:45:00.000Z', questions: [], wakes: undefined };
+}
+
+test.skipIf(!hasDom)('a script wrote last and the session that wrote here is live: no ended note, Send goes with no `to` (the server gives it that session), and the line names it', async () => {
+  sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true })] };
+  unwakeable = { live: false, taker: { host: 'claude-code', session: 'ses_asker' } };
+  const el = await render(threadOf(asking(), scripted()));
+  expect(el.querySelector('[data-session-ended]')).toBeNull();
+  await writeReply(el);
+  expect(el.querySelector('[data-asker-ended]')).toBeNull();
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(pillList(el)).toBeNull();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.path).toContain(M2);
+  expect(replies()[0]!.body.to).toBeUndefined();
+
+  // A reply left for the script before (no `to`): that session reads it, and the line says so.
+  act(() => root?.unmount());
+  host?.remove();
+  const after = await render(threadOf(asking(), scripted(), personReply({ reply_to: M2 })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for Claude Code. It sees it when it next reads this thread.');
+});
+
+test.skipIf(!hasDom)('a script wrote last and no live session wrote here: it reads as ended, the pill offers the live sessions, and the saved line says ended', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  unwakeable = { live: false, taker: null };
+  const el = await render(threadOf(asking(), scripted()));
+  const note = el.querySelector('[data-asker-ended]') as HTMLElement;
+  expect(note.getAttribute('data-asker-ended')).toBe('live');
+  expect(note.querySelector('b')?.textContent).toBe('This agent session has ended.');
+  await writeReply(el);
+  act(() => pill(el)!.click());
+  await settle();
+  pickOnly(el, 'ses_other');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+
+  act(() => root?.unmount());
+  host?.remove();
+  const after = await render(threadOf(asking(), scripted(), personReply({ reply_to: M2 })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe("Saved for An agent. That session has ended; it gets this only if it's resumed.");
+});
+
+test.skipIf(!hasDom)('a script that is there now (it called the Inbox), or an older Inbox that does not say: as before, no ended note and the line reads as before', async () => {
+  for (const answer of [{ live: true, taker: null }, null]) {
+    sessions = { sessions: [live('ses_other', 'pi')] };
+    unwakeable = answer;
+    const el = await render(threadOf(asking(), scripted(), personReply({ reply_to: M2 })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+    expect(el.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for An agent. It sees it when it next reads this thread.');
+    act(() => root?.unmount());
+    host?.remove();
+    const open = await render(threadOf(asking(), scripted()));
+    expect(open.querySelector('[data-asker-ended]')).toBeNull();
+    act(() => root?.unmount());
+    host?.remove();
+  }
 });

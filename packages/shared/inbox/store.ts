@@ -94,6 +94,7 @@ import {
   isInboxActionReport,
   inboxActionInDraft,
   inboxAgentName,
+  inboxUnwakeableSender,
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_THREAD_NAME_MAX,
@@ -737,6 +738,20 @@ export interface InboxDeliveryPresence {
    * longer paired): nothing will send it a reply later (`owedToAnother`). Absent: never.
    */
   wakeGone?(session: string): boolean;
+  /**
+   * For an agent message from a sender nothing wakes (`inboxUnwakeableSender`): whether that sender's own session
+   * is there now (`live`), and else the live session a reply to it goes to (`taker`; null when none). Null for any
+   * other message. Absent: not known (the sender reads as not there, with no session to take its reply).
+   */
+  unwakeable?(messageId: string): InboxUnwakeableReply | null;
+}
+
+/** A reply to a sender nothing wakes, as the live sessions decide it (packages/server/inbox-sessions.ts, `unwakeableReply`). */
+export interface InboxUnwakeableReply {
+  /** The sender's own session is there now: the reply stays its own, as any reply. */
+  live: boolean;
+  /** Else the live session that takes it: the latest live writer in the thread, in its project. Null when none. */
+  taker: { host: string; session: string } | null;
 }
 
 /** The review app's comment types a guided-review line comment can be. */
@@ -2584,6 +2599,7 @@ export class InboxStore {
       stuck: noted("stuck", bound(presence.stuck)),
       autoSendAfterMs: presence.autoSendAfterMs,
       waitOf: noted("waitOf", bound(presence.waitOf)),
+      unwakeable: noted("unwakeable", bound(presence.unwakeable)),
     };
   }
 
@@ -2702,7 +2718,15 @@ export class InboxStore {
       // The session that asked (the thread's own rule, with its defaults): called ended only when its message
       // came through a waking connection and the Inbox has not heard from it (with the grace).
       const askingAuthor = asking?.author.kind === "agent" ? asking.author : null;
-      const askerEnded = !resolved && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
+      // A sender nothing wakes (a script, a raw MCP call) counts as ended too, as the thread says it: not there now,
+      // and no live session that wrote in the thread takes its reply (`InboxDeliveryPresence.unwakeable`).
+      const unwakeableOf = (message: InboxMessage | null | undefined) => (message && inboxUnwakeableSender(message) ? (presence?.unwakeable?.(message.id) ?? null) : null);
+      const askingUnwakeable = unwakeableOf(asking);
+      const askerEnded =
+        !resolved &&
+        ((asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session)) || (askingUnwakeable !== null && !askingUnwakeable.live && askingUnwakeable.taker === null));
+      // A reply to such a sender that a live session takes now (by its read) is named for that session.
+      const taker = unwakeableOf(repliedTo)?.taker ?? null;
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
@@ -2725,8 +2749,8 @@ export class InboxStore {
         send_now: decision.sendNow,
         message_id: last.id,
         at: deliveredAt,
-        host: author?.host ?? null,
-        name: author?.name ?? null,
+        host: taker ? taker.host : (author?.host ?? null),
+        name: taker ? null : (author?.name ?? null),
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
@@ -3887,14 +3911,23 @@ export class InboxStore {
   private readByAnother(message: InboxMessage, reader: string | null | undefined): string | null {
     if (!reader || message.to || hasTags(message)) return null;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
-    if (asked?.author.kind !== "agent" || !asked.author.host || asked.author.session === reader) return null;
+    if (asked?.author.kind !== "agent" || asked.author.session === reader) return null;
+    // A sender nothing wakes has no host to tell apart: any reader the Inbox can name is not it ("Read by Claude Code").
+    if (inboxUnwakeableSender(asked)) return this.namedHostOf(reader);
+    if (!asked.author.host) return null;
     // Both from the names the Inbox knows: an agent's host is free text, "Cursor" and "cursor" are one agent, and so
     // are `claude` and `claude-code`, so the names are what differ.
     if (!Object.hasOwn(INBOX_HOST_NAMES, asked.author.host)) return null;
-    const known = this.deliveryPresence?.hostOf?.(reader);
-    const wrote = known ? null : this.latestAgentMessages().get(reader)?.author;
+    const host = this.namedHostOf(reader);
+    return host && INBOX_HOST_NAMES[host] !== INBOX_HOST_NAMES[asked.author.host] ? host : null;
+  }
+
+  /** The host of a session, when the Inbox knows it and has a name for it: its poll or MCP call, else its own latest message. */
+  private namedHostOf(session: string): string | null {
+    const known = this.deliveryPresence?.hostOf?.(session);
+    const wrote = known ? null : this.latestAgentMessages().get(session)?.author;
     const host = known ?? (wrote?.kind === "agent" ? wrote.host : null);
-    return host && Object.hasOwn(INBOX_HOST_NAMES, host) && INBOX_HOST_NAMES[host] !== INBOX_HOST_NAMES[asked.author.host] ? host : null;
+    return host && Object.hasOwn(INBOX_HOST_NAMES, host) ? host : null;
   }
 
   /**
@@ -3917,6 +3950,11 @@ export class InboxStore {
    * So does a session the Inbox's own wake reaches whatever its message
    * promised (`wakesLater`), until that wake finds it gone: its id is the
    * same on every read, so a reader new to the thread is another agent.
+   *
+   * A reply to a sender nothing wakes (`inboxUnwakeableSender`: no host, a
+   * script or a raw MCP call) is not owed to another when an agent session
+   * the Inbox can name reads it, even one that wrote in the thread, unless the
+   * sender's own session is there now: nothing will ever take it otherwise.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
     if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
@@ -3926,6 +3964,9 @@ export class InboxStore {
     if ((asked.author.session ?? null) === reader) return false;
     if (asked.wakes === true) return true;
     if (wakesLater(asked.author) && this.deliveryPresence?.wakeGone?.(asked.author.session) !== true) return true;
+    // A sender nothing wakes, not there now: an agent session the Inbox can name takes its reply by reading it,
+    // though it wrote in the thread (it is the session that reply now goes to, `unwakeableReply`).
+    if (reader !== null && inboxUnwakeableSender(asked) && this.deliveryPresence?.unwakeable?.(asked.id)?.live !== true && this.namedHostOf(reader)) return false;
     return !isNewcomer();
   }
 

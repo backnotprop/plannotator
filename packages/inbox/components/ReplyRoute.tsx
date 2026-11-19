@@ -206,16 +206,18 @@ export function SessionEndedMark() {
 
 /** The note at the top of the foot, before the person replies (two variants); the host's always-mounted status region holds it. */
 export function AskerEndedNote({ asking, project, anyLive }: { asking: AskingSession; project: string; anyLive: boolean }) {
+  // A sender with no host and no name of its own (a script): "This agent session", never "This An agent session".
+  const name = asking.host || (asking.message.author.kind === 'agent' && asking.message.author.name) ? asking.name : 'agent';
   return (
     <p className="ib-sessnote" data-asker-ended={anyLive ? 'live' : 'none-live'}>
       <Icon name="info" size={15} />
       {anyLive ? (
         <span>
-          <b>This {asking.name} session has ended.</b> Send your reply to another session, or archive it if it's done.
+          <b>This {name} session has ended.</b> Send your reply to another session, or archive it if it's done.
         </span>
       ) : (
         <span>
-          <b>This {asking.name} session has ended</b>, and no agent is running in {project} now. A reply waits here until that session is resumed.
+          <b>This {name} session has ended</b>, and no agent is running in {project} now. A reply waits here until that session is resumed.
         </span>
       )}
     </p>

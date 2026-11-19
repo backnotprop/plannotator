@@ -57,18 +57,19 @@ export type NewMessageMode = { kind: 'pick' } | { kind: 'none' } | { kind: 'comp
  * The project's live sessions, read when the thread opens, every few seconds
  * while it stays open, and on demand. With `asker` (the session that asked,
  * for a host whose sessions poll), also whether that session is still there.
+ * With `answers` (a message from a sender nothing wakes), also where a reply to it goes.
  */
-export function useLiveSessions(threadId: string, asker: string | null = null, enabled = true, refreshMs = REFRESH_MS) {
+export function useLiveSessions(threadId: string, asker: string | null = null, enabled = true, refreshMs = REFRESH_MS, answers: string | null = null) {
   const [model, setModel] = useState<LiveSessionsModel | null>(null);
   const load = useCallback(async (): Promise<LiveSessionsModel | null> => {
     try {
-      const next = await inboxApi.sessions(threadId, asker);
+      const next = await inboxApi.sessions(threadId, asker, [], undefined, answers);
       setModel(next);
       return next;
     } catch {
       return null;
     }
-  }, [threadId, asker]);
+  }, [threadId, asker, answers]);
   useEffect(() => {
     setModel(null);
     // `enabled` false: nothing to watch (compose's "Not delivered" asks only while a message waits).

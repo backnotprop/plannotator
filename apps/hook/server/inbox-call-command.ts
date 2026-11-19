@@ -117,6 +117,10 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
   if (flag !== null) {
     const caller = callerOfFlag(flag);
     if (!caller) return { ok: false, usage: true, code: "invalid_session", message: `--session takes <host>:<id> or <id>, as your Tidy's wake gives it, not ${JSON.stringify(flag)}.` };
+    // A bare id this shell names is that session, host and name too: without them a reply to it reads as from
+    // "An agent", and the window cannot tell it from a script nothing wakes.
+    const own = caller.host === undefined ? named.filter((other) => other.session === caller.session) : [];
+    if (own.length === 1) return { ok: true, caller: own[0]! };
     // A host that names no session, in this shell's line, may be who holds the flag; otherwise the shell knows better.
     if (named.length === 0 || sessionless.length > 0 || named.some((other) => other.host === caller.host && other.session === caller.session)) return { ok: true, caller };
     const shell = named.map(refOf).join(", ");

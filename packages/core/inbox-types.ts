@@ -31,6 +31,7 @@ import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
+import { INBOX_PERMISSION_SESSION_PREFIX } from "./inbox-permission";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 import { INBOX_T3_HOST, isT3ThreadId, type InboxT3Status, type InboxT3WaitReason } from "./inbox-t3";
 
@@ -492,6 +493,18 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
   if (author.name) return author.name;
   if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
   return "An agent";
+}
+
+/**
+ * An agent message from a sender nothing can wake: no host, and not sent through a connection that wakes its
+ * session (`wakes`). A script's `plannotator inbox call` outside any agent session, the stdio shim outside one, a
+ * raw MCP call. A reply to it is owed to a sender that never polls, so the Inbox gives it to the live session
+ * that wrote in the thread (packages/server/inbox-sessions.ts, `unwakeableReply`). Never an Inbox permission
+ * question's session.
+ */
+export function inboxUnwakeableSender(message: { author: { kind: string; host?: string | null; session?: string | null }; wakes?: boolean } | null | undefined): boolean {
+  if (!message || message.author.kind !== "agent" || message.author.host || message.wakes === true) return false;
+  return !(typeof message.author.session === "string" && message.author.session.startsWith(INBOX_PERMISSION_SESSION_PREFIX));
 }
 
 /**

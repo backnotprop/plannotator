@@ -11,7 +11,7 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { ThreadTagLine } from './ThreadTagLine';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxUnwakeableSender, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
@@ -292,7 +292,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
   // (so a thread with one agent reads as it always did). Handoff "multi-agent-thread-model", option A.
   const firstAgent = startedTo ?? (root.author.kind === 'agent' ? root.author : null);
-  const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
+  const recipientName = (message: InboxMessageWire | null | undefined) => {
+    // A sender nothing wakes (a script, a raw MCP call) whose reply a live session that wrote here takes (`answers`): that session.
+    if (message && unwakeable?.taker && message.id === unwakeable.message_id) return hostName(unwakeable.taker.host);
+    return isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker;
+  };
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
   // 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest
@@ -1032,8 +1036,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const sendCarries = hasWords || records.length > 0 || replyUploads.length > 0 || draftPastes > 0;
   const wordsAsking = askingSessionOf(thread, { skip: skipIds, carries: sendCarries });
   const askerToWatch = wordsAsking && askerCanEnd(wordsAsking) ? wordsAsking.session : null;
+  // The words answer a sender nothing wakes (a script, a raw MCP call): the server says where the reply goes.
+  const unwakeableAsk = wordsAsking && inboxUnwakeableSender(wordsAsking.message) ? wordsAsking.message.id : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
-  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
+  const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch, true, undefined, unwakeableAsk);
+  /** For such a sender: whether it is there, else the live session that wrote here and takes the reply (`answers`). */
+  const unwakeable = unwakeableAsk && live?.answers?.message_id === unwakeableAsk ? live.answers : null;
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
   // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
@@ -1043,7 +1051,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
   const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
   const endedOthers = otherEnded.ended;
-  const wordsEnded = !resolved && wordsAsking?.session !== resumingSession && askerHasEnded(wordsAsking, live);
+  // A sender nothing wakes that is not there, with no live session that wrote here to take its reply: ended, as a
+  // session that asked and stopped is (the line, and the choice of another session).
+  const unwakeableEnded = unwakeable !== null && !unwakeable.live && unwakeable.taker === null;
+  const wordsEnded = !resolved && wordsAsking?.session !== resumingSession && (askerHasEnded(wordsAsking, live) || unwakeableEnded);
   const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
@@ -1059,7 +1070,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
   const { sessions, sessionNames } = useThreadSessions(participants, agentContext, machine, sessionLabels);
-  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
+  const tagOwner = wordsAsking?.session || taggable?.owner?.session || null;
   const agentNames = useAgentNames();
   const tagOpts: TagOption[] = useMemo(() => namedTagOptions(tagOptions(taggable, tagOwner, thread.project.id, whenTime), agentNames), [taggable, tagOwner, thread.project.id, agentNames]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
