@@ -3931,6 +3931,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-sheet-h .ib-sp { flex: 1; }
   .ib-changed { flex-wrap: wrap; padding: 8px 14px; }
   .ib-docscroll { padding: 56px 10px 24px; }
+  /* Full screen, the file's bar floats 14 px over the bottom (54 px tall, above the home indicator): the end of a
+     document scrolls clear of it, so its last lines and a drawing's foot can be read and pressed. */
+  .ib-view.ib-fullview.ib-phone .ib-docscroll { padding-bottom: calc(92px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); }
   .ib-toolstrip { top: 10px; left: 10px; }
   /* the viewer's Global comment and Copy float right on a desktop; on a phone they sit on their own line, so the file keeps the width */
   .ib-phone [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }

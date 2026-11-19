@@ -389,6 +389,51 @@ test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and mo
   delete (window as { innerHeight?: number }).innerHeight;
 });
 
+// A file full screen on a phone with its Comment / Reply card open (iPhone 15 and SE widths, as drawn there): "Added to
+// your reply" goes above the card, never over its tabs; minimized, above its pill. A fixed 148 px covered the tabs.
+for (const phone of [
+  { width: 393, height: 852, card: { left: 8, top: 644, width: 377, height: 200 }, tabsTop: 649 },
+  { width: 320, height: 568, card: { left: 8, top: 352, width: 304, height: 208 }, tabsTop: 357 },
+]) {
+  test.skipIf(!hasDom)(`a phone toast at ${phone.width} px sits above a full-screen file's Comment / Reply card and never over its tabs`, () => {
+    phoneWindow(true);
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: phone.height });
+    const page = document.createElement('div');
+    document.body.appendChild(page);
+    host = page;
+    const view = document.createElement('section');
+    view.className = 'ib-view ib-fullview ib-phone';
+    const card = document.createElement('div');
+    card.className = 'ib-fcomp ib-mode-reply ib-phone';
+    boxAt(card, phone.card.left, phone.card.top, phone.card.width, phone.card.height);
+    view.appendChild(card);
+    page.appendChild(view);
+    const toast = show({ icon: 'check', lead: 'Markup added to your reply', phoneLead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+    const bottom = parseFloat(toast.style.bottom);
+    // The toast's lowest pixel, 44 px tall at the least: above the card's top, so above the tabs inside it.
+    const toastBottomEdge = phone.height - bottom;
+    expect(toastBottomEdge).toBeLessThanOrEqual(phone.card.top);
+    expect(toastBottomEdge).toBeLessThan(phone.tabsTop);
+    expect(toastBottomEdge - 44).toBeGreaterThan(0);
+    delete (window as { innerHeight?: number }).innerHeight;
+  });
+}
+
+test.skipIf(!hasDom)("a phone toast sits above a full-screen file's minimized card (its pill), not over it", () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  const wrap = document.createElement('div');
+  wrap.className = 'ib-fcomp-pillwrap ib-phone';
+  boxAt(wrap, 12, 732, 52, 52);
+  page.appendChild(wrap);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe(`${852 - 732 + 8}px`);
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
 test.skipIf(!hasDom)("a phone toast sits above a Shape board's dock in its thread, whose foot is hidden under the board", () => {
   phoneWindow(true);
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });

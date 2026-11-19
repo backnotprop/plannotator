@@ -64,6 +64,7 @@ import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
 import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { useNarrowPhone } from '../phone';
 import { scrollerOf } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
@@ -451,6 +452,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** The thread's files outside the set being stepped through (the pill's sheet lists them). */
   const outsideSet = Math.max(0, allSteps.length - steps.length);
   const phone = props.phone === true;
+  const narrowPhone = useNarrowPhone();
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
@@ -2666,6 +2668,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 showHelpLink={false}
                 hideQuickLabel
                 compact
+                // Under 360 px the labelled strip ran under the Contents button: its tools as icons there.
+                iconOnly={phone && narrowPhone && contentsButton !== null}
               />
             </div>
           )}

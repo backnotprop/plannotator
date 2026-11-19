@@ -444,6 +444,7 @@ packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.escape.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
+packages/ui/components/ImageAnnotator/ZoomableCanvas.test.tsx
 packages/ui/utils/undoHistory.dom.test.ts
 packages/ui/utils/codeBlockMark.test.ts
 packages/ui/components/InlineMarkdown.seam.test.tsx

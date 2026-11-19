@@ -253,8 +253,10 @@ function useFit(ref: RefObject<HTMLDivElement | null>, toast: InboxToastModel, p
  * What a phone's toast keeps clear of, at the window's bottom: the open
  * thread's foot (Reply, the reply box), a Shape board's dock and pill (the
  * board takes the foot's place in its thread), and a full-screen file's bar,
- * its name chip and its captions. The image and video composers have their own
- * place for it (inbox.css), so their windows are left to the stylesheet.
+ * its name chip and its captions, and its Comment / Reply card (whose tabs a
+ * fixed height above the bottom covered: "Added to your reply" over them) or
+ * that card's pill. The image composer outside full screen has its own place
+ * for it (inbox.css), so its window is left to the stylesheet.
  */
 const PHONE_FLOOR = [
   'section.ib-pane .ib-pfoot',
@@ -265,8 +267,10 @@ const PHONE_FLOOR = [
   '.ib-view.ib-phone .ib-fvchip',
   '.ib-view.ib-phone .ib-optcap',
   '.ib-view.ib-phone .ib-linknote',
+  '.ib-fcomp.ib-phone',
+  '.ib-fcomp-pillwrap.ib-phone',
 ].join(', ');
-const PHONE_FLOOR_OWN = '.ib-imgcompose, .ib-fcomp';
+const PHONE_FLOOR_OWN = '.ib-imgcompose';
 
 /**
  * How far above the window's bottom a phone's toast sits: 8 px over the
