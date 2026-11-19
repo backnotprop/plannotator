@@ -99,8 +99,8 @@ A row has:
 Rules the test enforces:
 
 - **One decision per entry.** `v1` and `rethink` agree. An entry that one row marks `v1` and another `later` or `never` fails. An `undecided` row beside a decided one does not count.
-- **A new entry forces a choice.** You can decide it, or run `bun scripts/mobile/parity.ts --defer`, which gives each new entry an `undecided` row dated today. The owner then decides it.
-- **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the test fails until `bun scripts/mobile/parity.ts --owed` marks the row `owed` with today's date.
+- **An Inbox author runs one command.** `bun scripts/mobile/all.ts` keeps the ledger in step: each new entry gets an `undecided` row dated today, an entry the window lost leaves its row, and a `done` feature the window changed becomes `owed`. The author never picks a mark. The owner's operators decide `undecided` rows within 14 days.
+- **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the same command marks the row `owed` with today's date.
 - **The clock** is a script, `bun scripts/mobile/parity-debts.ts`. An `undecided` row or an `owed` debt older than 14 days fails it. Only `.github/workflows/mobile-ledger.yml` runs it (ubuntu, seconds): nightly, by hand, on a push to main that changes the ledger, and on a pull request only when the clock itself changes. An Inbox pull request that records a new entry in the ledger starts neither it nor a macOS build. It is not a test file, so no `bun test` runs it: the Test workflow, main's full run and a release's checks never fail for a mobile debt. Red there holds back only the app's own release. `tests/mobile-parity-debts.test.ts` checks the rule on fixed dates, never the real ledger, and `scripts/ci-affected-map.test.ts` holds all of this.
 
 The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names, then corrected by review. Rows whose `source` starts with `seed:` cover the entries no scope row names:
@@ -118,9 +118,9 @@ When you fold such an entry into its feature's row, take it out of the seed row.
 
 `tests/mobile-parity.test.ts` reads the live surface, not the committed file. It fails with:
 
-> The window gained `<entry>`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink, or run `bun scripts/mobile/parity.ts --defer` to leave it undecided for the owner
+> The window gained `<entry>`. Run `bun scripts/mobile/all.ts` and commit: it records the entry in the ledger as undecided, for the owner to decide.
 
-Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no longer has fails too. The test takes about half a second.
+Every failure an Inbox change can cause names that one command: a new or lost entry, a changed built feature, a stale generated file. Only the ledger's own rules (a mark, a why, two decisions for one entry) need a person to edit the ledger. The test takes about half a second.
 
 `tests/inbox-api-table.test.ts` ties `docs/agent-guides/server-and-storage.md`'s Inbox API table to the same server-derived route list. An endpoint with no row there fails, whatever the phone decides.
 

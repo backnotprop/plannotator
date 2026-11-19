@@ -8,6 +8,7 @@
  * the contract.
  */
 import { generateDoor } from './door';
+import { generateLedger } from './parity';
 import type { Output } from './lib';
 import { generateSchema } from './schema';
 import { generateSurface } from './surface';
@@ -24,5 +25,6 @@ export const GENERATORS: readonly (readonly [string, () => Output[] | Promise<Ou
   ['tokens', generateTokens],
   ['words', generateWords],
   ['surface', generateSurface],
+  ['ledger', generateLedger],
   ['vectors', generateVectors],
 ];

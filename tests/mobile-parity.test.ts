@@ -12,8 +12,8 @@
  *  - a row with a mark that is not one of the five, later or never with no
  *    why, undecided with no date, one entry with two decisions, a built
  *    feature the window changed without it being marked owed ("the rules");
- *  - --defer and --owed writing something other than what they promise
- *    ("the tools").
+ *  - the one command (bun scripts/mobile/all.ts) keeping the ledger in step
+ *    other than it promises ("the tools").
  * The 14-day clock is tests/mobile-parity-debts.test.ts, apart, so a pull
  * request that only changes the Inbox never fails for an old debt.
  *
@@ -21,7 +21,7 @@
  * builds nothing.
  */
 import { describe, expect, test } from 'bun:test';
-import { deferNew, entryFingerprints, gained, markOwed, parityProblems, readLedger, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
+import { deferNew, entryFingerprints, gained, ledgerInStep, markOwed, parityProblems, readLedger, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
 import { buildSurface, surfaceEntries } from '../scripts/mobile/surface';
 
 describe('the ledger decides', () => {
@@ -37,14 +37,14 @@ const row = (over: Partial<Ledger['rows'][number]>): Ledger['rows'][number] => (
 });
 
 describe('the rules', () => {
-  test('a new entry fails with the words that say what to do, and the one command that defers it', () => {
+  test('a new entry fails, and the message names the one command', () => {
     expect(parityProblems({ rows: [row({ surface: ['door:GET a'] })] }, ['door:GET a', 'door:GET b'], [])).toEqual([gained('door:GET b')]);
-    expect(gained('door:GET b')).toContain('bun scripts/mobile/parity.ts --defer');
+    expect(gained('door:GET b')).toContain('Run `bun scripts/mobile/all.ts` and commit');
   });
 
   test('a row naming an entry that is gone fails', () => {
     expect(parityProblems({ rows: [row({ surface: ['door:GET a', 'door:GET gone'] })] }, ['door:GET a'], [])).toEqual([
-      'The window lost `door:GET gone`. Remove it from ledger row r.',
+      'The window lost `door:GET gone` (ledger row r). Run `bun scripts/mobile/all.ts` and commit.',
     ]);
   });
 
@@ -76,9 +76,9 @@ describe('the rules', () => {
     const built = row({ id: 'built', surface: ['field:T.x'], ios: { state: 'done', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, prints) } });
     expect(parityProblems({ rows: [built] }, ['field:T.x'], [], prints)).toEqual([]);
     const changed = new Map([['field:T.x', 'bbbb']]);
-    expect(parityProblems({ rows: [built] }, ['field:T.x'], [], changed)).toEqual(['built: the window changed what ios built. Run `bun scripts/mobile/parity.ts --owed` to record the debt.']);
+    expect(parityProblems({ rows: [built] }, ['field:T.x'], [], changed)).toEqual(['built: the window changed what ios built. Run `bun scripts/mobile/all.ts` and commit: it records the debt.']);
     expect(parityProblems({ rows: [row({ id: 'n', ios: { state: 'done' } })] }, [], [], prints)).toEqual([
-      'n: ios is done with no fingerprint. Run `bun scripts/mobile/parity.ts --owed` once to record it.',
+      'n: ios is done with no fingerprint. Run `bun scripts/mobile/all.ts` and commit.',
     ]);
   });
 
@@ -89,18 +89,27 @@ describe('the rules', () => {
 });
 
 describe('the tools', () => {
-  test('--defer gives each new entry an undecided row of its own, dated, and the ledger then holds', () => {
+  test('a new entry gets an undecided row of its own, dated, and the ledger then holds', () => {
     const next = deferNew({ rows: [row({ surface: ['door:GET a'] })] }, ['door:GET a', 'field:T.new'], '2026-11-18');
     expect(next.rows.at(-1)).toEqual(row({ id: 'undecided-field-t-new', title: 'field:T.new', surface: ['field:T.new'], mobile: 'undecided', since: '2026-11-18' }));
     expect(parityProblems(next, ['door:GET a', 'field:T.new'], [])).toEqual([]);
   });
 
-  test('--owed marks a changed built feature owed today and records a fingerprint never recorded', () => {
+  test('a changed built feature becomes owed today, and a fingerprint never recorded is recorded', () => {
     const before = new Map([['field:T.x', 'aaaa']]);
     const after = new Map([['field:T.x', 'bbbb']]);
     const built = row({ id: 'built', surface: ['field:T.x'], ios: { state: 'done', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, before) } });
     const owed = markOwed({ rows: [built, row({ id: 'n', surface: ['field:T.x'], ios: { state: 'done' } })] }, after, '2026-11-18');
     expect(owed.rows[0]!.ios).toEqual({ state: 'owed', owed_since: '2026-11-18', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, after) });
     expect(owed.rows[1]!.ios).toEqual({ state: 'done', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, after) });
+  });
+
+  test('the one command keeps the ledger in step: a lost entry leaves its row, a new one is undecided, and the ledger holds', () => {
+    const prints = new Map([['field:T.x', 'aaaa']]);
+    const before: Ledger = { rows: [row({ id: 'a', surface: ['field:T.x', 'field:T.gone'] })] };
+    const next = ledgerInStep(before, ['field:T.x', 'field:T.new'], prints, '2026-11-18');
+    expect(next.rows.map((r) => [r.id, r.surface, r.mobile])).toEqual([['a', ['field:T.x'], 'v1'], ['undecided-field-t-new', ['field:T.new'], 'undecided']]);
+    expect(parityProblems(next, ['field:T.x', 'field:T.new'], [], prints)).toEqual([]);
+    expect(ledgerInStep(next, ['field:T.x', 'field:T.new'], prints, '2026-12-01')).toEqual(next);
   });
 });

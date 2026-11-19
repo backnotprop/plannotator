@@ -6,13 +6,16 @@
  * tests/mobile-parity.test.ts runs them on the real ledger. The clock (an
  * undecided row or a debt older than 14 days) is parity-debts.ts, run apart.
  *
- *   bun scripts/mobile/parity.ts --defer   every new entry becomes an `undecided` row, dated today
- *   bun scripts/mobile/parity.ts --owed    every built feature the window changed becomes `owed`, dated today
+ * The one command, `bun scripts/mobile/all.ts`, keeps the ledger in step
+ * (generateLedger): an entry the window gained becomes an `undecided` row
+ * dated today, an entry it lost leaves its row, and a built feature the
+ * window changed becomes `owed`. An Inbox author never picks a mark; the
+ * owner's operators decide undecided rows within the 14 days.
  */
 import { createHash } from 'node:crypto';
 import { doorEntries } from './door';
 import { FLOW_FILES } from './flows';
-import { OUT, jsonText, readRepoText, writeRepoText } from './lib';
+import { OUT, REGENERATE, jsonText, readRepoText, type Output } from './lib';
 import { buildSchema } from './schema';
 import { CHECK_LINE, buildSurface, surfaceEntries } from './surface';
 
@@ -42,15 +45,13 @@ export type LedgerRow = {
 
 export type Ledger = { about?: string; rows: LedgerRow[] };
 
-export const DEFER = 'bun scripts/mobile/parity.ts --defer';
-export const OWED = 'bun scripts/mobile/parity.ts --owed';
 
 export function readLedger(): Ledger {
   return JSON.parse(readRepoText(OUT.ledger)) as Ledger;
 }
 
 export const gained = (entry: string) =>
-  `The window gained \`${entry}\`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink, or run \`${DEFER}\` to leave it undecided for the owner`;
+  `The window gained \`${entry}\`. Run \`${REGENERATE}\` and commit: it records the entry in the ledger as undecided, for the owner to decide.`;
 
 /** Marks that agree: v1 and rethink are both "in the first app". */
 const decision = (mark: string) => (mark === 'rethink' ? 'v1' : mark);
@@ -93,7 +94,7 @@ export function parityProblems(ledger: Ledger, entries: readonly string[], check
     if ((row.mobile === 'later' || row.mobile === 'never') && !row.why?.trim()) problems.push(`${row.id}: ${row.mobile} needs a why.`);
     if (row.mobile === 'undecided' && !/^\d{4}-\d{2}-\d{2}$/.test(row.since ?? '')) problems.push(`${row.id}: undecided needs \`since\`, the day it was added (YYYY-MM-DD).`);
     for (const entry of row.surface) {
-      if (!live.has(entry)) problems.push(`The window lost \`${entry}\`. Remove it from ledger row ${row.id}.`);
+      if (!live.has(entry)) problems.push(`The window lost \`${entry}\` (ledger row ${row.id}). Run \`${REGENERATE}\` and commit.`);
       if (!marks.has(entry)) marks.set(entry, new Set());
       if (row.mobile !== 'undecided') marks.get(entry)!.add(`${decision(row.mobile)}:${row.id}`);
     }
@@ -103,9 +104,9 @@ export function parityProblems(ledger: Ledger, entries: readonly string[], check
       if (!CLIENT_STATES.includes(state.state)) problems.push(`${row.id}: ${client}.state is ${JSON.stringify(state.state)}.`);
       if (state.state === 'owed' && !state.owed_since) problems.push(`${row.id}: ${client} owes it, with no owed_since date.`);
       if (state.state === 'done') {
-        if (!state.fingerprint) problems.push(`${row.id}: ${client} is done with no fingerprint. Run \`${OWED}\` once to record it.`);
+        if (!state.fingerprint) problems.push(`${row.id}: ${client} is done with no fingerprint. Run \`${REGENERATE}\` and commit.`);
         else if (prints.size && state.fingerprint !== rowFingerprint(row, prints)) {
-          problems.push(`${row.id}: the window changed what ${client} built. Run \`${OWED}\` to record the debt.`);
+          problems.push(`${row.id}: the window changed what ${client} built. Run \`${REGENERATE}\` and commit: it records the debt.`);
         }
       }
     }
@@ -125,7 +126,7 @@ export function parityProblems(ledger: Ledger, entries: readonly string[], check
 const today = () => new Date().toISOString().slice(0, 10);
 const slug = (entry: string) => entry.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-/** `--defer`: every entry no row names gets an undecided row of its own, dated today. */
+/** Every entry no row names gets an undecided row of its own, dated today. */
 export function deferNew(ledger: Ledger, entries: readonly string[], day = today()): Ledger {
   const named = new Set(ledger.rows.flatMap((r) => r.surface));
   const added: LedgerRow[] = entries.filter((e) => !named.has(e)).map((e) => ({
@@ -134,7 +135,7 @@ export function deferNew(ledger: Ledger, entries: readonly string[], day = today
   return { ...ledger, rows: [...ledger.rows, ...added] };
 }
 
-/** `--owed`: a built feature whose entries changed becomes owed today; a done row with no fingerprint records it. */
+/** A built feature whose entries changed becomes owed today; a done row with no fingerprint records it. */
 export function markOwed(ledger: Ledger, prints: ReadonlyMap<string, string>, day = today()): Ledger {
   const rows = ledger.rows.map((row) => {
     const now = rowFingerprint(row, prints);
@@ -148,17 +149,17 @@ export function markOwed(ledger: Ledger, prints: ReadonlyMap<string, string>, da
   return { ...ledger, rows };
 }
 
-if (import.meta.main) {
-  const ledger = readLedger();
-  if (process.argv.includes('--defer')) {
-    const next = deferNew(ledger, surfaceEntries(buildSurface()));
-    writeRepoText(OUT.ledger, jsonText(next));
-    console.log(`parity: ${next.rows.length - ledger.rows.length} new entr${next.rows.length - ledger.rows.length === 1 ? 'y' : 'ies'} left undecided`);
-  } else if (process.argv.includes('--owed')) {
-    writeRepoText(OUT.ledger, jsonText(markOwed(ledger, entryFingerprints())));
-    console.log('parity: built features checked against the window');
-  } else {
-    console.error(`usage: ${DEFER} | ${OWED}`);
-    process.exit(2);
-  }
+/** Entries the window no longer has leave every row (a row may end up naming none, which is allowed). */
+export function dropGone(ledger: Ledger, entries: readonly string[]): Ledger {
+  const live = new Set(entries);
+  return { ...ledger, rows: ledger.rows.map((row) => (row.surface.every((e) => live.has(e)) ? row : { ...row, surface: row.surface.filter((e) => live.has(e)) })) };
+}
+
+/** The ledger kept in step with the window: gone entries dropped, new ones undecided today, changed built features owed. */
+export function ledgerInStep(ledger: Ledger, entries: readonly string[], prints: ReadonlyMap<string, string>, day = today()): Ledger {
+  return markOwed(deferNew(dropGone(ledger, entries), entries, day), prints, day);
+}
+
+export function generateLedger(): Output[] {
+  return [{ path: OUT.ledger, text: jsonText(ledgerInStep(readLedger(), surfaceEntries(buildSurface()), entryFingerprints())) }];
 }
