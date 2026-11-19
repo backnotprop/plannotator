@@ -20,7 +20,8 @@
  * agent asks you or starts a thread";
  * a question right after agent chatter still rings;
  * the sound off rings nothing (and notifications stop being silent); two tabs
- * ring once; a fresh install never shows the dialog; after an update the
+ * ring once; the two sound choices stay inside their Settings row from 320 to
+ * 1440 px; a fresh install never shows the dialog; after an update the
  * dialog shows once, in one of two tabs, and not again on reload.
  * Screenshots (light and dark) land in PLANNOTATOR_SOUND_SHOTS (default
  * .local/proof/sound/).
@@ -433,6 +434,57 @@ test('Settings: the row, Play always plays, "when an agent asks you or starts a 
   expect(await rings(page)).toBe(off);
   await expect.poll(() => page.evaluate(() => window.__notified.at(-1)?.title)).toContain('Codex');
   expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(false);
+});
+
+test('Settings: the two "Play a sound" choices stay inside their row at every width, with the slider and the switch beside them', async () => {
+  await setFront(page, true, true);
+  await page.evaluate(() => (location.hash = '#settings/general'));
+  const row = page.locator('[data-settings-notifications] [data-settings-sound]');
+  const sw = row.getByRole('switch', { name: 'Play a sound' });
+  await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  await expect(row.getByRole('radio', { name: 'when an agent asks you or starts a thread' })).toBeChecked();
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  const sidebar = page.locator('.pn-inbox .ib-sb');
+  const broken: string[] = [];
+  for (const [width, withSidebar] of [[320, false], [390, false], [768, false], [1024, false], [1280, false], [1440, false], [1280, true]] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    if (withSidebar) {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press('Control+b');
+      await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+      await expect(page.locator('.ib-sb-panel[data-hidden]')).toHaveCount(0);
+    }
+    await row.scrollIntoViewIfNeeded();
+    await expect(row.getByRole('slider', { name: 'Volume' })).toBeVisible();
+    await expect(sw).toBeVisible();
+    await page.waitForTimeout(300);
+    const name = `row-${width}${withSidebar ? '-sidebar' : ''}`;
+    const fault = await row.evaluate((el, at) => {
+      const box = (q: Element) => q.getBoundingClientRect();
+      const txt = box(el.querySelector('.ib-txt')!);
+      const seg = el.querySelector('.ib-sound-when')!;
+      const choices = [...seg.querySelectorAll('.ib-seg-o')];
+      const ctl = box(el.querySelector('.ib-ctl')!);
+      const out: string[] = [];
+      if (el.scrollWidth > el.clientWidth + 1) out.push(`row scrolls (${el.scrollWidth} > ${el.clientWidth})`);
+      const spage = document.querySelector('.ib-spage')!;
+      if (spage.scrollWidth > spage.clientWidth + 1) out.push(`page scrolls (${spage.scrollWidth} > ${spage.clientWidth})`);
+      for (const o of choices) {
+        if (box(o).right > Math.min(box(seg).right, txt.right) + 1) out.push(`a choice ends at ${Math.round(box(o).right)}, past the column's ${Math.round(txt.right)}`);
+        if (o.scrollWidth > o.clientWidth + 1) out.push(`a choice is cut (${o.scrollWidth} > ${o.clientWidth})`);
+      }
+      if (ctl.right > box(el).right + 1) out.push(`the controls end past the row`);
+      if (ctl.left < txt.right - 1 && ctl.top < txt.bottom - 1) out.push('the controls overlap the column');
+      const inLine = choices.reduce((sum, o) => sum + o.scrollWidth, 0) + 2 * (choices.length - 1) + 6;
+      return out.length ? `${at}: column ${Math.round(txt.width)} px, the pair in a line ${inLine} px: ${out.join('; ')}` : '';
+    }, name);
+    if (fault) broken.push(fault);
+    await row.locator('xpath=..').screenshot({ path: join(shots, `${name}.png`) });
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 820 });
+  expect(broken).toEqual([]);
 });
 
 test('after an update the dialog shows once: in one of two tabs opened together, and never again on reload', async ({ browser }) => {
