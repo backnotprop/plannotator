@@ -8,17 +8,17 @@
  * undecided row or a debt older than 14 days) is parity-debts.ts, run apart.
  *
  * The one command, `bun scripts/mobile/all.ts`, keeps the ledger in step
- * (generateLedger): an entry the window gained becomes an `undecided` row
- * dated today, an entry it lost leaves its row, and a built feature the
- * window changed becomes `owed`. An Inbox author never picks a mark; the
- * owner's operators decide undecided rows within the 14 days.
+ * (ledgerInStep, through ledger.ts): an entry the window gained becomes an
+ * `undecided` row dated today, an entry it lost leaves its row, and a built
+ * feature the window changed becomes `owed`. An Inbox author never picks a
+ * mark; the owner's operators decide undecided rows within the 14 days.
+ *
+ * Rules only: this module reads no file and imports no product code, so its
+ * test never fails for an Inbox change (scripts/ci-affected-map.test.ts holds
+ * that). Reading the real ledger and the live surface is ledger.ts.
  */
 import { createHash } from 'node:crypto';
-import { doorEntries } from './door';
-import { FLOW_FILES } from './flows';
-import { OUT, REGENERATE, jsonText, readRepoText, type Output } from './lib';
-import { buildSchema } from './schema';
-import { CHECK_LINE, buildSurface, surfaceEntries } from './surface';
+import { REGENERATE } from './lib';
 
 /** v1 and rethink: in the first app (rethink: done the phone's way). undecided: the owner has not decided yet (needs `since`). */
 export const MOBILE_MARKS = ['v1', 'rethink', 'later', 'never', 'undecided'] as const;
@@ -47,34 +47,11 @@ export type LedgerRow = {
 export type Ledger = { about?: string; rows: LedgerRow[] };
 
 
-export function readLedger(): Ledger {
-  return JSON.parse(readRepoText(OUT.ledger)) as Ledger;
-}
-
 export const gained = (entry: string) =>
   `The window gained \`${entry}\`. Run \`${REGENERATE}\` and commit: it records the entry in the ledger as undecided, for the owner to decide.`;
 
 /** Marks that agree: v1 and rethink are both "in the first app". */
 const decision = (mark: string) => (mark === 'rethink' ? 'v1' : mark);
-
-/**
- * Each entry's fingerprint: what the phone builds from it. A field: its schema; a door route: its door.json entry;
- * a flow check: its line. Other kinds: the name alone.
- */
-export function entryFingerprints(): Map<string, string> {
-  const out = new Map<string, string>();
-  const hash = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
-  const defs = (buildSchema() as { $defs: Record<string, { properties?: Record<string, unknown> }> }).$defs;
-  for (const [type, def] of Object.entries(defs)) for (const [field, schema] of Object.entries(def.properties ?? {})) out.set(`field:${type}.${field}`, hash(JSON.stringify(schema)));
-  for (const route of doorEntries()) out.set(`door:${route.name}`, hash(JSON.stringify(route)));
-  for (const file of FLOW_FILES) {
-    for (const line of readRepoText(file).split('\n')) {
-      const id = CHECK_LINE.exec(line)?.[1];
-      if (id) out.set(`check:${id}`, hash(line));
-    }
-  }
-  return out;
-}
 
 /** A row's fingerprint: its entries' together. */
 export function rowFingerprint(row: Pick<LedgerRow, 'surface'>, prints: ReadonlyMap<string, string>): string {
@@ -161,6 +138,12 @@ export function ledgerInStep(ledger: Ledger, entries: readonly string[], prints:
   return markOwed(deferNew(dropGone(ledger, entries), entries, day), prints, day);
 }
 
-export function generateLedger(): Output[] {
-  return [{ path: OUT.ledger, text: jsonText(ledgerInStep(readLedger(), surfaceEntries(buildSurface()), entryFingerprints())) }];
+/**
+ * The decided rows that named entries before and name none after (a rename, or a feature the window dropped): the
+ * one command leaves each naming nothing, so its decision is moved by hand to whatever replaced it. Rows that never
+ * named an entry (a behavior with no entry of its own) are not listed.
+ */
+export function emptiedRows(before: Ledger, after: Ledger): LedgerRow[] {
+  const now = new Map(after.rows.map((r) => [r.id, r]));
+  return before.rows.filter((r) => r.mobile !== 'undecided' && r.surface.length > 0 && now.get(r.id)?.surface.length === 0);
 }

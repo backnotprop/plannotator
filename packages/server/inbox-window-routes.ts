@@ -1,8 +1,11 @@
 /**
  * The Inbox's own endpoints, read from the server's code as text (no server
- * module is imported). The parity surface lists them (`window:` entries,
- * scripts/mobile/surface.ts), and tests/inbox-api-table.test.ts holds
- * docs/agent-guides/server-and-storage.md's Inbox API table to them.
+ * module is imported, and nothing here runs in the server). It is Inbox code:
+ * tests/inbox-api-table.test.ts holds docs/agent-guides/server-and-storage.md's
+ * Inbox API table to it, and a new route module is added to ROUTE_FILES here.
+ * The native app's parity surface reads the same list (`window:` entries,
+ * scripts/mobile/surface.ts); keeping that in step is the mobile contract's
+ * job, never an Inbox pull request's.
  *
  * The Inbox answers a request through one long chain of checks in
  * packages/server/inbox.ts and the route modules it calls. What is read:
@@ -17,7 +20,15 @@
  * Methods are not read: the chain decides them in many ways (an early 405, a
  * method in the same check), so an entry is a path.
  */
-import { readRepoText } from './lib';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+const ROOT = resolve(import.meta.dir, '../..');
+
+/** A repository file's text, by its path from the root. */
+export function readSource(path: string): string {
+  return readFileSync(join(ROOT, path), 'utf8');
+}
 
 /**
  * The files that answer the Inbox's requests: inbox.ts and every route module
@@ -212,7 +223,7 @@ export type WindowRoutes = { routes: string[]; families: string[]; read: string[
 export function windowRoutesFromCode(): WindowRoutes {
   const exact = new Set<string>();
   const prefixes = new Set<string>();
-  const texts = ROUTE_FILES.map((file) => readRepoText(file));
+  const texts = ROUTE_FILES.map((file) => readSource(file));
   const consts = new Map<string, string>();
   const lists: [string, string][] = [];
   for (const text of texts) {
@@ -262,10 +273,10 @@ export const API_DOC = 'docs/agent-guides/server-and-storage.md';
 
 /** The Inbox table's rows: each route its endpoint cell names, with the cell and its line. */
 export function docTableRows(): { route: string; cell: string; line: number }[] {
-  const text = readRepoText(API_DOC);
+  const text = readSource(API_DOC);
   const start = text.indexOf('### Inbox Server (');
   const end = text.indexOf('\n### ', start + 1);
-  if (start < 0 || end < 0) throw new Error(`window-routes.ts: no Inbox Server table in ${API_DOC}`);
+  if (start < 0 || end < 0) throw new Error(`inbox-window-routes.ts: no Inbox Server table in ${API_DOC}`);
   const first = text.slice(0, start).split('\n').length;
   const rows: { route: string; cell: string; line: number }[] = [];
   text.slice(start, end).split('\n').forEach((l, i) => {

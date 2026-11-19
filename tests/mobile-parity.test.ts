@@ -16,15 +16,15 @@
  *    why, undecided with no date, one entry with two decisions, a built
  *    feature the window changed without it being marked owed ("the rules");
  *  - the one command (bun scripts/mobile/all.ts) keeping the ledger in step
- *    other than it promises ("the tools").
+ *    other than it promises, or a rename leaving a decided row naming
+ *    nothing without saying so ("the tools").
  * The 14-day clock is tests/mobile-parity-debts.test.ts, apart, so a pull
  * request that only changes the Inbox never fails for an old debt.
  *
- * Reads committed JSON and a few source files as text; imports no React and
- * builds nothing.
+ * Imports only the rules (parity.ts), which read no file and no product code.
  */
 import { describe, expect, test } from 'bun:test';
-import { deferNew, gained, ledgerInStep, markOwed, parityProblems, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
+import { deferNew, emptiedRows, gained, ledgerInStep, markOwed, parityProblems, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
 
 const row = (over: Partial<Ledger['rows'][number]>): Ledger['rows'][number] => ({
   id: 'r', title: 't', surface: [], flows: [], mobile: 'v1', why: '', ios: { state: 'not-started' }, ...over,
@@ -105,5 +105,19 @@ describe('the tools', () => {
     expect(next.rows.map((r) => [r.id, r.surface, r.mobile])).toEqual([['a', ['field:T.x'], 'v1'], ['undecided-field-t-new', ['field:T.new'], 'undecided']]);
     expect(parityProblems(next, ['field:T.x', 'field:T.new'], [], prints)).toEqual([]);
     expect(ledgerInStep(next, ['field:T.x', 'field:T.new'], prints, '2026-12-01')).toEqual(next);
+  });
+
+  test('a decided row whose every entry is gone is listed; one that never named an entry, or an undecided one, is not', () => {
+    const before: Ledger = {
+      rows: [
+        row({ id: 'renamed', surface: ['field:T.old'] }),
+        row({ id: 'behavior', surface: [] }),
+        row({ id: 'kept', surface: ['field:T.x', 'field:T.old'] }),
+        row({ id: 'pending', surface: ['field:T.gone'], mobile: 'undecided', since: '2026-11-01' }),
+      ],
+    };
+    const after = ledgerInStep(before, ['field:T.x', 'field:T.new'], new Map(), '2026-11-18');
+    expect(emptiedRows(before, after).map((r) => [r.id, r.surface])).toEqual([['renamed', ['field:T.old']]]);
+    expect(emptiedRows(after, ledgerInStep(after, ['field:T.x', 'field:T.new'], new Map(), '2026-11-19'))).toEqual([]);
   });
 });

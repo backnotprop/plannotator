@@ -8,7 +8,7 @@
  * the contract.
  */
 import { generateDoor } from './door';
-import { generateLedger } from './parity';
+import { generateLedger } from './ledger';
 import type { Output } from './lib';
 import { generateSchema } from './schema';
 import { generateSurface } from './surface';
