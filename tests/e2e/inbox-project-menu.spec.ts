@@ -115,7 +115,7 @@ test('the keyboard reaches ⋯, Enter opens the menu, Escape gives focus back', 
   await page.keyboard.press('Enter');
   const menu = page.locator('[data-project-menu]');
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();

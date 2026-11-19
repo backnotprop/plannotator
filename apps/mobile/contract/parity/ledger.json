@@ -19842,6 +19842,48 @@
       }
     },
     {
+      "id": "undecided-door-post-projects-id-tags",
+      "title": "door:POST projects/:id/tags",
+      "surface": [
+        "door:POST projects/:id/tags"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-projects-id-tags",
+      "title": "window:/api/inbox/projects/:id/tags",
+      "surface": [
+        "window:/api/inbox/projects/:id/tags"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-projectfolder-tags",
+      "title": "field:ProjectFolder.tags",
+      "surface": [
+        "field:ProjectFolder.tags"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-field-inboxlistrow-last-agent",
       "title": "field:InboxListRow.last_agent",
       "surface": [

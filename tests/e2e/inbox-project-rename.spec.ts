@@ -153,7 +153,7 @@ test('Rename… from the sidebar menu: the sidebar, the rows, search and the pro
   const main = row(page, 'main');
   await main.hover();
   await main.locator('.ib-pmore').click();
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await menu(page).locator('[data-project-action="rename"]').hover();
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(proofDir, '01-menu-rename-light.png') });
@@ -276,7 +276,7 @@ test('keyboard only: ⋯, the arrows to Rename…, typing, Enter', async () => {
   await expect(acme.locator('.ib-pmore')).toBeFocused();
   await page.keyboard.press('Enter');
   // A name is set now: Reset name follows Rename….
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…', 'Reset name']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…', 'Reset name']);
   await expect(page.locator('[data-project-action="read"]')).toBeFocused();
   await page.keyboard.press('End');
   await expect(page.locator('[data-project-action="reset"]')).toBeFocused();
@@ -328,7 +328,7 @@ test('Reset name brings back "main", and the item goes until a name is set again
   // The feat-x thread was opened (the reply box case), so it sits in the folded Quiet section: the other two are drawn.
   for (const id of [threads.main, threads.fixY]) await expect.poll(() => rowProject(page, id)).toBe('main');
   await row(page, 'main').locator('.ib-proj').click({ button: 'right' });
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await page.keyboard.press('Escape');
   expect(world.errors).toEqual([]);
 });
@@ -345,7 +345,7 @@ test('a phone: Rename… in the menu sheet, the field in the navigation sheet', 
   await expect(main.locator('.ib-pmore')).toHaveCSS('opacity', '1');
   await main.locator('.ib-pmore').tap();
   await expect(menu(page).locator('.ib-pm-title')).toHaveText('main');
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Add tag', 'Rename…']);
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(proofDir, '05-phone-menu.png') });
   await page.locator('[data-project-action="rename"]').tap();
