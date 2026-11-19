@@ -417,7 +417,8 @@ export function createInboxCanvas(options: {
         rev: committed.rev,
         before: scene.elements.filter((e) => result.touched.has(e.id)),
         added: [...result.added],
-        after: Object.fromEntries(looksIn(result.scene, [...result.touched, ...result.added])),
+        after: Object.fromEntries(looksIn(result.scene, result.added)),
+        left: result.scene.elements.filter((e) => result.touched.has(e.id)),
       });
     }
     if (key) {
@@ -576,16 +577,34 @@ export function createInboxCanvas(options: {
         };
         const kept = new Set<string>();
         const stamp = (e: CanvasElement, current: CanvasElement) => ({ ...e, version: (current.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: now() });
-        // Only what still looks as that change left it goes back. A thing the person moved, rewrote or deleted since
-        // is theirs now and stays as they have it; what the agent added goes only if nobody touched it.
+        // Field by field: what the change made of a thing goes back only where it is still what the change made it.
+        // A thing the person moved keeps its place and still loses the agent's colour; one they rewrote keeps their
+        // words; one they deleted stays deleted. What the agent added goes only if nobody touched it.
+        const left = new Map(undo.left.map((e) => [e.id, e]));
+        const FIELDS = ["x", "y", "width", "height", "text", "originalText", "strokeColor", "backgroundColor", "frameId", "containerId", "name", "points", "isDeleted", "startBinding", "endBinding", "boundElements"] as const;
+        const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
         const elements = stored.elements.map((e) => {
-          if (!was.has(e.id) && !added.has(e.id)) return e;
+          const before = was.get(e.id);
+          const after = left.get(e.id);
+          if (before && after) {
+            // Deleted by the person since: theirs to decide; it stays gone.
+            if (e.isDeleted && !after.isDeleted) return e;
+            const made = FIELDS.filter((f) => !same(before[f], after[f]));
+            const back = made.filter((f) => same(e[f], after[f]));
+            if (back.length < made.length && made.some((f) => !["boundElements", "startBinding", "endBinding"].includes(f) && !back.includes(f))) {
+              const name = nameOf(e.id);
+              if (name) kept.add(name);
+            }
+            if (back.length === 0) return e;
+            return stamp({ ...e, ...Object.fromEntries(back.map((f) => [f, before[f]])) } as CanvasElement, e);
+          }
+          if (!added.has(e.id) || e.isDeleted) return e;
           if (lookOf(e) !== undo.after[e.id]) {
-            const name = e.isDeleted ? null : nameOf(e.id);
+            const name = nameOf(e.id);
             if (name) kept.add(name);
             return e;
           }
-          return was.has(e.id) ? stamp(was.get(e.id)!, e) : e.isDeleted ? e : stamp({ ...e, isDeleted: true }, e);
+          return stamp({ ...e, isDeleted: true }, e);
         });
         const committed = commitCanvas(dir, threadId, { ...stored, elements }, { kind: "person" }, new Date(now()), { undid: undo.rev });
         removeCanvasUndo(dir, threadId, undo.rev);

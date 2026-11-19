@@ -305,9 +305,11 @@ describe("undo of an agent's change", () => {
     const undone = await post(t, path, { rev: second.rev });
     const after = readCanvasScene(t.dir, THREAD);
     const ledger = after.elements.find((e) => e.type === "rectangle" && !e.isDeleted && e.id !== "personBox1")!;
+    // The person's move stays; the agent's colour, which the person did not touch, goes back.
     expect(ledger.x).toBe(900);
+    expect(ledger.strokeColor).toBe("#1e1e1e");
     expect(after.elements.filter((e) => e.type === "text" && !e.isDeleted).map((e) => e.text)).toEqual(["Ledger"]);
-    expect(undone.kept?.join(" ")).toContain("Ledger");
+    expect(undone.kept ?? []).toEqual([]);
     // Again: nothing.
     const again = await post(t, path, { rev: second.rev });
     expect(again.already).toBe(true);

@@ -243,8 +243,10 @@ export interface CanvasUndo {
   rev: number;
   before: CanvasScene['elements'];
   added: string[];
-  /** The look (scene.ts `lookOf`) the change left each element with: only what still looks like that is taken back. */
+  /** The look (scene.ts `lookOf`) the change left each element it added with: one nobody touched since is removed. */
   after: Record<string, string>;
+  /** Each changed element as the change left it: a field goes back only where it is still what the change made it. */
+  left: CanvasScene['elements'];
 }
 
 export function writeCanvasUndo(inboxDirPath: string, threadId: string, undo: CanvasUndo): void {
@@ -271,7 +273,7 @@ export function removeCanvasUndo(inboxDirPath: string, threadId: string, rev: nu
 
 export function readCanvasUndo(inboxDirPath: string, threadId: string, rev: number): CanvasUndo | null {
   const raw = readJson(join(canvasDirOf(inboxDirPath, threadId), 'undo', `${rev}.json`)) as CanvasUndo | null;
-  return raw && Array.isArray(raw.before) && Array.isArray(raw.added) && raw.after && typeof raw.after === 'object' ? raw : null;
+  return raw && Array.isArray(raw.before) && Array.isArray(raw.added) && raw.after && typeof raw.after === 'object' && Array.isArray(raw.left) ? raw : null;
 }
 
 /** Every thread that has a canvas folder. */

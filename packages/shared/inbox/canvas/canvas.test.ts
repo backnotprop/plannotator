@@ -172,3 +172,32 @@ describe("who changed what", () => {
     expect(sinceLines(readCanvasLog(dir, thread), 5, { kind: "agent", name: "Other", key: "o" }).undone).toEqual([]);
   });
 });
+
+describe("what the break pass found in an agent's placement", () => {
+  test("a place a continent away is refused, with the reach", () => {
+    const scene = applyOps(emptyScene(), [{ add: "box", text: "A" }], agent).scene;
+    const far = applyOps(scene, [{ add: "box", text: "lost", at: [1e9, 1e9] }], agent);
+    expect(far.ok).toBe(false);
+    expect(far.errors[0]).toContain("20000");
+    expect(applyOps(scene, [{ add: "box", text: "near enough", at: [5000, 0] }], agent).ok).toBe(true);
+  });
+
+  test("words nobody can see are not words; wide characters get the room they take", () => {
+    expect(applyOps(emptyScene(), [{ add: "note", text: " \u200b\u200b " }], agent).ok).toBe(false);
+    const made = applyOps(emptyScene(), [{ add: "box", text: "abcdefgh" }, { add: "box", text: "\u652f\u4ed8\u961f\u5217\u670d\u52a1\u7f51\u5173", below: "abcdefgh" }], agent);
+    const [latin, cjk] = thingsOf(made.scene).filter((t) => t.kind === "box").sort((a, b) => a.box.y - b.box.y);
+    // Eight Chinese characters need about twice the width of eight Latin letters.
+    expect(cjk!.box.w).toBeGreaterThan(latin!.box.w * 1.3);
+  });
+
+  test("many things near one box make a block around it, not a line across the board", () => {
+    let scene = applyOps(emptyScene(), [{ add: "box", text: "Hub" }], agent).scene;
+    scene = applyOps(scene, Array.from({ length: 60 }, (_, i) => ({ add: "note", text: `n${i}`, near: "Hub" })), agent).scene;
+    const all = thingsOf(scene);
+    const xs = all.map((t) => t.box.x);
+    const ys = all.map((t) => t.box.y);
+    const w = Math.max(...xs) - Math.min(...xs);
+    const h = Math.max(...ys) - Math.min(...ys);
+    expect(Math.max(w, h) / Math.min(w, h)).toBeLessThan(3);
+  });
+});
