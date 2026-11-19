@@ -8,7 +8,10 @@ import { indexFor } from '../view/document-index';
 import { findSnapshotBlocks, insertSnapshotBlock, parseSnapshotBlock, serializeSnapshotBlock, serializeSnapshotBody } from './block';
 import { defaultSnapshotTitle, snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { createSnapshotDirectiveRenderer } from './directive';
-import { snapshotToSvg } from './picture';
+import { snapshotToSvg, stillPalette } from './picture';
+import { chartShapes } from '../view/chart';
+import { checkObject } from '../model/codec';
+import type { ChartObject } from '../model/types';
 import { nearestGap } from '../react/plan-drop';
 import { behindSnapshots, resolveSnapshot } from './resolve';
 import { frameAt, ghostOpacity, recedeAt, rimOpacity, springAtRest, stepSpring } from './transition';
@@ -379,6 +382,62 @@ describe('the still picture fallback', () => {
     expect(snapshotToSvg(store.getDocument(), 'chart')).toBe(svg);
     store.dispatch({ type: 'update-snapshot', id: 'chart' });
     expect(snapshotToSvg(store.getDocument(), 'chart')).toContain('>77<');
+  });
+
+  test('a chart is a drawing of its own in the file: what it draws past its box is cut off there', () => {
+    const store = board();
+    // An end label of a long number and a long name runs past the chart's right edge.
+    const chart = { id: 'ch', type: 'chart', x: 40, y: 400, w: 210, h: 140, mark: 'line', fields: ['week', 'team', 'v'], rows: [[1, 'a team with a long name', 123456.789], [2, 'a team with a long name', 987654.321], [1, 'b', 5], [2, 'b', 6]], encode: { x: 'week', y: 'v', series: 'team' } };
+    store.dispatch({ type: 'add', objects: [chart as unknown as CanvasObject] });
+    store.dispatch({ type: 'add-snapshot', snapshot: { id: 'chart', title: '', source: { kind: 'objects', objects: ['ch'] } } });
+    const svg = snapshotToSvg(store.getDocument(), 'chart')!;
+    expect(svg).toContain('<svg x="40" y="400" width="210" height="140" viewBox="0 0 210 140" overflow="hidden">');
+    // Everything the chart draws is inside that drawing, and no id is made (two charts in one file cannot collide).
+    const inner = svg.slice(svg.indexOf('overflow="hidden">'), svg.indexOf('</svg>'));
+    expect(inner).toContain('<path');
+    expect(svg).not.toMatch(/ id="|url\(#/);
+  });
+
+  test('a chart with no colour of its own is the board\'s accent for the theme, and a custom colour is written once', () => {
+    const store = board();
+    const base = { type: 'chart', x: 0, y: 400, w: 380, h: 240, mark: 'bar', fields: ['x', 'v'], rows: [['a', 1], ['b', 2]], encode: { x: 'x', y: 'v' } };
+    store.dispatch({ type: 'add', objects: [{ ...base, id: 'plain' }, { ...base, id: 'own', x: 500, color: { custom: 'rgb(194 65 12)' } }] as unknown as CanvasObject[] });
+    store.dispatch({ type: 'add-snapshot', snapshot: { id: 'two', title: '', source: { kind: 'objects', objects: ['plain', 'own'] } } });
+    for (const theme of ['light', 'dark'] as const) {
+      const svg = snapshotToSvg(store.getDocument(), 'two', { theme })!;
+      expect(svg).toContain(`fill="${stillPalette(theme).accent}"`);
+      expect(svg).toContain('fill="rgb(194 65 12)"');
+    }
+    expect(stillPalette('light').accent).not.toBe(stillPalette('dark').accent);
+  });
+
+  test('every mark of a chart, in every step it can be drawn in, is at least 3 to 1 against its card, light and dark', () => {
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const blend = (over: string, under: string, alpha: number) => `#${[1, 3, 5].map((i) => Math.round(parseInt(over.slice(i, i + 2), 16) * alpha + parseInt(under.slice(i, i + 2), 16) * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+    const contrast = (a: string, b: string) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05);
+    const rows = Array.from({ length: 16 }, (_row, i) => [i % 2, `k${i % 8}`, i + 1]);
+    const charts = (['bar', 'line', 'dot', 'area'] as const).map((mark) => {
+      const checked = checkObject({ id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, mark, fields: ['x', 'k', 'v'], rows, encode: { x: 'x', y: 'v', series: 'k' }, stack: true });
+      if (!checked.ok) throw new Error(checked.error);
+      return checked.value as ChartObject;
+    });
+    let seen = 0;
+    for (const theme of ['light', 'dark'] as const) {
+      const palette = stillPalette(theme);
+      const colour = { ink: palette.ink, muted: palette.muted, accent: palette.accent, rule: palette.line };
+      for (const chart of charts) for (const shape of chartShapes(chart)) {
+        // The rules behind the marks are not marks.
+        const role = shape.kind === 'text' ? shape.fill : (shape.stroke ?? shape.fill);
+        if (!role || role === 'rule') continue;
+        const drawn = blend(colour[role], palette.card, shape.kind === 'path' ? (shape.opacity ?? 1) : 1);
+        if (contrast(drawn, palette.card) < 3) throw new Error(`${theme} ${chart.mark}: ${role} at ${shape.kind === 'path' ? (shape.opacity ?? 1) : 1} is ${contrast(drawn, palette.card).toFixed(2)} to 1`);
+        seen += 1;
+      }
+    }
+    expect(seen).toBeGreaterThan(200);
   });
 
   test('it pictures the capture, not the canvas as it is now', () => {

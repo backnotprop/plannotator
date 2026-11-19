@@ -15,15 +15,17 @@ import { TEXT_SIZE_PX, isPlaced } from '../model/types';
 import { HIGHLIGHTER_OPACITY, PEN_WIDTH, inkPath } from '../view/ink-path';
 import { shapeOutline, toPath } from '../view/shape-outline';
 import { referenceAddress } from '../model/reference';
-import { chartToSvg } from '../view/chart';
+import { chartToSvg, escapeXml as esc } from '../view/chart';
 
-interface Palette {
+export interface Palette {
   stage: string;
   card: string;
   line: string;
   ink: string;
   muted: string;
   arrow: string;
+  /** The board's accent when the host names none: what a chart with no colour of its own is drawn in. */
+  accent: string;
   note: string;
   onNote: string;
   named: Record<string, { stroke: string; fill: string }>;
@@ -36,6 +38,7 @@ const LIGHT: Palette = {
   ink: '#10131c',
   muted: '#474b57',
   arrow: '#646874',
+  accent: '#5537eb',
   note: '#f4b467',
   onNote: '#2b1c08',
   named: {
@@ -54,6 +57,7 @@ const DARK: Palette = {
   ink: '#eeeeef',
   muted: '#c8c8cc',
   arrow: '#9b9ba1',
+  accent: '#a8a8ff',
   note: '#eaa860',
   onNote: '#22160a',
   named: {
@@ -67,12 +71,6 @@ const DARK: Palette = {
 
 /** A generic family for each face: the file names no font a reader's device may lack. */
 const TEXT_FAMILY: Record<Exclude<TextFace, 'sans'>, string> = { serif: 'Georgia, serif', mono: 'ui-monospace, Menlo, Consolas, monospace', hand: 'cursive' };
-
-/** Text made safe for XML: the five characters escaped, and the control characters XML forbids taken out (one of them makes the whole file fail to load). */
-const esc = (value: string): string =>
-  value
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const n = (value: number): string => String(Math.round(value * 100) / 100);
 
@@ -88,6 +86,9 @@ function paint(color: CanvasColor | undefined, palette: Palette): { stroke: stri
   if (typeof color === 'string') return palette.named[color] ?? { stroke: palette.line, fill: palette.card };
   return { stroke: esc(color.custom), fill: palette.card };
 }
+
+/** The colours a still picture is drawn in, for each theme. */
+export const stillPalette = (theme: 'light' | 'dark' = 'light'): Readonly<Palette> => (theme === 'dark' ? DARK : LIGHT);
 
 function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette): string {
   if (object.type === 'arrow') {
@@ -157,10 +158,12 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
       return `<path transform="translate(${n(x)} ${n(y)})" d="${inkPath(object.points, w, h)}" fill="none" stroke="${stroke}" stroke-width="${PEN_WIDTH[pen]}" stroke-linecap="round" stroke-linejoin="round"${pen === 'highlighter' ? ` stroke-opacity="${HIGHLIGHTER_OPACITY}"` : ''}/>`;
     }
     case 'chart': {
-      // The same shapes the board draws, in plain colours. The accent is the object's colour, as on the board.
-      const accent = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.named.violet.stroke;
+      // The same shapes the board draws, in plain colours. The accent is the object's colour, as on the board;
+      // with none it is the board's own accent for this theme (`--pcv-accent` in canvas.css, when the host gives no other).
+      const accent = !object.color || object.color === 'neutral' ? palette.accent : typeof object.color === 'string' ? (palette.named[object.color]?.stroke ?? palette.accent) : object.color.custom;
       const inside = chartToSvg(object, { ink: palette.ink, muted: palette.muted, rule: palette.line, accent, mono: 'ui-monospace, SFMono-Regular, Menlo, monospace', sans: 'Inter, system-ui, sans-serif' });
-      return `<rect ${box} rx="4" fill="${palette.card}" stroke="${palette.line}"/><g transform="translate(${n(x)} ${n(y)})">${inside}</g>`;
+      // A drawing of its own with its own edge: nothing a chart draws can land on what is beside it in the file.
+      return `<rect ${box} rx="4" fill="${palette.card}" stroke="${palette.line}"/><svg x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" viewBox="0 0 ${n(w)} ${n(h)}" overflow="hidden">${inside}</svg>`;
     }
     case 'html':
       return `<rect ${box} rx="6" fill="none" stroke="${palette.line}" stroke-dasharray="4 3"/>`;
