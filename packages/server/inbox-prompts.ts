@@ -90,7 +90,7 @@ export function inboxPromptsModel(
   config: PlannotatorConfig,
   on: Record<InboxPromptHost, boolean>,
   wakes: Record<InboxPromptHost, boolean> = { "claude-code": true, pi: true, opencode: true },
-  delivery?: Pick<InboxRulesDelivery, "notes">,
+  delivery?: Pick<InboxRulesDelivery, "notes" | "mcp">,
 ): InboxPromptsSettings {
   const inbox = record(record(config.prompts)?.inbox);
   const prompts = record(config.prompts);
@@ -130,7 +130,7 @@ export function inboxPromptsModel(
     },
     others,
     guide: { text: readGuideInstructions() || null, max: GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS },
-    rules: inboxRulesModel(config, wakes, delivery ? { notes: delivery.notes, on } : undefined),
+    rules: inboxRulesModel(config, wakes, delivery ? { notes: delivery.notes, on, mcp: delivery.mcp } : undefined),
   };
 }
 

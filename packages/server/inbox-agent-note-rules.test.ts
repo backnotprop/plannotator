@@ -38,6 +38,7 @@ import {
 import { noteWithoutMarkers } from "../inbox/agents";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { inboxRulesModel } from "./inbox-rules";
+import { INBOX_MCP_RULES_ROOMS } from "./inbox-mcp-instructions";
 
 let fake: FakeAgents;
 let dataDir: string;
@@ -422,6 +423,21 @@ describe("Settings says who does not get them", () => {
     expect(inboxRulesModel(shared(), wakes, { notes, on }).unsent).toEqual([{ agent: "gemini", slot: "shared", why: "none", fix: true }]);
     // Claude Code's reminder off and no note: not sent there either.
     expect(inboxRulesModel(shared(), wakes, { notes, on: { ...on, "claude-code": false } }).unsent?.map((u) => u.agent)).toEqual(["claude-code", "gemini"]);
+  });
+
+  test("an agent connected through MCP reads the rules in the MCP instructions: no line, unless they do not fit there or the reminder is off", () => {
+    install();
+    const notes = noteRulesStates(dataDir, e, shared())!;
+    const on = { "claude-code": true, pi: true, opencode: true };
+    // Codex and Gemini CLI with no note: "Not sent" while not connected through MCP, nothing for the one that is.
+    expect(inboxRulesModel(shared(), wakes, { notes, on }).unsent?.map((u) => u.agent)).toEqual(["codex", "gemini"]);
+    expect(inboxRulesModel(shared(), wakes, { notes, on, mcp: { gemini: true } }).unsent?.map((u) => u.agent)).toEqual(["codex"]);
+    // The reminder off everywhere: the MCP instructions carry nothing of the person's, so the line is back.
+    const off = { ...shared(), inboxReminder: false };
+    expect(inboxRulesModel(off, wakes, { notes, on: { "claude-code": false, pi: false, opencode: false }, mcp: { gemini: true } }).unsent?.map((u) => u.agent)).toEqual(["claude-code", "codex", "gemini"]);
+    // Rules past the MCP room of non-Claude clients: they do not go there, so the line stays.
+    const long = shared("r".repeat(INBOX_MCP_RULES_ROOMS.other + 1));
+    expect(inboxRulesModel(long, wakes, { notes, on, mcp: { gemini: true } }).unsent?.map((u) => u.agent)).toEqual(["codex", "gemini"]);
   });
 
   test("never a fix Settings → Agents does not have: no file to put it in, or notes turned off", () => {

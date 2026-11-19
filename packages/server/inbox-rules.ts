@@ -8,6 +8,7 @@ import {
   inboxReminderWithRules,
   inboxRulesRoom,
 } from "@plannotator/shared/inbox/connection";
+import { INBOX_MCP_RULES_ROOMS, INBOX_MCP_TIERS, inboxMcpSent, resolveInboxMcpReminder } from "./inbox-mcp-instructions";
 
 const LONGEST_TOOL_NAME = "mcp__plannotator__plannotator_inbox";
 
@@ -34,12 +35,14 @@ function slots(config: PlannotatorConfig): { shared: string | null; runtimes: Re
 }
 
 /**
- * How the rules reach each agent (inbox.ts): whose note holds them now (noteRulesStates) and whose
- * reminder is on. Without it (a caller that has neither) the model is the reminder's alone.
+ * How the rules reach each agent (inbox.ts): whose note holds them now (noteRulesStates), whose
+ * reminder is on, and who is connected through MCP. Without it (a caller that has neither) the model is the reminder's alone.
  */
 export interface InboxRulesDelivery {
   notes: Partial<Record<InboxNoteAgentId, InboxNoteRulesState>>;
   on: Record<InboxPromptHost, boolean>;
+  /** The note agents connected to the Inbox through MCP (inbox/agents.json): the MCP instructions carry them the shared rules. */
+  mcp?: Partial<Record<InboxNoteAgentId, boolean>>;
 }
 
 export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes, delivery?: InboxRulesDelivery): NonNullable<InboxPromptsSettings["rules"]> {
@@ -54,7 +57,19 @@ export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes, deliver
     const reminder = reminderOf(config, host, wakes);
     return inboxReminderWithRules(reminder, rules, LONGEST_TOOL_NAME) === reminder;
   });
-  if (!delivery) return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped };
+  // Agents over MCP: the shared text only, in the server instructions' smaller room (inbox-mcp-instructions.ts).
+  const mcpText = resolveInboxMcpReminder(config);
+  const sent = INBOX_MCP_TIERS.map((tier) => [tier, inboxMcpSent(mcpText, tier)] as const);
+  const mcp = {
+    room: INBOX_MCP_RULES_ROOMS.claude_code,
+    rooms: { ...INBOX_MCP_RULES_ROOMS },
+    dropped: mcpText?.rules != null ? sent.filter(([, fit]) => !fit.rules).map(([tier]) => tier) : [],
+    reminder_dropped: mcpText?.custom != null ? sent.filter(([, fit]) => !fit.reminder).map(([tier]) => tier) : [],
+  };
+  if (!delivery) return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, mcp };
+  // The note agents other than Claude Code, Pi and OpenCode are MCP clients of the `other` room (Codex, Gemini CLI,
+  // Qwen Code): connected through MCP, they read the shared rules in the server instructions whenever they fit there.
+  const mcpCarries = mcpText?.rules != null && inboxMcpSent(mcpText, "other").rules;
   const unsent: InboxRulesUnsent[] = [];
   for (const agent of INBOX_NOTE_AGENT_IDS) {
     const state = delivery.notes[agent];
@@ -62,9 +77,10 @@ export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes, deliver
     const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? (agent as InboxPromptHost) : null;
     // Claude Code, Pi and OpenCode get them by the reminder while it is on.
     if (host && delivery.on[host]) continue;
+    if (!host && mcpCarries && delivery.mcp?.[agent]) continue;
     unsent.push({ agent, slot: host && runtimes[host] !== null ? host : "shared", why: state.why, fix: state.fix });
   }
-  return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, unsent };
+  return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, mcp, unsent };
 }
 
 export function inboxRulesFitError(change: InboxPromptsChange, config: PlannotatorConfig, wakes: Wakes): { field: string; message: string } | null {
