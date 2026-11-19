@@ -120,6 +120,9 @@ private struct ActionRow: View {
   @State private var copied = false
   @FocusState private var focus: Field?
   enum Field { case reason, note }
+  @Environment(ScrollBox.self) private var scroll: ScrollBox?
+  @Environment(\.cardKey) private var cardKey
+  private func touch() { if let cardKey { scroll?.act(cardKey) } }
 
   private var state: ActionMarks.State { ActionMarks.state(action) }
   private var result: InboxActionResult? { action.actionResult }
@@ -174,7 +177,8 @@ private struct ActionRow: View {
         .buttonStyle(ChoiceStyle())
         .accessibilityAddTraits(.isButton)
       }
-      .padding(.leading, 6)
+      // The tick stands in the column of a question's radio.
+      .padding(.leading, 9)
       if let line = underLine {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
           Text(line).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
@@ -208,7 +212,10 @@ private struct ActionRow: View {
       try? await Task.sleep(for: .milliseconds(600))
       if !Task.isCancelled { saveNote() }
     }
-    .onChange(of: focus) { before, now in if before == .note, now != .note { saveNote() } }
+    .onChange(of: focus) { before, now in
+      if before == .note, now != .note { saveNote() }
+      if now != nil { touch() }
+    }
   }
 
   /// The task as a button's words: a link keeps its label (a button holds no link).
@@ -350,8 +357,8 @@ private struct ActionRow: View {
   private var answers: some View {
     // Side by side; one under the other when the words are too large to fit whole.
     ViewThatFits(in: .horizontal) {
-      HStack(spacing: 6) { answerButtons }
-      VStack(alignment: .leading, spacing: 6) { answerButtons }
+      HStack(spacing: 18) { answerButtons }
+      VStack(alignment: .leading, spacing: 4) { answerButtons }
     }
     .buttonStyle(ChoiceStyle())
     .disabled(busy)
@@ -367,14 +374,16 @@ private struct ActionRow: View {
           .foregroundStyle(Token.primaryForeground)
           .fixedSize()
           .padding(.horizontal, 18)
+          .padding(.vertical, 9)
           .frame(minHeight: 44)
           .background(Token.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
       }
       Button {
+        touch()
         composing = true
         focus = .reason
       } label: {
-        Text(PhoneWords.cantDoItMore).font(.body).foregroundStyle(Token.foreground).fixedSize().padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+        Text(PhoneWords.cantDoItMore).font(.body.weight(.medium)).foregroundStyle(Token.primary).fixedSize().frame(minHeight: 44).contentShape(Rectangle())
       }
     }
   }
@@ -408,8 +417,8 @@ private struct ActionRow: View {
           composing = false
           focus = nil
         }
-        .font(.body)
-        .foregroundStyle(Token.foreground)
+        .font(.body.weight(.medium))
+        .foregroundStyle(Token.primary)
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
@@ -422,6 +431,7 @@ private struct ActionRow: View {
   private func mark(_ next: ActionMarks.Mark?) {
     guard !busy else { return }
     busy = true
+    touch()
     Task {
       let taken = await session.mark(action: action, thread: thread, message: message, next)
       busy = false

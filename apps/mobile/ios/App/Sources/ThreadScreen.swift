@@ -40,6 +40,8 @@ struct ThreadScreen: View {
   @State private var scroll = ScrollBox()
   @State private var jumped: String?
   @State private var position = ScrollPosition()
+  /// Room added under the last message so the page can rest on a block's start even when the thread ends sooner.
+  @State private var room: CGFloat = 0
   @FocusState private var composing: Bool
 
   private var model: ThreadModel? { session.thread(id) }
@@ -133,9 +135,11 @@ struct ThreadScreen: View {
         .id(Self.landing)
         // Room under a short last message, so it can still start at the top.
         Color.clear.containerRelativeFrame(.vertical) { length, _ in max(0, length - tail) }
+        Color.clear.frame(height: room)
       }
       .padding(.horizontal, 20)
-      .padding(.bottom, 20)
+      // The content ends above the reply field's fade: the last card is never under it.
+      .padding(.bottom, Self.clear)
       .coordinateSpace(.named(Self.content))
       .onPreferenceChange(CardFrames.self) { now in
         let before = cards
@@ -209,32 +213,53 @@ struct ThreadScreen: View {
     }
   }
 
-  /// Land on the newest agent message. When what it asks would end under the reply field, land on the card
-  /// instead: whole and resting on the reply field when it fits, from its top when it is taller than the page.
+  /// Land on the newest agent message. When what it asks would end under the reply field, the page rests further
+  /// down instead, with the card whole over the field.
   private func land(_ waiting: [(id: String, open: Bool)], _ proxy: ScrollViewProxy) {
-    proxy.scrollTo(Self.landing, anchor: .top)
-    guard let start = cards[Self.landing], scroll.height > 0 else { return }
-    guard let first = waiting.first(where: { cards[$0.id].map { $0.minY >= start.minY } ?? false }), let card = cards[first.id] else { return }
-    if card.maxY + Self.margin <= start.minY + scroll.height { return }
-    show(first.id, proxy)
+    guard let start = cards[Self.landing], scroll.height > 0 else { return proxy.scrollTo(Self.landing, anchor: .top) }
+    var y = start.minY
+    if let first = waiting.first(where: { cards[$0.id].map { $0.minY >= start.minY } ?? false }), let card = cards[first.id], card.maxY + Self.clear > start.minY + scroll.height {
+      y = rest(for: card)
+    }
+    settle(at: y, end: start.maxY + Self.clear)
   }
 
-  /// Bring a card on screen: all of it when it fits over the reply field, else its top.
+  /// Rest the page's top at `y`. A thread that ends too soon for that is given the room it lacks first, so the
+  /// page is never pushed back to rest through the middle of a block.
+  private func settle(at y: CGFloat, end: CGFloat) {
+    let lacks = max(0, y + scroll.height - end)
+    guard abs(lacks - room) > 0.5 else { return position.scrollTo(y: y) }
+    room = lacks
+    Task {
+      try? await Task.sleep(for: .milliseconds(30))
+      position.scrollTo(y: y)
+    }
+  }
+
+  /// Where the page's top rests so that `card` is whole over the reply field: on the start of a block (a
+  /// paragraph, a code block, a card), never through the middle of a line. A card taller than the page starts at
+  /// its own top.
+  private func rest(for card: CGRect) -> CGFloat {
+    let own = card.minY - Self.margin
+    guard card.height + Self.margin + Self.clear <= scroll.height else { return own }
+    let need = card.maxY + Self.clear - scroll.height
+    return cards.values.map { $0.minY - Self.margin }.filter { $0 >= need && $0 <= own }.min() ?? own
+  }
+
+  /// Bring a card on screen.
   private func show(_ key: String, _ proxy: ScrollViewProxy) {
-    guard let card = cards[key] else { return proxy.scrollTo(key, anchor: .top) }
-    proxy.scrollTo(key, anchor: card.height + Self.margin * 2 <= scroll.height ? .bottom : .top)
+    guard let card = cards[key], scroll.height > 0 else { return proxy.scrollTo(key, anchor: .top) }
+    if let tail = cards[Self.landing] { settle(at: rest(for: card), end: tail.maxY + Self.clear) } else { position.scrollTo(y: rest(for: card)) }
   }
 
   /// The card the person is at work on, after it grew or the keyboard rose: if its end went under the reply
-  /// field, it is brought back over it. A card taller than the page is left where it is: the system keeps the
-  /// field being typed in on screen, and the card's end would push that field off the top.
+  /// field, it is brought back over it. A card taller than the page is left where it is, unless the part the
+  /// person opened (a field with its buttons) says where it is: then that part is what stays in view.
   private func reveal(_ key: String, _ proxy: ScrollViewProxy) {
     guard let whole = cards[key], scroll.height > 0 else { return }
-    // The part of the card the person just opened (a reason and its buttons), when it says where it is.
     let card = cards[CardFrames.part].flatMap { $0.intersects(whole) ? $0 : nil } ?? whole
-    guard card.height + Self.margin * 2 <= scroll.height, card.maxY + Self.margin > scroll.bottom else { return }
-    // By its own distance, not by name: a named scroll rests the card on the page's edge under the keyboard.
-    withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(y: scroll.top + card.maxY + Self.margin - scroll.bottom) }
+    guard card.height + Self.margin + Self.clear <= scroll.height, card.maxY + Self.clear > scroll.bottom else { return }
+    withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(y: max(scroll.top, rest(for: card))) }
   }
 
   private static let end = "end"
@@ -242,6 +267,8 @@ struct ThreadScreen: View {
   nonisolated private static let content = "content"
   /// The air kept between a card and the reply field (or the title bar).
   static let margin: CGFloat = 12
+  /// The room kept over the reply field: its fade, then air, so a card resting there keeps its edge and corners.
+  static let clear: CGFloat = 30
 }
 
 /// The names the thread scrolls to.
@@ -269,14 +296,30 @@ struct CardPlace: ViewModifier {
     content
       .background { GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: [key: geometry.frame(in: .named("content"))]) } }
       .simultaneousGesture(TapGesture().onEnded { scroll.act(key) })
+      // The cards say it themselves too, from their own actions and fields: VoiceOver and a keyboard make no tap.
+      .environment(\.cardKey, key)
       .padding(.vertical, ThreadScreen.margin)
       .id(key)
       .padding(.vertical, -ThreadScreen.margin)
   }
 }
 
+private struct CardKey: EnvironmentKey { static let defaultValue: String? = nil }
+extension EnvironmentValues {
+  /// The name of the card a view is in, so its own actions can say the person is on it.
+  var cardKey: String? {
+    get { self[CardKey.self] }
+    set { self[CardKey.self] = newValue }
+  }
+}
+
 extension View {
   func card(_ key: String) -> some View { modifier(CardPlace(key: key)) }
+
+  /// The start of a block of words: a place the page's top may rest on.
+  func blockEdge(_ key: String) -> some View {
+    background { GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: ["b/\(key)": geometry.frame(in: .named("content"))]) } }
+  }
 
   /// A field and its buttons, opened inside a card: when the keyboard rises it is this, whole, that stays over the
   /// reply field, even in a card taller than the page.
@@ -334,7 +377,8 @@ struct MessageView: View {
       }
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
-      ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+      .blockEdge("\(message.id.rawValue)/head")
+      ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
         switch block {
         case .question(let index):
           let question = questions[index]
@@ -348,7 +392,7 @@ struct MessageView: View {
           ActionChecklist(session: session, thread: thread.threadId, message: message.id, actions: Array(todos[first..<min(first + count, todos.count)]), agent: name, readOnly: !SendPlan.live(message, in: thread), drafts: drafts)
             .card(CardID.actions(message.id, first))
         default:
-          MessageWords(block: block)
+          MessageWords(block: block).blockEdge("\(message.id.rawValue)/\(index)")
         }
       }
       if showsDelivery, let line = deliveryLine {
@@ -409,11 +453,13 @@ struct Composer: View {
   private var canSend: Bool {
     // While a Send waits, its picks are already on their way: only new words make another Send.
     if session.hasHeldReply(id), words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+    if guarded { return false }
     return session.canSend(thread: id, words: words) && !session.sending.contains(id)
   }
   @Environment(\.dynamicTypeSize) private var typeSize
-  /// At the largest text sizes the longer hint would be cut: the short one says enough.
-  private var hint: String { hasPicks && !typeSize.isAccessibilitySize ? PhoneWords.noteOrSend : PhoneWords.reply }
+  private var hint: String { hasPicks ? PhoneWords.noteOrSend : PhoneWords.reply }
+  /// The stale guard is up: it stands in place of the reply's own actions, as in the window.
+  private var guarded: Bool { session.stopped.contains(id) && !(session.stale[id] ?? []).isEmpty }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -424,21 +470,24 @@ struct Composer: View {
           .foregroundStyle(Token.mutedForeground)
           .padding(.horizontal, 6)
       }
-      if let notice = session.notices[id] {
+      // Under the guard only the guard speaks: the refusal behind it names keys.
+      if let notice = session.notices[id], !guarded {
         let said = PhoneWords.notice(notice, computer: session.computer.name, agent: thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) })
         Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
           .font(.footnote)
           .foregroundStyle(Token.destructive)
           .padding(.horizontal, 6)
       }
-      if session.stopped.contains(id), let stale = session.stale[id], !stale.isEmpty {
-        StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go)
+      if guarded, let stale = session.stale[id] {
+        // As wide as the cards above it.
+        StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go).padding(.horizontal, 8)
       } else if items.shown {
         // The window's own pill: what still wants an answer, and a touch goes to the next one.
         Button(action: jump) {
           HStack(spacing: 6) {
             Image(systemName: "questionmark.circle")
-            Text(PhoneWords.openItems(items))
+            // A number never parts from its noun when the words are large and wrap.
+            if let words = PhoneWords.openItems(items) { Text(words.replacing(#/(\d) /#) { "\($0.1)\u{00A0}" }).multilineTextAlignment(.leading) }
             Image(systemName: "chevron.down").font(.caption.weight(.bold))
           }
           .font(.subheadline.weight(.medium))
@@ -450,6 +499,7 @@ struct Composer: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(ChoiceStyle())
+        .accessibilityLabel(PhoneWords.openItems(items) ?? PhoneWords.allAnswered)
       }
       if session.standing == .appNeedsUpdate {
         Label(PhoneWords.updateToAnswer, systemImage: "arrow.down.app")
@@ -472,8 +522,8 @@ struct Composer: View {
     // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge.
     .overlay(alignment: .top) {
       LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
-        .frame(height: 22)
-        .offset(y: -22)
+        .frame(height: 14)
+        .offset(y: -14)
         .allowsHitTesting(false)
     }
   }
@@ -527,6 +577,7 @@ struct StaleGuard: View {
   }
   private func pick(_ answer: QuestionAnswer?) -> String? {
     guard let answer else { return nil }
+    if answer.skipped == true { return PhoneWords.skipped }
     let parts = answer.selected + [answer.other, answer.text].compactMap { $0 }.filter { !$0.isEmpty }
     return parts.isEmpty ? nil : parts.joined(separator: ", ")
   }
@@ -543,7 +594,7 @@ struct StaleGuard: View {
         .accessibilityAddTraits(.isHeader)
       ForEach(asked, id: \.key) { question in
         if let by = question.supersededBy, let message = thread.messages.first(where: { $0.id == by.messageId }) {
-          Text(MessageBody.attributed("\(PhoneWords.guardReplaced(agent: Names.agent(message.author), prompt: question.prompt, at: TimeWords().clock(message.createdAt), by: by.key != nil)) \(PhoneWords.guardPick(pick(question.answer)))"))
+          Text(MessageBody.attributed("\(PhoneWords.guardReplaced(agent: Names.agent(message.author), prompt: question.prompt, at: TimeWords().when(message.createdAt), by: by.key != nil)) \(PhoneWords.guardPick(pick(question.answer)))"))
             .font(.subheadline)
             .foregroundStyle(Token.foreground)
             .fixedSize(horizontal: false, vertical: true)
@@ -573,8 +624,8 @@ struct StaleGuard: View {
           .background(Token.foreground.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         Button(PhoneWords.guardKeepEditing) { session.clearStale(id) }
-          .font(.body)
-          .foregroundStyle(Token.foreground)
+          .font(.body.weight(.medium))
+          .foregroundStyle(Token.primary)
           .frame(maxWidth: .infinity, minHeight: 44)
           .contentShape(Rectangle())
       }

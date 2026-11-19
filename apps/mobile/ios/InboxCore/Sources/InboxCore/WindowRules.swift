@@ -82,25 +82,37 @@ public struct RowMarks: Hashable, Sendable {
   }
 }
 
-/// What the button at a thread's foot counts (packages/core/inbox-open-questions.ts): the questions that wait
-/// (open, or picked and not sent), the action items still open, and a started agent's permission prompts.
+/// TODO(contract): "rowMarks/codeBlockKeepsLayout vectors" (the open-items label). What the button at a thread's
+/// foot says (packages/inbox/components/OpenQuestions.tsx:157-169, approval "reply-bar-pairs"). It is shown while a
+/// question (open, or picked and not sent) or an open action item waits, and it counts only the questions not yet
+/// answered: one picked and not sent is the draft's to count.
 public struct OpenItems: Hashable, Sendable {
-  public var questions = 0
+  /// Every question that waits, a started agent's permission prompts included: open, or picked and not sent.
+  public var listed = 0
+  /// Those of them not answered yet.
+  public var unanswered = 0
+  /// Open action items.
   public var actions = 0
-  public var permissions = 0
+  /// Every question that waits is a started agent's permission prompt.
+  public var onlyPermissions = false
 
   public init(_ thread: InboxThread) {
+    var every = true
     for message in thread.messages where message.author.kind == .agent {
       let asked = (message.questions ?? []).filter { $0.kind != .action && ($0.state == .openValue || $0.state == .picked) }
-      if SendPlan.isPermissionPrompt(message) {
-        permissions += asked.count
-      } else {
-        questions += asked.count
-        actions += ActionMarks.items(of: message).filter { ActionMarks.state($0) == .open }.count
-      }
+      listed += asked.count
+      unanswered += asked.filter { $0.state == .openValue }.count
+      if SendPlan.isPermissionPrompt(message) { continue }
+      if !asked.isEmpty { every = false }
+      actions += ActionMarks.items(of: message).filter { ActionMarks.state($0) == .open }.count
     }
+    onlyPermissions = every && listed > 0
   }
 
-  /// `openQuestionsShown`: whenever a question, an action item or a permission prompt waits.
-  public var shown: Bool { questions + actions + permissions > 0 }
+  /// `openQuestionsShown`.
+  public var shown: Bool { listed + actions > 0 }
+  /// "1 permission waiting": no action item, something unanswered, and every waiting question a permission prompt.
+  public var permission: Bool { actions == 0 && unanswered > 0 && onlyPermissions }
+  /// Every listed question is answered in the draft, and no action item is open.
+  public var answered: Bool { unanswered + actions == 0 && listed > 0 }
 }

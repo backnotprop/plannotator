@@ -300,7 +300,7 @@ struct ThreadRow: View {
         Text(row.latestPreview ?? " ")
           .font(.subheadline)
           .foregroundStyle(row.unread ? Token.foreground : Token.mutedForeground)
-          .lineLimit(large ? 2 : 1)
+          .lineLimit(large ? 3 : 1)
           .truncationMode(.tail)
           .padding(.top, 1)
       }
@@ -373,7 +373,9 @@ private struct CountMark: View {
     }
     .foregroundStyle(ink)
     .padding(.horizontal, step == .open && !boxed ? 2 : 8)
-    .frame(height: 22)
+    // As tall as its words at any text size: the mark never spills out of its pill.
+    .padding(.vertical, 2)
+    .frame(minHeight: 22)
     .background(step == .open ? (boxed ? Token.muted : Color.clear) : ink.opacity(0.14), in: Capsule())
     .accessibilityHidden(true)
   }

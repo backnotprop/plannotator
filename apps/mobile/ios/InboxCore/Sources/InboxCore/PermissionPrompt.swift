@@ -229,38 +229,36 @@ public struct PermissionPrompt: Hashable, Sendable {
     return nil
   }
 
-  /// TODO(contract): "permission vectors" (the Link origin and host). A link's origin (`https://host`) and host as a
-  /// browser reads them, which is what the window's card shows (`new URL`, PermissionCard.tsx `Link`): the scheme and
-  /// host in lower case, the default port dropped, anything before an `@` in the authority left out, a backslash
-  /// ending the authority as a slash does, a host that is not ASCII in its punycode form. `origin` is given only
-  /// when the text starts with it and a path, query or fragment (or nothing) follows: the card stresses it then,
-  /// and names `host` on its own line when it does not.
+  /// TODO(contract): "permission vectors" (the host computed in core with `new URL`, and vectors for it). A link's
+  /// origin and host for the card (PermissionCard.tsx `Link`), which the window reads with the browser's own
+  /// `new URL`. The phone has no such reader, and a second one written by hand is how a card comes to name the
+  /// wrong host. So the phone names a host only for an address so plain that every reader agrees on it: `http` or
+  /// `https` in lower case, `://`, a host of lower-case ASCII letters, digits, hyphens and dots (or a dotted
+  /// quad), an optional port, then a path, query or fragment, with nothing odd anywhere in the text. Foundation
+  /// must read the same host and port. For anything else (a name before `@`, a percent sign or a space or a tab in
+  /// the host, upper case, another alphabet, odd slashes, number shorthands, IPv6) it stresses nothing and names
+  /// nothing: the card shows the address whole and unstyled, never a host that could be the wrong one.
+  /// `origin` is given when the text starts with it (the card stresses it); with a default port in the text the
+  /// text does not start with what a browser opens, so only `host` is given and the card names it on its own line.
   public static func link(_ text: String) -> (origin: String?, host: String?) {
-    guard let cut = text.range(of: "://") else { return (nil, nil) }
-    let scheme = text[..<cut.lowerBound].lowercased()
-    guard scheme == "http" || scheme == "https" else { return (nil, nil) }
-    let rest = text[cut.upperBound...]
-    let authority = rest.prefix { !"/\\?#".contains($0) }
-    // What a browser opens is what follows the last `@`.
-    var named = String(authority.split(separator: "@", omittingEmptySubsequences: false).last ?? "").lowercased()
-    var port: String?
-    if !named.hasPrefix("["), let colon = named.lastIndex(of: ":") {
-      port = String(named[named.index(after: colon)...])
-      named = String(named[..<colon])
+    // A browser drops tabs and line breaks anywhere, and spaces at the ends: such an address is not plain.
+    guard text.unicodeScalars.allSatisfy({ $0.value > 0x20 && $0.value != 0x7F && $0.value != 0x5C }) else { return (nil, nil) }
+    guard let match = text.wholeMatch(of: /(https?):\/\/([a-z0-9](?:[a-z0-9\-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?)*)(?::([1-9][0-9]{0,4}))?(?:[\/?#].*)?/) else { return (nil, nil) }
+    let scheme = String(match.1), host = String(match.2)
+    let port = match.3.flatMap { Int($0) }
+    if let port, port > 65535 { return (nil, nil) }
+    // A last label of digits (or `0x…`) is a number to a browser: only a plain dotted quad is read the same by all.
+    let labels = host.split(separator: ".")
+    if let last = labels.last, last.allSatisfy(\.isNumber) || last.hasPrefix("0x") {
+      guard labels.count == 4, labels.allSatisfy({ $0.allSatisfy(\.isNumber) && ($0 == "0" || !$0.hasPrefix("0")) && (Int($0) ?? 256) <= 255 }) else { return (nil, nil) }
     }
-    guard !named.isEmpty, port?.allSatisfy(\.isNumber) ?? true else { return (nil, nil) }
-    if !named.allSatisfy(\.isASCII) {
-      // The form a browser shows for a host outside ASCII, which gives a look-alike letter away.
-      guard let ascii = URLComponents(string: "\(scheme)://\(named)")?.encodedHost, ascii.allSatisfy(\.isASCII) else { return (nil, nil) }
-      named = ascii.lowercased()
+    // Punycode is another alphabet in disguise; the card shows it as it is, unstressed.
+    if labels.contains(where: { $0.hasPrefix("xn--") }) { return (nil, nil) }
+    guard let read = URLComponents(string: text), read.host == host, read.port == port, read.user == nil, read.password == nil else { return (nil, nil) }
+    if let port, port != (scheme == "https" ? 443 : 80) {
+      return ("\(scheme)://\(host):\(port)", "\(host):\(port)")
     }
-    if let given = port, given.isEmpty || given == (scheme == "https" ? "443" : "80") { port = nil }
-    let host = port.map { "\(named):\($0)" } ?? named
-    let origin = "\(scheme)://\(host)"
-    guard text.hasPrefix(origin) else { return (nil, host) }
-    let after = text.dropFirst(origin.count)
-    if after.isEmpty || "/?#".contains(after.first!) { return (origin, host) }
-    return (nil, host)
+    return (port == nil ? "\(scheme)://\(host)" : nil, host)
   }
 
   /// The session already switched to Full permissions from an earlier prompt in the thread: no confirmation again

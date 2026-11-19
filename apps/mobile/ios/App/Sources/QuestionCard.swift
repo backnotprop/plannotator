@@ -39,6 +39,8 @@ struct QuestionCard: View {
   let drafts: ThreadDrafts
 
   @State private var draft = CardDraft()
+  @Environment(ScrollBox.self) private var scroll: ScrollBox?
+  @Environment(\.cardKey) private var cardKey
   @FocusState private var focus: Field?
   enum Field { case other, note, text }
 
@@ -99,7 +101,11 @@ struct QuestionCard: View {
       try? await Task.sleep(for: .milliseconds(500))
       if !Task.isCancelled { save() }
     }
-    .onChange(of: focus) { before, now in if before != nil, now != before { save() } }
+    .onChange(of: focus) { before, now in
+      if before != nil, now != before { save() }
+      // A field taken up by any means (a touch, VoiceOver, a keyboard) says which card the person is on.
+      if now != nil, let cardKey { scroll?.act(cardKey) }
+    }
   }
 
   /// Take the saved answer's words into the fields that are not being typed in.
@@ -113,7 +119,10 @@ struct QuestionCard: View {
 
   private func save() { CardSaver.save(session: session, thread: thread, message: message, key: question.key, draft: draft) }
 
-  private func apply(_ edit: CardAnswers.Edit) { CardSaver.apply(edit, session: session, thread: thread, message: message, question: question) }
+  private func apply(_ edit: CardAnswers.Edit) {
+    if let cardKey { scroll?.act(cardKey) }
+    CardSaver.apply(edit, session: session, thread: thread, message: message, question: question)
+  }
 
   private var header: some View {
     ViewThatFits(in: .horizontal) {
@@ -126,6 +135,7 @@ struct QuestionCard: View {
         kindText
         marks
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .font(.subheadline)
     .foregroundStyle(Token.mutedForeground)

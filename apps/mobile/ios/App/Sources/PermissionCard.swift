@@ -18,6 +18,8 @@ struct PermissionCard: View {
   @State private var shown = Date()
   @State private var opened = false
   @FocusState private var typing: Bool
+  @Environment(ScrollBox.self) private var scroll: ScrollBox?
+  @Environment(\.cardKey) private var cardKey
 
   /// How long the answers ignore a touch after the card appears (the window's `ARM_MS`): a tap aimed at what was
   /// there a moment ago never allows a prompt the person has not seen.
@@ -47,6 +49,9 @@ struct PermissionCard: View {
       .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
       .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.border.opacity(0.7)))
       .onAppear { shown = Date() }
+      // Opening a field or the confirmation by any means says which card the person is on.
+      .onChange(of: mode) { _, _ in if let cardKey { scroll?.act(cardKey) } }
+      .onChange(of: typing) { _, now in if now, let cardKey { scroll?.act(cardKey) } }
     }
   }
 
@@ -180,8 +185,9 @@ struct PermissionCard: View {
       busy = false
       // Refused: what the person typed stays. A Full permissions answer the Inbox wants confirmed first (this
       // phone took it for confirmed already) opens the confirmation, never a dead end.
-      if case .refused(let words, _)? = session.refusal(message: message.id, key: question.key) {
-        if words.contains("confirm_full") { mode = .confirmFull }
+      if session.refusal(message: message.id, key: question.key) != nil {
+        // By the refusal's code and the field it names, never by its words.
+        if case .refused(_, "validation_error")? = session.refusal(message: message.id, key: question.key), session.refusalField(message: message.id, key: question.key) == "confirm_full" { mode = .confirmFull }
       } else {
         mode = .answers
         self.reason = ""
@@ -298,8 +304,9 @@ private struct AnswerButton: View {
   var body: some View {
     Button(action: action) {
       Text(PermissionCard.ticks(words, onPrimary: style == .filled))
-        .font(.body.weight(style == .ghost ? .regular : .semibold))
-        .foregroundStyle(style == .filled ? Token.primaryForeground : style == .off ? Token.mutedForeground : Token.foreground)
+        .font(.body.weight(style == .ghost ? .medium : .semibold))
+        // Words alone that can be touched are the accent colour everywhere in the app.
+        .foregroundStyle(style == .filled ? Token.primaryForeground : style == .off ? Token.mutedForeground : style == .ghost ? Token.primary : Token.foreground)
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 14)
@@ -308,6 +315,8 @@ private struct AnswerButton: View {
         .frame(minWidth: hugs ? 72 : nil)
         // A tint of the words' own colour, so the button stands off its card in the dark as in the light.
         .background(style == .filled ? Token.primary : style == .ghost ? Color.clear : Token.foreground.opacity(style == .off ? 0.05 : 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // A hairline too, so a plain answer stands off its card in the dark.
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Token.foreground.opacity(style == .plain ? 0.22 : 0)))
         .contentShape(Rectangle())
     }
     .buttonStyle(ChoiceStyle())
@@ -323,9 +332,8 @@ private struct LinkButton: View {
   var body: some View {
     Button(action: action) {
       Text(words)
-        .font(.subheadline.weight(quiet ? .regular : .medium))
-        .underline(true, color: Token.foreground.opacity(0.3))
-        .foregroundStyle(quiet ? Token.mutedForeground : Token.foreground)
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(quiet ? Token.mutedForeground : Token.primary)
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(Rectangle())
     }

@@ -102,13 +102,17 @@ enum PhoneWords {
   /// TODO(contract): "words rows" (`openItemsLabel`, packages/core/inbox-open-questions.ts). The button at a thread's
   /// foot: "3 open questions" or "2 open action items" when one kind waits; both named, without "open", when both
   /// do; "1 permission waiting" when only a started agent's permission prompts do.
-  static func openItems(_ items: OpenItems) -> String {
+  /// Nil when every question is answered in the draft: the button is its mark alone then, named `allAnswered`.
+  static func openItems(_ items: OpenItems) -> String? {
     func each(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
-    if items.questions == 0, items.actions == 0 { return "\(items.permissions) permission\(items.permissions == 1 ? "" : "s") waiting" }
-    if items.actions == 0 { return "\(items.questions) open question\(items.questions == 1 ? "" : "s")" }
-    if items.questions == 0 { return "\(items.actions) open action item\(items.actions == 1 ? "" : "s")" }
-    return "\(each(items.questions, "question")), \(each(items.actions, "action item"))"
+    if items.answered { return nil }
+    if items.permission { return "\(items.unanswered) permission\(items.unanswered == 1 ? "" : "s") waiting" }
+    if items.actions == 0 { return "\(items.unanswered) open question\(items.unanswered == 1 ? "" : "s")" }
+    if items.unanswered == 0 { return "\(items.actions) open action item\(items.actions == 1 ? "" : "s")" }
+    return "\(each(items.unanswered, "question")), \(each(items.actions, "action item"))"
   }
+  /// packages/inbox/components/OpenQuestions.tsx: the button's name when it shows no count.
+  static let allAnswered = "Questions, all answered in your draft"
   /// TODO(contract): "words rows". packages/ui/components/blocks/CodeBlock.tsx:63: the copy button and its answer.
   static let copy = "Copy code"
   static let copied = "Copied!"
@@ -150,7 +154,7 @@ enum PhoneWords {
   }
   static let pickNotSaved = "The pick was not saved."
   /// The phone's own: a pick that waited on the phone while another device answered gives way to that answer.
-  static let gaveWay = "Another device answered this while your pick waited. Its answer is shown."
+  static let gaveWay = "Another device answered after you, while your pick waited. That answer is shown, not yours."
   /// Why a Done or Can't do it the person pressed did not go. The Inbox's own lines name the item's key.
   static func markNotice(_ notice: InboxSession.Notice, computer: String) -> String {
     switch notice {

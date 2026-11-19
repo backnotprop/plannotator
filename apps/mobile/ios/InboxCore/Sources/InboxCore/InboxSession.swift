@@ -64,6 +64,8 @@ public final class InboxSession {
   public private(set) var notices: [ThreadID: Notice] = [:]
   /// Why a pick was refused, by question, until the person acts on that question again.
   public private(set) var refusals: [String: Notice] = [:]
+  /// The field a refused pick's refusal names, by question (`DoorError.field`): what the app acts on, never the words.
+  private var refusedFields: [String: String] = [:]
   /// The words of a refused Send, to go back into the composer.
   public private(set) var returned: [ThreadID: String] = [:]
   /// Writes with no definite answer yet, oldest first.
@@ -338,6 +340,11 @@ public final class InboxSession {
   /// Why the computer did not take a pick on this question, until the person acts on the question again.
   public func refusal(message: MessageID, key: String) -> Notice? { refusals[ref(message.rawValue, key)] }
 
+  /// The field the Inbox named when it refused this question's pick (`confirm_full`, say), while that refusal stands.
+  public func refusalField(message: MessageID, key: String) -> String? {
+    refusals[ref(message.rawValue, key)] == nil ? nil : refusedFields[ref(message.rawValue, key)]
+  }
+
   /// Whether this question's pick is still on the phone only.
   public func isHeldPick(message: MessageID, key: String) -> Bool {
     held.contains { write in
@@ -489,19 +496,25 @@ public final class InboxSession {
   /// Another place's answer landed first (PickConflict). True when the pick was dealt with quietly: saved again
   /// at the revision the Inbox holds now (it stays in the outbox with a new key), or dropped for the Inbox's answer.
   private func settleConflict(_ write: HeldWrite, _ failure: DoorFailure) async -> Bool {
-    guard write.kind == .pick, let now = PickConflict.revision(failure), var body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body), let index = held.firstIndex(where: { $0.id == write.id }) else { return false }
+    guard write.kind == .pick, let now = PickConflict.revision(failure), var body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body), held.contains(where: { $0.id == write.id }) else { return false }
     let message = MessageID(write.message ?? "")
     let stale = body.questions.map { ($0.key, $0.revision) }
-    // The person's own later writes on this question name the revision this pick read: they go at the Inbox's.
-    // Not behind a pick that waited: a later pick of that wait must meet the Inbox's answer itself, and give way too.
-    if write.waited != true { for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: now) } }
-    // A newer answer of it waits behind this one: that one decides.
-    let newer = held.indices.contains { later in
-      later > index && held[later].kind == .pick && held[later].message == write.message
-        && ((try? JSONDecoder().decode(DoorPicksBody.self, from: held[later].body))?.questions.contains { q in stale.contains { $0.0 == q.key } } ?? false)
+    // What the Inbox holds now is read before anything is decided.
+    await readThread(ThreadID(write.thread))
+    guard let index = held.firstIndex(where: { $0.id == write.id }) else { return true }
+    // A newer answer of it waits behind this one: that one decides, and meets the Inbox's answer itself.
+    if stale.contains(where: { laterPick(after: write, key: $0.0) }) {
+      settle(write.id)
+      return true
     }
-    let step = PickConflict.step(failure, tries: write.tries ?? 0, waited: write.waited == true)
-    if !newer, case .retry(let revision)? = step {
+    let current = threads[ThreadID(write.thread)]?.thread.messages.first { $0.id == message }?.questions?.first { q in stale.contains { $0.0 == q.key } }
+    let outcome = PickConflict.decide(
+      failure, tries: write.tries ?? 0, waited: write.waited == true, tapped: write.madeAt,
+      inboxAnswered: current?.answer != nil, inboxPickedAt: current?.pickedAt.flatMap { TimeWords.date($0) })
+    switch outcome {
+    case .retry(let revision)?:
+      // The person's own later writes on this question name the revision this pick read: they go at the Inbox's.
+      for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: revision) }
       // The refused key is spent: the same answer goes again as a new write, in the same place in the queue.
       var again = write
       let key = UUID().uuidString
@@ -513,16 +526,18 @@ public final class InboxSession {
       held[index] = again
       copy.saveOutbox(held)
       return true
+    case .giveWay?:
+      // An old pick never goes over a newer answer made elsewhere: that answer is shown, the person is told in
+      // one line, and a Send made behind this pick waits for them to look.
+      if body.questions.contains(where: { $0.answer != nil }) {
+        for (key, _) in stale { refusals[ref(write.message, key)] = .gaveWay }
+        pullBackSends(after: write, notice: .refused("", code: "question_revision_conflict"))
+      }
+    default:
+      // The Inbox's answer is drawn, quietly; a Send behind it carries that answer, at the Inbox's revision.
+      for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: now) }
     }
-    if !newer, write.waited == true, body.questions.contains(where: { $0.answer != nil }) {
-      // An old pick never goes over a newer answer made elsewhere: the Inbox's is shown, the person is told in one
-      // line, and a Send made behind this pick waits for them to look.
-      for (key, _) in stale { refusals[ref(write.message, key)] = .gaveWay }
-      pullBackSends(after: write, notice: .refused("", code: "question_revision_conflict"))
-    }
-    // The Inbox's answer is drawn; a Send behind it carries that answer, at the Inbox's revision.
     settle(write.id)
-    await readThread(ThreadID(write.thread))
     return true
   }
 
@@ -561,7 +576,11 @@ public final class InboxSession {
       }
       // Words first, then the outbox: a refusal never leaves the phone with neither.
       switch failure {
-      case .refused(_, let error): giveBack(write, .refused(error.error, code: error.code))
+      case .refused(_, let error):
+        if write.kind == .pick, let body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body) {
+          for question in body.questions { refusedFields[ref(write.message, question.key)] = error.field }
+        }
+        giveBack(write, .refused(error.error, code: error.code))
       case .unreadable(let status): giveBack(write, .unreadable(status: status))
       case .appNeedsUpdate: giveBack(write, .appNeedsUpdate)
       default: giveBack(write, .notOffered)
@@ -670,7 +689,8 @@ public final class InboxSession {
 
   private func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false) {
     // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
-    let waits = client == nil || reach != .here
+    // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers.
+    let waits = reach == .away
     hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil))
   }
 
@@ -723,6 +743,9 @@ public final class InboxSession {
   @discardableResult
   public func mark(action: InboxQuestion, thread: ThreadID, message: MessageID, _ mark: ActionMarks.Mark?) async -> ActionMarks.Taken {
     guard hold(mark: mark, action: action, thread: thread, message: message) else { return .notOffered }
+    // A note's autosave may be on its way: this mark goes after it, and its own answer is waited for, so a
+    // refusal is never mistaken for "waits".
+    while pumping.contains(thread.rawValue) { try? await Task.sleep(for: .milliseconds(15)) }
     await pump(thread.rawValue)
     // Only what the computer answered counts: a refused mark leaves what the person typed where it is.
     if refusals[ref(message.rawValue, action.key)] != nil { return .refused }
