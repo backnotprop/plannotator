@@ -7,6 +7,8 @@ import InboxWire
 /// backups (SPEC 1.5). Brief S1 names SQLite; plain files hold the same data for this slice.
 public struct LocalCopy: Sendable {
   public let folder: URL?
+  /// Told of each file written, by name, after it is written (the tests read every outbox the phone keeps).
+  var watch: (@Sendable (String, Data) -> Void)?
 
   /// `folder` nil keeps nothing (the demo, and tests that do not ask for a copy).
   public init(folder: URL?) { self.folder = folder }
@@ -21,7 +23,7 @@ public struct LocalCopy: Sendable {
 
   private func file(_ name: String) -> URL? { folder?.appendingPathComponent(name) }
 
-  private func write(_ data: Data, to name: String) {
+  func write(_ data: Data, to name: String) {
     guard let folder, let file = file(name) else { return }
     do {
       try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -30,12 +32,13 @@ public struct LocalCopy: Sendable {
       values.isExcludedFromBackup = true
       var target = folder
       try? target.setResourceValues(values)
+      watch?(name, data)
     } catch {
       // A copy that cannot be written is only a slower next open.
     }
   }
 
-  private func read(_ name: String) -> Data? { file(name).flatMap { try? Data(contentsOf: $0) } }
+  func read(_ name: String) -> Data? { file(name).flatMap { try? Data(contentsOf: $0) } }
 
   public func saveList(_ model: ListModel) { if let data = try? JSONEncoder().encode(model) { write(data, to: "list.json") } }
   public func list() -> ListModel? { read("list.json").flatMap { try? DoorClient.readList($0).model } }
@@ -79,7 +82,8 @@ public struct LocalCopy: Sendable {
 /// A write the person made that has no definite answer yet. Its key never changes: across retries, paths and
 /// restarts the door sees one intent.
 public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
-  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action }
+  /// `state`: a thread action (ThreadAct): archive, read, star, snooze, priority and their reverses.
+  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state }
 
   /// The idempotency key.
   public var id: String
@@ -100,4 +104,12 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var waited: Bool?
   /// A note typed under a marked action item: its refusal, when the item moved on meanwhile, is not the person's to act on.
   public var quiet: Bool?
+  /// A thread action: what it does, so the list draws it while it waits.
+  public var act: ThreadAct?
+  /// A thread action: what the person saw of the thread at the tap, which the computer's row is checked against if
+  /// the act waited (StateConflict).
+  public var shown: ShownState?
+  /// The reverses an Undo made of an act whose answer never came carry that act's key. The first to meet the
+  /// computer's row says whether the act was taken: if there is nothing to take back, none of them goes.
+  public var undoes: String?
 }

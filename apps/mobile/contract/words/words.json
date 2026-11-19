@@ -31,6 +31,16 @@
       "parts": [],
       "source": "packages/core/inbox-types.ts INBOX_SECTIONS quiet"
     },
+    "group.priority": {
+      "text": "Priority",
+      "parts": [],
+      "source": "packages/core/inbox-types.ts INBOX_PRIORITY_GROUP"
+    },
+    "group.snoozed": {
+      "text": "Snoozed",
+      "parts": [],
+      "source": "packages/core/inbox-snooze.ts INBOX_SNOOZED_BAND"
+    },
     "agent.claude-code": {
       "text": "Claude Code",
       "parts": [],
