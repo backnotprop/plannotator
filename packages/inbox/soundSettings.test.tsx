@@ -4,7 +4,7 @@
  * line before the first click, the notification ask's "Sound is on.",
  * and the hook itself against a recording AudioContext: nothing rings before
  * the first click or with the tab in front, a burst rings once, Play always
- * plays the Ding-dong; "for every agent message" (the default, also with
+ * plays the Ding-dong; "every agent message" (the default, also with
  * nothing chosen) plays the Felt note for a plain reply, "when an agent asks
  * you or starts a thread" nothing; off stays off.
  * Never audible: the AudioContext is a stub that only counts.
@@ -122,7 +122,7 @@ describe.if(hasDom)('Settings: the sound row', () => {
     const block = renderSettings(sound);
     const row = block.querySelector('[data-settings-sound]') as HTMLElement;
     expect(row.getAttribute('data-settings-sound')).toBe('on');
-    // The label, then the owner's two choices in their order, "for every agent message" chosen, then what it rings for.
+    // The label, then the owner's two choices in their order, "every agent message" chosen, then what it rings for.
     expect(row.querySelector('#ib-sound-label')?.textContent).toBe('Play a sound');
     // The section it sits in (the owner, 2026-11-18): named for what reaches the person now, not only questions.
     expect(document.getElementById('ib-g-attention')?.textContent).toBe('When an agent sends you something');
@@ -131,7 +131,7 @@ describe.if(hasDom)('Settings: the sound row', () => {
     // The description says what the chosen one rings for, and screen readers hear it with the choice.
     expect(document.getElementById(group.getAttribute('aria-describedby')!)?.textContent).toBe('A reply, a new thread or a question, while no Inbox tab is in front');
     const radios = [...group.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
-    expect(radios.map((r) => r.parentElement!.textContent)).toEqual(['when an agent asks you or starts a thread', 'for every agent message']);
+    expect(radios.map((r) => r.parentElement!.textContent)).toEqual(['questions and new threads', 'every agent message']);
     expect(radios.map((r) => r.checked)).toEqual([false, true]);
     expect(row.querySelector('.ib-desc')?.textContent).toBe('A reply, a new thread or a question, while no Inbox tab is in front');
     const slider = row.querySelector('input[type="range"]') as HTMLInputElement;
@@ -144,7 +144,7 @@ describe.if(hasDom)('Settings: the sound row', () => {
     expect(document.getElementById(sw.getAttribute('aria-labelledby')!)?.textContent).toBe('Play a sound');
   });
 
-  test('picking a choice saves it; "when an agent asks you or starts a thread" says when it rings', () => {
+  test('picking a choice saves it; "questions and new threads" says when it rings', () => {
     const every = fakeSound();
     let block = renderSettings(every.sound);
     act(() => (block.querySelector('[data-sound-when-o="asks"] input') as HTMLInputElement).click());
@@ -345,7 +345,7 @@ describe.if(hasDom)('useInboxSound', () => {
     }
   }
 
-  test('nothing chosen (an update): "for every agent message"; a plain reply away plays the note, not the bell, five agents at once once, in front nothing', () => {
+  test('nothing chosen (an update): "every agent message"; a plain reply away plays the note, not the bell, five agents at once once, in front nothing', () => {
     mount(<Probe />);
     expect(api.settings.when).toBe('messages');
     armedAndAway();
@@ -409,7 +409,7 @@ describe.if(hasDom)('useInboxSound', () => {
     }
   });
 
-  test('"when an agent asks you or starts a thread": a plain reply plays nothing and starts no burst; a question then rings', () => {
+  test('"questions and new threads": a plain reply plays nothing and starts no burst; a question then rings', () => {
     probeSettings = { enabled: true, volume: 60, when: 'asks', dialog_shown_for: null };
     mount(<Probe />);
     armedAndAway();

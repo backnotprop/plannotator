@@ -2054,7 +2054,7 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
    being 442 px at most), one under another, each the column's full width (as Rows' agents). */
 .ib-prow[data-settings-sound] .ib-txt { container: ib-sound-row / inline-size; }
 .ib-prow .ib-sound-when { align-self: flex-start; max-width: 100%; margin: 6px 0 3px; }
-@container ib-sound-row (max-width: 479px) {
+@container ib-sound-row (max-width: 379px) {
   .ib-prow .ib-sound-when { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; align-self: stretch; }
   .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; height: auto; min-height: 28px; padding-block: 5px; white-space: normal; line-height: 1.35; }
 }

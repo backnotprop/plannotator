@@ -16,8 +16,8 @@
  *
  * Proves: a question while the tab is hidden rings once; a burst of three
  * rings once; a visible tab rings nothing; a plain reply plays the Felt note
- * under the default ("for every agent message") and nothing under "when an
- * agent asks you or starts a thread";
+ * under the default ("every agent message") and nothing under "questions and
+ * new threads";
  * a question right after agent chatter still rings;
  * the sound off rings nothing (and notifications stop being silent); two tabs
  * ring once; the two sound choices stay inside their Settings row from 320 to
@@ -386,13 +386,13 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   await second.close();
 });
 
-test('Settings: the row, Play always plays, "when an agent asks you or starts a thread" rings a new thread but not a plain reply, and the switch off silences the next question (notifications ring the system again)', async () => {
+test('Settings: the row, Play always plays, "questions and new threads" rings a new thread but not a plain reply, and the switch off silences the next question (notifications ring the system again)', async () => {
   await setFront(page, true, true);
   await page.getByRole('button', { name: 'Settings' }).click();
   const block = page.locator('[data-settings-notifications]');
   const row = block.locator('[data-settings-sound]');
   await expect(row).toContainText('Play a sound');
-  await expect(row.getByRole('radio', { name: 'for every agent message' })).toBeChecked();
+  await expect(row.getByRole('radio', { name: 'every agent message' })).toBeChecked();
   await expect(row).toContainText('A reply, a new thread or a question, while no Inbox tab is in front');
   await expect(row.getByRole('slider', { name: 'Volume' })).toHaveValue('60');
   await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
@@ -402,7 +402,7 @@ test('Settings: the row, Play always plays, "when an agent asks you or starts a 
   await row.getByRole('button', { name: 'Play the sound' }).click();
   await expect.poll(() => rings(page)).toBe(before + 1);
 
-  await row.getByRole('radio', { name: 'when an agent asks you or starts a thread' }).check();
+  await row.getByRole('radio', { name: 'questions and new threads' }).check();
   await expect.poll(() => config(fresh).inboxSound?.when).toBe('asks');
   await expect(row.locator('.ib-desc')).toHaveText('While no Inbox tab is in front');
   await awayAgain(page);
@@ -436,16 +436,43 @@ test('Settings: the row, Play always plays, "when an agent asks you or starts a 
   expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(false);
 });
 
-test('Settings: the two "Play a sound" choices stay inside their row at every width, with the slider and the switch beside them', async () => {
+test('Settings: the two "Play a sound" choices stay inside their row at every width, side by side at 1280 px, with the slider and the switch beside them', async () => {
   await setFront(page, true, true);
   await page.evaluate(() => (location.hash = '#settings/general'));
   const row = page.locator('[data-settings-notifications] [data-settings-sound]');
   const sw = row.getByRole('switch', { name: 'Play a sound' });
   await sw.click();
   await expect(sw).toHaveAttribute('aria-checked', 'true');
-  await expect(row.getByRole('radio', { name: 'when an agent asks you or starts a thread' })).toBeChecked();
+  const asks = row.getByRole('radio', { name: 'questions and new threads' });
+  await expect(asks).toBeChecked();
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   const sidebar = page.locator('.pn-inbox .ib-sb');
+  const faults = (at: string, oneLine: boolean) =>
+    row.evaluate(
+      (el, [at, oneLine]) => {
+        const box = (q: Element) => q.getBoundingClientRect();
+        const txt = box(el.querySelector('.ib-txt')!);
+        const seg = el.querySelector('.ib-sound-when')!;
+        const choices = [...seg.querySelectorAll('.ib-seg-o')];
+        const ctl = box(el.querySelector('.ib-ctl')!);
+        const out: string[] = [];
+        if (el.scrollWidth > el.clientWidth + 1) out.push(`row scrolls (${el.scrollWidth} > ${el.clientWidth})`);
+        const spage = document.querySelector('.ib-spage')!;
+        if (spage.scrollWidth > spage.clientWidth + 1) out.push(`page scrolls (${spage.scrollWidth} > ${spage.clientWidth})`);
+        for (const o of choices) {
+          if (box(o).right > Math.min(box(seg).right, txt.right) + 1) out.push(`a choice ends at ${Math.round(box(o).right)}, past the column's ${Math.round(txt.right)}`);
+          if (o.scrollWidth > o.clientWidth + 1) out.push(`a choice is cut (${o.scrollWidth} > ${o.clientWidth})`);
+        }
+        if (oneLine && new Set(choices.map((o) => Math.round(box(o).top))).size > 1) out.push('the choices are not on one line');
+        if (ctl.right > box(el).right + 1) out.push(`the controls end past the row`);
+        if (ctl.left < txt.right - 1 && ctl.top < txt.bottom - 1) out.push('the controls overlap the column');
+        const inLine = choices.reduce((sum, o) => sum + o.scrollWidth, 0) + 2 * (choices.length - 1) + 6;
+        console.log(`MEASURE ${at}: column ${txt.width} px, the pair in a line ${inLine} px`);
+        return out.length ? `${at}: column ${Math.round(txt.width)} px, the pair in a line ${inLine} px: ${out.join('; ')}` : '';
+      },
+      [at, oneLine] as const,
+    );
+  page.on('console', (m) => m.text().startsWith('MEASURE') && console.log(m.text()));
   const broken: string[] = [];
   for (const [width, withSidebar] of [[320, false], [390, false], [768, false], [1024, false], [1280, false], [1440, false], [1280, true]] as const) {
     await page.setViewportSize({ width, height: 900 });
@@ -460,31 +487,19 @@ test('Settings: the two "Play a sound" choices stay inside their row at every wi
     await expect(sw).toBeVisible();
     await page.waitForTimeout(300);
     const name = `row-${width}${withSidebar ? '-sidebar' : ''}`;
-    const fault = await row.evaluate((el, at) => {
-      const box = (q: Element) => q.getBoundingClientRect();
-      const txt = box(el.querySelector('.ib-txt')!);
-      const seg = el.querySelector('.ib-sound-when')!;
-      const choices = [...seg.querySelectorAll('.ib-seg-o')];
-      const ctl = box(el.querySelector('.ib-ctl')!);
-      const out: string[] = [];
-      if (el.scrollWidth > el.clientWidth + 1) out.push(`row scrolls (${el.scrollWidth} > ${el.clientWidth})`);
-      const spage = document.querySelector('.ib-spage')!;
-      if (spage.scrollWidth > spage.clientWidth + 1) out.push(`page scrolls (${spage.scrollWidth} > ${spage.clientWidth})`);
-      for (const o of choices) {
-        if (box(o).right > Math.min(box(seg).right, txt.right) + 1) out.push(`a choice ends at ${Math.round(box(o).right)}, past the column's ${Math.round(txt.right)}`);
-        if (o.scrollWidth > o.clientWidth + 1) out.push(`a choice is cut (${o.scrollWidth} > ${o.clientWidth})`);
-      }
-      if (ctl.right > box(el).right + 1) out.push(`the controls end past the row`);
-      if (ctl.left < txt.right - 1 && ctl.top < txt.bottom - 1) out.push('the controls overlap the column');
-      const inLine = choices.reduce((sum, o) => sum + o.scrollWidth, 0) + 2 * (choices.length - 1) + 6;
-      return out.length ? `${at}: column ${Math.round(txt.width)} px, the pair in a line ${inLine} px: ${out.join('; ')}` : '';
-    }, name);
-    if (fault) broken.push(fault);
+    const oneLine = width === 1280 && !withSidebar;
+    broken.push(await faults(name, oneLine));
     await row.locator('xpath=..').screenshot({ path: join(shots, `${name}.png`) });
+    if (oneLine) {
+      await row.getByRole('radio', { name: 'every agent message' }).check();
+      await page.waitForTimeout(300);
+      broken.push(await faults(`${name}, every agent message chosen`, true));
+      await asks.check();
+    }
   }
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 820 });
-  expect(broken).toEqual([]);
+  expect(broken.filter(Boolean)).toEqual([]);
 });
 
 test('after an update the dialog shows once: in one of two tabs opened together, and never again on reload', async ({ browser }) => {

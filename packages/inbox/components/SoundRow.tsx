@@ -8,12 +8,12 @@ export function Switch({ on, labelledBy, label, disabled, onClick }: { on: boole
 }
 
 /**
- * Play a sound: "when an agent asks you or starts a thread" / "for every agent message" (the owner's words and order,
+ * Play a sound: "questions and new threads" / "every agent message" (the owner's words and order,
  * 2026-11-18 and 2026-11-19; the second is the default), each with what it rings for under the choice.
  */
 export const SOUND_WHEN_CHOICES: readonly { id: InboxSoundWhen; label: string; desc: string }[] = [
-  { id: 'asks', label: 'when an agent asks you or starts a thread', desc: 'While no Inbox tab is in front' },
-  { id: 'messages', label: 'for every agent message', desc: 'A reply, a new thread or a question, while no Inbox tab is in front' },
+  { id: 'asks', label: 'questions and new threads', desc: 'While no Inbox tab is in front' },
+  { id: 'messages', label: 'every agent message', desc: 'A reply, a new thread or a question, while no Inbox tab is in front' },
 ];
 
 export function SoundRow({ sound }: { sound: InboxSound }) {
