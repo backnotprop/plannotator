@@ -11,7 +11,7 @@
  * enter the event log (the window's stream, search, the phone relay). Written
  * whole (temp, then rename), owner-only, like a reply draft.
  */
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { diffScenes, type CanvasAuthor, type CanvasLogEntry } from './changes';
 import { asScene, emptyScene, type Box, type CanvasScene } from './scene';
@@ -20,6 +20,8 @@ export const INBOX_CANVAS_DIR = 'canvas';
 const THREAD_ID = /^[A-Za-z0-9_]{1,80}$/;
 /** The log keeps this many revisions; an agent that last looked before them is told to read again. */
 const LOG_KEEP = 400;
+/** The pictures cut for agents that are kept (`pictures/`). */
+export const AGENT_PICTURES_KEPT = 24;
 
 export interface CanvasPictureMeta {
   rev: number;
@@ -80,9 +82,43 @@ export function writeCanvasMeta(inboxDirPath: string, threadId: string, meta: Ca
   writeWhole(join(dir, 'meta.json'), `${JSON.stringify(meta)}\n`);
 }
 
-export function readCanvasScene(inboxDirPath: string, threadId: string): CanvasScene {
-  const raw = readJson(join(canvasDirOf(inboxDirPath, threadId), 'scene.excalidraw'));
-  return raw ? asScene(raw) : emptyScene();
+const FILE_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
+/**
+ * The scene. Pictures' bytes are not in `scene.excalidraw`: each is one file under `files/`, written once, so a save
+ * of a canvas with photos rewrites kilobytes, not megabytes, and a picture's file outlives its element's deletion.
+ * `withFiles`: put the files every picture element names (deleted ones too) back into the scene, as Excalidraw's own
+ * JSON has them.
+ */
+export function readCanvasScene(inboxDirPath: string, threadId: string, withFiles = true): CanvasScene {
+  const dir = canvasDirOf(inboxDirPath, threadId);
+  const raw = readJson(join(dir, 'scene.excalidraw'));
+  const scene = raw ? asScene(raw) : emptyScene();
+  if (!withFiles) return { ...scene, files: {} };
+  const files: Record<string, unknown> = { ...scene.files };
+  for (const el of scene.elements) {
+    const id = el.fileId;
+    if (typeof id !== 'string' || files[id] !== undefined || !FILE_ID.test(id)) continue;
+    const file = readJson(join(dir, 'files', `${id}.json`));
+    if (file) files[id] = file;
+  }
+  return { ...scene, files };
+}
+
+/** One picture's file (Excalidraw's `{ id, mimeType, dataURL, … }`), or null. */
+export function readCanvasFile(inboxDirPath: string, threadId: string, fileId: string): unknown {
+  if (!FILE_ID.test(fileId)) return null;
+  return readJson(join(canvasDirOf(inboxDirPath, threadId), 'files', `${fileId}.json`));
+}
+
+function writeNewFiles(dir: string, files: Record<string, unknown>): void {
+  for (const [id, file] of Object.entries(files)) {
+    if (!FILE_ID.test(id) || !file || typeof file !== 'object') continue;
+    const path = join(dir, 'files', `${id}.json`);
+    if (existsSync(path)) continue;
+    mkdirSync(join(dir, 'files'), { recursive: true, mode: 0o700 });
+    writeWhole(path, JSON.stringify(file));
+  }
 }
 
 export function hasCanvas(inboxDirPath: string, threadId: string): boolean {
@@ -120,14 +156,15 @@ export function readCanvasLog(inboxDirPath: string, threadId: string): CanvasLog
  */
 export function commitCanvas(inboxDirPath: string, threadId: string, next: CanvasScene, by: CanvasAuthor, at: Date, extra: { undid?: number } = {}): { rev: number; entry: CanvasLogEntry | null } {
   const dir = canvasDirOf(inboxDirPath, threadId);
-  const prev = readCanvasScene(inboxDirPath, threadId);
+  const prev = readCanvasScene(inboxDirPath, threadId, false);
   const meta = readCanvasMeta(inboxDirPath, threadId);
   const changes = diffScenes(prev, next);
   // A scene an agent started has no background yet; the editor's first save names the default one. Not a change.
   const paper = (scene: CanvasScene) => scene.appState.viewBackgroundColor ?? '#ffffff';
   const background = paper(prev) !== paper(next);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const text = `${JSON.stringify(next)}\n`;
+  writeNewFiles(dir, next.files);
+  const text = `${JSON.stringify({ ...next, files: {} })}\n`;
   if (changes.length === 0 && !background) {
     // Selection order, a version bump with no visible change: keep the bytes current, not the revision.
     if (existsSync(join(dir, 'scene.excalidraw')) || next.elements.length > 0) writeWhole(join(dir, 'scene.excalidraw'), text);
@@ -165,6 +202,16 @@ export function writeAgentPicture(inboxDirPath: string, threadId: string, name: 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, `${name.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80)}.png`);
   writeWhole(file, png);
+  // The folder holds the newest few: a picture is asked for, read, and not needed again.
+  try {
+    const kept = readdirSync(dir)
+      .filter((n) => n.endsWith('.png'))
+      .map((n) => ({ n, at: statSync(join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.at - a.at);
+    for (const old of kept.slice(AGENT_PICTURES_KEPT)) if (join(dir, old.n) !== file) unlinkSync(join(dir, old.n));
+  } catch {
+    // Tidying is best effort.
+  }
   return file;
 }
 
@@ -220,4 +267,40 @@ export function retireCanvas(inboxDirPath: string, threadId: string, at: number)
   } catch {
     return false;
   }
+}
+
+/**
+ * What each agent session has been shown, thing by thing: element id → the revision at which an answer to that
+ * session held the thing's line. `*` is everyone: the things a reply the person sent from the canvas listed (their
+ * "work on this" tells whoever reads it). An agent may change a thing only as it was last shown it; nothing else moves
+ * this, so no error, cut list or copied revision can stand in for having been told.
+ */
+export type CanvasTold = Record<string, Record<string, number>>;
+export const TOLD_EVERYONE = '*';
+const TOLD_SESSIONS = 32;
+
+export function readCanvasTold(inboxDirPath: string, threadId: string): CanvasTold {
+  const raw = readJson(join(canvasDirOf(inboxDirPath, threadId), 'told.json'));
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as CanvasTold) : {};
+}
+
+export function markCanvasTold(inboxDirPath: string, threadId: string, session: string, elementIds: Iterable<string>, rev: number): void {
+  const dir = canvasDirOf(inboxDirPath, threadId);
+  if (!existsSync(dir)) return;
+  const all = readCanvasTold(inboxDirPath, threadId);
+  const mine = all[session] ?? {};
+  let changed = false;
+  for (const id of elementIds) {
+    if ((mine[id] ?? -1) < rev) {
+      mine[id] = rev;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  // The session just told moves to the end; the oldest sessions beyond the cap go (the reply's `*` always stays).
+  delete all[session];
+  all[session] = mine;
+  const sessions = Object.keys(all).filter((k) => k !== TOLD_EVERYONE);
+  for (const old of sessions.slice(0, Math.max(0, sessions.length - TOLD_SESSIONS))) delete all[old];
+  writeWhole(join(dir, 'told.json'), `${JSON.stringify(all)}\n`);
 }

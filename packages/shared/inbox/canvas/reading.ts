@@ -35,15 +35,28 @@ export interface Thing {
 const SKETCH_GAP = 32;
 const POINT_NEAR = 18;
 
+const ID_LENGTH = 8;
+
+/**
+ * The id a thing is named by: the first 8 characters of its element's id, with anything but letters, digits, `_` and
+ * `-` replaced (an imported file can hold any string as an id; it must not be able to break a line of the reading).
+ * A fixed length, so a thing's id does not change when other things are added; two elements that share those 8
+ * characters (about never) get as many more as tell them apart.
+ */
 function shortIds(ids: string[]): Map<string, string> {
   const out = new Map<string, string>();
+  const clean = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, '_');
   const sorted = [...ids].sort();
+  const taken = new Set<string>();
   for (let i = 0; i < sorted.length; i++) {
     const id = sorted[i]!;
-    let n = Math.min(4, id.length);
-    const clash = (other: string | undefined) => other !== undefined && other !== id && other.slice(0, n) === id.slice(0, n);
+    let n = Math.min(ID_LENGTH, id.length);
+    const clash = (other: string | undefined) => other !== undefined && other !== id && clean(other.slice(0, n)) === clean(id.slice(0, n));
     while (n < id.length && (clash(sorted[i - 1]) || clash(sorted[i + 1]))) n++;
-    out.set(id, id.slice(0, n));
+    let short = clean(id.slice(0, n)) || '_';
+    while (taken.has(short)) short += '_';
+    taken.add(short);
+    out.set(id, short);
   }
   return out;
 }
@@ -118,18 +131,50 @@ export function thingsOf(scene: CanvasScene): Thing[] {
 
   // Freehand strokes near each other are one sketch. Strokes in different frames never join.
   const parent = strokes.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
+    }
+    return i;
+  };
   const boxes = strokes.map(boxOf);
+  // Neighbours are found through a grid, so thousands of strokes cost about their number, not its square. A stroke
+  // that spans very many cells (a line across the board) is compared with every other one instead.
+  const CELL = 160;
+  const grid = new Map<string, number[]>();
+  const wide: number[] = [];
+  const join = (i: number, j: number) => {
+    if ((strokes[i]!.frameId ?? null) !== (strokes[j]!.frameId ?? null)) return;
+    if (boxGap(boxes[i]!, boxes[j]!) <= SKETCH_GAP) parent[find(i)] = find(j);
+  };
   for (let i = 0; i < strokes.length; i++) {
-    for (let j = i + 1; j < strokes.length; j++) {
-      if ((strokes[i]!.frameId ?? null) !== (strokes[j]!.frameId ?? null)) continue;
-      if (boxGap(boxes[i]!, boxes[j]!) <= SKETCH_GAP) parent[find(i)] = find(j);
+    const b = boxes[i]!;
+    const x0 = Math.floor((b.x - SKETCH_GAP) / CELL), x1 = Math.floor((b.x + b.w + SKETCH_GAP) / CELL);
+    const y0 = Math.floor((b.y - SKETCH_GAP) / CELL), y1 = Math.floor((b.y + b.h + SKETCH_GAP) / CELL);
+    if (!Number.isFinite(x0 + x1 + y0 + y1) || (x1 - x0 + 1) * (y1 - y0 + 1) > 400) {
+      for (let j = 0; j < i; j++) join(i, j);
+      wide.push(i);
+      continue;
+    }
+    for (const j of wide) join(i, j);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const key = `${x}:${y}`;
+        const cell = grid.get(key);
+        if (cell) {
+          for (const j of cell) join(i, j);
+          cell.push(i);
+        } else grid.set(key, [i]);
+      }
     }
   }
   const clusters = new Map<number, number[]>();
   strokes.forEach((_, i) => {
     const root = find(i);
-    clusters.set(root, [...(clusters.get(root) ?? []), i]);
+    const members = clusters.get(root);
+    if (members) members.push(i);
+    else clusters.set(root, [i]);
   });
   for (const members of clusters.values()) {
     const ids = members.map((i) => strokes[i]!.id).sort();
@@ -336,6 +381,10 @@ export interface Reading {
   total: number;
   /** The id of the last thing shown when lines were left out. */
   cutAfter?: string;
+  /** `after` named a thing that is not there (removed, or renamed since): the reading starts from the top, and says so. */
+  afterMissing?: boolean;
+  /** The things whose lines are in `lines`. */
+  shown: Thing[];
   box: Box;
 }
 
@@ -346,9 +395,11 @@ export function readThings(scene: CanvasScene, things: Thing[], options: ReadOpt
   const total = chosen.length;
   const box = unionBox(chosen.map((t) => t.box));
   let start = 0;
+  let afterMissing = false;
   if (options.after) {
     const at = chosen.findIndex((t) => t.id === options.after);
     if (at >= 0) start = at + 1;
+    else afterMissing = true;
   }
   const limit = Math.max(1, options.limit ?? 150);
   const page = chosen.slice(start, start + limit);
@@ -365,7 +416,7 @@ export function readThings(scene: CanvasScene, things: Thing[], options: ReadOpt
       if (members.length > 1) lines.push(`group: ${members.join(', ')}`);
     }
   }
-  return { lines, total, cutAfter: start + limit < chosen.length ? page[page.length - 1]?.id : undefined, box };
+  return { lines, total, cutAfter: start + limit < chosen.length ? page[page.length - 1]?.id : undefined, box, shown: page, ...(afterMissing ? { afterMissing } : {}) };
 }
 
 /** What a canvas holds in a few words: "12 things: 5 boxes, 4 arrows, 2 texts, 1 sketch". */

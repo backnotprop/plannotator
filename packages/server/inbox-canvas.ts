@@ -24,12 +24,16 @@ import * as z from "zod";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxAgentName, type InboxReplySketch } from "@plannotator/core/inbox-types";
 import { applyOps, mermaidTexts, RefError, resolveThing } from "@plannotator/shared/inbox/canvas/apply";
-import { mergeSave, sinceLines, type CanvasAuthor } from "@plannotator/shared/inbox/canvas/changes";
-import { countWords, readThings, thingsOf } from "@plannotator/shared/inbox/canvas/reading";
+import { mergeSave, sameAuthor, sinceLines, type CanvasAuthor } from "@plannotator/shared/inbox/canvas/changes";
+import { countWords, lineOf, readThings, thingsOf } from "@plannotator/shared/inbox/canvas/reading";
 import { asScene, unionBox, type Box, type CanvasElement } from "@plannotator/shared/inbox/canvas/scene";
 import {
   canvasThreads,
   commitCanvas,
+  markCanvasTold,
+  readCanvasFile,
+  readCanvasTold,
+  TOLD_EVERYONE,
   noteCanvasSeen,
   readCanvasUndo,
   retireCanvas,
@@ -147,13 +151,20 @@ export function createInboxCanvas(options: {
     });
   };
 
-  const viewerKey = (viewer: CanvasAuthor) => viewer.key || "agent";
+  /** An agent session's own key; none for a call that names no session (nothing is remembered for it, and it shares nothing). */
+  const sessionOf = (viewer: CanvasAuthor): string | undefined => viewer.key || undefined;
+  const readCall = (threadId: string, more: Record<string, unknown> = {}) => `canvas ${JSON.stringify({ thread_id: threadId, ...more })}`;
 
   const undoneLines = (revs: number[]) => revs.map((n) => `The person undid your change (rev ${n}): what it changed is as it was before, and what it added is gone.`);
 
-  /** The lines an answer opens with: what others changed since this agent's last look. Marks the look, only as far as it told. */
+  /**
+   * The lines an answer opens with: what others changed since this session's last answer about the canvas. Each
+   * thing listed is marked as shown to the session; the list's point (`seen`) moves only as far as the list reached.
+   * A call with no session has no memory: it opens with nothing and is told nothing.
+   */
   const opening = (threadId: string, viewer: CanvasAuthor, rev: number): string[] => {
-    const key = viewerKey(viewer);
+    const key = sessionOf(viewer);
+    if (!key) return [];
     const last = readCanvasMeta(dir, threadId).seen[key];
     if (last === undefined || last >= rev) {
       noteCanvasSeen(dir, threadId, key, rev);
@@ -161,49 +172,55 @@ export function createInboxCanvas(options: {
     }
     const told = sinceLines(readCanvasLog(dir, threadId), last, viewer);
     noteCanvasSeen(dir, threadId, key, told.cut ? told.through : rev);
+    // Shown is shown at the revision of the change listed, no later.
+    const byRev = new Map<number, string[]>();
+    for (const [id, hit] of told.byElement) byRev.set(hit.rev, [...(byRev.get(hit.rev) ?? []), id]);
+    for (const [at, ids] of byRev) markCanvasTold(dir, threadId, key, ids, at);
     if (told.lines.length === 0 && told.undone.length === 0) return [`Nothing others did changed it since you last looked (rev ${last}); your own changes made it rev ${rev}.`];
     return [
       ...undoneLines(told.undone),
       `Changed since you last looked (rev ${last}):`,
       ...told.lines,
-      ...(told.cut ? [`  More changed after rev ${told.through}. Your next call about this canvas tells the rest; until then, change only things listed here or new ones.`] : []),
+      ...(told.cut ? [`  More changed after rev ${told.through}. For the rest: ${readCall(threadId)}`] : []),
     ];
   };
 
   const read: InboxCanvas["read"] = (threadId, viewer, readOptions = {}) => {
-    const scene = readCanvasScene(dir, threadId);
+    const scene = readCanvasScene(dir, threadId, false);
     const meta = readCanvasMeta(dir, threadId);
     const things = thingsOf(scene);
-    const head = opening(threadId, viewer, meta.rev);
-    if (things.length === 0) {
-      return [...head, `Canvas of thread ${threadId}, rev ${meta.rev}: empty. Add to it with "do" and "base": ${meta.rev}, or wait for the person to draw.`].join("\n");
-    }
+    // Everything that can refuse the read comes before anything is marked as shown.
     let frame: string | undefined;
     if (readOptions.in) {
       const thing = resolveThing(readOptions.in, things, scene);
       if (thing.kind !== "frame") throw new InboxError("validation_error", `in: ${thing.id} is a ${thing.kind}, not a frame.`, { field: "in" });
       frame = thing.id;
     }
-    const reading = readThings(scene, things, { frame, after: readOptions.after });
-    const size = `${Math.round(reading.box.w)}x${Math.round(reading.box.h)}`;
-    const lines = [...head, `Canvas of thread ${threadId}, rev ${meta.rev}, ${frame ? `frame ${frame}` : countWords(things)}, ${size}:`, ...reading.lines];
-    if (reading.cutAfter) {
-      const next = { thread_id: threadId, ...(frame ? { in: frame } : {}), after_thing: reading.cutAfter };
-      lines.push(`${reading.total - reading.lines.length} more. Next: canvas ${JSON.stringify(next)}`);
+    const head = opening(threadId, viewer, meta.rev);
+    if (things.length === 0) {
+      return [...head, `Canvas of thread ${threadId}, rev ${meta.rev}: empty. Add to it with "do" and "base": ${meta.rev}, or wait for the person to draw.`].join("\n");
     }
+    const reading = readThings(scene, things, { frame, after: readOptions.after });
+    const key = sessionOf(viewer);
+    if (key) markCanvasTold(dir, threadId, key, reading.shown.flatMap((t) => t.elementIds), meta.rev);
+    const size = `${Math.round(reading.box.w)}x${Math.round(reading.box.h)}`;
+    const lines = [...head, `Canvas of thread ${threadId}, rev ${meta.rev}, ${frame ? `frame ${frame}` : countWords(things)}, ${size}:`];
+    if (reading.afterMissing) lines.push(`(Nothing is called ${JSON.stringify(readOptions.after)} any more, so this reading starts from the top.)`);
+    lines.push(...reading.lines);
+    if (reading.cutAfter) lines.push(`${reading.total - reading.lines.length} more. Next: ${readCall(threadId, { ...(frame ? { in: frame } : {}), after_thing: reading.cutAfter })}`);
     return lines.join("\n");
   };
 
-  const crop = (stored: PictureAnswer, want: Box): Uint8Array | null => {
-    const decoded = decodePng(stored.png);
-    if (!decoded) return null;
+  const crop = (stored: PictureAnswer, want: Box): Uint8Array | "outside" | "unreadable" => {
+    const decoded = decodePng(stored.png, 8192);
+    if (!decoded) return "unreadable";
     const x0 = Math.max(0, Math.floor((want.x - stored.box.x) * stored.scale));
     const y0 = Math.max(0, Math.floor((want.y - stored.box.y) * stored.scale));
     const x1 = Math.min(decoded.width, Math.ceil((want.x + want.w - stored.box.x) * stored.scale));
     const y1 = Math.min(decoded.height, Math.ceil((want.y + want.h - stored.box.y) * stored.scale));
     const w = x1 - x0;
     const h = y1 - y0;
-    if (w < 2 || h < 2) return null;
+    if (w < 2 || h < 2) return "outside";
     const out = new Uint8Array(w * h * 4);
     for (let row = 0; row < h; row++) {
       const from = ((y0 + row) * decoded.width + x0) * 4;
@@ -213,14 +230,13 @@ export function createInboxCanvas(options: {
   };
 
   const picture = async (threadId: string, of: unknown): Promise<{ path: string; note: string; only: Set<string> | null; named: string[] }> => {
-    const scene = readCanvasScene(dir, threadId);
+    const scene = readCanvasScene(dir, threadId, false);
     const meta = readCanvasMeta(dir, threadId);
     const things = thingsOf(scene);
     if (things.length === 0) throw new InboxError("validation_error", "picture: the canvas is empty, so there is nothing to draw.", { field: "picture" });
     let only: Set<string> | null = null;
     let named: string[] = [];
     let box: Box | null = null;
-    let elementIds: string[] | null = null;
     if (of !== true) {
       const names = Array.isArray(of) ? of : [of];
       let chosen;
@@ -236,7 +252,6 @@ export function createInboxCanvas(options: {
       const shown = things.filter((t) => only!.has(t.id) || (t.frame && only!.has(t.frame)));
       const around = unionBox(shown.map((t) => t.box));
       box = { x: around.x - 24, y: around.y - 24, w: around.w + 48, h: around.h + 48 };
-      elementIds = shown.flatMap((t) => t.elementIds);
       for (const t of shown) only.add(t.id);
     }
     const name = `rev${meta.rev}-${only ? named.slice(0, 3).join("-") : "all"}`;
@@ -250,24 +265,28 @@ export function createInboxCanvas(options: {
     if (!stored || !meta.picture) {
       throw new InboxError("validation_error", "picture: no Inbox window is open to draw the canvas, and none stored a picture of it yet. The text reading is complete; ask again when the person has the Inbox open.", { field: "picture" });
     }
-    const whole: PictureAnswer = { png: stored, box: meta.picture.box, scale: meta.picture.scale };
-    const cut = box ? crop(whole, box) : stored;
     const stale = meta.picture.rev !== meta.rev ? ` It shows rev ${meta.picture.rev}; the canvas is now rev ${meta.rev} and no Inbox window is open to draw it again, so trust the text where they differ.` : "";
-    void elementIds;
-    if (!cut) return { path: writeAgentPicture(dir, threadId, `rev${meta.picture.rev}-all`, stored), note: ` This is the whole canvas: the part you asked for is outside the stored picture.${stale}`, only, named };
+    const cut = box ? crop({ png: stored, box: meta.picture.box, scale: meta.picture.scale }, box) : stored;
+    if (typeof cut === "string") {
+      const why = cut === "outside" ? "the part you asked for is not in the stored picture (it was added after it was drawn)" : "the stored picture could not be cut here";
+      return { path: writeAgentPicture(dir, threadId, `rev${meta.picture.rev}-all`, stored), note: ` This is the whole canvas: no Inbox window is open to draw the part, and ${why}.${stale}`, only, named };
+    }
     return { path: writeAgentPicture(dir, threadId, `rev${meta.picture.rev}-${only ? named.slice(0, 3).join("-") : "all"}`, cut), note: stale, only, named };
   };
 
+  const ANSWER_LINES = 40;
+  const CLASH_LINES = 12;
+
   const apply: InboxCanvas["apply"] = async (threadId, viewer, base, ops) => {
-    const meta = readCanvasMeta(dir, threadId);
-    const rev = meta.rev;
+    const rev = readCanvasMeta(dir, threadId).rev;
+    const key = sessionOf(viewer);
+    const refuse = (text: string, at = rev) => ({ ok: false, rev: at, text });
     if (!Number.isInteger(base)) {
-      return { ok: false, rev, text: `Nothing changed. "do" needs "base": the rev of your last answer about this canvas, so a change the person made since is never replaced unseen. Read it first: canvas ${JSON.stringify({ thread_id: threadId })}` };
+      return refuse(`Nothing changed. "do" needs "base": the rev of your last answer about this canvas. Read it first: ${readCall(threadId)}`);
     }
     if ((base as number) > rev || (base as number) < 0) {
-      return { ok: false, rev, text: `Nothing changed. "base": ${String(base)} is not a rev of this canvas (it is at rev ${rev}). Read it: canvas ${JSON.stringify({ thread_id: threadId })}` };
+      return refuse(`Nothing changed. "base": ${String(base)} is not a rev of this canvas (it is at rev ${rev}). Read it: ${readCall(threadId)}`);
     }
-    const scene = readCanvasScene(dir, threadId);
     const wanted = mermaidTexts(ops);
     let mermaid: Map<string, CanvasElement[]> | undefined;
     if (wanted.length > 0) {
@@ -276,63 +295,103 @@ export function createInboxCanvas(options: {
         mermaid = new Map();
         for (const text of wanted) {
           const made = drawn[text];
-          if (made && !Array.isArray(made)) return { ok: false, rev, text: `Nothing changed. The mermaid diagram was not drawn: ${made.error.slice(0, 400)}` };
+          if (made && !Array.isArray(made)) return refuse(`Nothing changed. The mermaid diagram was not drawn: ${String(made.error).slice(0, 400)}`);
           if (Array.isArray(made)) mermaid.set(text, asScene({ elements: made }).elements);
         }
       }
     }
-    // The scene may have moved on while a window drew the diagram.
-    const fresh = readCanvasScene(dir, threadId);
-    const freshRev = readCanvasMeta(dir, threadId).rev;
-    const result = applyOps(freshRev === rev ? scene : fresh, ops, { by: viewer.name || "agent", now: now(), mermaid });
-    if (!result.ok) {
-      return { ok: false, rev: freshRev, text: [`Nothing changed (rev ${freshRev}). ${result.errors.length === 1 ? "One change cannot be made" : `${result.errors.length} changes cannot be made`}:`, ...result.errors.map((e) => `  ${e}`)].join("\n") };
-    }
+    // Read after any wait for a window: the scene may have moved on meanwhile.
+    const scene = readCanvasScene(dir, threadId, false);
+    const now0 = readCanvasMeta(dir, threadId).rev;
     const log = readCanvasLog(dir, threadId);
-    // Judged by what this agent was told, not only by the rev it sends: a rev copied from a message (the person's
-    // "work on this" names one) says nothing about what changed between the agent's last look and that rev.
-    const told = readCanvasMeta(dir, threadId).seen[viewerKey(viewer)];
-    const from = told === undefined ? (base as number) : Math.min(base as number, told);
-    const since = sinceLines(log, from, viewer, Number.MAX_SAFE_INTEGER);
-    const heard = sinceLines(log, from, viewer);
-    const clashes = new Map<string, string>();
-    for (const id of result.touched) {
-      const hit = since.byElement.get(id);
-      if (hit) clashes.set(hit.change.elements.slice().sort()[0] ?? id, `  ${hit.by.kind === "person" ? "the person" : hit.by.name || "another agent"} ${hit.change.op === "changed" ? hit.change.what ?? "edited" : hit.change.op} (rev ${hit.rev}): ${hit.change.line}`);
-    }
-    // A base older than the log reaches: what changed since cannot be told, so read again.
-    const oldest = log[0]?.rev ?? 1;
-    if (from < oldest - 1 && result.touched.size > 0) {
-      noteCanvasSeen(dir, threadId, viewerKey(viewer), freshRev);
-      return { ok: false, rev: freshRev, text: `Nothing changed. Your base (rev ${String(base)}) is older than this canvas's history reaches, so what changed since cannot be checked. Read it again and send your change with "base": ${freshRev}: canvas ${JSON.stringify({ thread_id: threadId })}` };
-    }
-    if (clashes.size > 0) {
-      noteCanvasSeen(dir, threadId, viewerKey(viewer), freshRev);
-      return {
-        ok: false,
-        rev: freshRev,
-        text: [
-          `Nothing changed. Since ${from < (base as number) ? `you last looked (rev ${from})` : `your base (rev ${String(base)})`} ${clashes.size === 1 ? "a thing you are changing was" : `${clashes.size} things you are changing were`} changed by someone else:`,
-          ...clashes.values(),
-          `Their change stays. If yours still makes sense with theirs in view, send it again with "base": ${freshRev}; if it would undo what the person did, ask them first.`,
+    // No session, no memory: the only thing such a caller can show is that it holds the canvas as it is now.
+    if (!key && (base as number) !== now0) {
+      const since = sinceLines(log, base as number, null);
+      return refuse(
+        [
+          `Nothing changed. This call names no session, so nothing is remembered between your calls, and "base" must be the canvas's current rev (${now0}), not ${String(base)}.`,
+          ...(since.lines.length > 0 ? [`Changed since rev ${String(base)}:`, ...since.lines, ...(since.cut ? [`  More changed after rev ${since.through}.`] : [])] : []),
+          `Read it as it is now, then send your change with "base": ${now0}: ${readCall(threadId)}`,
         ].join("\n"),
-      };
+        now0,
+      );
     }
-    const base0 = freshRev === rev ? scene : fresh;
+    const result = applyOps(scene, ops, { by: viewer.name || "agent", now: now(), mermaid });
+    if (!result.ok) {
+      // An error opens with what changed too: the answer the agent acts on next must not hide news.
+      const head = opening(threadId, viewer, now0);
+      const news = head.filter((line) => !line.startsWith("Nothing") && !line.startsWith("Your first look"));
+      return refuse([...news, `Nothing changed (rev ${now0}). ${result.errors.length === 1 ? "One change cannot be made" : `${result.errors.length} changes cannot be made`}:`, ...result.errors.slice(0, 10).map((e) => `  ${e}`)].join("\n"), now0);
+    }
+    if (key) {
+      // Thing by thing: a change may overwrite, move or remove a thing only as this session was last shown it. Shown
+      // means an answer to this session (or the person's reply from the canvas) held the thing's line at or after the
+      // last change anyone else made to it. Nothing else counts: not the base sent, not a reading that was cut.
+      const told = readCanvasTold(dir, threadId);
+      const shownAt = (id: string) => Math.max(told[key]?.[id] ?? -1, told[TOLD_EVERYONE]?.[id] ?? -1);
+      const lastOther = new Map<string, { rev: number; by: CanvasAuthor; what: string }>();
+      for (const entry of log) {
+        if (sameAuthor(entry.by, viewer)) continue;
+        for (const change of entry.changes) {
+          for (const id of change.elements) lastOther.set(id, { rev: entry.rev, by: entry.by, what: change.op === "changed" ? change.what ?? "edited" : change.op });
+        }
+      }
+      const things = thingsOf(scene);
+      const thingOf = new Map<string, (typeof things)[number]>();
+      for (const t of things) for (const id of t.elementIds) thingOf.set(id, t);
+      const clashes = new Map<string, { line: string; ids: string[] }>();
+      for (const id of result.direct) {
+        const at = shownAt(id);
+        const other = lastOther.get(id);
+        if (at >= 0 && (!other || other.rev <= at)) continue;
+        const thing = thingOf.get(id);
+        if (!thing || clashes.has(thing.id)) continue;
+        const who = other ? `${other.by.kind === "person" ? "the person" : other.by.name || "another agent"} ${other.what} (rev ${other.rev})` : "not shown to you yet";
+        clashes.set(thing.id, { line: `  ${who}: ${lineOf(thing, scene, things)}`, ids: thing.elementIds });
+      }
+      if (clashes.size > 0) {
+        const listed = [...clashes.values()].slice(0, CLASH_LINES);
+        // What this answer shows is now shown, as it is at this rev; what it leaves out is not.
+        markCanvasTold(dir, threadId, key, listed.flatMap((c) => c.ids), now0);
+        const more = clashes.size - listed.length;
+        return refuse(
+          [
+            `Nothing changed. ${clashes.size === 1 ? "A thing you are changing is" : `${clashes.size} things you are changing are`} not as you were last shown ${clashes.size === 1 ? "it" : "them"}:`,
+            ...listed.map((c) => c.line),
+            ...(more > 0 ? [`  and ${more} more. See them all first: ${readCall(threadId)}`] : []),
+            `That stays as it is. If your change still makes sense with this in view, send it again with "base": ${now0}; if it would undo what the person did, ask them first.`,
+          ].join("\n"),
+          now0,
+        );
+      }
+    }
+    const heard = key ? sinceLines(log, readCanvasMeta(dir, threadId).seen[key] ?? (base as number), viewer) : null;
     const committed = commitCanvas(dir, threadId, result.scene, viewer, new Date(now()));
     // What this change replaced, so the person can take it back with one press (the window's Undo).
-    if (committed.entry) writeCanvasUndo(dir, threadId, { rev: committed.rev, before: base0.elements.filter((e) => result.touched.has(e.id)), added: [...result.added] });
-    noteCanvasSeen(dir, threadId, viewerKey(viewer), heard.cut ? heard.through : committed.rev);
+    if (committed.entry) writeCanvasUndo(dir, threadId, { rev: committed.rev, before: scene.elements.filter((e) => result.touched.has(e.id)), added: [...result.added] });
+    if (key) {
+      // Its own change is what it now knows of those things; the others' changes this answer lists are shown too.
+      markCanvasTold(dir, threadId, key, [...result.added, ...result.direct], committed.rev);
+      if (heard) {
+        const byRev = new Map<number, string[]>();
+        for (const [id, hit] of heard.byElement) if (!result.direct.has(id)) byRev.set(hit.rev, [...(byRev.get(hit.rev) ?? []), id]);
+        for (const [at, ids] of byRev) markCanvasTold(dir, threadId, key, ids, at);
+        noteCanvasSeen(dir, threadId, key, heard.cut ? heard.through : committed.rev);
+      }
+    }
     emit("canvas", { thread_id: threadId, rev: committed.rev, by: viewer.name || "An agent", elements: [...result.added, ...result.touched] });
-    const others = [
-      ...undoneLines(heard.undone),
-      ...(heard.lines.length > 0 ? [`Changed by others since you last looked (rev ${from}), not touched by you:`, ...heard.lines] : []),
-      ...(heard.cut ? [`  More changed after rev ${heard.through}. Your next call about this canvas tells the rest.`] : []),
-    ];
+    const others = heard
+      ? [
+          ...undoneLines(heard.undone),
+          ...(heard.lines.length > 0 ? ["Changed by others since you last looked, not touched by you:", ...heard.lines] : []),
+          ...(heard.cut ? [`  More changed after rev ${heard.through}. For the rest: ${readCall(threadId)}`] : []),
+        ]
+      : [];
+    const done = result.done.length > ANSWER_LINES ? [...result.done.slice(0, ANSWER_LINES), `and ${result.done.length - ANSWER_LINES} more changes, all made. To see them: ${readCall(threadId)}`] : result.done;
     return {
       ok: true,
       rev: committed.rev,
-      text: [...others, `Done: the canvas is now rev ${committed.rev}. The person sees it on the canvas; nothing was sent to them.`, ...result.done.map((line) => `  ${line}`)].join("\n"),
+      text: [...others, `Done: the canvas is now rev ${committed.rev}. The person sees it on the canvas; nothing was sent to them.`, ...done.map((line) => `  ${line}`)].join("\n"),
     };
   };
 
@@ -371,6 +430,9 @@ export function createInboxCanvas(options: {
       }
     }
     const reading = readThings(scene, things, { only, limit: 80 });
+    // The person's reply shows these things, as they are now, to whoever reads it: an agent asked to work on them
+    // changes them on its first try.
+    markCanvasTold(dir, threadId, TOLD_EVERYONE, reading.shown.flatMap((t) => t.elementIds), readCanvasMeta(dir, threadId).rev);
     const lines = reading.lines.map((line) => {
       const id = /^\s*sketch (\S+)/.exec(line)?.[1];
       const name = id ? pictures.get(id) : undefined;
@@ -416,6 +478,14 @@ export function createInboxCanvas(options: {
           .map(({ id, meta }) => ({ thread_id: id, rev: meta.rev, changed: meta.agent_rev > meta.person_seen }));
         return json({ serverSession: options.serverSession, canvases });
       }
+      const fileMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas\/files\/([A-Za-z0-9_-]{1,100})$/.exec(path);
+      if (fileMatch) {
+        // One picture's file, for a window that holds the element but not its bytes (an agent's change or an Undo brought it back).
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        const root = store.message(fileMatch[1]!)?.thread_id;
+        const file = root ? readCanvasFile(dir, root, fileMatch[2]!) : null;
+        return file ? json({ file }) : json({ error: "No such file.", code: "not_found" }, 404);
+      }
       const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas(\/picture|\/undo)?$/.exec(path);
       if (!match) return null;
       const message = store.message(match[1]!);
@@ -430,14 +500,14 @@ export function createInboxCanvas(options: {
         if (mismatch) return mismatch;
         const undo = Number.isInteger(body.rev) ? readCanvasUndo(dir, threadId, body.rev as number) : null;
         if (!undo) return json({ error: "That change can no longer be undone.", code: "validation_error" }, 422);
-        const stored = readCanvasScene(dir, threadId);
+        const stored = readCanvasScene(dir, threadId, false);
         const was = new Map(undo.before.map((e) => [e.id, e]));
         const added = new Set(undo.added);
         const stamp = (e: CanvasElement, current: CanvasElement) => ({ ...e, version: (current.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: now() });
         const elements = stored.elements.map((e) => (was.has(e.id) ? stamp(was.get(e.id)!, e) : added.has(e.id) && !e.isDeleted ? stamp({ ...e, isDeleted: true }, e) : e));
         const committed = commitCanvas(dir, threadId, { ...stored, elements }, { kind: "person" }, new Date(now()), { undid: undo.rev });
         emit("canvas", { thread_id: threadId, rev: committed.rev, by: null, window: typeof body.window === "string" ? body.window : null, elements: [] });
-        return json({ serverSession: options.serverSession, rev: committed.rev, scene: readCanvasScene(dir, threadId) });
+        return json({ serverSession: options.serverSession, rev: committed.rev, scene: readCanvasScene(dir, threadId, false) });
       }
       if (match[2]) {
         // The window's drawing of the whole canvas, kept for an agent's `picture` when no window is open.
@@ -454,7 +524,9 @@ export function createInboxCanvas(options: {
         // The canvas is on the person's screen (`look=1`): an agent's change up to here is no longer news.
         if (url.searchParams.get("look") === "1" && meta.person_seen !== meta.rev && meta.rev > 0) writeCanvasMeta(dir, threadId, { ...meta, person_seen: meta.rev });
         const since = Number(url.searchParams.get("since"));
-        const scene = readCanvasScene(dir, threadId);
+        // The first read carries the pictures' files; a read after a change (`since`) does not: the window holds
+        // them already and asks for one it lacks by id (`…/canvas/files/<id>`).
+        const scene = readCanvasScene(dir, threadId, !url.searchParams.has("since"));
         // What changed after a revision, for the window's "what changed" line.
         const changes = url.searchParams.has("since") && Number.isInteger(since) ? readCanvasLog(dir, threadId).filter((entry) => entry.rev > since) : [];
         return json({ serverSession: options.serverSession, rev: meta.rev, scene, changes });
@@ -462,11 +534,21 @@ export function createInboxCanvas(options: {
       if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
       const length = Number(req.headers.get("content-length") ?? "0");
       if (length > SCENE_MAX_BYTES) return json({ error: "This canvas is too large to save.", code: "validation_error" }, 413);
-      const body = await options.readBody(req);
+      // The window sends its saves compressed (a scene is repetitive JSON: about a tenth), so the save made as the page
+      // closes fits what a browser lets a closing page send.
+      let body: Record<string, unknown>;
+      if ((req.headers.get("content-encoding") ?? "").toLowerCase() === "gzip") {
+        try {
+          const value = JSON.parse(new TextDecoder().decode(Bun.gunzipSync((await rawBody(req, SCENE_MAX_BYTES)) as Uint8Array<ArrayBuffer>))) as unknown;
+          body = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+        } catch {
+          return json({ error: "body: expected a JSON object.", code: "validation_error" }, 422);
+        }
+      } else body = await options.readBody(req);
       const mismatch = options.sessionMismatch(body);
       if (mismatch) return mismatch;
       const incoming = asScene(body.scene);
-      let stored = readCanvasScene(dir, threadId);
+      let stored = readCanvasScene(dir, threadId, false);
       const before = readCanvasMeta(dir, threadId).rev;
       // What this window held and no longer does (a file loaded over the canvas): deleted, not "never seen".
       const gone = new Set(Array.isArray(body.gone) ? body.gone.filter((id): id is string => typeof id === "string") : []);

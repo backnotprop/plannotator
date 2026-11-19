@@ -88,8 +88,12 @@ export const canvasApi = {
   undo: (threadId: string, rev: number) => apiPost<{ rev: number; scene: CanvasScene }>(`${path(threadId)}/undo`, { rev, window: CANVAS_WINDOW }),
   marks: () => apiGet<{ canvases: CanvasMark[] }>('/api/inbox/canvases'),
   /** `have`: the revision this window last took. The answer carries the merged scene when the Inbox held changes this window did not. */
-  save: (threadId: string, scene: CanvasScene, have: number, options: { gone?: string[]; keepalive?: boolean } = {}) =>
-    apiPost<{ rev: number; scene?: CanvasScene }>(path(threadId), { scene, have, window: CANVAS_WINDOW, ...(options.gone?.length ? { gone: options.gone } : {}) }, { keepalive: options.keepalive }),
+  save: (threadId: string, scene: CanvasScene, have: number, options: { gone?: string[]; keepalive?: boolean; plain?: boolean } = {}) =>
+    // Compressed: a scene is repetitive JSON, so a save is about a tenth of its size, and the one made as the page
+    // closes fits what a browser lets a closing page send.
+    apiPost<{ rev: number; scene?: CanvasScene }>(path(threadId), { scene, have, window: CANVAS_WINDOW, ...(options.gone?.length ? { gone: options.gone } : {}) }, { keepalive: options.keepalive, gzip: !options.plain }),
+  /** One picture's file, by its id (the scene a window takes after a change carries the elements, not the bytes). */
+  file: (threadId: string, fileId: string) => apiGet<{ file: unknown }>(`${path(threadId)}/files/${encodeURIComponent(fileId)}`),
   async picture(threadId: string, rev: number, png: Blob, place: { x: number; y: number; w: number; h: number; scale: number }): Promise<void> {
     const query = new URLSearchParams({ rev: String(rev), x: String(place.x), y: String(place.y), w: String(place.w), h: String(place.h), scale: String(place.scale) });
     await fetch(`${path(threadId)}/picture?${query}`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png });

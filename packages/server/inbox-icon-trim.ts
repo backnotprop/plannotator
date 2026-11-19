@@ -25,7 +25,7 @@ const crc32 = (bytes: Uint8Array) => {
 };
 
 /** The picture's pixels as RGBA, or null when this reader does not take it. */
-export function decodePng(bytes: Uint8Array): { width: number; height: number; rgba: Uint8Array } | null {
+export function decodePng(bytes: Uint8Array, maxSide = 1024): { width: number; height: number; rgba: Uint8Array } | null {
   if (bytes.length < 33 || SIGNATURE.some((b, i) => bytes[i] !== b)) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let at = 8;
@@ -53,7 +53,7 @@ export function decodePng(bytes: Uint8Array): { width: number; height: number; r
     at += 12 + length;
   }
   const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[type];
-  if (!channels || !width || !height || width > 1024 || height > 1024) return null;
+  if (!channels || !width || !height || width > maxSide || height > maxSide) return null;
   if (depth !== 8 && !(type === 3 && (depth === 1 || depth === 2 || depth === 4))) return null;
   if (type === 3 && !palette) return null;
   let raw: Uint8Array;

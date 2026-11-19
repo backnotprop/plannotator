@@ -168,7 +168,8 @@ function parseHex(color: string): [number, number, number] | null {
 export function colorWord(color: unknown): string {
   if (typeof color !== 'string' || !color || color === 'transparent') return '';
   const rgb = parseHex(color);
-  if (!rgb) return color;
+  // Anything but a hex colour or a plain colour word is not repeated: a file can hold any string here.
+  if (!rgb) return /^[a-z]{3,20}$/.test(color) ? color : '';
   const max = Math.max(...rgb);
   const min = Math.min(...rgb);
   // A pale tint is named by its hue: Excalidraw's fills are tints of its strokes.

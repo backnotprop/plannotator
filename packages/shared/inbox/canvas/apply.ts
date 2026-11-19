@@ -32,6 +32,11 @@ export interface ApplyResult {
   touched: Set<string>;
   /** Elements this call added. */
   added: Set<string>;
+  /**
+   * The elements of the things a change named to overwrite, move, remove, replace or frame. These are what the agent
+   * must have been shown; what only followed along (an arrow rerouted, a frame that grew) is in `touched` alone.
+   */
+  direct: Set<string>;
 }
 
 const PLACES = ['near', 'rightOf', 'leftOf', 'above', 'below', 'in'] as const;
@@ -74,17 +79,15 @@ export interface ResolveOptions {
 export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, options: ResolveOptions = {}): Thing {
   if (typeof ref !== 'string' || !ref.trim()) throw new RefError('name a thing by its id or its words');
   const name = ref.trim();
-  const exact = things.find((t) => t.id === name) ?? things.find((t) => t.elementIds.includes(name));
-  if (exact) return exact;
   const lower = name.toLowerCase();
   const list = (found: Thing[]) => found.slice(0, 6).map((t) => `  ${lineOf(t, scene, things)}`).join('\n');
-  // One word with no space may be the start of an id.
-  const starts = /\s/.test(name) ? [] : things.filter((t) => t.id.startsWith(name) || t.elementIds.some((id) => id.startsWith(name)));
-  if (starts.length === 1) return starts[0]!;
+  // A thing's whole words come first, before anything that could read the name as an id.
   const same = things.filter((t) => t.words.toLowerCase() === lower);
   if (same.length === 1) return same[0]!;
   if (same.length > 1) throw new RefError(`${JSON.stringify(name)} is the words of ${same.length} things; name one by its id:\n${list(same)}`);
-  if (starts.length > 1) throw new RefError(`${JSON.stringify(name)} starts ${starts.length} ids; write more of it:\n${list(starts)}`);
+  // An id is the whole id, as the reading prints it (or the element's own full id). Never the start of one.
+  const byId = things.filter((t) => t.id === name || t.elementIds.includes(name));
+  if (byId.length === 1) return byId[0]!;
   // Loose: part of its words, or its words in any order, with a kind word standing for the kind.
   const holds = things.filter((t) => t.words && t.words.toLowerCase().includes(lower));
   let loose = holds;
@@ -121,10 +124,17 @@ interface Work {
   ctx: ApplyContext;
   touched: Set<string>;
   added: Set<string>;
+  direct: Set<string>;
   original: Set<string>;
   rand: () => number;
   /** What the board decided for the change being made (how a name was read, which side, a frame that grew): said after its line. */
   notes: string[];
+  /** The things of the scene as it is now, read once and again only after a change (reading them costs time on a large canvas). */
+  things: Thing[] | null;
+}
+
+function thingsNow(work: Work): Thing[] {
+  return (work.things ??= thingsOf(work.scene));
 }
 
 function newId(work: Work): string {
@@ -169,12 +179,14 @@ function base(work: Work, type: string, box: Box, extra: Partial<CanvasElement> 
   };
   work.scene.elements.push(el);
   work.added.add(el.id);
+  work.things = null;
   return el;
 }
 
 /** Record a change to an element that was already there. */
 function touch(work: Work, el: CanvasElement, change: Partial<CanvasElement>): void {
   Object.assign(el, change);
+  work.things = null;
   el.version = (el.version ?? 1) + 1;
   el.versionNonce = Math.floor(work.rand() * 2 ** 31);
   el.updated = work.ctx.now;
@@ -307,7 +319,7 @@ function growFrame(work: Work, frame: CanvasElement, box: Box): void {
   const top = Math.min(frame.y, box.y - pad);
   if (left !== frame.x || top !== frame.y || right !== frame.x + frame.width || bottom !== frame.y + frame.height) {
     touch(work, frame, { x: left, y: top, width: right - left, height: bottom - top });
-    const name = thingsOf(work.scene).find((t) => t.elementIds.includes(frame.id));
+    const name = thingsNow(work).find((t) => t.elementIds.includes(frame.id));
     const note = `frame ${name?.id ?? frame.id} grew to ${Math.round(right - left)}x${Math.round(bottom - top)} to hold it; nothing else moved`;
     if (!work.notes.includes(note)) work.notes.push(note);
   }
@@ -320,7 +332,7 @@ interface Spot {
 
 /** Where a new or moved thing of a size goes, from the op's placement words. Always a free spot. */
 function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, ignore: Set<string>, fallback?: Box): Spot {
-  const things = thingsOf(work.scene);
+  const things = thingsNow(work);
   const taken = obstacles(work, ignore);
   const lines = connectorLines(work, ignore);
   if (op.at !== undefined) {
@@ -390,6 +402,7 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
 
 function settle(work: Work, els: CanvasElement[], spot: Spot): void {
   if (!spot.frame) return;
+  work.things = null;
   for (const el of els) el.frameId = spot.frame.id;
   growFrame(work, spot.frame, unionBox(els.map(boxOf)));
   // A frame draws over what it holds: it sits after its children.
@@ -476,7 +489,7 @@ function text(value: unknown, field: string, required = true): string {
 }
 
 function describe(work: Work, el: CanvasElement): string {
-  const things = thingsOf(work.scene);
+  const things = thingsNow(work);
   const thing = things.find((t) => t.elementIds.includes(el.id));
   return thing ? lineOf(thing, work.scene, things) : el.id;
 }
@@ -515,6 +528,7 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
       if (e.type !== 'text' && e.type !== 'arrow' && e.type !== 'line') delete copy.containerId;
       work.scene.elements.push(copy);
       work.added.add(copy.id);
+      work.things = null;
       return copy;
     });
     settle(work, copies, spot);
@@ -563,8 +577,8 @@ function sizeOf(op: CanvasOp, natural: { w: number; h: number }): { w: number; h
 }
 
 function connect(work: Work, op: CanvasOp): string {
-  const things = thingsOf(work.scene);
-  const from = resolveThing(op.connect, things, work.scene, { notes: work.notes });
+  const things = thingsNow(work);
+  const from = resolveThing(op.connect ?? op.from, things, work.scene, { notes: work.notes });
   const to = resolveThing(op.to, things, work.scene, { notes: work.notes });
   if (from.id === to.id) throw new RefError(`"connect" and "to" are the same thing (${from.id})`);
   for (const end of [from, to]) {
@@ -595,13 +609,14 @@ function connect(work: Work, op: CanvasOp): string {
 }
 
 function describeId(work: Work, el: CanvasElement): string {
-  return thingsOf(work.scene).find((t) => t.elementIds.includes(el.id))?.id ?? el.id;
+  return thingsNow(work).find((t) => t.elementIds.includes(el.id))?.id ?? el.id;
 }
 
 function set(work: Work, op: CanvasOp): string {
-  const things = thingsOf(work.scene);
+  const things = thingsNow(work);
   const thing = resolveThing(op.set, things, work.scene, { exact: true });
   const els = elementsOf(work, thing);
+  for (const el of els) work.direct.add(el.id);
   const said: string[] = [];
   if (op.text === undefined && op.color === undefined) throw new RefError('"set" changes "text" or "color"; give one');
   if (op.text !== undefined) {
@@ -640,11 +655,12 @@ function set(work: Work, op: CanvasOp): string {
 }
 
 function move(work: Work, op: CanvasOp): string {
-  const things = thingsOf(work.scene);
+  const things = thingsNow(work);
   const thing = resolveThing(op.move, things, work.scene, { notes: work.notes });
   if (thing.kind === 'arrow' && (thing.from?.attached || thing.to?.attached)) throw new RefError(`${thing.id} is an arrow attached to things; move those and it follows`);
   const els = withContents(work, thing);
   const ids = new Set(els.map((e) => e.id));
+  for (const el of elementsOf(work, thing)) work.direct.add(el.id);
   const from = thing.kind === 'frame' ? boxOf(els[0]!) : thing.box;
   if (!PLACES.some((p) => op[p] !== undefined) && op.at === undefined) throw new RefError('"move" needs a place: near, rightOf, leftOf, above, below, in, or at');
   const spot = findSpot(work, op, { w: from.w, h: from.h }, ids);
@@ -653,6 +669,7 @@ function move(work: Work, op: CanvasOp): string {
   for (const el of els) touch(work, el, { x: el.x + dx, y: el.y + dy });
   if (thing.kind !== 'frame') {
     for (const el of els) el.frameId = spot.frame?.id ?? null;
+    work.things = null;
     if (spot.frame) settle(work, els, spot);
   }
   reroute(work, ids);
@@ -662,11 +679,12 @@ function move(work: Work, op: CanvasOp): string {
 function frame(work: Work, op: CanvasOp): string {
   const names = op.frame as unknown;
   if (!Array.isArray(names) || names.length === 0) throw new RefError('"frame" is a list of things to put in a new frame');
-  const things = thingsOf(work.scene);
+  const things = thingsNow(work);
   const members = names.map((n) => resolveThing(n, things, work.scene, { notes: work.notes }));
   for (const m of members) if (m.kind === 'frame') throw new RefError(`${m.id} is a frame; a frame cannot go in a frame`);
   const title = text(op.title ?? op.text, 'title', false);
   const els = members.flatMap((m) => elementsOf(work, m));
+  for (const el of els) work.direct.add(el.id);
   const around = unionBox(els.map(boxOf));
   const pad = 32;
   const el = base(work, 'frame', { x: around.x - pad, y: around.y - pad - 8, w: around.w + pad * 2, h: around.h + pad * 2 + 8 }, { name: title || null, strokeColor: '#bbb' });
@@ -675,7 +693,7 @@ function frame(work: Work, op: CanvasOp): string {
 }
 
 function replace(work: Work, op: CanvasOp): string[] {
-  const things = thingsOf(work.scene);
+  const things = thingsNow(work);
   const names = Array.isArray(op.replace) ? op.replace : [op.replace];
   if (names.length === 0) throw new RefError('"replace" names a thing or a list of things');
   const targets = names.map((n) => resolveThing(n, things, work.scene, { exact: true }));
@@ -696,6 +714,7 @@ function replace(work: Work, op: CanvasOp): string[] {
     gone = targets.flatMap((t) => elementsOf(work, t));
     region = unionBox(targets.map((t) => t.box));
   }
+  for (const el of gone) work.direct.add(el.id);
   remove(work, gone);
   const lines = [`replaced ${frameThing ? `what ${frameThing.id} held` : targets.map((t) => t.id).join(', ')} (${gone.length} element${gone.length === 1 ? '' : 's'} removed)`];
   // What has no place of its own flows left to right from the top left of the freed space.
@@ -732,6 +751,9 @@ function replace(work: Work, op: CanvasOp): string[] {
 
 function one(work: Work, op: CanvasOp): string[] {
   if (!op || typeof op !== 'object' || Array.isArray(op)) throw new RefError('a change is an object with one verb: add, connect, set, move, remove, frame or replace');
+  // {"from": A, "to": B} is a connection too, as is {"connect": B, "from": A} (the arrow always points at "to", or at "connect" when "from" is given).
+  if (!('connect' in op) && 'from' in op && 'to' in op) op = { ...op, connect: op.from };
+  else if ('connect' in op && 'from' in op && !('to' in op)) op = { ...op, to: op.connect, connect: op.from };
   const verbs = ['add', 'connect', 'set', 'move', 'remove', 'frame', 'replace'].filter((v) => v in op);
   if (verbs.length !== 1) {
     throw new RefError(verbs.length === 0 ? `no verb in ${JSON.stringify(op).slice(0, 120)}; use add, connect, set, move, remove, frame or replace` : `one verb per change, not ${verbs.join(' and ')}`);
@@ -750,9 +772,10 @@ function one(work: Work, op: CanvasOp): string[] {
     case 'replace':
       return replace(work, op);
     default: {
-      const things = thingsOf(work.scene);
+      const things = thingsNow(work);
       const thing = resolveThing(op.remove, things, work.scene, { exact: true });
       const line = lineOf(thing, work.scene, things);
+      for (const el of elementsOf(work, thing)) work.direct.add(el.id);
       remove(work, elementsOf(work, thing));
       return [`removed ${line}`];
     }
@@ -777,13 +800,13 @@ export function mermaidTexts(ops: unknown): string[] {
 
 export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): ApplyResult {
   const copy: CanvasScene = { ...scene, elements: scene.elements.map((e) => ({ ...e })) };
-  const work: Work = { scene: copy, ctx, touched: new Set(), added: new Set(), original: new Set(scene.elements.map((e) => e.id)), rand: ctx.random ?? Math.random, notes: [] };
+  const work: Work = { scene: copy, ctx, touched: new Set(), added: new Set(), direct: new Set(), original: new Set(scene.elements.map((e) => e.id)), rand: ctx.random ?? Math.random, notes: [], things: null };
   const done: string[] = [];
   const errors: string[] = [];
   if (!Array.isArray(ops) || ops.length === 0) {
-    return { ok: false, scene, done, errors: ['"do" is a list of changes, for example [{"add": "note", "text": "…", "near": "<thing>"}]'], touched: work.touched, added: work.added };
+    return { ok: false, scene, done, errors: ['"do" is a list of changes, for example [{"add": "note", "text": "…", "near": "<thing>"}]'], touched: work.touched, added: work.added, direct: work.direct };
   }
-  if (ops.length > 200) return { ok: false, scene, done, errors: ['at most 200 changes in one call'], touched: work.touched, added: work.added };
+  if (ops.length > 200) return { ok: false, scene, done, errors: ['at most 200 changes in one call'], touched: work.touched, added: work.added, direct: work.direct };
   ops.forEach((op, i) => {
     try {
       work.notes = [];
@@ -796,6 +819,6 @@ export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): A
       errors.push(`change ${i + 1}: ${error.message}`);
     }
   });
-  if (errors.length > 0) return { ok: false, scene, done: [], errors, touched: new Set(), added: new Set() };
-  return { ok: true, scene: copy, done, errors, touched: work.touched, added: work.added };
+  if (errors.length > 0) return { ok: false, scene, done: [], errors, touched: new Set(), added: new Set(), direct: new Set() };
+  return { ok: true, scene: copy, done, errors, touched: work.touched, added: work.added, direct: new Set([...work.direct].filter((id) => work.original.has(id))) };
 }

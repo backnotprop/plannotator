@@ -218,6 +218,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   const rev = useRef(0);
   const synced = useRef(new Map<string, string>());
   const sentFiles = useRef(new Set<string>());
+  const fetching = useRef(new Set<string>());
   const lastVersion = useRef('');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pictureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -249,12 +250,27 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     const files = Object.values(scene.files as Record<string, BinaryFileData>).filter((file) => file && !sentFiles.current.has(file.id));
     for (const file of files) sentFiles.current.add(file.id);
     if (files.length > 0) editor.addFiles(files);
+    // A picture this window holds no bytes for (an agent's change or an Undo brought its element back): fetched by id.
+    const held = editor.getFiles();
+    for (const el of scene.elements) {
+      const id = el.fileId;
+      if (el.isDeleted || typeof id !== 'string' || held[id] || fetching.current.has(id)) continue;
+      fetching.current.add(id);
+      void canvasApi
+        .file(threadId, id)
+        .then((answer) => {
+          sentFiles.current.add(id);
+          if (live.current && answer.file) api.current?.addFiles([answer.file as BinaryFileData]);
+        })
+        .catch(() => {})
+        .finally(() => fetching.current.delete(id));
+    }
     const next = restored(merged);
     lastVersion.current = '';
     editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
     // What the editor re-stamped while taking it in is the Inbox's change still, not the person's.
     for (const el of editor.getSceneElementsIncludingDeleted()) if (taken.has(el.id)) synced.current.set(el.id, sig(el));
-  }, []);
+  }, [threadId]);
 
   const sceneNow = (): CanvasScene | null => {
     const editor = api.current;
@@ -367,10 +383,23 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     openBoards.set(threadId, () => ({ elements: api.current?.getSceneElements() ?? [], files: api.current?.getFiles() ?? {} }));
     const leaving = () => {
       const scene = sceneNow();
-      if (scene && saveTimer.current) void canvasApi.save(threadId, scene, rev.current, { keepalive: true }).catch(() => {});
+      if (scene && saveTimer.current) // Uncompressed: compressing waits, and a closing page's request must start at once. Only a scene under the
+      // browser's 64 KB limit for such a request gets out this way; a larger one relies on the save made as the tab was put away.
+      void canvasApi.save(threadId, scene, rev.current, { keepalive: true, plain: true }).catch(() => {});
     };
+    // A tab put away saves at once (while the page can still wait for the answer); a page going away sends what is left.
+    const hidden = () => {
+      if (document.visibilityState === 'hidden' && saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        const scene = sceneNow();
+        if (scene) void canvasApi.save(threadId, scene, rev.current, { keepalive: true }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', hidden);
     window.addEventListener('pagehide', leaving);
     return () => {
+      document.removeEventListener('visibilitychange', hidden);
       window.removeEventListener('pagehide', leaving);
       openBoards.delete(threadId);
       if (saveTimer.current) {
@@ -643,6 +672,8 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
               theme={dark ? 'dark' : 'light'}
               name="canvas"
               UIOptions={{ canvasActions: { toggleTheme: false, saveToActiveFile: false } }}
+              // Embedding a web page cannot work here (the Inbox's pages load nothing from other sites): not offered.
+              validateEmbeddable={false}
             >
               <MainMenu>
                 <MainMenu.DefaultItems.LoadScene />

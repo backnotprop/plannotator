@@ -922,7 +922,8 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
     body: zipped ?? text,
-    ...(init.keepalive && text.length <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
+    // What counts against the browser's limit is what is sent: the compressed bytes when the body is compressed.
+    ...(init.keepalive && (zipped ? zipped.byteLength : text.length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {

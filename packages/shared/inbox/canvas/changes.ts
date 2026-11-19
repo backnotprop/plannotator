@@ -110,7 +110,8 @@ export function diffScenes(prev: CanvasScene, next: CanvasScene): CanvasChange[]
   return changes;
 }
 
-export const sameAuthor = (a: CanvasAuthor, b: CanvasAuthor) => a.kind === b.kind && (a.kind === 'person' || (a.key ?? a.name ?? '') === (b.key ?? b.name ?? ''));
+/** The same actor: the person, or the same agent session. An agent call with no session is nobody in particular, so it is never the same as another (two unnamed callers must not pass for one). */
+export const sameAuthor = (a: CanvasAuthor, b: CanvasAuthor) => a.kind === b.kind && (a.kind === 'person' || (!!a.key && a.key === b.key));
 
 export const authorWords = (by: CanvasAuthor) => (by.kind === 'person' ? 'the person' : by.name || 'another agent');
 
@@ -208,11 +209,9 @@ export function mergeSave(stored: CanvasScene, incoming: CanvasScene, now: numbe
   }
   const cutoff = now - TOMBSTONE_DAYS * 86_400_000;
   const live = out.filter((e) => !e.isDeleted || (e.updated ?? now) > cutoff);
-  // Pictures: every file either side holds that a live picture still uses.
-  const used = new Set(live.filter((e) => !e.isDeleted && typeof e.fileId === 'string').map((e) => e.fileId as string));
-  const files: Record<string, unknown> = {};
-  for (const [id, file] of [...Object.entries(stored.files), ...Object.entries(incoming.files)]) {
-    if (used.has(id)) files[id] = file;
-  }
+  // Pictures' bytes are kept apart, once each, for as long as the canvas lives (store.ts): a picture deleted and
+  // brought back by Undo, or by the person taking back an agent's change, still has its file. What the window sends
+  // new rides along to be written.
+  const files: Record<string, unknown> = { ...stored.files, ...incoming.files };
   return { scene: { ...stored, source: incoming.source || stored.source, elements: live, appState: { ...stored.appState, ...incoming.appState }, files }, kept };
 }
