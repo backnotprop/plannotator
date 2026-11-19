@@ -337,6 +337,9 @@ describe('the native app (apps/mobile)', () => {
 
   test('the app\'s files add nothing to an ordinary change, and its code files keep the ordinary rules', () => {
     expect(lanesOf(run([ch('packages/a/src.ts'), ch('apps/mobile/ios/App.swift')]))).toEqual(lanesOf(run([ch('packages/a/src.ts')])));
+    // The app's own ignore file (Swift's and Xcode's build output) is one of the native kinds; one anywhere else is not.
+    for (const f of ['apps/mobile/ios/App/.gitignore', 'apps/mobile/ios/InboxCore/.gitignore']) expect(nativeAppFile(f), f).toBe(true);
+    for (const f of ['.gitignore', 'apps/mobile/.gitignore', 'apps/mobile/contract/.gitignore', 'apps/mobile/ios/x.gitignore.ts']) expect(nativeAppFile(f), f).toBe(false);
     for (const f of ['apps/mobile/ios/tool.ts', 'apps/mobile/ios/x.test.ts', 'apps/mobile/ios/package.json', 'apps/mobile/ios/ci.sh', 'apps/mobile/ios/tsconfig.json', 'apps/mobile/ios/bunfig.toml', 'apps/mobile/ios/tool.py', 'apps/mobile/ios/x.yml', 'apps/mobile/ios/InboxCore/Package.resolved', 'apps/mobile/android/build.sh', 'apps/mobile/android/x.json']) {
       expect(nativeAppFile(f), f).toBe(false);
     }
@@ -383,9 +386,44 @@ describe('the native app (apps/mobile)', () => {
     expect(jobs.ios!.if).toContain("vars.MOBILE_CI != 'nightly'");
     for (const file of files.filter((f) => f !== 'mobile-ios.yml')) {
       const text = readFileSync(join(WF_DIR, file), 'utf8');
-      expect(text, file).not.toContain('apps/mobile');
+      // mobile-ledger.yml names the ledger (a push path) and builds nothing.
+      if (file !== 'mobile-ledger.yml') expect(text, file).not.toContain('apps/mobile');
       expect(text, file).not.toMatch(/xcodebuild|swift (build|test)/);
     }
+  });
+
+  test("the parity ledger's clock runs only in mobile-ledger.yml, never in a `bun test` or on an Inbox pull request", () => {
+    // A mobile debt must never turn the Inbox's checks, main's full run or a release red: the clock is a script
+    // (bun test runs only *.test.ts), one job runs it, and no test file reads the ledger's dates.
+    const runners = files.flatMap((file) =>
+      Object.entries(workflow(file).jobs).flatMap(([id, job]) => ((job.steps ?? []).some((s) => s.run?.includes('parity-debts')) ? [`${file} ${id}`] : [])),
+    );
+    expect(runners).toEqual(['mobile-ledger.yml ledger']);
+    const ledger = workflow('mobile-ledger.yml') as Workflow & { on: Record<string, { paths?: string[]; branches?: string[] } | null> };
+    expect(ledger.jobs.ledger!.steps!.map((s) => s.run).filter(Boolean)).toEqual(['bun scripts/mobile/parity-debts.ts']);
+    expect(ledger.jobs.ledger!['runs-on']).toBe('ubuntu-24.04');
+    expect(ledger.on.pull_request).toEqual({ branches: ['main'], paths: ['scripts/mobile/parity-debts.ts', '.github/workflows/mobile-ledger.yml'] });
+    expect(ledger.on.push?.paths).toContain('apps/mobile/contract/parity/ledger.json');
+    const testFiles = tracked.filter((f) => /\.(test|spec)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$/.test(f));
+    expect(testFiles.filter((f) => f.includes('debts'))).toEqual(['tests/mobile-parity-debts.test.ts']);
+    expect(readFileSync(join(repoRoot, 'tests/mobile-parity-debts.test.ts'), 'utf8')).not.toContain('ledger.json');
+  });
+
+  test('a pull request that records a ledger row beside Inbox changes starts no macOS job and no ledger job', () => {
+    // An Inbox pull request that adds a field or route must record it in the ledger (tests/mobile-parity.test.ts).
+    const changed = ['apps/mobile/contract/parity/ledger.json', 'apps/mobile/contract/parity/surface.json', 'packages/server/inbox.ts', 'packages/core/inbox-types.ts', 'packages/inbox/api.ts'];
+    const started = files.flatMap((file) => {
+      const wf = workflow(file);
+      const pr = wf.on.pull_request;
+      if (pr === undefined) return [];
+      const paths = pr?.paths;
+      const reached = !paths || changed.some((f) => paths.some((g) => new Bun.Glob(g).match(f)));
+      if (!reached) return [];
+      return Object.entries(wf.jobs).flatMap(([id, job]) =>
+        String(job['runs-on'] ?? '').includes('macos') || (job.steps ?? []).some((s) => s.run?.includes('parity-debts')) ? [`${file} ${id}`] : [],
+      );
+    });
+    expect(started).toEqual([]);
   });
 });
 
@@ -535,7 +573,7 @@ describe('the real graph', () => {
   test("the app contract's check runs for a wire change, not for the window's or the shared UI's code", () => {
     // Picked at all (a tree-scanning pick would run it on every pull request).
     const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.some((t) => t.path === 'tests/mobile-vectors.test.ts');
-    // A file the schema reaches only by `import type` too (scripts/mobile/schema.ts SCHEMA_SOURCES).
+    // A file the schema reaches only by `import type` too (SCHEMA_SOURCES, scripts/mobile/schema-sources.ts).
     for (const wire of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts']) expect(picks(wire), wire).toBe(true);
     for (const window of ['packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) expect(picks(window), window).toBe(false);
   });

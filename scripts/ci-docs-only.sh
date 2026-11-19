@@ -42,7 +42,7 @@
 # explicit `true` (this step failing, its output missing) as "run".
 set -euo pipefail
 
-DOCS_ONLY='^(README\.md|CONTRIBUTING\.md|SECURITY\.md|LICENSE-MIT|LICENSE-APACHE|docs/[^/]+\.md|(adr|docs/releases|\.github/assets)/([^/]+/)*[^/]+\.(md|png|jpe?g|gif|webp|avif|svg)|apps/mobile/ios/([^/]+/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|apps/mobile/ios/([^/]+/)*[^/]+\.xcassets/([^/]+/)*Contents\.json)$'
+DOCS_ONLY='^(README\.md|CONTRIBUTING\.md|SECURITY\.md|LICENSE-MIT|LICENSE-APACHE|docs/[^/]+\.md|(adr|docs/releases|\.github/assets)/([^/]+/)*[^/]+\.(md|png|jpe?g|gif|webp|avif|svg)|apps/mobile/ios/([^/]+/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|apps/mobile/ios/([^/]+/)*[^/]+\.xcassets/([^/]+/)*Contents\.json|apps/mobile/ios/([^/]+/)*\.gitignore)$'
 
 # Every stdin line a plain-file change on the allowlist, and at least one line:
 # `docs`. Otherwise `code`. A raw line is `:<old mode> <new mode> <old sha>
