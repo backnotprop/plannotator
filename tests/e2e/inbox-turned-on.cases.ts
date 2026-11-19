@@ -206,14 +206,13 @@ export function turnedOnCases(binary: string): void {
   });
 
   /**
-   * The first setup, as an agent follows it, on a fresh computer: the setup script, the llms Inbox page and the
-   * Claude Code and Codex pages (tests/helpers/setup-texts.ts), each with and without SSH_CONNECTION, stdin
-   * never a terminal. Every command an agent runs from them, in their order: none gets the off line, each returns
-   * (setup-order.test.ts keeps bare `plannotator inbox` and `--background` out of every page), and once the turn-on
-   * has run, `plannotator inbox mcp` lists the tools and the script's first message is sent.
+   * The first setup on a fresh computer: the setup script, the llms Inbox page and the Claude Code and Codex pages
+   * (tests/helpers/setup-texts.ts), each with and without SSH_CONNECTION, stdin never a terminal. Every command from
+   * them, in their order: none gets the off line, and once the Inbox is on, `plannotator inbox mcp` lists the tools
+   * and the script's first message is sent. The script and the llms page are an agent's: each command returns
+   * (setup-order.test.ts keeps bare `plannotator inbox` and `--background` out of them). The Claude Code and Codex
+   * pages are a person's: their bare `plannotator inbox` serves in the foreground while the rest runs.
    */
-  // The agent's texts (the script, the llms page) are run as an agent runs them: each command returns. The Claude Code
-  // and Codex pages are a person's: their bare `plannotator inbox` serves in the foreground while the rest runs.
   test('First setup: the setup script, the llms page, the Claude Code and Codex pages run in order: never off, each returns, tools after the turn-on', async () => {
     const promptSource = readFileSync(join(repo, 'apps/marketing/src/lib/inbox-prompt.md'), 'utf8');
     const agent = (slug: string) => agentSetup(LISTED_AGENTS.find((a) => a.slug === slug)!);
