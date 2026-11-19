@@ -441,6 +441,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
 test('the automatic run off, picking what to make names the agent it would start, read once, and the sheet still fits a phone', async () => {
   mkdirSync(join(dataDir, 'agents-home', '.pi', 'agent'), { recursive: true });
   writeFileSync(join(dataDir, 'agents-home', '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
+  expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
   await expect
     .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
     .toContain('"agent":"pi"');
@@ -496,6 +497,7 @@ test('the automatic run off, picking what to make names the agent it would start
   await expect(withAgent).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
 });
 
 test('the filter: High, Medium and up, remembered; under High what it could not place is one quiet count that shows it', async () => {
