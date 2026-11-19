@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { isPlanId, planApprovalsOn, planPictureTypeOf, PLAN_PERSON } from "@plannotator/core/plans";
 import { newSpaceId, newSpaceShareRecord, planSpaceShare, type LocalSpace, type SpaceShareMode, type SpaceShareRecord, type SpaceShareStatus } from "@plannotator/core/space-share";
 import type { PlanStore } from "../plans/store";
-import { createSpacesClient, SpacesError } from "./client";
+import { createSpacesClient, spaceKeptByAnother, SpacesError } from "./client";
 import { clearSpacesCredential, readSpacesCredential, saveSpacesCredential } from "./credential";
 import { runSpaceShare, type SpaceShareProgress, type SpaceShareSource } from "./engine";
 import { dropSpaceShareRecord, readSpaceShareRecord, saveSpaceShareRecord } from "./record";
@@ -94,19 +94,29 @@ interface Live {
   progress: SpaceShareProgress | null;
   keep: "waiting" | "remote" | null;
   signIn: SpacesSignIn | null;
+  /** The claim going for this plan: one at a time, and no run starts while it is. */
+  claiming: Promise<void> | null;
+  /** The plan as the run going read it, and the last read while something is in flight (the status is asked often then). */
+  source: SpaceShareSource | null;
+  memo: { at: number; source: SpaceShareSource } | null;
 }
+
+/** How long a read of the plan answers the status while a run or a sign-in is in flight. */
+const STATUS_MEMO_MS = 2000;
 
 export interface SpaceShareJobs {
   status(id: string): SpaceShareStatus | null;
-  /** Answers at once (the upload runs on); a promise only when a sign-in has to start first. */
-  share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null | Promise<SpaceShareStatus | null>;
+  /** Answers at once; the upload runs on. Never opens a browser. */
+  share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null;
   stop(id: string): SpaceShareStatus | null;
   keep(id: string): Promise<SpaceShareStatus | null>;
   keepCancel(id: string): SpaceShareStatus | null;
   remove(id: string): Promise<{ ok: boolean; status: SpaceShareStatus | null }>;
   /** The run going for a plan, if any (tests wait on it). */
   running(id: string): Promise<void> | null;
-  /** Stop every run and sign-in (the server is going down). */
+  /** The claim going for a plan, if any (tests wait on it). */
+  claiming(id: string): Promise<void> | null;
+  /** Stop every run and sign-in, and close every listener (the server is going down). */
   close(): void;
 }
 
@@ -114,54 +124,71 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
   const lives = new Map<string, Live>();
   const liveOf = (id: string): Live => {
     let live = lives.get(id);
-    if (!live) lives.set(id, (live = { running: null, abort: null, progress: null, keep: null, signIn: null }));
+    if (!live) lives.set(id, (live = { running: null, abort: null, progress: null, keep: null, signIn: null, claiming: null, source: null, memo: null }));
     return live;
   };
   const now = options.now ?? Date.now;
   const credentialOf = (host: string) => readSpacesCredential(options.dataDir, host);
   const clientOf = (host: string, signal?: AbortSignal) => createSpacesClient({ host, token: credentialOf(host)?.token ?? null, fetch: options.fetch, signal });
+  const inFlight = (live: Live) => live.running !== null || live.claiming !== null || live.keep === "waiting";
+
+  /** The plan as a share reads it. While something is in flight the status is asked for often: it is read once then. */
+  function sourceOf(id: string, live: Live): SpaceShareSource | null {
+    if (live.running && live.source) return live.source;
+    if (inFlight(live) && live.memo && Date.now() - live.memo.at < STATUS_MEMO_MS) return live.memo.source;
+    const source = spaceShareSource(options.store(), id);
+    live.memo = source && inFlight(live) ? { at: Date.now(), source } : null;
+    return source;
+  }
 
   function status(id: string): SpaceShareStatus | null {
     if (!isPlanId("pln", id)) return null;
-    const source = spaceShareSource(options.store(), id);
+    const live = liveOf(id);
+    const source = sourceOf(id, live);
     if (!source) return null;
     const record = readSpaceShareRecord(options.dataDir, id);
-    const live = liveOf(id);
     const host = record?.host ?? options.host();
     const credential = credentialOf(host);
     const signedIn = credential !== null;
     const planOf = (mode: SpaceShareMode) => planSpaceShare(source.local, record, { mode, signedIn });
     const plan = planOf(record?.mode ?? "all");
     const running = live.running !== null;
-    const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : record.job ? (record.job.ended ?? "failed") : record.shared_at ? "shared" : "none";
-    const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job ? { done: record.job.done, total: record.job.total } : null;
+    // The person's own space, and the sign-in is gone from this computer: nothing can be sent until they sign in
+    // again, which the result panel's Keep does. Nothing is offered that would only fail.
+    const signedOut = !!record?.kept && !signedIn;
+    const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : signedOut && record.shared_at ? "shared" : record.job ? (record.job.ended ?? "failed") : record.shared_at ? "shared" : "none";
+    const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" ? { done: record.job.done, total: record.job.total } : null;
     const until = running ? (live.progress?.waiting_until ?? null) : null;
+    const link = record?.share_url ?? null;
     return {
       phase,
       progress,
       waiting: until !== null ? Math.max(1, Math.ceil((until - now()) / 1000)) : null,
-      link: record?.share_url ?? null,
+      link,
       shared_once: !!record?.shared_at,
-      kept: record ? record.kept : false,
+      kept: !!record?.kept && signedIn,
       signed_in: signedIn,
       who: signedIn ? (credential.name ?? (record?.kept ? record.owner : null)) : null,
       keep: live.keep,
+      busy: live.claiming !== null,
       mode: record?.mode ?? "all",
       versions: Math.max(0, ...source.local.documents.map((d) => d.versions.length)),
-      changes: phase === "shared" ? plan.changes : 0,
-      stopped_pages: record ? source.local.documents.filter((d) => record.pages[d.id]?.stopped).map((d) => ({ title: d.title })) : [],
+      changes: phase === "shared" && !signedOut ? plan.changes : 0,
+      // A page's address in the space is the link and its path.
+      stopped_pages: record ? source.local.documents.filter((d) => record.pages[d.id]?.stopped).map((d) => ({ title: d.title, url: link ? `${link.replace(/\/+$/, "")}/${record.pages[d.id]!.doc_path.split("/").map(encodeURIComponent).join("/")}` : null })) : [],
       details: { all: planOf("all").details, newest: planOf("newest").details },
     };
   }
 
-  /** Run the upload for a record already on disk. */
+  /** Run the upload for a record already on disk. Never while a claim is going: it would write over what the claim keeps. */
   function start(id: string, record: SpaceShareRecord): void {
     const live = liveOf(id);
-    if (live.running) return;
+    if (live.running || live.claiming) return;
     const source = spaceShareSource(options.store(), id);
     if (!source) return;
     const abort = new AbortController();
     live.abort = abort;
+    live.source = source;
     live.progress = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, waiting_until: null, link: record.share_url };
     live.running = runSpaceShare({
       source,
@@ -171,7 +198,6 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       signal: abort.signal,
       now: options.now,
       sleep: options.sleep,
-      newSpaceId: () => newSpaceId(),
       progress: (progress) => {
         live.progress = progress;
         options.changed?.(id);
@@ -179,6 +205,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     })
       .then(
         (result) => {
+          // The space refused the sign-in: it is forgotten, and the person is signed out here.
           if (result.signedOut) clearSpacesCredential(options.dataDir, record.host);
         },
         () => {
@@ -195,27 +222,27 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
         live.running = null;
         live.abort = null;
         live.progress = null;
+        live.source = null;
+        live.memo = null;
         options.changed?.(id);
       });
   }
 
-  function share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null | Promise<SpaceShareStatus | null> {
+  function share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null {
+    const live = liveOf(id);
+    if (live.running || live.claiming) return status(id);
     const source = spaceShareSource(options.store(), id);
     if (!source) return null;
-    const live = liveOf(id);
-    if (live.running) return status(id);
     let record = input.fresh ? null : readSpaceShareRecord(options.dataDir, id);
     if (record?.refused) return status(id);
     if (!record) {
-      const host = options.host();
-      record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: credentialOf(host) !== null, at: new Date(now()).toISOString() });
+      // Whether the space is the person's own is what the space answers, never assumed here.
+      record = newSpaceShareRecord({ host: options.host(), space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, at: new Date(now()).toISOString() });
       saveSpaceShareRecord(options.dataDir, id, record);
-    } else if (!record.created && !record.kept && credentialOf(record.host)) {
-      // Signed in since a first try that made nothing: the space is made as the person's own.
-      record.kept = true;
     }
-    // The person's own space, and the sign-in is gone from this computer: sign in again, then go on.
-    if (record.kept && !credentialOf(record.host)) return keep(id);
+    // The person's own space with no sign-in on this computer: nothing is sent, and no browser is opened by an
+    // Update. The panel's Keep signs in.
+    if (record.kept && !credentialOf(record.host)) return status(id);
     start(id, record);
     return status(id);
   }
@@ -225,33 +252,47 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     return status(id);
   }
 
-  /** Signed in: make the space the person's own (when it is up and not theirs yet), then send what is left. */
-  async function claimAndGoOn(id: string): Promise<void> {
-    // A run going without the sign-in (waiting on a busy space, say) is stopped first: it goes on signed in.
+  /** Signed in: make the space the person's own when it is up and not theirs yet. */
+  async function claim(id: string): Promise<void> {
     const live = liveOf(id);
+    // A run going without the sign-in (waiting on a busy space, say) is stopped first: it goes on signed in.
     if (live.running) {
       live.abort?.abort();
       await live.running;
     }
     const record = readSpaceShareRecord(options.dataDir, id);
-    if (!record) return;
-    if (record.created && !record.kept && !record.refused) {
-      try {
-        const space = await clientOf(record.host).claim(record.space_id);
-        record.kept = true;
-        record.owner = space.owner_name ?? record.owner;
-        record.share_url = space.share_url ?? record.share_url;
-      } catch (error) {
-        // Someone else kept it first (the space is theirs, or no longer shown to this person).
-        if (error instanceof SpacesError && [401, 403, 404, 409].includes(error.status)) record.refused = true;
-        else return;
-      }
-      saveSpaceShareRecord(options.dataDir, id, record);
-    } else if (!record.created && !record.kept) {
+    if (!record || !record.created || record.refused) return;
+    try {
+      // Claiming a space that is already the person's own answers the same again.
+      const space = await clientOf(record.host).claim(record.space_id);
       record.kept = true;
-      saveSpaceShareRecord(options.dataDir, id, record);
+      record.owner = space.owner_name ?? record.owner;
+      record.share_url = space.share_url ?? record.share_url;
+    } catch (error) {
+      if (spaceKeptByAnother(error, "claim")) record.refused = true;
+      else {
+        // The space refused the sign-in: it is forgotten. Anything else: nothing changed.
+        if (error instanceof SpacesError && error.status === 401) clearSpacesCredential(options.dataDir, record.host);
+        return;
+      }
     }
-    if (record.refused) return;
+    saveSpaceShareRecord(options.dataDir, id, record);
+  }
+
+  /** One claim per plan at a time (a second Keep joins the first), then what waits is sent. */
+  async function claimAndGoOn(id: string): Promise<void> {
+    const live = liveOf(id);
+    if (live.claiming) return live.claiming;
+    const mine = claim(id);
+    live.claiming = mine;
+    try {
+      await mine;
+    } finally {
+      live.claiming = null;
+      live.memo = null;
+    }
+    const record = readSpaceShareRecord(options.dataDir, id);
+    if (!record || record.refused || !credentialOf(record.host)) return;
     const source = spaceShareSource(options.store(), id);
     // What waits: a run that did not finish, or the approval, which goes only into a kept space.
     if (source && (record.job || planSpaceShare(source.local, record, { mode: record.mode, signedIn: true }).steps.length > 0)) start(id, record);
@@ -262,6 +303,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const record = readSpaceShareRecord(options.dataDir, id);
     const host = record?.host ?? options.host();
     if (status(id) === null) return null;
+    if (live.claiming) return status(id);
     if (credentialOf(host)) {
       await claimAndGoOn(id);
       return status(id);
@@ -307,7 +349,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
   async function remove(id: string): Promise<{ ok: boolean; status: SpaceShareStatus | null }> {
     const record = readSpaceShareRecord(options.dataDir, id);
     const live = liveOf(id);
-    if (!record || !record.kept || live.running) return { ok: false, status: status(id) };
+    if (!record || !record.kept || !credentialOf(record.host) || live.running || live.claiming) return { ok: false, status: status(id) };
     try {
       if (record.created) await clientOf(record.host).deleteSpace(record.space_id);
     } catch (error) {
@@ -327,6 +369,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     keepCancel,
     remove,
     running: (id) => lives.get(id)?.running ?? null,
+    claiming: (id) => lives.get(id)?.claiming ?? null,
     close() {
       for (const live of lives.values()) {
         live.abort?.abort();
@@ -376,7 +419,7 @@ export async function handleSpaceShareRoute(req: SpaceShareRouteRequest, jobs: S
       if (unknown) return bad(`unknown field ${unknown}`);
       if (body.mode !== undefined && body.mode !== "all" && body.mode !== "newest") return bad("mode is all or newest");
       if (body.fresh !== undefined && typeof body.fresh !== "boolean") return bad("fresh is true or false");
-      return answer(await jobs.share(id, { mode: body.mode as SpaceShareMode | undefined, fresh: body.fresh === true }));
+      return answer(jobs.share(id, { mode: body.mode as SpaceShareMode | undefined, fresh: body.fresh === true }));
     }
     case "stop":
       return answer(jobs.stop(id));

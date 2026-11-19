@@ -91,7 +91,7 @@ export interface FakeSpacesOptions {
   fileMax?: number;
   /** The approval call: `refuse` (as a tool's token is today) or `accept`. */
   approvals?: "refuse" | "accept";
-  /** The status a write gets once someone else kept the space (the real code is not settled; default 404). */
+  /** The status a write gets once someone else kept the space (the real code is not settled; default 403). */
   refusal?: 401 | 403 | 404;
   /** `/cli/login` sends the browser straight back with a code (default), or shows a page with an Allow link. */
   login?: "auto" | "page";
@@ -123,7 +123,8 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
   const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(body === null ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
   const fail = (status: number, code: string, details?: Record<string, unknown>, headers: Record<string, string> = {}) => json(status, { error: { code, message: code.replace(/_/g, " "), ...(details ? { details } : {}) } }, headers);
   const docWire = (space: FakeSpace, doc: FakeDoc) => ({ id: doc.id, workspace_id: space.id, doc_path: doc.doc_path, kind: doc.kind, title: doc.title, version: doc.versions[doc.versions.length - 1]!.version, version_count: doc.versions.length });
-  const spaceWire = (space: FakeSpace) => ({
+  const spaceWire = (space: FakeSpace, user: string | null = null) => ({
+    access: space.owner !== null && space.owner === user ? "owner" : "edit",
     id: space.id,
     name: space.name,
     owner_name: space.owner,
@@ -235,25 +236,26 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     // A space that is not there: without a credential a read is asked to sign in, as the service answers.
     if (!space) return !user && method === "GET" ? fail(401, "login_required") : fail(404, "workspace_not_found");
     if (space.deleted) return fail(410, "workspace_deleted");
+    const rest = parts.slice(3);
+    if (rest[0] === "claim" && rest.length === 1 && method === "POST") {
+      if (!user) return fail(401, "login_required");
+      // One winner: a space with another owner is not claimable; your own answers the same again.
+      if (space.owner !== null && space.owner !== user) return fail(409, "claim_conflict");
+      space.owner = user;
+      return json(200, spaceWire(space, user));
+    }
     const outsider = space.owner !== null && space.owner !== user;
     if (outsider) {
-      const status = settings.refusal ?? 404;
+      const status = settings.refusal ?? 403;
       return fail(status, status === 404 ? "workspace_not_found" : status === 403 ? "forbidden" : "login_required");
     }
-    const rest = parts.slice(3);
 
-    if (rest.length === 0 && method === "GET") return json(200, spaceWire(space));
+    if (rest.length === 0 && method === "GET") return json(200, spaceWire(space, user));
     if (rest.length === 0 && method === "DELETE") {
       if (!space.owner) return fail(403, "forbidden");
       space.deleted = true;
       return json(200, { deleted: true });
     }
-    if (rest[0] === "claim" && rest.length === 1 && method === "POST") {
-      if (!user) return fail(401, "login_required");
-      space.owner = user;
-      return json(200, spaceWire(space));
-    }
-
     if (rest[0] === "documents" && rest.length === 1 && method === "POST") {
       const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
       const path = body?.doc_path;

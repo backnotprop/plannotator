@@ -46,7 +46,7 @@ describe("no test reaches a Spaces host", () => {
     expect(resolveSpacesUrl()).toBe(DEAD);
     expect(readFileSync(join(root, "tests/setup/feedback-archive-off.ts"), "utf8")).toContain(`process.env.PLANNOTATOR_SPACES_URL = "${DEAD}"`);
     for (const file of ["tests/e2e/playwright.config.ts", "tests/e2e/global-setup.ts"]) {
-      expect(readFileSync(join(root, file), "utf8")).toContain(`process.env.PLANNOTATOR_SPACES_URL ??= '${DEAD}'`);
+      expect(readFileSync(join(root, file), "utf8")).toContain(`process.env.PLANNOTATOR_SPACES_URL = '${DEAD}'`);
     }
   });
 

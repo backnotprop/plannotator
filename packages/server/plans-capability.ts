@@ -246,6 +246,11 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
       const timer = setTimeout(() => background(true), 0);
       (timer as { unref?: () => void }).unref?.();
     },
+    // Going down: the history watch, every share run and every sign-in listener end with the Inbox.
+    stopped() {
+      stopWatch();
+      shareJobs?.close();
+    },
     importing: () => running,
     sync,
     shares,

@@ -24,10 +24,26 @@ export class SpacesError extends Error {
   }
 }
 
+/**
+ * "This space now belongs to someone else": the one place that reads it off an answer. Only an answer that says so
+ * counts: a claim that lost (`409`), or a write that is not allowed (`403`) to a space this computer made and never
+ * kept. No credential asked for (`401`), not found (`404`) and anything else are not that. The service has not
+ * settled one code for it yet; when it does, it is written here.
+ */
+export function spaceKeptByAnother(error: unknown, call: "write" | "claim"): boolean {
+  if (!(error instanceof SpacesError)) return false;
+  return call === "claim" ? error.status === 409 : error.status === 403;
+}
+
+/** How long a call may take before it counts as not answered: a minute, and longer for many bytes. */
+export const SPACES_CALL_TIMEOUT_MS = 60_000;
+
 export interface SpacesSpace {
   id: string;
   share_url: string | null;
   owner_name: string | null;
+  /** The caller owns it (`access: "owner"`). */
+  owned: boolean;
   documents: { id: string; doc_path: string; version: string | null }[];
 }
 
@@ -67,13 +83,14 @@ function spaceOf(value: Record<string, unknown>): SpacesSpace {
     id: text(value.id) ?? "",
     share_url: text(value.share_url),
     owner_name: text(value.owner_name),
+    owned: value.access === "owner",
     documents: documents.filter(isObject).map((d) => ({ id: text(d.id) ?? "", doc_path: text(d.doc_path) ?? "", version: text(d.version) })),
   };
 }
 
 const segment = (value: string) => encodeURIComponent(value);
 
-export function createSpacesClient(options: { host: string; token?: string | null; fetch?: typeof fetch; signal?: AbortSignal }): SpacesClient {
+export function createSpacesClient(options: { host: string; token?: string | null; fetch?: typeof fetch; signal?: AbortSignal; timeoutMs?: number }): SpacesClient {
   const doFetch = options.fetch ?? fetch;
   const token = options.token ?? null;
 
@@ -81,22 +98,25 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     const headers: Record<string, string> = { Accept: "application/json", ...init.headers };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (init.json !== undefined) headers["Content-Type"] = "application/json";
+    // A connection that stalls ends as a call that was not answered (about 50 KB a second at the least for bytes).
+    const timeout = AbortSignal.timeout((options.timeoutMs ?? SPACES_CALL_TIMEOUT_MS) + (init.bytes ? init.bytes.length / 50 : 0));
     let response: Response;
+    let raw: string;
     try {
       response = await doFetch(`${options.host}${path}`, {
         method,
         headers,
         body: init.json !== undefined ? JSON.stringify(init.json) : (init.bytes as BodyInit | undefined),
         redirect: "error",
-        signal: options.signal,
+        signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
       });
+      raw = await response.text();
     } catch (error) {
       if (options.signal?.aborted) throw error;
       throw new SpacesError(0, "offline", "Spaces could not be reached.");
     }
     let body: unknown = null;
     try {
-      const raw = await response.text();
       body = raw ? JSON.parse(raw) : null;
     } catch {
       body = null;

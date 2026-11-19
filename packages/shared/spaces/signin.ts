@@ -43,6 +43,7 @@ export async function exchangeSpacesCode(host: string, input: { code: string; ve
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ code: input.code, code_verifier: input.verifier }),
       redirect: "error",
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) return null;
     const body = (await response.json()) as Record<string, unknown> | null;

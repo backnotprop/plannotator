@@ -61,6 +61,7 @@ export const SHARE_WORDS = {
 
 const changesWords = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'} here`;
 const busyWords = (seconds: number) => `Spaces is busy. Trying again in ${seconds} s.`;
+const pageLink = (url: string | null | undefined) => (url && /^https?:\/\//i.test(url) ? url : null);
 /** Only an http(s) address is ever a link on the page. */
 const linkOf = (status: SpaceShareStatus) => (status.link && /^https?:\/\//i.test(status.link) ? status.link : null);
 
@@ -217,23 +218,55 @@ function VersionSwitch({ mode, onMode }: { mode: SpaceShareMode; onMode: (mode: 
   );
 }
 
+/** The most words the Details view shows (the approved rule: about 20 a state). */
+export const DETAILS_WORDS_MAX = 20;
+
+/**
+ * The Details rows: what goes up, then what stays. Every row that applies is shown while the view holds its 20
+ * words; past that, the rows about what stays give way, least surprising first (the dates, older approvals, the
+ * comments the agent has). A file or a page too big to go is never the one left out: with both, and every row above
+ * them, the view is 21 words. Shown in the approved order.
+ */
+export function detailsRows(details: SpaceShareDetails): { up: [string, string][]; not: [string, string][] } {
+  const up: [string, string][] = [];
+  if (details.pages > 0) up.push(['Pages', String(details.pages)]);
+  if (details.files > 0) up.push(['Files', String(details.files)]);
+  if (details.comments > 0) up.push(['Comments', String(details.comments)]);
+  if (details.approval !== null) up.push(['Approval', `v${details.approval}`]);
+  // [label, value, the order it is kept in when words run short]
+  const all: [string, string, number][] = [];
+  if (details.not.sent_comments > 0) all.push(['Sent comments', String(details.not.sent_comments), 4]);
+  if (details.not.pictures > 0) all.push(['Pictures', String(details.not.pictures), 5]);
+  if (details.not.original_dates) all.push(['Original dates', '', 7]);
+  if (details.not.files_over > 0) all.push(['File over 100 MB', String(details.not.files_over), 1]);
+  if (details.not.pages_over > 0) all.push(['Page over 1.5 MB', String(details.not.pages_over), 2]);
+  if (details.not.long_comments > 0) all.push(['Long comment', String(details.not.long_comments), 3]);
+  if (details.not.older_approvals > 0) all.push(['Older approvals', String(details.not.older_approvals), 6]);
+  const wordsOf = (label: string, value: string) => label.split(' ').length + (value ? 1 : 0);
+  // "Details", the rows that go up, and "Not shared" once any row follows it.
+  let left = DETAILS_WORDS_MAX - 1 - up.reduce((n, [label, value]) => n + wordsOf(label, value), 0) - 2;
+  const kept = new Set<string>();
+  for (const [label, value] of [...all].sort((a, b) => a[2] - b[2])) {
+    const words = wordsOf(label, value);
+    // A file or a page too big to go is always said, even where the two together run one word over.
+    const must = label.includes(' over ');
+    if (words > left && !must) continue;
+    left -= words;
+    kept.add(label);
+  }
+  return { up, not: all.filter(([label]) => kept.has(label)).map(([label, value]) => [label, value]) };
+}
+
 function DetailsView({ details, onBack, onStopSharing }: { details: SpaceShareDetails; onBack: () => void; onStopSharing: (() => void) | null }) {
-  const row = (label: string, value: string | number) => (
-    <div className="ib-shr-row" key={label}>
+  const row = ([label, value]: [string, string]) => (
+    <div className="ib-shr-row" key={label} data-share-row={label}>
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>
   );
-  const up = [details.pages > 0 && row('Pages', details.pages), details.files > 0 && row('Files', details.files), details.comments > 0 && row('Comments', details.comments), details.approval !== null && row('Approval', `v${details.approval}`)].filter(Boolean);
-  const not = [
-    details.not.sent_comments > 0 && row('Sent comments', details.not.sent_comments),
-    details.not.pictures > 0 && row('Pictures', details.not.pictures),
-    details.not.original_dates && row('Original dates', ''),
-    details.not.files_over > 0 && row('File over 100 MB', details.not.files_over),
-    details.not.pages_over > 0 && row('Page over 1.5 MB', details.not.pages_over),
-    details.not.long_comments > 0 && row('Long comment', details.not.long_comments),
-    details.not.older_approvals > 0 && row('Older approvals', details.not.older_approvals),
-  ].filter(Boolean);
+  const rows = detailsRows(details);
+  const up = rows.up.map(row);
+  const not = rows.not.map(row);
   return (
     <>
       <div className="ib-shr-head">
@@ -430,7 +463,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
           {link && <LinkRow link={link} primary={!stopped && !update} />}
           {stopped
             ? status.stopped_pages.map((page) => (
-                <Row key={page.title} mark="excl" warn right={link ? <LinkBtn href={link} name="open-page">{SHARE_WORDS.openInSpaces}</LinkBtn> : undefined}>
+                <Row key={page.title} mark="excl" warn right={pageLink(page.url) ?? link ? <LinkBtn href={(pageLink(page.url) ?? link)!} name="open-page">{SHARE_WORDS.openInSpaces}</LinkBtn> : undefined}>
                   {page.title} changed
                 </Row>
               ))
@@ -450,7 +483,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
             <Row
               mark="user"
               right={
-                <Btn onClick={actions.keep} name="keep">
+                <Btn onClick={actions.keep} name="keep" disabled={status.busy === true}>
                   {SHARE_WORDS.keep}
                 </Btn>
               }
@@ -548,7 +581,7 @@ export function PlanShare({ id, phone, fresh = 0 }: PlanShareProps) {
     return () => document.removeEventListener('visibilitychange', back);
   }, [read]);
   // While an upload or a sign-in is going, its standing is read again and again, panel open or not.
-  const going = status?.phase === 'sharing' || status?.keep === 'waiting';
+  const going = status?.phase === 'sharing' || status?.keep === 'waiting' || status?.busy === true;
   useEffect(() => {
     if (!going) return;
     const timer = setInterval(() => void read(), SHARE_POLL_MS);

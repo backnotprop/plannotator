@@ -300,7 +300,7 @@
 /* Share this space (PlanShare.tsx, approval "share-this-space"): the top bar's button and the panel under it. */
 .ib-shr-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; color: var(--muted-foreground); white-space: nowrap; flex-shrink: 0; cursor: pointer; }
 .ib-shr-btn .ib-ic { width: 14px; height: 14px; flex: none; }
-.ib-shr-btn:hover, .ib-shr-btn[aria-expanded="true"], .ib-shr-btn[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-shr-btn:not([data-phone]):hover, .ib-shr-btn:not([data-phone])[aria-expanded="true"], .ib-shr-btn:not([data-phone])[data-popup-open] { background: var(--muted); color: var(--foreground); }
 .ib-shr-btn:focus-visible, .ib-shr :is(button, a, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-shr-btn[data-state="busy"], .ib-shr-btn[data-state="shared"], .ib-shr-btn[data-state="look"], .ib-shr-btn[data-state="failed"] { color: var(--foreground); }
 .ib-shr-btn[data-state="update"] { color: var(--primary); }

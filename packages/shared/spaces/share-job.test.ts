@@ -58,7 +58,9 @@ function setup(options: { spaces?: Parameters<typeof createFakeSpaces>[0]; jobs?
   const settle = async () => {
     for (let i = 0; i < 200; i++) {
       const running = jobs.running(world.plan);
+      const claiming = jobs.claiming(world.plan);
       if (running) await running;
+      else if (claiming) await claiming;
       else if (jobs.status(world.plan)!.keep !== "waiting") return;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -71,7 +73,7 @@ describe("the status", () => {
     const s = setup();
     const id = s.world.plan;
     expect(s.jobs.status(id)).toMatchObject({ phase: "none", link: null, versions: 4, signed_in: false, kept: false, changes: 0 });
-    expect(s.jobs.status(id)!.details.all).toEqual({ pages: 4, files: 3, comments: 1, approval: 4, not: { sent_comments: 3, pictures: 2, original_dates: true, files_over: 0, pages_over: 0, long_comments: 0, older_approvals: 0 } });
+    expect(s.jobs.status(id)!.details.all).toEqual({ pages: 4, files: 3, comments: 1, approval: null, not: { sent_comments: 3, pictures: 2, original_dates: true, files_over: 0, pages_over: 0, long_comments: 0, older_approvals: 0 } });
     expect(s.jobs.share(id, { mode: "all" })).toMatchObject({ phase: "sharing" });
     await s.settle();
     const shared = s.jobs.status(id)!;
@@ -110,7 +112,8 @@ describe("the status", () => {
     s.world.store.addVersion(id, s.world.pages.rollout, { bytes: enc("# Rollout checklist\n\nv3\n"), committed_at: new Date().toISOString(), source: "agent-tool" });
     s.jobs.share(id, {});
     await s.settle();
-    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", stopped_pages: [{ title: "Rollout checklist" }], changes: 0 });
+    const link = s.jobs.status(id)!.link!;
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", stopped_pages: [{ title: "Rollout checklist", url: `${link}/Rollout%20checklist.md` }], changes: 0 });
     s.spaces.keptBy(first, "Someone Else");
     s.world.store.addVersion(id, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     s.jobs.share(id, {});
@@ -201,7 +204,75 @@ describe("Keep this space", () => {
     s.jobs.share(s.world.plan, {});
     await s.jobs.running(s.world.plan);
     expect(readSpacesCredential(s.dataDir, HOST)).toBeNull();
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "failed", signed_in: false, kept: true });
+    // Signed out: the result panel with Keep, which signs in. No Update is offered that could only fail, an Update
+    // pressed anyway sends nothing, and no browser is ever opened by it.
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: false, kept: false, changes: 0, keep: null });
+    const calls = s.spaces.calls.length;
+    expect(s.jobs.share(s.world.plan, {})).toMatchObject({ phase: "shared", keep: null });
+    await s.settle();
+    expect([s.spaces.calls.length, s.opened]).toEqual([calls, []]);
+    // Keep signs in again; the space was the person's own all along, and what waited goes up.
+    await s.jobs.keep(s.world.plan);
+    await s.settle();
+    expect(s.opened).toHaveLength(1);
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: true, kept: true, changes: 0 });
+    expect(s.spaces.spaces.size).toBe(1);
+  });
+
+  test("one claim at a time: a second Keep joins the first, and an Update pressed meanwhile neither starts nor undoes it", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const s = setup();
+    s.jobs.share(s.world.plan, {});
+    await s.settle();
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    // The claim's answer is held back.
+    const held = createSpaceShareJobs({ dataDir: s.dataDir, store: () => s.world.store, host: () => HOST, remote: () => false, openBrowser: async () => "opened", fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/claim")) await gate;
+      return s.spaces.fetch(input, init);
+    }) as typeof fetch });
+    closers.push(() => held.close());
+    const first = held.keep(s.world.plan);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(held.status(s.world.plan)).toMatchObject({ busy: true, kept: false });
+    const second = held.keep(s.world.plan);
+    s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# v5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    expect(held.share(s.world.plan, {})).toMatchObject({ phase: "shared", busy: true });
+    expect(held.running(s.world.plan)).toBeNull();
+    release();
+    await Promise.all([first, second]);
+    await held.running(s.world.plan);
+    expect(s.spaces.calls.filter((c) => c.path.endsWith("/claim"))).toHaveLength(1);
+    expect(readSpaceShareRecord(s.dataDir, s.world.plan)!.kept).toBe(true);
+    expect(held.status(s.world.plan)).toMatchObject({ phase: "shared", kept: true, busy: false, changes: 0 });
+  });
+
+  test("a claim that gets a 401: the token is forgotten and nothing is called someone else's; a 404 changes nothing", async () => {
+    const s = setup();
+    s.jobs.share(s.world.plan, {});
+    await s.settle();
+    saveSpacesCredential(s.dataDir, HOST, { token: "wscli_live_revoked", name: "Maya Chen" });
+    await s.jobs.keep(s.world.plan);
+    expect(readSpacesCredential(s.dataDir, HOST)).toBeNull();
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: false, signed_in: false });
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.spaces.failNext(/claim$/, 404, "workspace_not_found");
+    await s.jobs.keep(s.world.plan);
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: false, signed_in: true });
+  });
+
+  test("going down: the sign-in's listener is closed and a run is stopped", async () => {
+    let login = "";
+    const s = setup({ jobs: { openBrowser: async (url) => ((login = url), "opened") } });
+    s.jobs.share(s.world.plan, {});
+    await s.settle();
+    await s.jobs.keep(s.world.plan);
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ keep: "waiting" });
+    const back = new URL(login).searchParams.get("redirect_uri")!;
+    expect((await fetch(back)).status).toBe(404);
+    s.jobs.close();
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ keep: null });
+    expect(await fetch(back).then(() => "answered", () => "closed")).toBe("closed");
   });
 });
 

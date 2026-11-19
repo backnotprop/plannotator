@@ -60,7 +60,6 @@ async function share(label: string, record: SpaceShareRecord, dataDir: string, p
     record,
     save: () => {},
     client: createSpacesClient({ host: host!, token, fetch: logged }),
-    newSpaceId,
     progress: (p) => p.waiting_until !== null && say(`${label}: waiting`, { done: p.done, total: p.total, seconds: Math.ceil((p.waiting_until - Date.now()) / 1000) }),
   });
   say(`${label}: calls`, { calls: calls.splice(0) });

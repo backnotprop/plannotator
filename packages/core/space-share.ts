@@ -81,6 +81,27 @@ export function spacePagePath(doc: { doc_path: string | null; title: string }, e
   }
 }
 
+/**
+ * The path a file goes up at: its own when a hosted space takes it, else the same with what it refuses (`#`, `%`,
+ * `?`, an over-long name) written as `-` or cut, never one already `taken`. The file keeps its name on this computer.
+ */
+export function spaceFilePath(assetPath: string, taken: ReadonlySet<string>): string {
+  if (isSpacePath(assetPath) && !taken.has(foldPath(assetPath))) return assetPath;
+  const names = assetPath.split("/").map((name) => {
+    let safe = name.replace(/[\\?#%\u0000-\u001f\u007f]+/g, "-");
+    if (safe === "." || safe === ".." || safe.toLowerCase() === ".git") safe = `-${safe.slice(1)}`;
+    while (utf8Length(safe) > 255) safe = safe.slice(1);
+    return safe || "-";
+  });
+  const last = names.pop()!;
+  const dot = last.lastIndexOf(".");
+  const [stem, extension] = dot > 0 ? [last.slice(0, dot), last.slice(dot)] : [last, ""];
+  for (let n = 1; ; n++) {
+    const path = [...names, `${n === 1 ? stem : `${stem} ${n}`}${extension}`].join("/");
+    if (!taken.has(foldPath(path))) return path;
+  }
+}
+
 /** A hosted space's id, made here so a create tried twice is one space. */
 export const newSpaceId = (now?: number): string => `ws_${ulid(now)}`;
 export const isSpaceId = (value: unknown): value is string => typeof value === "string" && /^ws_[0-9A-HJKMNP-TV-Z]{26}$/.test(value);
@@ -108,6 +129,8 @@ export interface SpaceSharePage {
 }
 
 export interface SpaceShareFile {
+  /** The path it has in the space, when that is not its path here (a name the space does not take). */
+  remote_path?: string;
   remote_id: string | null;
   /** SHA-256 of the bytes that went up. */
   content_hash: string;
@@ -284,13 +307,19 @@ export interface SpaceSharePlan {
   file_bytes: number;
   /** The path each document goes up at. */
   paths: Record<string, string>;
+  /** The path each file (by its path here) goes up at. */
+  file_paths: Record<string, string>;
 }
 
 const annotationOf = (comment: PlanComment): Record<string, unknown> => (isObject(comment.anchor) ? comment.anchor : {});
 
-/** A comment's anchor as it goes up: the annotation without its pictures (they are paths on this computer). */
+/**
+ * A comment's anchor as it goes up: where it is and what it says, and nothing about who or when. Left here: its
+ * pictures (paths on this computer), the commenter's name and the people it names (a space nobody kept is open to
+ * every holder of its link), and when it was made.
+ */
 export function spaceCommentAnchor(comment: PlanComment): Record<string, unknown> {
-  const { images: _images, ...rest } = annotationOf(comment);
+  const { images: _images, author: _author, mentions: _mentions, createdA: _createdA, ...rest } = annotationOf(comment);
   return rest;
 }
 
@@ -305,15 +334,23 @@ const picturesOf = (comment: PlanComment) => {
  */
 export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | null, options: { mode: SpaceShareMode; signedIn: boolean }): SpaceSharePlan {
   const mode = record?.mode ?? options.mode;
-  const kept = record ? record.kept : options.signedIn;
+  // Before the space is made, a signed-in share will make it the person's own.
+  const kept = record?.created ? record.kept : options.signedIn;
   const steps: SpaceShareStep[] = [];
   const details: SpaceShareDetails = { pages: 0, files: 0, comments: 0, approval: null, not: { sent_comments: 0, pictures: 0, original_dates: false, files_over: 0, pages_over: 0, long_comments: 0, older_approvals: local.older_approvals } };
   const changed = new Set<string>();
   let fileBytes = 0;
 
-  // Paths: a recorded one stays; a new page never takes a file's path or another page's.
-  const taken = new Set<string>(local.artifacts.map((a) => foldPath(a.asset_path)));
+  // Paths: a recorded one stays; a file keeps its own path where the space takes it; a new page never takes a
+  // file's path or another page's.
+  const taken = new Set<string>();
   for (const page of Object.values(record?.pages ?? {})) taken.add(foldPath(page.doc_path));
+  const filePaths: Record<string, string> = {};
+  for (const artifact of [...local.artifacts].sort((a, b) => Number(isSpacePath(b.asset_path)) - Number(isSpacePath(a.asset_path)))) {
+    const path = record?.files[artifact.asset_path]?.remote_path ?? (record?.files[artifact.asset_path] ? artifact.asset_path : spaceFilePath(artifact.asset_path, taken));
+    taken.add(foldPath(path));
+    filePaths[artifact.asset_path] = path;
+  }
   const paths: Record<string, string> = {};
   const docs = [...local.documents].sort((a, b) => Number(b.id === local.primary_doc_id) - Number(a.id === local.primary_doc_id));
   for (const doc of docs) {
@@ -374,7 +411,6 @@ export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | nul
       asPage ? details.not.pages_over++ : details.not.files_over++;
       continue;
     }
-    if (!isSpacePath(artifact.asset_path)) continue;
     details.files++;
     if (!asPage) fileBytes += artifact.size;
     if (record?.files[artifact.asset_path]?.content_hash === artifact.content_hash) continue;
@@ -425,14 +461,15 @@ export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | nul
   const primary = local.documents.find((d) => d.id === local.primary_doc_id);
   if (approval && primary && isSpacePageKind(primary.kind) && !record?.approval_refused) {
     const head = primary.versions.find((v) => v.version_number === approval.version_number);
-    if (head && up.get(primary.id)?.has(head.version) && !record?.pages[primary.id]?.stopped) {
+    // Listed in Details only where it goes: never for a space nobody kept.
+    if (kept && head && up.get(primary.id)?.has(head.version) && !record?.pages[primary.id]?.stopped) {
       details.approval = approval.version_number;
       const there = record?.approval?.document_id === approval.document_id && record.approval.version_number === approval.version_number && !primarySaved;
-      if (kept && !there) steps.push({ kind: "approval", doc: approval.document_id, version: approval.version_number });
+      if (!there) steps.push({ kind: "approval", doc: approval.document_id, version: approval.version_number });
     }
   }
 
-  return { steps, details, changes: changed.size, file_bytes: fileBytes, paths };
+  return { steps, details, changes: changed.size, file_bytes: fileBytes, paths, file_paths: filePaths };
 }
 
 // ─────────────────────────────── What the page is told ───────────────────────────────
@@ -466,8 +503,10 @@ export interface SpaceShareStatus {
   versions: number;
   /** Pages, files and comments new since the last share. */
   changes: number;
-  /** Pages left alone because they changed in the space. */
-  stopped_pages: { title: string }[];
+  /** Pages left alone because they changed in the space, each with its address there (the link and its path). */
+  stopped_pages: { title: string; url?: string | null }[];
+  /** The claim is going: Keep waits for it. */
+  busy?: boolean;
   details: Record<SpaceShareMode, SpaceShareDetails>;
 }
 

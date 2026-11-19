@@ -36,7 +36,7 @@ function setup(options: { mode?: SpaceShareMode; token?: boolean; seed?: Paramet
   const world = seedSpaceShareWorld(dataDir, options.seed);
   const spaces = createFakeSpaces({ origin: HOST, ...options.spaces });
   const token = options.token ? spaces.issueToken("Maya Chen") : null;
-  const record = newSpaceShareRecord({ host: HOST, space_id: newSpaceId(), name: "Rate limiting for public endpoints", mode: options.mode ?? "all", kept: !!token, at: new Date().toISOString() });
+  const record = newSpaceShareRecord({ host: HOST, space_id: newSpaceId(), name: "Rate limiting for public endpoints", mode: options.mode ?? "all", kept: false, at: new Date().toISOString() });
   const saved: SpaceShareRecord[] = [];
   const progress: SpaceShareProgress[] = [];
   const waits: number[] = [];
@@ -52,7 +52,6 @@ function setup(options: { mode?: SpaceShareMode; token?: boolean; seed?: Paramet
         waits.push(ms);
         spaces.resetWrites();
       },
-      newSpaceId,
     });
   return { world, spaces, record, saved, progress, waits, run, token };
 }
@@ -81,7 +80,7 @@ describe("what goes up", () => {
     expect(space.comments[0]!.key).toBe(s.world.unsent);
     expect(space.comments[0]!.document_version).toBe(main.versions[3]!.version);
     expect((space.comments[0]!.anchor as { id: string; images?: unknown }).id).toBe("open-1");
-    expect((space.comments[0]!.anchor as { images?: unknown }).images).toBeUndefined();
+    expect(Object.keys(space.comments[0]!.anchor as object).sort()).toEqual(["blockId", "endOffset", "id", "originalText", "startOffset", "text", "type"]);
     expect(JSON.stringify([...s.spaces.spaces.values()])).not.toContain(s.world.changesAsked);
     expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
     // The count never goes back and ends whole.
@@ -137,7 +136,7 @@ describe("a call tried twice is one thing", () => {
     expect((await s.run()).end).toBe("failed");
     s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     const again = spaceShareSource(s.world.store, s.world.plan)!;
-    expect((await runSpaceShare({ source: again, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }), newSpaceId })).end).toBe("done");
+    expect((await runSpaceShare({ source: again, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) })).end).toBe("done");
     expect(s.spaces.spaces.size).toBe(1);
     expect(mainOf(s).versions.map((v) => v.body.includes("v5"))).toEqual([false, true]);
   });
@@ -190,7 +189,7 @@ describe("a run that stopped goes on", () => {
         return response;
       }) as typeof fetch,
     });
-    const stopped = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client, signal: abort.signal, newSpaceId });
+    const stopped = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client, signal: abort.signal });
     expect(stopped.end).toBe("stopped");
     expect(s.record.job).toMatchObject({ done: 3, ended: "stopped" });
     expect((await s.run()).end).toBe("done");
@@ -222,7 +221,7 @@ describe("Update", () => {
     expect(s.spaces.calls.length).toBe(before);
     s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     const next = spaceShareSource(s.world.store, s.world.plan)!;
-    expect((await runSpaceShare({ source: next, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }), newSpaceId })).end).toBe("done");
+    expect((await runSpaceShare({ source: next, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) })).end).toBe("done");
     expect(writes(s.spaces).slice(12)).toEqual(["PUT /v1/workspaces/ws/documents/doc"]);
     expect(mainOf(s).versions).toHaveLength(5);
   });
@@ -235,7 +234,7 @@ describe("Update", () => {
     const { store, plan, main, pages } = s.world;
     store.addVersion(plan, pages.rollout, { bytes: enc("# Rollout checklist\n\nv3 here\n"), committed_at: new Date().toISOString(), source: "agent-tool" });
     store.addVersion(plan, main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
-    const run = () => runSpaceShare({ source: spaceShareSource(store, plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }), newSpaceId });
+    const run = () => runSpaceShare({ source: spaceShareSource(store, plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
     expect((await run()).end).toBe("done");
     const rollout = space.documents.find((d) => d.doc_path === "Rollout checklist.md")!;
     expect(rollout.versions[rollout.versions.length - 1]!.body).toContain("Edited in the space.");
@@ -247,27 +246,84 @@ describe("Update", () => {
     expect(s.spaces.calls.length).toBe(before);
   });
 
-  for (const refusal of [401, 403, 404] as const) {
-    test(`someone else kept the space (${refusal}): refused, and nothing more is sent`, async () => {
-      const s = setup({ spaces: { refusal } });
+  test("someone else kept the space (the space says the write is not allowed): refused, and nothing more is sent", async () => {
+    const s = setup();
+    await s.run();
+    s.spaces.keptBy(s.record.space_id, "Someone Else");
+    s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    const run = () => runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
+    expect((await run()).end).toBe("refused");
+    expect(s.record.refused).toBe(true);
+    expect(mainOf(s).versions).toHaveLength(4);
+    const before = s.spaces.calls.length;
+    expect((await run()).end).toBe("refused");
+    expect(s.spaces.calls.length).toBe(before);
+  });
+
+  for (const [status, code] of [[401, "login_required"], [404, "workspace_not_found"], [404, "not_found"], [410, "gone"]] as const) {
+    test(`a "no" that does not say whose the space is (${status} ${code}) is a run that did not finish: never "someone else kept it", never a new space`, async () => {
+      const s = setup();
       await s.run();
-      s.spaces.keptBy(s.record.space_id, "Someone Else");
       s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
-      const run = () => runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }), newSpaceId });
-      expect((await run()).end).toBe("refused");
-      expect(s.record.refused).toBe(true);
-      expect(mainOf(s).versions).toHaveLength(4);
-      const before = s.spaces.calls.length;
-      expect((await run()).end).toBe("refused");
-      expect(s.spaces.calls.length).toBe(before);
+      s.spaces.failNext(/^PUT .*\/documents\//, status, code);
+      const result = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
+      expect(result.end).toBe("failed");
+      expect(s.record.refused).toBe(false);
+      expect(s.record.job!.ended).toBe("failed");
+      expect(s.spaces.spaces.size).toBe(1);
+      expect(s.record.share_url).toBe(spaceOf(s.spaces, s.record).share_url);
     });
   }
+
+  test("a file whose name the space does not take goes up under another name, once", async () => {
+    const s = setup({ seed: { extras: false, versions: 1, approve: false } });
+    s.world.store.addArtifact(s.world.plan, { asset_path: "q#3 50%.png", content_type: "image/png", created_at: new Date().toISOString(), bytes: new Uint8Array([1, 2, 3]) });
+    expect((await s.run()).end).toBe("done");
+    expect(spaceOf(s.spaces, s.record).assets.map((a) => a.path)).toEqual(["q-3 50-.png"]);
+    expect(s.record.files["q#3 50%.png"]!.remote_path).toBe("q-3 50-.png");
+    const before = s.spaces.calls.length;
+    expect((await s.run()).end).toBe("done");
+    expect(s.spaces.calls.length).toBe(before);
+  });
 
   test("more files than a space nobody kept may hold: over the limit, with what is up kept", async () => {
     const s = setup({ spaces: { openQuota: 80 } });
     expect((await s.run()).end).toBe("over_limit");
     expect(s.record.job!.ended).toBe("over_limit");
     expect(s.record.share_url).not.toBeNull();
+  });
+});
+
+describe("whose the space is", () => {
+  test("kept only when the space says so: a signed-in create is the person's own", async () => {
+    const s = setup({ token: true, seed: { extras: false } });
+    expect(s.record.kept).toBe(false);
+    expect((await s.run()).end).toBe("done");
+    expect(s.record.kept).toBe(true);
+    expect(spaceOf(s.spaces, s.record).owner).toBe("Maya Chen");
+  });
+
+  test("made without sign-in and its answer lost, then tried again signed in: the ownerless space is claimed, never called kept unclaimed", async () => {
+    const s = setup({ seed: { extras: false } });
+    s.spaces.failNext(/^POST \/v1\/workspaces$/, 0, "lost", { after: true });
+    expect((await s.run()).end).toBe("failed");
+    expect(spaceOf(s.spaces, s.record).owner).toBeNull();
+    const token = s.spaces.issueToken("Maya Chen");
+    const signedIn = () => runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, token, fetch: s.spaces.fetch }) });
+    expect((await signedIn()).end).toBe("done");
+    expect(s.spaces.spaces.size).toBe(1);
+    expect(spaceOf(s.spaces, s.record).owner).toBe("Maya Chen");
+    expect(s.record.kept).toBe(true);
+  });
+
+  test("the same, but someone else kept it meanwhile: refused, and not called the person's own", async () => {
+    const s = setup({ seed: { extras: false } });
+    s.spaces.failNext(/^POST \/v1\/workspaces$/, 0, "lost", { after: true });
+    await s.run();
+    s.spaces.keptBy(s.record.space_id, "Someone Else");
+    const token = s.spaces.issueToken("Maya Chen");
+    const result = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, token, fetch: s.spaces.fetch }) });
+    expect([result.end, s.record.kept, s.record.refused]).toEqual(["refused", false, true]);
   });
 });
 

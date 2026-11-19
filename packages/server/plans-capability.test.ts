@@ -364,6 +364,9 @@ describe("Share this space is its own switch", () => {
     const answer = await route(list, "GET", `/api/plans/${id}/share`);
     expect(answer?.status).toBe(200);
     expect(await answer!.json()).toMatchObject({ phase: "none", link: null, signed_in: false });
+    // Going down with the Inbox: nothing of a share is left going.
+    capability.stopped!();
+    expect(capability.shares().running(id)).toBeNull();
     expect(capabilitiesWire(list)).toEqual({ plans: { on: true, share: true } });
     expect((await route(list, "GET", `/api/plans/${id}/share`, undefined, { ...owner, local: false }))?.status).toBe(404);
     expect((await route(list, "POST", `/api/plans/${id}/share`, { serverSession: "another-page" }))?.status).toBe(409);

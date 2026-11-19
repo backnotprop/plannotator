@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { isPlanAssetPath, type PlanComment } from "./plans";
-import { isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
+import { spaceCommentAnchor, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
 
 const DOC = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ1";
 const DOC2 = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ2";
@@ -42,9 +42,14 @@ const local = (more: Partial<LocalSpace> = {}): LocalSpace => ({
 const record = () => newSpaceShareRecord({ host: "http://127.0.0.1:1", space_id: newSpaceId(), name: "Plan", mode: "all", kept: false, at: "2026-11-11T10:00:00.000Z" });
 
 describe("paths", () => {
-  test("a local file path refuses what a hosted space refuses", () => {
-    for (const path of ["a#b.png", "50%.png", ".git/config", "x/.git/y", "../x", "a\\b", "a?b"]) expect(isPlanAssetPath(path)).toBe(false);
-    expect(isPlanAssetPath("notes/chart 2.png")).toBe(true);
+  test("a file's name here is not changed by sharing: what a hosted space refuses is written another way on the way up", () => {
+    // The library takes these names as before (the switch off changes nothing).
+    for (const path of ["a#b.png", "50%.png"]) expect(isPlanAssetPath(path)).toBe(true);
+    expect(spaceFilePath("notes/chart.png", new Set())).toBe("notes/chart.png");
+    expect(spaceFilePath("a#b 50%.png", new Set())).toBe("a-b 50-.png");
+    expect(isSpacePath(spaceFilePath("a#b 50%.png", new Set()))).toBe(true);
+    expect(spaceFilePath("a#b.png", new Set(["a-b.png"]))).toBe("a-b 2.png");
+    expect(spaceFilePath("chart.png", new Set(["chart.png"]))).toBe("chart 2.png");
   });
 
   test("a hosted path", () => {
@@ -96,8 +101,17 @@ describe("the steps", () => {
       { mode: "all", signedIn: false },
     );
     expect(plan.steps.map((s) => s.kind)).toEqual(["create", "page-save", "file", "comment", "reply"]);
+    // The anchor says where and what, never who or when.
+    expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ id: "Z", text: "x", originalText: "q" });
     expect(plan.details).toEqual({ pages: 1, files: 1, comments: 2, approval: null, not: { sent_comments: 1, pictures: 1, original_dates: true, files_over: 1, pages_over: 1, long_comments: 1, older_approvals: 1 } });
     expect(plan.changes).toBe(4);
+  });
+
+  test("a file the space does not take under its name goes up under another, kept in the plan", () => {
+    const plan = planSpaceShare(local({ artifacts: [{ asset_path: "q#3 50%.png", content_hash: "e".repeat(64), content_type: "image/png", size: 5, title: null, created_at: "2026-11-11T10:00:00.000Z" }] }), null, { mode: "newest", signedIn: false });
+    expect(plan.steps.map((s) => s.kind)).toEqual(["create", "file"]);
+    expect(plan.file_paths).toEqual({ "q#3 50%.png": "q-3 50-.png" });
+    expect(plan.details.files).toBe(1);
   });
 
   test("a file with a page's extension goes up as a page; a picture page as a file, counted against the open limit", () => {
@@ -114,14 +128,17 @@ describe("the steps", () => {
     expect(plan.file_bytes).toBe(SPACE_OPEN_FILES_MAX + 1);
   });
 
-  test("the approval: planned last and only for a kept space; shown in Details either way; never again once refused", () => {
+  test("the approval: planned last and only for a kept space; listed in Details only where it goes; never again once refused", () => {
     const approved = local({ approval: { document_id: DOC, version_number: 2 } });
     const open = planSpaceShare(approved, null, { mode: "all", signedIn: false });
     expect(open.steps.some((s) => s.kind === "approval")).toBe(false);
-    expect(open.details.approval).toBe(2);
+    expect(open.details.approval).toBeNull();
+    // Signed in, but the space is up and nobody's: not the person's own, so no approval.
+    const unkept = { ...record(), created: true };
+    expect(planSpaceShare(approved, unkept, { mode: "all", signedIn: true }).details.approval).toBeNull();
     const kept = planSpaceShare(approved, null, { mode: "all", signedIn: true });
     expect(kept.steps[kept.steps.length - 1]).toEqual({ kind: "approval", doc: DOC, version: 2 });
-    const refused = { ...record(), kept: true, approval_refused: true };
+    const refused = { ...record(), created: true, kept: true, approval_refused: true };
     const after = planSpaceShare(approved, refused, { mode: "all", signedIn: true });
     expect(after.steps.some((s) => s.kind === "approval")).toBe(false);
     expect(after.details.approval).toBeNull();

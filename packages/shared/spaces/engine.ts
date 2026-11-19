@@ -13,8 +13,11 @@
  *   progress says so meanwhile.
  * - It never writes over another's work. A save names the version it expects the space to hold; when the space holds
  *   another (412), that page is marked `stopped` and left alone, and the rest goes on.
- * - It tells when the space is no longer open to it. A write refused (401, 403, or the space not found) to a space
- *   made here without sign-in means someone else kept it: `refused`, and nothing more is sent.
+ * - It tells when the space is no longer open to it. A write the space says is not allowed, to a space made here and
+ *   never kept, means someone else kept it (`spaceKeptByAnother` in client.ts, the one place that reads it):
+ *   `refused`, and nothing more is sent. Any other "no" (no credential, not found, gone) is a run that did not finish.
+ * - The space is the person's own only when the space says so: `kept` is read from the create's answer, and a
+ *   signed-in create that comes back with no owner (its first answer was lost before the sign-in) is claimed.
  * - The approval goes last, and only into a space that is the person's own. A space that does not take it is not
  *   asked again, and the run ends as done without it.
  */
@@ -32,7 +35,7 @@ import {
   type SpaceShareRecord,
   type SpaceShareStep,
 } from "@plannotator/core/space-share";
-import { SpacesError, type SpacesClient, type SpacesSpace } from "./client";
+import { spaceKeptByAnother, SpacesError, type SpacesClient, type SpacesSpace } from "./client";
 
 export interface SpaceShareSource {
   local: LocalSpace;
@@ -61,8 +64,6 @@ export interface SpaceShareRun {
   /** Tests: the clock and the wait. */
   now?: () => number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
-  /** A new id for the space (a space that is gone is shared again as a new one). */
-  newSpaceId: () => string;
 }
 
 export interface SpaceShareResult {
@@ -117,7 +118,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   // What a run that did not finish had done still counts: "13 of 40" after "12 of 40".
   const base = record.job ? record.job.done : 0;
   record.job = { done: base, total: base + first.steps.length, ended: null };
-  if (!record.kept && first.file_bytes > SPACE_OPEN_FILES_MAX) return end("over_limit");
+  if (!client.signedIn && first.file_bytes > SPACE_OPEN_FILES_MAX) return end("over_limit");
   keep();
   tell();
 
@@ -134,10 +135,22 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   const localHash = (docId: string, n: number) => docOf(docId).versions.find((v) => v.version_number === n)?.version ?? "";
   /** Where a version came from (its agent and its own time), as the call carries it: nothing yet (`spaceImportedFields`). */
   const originOf = (docId: string, n: number) => spaceImportedFields(docOf(docId).versions.find((v) => v.version_number === n)?.imported ?? null);
-  const adopt = (space: SpacesSpace | { share_url: string | null; owner_name: string | null }) => {
+  /** The space is there: its link, and whether it is the person's own, as the space says (never assumed). */
+  const adopt = async (space: SpacesSpace) => {
     record.created = true;
     record.share_url = space.share_url ?? record.share_url;
     record.owner = space.owner_name ?? record.owner;
+    record.kept = client.signedIn && space.owned;
+    if (!client.signedIn || space.owned) return;
+    // Signed in, and the space has no owner (it was made before the sign-in and its answer was lost): keep it now.
+    try {
+      const mine = await client.claim(record.space_id);
+      record.kept = true;
+      record.owner = mine.owner_name ?? record.owner;
+    } catch (error) {
+      if (!spaceKeptByAnother(error, "claim")) throw error;
+      record.refused = true;
+    }
   };
   /** A page found in the space by its path after a lost answer: ours when it holds what was sent, else left alone. */
   const found = (docId: string, n: number, path: string, there: { id: string; version: string | null }, bytes: Uint8Array) => {
@@ -145,7 +158,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     record.pages[docId] = { lane: "page", remote_id: there.id, doc_path: path, pushed: ours ? [{ local: n, remote: there.version!, hash: localHash(docId, n) }] : [], stopped: ours ? null : { current: there.version } };
   };
 
-  async function attempt(step: SpaceShareStep, paths: Record<string, string>): Promise<void> {
+  async function attempt(step: SpaceShareStep, next: SpaceSharePlan): Promise<void> {
+    const paths = next.paths;
     const spaceId = record.space_id;
     switch (step.kind) {
       case "create": {
@@ -161,7 +175,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const document = doc && bytes && path && isSpacePageKind(doc.kind) ? { path, kind: doc.kind, title: doc.title, body: textOf(bytes) } : null;
         try {
           const made = await client.createSpace({ id: spaceId, name: record.name, document }, doc && seed.version ? originOf(doc.id, seed.version) : {});
-          adopt(made.space);
+          await adopt(made.space);
           if (doc && bytes && path) {
             if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
             else {
@@ -174,7 +188,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
           // The id is taken by a create that was not this exact call: the space is there; take it as it is.
           if (!(error instanceof SpacesError) || error.code !== "workspace_id_conflict") throw error;
           const space = await client.getSpace(spaceId);
-          adopt(space);
+          await adopt(space);
           const there = path ? space.documents.find((d) => d.doc_path === path) : null;
           if (doc && bytes && path && there) found(doc.id, seed.version!, path, there, bytes);
         }
@@ -232,8 +246,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const artifact = local.artifacts.find((a) => a.asset_path === step.path);
         const bytes = artifact ? source.artifactBytes(artifact.asset_path) : null;
         if (!artifact || !bytes) throw new Error(`The file ${step.path} could not be read.`);
-        const put = await client.putFile(spaceId, artifact.asset_path, bytes, artifact.content_type, artifact.title);
-        record.files[artifact.asset_path] = { remote_id: put.id, content_hash: artifact.content_hash };
+        const path = next.file_paths[artifact.asset_path] ?? artifact.asset_path;
+        const put = await client.putFile(spaceId, path, bytes, artifact.content_type, artifact.title);
+        record.files[artifact.asset_path] = { remote_id: put.id, content_hash: artifact.content_hash, ...(path !== artifact.asset_path ? { remote_path: path } : {}) };
         return;
       }
       case "file-page": {
@@ -242,17 +257,19 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const kind = spacePageKindOfPath(step.path);
         if (!artifact || !bytes || !kind) throw new Error(`The file ${step.path} could not be read.`);
         const was = record.files[artifact.asset_path];
-        const up = (remoteId: string | null, version: string | undefined) => (record.files[artifact.asset_path] = { remote_id: remoteId, content_hash: artifact.content_hash, ...(version ? { page_version: version } : {}) });
+        const path = next.file_paths[artifact.asset_path] ?? artifact.asset_path;
+        const up = (remoteId: string | null, version: string | undefined) =>
+          (record.files[artifact.asset_path] = { remote_id: remoteId, content_hash: artifact.content_hash, ...(version ? { page_version: version } : {}), ...(path !== artifact.asset_path ? { remote_path: path } : {}) });
         try {
           if (was?.remote_id && was.page_version) up(was.remote_id, (await client.savePage(spaceId, was.remote_id, bytes, kind, was.page_version)).version);
           else {
-            const made = await client.addPage(spaceId, { doc_path: artifact.asset_path, kind, title: artifact.title ?? artifact.asset_path.split("/").pop()!, body: textOf(bytes) });
+            const made = await client.addPage(spaceId, { doc_path: path, kind, title: artifact.title ?? artifact.asset_path.split("/").pop()!, body: textOf(bytes) });
             up(made.id, made.version);
           }
         } catch (error) {
           if (!(error instanceof SpacesError)) throw error;
           if (error.code === "path_conflict") {
-            const there = (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === artifact.asset_path);
+            const there = (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === path);
             if (!there) throw error;
             up(there.id, there.version ?? undefined);
           } else if (error.code === "version_conflict" || error.code === "document_archived" || error.code === "document_not_found") {
@@ -322,7 +339,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     lastStep = key;
     if (sameStep > 8) return end("failed");
     try {
-      await attempt(step, next.paths);
+      await attempt(step, next);
     } catch (error) {
       if (run.signal?.aborted) return end("stopped");
       if (error instanceof StepLeft) {
@@ -347,25 +364,21 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         sameStep = 0;
         continue;
       }
-      // The space is gone for good: this plan is shared again as a new one.
-      if (error.status === 410 && record.created) {
-        Object.assign(record, { space_id: run.newSpaceId(), seed: null, created: false, share_url: null, kept: client.signedIn, owner: null, pages: {}, files: {}, comments: {}, approval: null, approval_refused: false, shared_at: null });
-        record.job = { done: 0, total: plan().steps.length, ended: null };
-        keep();
-        tell();
-        continue;
-      }
-      // No way in: no credential where one is now asked for, not allowed, or a space this caller is no longer shown.
-      // (A plain `not_found` is a route the service does not have, never a refusal.)
-      const noEntry = error.status === 401 || error.status === 403 || (error.status === 404 && error.code === "workspace_not_found");
-      if (noEntry && record.created && !record.kept) {
+      // Someone else kept the space: said by the space, never guessed from a "no" that could mean something else.
+      if (record.created && !record.kept && spaceKeptByAnother(error, "write")) {
         record.refused = true;
         record.job = null;
         keep();
         return { end: "refused" };
       }
-      if (error.status === 413 && error.code === "quota_exceeded" && !record.kept) return end("over_limit");
+      if (error.status === 413 && error.code === "quota_exceeded" && !client.signedIn) return end("over_limit");
+      // Anything else, a space that is gone (410) included: the run did not finish. A sign-in the space refused is forgotten.
       return end("failed", { error, signedOut: error.status === 401 && client.signedIn });
+    }
+    if (record.refused) {
+      record.job = null;
+      keep();
+      return { end: "refused" };
     }
     serverTries = 0;
     record.job = { done: (record.job?.done ?? 0) + 1, total: Math.max(record.job?.total ?? 0, (record.job?.done ?? 0) + next.steps.length), ended: null };
