@@ -191,3 +191,17 @@ describe("personWroteIt matches core's notes and action reports", () => {
     });
   }
 });
+
+// Settings' Plannotator Inbox row, on every server (POST /api/config { inboxOn }).
+describe("the Settings write", () => {
+  test("on is the person's click (settings); off answers how to turn it back on, or the error when it did not save", async () => {
+    const { inboxOnConfigWrite, INBOX_TURN_ON_AGAIN, INBOX_OFF_NOT_SAVED } = await import("./inbox-on-config");
+    expect(await inboxOnConfigWrite(true, async () => true)).toEqual({ status: 200, body: { ok: true } });
+    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "settings" });
+    let offAsked = 0;
+    expect(await inboxOnConfigWrite(false, async () => (offAsked++, recordInboxOff(dataDir, NOW)))).toEqual({ status: 200, body: { ok: true, inboxOnLine: INBOX_TURN_ON_AGAIN } });
+    expect(offAsked).toBe(1);
+    expect(isInboxOn(dataDir, REAL)).toBe(false);
+    expect(await inboxOnConfigWrite(false, async () => false)).toEqual({ status: 500, body: { error: INBOX_OFF_NOT_SAVED } });
+  });
+});

@@ -24,6 +24,10 @@ import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { isInboxOn, readInboxOnRecord, recordInboxOff, writeInboxOnRecord, type InboxOnRecord } from "@plannotator/shared/inbox/inbox-on";
 import { stopInbox, type InboxStopResult } from "@plannotator/shared/inbox/registry";
+import { INBOX_OFF_NOT_SAVED, INBOX_TURN_ON_AGAIN, inboxOnConfigWrite } from "@plannotator/shared/inbox/inbox-on-config";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+
+export { INBOX_TURN_ON_AGAIN };
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { createAgentEnvironment, type AgentEnvironment } from "./inbox-agents";
 import { noteStatus, removeInboxNote } from "./inbox-agent-notes";
@@ -129,7 +133,7 @@ export async function turnInboxOff(dataDir: string, options: { stop?: boolean; e
 
 /** The lines `plannotator inbox off` prints (and the Settings switches show the first and last of). */
 export function inboxOffReport(off: InboxTurnedOff): string[] {
-  const lines = [off.recorded ? "The Plannotator Inbox is off on this computer: agents lose it from their next session, and nothing starts it." : "Could not turn the Plannotator Inbox off: state.json in Plannotator's data folder could not be written."];
+  const lines = [off.recorded ? "The Plannotator Inbox is off on this computer: agents lose it from their next session, and nothing starts it." : INBOX_OFF_NOT_SAVED];
   if (off.stop?.state === "still_running") lines.push(`The running Inbox (pid ${off.stop.pid}) did not stop; stop it with plannotator inbox stop.`);
   for (const note of off.notes.removed) lines.push(`Removed Plannotator's note for ${INBOX_AGENT_LABELS[note.agent]} from ${note.path}.`);
   for (const note of off.notes.kept) lines.push(`Left the note for ${INBOX_AGENT_LABELS[note.agent]} in ${note.path}: you edited it.`);
@@ -138,5 +142,7 @@ export function inboxOffReport(off: InboxTurnedOff): string[] {
   return lines;
 }
 
-/** How to turn it back on, said after every Turn off. */
-export const INBOX_TURN_ON_AGAIN = "Turn it back on any time with plannotator inbox.";
+/** The Bun servers' answer to Settings' `{ inboxOn }` (packages/shared/inbox/inbox-on-config.ts). */
+export function inboxOnConfigResponse(on: boolean): Promise<Response> {
+  return inboxOnConfigWrite(on, async () => (await turnInboxOff(getPlannotatorDataDir())).recorded).then(({ status, body }) => Response.json(body, { status }));
+}

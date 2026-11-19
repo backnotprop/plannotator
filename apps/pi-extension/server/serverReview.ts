@@ -1,4 +1,6 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { inboxOnConfigWrite } from "../generated/inbox/inbox-on-config.ts";
+import { turnInboxOffWithCli } from "../generated/inbox/agent-link.ts";
 import { schedulePiDailyPing } from "./daily-ping.ts";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "../generated/package-changes-service.ts";
 import { parseDiffToFiles } from "../generated/diff-files.ts";
@@ -3858,6 +3860,12 @@ export async function startReviewServer(options: {
 			}
 			try {
 				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
+				// The Plannotator Inbox on this computer (Settings' Inbox row): its own write, sent alone (inbox-on-config.ts).
+				if (typeof (body as { inboxOn?: unknown }).inboxOn === "boolean") {
+					const answer = await inboxOnConfigWrite((body as { inboxOn: boolean }).inboxOn, () => turnInboxOffWithCli());
+					json(res, answer.body, answer.status);
+					return;
+				}
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);

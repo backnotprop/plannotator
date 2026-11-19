@@ -78,9 +78,10 @@ printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/project-key
 # tailnet-audience and so this-machine-reader) imports ../tailscale.
 # pi-session-claim (which process runs a Pi session) imports node: only.
 # inbox-on-contract and inbox-on (whether the person turned the Inbox on here)
-# import ../config and ../data-dir (vendored flat above) and node: modules.
+# import ../config and ../data-dir (vendored flat above) and node: modules;
+# inbox-on-config is Settings' Inbox row write (POST /api/config { inboxOn }).
 mkdir -p generated/inbox
-for f in connection agent-link tailnet pi-session-claim inbox-on-contract inbox-on; do
+for f in connection agent-link tailnet pi-session-claim inbox-on-contract inbox-on inbox-on-config; do
   src="../../packages/shared/inbox/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
 done

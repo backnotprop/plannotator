@@ -39,6 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
+import { inboxOffReport, turnInboxOff } from "./inbox-on-settle";
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
@@ -6556,6 +6557,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "This Inbox cannot restart itself; quit it and run plannotator inbox.", code: "restart_unavailable" }, 409);
         }
         return json({ ok: true, restarting: true });
+      }
+      // Turn the Inbox off (Settings → General, inbox-on-settle.ts): the record says off, Plannotator's untouched
+      // notes go, the answer says what happened, then this Inbox stops. No confirmation: Turn on is one command.
+      if (path === "/api/inbox/off") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const off = await turnInboxOff(dataDir, { stop: false });
+        if (!off.recorded) return json({ error: inboxOffReport(off)[0], code: "off_not_saved" }, 500);
+        if (!stopRequested) {
+          stopRequested = true;
+          setTimeout(() => {
+            stop();
+            options.onStopRequested?.();
+          }, 250);
+        }
+        return json({ ok: true, off: true, lines: inboxOffReport(off) });
       }
       // What's new and its images (inbox-whats-new-images.ts) only read public release
       // notes, so they answer every window: this computer, the owner over the tailnet

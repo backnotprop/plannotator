@@ -186,6 +186,13 @@ interface SettingsProps {
   /** Saves the agent tool switch (saveAgentToolSetting); rejects with a
    *  readable Error, which the row shows. */
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
+  /** The Plannotator Inbox row (hooks/useInboxOnSetting.ts): undefined (no row) unless the server reported the Inbox
+   *  on when the page loaded. Shown only together with onInboxOnChange. */
+  inboxOnSetting?: boolean;
+  /** What the server said after the last change (after off: how to turn it back on). */
+  inboxOnLine?: string;
+  /** Turns the Inbox off or on; rejects with a readable Error, which the row shows. */
+  onInboxOnChange?: (on: boolean) => Promise<void>;
   /** Current session is a local git review where since-base ISN'T offered
    *  (base ref unresolvable) — the Review tab's Git section shows a note that
    *  the Git-status preference can't take effect in THIS repo. */
@@ -385,6 +392,57 @@ function AgentToolSettingRow({ setting, onChange }: {
       />
       {error && (
         <p role="alert" data-agent-tool-setting-error className="mt-1 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Plannotator Inbox on this computer (utils/inboxOnSetting.ts): shown only
+ * to someone who turned it on. Off stops it and removes Plannotator's untouched
+ * notes in agents' instruction files; on again is the person's own click.
+ */
+function InboxOnSettingRow({ on, line, onChange }: {
+  readonly on: boolean;
+  readonly line?: string;
+  readonly onChange: (on: boolean) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const change = async (next: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onChange(next);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'Could not change the Inbox.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div data-inbox-on-setting={on ? 'on' : 'off'} aria-busy={saving}>
+      <ToggleSwitch
+        checked={on}
+        onChange={(next) => void change(next)}
+        disabled={saving}
+        label="Plannotator Inbox"
+        description={
+          on
+            ? 'On for this computer: agents can leave you messages and questions in it. Off stops it, and nothing starts it again until you turn it on.'
+            : 'Off for this computer: agents do not get it, and nothing starts it.'
+        }
+      />
+      {!on && line && (
+        <p data-inbox-on-setting-line className="mt-1 text-xs text-muted-foreground">
+          {line}
+        </p>
+      )}
+      {error && (
+        <p role="alert" data-inbox-on-setting-error className="mt-1 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -1186,7 +1244,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, inboxOnSetting, inboxOnLine, onInboxOnChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1772,6 +1830,15 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       <>
                         <div className="border-t border-border" />
                         <AgentToolSettingRow setting={agentToolSetting} onChange={onAgentToolChange} />
+                      </>
+                    )}
+
+                    {/* The Plannotator Inbox on this computer: only where the
+                        server reported it on (someone who turned it on). */}
+                    {inboxOnSetting !== undefined && onInboxOnChange && (
+                      <>
+                        <div className="border-t border-border" />
+                        <InboxOnSettingRow on={inboxOnSetting} line={inboxOnLine} onChange={onInboxOnChange} />
                       </>
                     )}
 

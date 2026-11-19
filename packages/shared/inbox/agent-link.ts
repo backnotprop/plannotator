@@ -33,7 +33,7 @@
  */
 
 import { INBOX_OFF_AGENT_LINE, INBOX_SLASH_COMMAND_ENV, isInboxOffAnswer } from "./inbox-on-contract";
-import { isInboxOn } from "./inbox-on";
+import { isInboxOn, recordInboxOff } from "./inbox-on";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -67,6 +67,7 @@ import {
   type InboxToolInfo,
 } from "./connection";
 import { directFetchInit } from "../loopback-proxy";
+import { getPlannotatorDataDir } from "../data-dir";
 
 /** The longest a host's start waits for a running Inbox's `tools/list` (the mod's bound). */
 export const INBOX_DISCOVER_TIMEOUT_MS = 2_000;
@@ -409,6 +410,24 @@ function runOnce(
     child.on("error", (error: NodeJS.ErrnoException) => done({ missing: error.code === "ENOENT", exitCode: null, output: error.message }));
     child.on("close", (code) => done({ missing: false, exitCode: code, output, stdout, stderr }));
   });
+}
+
+/**
+ * Settings' Turn off on Pi (inbox-on-config.ts): `plannotator inbox off`, which
+ * stops the Inbox and removes Plannotator's untouched notes. With no
+ * `plannotator` to run, the record says off with the notes still to go (the
+ * next `plannotator inbox` removes them). Resolves whether the record says off.
+ */
+export async function turnInboxOffWithCli(options: { dataDir?: string; command?: string } = {}): Promise<boolean> {
+  const dataDir = options.dataDir ?? getPlannotatorDataDir();
+  const env = { ...process.env, PLANNOTATOR_DATA_DIR: dataDir };
+  for (const command of plannotatorCommands(options.command)) {
+    const run = await runOnce(command, ["inbox", "off"], env);
+    if (run.missing) continue;
+    if (run.exitCode === 0) return true;
+    break;
+  }
+  return recordInboxOff(dataDir, new Date(), "remove");
 }
 
 /** The commands that run Plannotator: PLANNOTATOR_BIN, else `plannotator` on PATH, else ~/.local/bin/plannotator. */

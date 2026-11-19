@@ -134,6 +134,7 @@ import {
   markAgentToolAnnouncementSeen,
 } from '@plannotator/ui/utils/agentToolAnnouncement';
 import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
+import { useInboxOnSetting } from '@plannotator/ui/hooks/useInboxOnSetting';
 import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { buildDefaultPrompt, draftAnnotationsToSend, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { askScopeFromContext as askScopeFromContextFor } from './askScope';
@@ -930,6 +931,7 @@ const App: React.FC = () => {
   // The `plannotator` agent tool switch (Settings row + one-time offer on Pi
   // and OpenCode 2), from the server's serverConfig.
   const agentTool = useAgentToolSetting();
+  const inboxOn = useInboxOnSetting();
   // One-time offer to turn the agent tool on, after the terminal-tools
   // announcement (never on the same load). Latched at mount for the same reason.
   const [agentToolIntroPending, setAgentToolIntroPending] = useState(
@@ -4014,6 +4016,7 @@ const App: React.FC = () => {
         // toggle; OpenCode, Pi and dev runs send no autoUpdateSupported.
         setAutoUpdateSetting(data.autoUpdateSupported === true && typeof data.serverConfig?.autoUpdate === 'boolean' ? { env: data.serverConfig.autoUpdateEnv } : undefined);
         agentTool.adopt(data.serverConfig);
+        inboxOn.adopt(data.serverConfig);
         setAutoUpdateActive(data.autoUpdateActive === true);
         setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
         setUpdateAdvert(parseUpdateAdvert(data.updateAvailable));
@@ -7602,6 +7605,9 @@ const App: React.FC = () => {
           cookieHostSetting={cookieHostSetting.setting}
           agentToolSetting={agentTool.setting}
           onAgentToolChange={agentTool.save}
+          inboxOnSetting={inboxOn.on}
+          inboxOnLine={inboxOn.line}
+          onInboxOnChange={inboxOn.save}
           agentTerminalAvailable={showAgentTerminalControls}
           webmcpAvailable={webmcp.available}
           documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc' || renderAs === 'code'}

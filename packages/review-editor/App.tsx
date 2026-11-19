@@ -68,6 +68,7 @@ import {
 } from '@plannotator/ui/utils/inboxAnnouncement';
 import { askSessionSetupHint } from '@plannotator/ui/utils/askSessionSetupHint';
 import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
+import { useInboxOnSetting } from '@plannotator/ui/hooks/useInboxOnSetting';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget, type ImageAttachment, type MarkdownPreviewAnchor } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
@@ -1535,6 +1536,7 @@ const ReviewApp: React.FC = () => {
     setGuideHintActive(false);
   }, [guideOpen, guideHintActive]);
   const agentTool = useAgentToolSetting();
+  const inboxOn = useInboxOnSetting();
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -2848,6 +2850,7 @@ const ReviewApp: React.FC = () => {
         // toggle; OpenCode, Pi and dev runs send no autoUpdateSupported.
         setAutoUpdateSetting(data.autoUpdateSupported === true && typeof data.serverConfig?.autoUpdate === 'boolean' ? { env: data.serverConfig.autoUpdateEnv } : undefined);
         agentTool.adopt(data.serverConfig);
+        inboxOn.adopt(data.serverConfig);
         setAutoUpdateActive(data.autoUpdateActive === true);
         setAutoUpdateNotice(parseAutoUpdateNotice(data.autoUpdateNotice));
         setUpdateAdvert(parseUpdateAdvert(data.updateAvailable));
@@ -6643,6 +6646,9 @@ const ReviewApp: React.FC = () => {
             packageChangesSetting={packageChangesSetting}
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
+            inboxOnSetting={inboxOn.on}
+            inboxOnLine={inboxOn.line}
+            onInboxOnChange={inboxOn.save}
             externalOpen={openSettingsMenu !== false}
             externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}

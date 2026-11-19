@@ -1637,6 +1637,7 @@ export function getServerConfig(
   agentToolEnabled?: boolean;
   packageChanges: { card: boolean; lookup: boolean; lookupEnv?: false };
   cookieHost?: CookieHostState;
+  inboxOn?: true;
 } {
   const cfg = loadConfig();
   const packageLookupEnv = parsePackageLookupEnv();
@@ -1688,6 +1689,8 @@ export function getServerConfig(
     },
     // Settings' "Open Plannotator at plannotator.localhost" (#2184), only where the server says it is local.
     ...(options.cookieHost === true && { cookieHost: cookieHostState(cfg) }),
+    // Settings' Plannotator Inbox row (packages/ui/utils/inboxOnSetting.ts): only while the person has it on here.
+    ...(cfg.inboxOn?.on === true && { inboxOn: true as const }),
   };
 }
 

@@ -30,6 +30,7 @@ import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
 import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
+import { InboxOffSetting } from './InboxOffSetting';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings, voiceWhere } from '../voice';
@@ -268,6 +269,7 @@ function GeneralSection({
   return (
     <>
       {updateRow}
+      <InboxOffSetting />
       {onTakeTour && (
         <section className="ib-sgroup" data-settings-tour="" aria-labelledby="ib-g-start">
           <h2 id="ib-g-start">Getting started</h2>

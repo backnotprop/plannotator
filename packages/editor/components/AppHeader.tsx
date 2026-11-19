@@ -130,6 +130,9 @@ interface AppHeaderProps {
   /** The `plannotator` agent tool switch (parseAgentToolSetting of serverConfig); Settings shows its row. */
   agentToolSetting?: AgentToolSetting;
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
+  inboxOnSetting?: boolean;
+  inboxOnLine?: string;
+  onInboxOnChange?: (on: boolean) => Promise<void>;
   /** This session offers the Agent TUI, so Settings shows its Position row. */
   agentTerminalAvailable: boolean;
   /** The browser exposes WebMCP, so Settings shows the "Agent tools" opt-out.
@@ -233,6 +236,9 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   cookieHostSetting,
   agentToolSetting,
   onAgentToolChange,
+  inboxOnSetting,
+  inboxOnLine,
+  onInboxOnChange,
   agentTerminalAvailable,
   webmcpAvailable = false,
   documentTextSizeAvailable = false,
@@ -512,6 +518,9 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             cookieHostSetting={cookieHostSetting}
             agentToolSetting={agentToolSetting}
             onAgentToolChange={onAgentToolChange}
+            inboxOnSetting={inboxOnSetting}
+            inboxOnLine={inboxOnLine}
+            onInboxOnChange={onInboxOnChange}
             agentTerminalAvailable={agentTerminalAvailable}
             webmcpAvailable={webmcpAvailable}
             showDocumentTextSize={documentTextSizeAvailable}
