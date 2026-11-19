@@ -3,6 +3,7 @@
  * artefact. `bun run --cwd packages/canvas demo` serves it; the benchmark
  * (`bench/run.ts`) builds it once and measures the built page.
  */
+import fs from 'node:fs';
 import path from 'path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -12,6 +13,15 @@ import { createUnfurlHandler } from '../unfurl/route';
 
 const root = path.resolve(__dirname);
 const repo = path.resolve(__dirname, '../../..');
+
+/**
+ * The repository's own faces, lent to HTML items in the demo as data: URLs. Both are under the SIL Open Font
+ * License 1.1 (see the licence files beside them), which allows embedding. Read here, at build time, from the
+ * files already in the repository: nothing is downloaded and no font is added to the package.
+ */
+const fontsDir = path.resolve(repo, 'apps/marketing/public/fonts');
+const face = (family: string, file: string) => ({ family, src: `data:font/woff2;base64,${fs.readFileSync(path.join(fontsDir, file)).toString('base64')}`, weight: [100, 900] });
+const HOUSE_FACES = [face('Geist', 'geist/Geist-Variable.woff2'), face('Paper Mono', 'paper-mono/PaperMono-Variable.woff2')];
 
 /** Where the demo's editor asks for link previews. */
 const UNFURL_PATH = '/__canvas/unfurl';
@@ -45,6 +55,7 @@ export default defineConfig({
   server: { port: 3017, host: '127.0.0.1', strictPort: false },
   preview: { port: 3018, host: '127.0.0.1', strictPort: false },
   plugins: [unfurlRoute(), react(), tailwindcss()],
+  define: { __HOUSE_FACES__: JSON.stringify(HOUSE_FACES) },
   publicDir: path.resolve(root, 'public'),
   resolve: {
     alias: {

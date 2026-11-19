@@ -120,6 +120,13 @@ export function createMarksStore(): CanvasStore {
       ];
     }),
 
+    // HTML items set in the host's lent faces. With the crowd below, this board is past full detail at "fit":
+    // the items must still be drawn.
+    { id: 'f-html', type: 'frame', x: 2040, y: 600, w: 760, h: 420, title: 'HTML items in the house faces' },
+    { id: 'h1', type: 'html', x: 2072, y: 640, w: 330, h: 150, alt: 'Sixteen steps, eight knobs', html: '<div style="font-family:\'Geist\',sans-serif;color:#ECE7DC;background:#0F0D16;height:150px;padding:16px;box-sizing:border-box"><div style="font:500 11px \'Paper Mono\',monospace;letter-spacing:.08em;color:#A79AEC">FS-16 / PANEL</div><div style="font-weight:800;font-size:52px;line-height:1;letter-spacing:-.03em;margin-top:14px">sixteen.</div><div style="font:400 12px \'Paper Mono\',monospace;margin-top:12px;color:#B4DA94">8 knobs · 212 × 96 × 28 mm · 412 g</div></div>' },
+    { id: 'h2', type: 'html', x: 2434, y: 640, w: 330, h: 150, alt: 'Step grid, bar one', html: '<div style="font-family:\'Paper Mono\',monospace;color:#ECE7DC;background:#0F0D16;height:150px;padding:16px;box-sizing:border-box"><div style="font-size:11px;letter-spacing:.08em;color:#A79AEC">BAR 01</div><div style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:14px">' + Array.from({ length: 16 }, (_, i) => `<div style="height:30px;border:1px solid #ECE7DC55;background:${[0, 3, 6, 10, 12].includes(i) ? '#ECE7DC' : 'transparent'}"></div>`).join('') + '</div></div>' },
+    { id: 'h3', type: 'html', x: 2072, y: 822, w: 692, h: 160, alt: 'The device faces, for comparison', html: '<div style="color:#ECE7DC;background:#0F0D16;height:160px;padding:16px;box-sizing:border-box;font:14px system-ui,sans-serif"><div style="font-size:11px;letter-spacing:.08em;color:#A79AEC">NO FACE NAMED: THE DEVICE\'S OWN</div><div style="font-weight:800;font-size:52px;line-height:1;letter-spacing:-.03em;margin-top:14px">sixteen.</div><div style="font:400 12px ui-monospace,monospace;margin-top:12px;color:#B4DA94">8 knobs · 212 × 96 × 28 mm · 412 g</div></div>' },
+
     // Curves: a relationship map. A pair, one each way, part.
     { id: 'f-curve', type: 'frame', x: 1640, y: 0, w: 760, h: 520, title: 'Curved connectors' },
     { id: 'c1', type: 'box', x: 1700, y: 70, w: 150, h: 60, text: 'Keys', shape: 'pill' },

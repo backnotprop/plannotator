@@ -22,6 +22,8 @@ import type { PasteResolver } from '../react/references';
 import { pictureResolver } from '../model/assets';
 import { routeLinkPreview } from '../react/link-preview';
 import { CanvasEditor } from '../react/CanvasEditor';
+import { HtmlItemFacesProvider } from '../react/objects';
+import type { HtmlItemFace } from '../model/html-item';
 import { findSnapshotBlocks, insertSnapshotBlock } from '../snapshot/block';
 import { CanvasStage } from '../snapshot/CanvasStage';
 import { createSnapshotDirectiveRenderer } from '../snapshot/directive';
@@ -89,6 +91,9 @@ function DataToggle() {
 const snapshotCount = (count: number) => (count === 1 ? '1 snapshot' : `${count} snapshots`);
 
 const registry = new CanvasRegistry();
+
+/** The demo's host lends its two house faces to HTML items. A product host would lend its own. */
+const HOUSE_FACES: HtmlItemFace[] = __HOUSE_FACES__;
 
 /** The demo's people: one person and one agent. A product host answers from its own accounts. */
 const people: People = (actor) => (actor.kind === 'agent' ? { name: 'Planner' } : actor.id === 'ana' ? { name: 'Ana', color: '#B9A6FF' } : actor.id === 'ines' ? { name: 'Ines', color: '#6d4aff' } : null);
@@ -269,6 +274,7 @@ function PlanAndCanvas() {
 
   return (
     <PeopleProvider people={people}>
+      <HtmlItemFacesProvider faces={HOUSE_FACES}>
     <CanvasRegistryProvider registry={registry}>
       <div ref={shell} className="demo-shell pcv">
         <header className="demo-head">
@@ -309,6 +315,7 @@ function PlanAndCanvas() {
       </div>
       <CanvasStage request={request} registry={registry} recede={() => shell.current} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
     </CanvasRegistryProvider>
+      </HtmlItemFacesProvider>
     </PeopleProvider>
   );
 }
