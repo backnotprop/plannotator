@@ -467,12 +467,10 @@ test('Settings: the two "Play a sound" choices stay inside their row at every wi
         if (ctl.right > box(el).right + 1) out.push(`the controls end past the row`);
         if (ctl.left < txt.right - 1 && ctl.top < txt.bottom - 1) out.push('the controls overlap the column');
         const inLine = choices.reduce((sum, o) => sum + o.scrollWidth, 0) + 2 * (choices.length - 1) + 6;
-        console.log(`MEASURE ${at}: column ${txt.width} px, the pair in a line ${inLine} px`);
         return out.length ? `${at}: column ${Math.round(txt.width)} px, the pair in a line ${inLine} px: ${out.join('; ')}` : '';
       },
       [at, oneLine] as const,
     );
-  page.on('console', (m) => m.text().startsWith('MEASURE') && console.log(m.text()));
   const broken: string[] = [];
   for (const [width, withSidebar] of [[320, false], [390, false], [768, false], [1024, false], [1280, false], [1440, false], [1280, true]] as const) {
     await page.setViewportSize({ width, height: 900 });
