@@ -185,6 +185,40 @@ const LONG_NOTE = 'Check this before the rollout: the replay tool takes a time r
  * has them: every twelfth box is a picture, every thirtieth an HTML item,
  * every fortieth a card with a picture, and the notes are long.
  */
+const SHAPES = ['process', 'decision', 'database', 'queue', 'document', 'cloud', 'pill'] as const;
+
+/**
+ * `typed`: `count` shapes of every kind and `connectors` routed connectors
+ * between neighbours (to the right, and down), for the router's rows.
+ */
+export function createTypedStore(count: number, connectors: number): CanvasStore {
+  const store = new CanvasStore(createDocument('typed-board', `${count} shapes`));
+  const random = mulberry(11);
+  const columns = Math.ceil(Math.sqrt(count * 1.8));
+  const objects: Record<string, unknown>[] = [];
+  for (let i = 0; i < count; i++) {
+    const kind = SHAPES[i % SHAPES.length];
+    objects.push({
+      id: `b${i}`,
+      type: 'box',
+      shape: kind,
+      x: (i % columns) * 280 + Math.round(random() * 30),
+      y: Math.floor(i / columns) * 210 + Math.round(random() * 24),
+      text: `Step ${i}`,
+      ...(kind === 'decision' || kind === 'pill' ? {} : { detail: 'detail line' }),
+      ...(random() < 0.6 ? { color: COLORS[i % COLORS.length] } : {}),
+    });
+  }
+  let made = 0;
+  for (let i = 0; i < count && made < connectors; i++) {
+    if ((i + 1) % columns !== 0 && i + 1 < count) objects.push({ id: `a${made++}`, type: 'arrow', from: { object: `b${i}` }, to: { object: `b${i + 1}` }, ...(made % 5 === 0 ? { label: 'next' } : {}) });
+    if (made < connectors && i + columns < count && i % 2 === 0) objects.push({ id: `a${made++}`, type: 'arrow', from: { object: `b${i}` }, to: { object: `b${i + columns}` } });
+  }
+  const added = store.dispatch({ type: 'add', objects: objects as unknown as CanvasObject[] });
+  if (!added.ok) throw new Error(added.error);
+  return new CanvasStore(store.getDocument());
+}
+
 export function createLargeStore(count: number, snapshots = 0, rich = false): CanvasStore {
   const store = new CanvasStore(createDocument('large-board', `${count} objects`));
   const random = mulberry(7);

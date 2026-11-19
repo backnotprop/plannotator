@@ -14,8 +14,11 @@ import type { CanvasEvent } from '../events/types';
 import { type CanvasDocument, type ObjectId, isPlaced } from '../model/types';
 import { SpatialIndex } from './spatial-index';
 
-/** Room around an arrow's line for its head and for a finger. */
-const ARROW_MARGIN = 8;
+/**
+ * Room around the straight line between an arrow's ends. A routed connector may run wide of that line to go
+ * round something, so the room is generous: enough that a line on screen is mounted and can be grabbed.
+ */
+const ARROW_MARGIN = 72;
 
 export class DocumentIndex {
   readonly spatial = new SpatialIndex();

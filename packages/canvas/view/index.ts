@@ -6,3 +6,6 @@ export * from './spatial-index';
 export * from './snapshot-source';
 export * from './reading-order';
 export * from './shape-outline';
+export * from './route';
+export * from './routes';
+export * from './route-path';

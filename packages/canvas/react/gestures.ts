@@ -16,6 +16,7 @@ import { type CanvasObject, type ObjectId, isPlaced } from '../model/types';
 import { type CameraController, panBy, screenToWorld, zoomAt } from '../view/camera';
 import { indexFor } from '../view/document-index';
 import { hitTest, objectsInRect, withFrameContents } from '../view/hit-test';
+import { routesFor } from '../view/routes';
 import type { EditorState, Tool } from './editor-state';
 
 /** Screen pixels a pointer may wander before a press becomes a drag. */
@@ -125,7 +126,7 @@ export class GestureController {
 
     const doc = store.getDocument();
     const z = camera.get().z;
-    const hit = hitTest(doc, indexFor(store), this.world(p), HIT_PX / z);
+    const hit = hitTest(doc, indexFor(store), this.world(p), HIT_PX / z, routesFor(store));
 
     if (tool === 'region') {
       this.gesture = { kind: 'region', start: p };
@@ -264,7 +265,7 @@ export class GestureController {
       case 'arrow': {
         state.set({ draftArrow: null, tool: 'select' });
         const to = this.world(p);
-        const hit = hitTest(doc, indexFor(store), to, HIT_PX / this.host.camera.get().z);
+        const hit = hitTest(doc, indexFor(store), to, HIT_PX / this.host.camera.get().z, routesFor(store));
         const toId = hit && doc.objects[hit]?.type !== 'arrow' && hit !== g.fromId ? hit : null;
         if (!toId && Math.hypot(to.x - g.from.x, to.y - g.from.y) < 12) return;
         const id = createId('arrow');
@@ -291,7 +292,7 @@ export class GestureController {
     const { store, state, camera } = this.host;
     if (state.get().tool !== 'select' || (event.target as HTMLElement).closest?.('.pcv-bar')) return;
     const doc = store.getDocument();
-    const hit = hitTest(doc, indexFor(store), this.world(this.local(event)), HIT_PX / camera.get().z);
+    const hit = hitTest(doc, indexFor(store), this.world(this.local(event)), HIT_PX / camera.get().z, routesFor(store));
     const object = hit ? doc.objects[hit] : null;
     if (object && (object.type === 'box' || object.type === 'note' || object.type === 'text' || object.type === 'frame')) {
       state.select([object.id]);

@@ -337,27 +337,61 @@ export interface ArrowViewProps {
   arrow: ArrowObject;
   /** What a screen reader says: "Arrow from X to Y, label". */
   label?: string;
+  /** The line as an SVG path. */
+  d: string;
+  /** Where the line starts and ends, and the angle it meets each end at. */
   x1: number;
   y1: number;
+  a1: number;
   x2: number;
   y2: number;
+  a2: number;
+  /** Where the label sits. */
+  lx: number;
+  ly: number;
   selected: boolean;
 }
 
-const HEAD = 10;
+const HEAD = 9;
 const SPREAD = 0.42;
 
-/** An arrow: a line, a head and an optional label. Memoised on its four numbers. */
-export const ArrowView = memo(function ArrowView({ arrow, label, x1, y1, x2, y2, selected }: ArrowViewProps) {
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  const head = `${x2},${y2} ${x2 - HEAD * Math.cos(angle - SPREAD)},${y2 - HEAD * Math.sin(angle - SPREAD)} ${x2 - HEAD * Math.cos(angle + SPREAD)},${y2 - HEAD * Math.sin(angle + SPREAD)}`;
+function head(x: number, y: number, angle: number): string {
+  return `${x},${y} ${x - HEAD * Math.cos(angle - SPREAD)},${y - HEAD * Math.sin(angle - SPREAD)} ${x - HEAD * Math.cos(angle + SPREAD)},${y - HEAD * Math.sin(angle + SPREAD)}`;
+}
+
+function bar(x: number, y: number, angle: number): { x1: number; y1: number; x2: number; y2: number } {
+  const nx = Math.cos(angle + Math.PI / 2) * 6;
+  const ny = Math.sin(angle + Math.PI / 2) * 6;
+  return { x1: x - nx, y1: y - ny, x2: x + nx, y2: y + ny };
+}
+
+/** A connector: its line, what its ends look like, and its label on the line. Memoised on its path and numbers. */
+export const ArrowView = memo(function ArrowView({ arrow, label, d, x1, y1, a1, x2, y2, a2, lx, ly, selected }: ArrowViewProps) {
   const color = colorAttrs(arrow.color);
+  const ends = arrow.style?.ends ?? 'arrow';
   return (
-    <g className="pcv-arrow" role="img" aria-label={label} data-id={arrow.id} data-color={color['data-color']} data-selected={selected ? '' : undefined} style={color.style}>
-      <line x1={x1} y1={y1} x2={x2 - 4 * Math.cos(angle)} y2={y2 - 4 * Math.sin(angle)} />
-      <polygon points={head} />
+    <g
+      className="pcv-arrow"
+      role="img"
+      aria-label={label}
+      data-id={arrow.id}
+      data-color={color['data-color']}
+      data-dash={arrow.style?.dash ? '' : undefined}
+      data-selected={selected ? '' : undefined}
+      style={color.style}
+    >
+      <path className="pcv-arrow-line" d={d} />
+      {ends === 'arrow' || ends === 'bar-arrow' ? <polygon points={head(x2, y2, a2)} /> : null}
+      {ends === 'bar-arrow' ? <polygon points={head(x1, y1, a1)} /> : null}
+      {ends === 'dot' ? <circle cx={x2} cy={y2} r={3.2} /> : null}
+      {ends === 'bar' || ends === 'bar-arrow' ? (
+        <>
+          <line className="pcv-arrow-bar" {...bar(x1, y1, a1)} />
+          <line className="pcv-arrow-bar" {...bar(x2, y2, a2)} />
+        </>
+      ) : null}
       {arrow.label ? (
-        <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6}>
+        <text x={lx} y={ly + 4}>
           {arrow.label}
         </text>
       ) : null}

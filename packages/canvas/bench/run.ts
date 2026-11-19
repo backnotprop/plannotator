@@ -165,6 +165,8 @@ try {
   results.displayIntervalMs = Math.round(interval * 100) / 100;
   results.mode = headed ? 'headed' : 'headless';
 
+  // `--skip-plan` leaves the plan rows out, for a quicker run while working on the canvas rows.
+  if (!args.includes('--skip-plan')) {
   const planInfo = await page.evaluate(() => {
     const pane = document.querySelector<HTMLElement>('.demo-plan')!;
     return { figures: document.querySelectorAll('.pcv-figure').length, live: document.querySelectorAll('.pcv-figure .pcv-root').length, height: pane.scrollHeight };
@@ -365,6 +367,7 @@ try {
 
   const behindScroll = await scrollPass(passMs);
   frameRow('Plan with 50 snapshots, all behind: scroll', behindScroll, interval);
+  }
 
   // ── A canvas with 2,000 objects ─────────────────────────────────────────
   await open(page, `${server.url}/?bench=canvas&n=2000`);
@@ -442,7 +445,7 @@ try {
     page.evaluate(() => {
       const root = document.querySelector<HTMLElement>('.pcv-root')!;
       const view = root.getBoundingClientRect();
-      const boxes = [...root.querySelectorAll<HTMLElement>('.pcv-box')];
+      const boxes = [...root.querySelectorAll<HTMLElement>('.pcv-box, .pcv-shape')];
       const inMiddle = (el: HTMLElement) => {
         const box = el.getBoundingClientRect();
         return box.left > view.left + 300 && box.right < view.right - 300 && box.top > view.top + 200 && box.bottom < view.bottom - 250;
@@ -499,6 +502,42 @@ try {
   await page.waitForTimeout(500);
   frameRow('Same board at 100% (pictures and HTML items drawn): pan across it', await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
   frameRow('Same board at 100%: drag an object with the pointer', await pointerDrag(), interval);
+
+  // ── Typed shapes and routed connectors ──────────────────────────────────
+  await open(page, `${server.url}/?bench=canvas&n=2000&typed&connectors=1500`);
+  await page.waitForTimeout(600);
+  const typed = await page.evaluate(() => {
+    const objects = Object.values((window as unknown as { __canvas: { store: { getDocument(): { objects: Record<string, { type: string }> } } } }).__canvas.store.getDocument().objects);
+    return `${objects.filter((object) => object.type === 'box').length} typed shapes and ${objects.filter((object) => object.type === 'arrow').length} connectors`;
+  });
+  frameRow(`Canvas, ${typed}, whole board in view (far: lines straight): pan`, await wheel(4000, fitPan), interval);
+  frameRow(`Canvas, ${typed}: zoom in and out through every level of detail`, await wheel(5000, 'send({ ctrlKey: true, deltaY: Math.sin(t / 5000 * Math.PI * 4) > 0 ? -4 : 4 });'), interval);
+  // In to where connectors are drawn routed, with as much of the board on screen as that allows.
+  await page.getByRole('button', { name: 'Zoom to fit' }).first().click();
+  for (let i = 0; i < 7; i++) await page.getByRole('button', { name: 'Zoom in' }).click();
+  const routedAt = await page.evaluate(() => document.querySelector('.pcv-bar-zoom span')?.textContent ?? '');
+  const routedCount = await mounted();
+  frameRow(`Canvas, ${typed}, at ${routedAt} with routes drawn (${routedCount} mounted): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 22 * dir, deltaY: 8 * dir });'), interval);
+  const dragRouted = (ids: number) =>
+    page.evaluate(
+      ([n]) => {
+        const { store } = (window as unknown as { __canvas: { store: { dispatch(c: unknown, o: unknown): unknown } } }).__canvas;
+        // The shapes on screen, so the connectors that re-route are ones being drawn.
+        const moving = [...document.querySelectorAll<HTMLElement>('.pcv-obj')].map((el) => el.dataset.id ?? '').filter((id) => id.startsWith('b')).slice(0, n as number);
+        const gesture = `bench-routed-${n}-${Math.random()}`;
+        return (window as unknown as { __frames: (ms: number, step: (t: number) => void) => Promise<number[]> }).__frames(3000, (t) => {
+          const a = t / 300;
+          store.dispatch({ type: 'move', ids: moving, dx: Math.cos(a) * 4, dy: Math.sin(a) * 4 }, { gesture });
+        });
+      },
+      [ids],
+    );
+  frameRow(`Canvas, ${typed}, at ${routedAt}: drag 1 shape, its connectors re-routing`, await dragRouted(1), interval);
+  frameRow(`Canvas, ${typed}, at ${routedAt}: drag 300 shapes together, their connectors re-routing`, await dragRouted(300), interval);
+  await zoomTo100();
+  await page.waitForTimeout(500);
+  frameRow(`Canvas, ${typed}, at 100% (${await mounted()} mounted, hops drawn): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+  frameRow(`Canvas, ${typed}, at 100%: drag a shape with the pointer`, await pointerDrag(), interval);
 
   // ── 10,000 objects: past what the budgets were set for; measured so the number is known ──
   await open(page, `${server.url}/?bench=canvas&n=10000`);

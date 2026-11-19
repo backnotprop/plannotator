@@ -14,12 +14,17 @@ import {
 } from '../model/geometry';
 import { type ArrowEnd, type CanvasDocument, type CanvasObject, type FrameObject, type ObjectId, isPlaced } from '../model/types';
 import type { DocumentIndex } from './document-index';
+import { distanceToRoute } from './route-path';
+import type { Router } from './routes';
 
 /** How far inside a frame's edge still grabs the frame, in world units at zoom 1. */
 export const FRAME_GRAB_BAND = 10;
 
-function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: number): boolean {
+function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: number, routes?: Router): boolean {
   if (object.type === 'arrow') {
+    // A routed connector is grabbed along its line, wherever that runs.
+    const routed = routes && (object.routing ?? 'elbow') === 'elbow' ? routes.get(object.id) : null;
+    if (routed) return distanceToRoute(p, routed.points) <= tolerance;
     const geometry = resolveArrow(doc, object);
     return !!geometry && distanceToSegment(p, geometry.from, geometry.to) <= tolerance;
   }
@@ -44,7 +49,7 @@ function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: nu
  * drawing order decides. `tolerance` is how near counts (world units): pass
  * a few screen pixels divided by the zoom.
  */
-export function hitTest(doc: CanvasDocument, index: DocumentIndex, p: Point, tolerance = 4): ObjectId | null {
+export function hitTest(doc: CanvasDocument, index: DocumentIndex, p: Point, tolerance = 4, routes?: Router): ObjectId | null {
   // A frame's title is drawn above the frame, so a point in it lies above the frame's own rect by up to the
   // title strip's height: the search must reach that far down, at any zoom.
   const strip = Math.max(FRAME_TITLE_HEIGHT, tolerance * 2);
@@ -54,7 +59,7 @@ export function hitTest(doc: CanvasDocument, index: DocumentIndex, p: Point, tol
   let bestRank = -1;
   for (const id of candidates) {
     const object = doc.objects[id];
-    if (!object || !hits(doc, object, p, tolerance)) continue;
+    if (!object || !hits(doc, object, p, tolerance, routes)) continue;
     const rank = (order.get(id) ?? 0) + (object.type === 'arrow' ? doc.order.length : 0);
     if (rank > bestRank) {
       bestRank = rank;

@@ -31,11 +31,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import { boundsOf, isBoundEnd, resolveArrow } from '../model/document';
-import type { Rect } from '../model/geometry';
+import type { Point, Rect } from '../model/geometry';
 import { type ArrowEnd, type ArrowObject, type CanvasDocument, type ObjectId, isPlaced } from '../model/types';
 import type { Camera, CameraController, Size } from '../view/camera';
 import { type Lod, OVERSCAN, lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
 import { indexFor } from '../view/document-index';
+import { endAngles, findHops, pointAlong, routePath } from '../view/route-path';
+import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
 import { ArrowView, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
@@ -112,6 +114,9 @@ export function CanvasView({
 }: CanvasViewProps) {
   const doc = useSyncExternalStore(store.subscribe, store.getDocument, store.getDocument);
   const index = indexFor(store);
+  const router = routesFor(store);
+  // Draw again when routes that were waiting have been finished.
+  useSyncExternalStore(router.subscribe, router.getVersion, router.getVersion);
   const root = useRef<HTMLDivElement | null>(null);
   const world = useRef<HTMLDivElement | null>(null);
   const overlay = useRef<HTMLDivElement | null>(null);
@@ -203,13 +208,23 @@ export function CanvasView({
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
+  const lines: { arrow: ArrowObject; points: Point[] }[] = [];
+  // Routes that are stale are worked out as they are drawn, for a few milliseconds; the rest keep their last
+  // shape and are finished next frame (the router says when).
+  const deadline = performance.now() + ROUTE_BUDGET_MS;
   const overlayNodes: React.ReactNode[] = [];
   for (const id of mounted) {
     const object = doc.objects[id];
     if (!object) continue;
     if (object.type === 'arrow') {
-      const g = resolveArrow(doc, object);
-      if (g) arrows.push(<ArrowView key={id} arrow={object} label={arrowLabel(doc, object)} x1={g.from.x} y1={g.from.y} x2={g.to.x} y2={g.to.y} selected={selection.has(id)} />);
+      // An elbow connector is routed round what is in the way; far out, where a route could not be told from a
+      // line, and for the other routings, it is the straight line between its ends.
+      const routed = lod !== 'far' && (object.routing ?? 'elbow') === 'elbow' ? router.get(id, deadline) : null;
+      if (routed) lines.push({ arrow: object, points: routed.points });
+      else {
+        const g = resolveArrow(doc, object);
+        if (g) lines.push({ arrow: object, points: [g.from, g.to] });
+      }
     } else if (object.type !== 'group' && lod === 'far' && editingId !== id && tabStop !== id) {
       // Far out on a crowded board: a flat patch each. Bare text has nothing to show at this size.
       if (object.type !== 'text') placed.push(<FlatView key={id} object={object} />);
@@ -238,6 +253,31 @@ export function CanvasView({
       }
     }
   }
+
+  // Hops are found among the lines on screen, once all of them are known.
+  const hops = lod === 'full' ? findHops(lines.map((line) => line.points)) : null;
+  lines.forEach(({ arrow, points }, i) => {
+    const angles = endAngles(points);
+    const at = pointAlong(points, arrow.style?.labelAt ?? 0.5);
+    const last = points[points.length - 1];
+    arrows.push(
+      <ArrowView
+        key={arrow.id}
+        arrow={arrow}
+        label={arrowLabel(doc, arrow)}
+        d={routePath(points, hops?.[i])}
+        x1={points[0].x}
+        y1={points[0].y}
+        a1={angles.start}
+        x2={last.x}
+        y2={last.y}
+        a2={angles.end}
+        lx={at.x}
+        ly={at.horizontal ? at.y : at.y}
+        selected={selection.has(arrow.id)}
+      />,
+    );
+  });
 
   if (selection.size > 1) {
     const around = boundsOf(doc, selection);

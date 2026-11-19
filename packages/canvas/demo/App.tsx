@@ -31,7 +31,7 @@ import { CanvasRegistry, CanvasRegistryProvider } from '../snapshot/registry';
 import type { SnapshotOpenRequest } from '../snapshot/SnapshotFigure';
 import { indexFor } from '../view/document-index';
 import { PlanPane } from './PlanPane';
-import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore } from './sample';
+import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
 
 const params = new URLSearchParams(location.search);
 const bench = params.get('bench');
@@ -73,7 +73,7 @@ function useTheme(): [boolean, () => void] {
 }
 
 function BenchCanvas() {
-  const store = useMemo(() => createLargeStore(count, 0, params.has('rich')), []);
+  const store = useMemo(() => (params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500) : createLargeStore(count, 0, params.has('rich'))), []);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };
   }, [store]);
