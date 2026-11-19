@@ -5385,7 +5385,7 @@ function Inbox() {
         // The other half of the one filter: a pick is a history entry too, and Back undoes it.
         onInitiative={(initiative) => {
           const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
-          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives)).length > 0;
+          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives), projects).length > 0;
           go({ page: 'board', project: route.project, initiative, thread: null, board: route.board ?? 'lanes', card: shows ? open.id : null });
         }}
         onMove={moveCard}

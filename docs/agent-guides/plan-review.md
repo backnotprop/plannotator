@@ -352,6 +352,19 @@ all items when there are 10 or fewer, else 10 items ending on the first open
 one (the first 10 until it is past them), and the last 10 once everything is
 done. `setWidget` only; the status line keeps the full count.
 
+**A prompt waiting in the terminal (Inbox).** While any blocking UI prompt is
+up (`ui_prompt_start` / `ui_prompt_end`, Pi 0.84+: an extension's confirm,
+select, input or editor), `PiTerminalPrompts` (`apps/pi-extension/inbox.ts`)
+makes the Inbox link say `blocked: { kind: 'question' }` on its polls and in a
+`state` event (Pi asks no permission of its own, so it is always `question`).
+Nested prompts count; a settled run, a session change or shutdown clears it.
+The event does not say what a prompt is for, so a permission-gate extension's
+confirm is told as a question too.
+Only the kind leaves Pi, never the prompt's title. An older Pi never raises the
+events: nothing is said. The Inbox side and the rule: "Status marks for every
+agent" in [inbox-notifications-and-agents.md](inbox-notifications-and-agents.md).
+Tests: `inbox-blocked.test.ts`.
+
 ### DeepSeek Harness: plan review, the `plannotator` tool and commands
 
 `@plannotator/dsh` (`apps/dsh-plugin/`, a Cordis plugin; DSH is never run in
