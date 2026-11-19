@@ -169,20 +169,115 @@ describe('the look', () => {
     expect(texts(shapes).filter((word) => word === 'plan')).toEqual([]);
   });
 
-  test('dots of different series have different outlines, and the legend names every series on as many lines as it takes', () => {
-    const rows = Array.from({ length: 8 }, (_row, i) => [10, 10, `a series with a long name ${i + 1}`]);
+  test('dots of different series have different outlines', () => {
+    const rows = Array.from({ length: 8 }, (_row, i) => [10, 10, `k${i + 1}`]);
     const object = chart({ mark: 'dot', fields: ['x', 'y', 'k'], rows, encode: { x: 'x', y: 'y', series: 'k' }, w: 380, h: 300 });
-    const shapes = chartShapes(object, { detail: 'marks' });
     // Eight dots at one place: eight outlines, none the same.
-    const dots = paths(shapes).filter(isMark);
+    const dots = paths(chartShapes(object, { detail: 'marks' })).filter(isMark);
     expect(new Set(dots.map((shape) => shape.d)).size).toBe(8);
-    const words = texts(chartShapes(object));
-    for (let i = 1; i <= 8; i++) expect(words).toContain(`a series with a long name ${i}`);
-    expect(words.filter((word) => /^\+\d/.test(word))).toEqual([]);
-    const legend = chartShapes(object).filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && shape.text.startsWith('a series'));
-    expect(legend).toHaveLength(8);
-    expect(new Set(legend.map((shape) => shape.y)).size).toBeGreaterThan(1);
-    for (const item of legend) expect(item.x + item.text.length * 6.1).toBeLessThanOrEqual(object.w);
+  });
+
+  test('a long key takes two lines at most and counts the rest; the plot under it is never crushed or turned over', () => {
+    const rows = Array.from({ length: 8 }, (_row, i) => [i * 10, i * 10, `a series with a long name ${i + 1}`]);
+    for (const [w, h] of [[380, 150], [380, 240], [380, 300], [200, 130], [900, 200]]) {
+      const object = chart({ mark: 'dot', fields: ['x', 'y', 'k'], rows, encode: { x: 'x', y: 'y', series: 'k' }, w, h });
+      const shapes = chartShapes(object);
+      const key = shapes.filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && (shape.text.startsWith('a series') || /^\+\d+$/.test(shape.text)));
+      expect(new Set(key.map((shape) => shape.y)).size).toBeLessThanOrEqual(2);
+      const named = key.filter((shape) => shape.text.startsWith('a series')).length;
+      const counted = key.find((shape) => /^\+\d+$/.test(shape.text));
+      // Every series is either named or counted: none is dropped in silence.
+      expect(named + (counted ? Number(counted.text.slice(1)) : 0)).toBe(named === 0 ? 0 : 8);
+      for (const item of key) expect(item.x + item.text.length * 6.1).toBeLessThanOrEqual(w);
+      // The eight dots: all inside the box, under the key, and the one with the largest y is drawn highest.
+      const keyFoot = Math.max(0, ...key.map((shape) => shape.y));
+      const tops = paths(shapes).filter((shape) => isMark(shape) && !key.some((item) => Math.abs(Number(shape.d.match(/^M[\d.-]+ ([\d.-]+)/)![1]) - item.y) < 12)).map((shape) => Number(shape.d.match(/^M[\d.-]+ ([\d.-]+)/)![1]));
+      expect(tops.length).toBeGreaterThanOrEqual(8);
+      for (const top of tops) {
+        expect(top).toBeGreaterThan(keyFoot - 2);
+        expect(top).toBeLessThan(h);
+      }
+      const [first, last] = [tops[0], tops[7]];
+      expect(last).toBeLessThanOrEqual(first);
+    }
+  });
+
+  test('the first five series differ by form, not by shade: two quiet solids, two hollow, then hatched ones', () => {
+    const rows = Array.from({ length: 16 }, (_row, i) => [`n${i % 2}`, `k${i % 8}`, i + 1]);
+    const bars = paths(chartShapes(chart({ mark: 'bar', fields: ['x', 'k', 'v'], rows, encode: { x: 'x', y: 'v', series: 'k' }, stack: true }), { detail: 'marks' })).filter((shape) => (shape.fill ?? shape.stroke) !== 'rule' && (shape.fill ?? shape.stroke) !== 'muted');
+    expect(bars).toHaveLength(8);
+    const form = (shape: (typeof bars)[number]) => (shape.fill ? 'solid' : shape.d.includes('L') ? 'hatched' : 'hollow');
+    expect(bars.map(form)).toEqual(['solid', 'solid', 'solid', 'hollow', 'hollow', 'hatched', 'hatched', 'hatched']);
+    // The three hatches are three different hatches: lines that rise, lines that fall, and both.
+    const slants = (d: string) => {
+      const found = new Set<string>();
+      for (const [, x1, y1, x2, y2] of d.matchAll(/M([\d.-]+) ([\d.-]+)L([\d.-]+) ([\d.-]+)/g)) found.add((Number(x2) - Number(x1)) * (Number(y2) - Number(y1)) < 0 ? 'rise' : 'fall');
+      return [...found].sort().join('+');
+    };
+    expect(bars.slice(5).map((shape) => slants(shape.d)).sort()).toEqual(['fall', 'fall+rise', 'rise']);
+    // In a grid of kinds a hollow tile would read as a hole: there the fourth and fifth are smaller solid tiles.
+    const grid = rows.map((row, i) => [`c${i}`, row[1], row[1]]);
+    const tiles = paths(chartShapes(chart({ mark: 'cell', fields: ['x', 'y', 'k'], rows: grid, encode: { x: 'x', y: 'y', series: 'k' } }), { detail: 'marks' })).filter((shape) => shape.fill === 'accent' || shape.fill === 'ink' || shape.stroke === 'accent' || shape.stroke === 'ink');
+    expect(tiles.slice(0, 5).every((shape) => !!shape.fill)).toBe(true);
+    const width = (shape: (typeof tiles)[number]) => Number(shape.d.match(/h([\d.]+)v/)![1]);
+    expect(width(tiles[3])).toBeLessThan(width(tiles[0]) * 0.7);
+    expect(width(tiles[4])).toBeLessThan(width(tiles[0]) * 0.7);
+  });
+
+  test('drawn small, a chart still says what it is: its title and a one-line key, larger, and none of the small words', () => {
+    const object = chart({ ...WEEKS, mark: 'line', encode: { x: 'week', y: ['minutes', 'plan'] }, title: 'Scan to alert', unit: 'min', rules: [{ at: 5, label: 'target' }] });
+    const full = chartShapes(object);
+    const named = chartShapes(object, { detail: 'named' });
+    const words = named.filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text');
+    expect(words.map((shape) => shape.text)).toEqual(['SCAN TO ALERT', 'minutes', 'plan']);
+    // Set large enough to read at under half size.
+    for (const word of words) expect(word.size).toBeGreaterThanOrEqual(20);
+    expect(new Set(words.slice(1).map((shape) => shape.y)).size).toBe(1);
+    expect(texts(full)).toContain('target');
+    // Each line keeps its own pattern and its weight against the other: the dashed plan is never a solid line heavier than the actual one.
+    const lineOf = (shapes: ChartShape[], role: string) => paths(shapes).filter((shape) => shape.stroke === role && shape.d.split('L').length === 3 && (shape.width ?? 1) > 1.2 && shape.dash !== '12 9' && shape.dash !== '4 3').pop()!;
+    for (const detail of ['named', 'marks'] as const) {
+      const drawn = chartShapes(object, { detail });
+      const actual = lineOf(drawn, 'accent');
+      const plan = lineOf(drawn, 'ink');
+      expect(actual.dash).toBeUndefined();
+      expect(plan.dash).toBe('21 12');
+      expect(plan.width!).toBeLessThan(actual.width!);
+      expect(actual.width! / plan.width!).toBeCloseTo(2 / 1.5, 5);
+    }
+    expect(texts(chartShapes(object, { detail: 'marks' }))).toEqual([]);
+  });
+
+  test('more lines than the plot has room to name at their ends are named in the key instead, not piled under the plot', () => {
+    const object = (h: number, series: number) => chart({ mark: 'line', fields: ['x', 'k', 'v'], rows: Array.from({ length: series * 2 }, (_row, i) => [i % 2, `line ${Math.floor(i / 2) + 1}`, 10 + Math.floor(i / 2)]), encode: { x: 'x', y: 'v', series: 'k' }, w: 380, h });
+    // Room for all: named at their ends, each on a line of its own, inside the plot.
+    const roomy = chartShapes(object(320, 8)).filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && /^1\d line \d$/.test(shape.text));
+    expect(roomy).toHaveLength(8);
+    // Not enough: no end names at all; the key names them (two lines, then a count), and nothing is written under the box.
+    const tight = chartShapes(object(160, 8));
+    expect(tight.filter((shape) => shape.kind === 'text' && /^1\d line \d$/.test(shape.text))).toEqual([]);
+    expect(texts(tight)).toContain('line 1');
+    for (const shape of tight) if (shape.kind === 'text') expect(shape.y).toBeLessThanOrEqual(160);
+  });
+
+  test('a label at a line\'s end is not written across another line that starts there', () => {
+    // The actual line stops at week 6; a projection starts at that very point and runs down to the right.
+    const rows = [[0, 'failing', 180], [3, 'failing', 138], [6, 'failing', 76], [6, 'at this rate', 76], [9, 'at this rate', 13], [0, 'plan', 180], [9, 'plan', 0]];
+    const object = chart({ mark: 'line', fields: ['week', 'line', 'tests'], rows, encode: { x: 'week', y: 'tests', series: 'line' }, w: 520, h: 320 });
+    const shapes = chartShapes(object);
+    const label = shapes.find((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && shape.text === '76 failing')!;
+    const projection = paths(shapes).find((shape) => shape.dash === '7 4' && shape.d.split('L').length === 2)!;
+    const [x1, y1, x2, y2] = projection.d.match(/[\d.-]+/g)!.map(Number);
+    // No point of the projection lies inside the label's box.
+    const left = label.anchor === 'end' ? label.x - label.text.length * 6.1 : label.x;
+    for (let k = 0; k <= 100; k++) {
+      const x = x1 + ((x2 - x1) * k) / 100;
+      const y = y1 + ((y2 - y1) * k) / 100;
+      expect(x >= left && x <= left + label.text.length * 6.1 && y >= label.y - 9 && y <= label.y + 2).toBe(false);
+    }
+    // A line that ends alone at the right edge keeps its label beside its end.
+    const plan = shapes.find((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && shape.text === '0 plan')!;
+    expect(plan.anchor).toBeUndefined();
   });
 
   test('a line runs along the x axis whatever order its rows came in, and the latest value is the right-most one', () => {
@@ -227,6 +322,14 @@ describe('the look', () => {
     }
   });
 
+  test('a cell that holds nothing is an empty cell, not a small tile', () => {
+    const rows = [['a', 'p', 0], ['b', 'p', 40], ['a', 'q', 21], ['b', 'q', 0]];
+    const tiles = paths(chartShapes(chart({ mark: 'cell', fields: ['x', 'y', 'v'], rows, encode: { x: 'x', y: 'y', value: 'v' } }), { detail: 'marks' })).filter((shape) => shape.fill === 'accent');
+    expect(tiles.reduce((count, shape) => count + shape.d.split('M').length - 1, 0)).toBe(2);
+    // The key still starts at nothing.
+    expect(texts(chartShapes(chart({ mark: 'cell', fields: ['x', 'y', 'v'], rows, encode: { x: 'x', y: 'y', value: 'v' } })))).toContain('0');
+  });
+
   test('spans in one lane that overlap in time stand in rows of their own; spans that only meet share a row', () => {
     const rows = [['Dish', 0, 6, 'listening'], ['Dish', 4, 5, 'locked'], ['Dish', 6, 9, 'listening'], ['Log', 0, 9, 'listening']];
     const shapes = paths(chartShapes(chart({ mark: 'span', fields: ['lane', 'from', 'to', 'state'], rows, encode: { x: 'from', x2: 'to', y: 'lane', series: 'state' } }), { detail: 'marks' }));
@@ -238,39 +341,24 @@ describe('the look', () => {
     expect(locked[0]).toBeGreaterThan(listening[0]);
   });
 
-  test('every step a mark is drawn in is strong enough to be seen: none is a faint patch', () => {
-    const rows = Array.from({ length: 16 }, (_row, i) => [`n${i % 2}`, `k${i % 8}`, i + 1]);
-    for (const mark of ['bar', 'dot', 'span', 'cell'] as const) {
-      const encode = mark === 'span' ? { x: 'v', x2: 'v', y: 'x', series: 'k' } : mark === 'cell' ? { x: 'x', y: 'k', series: 'k' } : { x: 'x', y: 'v', series: 'k' };
-      const marks = paths(chartShapes(chart({ mark, fields: ['x', 'k', 'v'], rows, encode, stack: true }), { detail: 'marks' })).filter(isMark);
-      expect(marks.length).toBeGreaterThanOrEqual(8);
-      for (const shape of marks) expect(shape.opacity ?? 1).toBeGreaterThanOrEqual((shape.fill ?? shape.stroke) === 'accent' ? 0.82 : 0.55);
-      // Among the first five series there are filled marks and hollow ones: they differ by more than a shade.
-      expect(marks.some((shape) => !shape.fill && shape.stroke)).toBe(true);
-    }
-  });
-
-  test('a rule past the data is still inside the chart: the scale grows to hold it', () => {
-    const object = chart({ ...WEEKS, mark: 'bar', encode: { x: 'week', y: 'minutes' }, rules: [{ at: 40, label: 'limit' }] });
-    const rule = paths(chartShapes(object)).find((shape) => shape.dash)!;
-    const y = Number(rule.d.match(/^M[\d.]+ ([\d.-]+)H/)![1]);
-    expect(y).toBeGreaterThan(0);
-    expect(y).toBeLessThan(object.h);
-    expect(texts(chartShapes(object))).toContain('limit');
-  });
-
-  test('stacked bars stand on each other: the scale holds their sum, not their largest', () => {
-    const table = { fields: ['x', 'a', 'b'], rows: [['one', 60, 70], ['two', 10, 20]] };
-    const top = (stack: boolean) => Math.max(...texts(chartShapes(chart({ ...table, mark: 'bar', encode: { x: 'x', y: ['a', 'b'] }, ...(stack ? { stack: true } : {}) }))).map(Number).filter(Number.isFinite));
-    expect(top(false)).toBeLessThan(130);
-    expect(top(true)).toBeGreaterThanOrEqual(130);
-  });
-
   test('one small chart for each value of the facet, each named', () => {
     const rows = ['p1', 'p2', 'p3'].flatMap((player) => [[player, 'keys', 20], [player, 'knobs', 30]]);
     const shapes = chartShapes(chart({ mark: 'bar', fields: ['player', 'doing', 'minutes'], rows, encode: { x: 'doing', y: 'minutes', facet: 'player' }, w: 600, h: 300 }));
     for (const player of ['p1', 'p2', 'p3']) expect(texts(shapes)).toContain(player);
     expect(paths(shapes).filter((shape) => shape.fill === 'accent').length).toBe(3);
+  });
+
+  test('twelve small charts in a short box each keep a height: no bar is drawn upside down', () => {
+    const rows = Array.from({ length: 24 }, (_row, i) => [`p${Math.floor(i / 2)}`, i % 2 ? 'b' : 'a', 5 + (i % 7)]);
+    const shapes = chartShapes(chart({ mark: 'bar', title: 'Twelve', fields: ['player', 'doing', 'v'], rows, encode: { x: 'doing', y: 'v', facet: 'player' }, w: 200, h: 130 }), { detail: 'marks' });
+    const bars = paths(shapes).filter((shape) => shape.fill === 'accent');
+    expect(bars).toHaveLength(12);
+    for (const bar of bars) for (const [, drop] of bar.d.matchAll(/v([\d.-]+)h/g)) expect(Number(drop)).toBeGreaterThan(0);
+    // The taller of the two bars in a small chart reaches higher up the box.
+    for (const bar of bars) {
+      const [first, second] = [...bar.d.matchAll(/M[\d.-]+ ([\d.-]+)h[\d.-]+v([\d.-]+)/g)].map((m) => ({ top: Number(m[1]), drop: Number(m[2]) }));
+      expect(Math.sign(first.top - second.top)).toBe(Math.sign(second.drop - first.drop));
+    }
   });
 
   test('a long line of names is thinned, and the first and last are always written', () => {

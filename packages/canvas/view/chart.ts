@@ -28,32 +28,77 @@ export type ChartShape =
 export interface ChartDrawOptions {
   w?: number;
   h?: number;
-  /** `marks`: no words at all, and heavier lines, for a chart too small on screen to read. */
-  detail?: 'full' | 'marks';
+  /**
+   * How much of the chart is written out.
+   * - `full`: everything.
+   * - `named`: for a chart drawn small (a figure in a plan, a phone): its title and a one-line key, set
+   *   large enough to read at that size, and none of the small words (axis values, names, end labels).
+   * - `marks`: no words at all, for a crowded board far out.
+   * Outside `full`, lines are drawn heavier, each keeping its own pattern and its weight against the others.
+   */
+  detail?: 'full' | 'named' | 'marks';
 }
 
 /**
- * How each series is filled, in order. The first is the object's colour at full strength. Every step is
- * at least 3 to 1 against the card on a light and on a dark board (ink never under 0.55, the colour never
- * under 0.82), so no part of a chart is a faint patch. The fourth and fifth are HOLLOW: an outline with
- * nothing in it, so the first five differ by more than a shade. A line also has its own pattern and its
- * name at its end, a dot its own outline, and the legend names every series.
+ * How each series is drawn, in order. The first is the object's colour, solid, and it is the loudest mark
+ * on the chart on a light board and on a dark one: every ink step is quieter than it (never over 0.65)
+ * and still at least 3 to 1 against the card (never under 0.46). So series are not told apart by how
+ * strong they are but by FORM: after two quiet solids come two hollow ones (an outline with nothing in
+ * it) and three hatched ones. In a grid of kinds a hollow tile would read as a hole, so there the hollow
+ * forms are a smaller solid tile instead (`small`).
  */
-const SERIES: readonly { role: ChartRole; opacity: number; hollow?: true }[] = [
-  { role: 'accent', opacity: 1 },
-  { role: 'ink', opacity: 0.55 },
-  { role: 'ink', opacity: 0.9 },
-  { role: 'accent', opacity: 1, hollow: true },
-  { role: 'ink', opacity: 1, hollow: true },
-  { role: 'accent', opacity: 0.82 },
-  { role: 'ink', opacity: 0.7 },
-  { role: 'ink', opacity: 0.55, hollow: true },
+type Form = 'solid' | 'hollow' | 'hatch' | 'back' | 'cross';
+const SERIES: readonly { role: ChartRole; opacity: number; form: Form }[] = [
+  { role: 'accent', opacity: 1, form: 'solid' },
+  { role: 'ink', opacity: 0.65, form: 'solid' },
+  { role: 'ink', opacity: 0.46, form: 'solid' },
+  { role: 'accent', opacity: 1, form: 'hollow' },
+  { role: 'ink', opacity: 0.65, form: 'hollow' },
+  { role: 'accent', opacity: 1, form: 'hatch' },
+  { role: 'ink', opacity: 0.65, form: 'back' },
+  { role: 'ink', opacity: 0.65, form: 'cross' },
 ];
 const paintOf = (series: number) => SERIES[series % SERIES.length];
-/** A series' marks as one shape: filled, or for a hollow series drawn as outlines. */
+
+type Box = [x: number, y: number, w: number, h: number];
+/** How far apart a hatch's lines are, and the most of them one mark is given (a very large bar is hatched wider). */
+const HATCH_GAP = 4.5;
+const HATCH_MAX = 60;
+
+/** Slanted lines across one box, cut to it: up to the right (`rise`) or down to the right. */
+function hatch([x, y, w, h]: Box, rise: boolean): string {
+  const gap = Math.max(HATCH_GAP, (w + h) / HATCH_MAX);
+  let d = '';
+  // Each line is where x + y (or x - y) holds one value; its two ends are where that meets the box.
+  for (let c = gap; c < w + h; c += gap) {
+    const x1 = Math.min(c, w);
+    const y1 = c - x1;
+    const y2 = Math.min(c, h);
+    const x2 = c - y2;
+    d += rise ? `M${n(x + x1)} ${n(y + h - y1)}L${n(x + x2)} ${n(y + h - y2)}` : `M${n(x + x1)} ${n(y + y1)}L${n(x + x2)} ${n(y + y2)}`;
+  }
+  return d;
+}
+
+/**
+ * All of one series' boxes (bars, spans, tiles, a legend's swatch) as one shape, in that series' form.
+ * `tile`: in a grid of kinds, where a hollow box would look like a missing one.
+ */
+function boxes(all: Box[], series: number, tile = false): ChartShape {
+  const paint = paintOf(series);
+  const outline = (inset: number) => all.map(([x, y, w, h]) => rect(x + inset, y + inset, Math.max(0.5, w - inset * 2), Math.max(0.5, h - inset * 2))).join('');
+  if (paint.form === 'solid') return { kind: 'path', d: outline(0), fill: paint.role, opacity: paint.opacity };
+  if (paint.form === 'hollow') {
+    if (tile) return { kind: 'path', d: all.map(([x, y, w, h]) => rect(x + w * 0.22, y + h * 0.22, w * 0.56, h * 0.56)).join(''), fill: paint.role, opacity: paint.opacity };
+    return { kind: 'path', d: outline(0.75), stroke: paint.role, width: 1.5, opacity: paint.opacity };
+  }
+  const lines = all.map((box) => (paint.form === 'hatch' ? hatch(box, true) : paint.form === 'back' ? hatch(box, false) : hatch(box, true) + hatch(box, false))).join('');
+  return { kind: 'path', d: outline(0.5) + lines, stroke: paint.role, width: 1, opacity: paint.opacity };
+}
+/** A series' marks that are not boxes (dots, a stacked area): filled, or for a hollow series an outline. */
 const filled = (d: string, series: number): ChartShape => {
   const paint = paintOf(series);
-  return paint.hollow ? { kind: 'path', d, stroke: paint.role, width: 1.5, opacity: paint.opacity } : { kind: 'path', d, fill: paint.role, opacity: paint.opacity };
+  return paint.form === 'hollow' ? { kind: 'path', d, stroke: paint.role, width: 1.5, opacity: paint.opacity } : { kind: 'path', d, fill: paint.role, opacity: paint.opacity };
 };
 
 /** The pattern of each line after the first, which is solid: no two series are told apart by colour alone. */
@@ -239,16 +284,27 @@ function spread<T extends { at: number }>(labels: T[], gap: number, top: number,
 export function chartShapes(object: ChartObject, options: ChartDrawOptions = {}): ChartShape[] {
   const w = options.w ?? object.w;
   const h = options.h ?? object.h;
-  const words = options.detail !== 'marks';
-  /** Drawn small on screen, a line is made heavier and loses its pattern, so it is still a line. */
+  const detail = options.detail ?? 'full';
+  const words = detail === 'full';
+  /** Drawn small: the title and a one-line key are still written, set larger; nothing else is. */
+  const named = detail === 'named';
+  /** Drawn small, every line is heavier by the same share, so each keeps its weight against the others. */
   const heavy = words ? 1 : 3;
+  /** A pattern of strokes and gaps, grown with the line it is drawn on. */
+  const scaled = (dash: string | undefined): string | undefined => (dash && heavy !== 1 ? dash.split(' ').map((part) => n(Number(part) * heavy)).join(' ') : dash);
+  const ruleDash = scaled(RULE_DASH);
   const tiny = w < 90 || h < 60;
   const small = tiny || w < 200 || h < 130;
   const pad = tiny ? 3 : small ? 8 : 14;
   const out: ChartShape[] = [];
-  const text = (x: number, y: number, value: string, size: number, fill: ChartRole, extra: Partial<Extract<ChartShape, { kind: 'text' }>> = {}) => {
-    if (words && value) out.push({ kind: 'text', x, y, text: value, size, fill, face: 'mono', ...extra });
+  const write = (on: boolean, x: number, y: number, value: string, size: number, fill: ChartRole, extra: Partial<Extract<ChartShape, { kind: 'text' }>> = {}) => {
+    if (on && value) out.push({ kind: 'text', x, y, text: value, size, fill, face: 'mono', ...extra });
   };
+  /** The small words: axis values, names along the axes, labels on marks. Only at full detail. */
+  const text = (x: number, y: number, value: string, size: number, fill: ChartRole, extra: Partial<Extract<ChartShape, { kind: 'text' }>> = {}) => write(words, x, y, value, size, fill, extra);
+  /** The title and the key: what says what the chart is. Written when it is drawn small too, and then larger. */
+  const head = (x: number, y: number, value: string, size: number, fill: ChartRole, extra: Partial<Extract<ChartShape, { kind: 'text' }>> = {}) => write(words || named, x, y, value, size, fill, extra);
+  const big = named ? 2.1 : 1;
   const mono = (value: string, size: number) => value.length * size * MONO_W;
   const fits = (value: string, size: number, room: number) => cut(value, Math.max(1, Math.floor(room / (size * MONO_W))));
   const { mark, encode, fields, rows } = object;
@@ -262,25 +318,31 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
   const flipped = mark === 'bar' && !!object.flip && !faceted;
   const stacked = !!object.stack && (mark === 'bar' || mark === 'area') && series.length > 1;
   const lined = mark === 'line' || (mark === 'area' && !stacked);
-  /** Lines that end in the open: each is named there, beside its last value, so the legend is not needed. */
-  const ends = !small && !faceted && lined;
+  const titled = !tiny && !!object.title && (h >= 80 || !small);
+  const headlined = words && !small && !faceted && (mark === 'line' || mark === 'area') && !!facets[0];
+  /**
+   * Lines that end in the open: each is named there, beside its last value, so the legend is not needed.
+   * Only when every name has a line of its own to stand on: more lines than the plot is tall fall back to the legend.
+   */
+  const ends = words && !small && !faceted && lined && series.length * 11 <= h - pad * 2 - (titled ? 20 : 0) - (headlined ? 38 : 0) - 34;
   const amounts = mark === 'cell' && !!encode.value && !encode.series;
   /** One sideways bar made of parts: each part is named over itself, so the legend is not needed. */
-  const whole = flipped && stacked && names.length === 1 && !small;
-  const legend = xy ? (series.length > 1 && !ends && !whole ? series : []) : kinds;
+  const whole = words && flipped && stacked && names.length === 1 && !small;
+  const keyed = xy ? (series.length > 1 && !ends && !whole ? series : []) : kinds;
   /** A series' line: the first is solid, every other has a pattern of its own. `dash` gives the first one too. */
   const firstDashed = object.dash?.includes(series[0]) ?? false;
   const dashOf = (s: number): string | undefined => {
-    if (!words) return undefined;
-    if (s === 0) return firstDashed ? DASHES[0] : undefined;
-    return DASHES[(s - (firstDashed ? 0 : 1)) % DASHES.length];
+    if (s === 0) return scaled(firstDashed ? DASHES[0] : undefined);
+    return scaled(DASHES[(s - (firstDashed ? 0 : 1)) % DASHES.length]);
   };
+  /** How a line of a series is drawn: the first in the colour and heaviest, the rest in quiet ink. */
+  const lineOf = (s: number) => ({ stroke: paintOf(s).role, opacity: paintOf(s).role === 'accent' ? 1 : 0.65, width: (s === 0 ? 2 : 1.5) * heavy, dash: dashOf(s) });
   let y = pad;
-  if (!tiny && object.title && (h >= 80 || !small)) {
-    text(pad, y + 8, fits(object.title.toUpperCase(), 10, w - pad * 2), 10, 'muted', { weight: 500 });
-    y += 20;
+  if (titled) {
+    head(pad, y + 8 * big, fits(object.title!.toUpperCase(), 10 * big, w - pad * 2), 10 * big, 'muted', { weight: 500 });
+    y += 20 * big;
   }
-  if (!small && !faceted && (mark === 'line' || mark === 'area') && facets[0]) {
+  if (headlined) {
     // The latest value of the first series, large: its right-most point, whatever order the rows came in.
     const first = facets[0].points.filter((point) => point.s === 0);
     const latest = first[first.length - 1];
@@ -291,29 +353,41 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       y += 38;
     }
   }
-  if (!small && legend.length) {
-    // Every series is named, in the order drawn, on as many lines as that takes. Its room is kept when no
-    // words are drawn, so the marks do not move when the detail changes.
+  // The key: every series named in the order drawn, on two lines at most (one when drawn small). What
+  // does not fit is counted ("+3"), never dropped in silence; and a chart too short to hold a key and a
+  // plot keeps the plot.
+  if (!small && detail !== 'marks' && keyed.length && h - y - 18 * big >= 64) {
+    const size = 10 * big;
+    const lines = named ? 1 : 2;
+    const lineMark = mark === 'line' || (mark === 'area' && !stacked);
+    const swatch = (lineMark ? 22 : 14) * big;
     let at = pad;
-    legend.forEach((name, s) => {
-      const swatch = mark === 'line' || mark === 'area' ? 22 : 14;
-      // A name is cut only when it is longer than a whole line of the chart.
-      const label = fits(name, 10, w - pad * 2 - swatch - 2);
-      const width = swatch + mono(label, 10) + 14;
-      if (at > pad && at + width > w - pad) {
+    let line = 0;
+    for (let s = 0; s < keyed.length; s++) {
+      const rest = keyed.length - s;
+      const last = line === lines - 1;
+      // On the last line, room is kept for the count of what is left.
+      const more = rest > 1 ? mono(`+${rest - 1}`, size) + 6 * big : 0;
+      const label = fits(keyed[s], size, w - pad * 2 - swatch - 2 - (last ? more : 0));
+      const width = swatch + mono(label, size) + 14 * big;
+      if (at > pad && at + width > w - pad - (last ? more : 0)) {
+        if (last) {
+          head(at, y + 9 * big, `+${rest}`, size, 'muted');
+          break;
+        }
         at = pad;
-        y += 16;
+        line += 1;
+        y += 16 * big;
+        s -= 1;
+        continue;
       }
-      const paint = paintOf(s);
-      if (words) {
-        if (mark === 'line' || (mark === 'area' && !stacked)) out.push({ kind: 'path', d: `M${n(at)} ${n(y + 6)}h18`, stroke: paint.role, opacity: Math.max(0.75, paint.opacity), width: s === 0 ? 2 : 1.5, dash: dashOf(s) });
-        else if (mark === 'dot') out.push(filled(marker(s, at + 4.5, y + 6, 4), s));
-        else out.push(filled(rect(at + 0.75, y + 2.75, 8, 7), s));
-      }
-      text(at + swatch, y + 9, label, 10, s === 0 ? 'ink' : 'muted');
+      if (lineMark) out.push({ kind: 'path', d: `M${n(at)} ${n(y + 6 * big)}h${n(18 * big)}`, ...lineOf(s) });
+      else if (mark === 'dot') out.push(filled(marker(s, at + 4.5 * big, y + 6 * big, 4 * big), s));
+      else out.push(boxes([[at + 0.75, y + 2.75 * big, 8 * big, 7 * big]], s, mark === 'cell'));
+      head(at + swatch, y + 9 * big, label, size, s === 0 ? 'ink' : 'muted');
       at += width;
-    });
-    y += 18;
+    }
+    y += 18 * big;
   }
 
   const hair = (d: string, role: ChartRole = 'rule') => out.push({ kind: 'path', d, stroke: role, width: 1 });
@@ -349,27 +423,30 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
     }
     const gutter = small ? 0 : Math.min(w * 0.34, Math.max(...lanes.map((lane) => mono(lane, 9.5))) + 8);
     const area: Area = { l: pad + gutter, t: y + (small ? 0 : 2), r: w - pad, b: h - pad - (small ? 0 : 14) };
+    area.b = Math.max(area.b, area.t + 4);
     const cw = Math.max(0.5, (area.r - area.l) / columns.length);
     const ch = Math.max(0.5, (area.b - area.t) / lanes.length);
     const gap = Math.min(1.5, cw * 0.12, ch * 0.12);
     // One path for each step or kind, however many cells there are.
-    const groups = new Map<number, string[]>();
+    const groups = new Map<number, Box[]>();
     const column = new Map(columns.map((name, index) => [name, index]));
     const lane = new Map(lanes.map((name, index) => [name, index]));
     for (const row of rows) {
       const cx = area.l + column.get(String(row[xi]))! * cw;
       const cy = area.t + lane.get(String(row[yi]))! * ch;
+      // Nothing is an empty cell, not a small tile: "none" must not read as "a little".
+      if (ki === -1 && Number(row[vi]) === 0) continue;
       const group = ki !== -1 ? kinds.indexOf(String(row[ki])) : hi === lo ? CELL_STEPS.length - 1 : Math.min(CELL_STEPS.length - 1, Math.floor(((Number(row[vi]) - lo) / (hi - lo)) * CELL_STEPS.length));
       let parts = groups.get(group);
       if (!parts) groups.set(group, (parts = []));
       const fw = Math.max(0.5, cw - gap);
       const fh = Math.max(0.5, ch - gap);
       const share = ki !== -1 ? 1 : CELL_STEPS[group];
-      parts.push(rect(cx + gap / 2 + (fw - fw * share) / 2, cy + gap / 2 + (fh - fh * share) / 2, fw * share, fh * share));
+      parts.push([cx + gap / 2 + (fw - fw * share) / 2, cy + gap / 2 + (fh - fh * share) / 2, fw * share, fh * share]);
     }
     // The ground every tile of amounts stands on: where a cell is, however little it holds.
     if (ki === -1) hair(`${[...Array(columns.length + 1).keys()].map((i) => `M${n(area.l + i * cw)} ${n(area.t)}V${n(area.b)}`).join('')}${[...Array(lanes.length + 1).keys()].map((i) => `M${n(area.l)} ${n(area.t + i * ch)}H${n(area.r)}`).join('')}`);
-    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(ki !== -1 ? filled(parts.join(''), group) : { kind: 'path', d: parts.join(''), fill: 'accent' });
+    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(ki !== -1 ? boxes(parts, group, true) : { kind: 'path', d: parts.map((box) => rect(...box)).join(''), fill: 'accent' });
     if (!small) {
       const rowEvery = Math.max(1, Math.ceil(11 / ch));
       lanes.forEach((name, index) => {
@@ -391,6 +468,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
     const lanes = namesOf(rows.map((row) => row[yi]));
     const gutter = small ? 0 : Math.min(w * 0.34, Math.max(...lanes.map((lane) => mono(lane, 9.5))) + 10);
     const area: Area = { l: pad + gutter, t: y + (small ? 0 : upright.some((rule) => rule.label) ? 14 : 4), r: w - pad, b: h - pad - (small ? 0 : 14) };
+    area.b = Math.max(area.b, area.t + 4);
     let lo = Infinity;
     let hi = -Infinity;
     for (const row of rows) {
@@ -422,7 +500,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       span.row = free;
       depth[span.lane] = Math.max(depth[span.lane], free + 1);
     }
-    const groups = new Map<number, string[]>();
+    const groups = new Map<number, Box[]>();
     for (const span of placed) {
       const rowsHere = depth[span.lane];
       const band = (rowH * 0.78) / rowsHere;
@@ -430,9 +508,9 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       const top = area.t + span.lane * rowH + (rowH - band * rowsHere) / 2 + span.row * band + (band - thick) / 2;
       let parts = groups.get(span.group);
       if (!parts) groups.set(span.group, (parts = []));
-      parts.push(rect(px(span.from), top, Math.max(2, px(span.to) - px(span.from)), thick));
+      parts.push([px(span.from), top, Math.max(2, px(span.to) - px(span.from)), thick]);
     }
-    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(filled(parts.join(''), group));
+    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(boxes(parts, group));
     if (!small) {
       const rowEvery = Math.max(1, Math.ceil(11 / rowH));
       lanes.forEach((name, index) => {
@@ -442,7 +520,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
     for (const rule of upright) {
       if (typeof rule.at !== 'number') continue;
       const rx = px(rule.at);
-      out.push({ kind: 'path', d: `M${n(rx)} ${n(area.t - 2)}V${n(area.b)}`, stroke: 'ink', width: heavy, dash: RULE_DASH });
+      out.push({ kind: 'path', d: `M${n(rx)} ${n(area.t - 2)}V${n(area.b)}`, stroke: 'ink', width: heavy, dash: ruleDash });
       if (!small && rule.label) text(rx + (rx > w * 0.6 ? -4 : 4), area.t - 5, fits(rule.label, 9.5, w * 0.5), 9.5, 'ink', { anchor: rx > w * 0.6 ? 'end' : undefined });
     }
     return out;
@@ -518,7 +596,8 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
   const gapX = faceted ? 12 : 0;
   const gapY = faceted ? 38 : 0;
   const panelW = (body.r - body.l - gapX * (columns - 1)) / columns;
-  const panelH = (body.b - body.t - gapY * (lines - 1)) / lines;
+  // Many small charts in a short box: whatever the gaps between them take, each keeps a height, so no mark is drawn upside down.
+  const panelH = Math.max(4, (body.b - body.t - gapY * (lines - 1)) / lines);
 
   facets.forEach((facet, index) => {
     const col = index % columns;
@@ -549,20 +628,20 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       const groups = stacked ? 1 : series.length;
       const thick = Math.max(1, Math.min((band - gap) / groups, 28));
       const inset = (band - thick * groups) / 2;
-      const paths = new Map<number, string[]>();
+      const paths = new Map<number, Box[]>();
       for (const { point, from, to } of placed) {
         const top = top0 + nameAt.get(String(point.x))! * band + inset + (stacked ? 0 : point.s * thick);
         const a = px(Math.min(from, to));
         const b = px(Math.max(from, to));
         let parts = paths.get(point.s);
         if (!parts) paths.set(point.s, (parts = []));
-        parts.push(rect(a + (stacked && from !== 0 ? 0.75 : 0), top, Math.max(1, b - a - (stacked && from !== 0 ? 0.75 : 0)), thick));
+        parts.push([a + (stacked && from !== 0 ? 0.75 : 0), top, Math.max(1, b - a - (stacked && from !== 0 ? 0.75 : 0)), thick]);
         if (whole) {
           const label = `${cut(series[point.s], 16)} ${shortNumber(point.y)}`;
           if (mono(label, 9.5) <= b - a - 2) text(a + 1, top - 5, label, 9.5, point.s === 0 ? 'ink' : 'muted');
         }
       }
-      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(filled(parts.join(''), s));
+      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(boxes(parts, s));
       if (!small) {
         const every = Math.max(1, Math.ceil(11 / band));
         names.forEach((name, i) => {
@@ -570,7 +649,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
         });
       }
       for (const rule of across) {
-        out.push({ kind: 'path', d: `M${n(px(rule.at))} ${n(top0 - 2)}V${n(area.b)}`, stroke: 'ink', width: heavy, dash: RULE_DASH });
+        out.push({ kind: 'path', d: `M${n(px(rule.at))} ${n(top0 - 2)}V${n(area.b)}`, stroke: 'ink', width: heavy, dash: ruleDash });
         if (!small && rule.label) text(px(rule.at) + (px(rule.at) > w * 0.6 ? -4 : 4), top0 + 8, fits(rule.label, 9.5, w * 0.4), 9.5, 'ink', { anchor: px(rule.at) > w * 0.6 ? 'end' : undefined });
       }
       return;
@@ -616,7 +695,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       const gap = Math.max(0.5, Math.min(8, band * 0.22));
       const groups = stacked ? 1 : series.length;
       const thick = Math.max(0.5, (band - gap) / groups);
-      const paths = new Map<number, string[]>();
+      const paths = new Map<number, Box[]>();
       for (const { point, from, to } of placed) {
         const left = area.l + band * nameAt.get(String(point.x))! + gap / 2 + (stacked ? 0 : point.s * thick);
         const top = py(Math.max(from, to));
@@ -624,9 +703,9 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
         let parts = paths.get(point.s);
         if (!parts) paths.set(point.s, (parts = []));
         // A stacked part stands a hair off the one under it, so two quiet parts do not read as one.
-        parts.push(rect(left, top, thick, Math.max(1, foot - top - (stacked && from !== 0 ? 0.75 : 0))));
+        parts.push([left, top, thick, Math.max(1, foot - top - (stacked && from !== 0 ? 0.75 : 0))]);
       }
-      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(filled(parts.join(''), s));
+      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(boxes(parts, s));
     } else if (mark === 'dot') {
       const paths = new Map<number, string[]>();
       for (const { point } of placed) {
@@ -638,6 +717,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(filled(parts.join(''), s));
     } else {
       // The first series is drawn last, on top.
+      const tracks = new Map<number, [number, number][]>();
       for (let s = series.length - 1; s >= 0; s--) {
         const own = placed.filter((entry) => entry.point.s === s);
         if (own.length === 0) continue;
@@ -649,29 +729,67 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
           out.push(stacked ? filled(`${top}${foot}Z`, s) : { kind: 'path', d: `${top}${foot}Z`, fill: paint.role, opacity: 0.14 });
         }
         if (!(mark === 'area' && stacked)) {
-          out.push({ kind: 'path', d: top, stroke: paint.role, opacity: s === 0 ? 1 : Math.max(0.75, paint.opacity), width: (s === 0 ? 2 : 1.5) * heavy, dash: dashOf(s) });
+          out.push({ kind: 'path', d: top, ...lineOf(s) });
+          tracks.set(s, own.map((entry) => [px(entry.point.x), py(entry.to)]));
           if (own.length === 1) out.push({ kind: 'path', d: marker(0, px(own[0].point.x), py(own[0].to), 2.5), fill: paint.role });
         }
       }
       if (ends) {
-        // Each line's last value and its name beside its end; two that would sit on each other are moved apart.
-        const labels = spread([...lastOf].map(([s, end]) => ({ s, ...end, at: end.y + 3.5 })), 11, area.t + 4, area.b + 3);
+        // Each line's last value and its name beside its end. A label goes to the right of the end unless
+        // another line runs through that place (a projection that starts where the actual line stops):
+        // then above it, below it, or to its left, the first of those that is clear.
+        const crossed = (s: number, l: number, t: number, r: number, b: number): boolean => {
+          for (const [other, points] of tracks) {
+            if (other === s) continue;
+            for (let i = 1; i < points.length; i++) {
+              const [ax, ay] = points[i - 1];
+              const [bx, by] = points[i];
+              if (Math.max(ax, bx) < l || Math.min(ax, bx) > r || Math.max(ay, by) < t || Math.min(ay, by) > b) continue;
+              const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 3));
+              for (let k = 0; k <= steps; k++) {
+                const x = ax + ((bx - ax) * k) / steps;
+                const y = ay + ((by - ay) * k) / steps;
+                if (x >= l && x <= r && y >= t && y <= b) return true;
+              }
+            }
+          }
+          return false;
+        };
+        const labels = [...lastOf].map(([s, end]) => {
+          const said = endWords(s, end.value);
+          const wide = mono(said, 10);
+          const places: { x: number; y: number; left?: true }[] = [
+            { x: end.x + 7, y: end.y + 3.5 },
+            { x: end.x + 6, y: end.y - 7 },
+            { x: end.x + 6, y: end.y + 15 },
+            { x: end.x - 6, y: end.y - 7, left: true },
+            { x: end.x - 6, y: end.y + 15, left: true },
+          ];
+          const clear = places.findIndex((place) => {
+            const l = place.left ? place.x - wide : place.x;
+            return l >= area.l && l + wide <= edge + 1 && place.y - 9 >= area.t - 12 && !crossed(s, l - 1, place.y - 9, l + wide + 1, place.y + 2);
+          });
+          const place = places[Math.max(0, clear)];
+          return { s, ...end, said, place, beside: clear <= 0, at: place.y };
+        });
+        // Those that stayed beside their ends are moved apart where two would sit on each other.
+        spread(labels.filter((label) => label.beside), 11, area.t + 4, area.b + 3);
         for (const label of labels) {
-          out.push({ kind: 'path', d: rect(label.x - 2.5, label.y - 2.5, 5, 5), fill: paintOf(label.s).role });
-          text(label.x + 7, label.at, fits(endWords(label.s, label.value), 10, edge - label.x - 7), 10, label.s === 0 ? 'ink' : 'muted');
+          out.push({ kind: 'path', d: rect(label.x - 2.5 * heavy, label.y - 2.5 * heavy, 5 * heavy, 5 * heavy), fill: paintOf(label.s).role });
+          text(label.place.x, label.at, label.beside ? fits(label.said, 10, edge - label.place.x) : label.said, 10, label.s === 0 ? 'ink' : 'muted', { anchor: label.place.left ? 'end' : undefined });
         }
       }
     }
 
     for (const rule of across) {
       const ry = py(rule.at);
-      out.push({ kind: 'path', d: `M${n(area.l)} ${n(ry)}H${n(ends ? area.r : edge)}`, stroke: 'ink', width: heavy, dash: RULE_DASH });
+      out.push({ kind: 'path', d: `M${n(area.l)} ${n(ry)}H${n(ends ? area.r : edge)}`, stroke: 'ink', width: heavy, dash: ruleDash });
       if (!small && rule.label) text(ends ? area.r : area.l, ry - 4, fits(rule.label, 9.5, panelW * 0.7), 9.5, 'ink', { anchor: ends ? 'end' : undefined });
     }
     for (const rule of upright) {
       if (numericX ? typeof rule.at !== 'number' : !nameAt.has(String(rule.at))) continue;
       const rx = px(rule.at);
-      out.push({ kind: 'path', d: `M${n(rx)} ${n(area.t - 2)}V${n(area.b)}`, stroke: 'ink', width: heavy, dash: RULE_DASH });
+      out.push({ kind: 'path', d: `M${n(rx)} ${n(area.t - 2)}V${n(area.b)}`, stroke: 'ink', width: heavy, dash: ruleDash });
       const leftward = rx > area.l + (area.r - area.l) * 0.6;
       if (!small && rule.label) text(rx + (leftward ? -4 : 4), area.t + 8, fits(rule.label, 9.5, panelW * 0.5), 9.5, 'ink', { anchor: leftward ? 'end' : undefined });
     }
