@@ -26,7 +26,7 @@ import { join } from 'node:path';
 import { MACHINE_PLATFORM, doorReachOf, doorRouteOf } from '../packages/server/inbox-devices';
 import { DOOR_CONTRACT } from '../packages/server/inbox-door-version';
 import { doorEntries, generateDoor } from '../scripts/mobile/door';
-import { GENERATORS } from '../scripts/mobile/all';
+import { GENERATORS } from '../scripts/mobile/generators';
 import { OUT, REGENERATE, VERSION_FILE, emit, readRepoText, type Output } from '../scripts/mobile/lib';
 import { SCHEMA_SOURCES, buildSchema, schemaWith } from '../scripts/mobile/schema';
 
