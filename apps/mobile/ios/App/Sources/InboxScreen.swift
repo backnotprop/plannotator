@@ -160,7 +160,7 @@ struct ComputerMenu: View {
       }
     } label: {
       HStack(spacing: Space.close) {
-        Circle().fill(state.0).frame(width: 9, height: 9)
+        Circle().fill(state.0).frame(width: Space.close, height: Space.close)
         Text(session.computer.name).font(TextRole.heading).foregroundStyle(Token.foreground).lineLimit(1)
         if model.isDemo {
           // The stand-in computer is never mistaken for a real one.

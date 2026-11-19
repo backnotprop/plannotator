@@ -120,7 +120,8 @@ struct PermissionCard: View {
             if let note = read.note { Text(note).font(TextRole.meta).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true) }
           } else {
             if labels.contains(PermissionPrompt.auto) {
-              VStack(alignment: .leading, spacing: 0) {
+              // On the buttons' own centre line, as every answer above it is.
+              VStack(alignment: .center, spacing: 0) {
                 Text(PhoneWords.orAllowAndSwitch).font(TextRole.meta).foregroundStyle(Token.mutedForeground).padding(.top, Space.trim)
                 HStack(spacing: Space.card) {
                   LinkButton(words: PhoneWords.autoMode) { answer(question, PermissionPrompt.auto) }
@@ -134,8 +135,9 @@ struct PermissionCard: View {
                   }
                 }
               }
+              .frame(maxWidth: .infinity)
             }
-            if toTerminal { LinkButton(words: PermissionPrompt.terminal, quiet: true) { answer(question, PermissionPrompt.terminal) } }
+            if toTerminal { LinkButton(words: PermissionPrompt.terminal, quiet: true) { answer(question, PermissionPrompt.terminal) }.frame(maxWidth: .infinity) }
           }
         }
         if self.session.refusal(message: message.id, key: question.key) != nil, mode != .confirmFull {

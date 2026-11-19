@@ -146,11 +146,36 @@ struct CodeBlock: View {
   private var fades: Bool { textWidth > boxWidth + 1 && !atEnd }
 
   private var words: some View {
-    Text(code)
-      .font(TextRole.code(copies ? .callout : .footnote))
+    Text(CodeLayout.keeps(code) ? Self.drawn(code) : AttributedString(code))
+      .font(TextRole.code(copies ? .subheadline : .footnote))
       .lineSpacing(TextRole.codeLeading)
       .foregroundStyle(Token.foreground)
       .textSelection(.enabled)
+  }
+
+  /// A drawing's rules (the box-drawing characters) in the quiet grey of a hairline, its words in the foreground:
+  /// the lines part the cells, the words are what is read.
+  private static func drawn(_ code: String) -> AttributedString {
+    var out = AttributedString()
+    var run = ""
+    var rules = false
+    func flush() {
+      guard !run.isEmpty else { return }
+      var part = AttributedString(run)
+      if rules { part.foregroundColor = Token.mutedForeground.opacity(0.45) }
+      out += part
+      run = ""
+    }
+    for character in code {
+      let rule = character.unicodeScalars.allSatisfy { (0x2500...0x257F).contains($0.value) }
+      if rule != rules {
+        flush()
+        rules = rule
+      }
+      run.append(character)
+    }
+    flush()
+    return out
   }
 
   var body: some View {
@@ -159,11 +184,11 @@ struct CodeBlock: View {
         ScrollView(.horizontal) {
           words
             .fixedSize()
-            .padding(.horizontal, Space.snug)
-            // A slim band over the drawing holds Copy: the drawing's first rule starts under the button, never
-            // through it.
-            .padding(.top, copies ? Space.touch - Space.hair : Space.step)
-            .padding(.bottom, Space.step)
+            .padding(.leading, Space.snug)
+            // Copy floats over the drawing's corner on a ground of its own. Scrolled to its end, the drawing
+            // stands clear of it: nothing of it is ever only under the button.
+            .padding(.trailing, copies ? Space.touch : Space.snug)
+            .padding(.vertical, Space.step)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
         }
         .scrollIndicators(.visible)
@@ -175,7 +200,7 @@ struct CodeBlock: View {
             LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: Size.codeFade)
           }
         }
-        .animation(.easeOut(duration: 0.15), value: fades)
+        .motion(.fade, value: fades)
       } else {
         words
           .fixedSize(horizontal: false, vertical: true)
@@ -186,9 +211,9 @@ struct CodeBlock: View {
           .padding(.trailing, copies ? Space.touch : Space.snug)
       }
     }
-    .frame(minHeight: copies ? 44 : 0)
+    .frame(minHeight: copies ? Space.touch : 0)
     .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
-    // Over a drawing that scrolls sideways, Copy is a chip of its own in the band above the drawing.
+    // Over a drawing that scrolls sideways, Copy is a chip of its own on the drawing's corner.
     .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied, ground: CodeLayout.keeps(code)) } }
   }
 }

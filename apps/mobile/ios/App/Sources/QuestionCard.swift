@@ -170,7 +170,8 @@ struct QuestionCard: View {
   @ViewBuilder private var marks: some View {
     HStack(alignment: .firstTextBaseline, spacing: Space.near) {
       if question.reversible?.value == false { Text(PhoneWords.cantBeUndone).foregroundStyle(Role.caution.ink).fontWeight(.semibold) }
-      if !question.holdsUp.isEmpty { RoleLine(words: PhoneWords.holdingUp(question.holdsUp), role: .hold) }
+      // Amber while the answer is still wanted; a settled card (sent, replaced) holds nothing up any more.
+      if !question.holdsUp.isEmpty { RoleLine(words: PhoneWords.holdingUp(question.holdsUp), role: live ? .hold : .quiet) }
     }
   }
 
@@ -336,7 +337,8 @@ struct QuestionCard: View {
   /// the one row they are `whole`: never squeezed onto two lines there (when they do not fit whole, the row gives
   /// way to one under the other, where they may wrap).
   private func quietWords(_ words: String, leading: CGFloat = 0, whole: Bool) -> some View {
-    Text(words).font(TextRole.link).foregroundStyle(Token.primary).fixedSize(horizontal: whole, vertical: true).padding(.leading, leading).touchTarget()
+    // In the foreground, as in the window: the accent in this row is the agent's own answer alone.
+    Text(words).font(TextRole.link).foregroundStyle(Token.foreground).fixedSize(horizontal: whole, vertical: true).padding(.leading, leading).touchTarget()
   }
 
   @ViewBuilder private var status: some View {

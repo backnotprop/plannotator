@@ -142,6 +142,28 @@ final class FirstSliceTests: XCTestCase {
     }
   }
 
+  /// The place a landed thread keeps is the person's to take: a tap on the status bar sends the page to the top
+  /// (no finger drags it, and the rows above are built and measured on the way), and the page stays where it was
+  /// sent. It is never pulled back to the question.
+  @MainActor
+  func testALandedThreadLetsGoWhenThePageIsMoved() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-open", "msg_STANDIN0000000000000003"]
+    app.launch()
+    sleep(6)
+    let prompt = app.staticTexts["How should this roll out?"]
+    XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+    sleep(1)
+    let foot = app.buttons["1 open question"].frame.minY
+    XCTAssertLessThan(prompt.frame.minY, foot, "landed on the question")
+    // The status bar, over the clock's side of the island.
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.03)).tap()
+    sleep(2)
+    XCTAssertGreaterThan(prompt.frame.minY, foot, "the page went to the top: the question is below it")
+    sleep(2)
+    XCTAssertGreaterThan(prompt.frame.minY, foot, "and it stayed there")
+  }
+
   /// A Can't do it reason being typed on the newest message survives the agent writing again meanwhile: the
   /// message is no longer the newest, and its card is built anew where older messages are.
   @MainActor

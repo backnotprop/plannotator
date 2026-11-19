@@ -113,7 +113,8 @@ enum TextRole {
   static let captionStrong = Font.caption.weight(.semibold)
   /// A small arrow beside words (a chevron).
   static let glyph = Font.caption.weight(.bold)
-  static func code(_ style: Font.TextStyle = .callout) -> Font { .system(style, design: .monospaced) }
+  /// Code is set a step under the words around it, as in the window: a line of it holds more, so it wraps less.
+  static func code(_ style: Font.TextStyle = .subheadline) -> Font { .system(style, design: .monospaced) }
   /// A heading inside a message; a name in a bar.
   static let heading = Font.headline
   /// Extra room between the lines of sentences to read, and of code.
@@ -328,7 +329,7 @@ struct Chip: View {
       .multilineTextAlignment(.leading)
       .fixedSize(horizontal: false, vertical: true)
       .padding(.horizontal, Space.close)
-      .padding(.vertical, 3)
+      .padding(.vertical, Space.tight)
       .background(role.tint, in: RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
       // Beside longer words in a row, the chip keeps its line and the words wrap.
       .layoutPriority(1)
@@ -345,7 +346,7 @@ struct RoleLine: View {
     let lift = dot * 0.42
     HStack(alignment: .firstTextBaseline, spacing: dot) {
       Circle().fill(role.ink).frame(width: dot, height: dot).alignmentGuide(.firstTextBaseline) { $0[.bottom] + lift }.accessibilityHidden(true)
-      Text(words).foregroundStyle(role.ink).fontWeight(.medium)
+      Text(words).foregroundStyle(role.ink).fontWeight(role == .quiet ? .regular : .medium)
     }
   }
 }

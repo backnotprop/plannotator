@@ -60,9 +60,11 @@ private struct SelectionRing: ViewModifier {
 
 // MARK: Raised surfaces
 
-/// Where a thing sits over the page. Glass is allowed only over content that moves under it (a bar or a foot over
-/// a scrolling page, a tool bar over a file or a picture): there it shows what is behind. Over a still ground it
-/// would blur a flat colour, so a sheet and a popover are solid.
+/// Where a thing sits over the page. Glass is for what floats over content that moves under it (a tool bar over a
+/// file or a picture): there it shows what is behind. A sheet and a popover stand on a still ground, where glass
+/// would only blur a flat colour, so they are solid. The thread's foot is the one exception today: its glass sits
+/// on the page's own solid ground (the words fade out above it, so no line is cut by it), which shows little of
+/// the glass; it is kept as the system's look for a reply field, and is the owner's to change.
 enum Surface {
   /// A sheet's ground: the card colour, so a sheet reads as a larger card.
   static let sheet = Token.card

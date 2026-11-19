@@ -25,6 +25,10 @@ final class ScrollBox {
   /// above that measure themselves again never carry the page off what it landed on.
   @ObservationIgnored var rest: CGFloat?
   @ObservationIgnored var restFor: String?
+  /// Where this view last sent the page, and when it last put the page back: a move to anywhere else, at any
+  /// other time, is not its own.
+  @ObservationIgnored var sentTo: CGFloat = -.infinity
+  @ObservationIgnored var keptAt = Date.distantPast
 
   func act(_ key: String) {
     acted = key
@@ -177,6 +181,7 @@ struct ThreadScreen: View {
           // stays on what it landed on. A newer message of the agent's is another block: it moves nothing.
           guard scroll.rest != nil, let before, abs(now.minY - before.minY) > 0.5 else { return }
           guard shown.indices.contains(landing), scroll.restFor == shown[landing].id.rawValue else { return scroll.rest = nil }
+          scroll.keptAt = Date()
           keepPlace()
         }
         .id(Self.landing)
@@ -224,15 +229,21 @@ struct ThreadScreen: View {
     .scrollPosition($position)
     // The person moved the page themselves: it has landed, and the second landing never pulls it back.
     .onScrollPhaseChange { _, phase in
+      // Any scroll that is not the page's own landing is someone moving the page (a finger, a tap on the status
+      // bar, VoiceOver's three-finger scroll): the kept place is theirs to take. The page's own landings set its
+      // place without animation and never leave idle.
+      if phase != .idle { scroll.rest = nil }
       guard phase == .interacting else { return }
       scroll.landed = true
-      scroll.rest = nil
       // And a card a jump still went for is no longer wanted: the person is reading somewhere else.
       scroll.wanted = nil
     }
     // What is on screen, in the content's coordinates. The container's size is already what is left between the
     // title bar and the reply field (and the keyboard, when it is up).
-    .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentOffset.y + $0.contentInsets.top, $0.contentOffset.y + $0.contentInsets.top + $0.containerSize.height] } action: { _, now in
+    .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentOffset.y + $0.contentInsets.top, $0.contentOffset.y + $0.contentInsets.top + $0.containerSize.height, $0.contentSize.height] } action: { before, now in
+      // The page moved while nothing in it changed size, and not to a place this view sent it: something moved
+      // it that has no scroll phase (VoiceOver bringing what it reads into view). The kept place is let go.
+      if scroll.rest != nil, abs(now[2] - before[2]) < 0.5, abs(now[0] - before[0]) > 0.5, abs(now[0] - scroll.sentTo) > 1, Date().timeIntervalSince(scroll.keptAt) > Self.landingStill { scroll.rest = nil }
       scroll.top = now[0]
       scroll.bottom = now[1]
     }
@@ -280,7 +291,7 @@ struct ThreadScreen: View {
     // measuring is followed to its end, never left half way), for 2 seconds more at most.
     .task {
       let until = Date().addingTimeInterval(Self.landingTime)
-      try? await Task.sleep(for: .milliseconds(60))
+      guard (try? await Task.sleep(for: .milliseconds(60))) != nil else { return }
       if !scroll.landed { land(waiting, proxy) }
       var landedOn = landingMarks(waiting)
       var movedAt = Date()
@@ -288,7 +299,8 @@ struct ThreadScreen: View {
         let now = Date()
         if now >= until.addingTimeInterval(Self.landingTime) { break }
         if now >= until, now.timeIntervalSince(movedAt) >= Self.landingStill { break }
-        try? await Task.sleep(for: .milliseconds(100))
+        // The person left the thread: the task is cancelled, and a cancelled sleep returns at once.
+        guard (try? await Task.sleep(for: .milliseconds(100))) != nil else { return }
         guard !scroll.landed else { break }
         let marks = landingMarks(waiting)
         if marks != landedOn {
@@ -359,9 +371,10 @@ struct ThreadScreen: View {
   private func keepPlace() {
     Task {
       for _ in 0..<4 {
-        try? await Task.sleep(for: .milliseconds(40))
+        guard (try? await Task.sleep(for: .milliseconds(40))) != nil else { return }
         guard let rest = scroll.rest, let block = cards[Self.landing] else { return }
         let y = block.minY + rest
+        scroll.keptAt = Date()
         if abs(scroll.top - y) > 0.5 { settle(at: y, end: block.maxY + Self.clear) }
       }
     }
@@ -370,6 +383,7 @@ struct ThreadScreen: View {
   /// Rest the page's top at `y`. A thread that ends too soon for that is given the room it lacks first, so the
   /// page is never pushed back to rest through the middle of a block.
   private func settle(at y: CGFloat, end: CGFloat) {
+    scroll.sentTo = y
     let lacks = max(0, y + scroll.height - end)
     guard abs(lacks - room) > 0.5 else { return position.scrollTo(y: y) }
     room = lacks
@@ -516,7 +530,7 @@ struct ThreadScreen: View {
       return
     }
     guard abs(y - scroll.top) > 0.5 else { return }
-    withAnimation(.easeOut(duration: 0.2)) {
+    withAnimation(Motion.fade.animation(still: false)) {
       if let tail = cards[Self.landing] { settle(at: y, end: tail.maxY + Self.clear) } else { position.scrollTo(y: y) }
     }
   }
