@@ -2300,7 +2300,7 @@ const ReviewApp: React.FC = () => {
       : lastMainPanelIdRef.current ? dockApi.getPanel(lastMainPanelIdRef.current) : undefined;
     return (panel?.group?.element as HTMLElement | undefined) ?? null;
   }, [dockApi]);
-  const stepToChange = useCallback(async (direction: ChangeStep) => {
+  const stepToChangeNow = useCallback(async (direction: ChangeStep) => {
     const container = codeGroupElement();
     if (!container) return;
     if ((await stepChange(container, direction)) === 'moved') return;
@@ -2330,6 +2330,16 @@ const ReviewApp: React.FC = () => {
       }
     }
   }, [codeGroupElement, currentNavLocation, files, openRepoFile]);
+  // One press at a time. A press that opens the next file lands on that file's
+  // first run once it has drawn (up to 3 s later); a press made meanwhile
+  // waits for that landing and steps on from there, so the landing never
+  // undoes it.
+  const changeStepQueue = useRef<Promise<void>>(Promise.resolve());
+  const stepToChange = useCallback((direction: ChangeStep) => {
+    const run = changeStepQueue.current.then(() => stepToChangeNow(direction));
+    changeStepQueue.current = run.catch(() => {});
+    return run;
+  }, [stepToChangeNow]);
 
   useEffect(() => {
     if (!dockApi) return;
