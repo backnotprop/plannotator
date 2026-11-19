@@ -1,7 +1,8 @@
 /**
- * The review editor's theme names for Pierre's diff views (usePierreTheme.ts
- * `resolveSyntaxTheme`, what the diff pane and the PR comments' hunk previews
- * use). The failure this guards: a custom theme's code colour name handed to
+ * The review editor's theme names for Pierre's diff views
+ * (utils/pierreSyntaxTheme.ts, usePierreTheme.ts's `resolveSyntaxTheme`: what
+ * the diff pane and the PR comments' hunk previews use). Imported from its own
+ * module: other files mock usePierreTheme for the whole process. The failure this guards: a custom theme's code colour name handed to
  * Pierre before it is registered (Pierre then has no loader for it), when the
  * first code on the page is a hunk preview rather than the diff pane or a fence.
  */
@@ -9,7 +10,7 @@ import { afterEach, expect, test } from 'bun:test';
 import * as pierre from '@pierre/diffs';
 import { __setCustomSyntaxFetchForTests, customSyntaxThemeName } from '@plannotator/ui/utils/customSyntaxThemes';
 import { setCustomThemes } from '@plannotator/ui/utils/themeRegistry';
-import { resolveSyntaxTheme } from './usePierreTheme';
+import { resolvePierreSyntaxTheme as resolveSyntaxTheme } from './pierreSyntaxTheme';
 
 const swatch = { primary: '#66d9ef', secondary: '#a1efe4', accent: '#ae81ff', background: '#272822', foreground: '#f8f8f2' };
 const entry = (id: string) => ({ id, name: id, modeSupport: 'dark-only', colors: { dark: swatch, light: swatch }, syntax: ['dark'] });

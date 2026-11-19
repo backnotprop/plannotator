@@ -199,6 +199,11 @@ export function customThemesScript(dataDir: string): string {
 /** The page's tag for the themes script, as the build writes it (`<script vite-ignore src=...>` in each index.html). */
 const THEMES_TAG = /<script\b[^>]*\bsrc="\/plannotator-themes\.js"[^>]*><\/script>/;
 
+/** The page as served to a person with no custom theme: the build's page without its themes tag (the release smoke's digests). */
+export function pageWithoutCustomThemes(html: string): string {
+  return html.replace(THEMES_TAG, "");
+}
+
 /** Per page: the page with no themes tag, and the last page made with themes in it (so a body is made once). */
 const pages: { html: string; bare: string; last: { script: string; page: string } | null }[] = [];
 
@@ -215,7 +220,7 @@ export function pageWithCustomThemes(html: string, dataDir: string): string {
   let entry = pages.find((e) => e.html === html);
   if (!entry) {
     if (!THEMES_TAG.test(html)) return html;
-    entry = { html, bare: html.replace(THEMES_TAG, ""), last: null };
+    entry = { html, bare: pageWithoutCustomThemes(html), last: null };
     pages.push(entry);
     if (pages.length > 8) pages.shift();
   }

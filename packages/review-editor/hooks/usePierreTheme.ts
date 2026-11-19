@@ -11,22 +11,11 @@ import { buildPierreFontCSS } from '../utils/pierreFontCss';
  * resolve the same theme this diff pane does. Re-exported here because it is
  * the import path the review editor has always used.
  */
-import { resolveSyntaxTheme as resolveSyntaxThemeName } from '@plannotator/ui/utils/syntaxTheme';
-import { registerCustomTheme, resolveTheme } from '@pierre/diffs';
-import { connectCustomSyntaxThemes, type CustomSyntaxPierre } from '@plannotator/ui/utils/customSyntaxThemes';
+import { resolvePierreSyntaxTheme as resolveSyntaxTheme } from '../utils/pierreSyntaxTheme';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
 export { SHIKI_THEME_MAP } from '@plannotator/ui/utils/syntaxTheme';
-
-/**
- * The theme pair for Pierre's diff views (`syntaxTheme.ts`), with a custom
- * theme's code colours registered with Pierre first (customSyntaxThemes.ts):
- * every diff view here (the diff pane, the PR comments' hunk previews) takes
- * its names from this, so Pierre never gets a name it cannot resolve.
- */
-export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
-  connectCustomSyntaxThemes({ registerCustomTheme, resolveTheme } as unknown as CustomSyntaxPierre);
-  return resolveSyntaxThemeName(colorTheme, mode);
-}
+// The theme pair for Pierre's diff views, a custom theme's code colours registered first.
+export { resolveSyntaxTheme };
 
 export interface PierreTheme {
   type: 'dark' | 'light';
