@@ -11,13 +11,17 @@
  *   colour alone (strike, weight), and the screen reader hears the words
  *   removed and added. A mostly rewritten line carries no marks (see
  *   `QUESTION_CHANGE_WHOLE_LINE_SHARE`): Now plain and dimmed, After plain.
- * - Unchanged neighbour lines are dimmed; a long value shows its changed
- *   lines with one neighbour each.
+ * - Unchanged lines show only beside a change, one on each side, dimmed; a
+ *   longer run of them is a quiet "…". A value over twelve lines shows its
+ *   first twelve and "Show more".
  * - When the After only adds lines, the Now line goes (the After shows the new
  *   line in its place). `Before: none` reads `New`, unmarked.
  * - The Versions rule: with one place whose Now is text, when every choice but
- *   one carries its own After, that one choice shows today's words and the
- *   separate Now line goes; the choices read as the versions.
+ *   one carries its own After, that one choice shows today's words in full
+ *   and the separate Now line goes; the choices read as the versions.
+ * - A choice's own version sits under its row, outside its label (the radio's
+ *   name stays the choice's label; the version is its description, through
+ *   `aria-describedby`), and in a picture choice's tile under its words.
  * - Pictures: Now and After side by side on a card 480 px wide or more,
  *   stacked under it; a choice's own pair stays side by side. Each opens in
  *   the host's image viewer.
@@ -25,7 +29,7 @@
  * No boxes, no left-edge accents, no uppercase labels, no outline rows. A
  * stylesheet (not Tailwind classes) for the reason `QuestionContext` gives.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import type { ParsedQuestion, QuestionChange, QuestionChangeGroup, QuestionChangeValue, QuestionChoice } from '@plannotator/core/question-block';
 import {
   diffQuestionChange,
@@ -42,9 +46,11 @@ const QUESTION_CHANGE_CSS = `
 .qc-where { display: flex; gap: 7px; align-items: flex-start; margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--muted-foreground); }
 .qc-where > svg { flex: none; margin-top: 3px; }
 .qc-where-text { min-width: 0; overflow-wrap: anywhere; }
-.qc-see { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 0 2px; border: 0; border-radius: 4px; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--primary); white-space: nowrap; vertical-align: baseline; cursor: pointer; }
+.qc-see { display: inline; margin-inline-start: 6px; padding: 0 2px; border: 0; border-radius: 4px; background: none; font: inherit; font-size: 12.5px; font-weight: 600; line-height: inherit; color: var(--primary); white-space: nowrap; cursor: pointer; }
+.qc-see > svg { display: inline-block; vertical-align: -0.125em; margin-inline-end: 4px; }
 .qc-see:hover { text-decoration: underline; text-underline-offset: 2px; }
 .qc-see:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.qc-src { display: block; font-size: 12px; }
 .qc-cmp { margin-top: 10px; }
 .qc-cmp + .qc-cmp { margin-top: 14px; }
 .qc-gh { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; line-height: 1.45; color: color-mix(in oklab, var(--foreground) 80%, transparent); }
@@ -60,24 +66,34 @@ const QUESTION_CHANGE_CSS = `
 .qc-li > .qc-bullet { flex: none; color: var(--muted-foreground); }
 .qc-h { font-weight: 600; }
 .qc-dim { color: color-mix(in oklab, var(--foreground) 62%, transparent); }
+.qc-gap { color: var(--muted-foreground); letter-spacing: 0.1em; }
 .qc-link { color: var(--primary); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--primary) 40%, transparent); text-underline-offset: 2px; }
 .qc-dim .qc-link, .qc-now .qc-link { color: inherit; }
 .qc-code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.92em; }
 ins.qc-ins { text-decoration: none; color: inherit; font-weight: 600; background: color-mix(in oklab, var(--success) 18%, transparent); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+/* Bold text already carries the weight: an added word there is underlined too, never told by its tint alone. */
+.qc-h ins.qc-ins, ins.qc-ins strong { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: color-mix(in oklab, var(--success) 80%, currentColor); }
 del.qc-del { color: inherit; text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: color-mix(in oklab, var(--destructive) 75%, currentColor); background: color-mix(in oklab, var(--destructive) 13%, transparent); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-.qc-choice { display: block; margin-top: 2px; font-size: 13.5px; font-weight: 400; color: color-mix(in oklab, var(--foreground) 88%, transparent); }
+.qc-more { display: inline; margin-top: 4px; padding: 0 2px; border: 0; border-radius: 4px; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--primary); cursor: pointer; }
+.qc-more:hover { text-decoration: underline; text-underline-offset: 2px; }
+.qc-more:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* A choice's own version, under its row and lined up with its words (a host with a wider control sets the indent). */
+.qc-choice { display: block; margin-block: 0 4px; margin-inline: var(--qc-choice-indent, 34px) 9px; font-size: 13.5px; font-weight: 400; color: color-mix(in oklab, var(--foreground) 88%, transparent); cursor: pointer; }
+.qc-choice.qc-readonly { cursor: default; }
 .qc-choice.qc-keep { color: color-mix(in oklab, var(--foreground) 64%, transparent); }
-/* A choice row with its version under the label keeps its control by the label (a host may centre tall rows). */
-.question-block label[data-question-option]:has(> [data-question-part="choice"] > [data-question-choice-change]) { align-items: flex-start; }
 .qc-place { display: block; }
 .qc-place + .qc-place { margin-top: 6px; }
 .qc-place > .qc-grid { margin-top: 2px; }
 .qc-cw { display: block; font-size: 12.5px; line-height: 1.5; color: var(--muted-foreground); }
-.qc-cw-pics { margin: 6px 0 0 34px; }
 .qc-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: 560px; }
 @container qcard (min-width: 480px) { .qc-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.qc-pair.qc-pair-sm { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 400px; margin: 6px 0 4px 34px; }
+.qc-pair.qc-pair-sm { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 400px; margin-block: 6px 4px; }
 .qc-pair.qc-one { grid-template-columns: minmax(0, 280px); }
+/* In a picture choice's tile: under its words, the tile's full width. */
+.qc-tile { display: block; padding: 0 10px 9px; font-size: 12.5px; line-height: 1.45; color: color-mix(in oklab, var(--foreground) 88%, transparent); }
+.qc-tile .qc-grid { font-size: 12.5px; line-height: 1.45; column-gap: 8px; }
+.qc-tile .qc-k { font-size: 12px; }
+.qc-tile .qc-pair.qc-pair-sm { max-width: none; margin-block: 2px 0; }
 .qc-fig { margin: 0; min-width: 0; }
 .qc-pic { display: grid; place-items: center; width: 100%; min-height: 48px; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: color-mix(in oklab, var(--muted) 45%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); cursor: zoom-in; }
 .qc-pic > img { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; }
@@ -157,8 +173,8 @@ function referenceAfter(question: Pick<ParsedQuestion, 'change' | 'choices'>, in
 
 const textOf = (value: QuestionChangeValue | undefined): string | null => (value?.kind === 'text' ? value.text : null);
 
-/** A long value (over four lines) shows its changed lines with one neighbour each; a short one shows every line. */
-const LONG_VALUE_LINES = 4;
+/** Over this many lines a side shows its first ones and "Show more". */
+export const QUESTION_CHANGE_LINE_CAP = 12;
 
 type Side = 'before' | 'after';
 
@@ -207,38 +223,71 @@ function markedNodes(tokens: readonly QuestionChangeMarkedToken[], side: Side): 
 
 function LineView({ line, children, dim }: { line: QuestionChangeLine; children: React.ReactNode; dim?: boolean }) {
   const cls = ['qc-line', line.kind === 'li' ? 'qc-li' : '', line.kind === 'h' ? 'qc-h' : '', dim ? 'qc-dim' : ''].filter(Boolean).join(' ');
-  // Spans drawn as blocks: a line may sit inside a choice's label, where only phrasing content belongs.
+  // Spans drawn as blocks: phrasing content only, wherever a host puts them. `dir="auto"`: each line takes its own direction.
   return line.kind === 'li'
-    ? <span className={cls}><span className="qc-bullet">{line.marker}</span><span>{children}</span></span>
-    : <span className={cls}>{children}</span>;
+    ? <span className={cls} dir="auto"><span className="qc-bullet">{line.marker}</span><span>{children}</span></span>
+    : <span className={cls} dir="auto">{children}</span>;
 }
 
+type SideMode = 'all' | 'near' | 'changed';
+/** A side's drawn lines: a row by its index, or a gap of unchanged lines not shown. */
+type SideItem = { row: number } | { gap: true };
+
 /**
- * One side of the rows. `mode`: `all` every line (unchanged ones dimmed),
- * `near` changed lines and one neighbour each (dimmed), `changed` changed
- * lines only. `marks`: draw the word marks (else plain).
+ * The lines one side draws. `all` every line; `near` the changed lines and
+ * the nearest unchanged line on each side of them, a longer run of unchanged
+ * lines a gap (one lone line is drawn: a "…" would take its room); `changed`
+ * the changed lines only (all when none changed).
  */
-function SideView({ rows, side, mode, marks }: { rows: readonly QuestionChangeRow[]; side: Side; mode: 'all' | 'near' | 'changed'; marks: boolean }) {
+function sideItems(rows: readonly QuestionChangeRow[], side: Side, mode: SideMode): SideItem[] {
   const own = (r: QuestionChangeRow) => (side === 'before' ? r.type !== 'add' : r.type !== 'del');
   const changed = (r: QuestionChangeRow) => r.type !== 'same';
+  const mine = rows.flatMap((r, i) => (own(r) ? [i] : []));
+  if (mode === 'all' || !rows.some(changed)) return mine.map((row) => ({ row }));
   const keep = new Set<number>();
-  rows.forEach((r, i) => {
-    if (mode === 'all' || (changed(r) && own(r))) keep.add(i);
-    if (mode === 'near' && changed(r)) {
-      keep.add(i - 1);
-      keep.add(i + 1);
+  mine.forEach((i, k) => {
+    if (!changed(rows[i]!)) return;
+    keep.add(i);
+    if (mode === 'near') {
+      if (k > 0) keep.add(mine[k - 1]!);
+      if (k < mine.length - 1) keep.add(mine[k + 1]!);
     }
   });
-  // Nothing changed on this side: show it whole.
-  if (mode === 'changed' && keep.size === 0) rows.forEach((_r, i) => keep.add(i));
+  if (keep.size === 0) return mine.map((row) => ({ row }));
+  const out: SideItem[] = [];
+  let hidden: number[] = [];
+  // Only the near view says lines were left out; the changed-only view is a choice's short version.
+  const flush = () => {
+    if (mode === 'near' && hidden.length === 1) out.push({ row: hidden[0]! });
+    else if (mode === 'near' && hidden.length > 0) out.push({ gap: true });
+    hidden = [];
+  };
+  for (const i of mine) {
+    if (keep.has(i)) {
+      flush();
+      out.push({ row: i });
+    } else hidden.push(i);
+  }
+  flush();
+  return out;
+}
+
+/** One side of the rows (see `sideItems`). `marks`: draw the word marks (else plain). `limit`: draw at most this many lines. */
+function SideView({ rows, side, mode, marks, limit }: { rows: readonly QuestionChangeRow[]; side: Side; mode: SideMode; marks: boolean; limit?: number }) {
   // Unchanged lines are dimmed only beside a change (a new value, or a whole text with nothing to compare, reads plain).
-  const anyChange = rows.some(changed);
+  const anyChange = rows.some((r) => r.type !== 'same');
+  const items = sideItems(rows, side, mode);
   const out: React.ReactNode[] = [];
-  rows.forEach((r, i) => {
-    if (!keep.has(i) || !own(r)) return;
+  items.slice(0, limit ?? items.length).forEach((item, k) => {
+    if ('gap' in item) {
+      out.push(<span key={`g${k}`} className="qc-line qc-gap">…</span>);
+      return;
+    }
+    const i = item.row;
+    const r = rows[i]!;
     if (r.type === 'same') {
       const line = side === 'before' ? r.before : r.after;
-      out.push(<LineView key={i} line={line} dim={anyChange && mode !== 'changed'}>{line.tokens.map(tokenNode)}</LineView>);
+      out.push(<LineView key={i} line={line} dim={anyChange && mode !== 'changed' && mode !== 'all'}>{line.tokens.map(tokenNode)}</LineView>);
     } else if (r.type === 'mod') {
       const line = side === 'before' ? r.before : r.after;
       const tokens = side === 'before' ? r.beforeTokens : r.afterTokens;
@@ -246,10 +295,37 @@ function SideView({ rows, side, mode, marks }: { rows: readonly QuestionChangeRo
     } else {
       const line = r.type === 'del' ? r.before : r.after;
       const whole = line.tokens.map(tokenNode);
-      out.push(<LineView key={i} line={line}>{marks ? (r.type === 'del' ? <del className="qc-del">{whole}</del> : <ins className="qc-ins">{whole}</ins>) : whole}</LineView>);
+      out.push(<LineView key={i} line={line}>{marks && !r.unmarked ? (r.type === 'del' ? <del className="qc-del">{whole}</del> : <ins className="qc-ins">{whole}</ins>) : whole}</LineView>);
     }
   });
   return <>{out}</>;
+}
+
+/** How many lines a side draws (for the cap). */
+const sideCount = (rows: readonly QuestionChangeRow[], side: Side, mode: SideMode) => sideItems(rows, side, mode).length;
+
+/** "Show more" for sides over the cap: the limit to draw them at, and the button (null when every side fits). */
+function useLineCap(counts: readonly number[]): { limit: number | undefined; toggle: React.ReactNode } {
+  const [open, setOpen] = useState(false);
+  if (Math.max(0, ...counts) <= QUESTION_CHANGE_LINE_CAP) return { limit: undefined, toggle: null };
+  return {
+    limit: open ? undefined : QUESTION_CHANGE_LINE_CAP,
+    toggle: (
+      <button
+        type="button"
+        className="qc-more annotation-exclude"
+        aria-expanded={open}
+        data-question-change-more=""
+        onClick={(event) => {
+          // Never the choice's pick: the version under a choice picks it when clicked.
+          event.stopPropagation();
+          setOpen(!open);
+        }}
+      >
+        {open ? 'Show less' : 'Show more'}
+      </button>
+    ),
+  };
 }
 
 /** The screen reader's sentence for a comparison: where, now, after, and the words removed and added. */
@@ -268,8 +344,20 @@ function spoken(parts: { where?: string; now?: QuestionChangeValue; after?: Ques
   return out.join(' ');
 }
 
+/** A picture's alt without the side's own label written at its start ("Now: the row…" → "the row…"). */
+const altWithout = (label: string, alt: string | undefined): string =>
+  (alt ?? '').replace(new RegExp(`^${label}\\s*[:·—–-]?\\s*`, 'i'), '').trim();
+
 /** One picture: opens in the viewer; a held picture is the host's placeholder; a failed one says so. */
-function Picture({ value, caption, host }: { value: Extract<QuestionChangeValue, { kind: 'image' }>; caption: React.ReactNode; host: QuestionChangeHost }) {
+function Picture({ value, label, name, caption, host }: {
+  value: Extract<QuestionChangeValue, { kind: 'image' }>;
+  /** Its side: Now, After or New. */
+  label: string;
+  /** What tells this picture apart from the others on the card: its choice's label, else its own alt. */
+  name: string;
+  caption: React.ReactNode;
+  host: QuestionChangeHost;
+}) {
   const url = host.pictureSrc(value.src);
   const held = url === null ? host.heldPlaceholder?.(value.src, value.alt) ?? null : null;
   const failed = url !== null && host.failed?.has(url);
@@ -279,32 +367,40 @@ function Picture({ value, caption, host }: { value: Extract<QuestionChangeValue,
         <button
           type="button"
           className="qc-pic"
-          aria-label={`Open the picture: ${value.alt || 'picture'}`}
-          onClick={host.onOpenPicture ? () => host.onOpenPicture!(url, value.alt) : undefined}
+          aria-label={`Open the picture: ${label}${name ? `, ${name}` : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            host.onOpenPicture?.(url, value.alt);
+          }}
         >
           <img src={url} alt="" draggable={false} data-question-picture="" data-zoomable="" data-image-src={value.src} onError={() => host.onPictureError?.(url)} />
         </button>
       ) : (
         <div className="qc-pic qc-pic-missing">{held ?? (failed ? 'Picture didn’t load' : value.alt || 'Picture')}</div>
       )}
-      <figcaption className="qc-cap">{caption}{value.caption ? <span className="qc-cap-words">{value.caption}</span> : null}</figcaption>
+      <figcaption className="qc-cap">{caption}{value.caption ? <span className="qc-cap-words" dir="auto">{value.caption}</span> : null}</figcaption>
     </figure>
   );
 }
 
-const captionOf = (label: string, alt: string | undefined, short: boolean) => (
-  <>
-    <b>{label}</b>
-    {!short && alt && alt.toLowerCase() !== label.toLowerCase() ? <> · {alt.replace(new RegExp(`^${label}:?\\s*`, 'i'), '')}</> : null}
-  </>
-);
+const captionOf = (label: string, alt: string | undefined, short: boolean) => {
+  const rest = altWithout(label, alt);
+  return (
+    <>
+      <b>{label}</b>
+      {!short && rest ? <> · {rest}</> : null}
+    </>
+  );
+};
 
-/** A Now / After pair of which at least one side is a picture. */
-function PicturePair({ before, after, host, small }: { before?: QuestionChangeValue; after?: QuestionChangeValue; host: QuestionChangeHost; small?: boolean }) {
+/** A Now / After pair of which at least one side is a picture. `choiceLabel`: the choice it belongs to (its pictures' names). */
+function PicturePair({ before, after, host, small, choiceLabel }: { before?: QuestionChangeValue; after?: QuestionChangeValue; host: QuestionChangeHost; small?: boolean; choiceLabel?: string }) {
   const figures: React.ReactNode[] = [];
   const side = (value: QuestionChangeValue, label: string, key: string) => {
-    if (value.kind === 'image') figures.push(<Picture key={key} value={value} caption={captionOf(label, value.alt, !!small)} host={host} />);
-    else if (value.kind === 'text') {
+    if (value.kind === 'image') {
+      const name = choiceLabel ?? altWithout(label, value.alt);
+      figures.push(<Picture key={key} value={value} label={label} name={name} caption={captionOf(label, value.alt, !!small)} host={host} />);
+    } else if (value.kind === 'text') {
       figures.push(
         <figure key={key} className="qc-fig">
           <span className="qc-v" style={{ display: 'block' }}>{questionChangeLines(value.text).map((line, i) => <LineView key={i} line={line}>{line.tokens.map(tokenNode)}</LineView>)}</span>
@@ -320,18 +416,20 @@ function PicturePair({ before, after, host, small }: { before?: QuestionChangeVa
 }
 
 /** The pin and the place in words, and "See it" when the question shows a picture of the place. */
-export function QuestionWhere({ id, where, host, place }: {
+export function QuestionWhere({ id, where, host, place, source }: {
   id?: string;
   where: string;
   host: QuestionChangeHost;
   /** The `Shows:` picture: its loaded URL and its alt (with the source, for the opened view). */
   place?: { url: string; alt: string } | null;
+  /** The question's `Source:` when "See it" cannot carry it (no picture to open): shown as written. */
+  source?: string;
 }) {
   return (
     <div id={id} className="qc-where" data-question-part="where">
       <Style />
       <PinGlyph />
-      <span className="qc-where-text">
+      <span className="qc-where-text" dir="auto">
         <span className="qc-sr">Where: </span>
         {host.inline(where)}
         {place && host.onOpenPicture && (
@@ -341,13 +439,14 @@ export function QuestionWhere({ id, where, host, place }: {
             <span className="qc-sr">: {place.alt}</span>
           </button>
         )}
+        {source && !(place && host.onOpenPicture) ? <span className="qc-src" data-question-change-source="">Source: {source}</span> : null}
       </span>
     </div>
   );
 }
 
 /** One place's comparison. */
-function GroupView({ question, index, group, heading, ownWhere, keep, host, place }: {
+function GroupView({ question, index, group, heading, ownWhere, keep, host, place, source }: {
   question: Pick<ParsedQuestion, 'change' | 'choices'>;
   index: number;
   group: QuestionChangeGroup;
@@ -356,14 +455,25 @@ function GroupView({ question, index, group, heading, ownWhere, keep, host, plac
   keep: boolean;
   host: QuestionChangeHost;
   place?: { url: string; alt: string } | null;
+  source?: string;
 }) {
+  const before = textOf(group.before);
+  const refText = textOf(referenceAfter(question, index));
+  const pictures = group.before?.kind === 'image' || group.after?.kind === 'image';
+  const rows = diffQuestionChange(before, refText ?? before);
+  const afterRows = group.after?.kind === 'text' ? diffQuestionChange(before ?? group.after.text, group.after.text) : null;
+  const isNew = group.before?.kind === 'none';
+  const pureAdd = before !== null && group.after?.kind === 'text' && rows.every((r) => r.type === 'same' || r.type === 'add');
+  const showNow = !pictures && !keep && !pureAdd && group.before !== undefined && group.before.kind !== 'none';
+  const afterMode: SideMode = isNew || before === null ? 'all' : 'near';
+  const cap = useLineCap([showNow ? sideCount(rows, 'before', 'near') : 0, afterRows ? sideCount(afterRows, 'after', afterMode) : 0]);
   const head = group.where
     ? heading
-      ? <p className="qc-gh">{host.inline(group.where)}</p>
-      : ownWhere ? <QuestionWhere where={group.where} host={host} place={place} /> : null
+      ? <p className="qc-gh" dir="auto">{host.inline(group.where)}</p>
+      : ownWhere ? <QuestionWhere where={group.where} host={host} place={place} source={source} /> : null
     : null;
   if (!group.before && !group.after) return head ? <div className="qc-cmp" data-question-change-group="">{head}</div> : null;
-  if (group.before?.kind === 'image' || group.after?.kind === 'image') {
+  if (pictures) {
     return (
       <div className="qc-cmp" data-question-change-group="">
         {head}
@@ -371,16 +481,6 @@ function GroupView({ question, index, group, heading, ownWhere, keep, host, plac
       </div>
     );
   }
-  const before = textOf(group.before);
-  const ref = referenceAfter(question, index);
-  const refText = textOf(ref);
-  const rows = diffQuestionChange(before, refText ?? before);
-  const long = questionChangeLines(before ?? textOf(group.after)).length > LONG_VALUE_LINES;
-  const mode = long ? 'near' : 'all';
-  const pureAdd = before !== null && group.after?.kind === 'text' && rows.every((r) => r.type === 'same' || r.type === 'add');
-  const showNow = !keep && !pureAdd && group.before !== undefined && group.before.kind !== 'none';
-  const afterRows = group.after?.kind === 'text' ? diffQuestionChange(before ?? group.after.text, group.after.text) : null;
-  const isNew = group.before?.kind === 'none';
   const afterLabel = isNew ? 'New' : 'After';
   if (!showNow && !group.after) return head ? <div className="qc-cmp" data-question-change-group="">{head}</div> : null;
   return (
@@ -391,7 +491,7 @@ function GroupView({ question, index, group, heading, ownWhere, keep, host, plac
           <>
             <span className="qc-k">Now</span>
             <div className="qc-v qc-now" data-question-change-now="">
-              <SideView rows={rows} side="before" mode={mode} marks={refText !== null} />
+              <SideView rows={rows} side="before" mode="near" marks={refText !== null} limit={cap.limit} />
             </div>
           </>
         )}
@@ -401,11 +501,12 @@ function GroupView({ question, index, group, heading, ownWhere, keep, host, plac
             <div className={group.after.kind === 'none' ? 'qc-v qc-quiet' : 'qc-v'} data-question-change-after="">
               {group.after.kind === 'none'
                 ? 'Removed'
-                : <SideView rows={afterRows!} side="after" mode={isNew || before === null ? 'all' : mode} marks={!isNew && before !== null} />}
+                : <SideView rows={afterRows!} side="after" mode={afterMode} marks={!isNew && before !== null} limit={cap.limit} />}
             </div>
           </>
         )}
       </div>
+      {cap.toggle}
       <p className="qc-sr">
         {spoken({
           where: heading ? group.where : undefined,
@@ -424,11 +525,13 @@ function GroupView({ question, index, group, heading, ownWhere, keep, host, plac
  * above (by `QuestionWhere`), a place's own Where is a small heading; without
  * it, each place leads with its own pin.
  */
-export function QuestionChangeGroups({ question, host, place }: {
+export function QuestionChangeGroups({ question, host, place, source }: {
   question: Pick<ParsedQuestion, 'change' | 'choices' | 'kind'>;
   host: QuestionChangeHost;
   /** The place picture's "See it", for the first place's own Where when the question has no Where of its own. */
   place?: { url: string; alt: string } | null;
+  /** The `Source:` to show as written when there is no place picture to carry it. */
+  source?: string;
 }) {
   const change: QuestionChange | undefined = question.change;
   if (!change || change.groups.length === 0) return null;
@@ -438,7 +541,18 @@ export function QuestionChangeGroups({ question, host, place }: {
     <div data-question-part="change">
       <Style />
       {change.groups.map((group, i) => (
-        <GroupView key={i} question={question} index={i} group={group} heading={change.where !== undefined} ownWhere={change.where === undefined} keep={keep} host={host} place={i === firstWhere ? place : null} />
+        <GroupView
+          key={i}
+          question={question}
+          index={i}
+          group={group}
+          heading={change.where !== undefined}
+          ownWhere={change.where === undefined}
+          keep={keep}
+          host={host}
+          place={i === firstWhere ? place : null}
+          source={i === firstWhere ? source : undefined}
+        />
       ))}
     </div>
   );
@@ -448,32 +562,35 @@ export function QuestionChangeGroups({ question, host, place }: {
 function ChoicePlace({ where, place, groupBefore }: { where?: string; place: QuestionChangeGroup; groupBefore: string | null }) {
   const own = textOf(place.before);
   const after = place.after;
+  const rows = after?.kind === 'text' ? diffQuestionChange(own ?? groupBefore ?? after.text, after.text) : null;
+  const mode: SideMode = own !== null ? 'near' : groupBefore !== null ? 'changed' : 'all';
+  const cap = useLineCap(rows ? [own !== null ? sideCount(rows, 'before', 'near') : 0, sideCount(rows, 'after', mode)] : []);
   if (!after || after.kind === 'image' || place.before?.kind === 'image') return null;
-  const head = where ? <span className="qc-cw">{where}</span> : null;
+  const head = where ? <span className="qc-cw" dir="auto">{where}</span> : null;
   if (after.kind === 'none') {
     return <span className="qc-place">{head}<span className="qc-quiet">Removed</span></span>;
   }
   if (own !== null) {
-    const rows = diffQuestionChange(own, after.text);
     return (
       <span className="qc-place">
         {head}
         <span className="qc-grid">
           <span className="qc-k">Now</span>
-          <span className="qc-v qc-now"><SideView rows={rows} side="before" mode="all" marks /></span>
+          <span className="qc-v qc-now"><SideView rows={rows!} side="before" mode="near" marks limit={cap.limit} /></span>
           <span className="qc-k">After</span>
-          <span className="qc-v"><SideView rows={rows} side="after" mode="all" marks /></span>
+          <span className="qc-v"><SideView rows={rows!} side="after" mode="near" marks limit={cap.limit} /></span>
         </span>
+        {cap.toggle}
       </span>
     );
   }
-  const rows = diffQuestionChange(groupBefore ?? after.text, after.text);
   return (
     <span className="qc-place">
       {head}
       <span className="qc-v" style={{ display: 'block' }}>
-        <SideView rows={rows} side="after" mode={groupBefore !== null ? 'changed' : 'all'} marks={groupBefore !== null} />
+        <SideView rows={rows!} side="after" mode={mode} marks={groupBefore !== null} limit={cap.limit} />
       </span>
+      {cap.toggle}
     </span>
   );
 }
@@ -486,69 +603,102 @@ function spokenPlace(where: string | undefined, place: QuestionChangeGroup, grou
   return spoken({ where, now: own !== null ? place.before : undefined, after: place.after, rows });
 }
 
-/** A choice's own words under its label, when it has any: its version, its own change, or (Versions) today's words. Null otherwise. */
-export function questionChoiceChangeText(
-  question: Pick<ParsedQuestion, 'change' | 'choices' | 'kind'>,
-  choice: QuestionChoice,
-  index: number,
-): React.ReactNode {
+/** A choice's places in words (not pictures), each with the Where it is read under. */
+function wordsPlacesOf(question: Pick<ParsedQuestion, 'change'>, choice: QuestionChoice) {
   const groups = question.change?.groups ?? [];
   const places = questionChoicePlaces(choice);
   const several = groups.length > 1 || places.length > 1;
-  const wordsPlaces = places
+  return places
     .map((place, k) => ({ place, k, where: place.where ?? (several ? groups[k]?.where : undefined), groupBefore: textOf(groups[k]?.before) }))
     .filter(({ place }) => place.after && place.after.kind !== 'image' && place.before?.kind !== 'image');
-  if (wordsPlaces.length > 0) {
-    return (
-      <span className="qc-choice" data-question-choice-change="">
-        <Style />
-        <span aria-hidden="true" style={{ display: 'block' }}>
-          {wordsPlaces.map(({ place, k, where, groupBefore }) => <ChoicePlace key={k} where={where} place={place} groupBefore={groupBefore} />)}
-        </span>
-        <span className="qc-sr">{wordsPlaces.map(({ place, where, groupBefore }) => spokenPlace(where, place, groupBefore)).join(' ')}</span>
-      </span>
-    );
-  }
-  if (places.length === 0 && questionKeepChoice(question) === index) {
-    return (
-      <span className="qc-choice qc-keep" data-question-choice-change="" data-question-choice-keeps="">
-        <Style />
-        <span aria-hidden="true" style={{ display: 'block' }}>
-          {groups.map((group, k) => {
-            const before = textOf(group.before)!;
-            const rows = diffQuestionChange(before, textOf(referenceAfter(question, k)) ?? before);
-            return (
-              <span key={k} className="qc-place">
-                {groups.length > 1 && group.where ? <span className="qc-cw">{group.where}</span> : null}
-                <SideView rows={rows} side="before" mode="changed" marks={false} />
-              </span>
-            );
-          })}
-        </span>
-        <span className="qc-sr">{groups.map((group) => spoken({ where: groups.length > 1 ? group.where : undefined, now: group.before })).join(' ')}</span>
-      </span>
-    );
-  }
-  return null;
 }
 
-/** A choice's own pictures (pick any: each choice its own change), drawn under its row, outside the label. */
-export function QuestionChoicePictures({ choice, host }: { choice: QuestionChoice; host: QuestionChangeHost }) {
-  const places = questionChoicePlaces(choice).filter((p) => p.after?.kind === 'image' || p.before?.kind === 'image');
-  if (places.length === 0) return null;
+/** A choice's places in pictures (pick any: each choice its own change). */
+const picturePlacesOf = (choice: QuestionChoice) =>
+  questionChoicePlaces(choice).filter((p) => p.after?.kind === 'image' || p.before?.kind === 'image');
+
+/** Whether a choice has anything of its own to draw: a version, pictures, or (Versions) today's words. */
+export function questionChoiceHasChange(question: Pick<ParsedQuestion, 'change' | 'choices' | 'kind'>, choice: QuestionChoice, index: number): boolean {
+  if (questionChoicePlaces(choice).length > 0) return wordsPlacesOf(question, choice).length > 0 || picturePlacesOf(choice).length > 0;
+  return questionKeepChoice(question) === index;
+}
+
+/** What a screen reader hears for a choice's own change (its input's description). */
+export function questionChoiceChangeSpoken(question: Pick<ParsedQuestion, 'change' | 'choices' | 'kind'>, choice: QuestionChoice, index: number): string {
+  const words = wordsPlacesOf(question, choice);
+  const pictures = picturePlacesOf(choice);
+  if (words.length > 0 || pictures.length > 0) {
+    return [
+      ...words.map(({ place, where, groupBefore }) => spokenPlace(where, place, groupBefore)),
+      ...pictures.map((place) => spoken({ where: place.where, now: place.before, after: place.after, afterLabel: place.before?.kind === 'none' ? 'New' : 'After' })),
+    ].join(' ');
+  }
+  if (questionChoicePlaces(choice).length === 0 && questionKeepChoice(question) === index) {
+    const groups = question.change?.groups ?? [];
+    return groups.map((group) => spoken({ where: groups.length > 1 ? group.where : undefined, now: group.before })).join(' ');
+  }
+  return '';
+}
+
+/**
+ * A choice's own change, drawn outside its label: its version (or its own
+ * Now / After), its pictures, or (Versions) today's words in full. `layout`:
+ * `row` under a choice row, lined up with its words; `tile` under a picture
+ * choice's words, in its tile. The words are hidden from the screen reader
+ * here: they reach it once, as the input's description (`spokenId`).
+ */
+export function QuestionChoiceChange({ question, choice, index, host, spokenId, layout = 'row', readOnly, onClick }: {
+  question: Pick<ParsedQuestion, 'change' | 'choices' | 'kind'>;
+  choice: QuestionChoice;
+  index: number;
+  host: QuestionChangeHost;
+  /** The id of the sentence the choice's input is described by. */
+  spokenId: string;
+  layout?: 'row' | 'tile';
+  readOnly?: boolean;
+  /** A click on the words (not a picture or a button): the host picks the choice, as a click on its row does. */
+  onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
+}) {
+  const words = wordsPlacesOf(question, choice);
+  const pictures = picturePlacesOf(choice);
+  const keeps = questionChoicePlaces(choice).length === 0 && questionKeepChoice(question) === index;
+  if (words.length === 0 && pictures.length === 0 && !keeps) return null;
+  const groups = question.change?.groups ?? [];
+  const cls = [layout === 'tile' ? 'qc-tile' : 'qc-choice', keeps ? 'qc-keep' : '', readOnly ? 'qc-readonly' : ''].filter(Boolean).join(' ');
   return (
-    <div data-question-choice-pictures="">
+    <div
+      className={cls}
+      data-question-choice-change=""
+      data-question-choice-keeps={keeps ? '' : undefined}
+      onClick={onClick}
+    >
       <Style />
-      {places.map((place, k) => (
-        <React.Fragment key={k}>
-          {place.where ? <p className="qc-cw qc-cw-pics">{place.where}</p> : null}
-          <PicturePair before={place.before} after={place.after} host={host} small />
-        </React.Fragment>
-      ))}
+      {words.length > 0 && (
+        <div aria-hidden="true">
+          {words.map(({ place, k, where, groupBefore }) => <ChoicePlace key={k} where={where} place={place} groupBefore={groupBefore} />)}
+        </div>
+      )}
+      {pictures.length > 0 && (
+        <div data-question-choice-pictures="">
+          {pictures.map((place, k) => (
+            <React.Fragment key={k}>
+              {place.where ? <p className="qc-cw" dir="auto" aria-hidden="true">{place.where}</p> : null}
+              <PicturePair before={place.before} after={place.after} host={host} small choiceLabel={choice.label} />
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      {keeps && (
+        <div aria-hidden="true">
+          {groups.map((group, k) => (
+            <span key={k} className="qc-place">
+              {groups.length > 1 && group.where ? <span className="qc-cw" dir="auto">{group.where}</span> : null}
+              <SideView rows={diffQuestionChange(textOf(group.before), textOf(group.before))} side="before" mode="all" marks={false} />
+            </span>
+          ))}
+        </div>
+      )}
+      <p id={spokenId} className="qc-sr">{questionChoiceChangeSpoken(question, choice, index)}</p>
     </div>
   );
 }
-
-/** Whether a choice has pictures of its own to draw under its row. */
-export const questionChoiceHasPictures = (choice: QuestionChoice): boolean =>
-  questionChoicePlaces(choice).some((p) => p.after?.kind === 'image' || p.before?.kind === 'image');

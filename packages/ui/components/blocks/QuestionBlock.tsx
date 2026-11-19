@@ -13,7 +13,7 @@ import {
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { QuestionContext } from './QuestionContext';
-import { QuestionChangeGroups, QuestionChoicePictures, QuestionWhere, questionChoiceChangeText, questionChoiceHasPictures, type QuestionChangeHost } from './QuestionChange';
+import { QuestionChangeGroups, QuestionChoiceChange, QuestionWhere, questionChoiceHasChange, type QuestionChangeHost } from './QuestionChange';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
@@ -830,6 +830,35 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     ? { url: showsSrc, alt: [question.shows.label || 'The place', change!.source].filter(Boolean).join(' · ') }
     : null;
 
+  // A `Source:` the parser took with the place picture, shown as written when that picture cannot open here.
+  const changeSource = change?.source && !place ? change.source : undefined;
+  // A choice's own change: its words, outside its label, describe its input.
+  const choiceChanges = changeHost ? question.choices.map((c, i) => questionChoiceHasChange(question, c, i)) : null;
+  const choiceChangeId = (index: number) => `${groupName}-change-${index}`;
+  /** A click on a choice's own change picks it, as a click on its row does (never while selecting words or on a double-click). */
+  const onChoiceChangeClick = (event: React.MouseEvent<HTMLDivElement>, label: string) => {
+    onRowClick(event, label);
+    if (event.defaultPrevented || readOnly) return;
+    const holder = event.currentTarget.closest('[data-question-option-with-change], [data-question-tile]');
+    holder?.querySelector<HTMLInputElement>('input[data-question-control]')?.click();
+  };
+  const choiceChange = (index: number, layout: 'row' | 'tile') => {
+    const choice = question.choices[index];
+    if (!changeHost || !choice || !choiceChanges?.[index]) return null;
+    return (
+      <QuestionChoiceChange
+        question={question}
+        choice={choice}
+        index={index}
+        host={changeHost}
+        spokenId={choiceChangeId(index)}
+        layout={layout}
+        readOnly={readOnly}
+        onClick={(event) => onChoiceChangeClick(event, choice.label)}
+      />
+    );
+  };
+
   const describedBy = [question.stakes ? stakesId : null, change?.where ? whereId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
@@ -953,7 +982,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {inline(question.stakes)}
         </p>
       )}
-      {changeHost && change?.where !== undefined && <QuestionWhere id={whereId} where={change.where} host={changeHost} place={place} />}
+      {changeHost && change?.where !== undefined && <QuestionWhere id={whereId} where={change.where} host={changeHost} place={place} source={changeSource} />}
       {question.shows && !place && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px]" data-question-shows="">
           <span className="annotation-exclude select-none text-muted-foreground" data-pinpoint-ignore="">Shows</span>
@@ -1026,7 +1055,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         />
       )}
       {/* The Where is the first thing under the prompt; the places' Now and After follow the context that explains them. */}
-      {changeHost && change && <QuestionChangeGroups question={question} host={changeHost} place={place} />}
+      {changeHost && change && <QuestionChangeGroups question={question} host={changeHost} place={place} source={change.where === undefined ? changeSource : undefined} />}
 
       {question.kind === 'text' ? (
         <>
@@ -1077,11 +1106,20 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 pictureBadge={pictureBadge}
                 // Asked by the picture's own URL, loaded or not: a picture that fails keeps the set's layout.
                 pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
+                {...(choiceChanges?.some(Boolean)
+                  ? {
+                    inputProps: (label: string) => {
+                      const index = question.choices.findIndex((c) => c.label === label);
+                      return choiceChanges[index] ? { 'aria-describedby': choiceChangeId(index) } : {};
+                    },
+                    renderBelow: (_choice: unknown, index: number) => choiceChange(index, 'tile'),
+                  }
+                  : {})}
               />
             ) : (
               question.choices.map((choice, choiceIndex) => {
                 const checked = selected.includes(choice.label);
-                const changeText = changeHost ? questionChoiceChangeText(question, choice, choiceIndex) : null;
+                const hasChange = !!choiceChanges?.[choiceIndex];
                 const row = (
                   <label
                     key={choice.label}
@@ -1102,6 +1140,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                       className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                       data-question-control=""
                       disabled={readOnly}
+                      aria-describedby={hasChange ? choiceChangeId(choiceIndex) : undefined}
                     />
                     <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
                       <span className="font-[550]">{inline(choice.label)}</span>
@@ -1110,15 +1149,14 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                         <span className="text-muted-foreground"> — {inline(choice.description)}</span>
                       )}
                       {choice.recommended && <> <Tag tone="rec">Recommended</Tag></>}
-                      {changeText}
                     </span>
                   </label>
                 );
-                // A choice that is its own change in pictures: the pair under its row, outside the label (each picture opens).
-                return changeHost && questionChoiceHasPictures(choice) ? (
-                  <div key={choice.label} data-question-option-with-pictures="">
+                // A choice's own change (its version, its pictures, or today's words): under its row, outside its label.
+                return hasChange ? (
+                  <div key={choice.label} data-question-option-with-change="" onPointerDown={onRowPointerDown}>
                     {row}
-                    <QuestionChoicePictures choice={choice} host={changeHost} />
+                    {choiceChange(choiceIndex, 'row')}
                   </div>
                 ) : row;
               })
@@ -1400,6 +1438,8 @@ export interface QuestionPictureTilesProps {
   inputProps?: (label: string) => React.InputHTMLAttributes<HTMLInputElement>;
   /** What sits under a choice's words (default: its Recommended tag). */
   renderBadges?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
+  /** What a tile draws under its label, outside it (the card: a choice's own version); null or absent draws nothing. */
+  renderBelow?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
   /** A small label over a tile's picture, top left (the card's `pictureBadge`); null or absent draws none. */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
   /** Each choice's picture size in pixels by its place in `choices`, when the host knows it before the picture loads
@@ -1430,6 +1470,7 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   labelProps,
   inputProps,
   renderBadges,
+  renderBelow,
   pictureBadge,
   pictureSize,
 }) => {
@@ -1545,6 +1586,7 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
                 </span>
               </span>
             </label>
+            {renderBelow?.(choice, index)}
             {shown && onZoom && (
               <button
                 type="button"

@@ -102,7 +102,7 @@ describe('change lines: the forms', () => {
       ],
     });
     // A picture with words after it on its line: the words are its caption.
-    expect(read(['Which?', 'Before: ![Toolbar today](today.png) Button "Sync" · tooltip "Syncs your stuff."', '- [ ] A', '- [ ] B'].join('\n')).change?.groups[0]?.before)
+    expect(read(['Which?', 'Before: ![Toolbar today](today.png) Button "Sync" · tooltip "Syncs your stuff."', 'After: ![Toolbar after](after.png)', '- [ ] A', '- [ ] B'].join('\n')).change?.groups[0]?.before)
       .toEqual({ kind: 'image', alt: 'Toolbar today', src: 'today.png', caption: 'Button "Sync" · tooltip "Syncs your stuff."' });
   });
 
@@ -262,6 +262,139 @@ describe('change lines: what stays text', () => {
     const body = ['Which wording?', '- [ ] Change it', '    After: First words', '- [ ] Change it', '    After: Second words'].join('\n');
     expect(read(body).choices.map((c) => c.label)).toEqual(plain(body).choices.map((c) => c.label));
     expect(read(body).choices.map((c) => c.label)).toEqual(['Change it After: First words', 'Change it After: Second words']);
+  });
+
+  /** Nothing is drawn: the question reads exactly as the default parse has it. */
+  const asWritten = (body: string) => {
+    const q = read(body);
+    const p = plain(body);
+    expect(q.change).toBeUndefined();
+    expect(q.context).toBe(p.context);
+    expect(q.choices.map((c) => [c.label, c.description, c.before, c.after, c.places])).toEqual(p.choices.map((c) => [c.label, c.description, undefined, undefined, undefined]));
+    return q;
+  };
+
+  test('a shape the card does not draw whole stays as written, in place: a Where, a Before or an After alone, under a choice or at the block\'s indent', () => {
+    // Prose a stored thread already holds: the words stay where they were.
+    expect(asWritten([
+      'Where should the nightly export run?',
+      '- [ ] Host it ourselves',
+      '    Where: our own box in a rented rack',
+      '- [ ] Migrate now',
+      '    Before: the Friday freeze',
+      '- [ ] Use the hosted runner',
+    ].join('\n')).choices.map((c) => c.description)).toEqual(['Where: our own box in a rented rack', 'Before: the Friday freeze', undefined]);
+    expect(asWritten([
+      'Keep the retry loop?',
+      'Before: we used cron, which missed runs.',
+      'The loop has run for a month with no misses.',
+      '- [ ] Keep it',
+      '- [ ] Go back',
+    ].join('\n')).context).toBe('Before: we used cron, which missed runs.\nThe loop has run for a month with no misses.');
+    asWritten(['Ship the new export?', 'After: lunch, once the build is green.', '- [ ] Yes', '- [ ] No'].join('\n'));
+    asWritten(['Add a banner?', 'Before: none', '- [ ] Yes', '- [ ] No'].join('\n'));
+    asWritten(['Which host?', 'Where: the settings page', 'Source: packages/x.ts:1', '- [ ] A', '- [ ] B'].join('\n'));
+  });
+
+  test('a drawn place takes only its own lines: a Where written after its place, a lone line under a choice and a Source with no place picture stay as written', () => {
+    const q = read([
+      'Reword the toast?',
+      'Before: Saved.',
+      'After: Saved to your drafts.',
+      'Where: the toast after you save',
+      'Source: packages/x.ts:12',
+      '- [ ] Reword it',
+      '    Where: only on phones',
+      '- [ ] Leave it',
+    ].join('\n'));
+    expect(q.change).toEqual({ groups: [{ before: { kind: 'text', text: 'Saved.' }, after: { kind: 'text', text: 'Saved to your drafts.' } }] });
+    expect(q.context).toBe('Where: the toast after you save\nSource: packages/x.ts:12');
+    expect(q.choices[0].description).toBe('Where: only on phones');
+    // A choice with a drawn After and a second place with no After: the After is drawn, the rest stays.
+    const choice = read(['Which?', '- [ ] A', '    After: New words', '    Where: the footer', '    Before: Old footer', '- [ ] B'].join('\n'));
+    expect(choice.choices[0].after).toEqual({ kind: 'text', text: 'New words' });
+    expect(choice.choices[0].description).toBe('Where: the footer Before: Old footer');
+  });
+
+  test('picture choices keep their own After (the card draws it in the tile), and their description keeps what is not drawn', () => {
+    const body = [
+      'Which toolbar?',
+      '- [ ] A · Sync with team — ![Sync A](sync-a.png) Keeps the word',
+      '    After: Button "Sync with team" · tooltip "Sends your edits to the team."',
+      '- [ ] B · Share — ![Share B](share-b.png) Shorter',
+      '    After: Button "Share"',
+    ].join('\n');
+    const q = read(body);
+    expect(q.choices.map((c) => c.after)).toEqual([
+      { kind: 'text', text: 'Button "Sync with team" · tooltip "Sends your edits to the team."' },
+      { kind: 'text', text: 'Button "Share"' },
+    ]);
+    expect(q.choices.every((c) => !c.description?.includes('After:'))).toBe(true);
+    sameIdentity(q, plain(body));
+  });
+
+  test('a recommended marker reads as the default parse reads it, with a choice\'s own After under it', () => {
+    const body = ['Narrow the rule?', '- [ ] Narrow it — recommended', '    After: Flag missing tests only when behaviour changes.', '- [ ] Leave it'].join('\n');
+    expect(read(body).choices.map((c) => c.recommended)).toEqual(plain(body).choices.map((c) => c.recommended));
+    expect(read(body).recommendedMarker).toBe(plain(body).recommendedMarker);
+    const marked = ['Narrow the rule?', '- [ ] Narrow it (recommended)', '    After: Flag missing tests only when behaviour changes.', '- [ ] Leave it'].join('\n');
+    expect(read(marked).choices.map((c) => [c.label, c.recommended])).toEqual(plain(marked).choices.map((c) => [c.label, c.recommended]));
+  });
+});
+
+describe('change lines: forgiving forms', () => {
+  test('a one-line value goes on over the lines right under it, to a blank line, another change line or other markdown', () => {
+    const q = read([
+      'Reword the paragraph?',
+      'Before: First line of the paragraph',
+      'second line of it.',
+      'After: First line, reworded,',
+      'and its second line.',
+      '',
+      'Context after a blank line.',
+      '- [ ] Yes',
+      '- [ ] No',
+    ].join('\n'));
+    expect(q.change?.groups).toEqual([{
+      before: { kind: 'text', text: 'First line of the paragraph\nsecond line of it.' },
+      after: { kind: 'text', text: 'First line, reworded,\nand its second line.' },
+    }]);
+    expect(q.context).toBe('Context after a blank line.');
+    // Under a choice too; a heading or a list ends the value.
+    const choice = read(['Which?', '- [ ] A', '    After: One line', '    and the next', '- [ ] B', 'Before: x', '# Heading'].join('\n'));
+    expect(choice.choices[0].after).toEqual({ kind: 'text', text: 'One line\nand the next' });
+    expect(choice.choices[0].description).toBeUndefined();
+  });
+
+  test('a picture written with a title loads: the title is not part of its address', () => {
+    const q = read([
+      'Change the toolbar?',
+      'Shows: ![The toolbar](shots/bar.png "The toolbar today")',
+      'Where: the toolbar',
+      "Before: ![Now](shots/now.png 'Today')",
+      'After: ![After](shots/after.png "The new toolbar") One button fewer.',
+      '- [ ] Yes',
+      '- [ ] No',
+    ].join('\n'), 'question');
+    expect(parseQuestionBlock('question', 'Which?\nShows: ![The toolbar](shots/bar.png "The toolbar today")\n- [ ] A', { contractLines: true })!.shows)
+      .toMatchObject({ kind: 'image', src: 'shots/bar.png' });
+    expect(q.change?.groups[0]?.before).toEqual({ kind: 'image', alt: 'Now', src: 'shots/now.png' });
+    expect(q.change?.groups[0]?.after).toEqual({ kind: 'image', alt: 'After', src: 'shots/after.png', caption: 'One button fewer.' });
+  });
+
+  test('an After written unindented right under a choice is that choice\'s', () => {
+    const body = [
+      'Which wording?',
+      '- [ ] Short',
+      'After: Saved.',
+      '- [ ] Long',
+      'After: Saved to your drafts.',
+      '- [ ] Leave it',
+    ].join('\n');
+    const q = read(body);
+    expect(q.choices.map((c) => c.after)).toEqual([{ kind: 'text', text: 'Saved.' }, { kind: 'text', text: 'Saved to your drafts.' }, undefined]);
+    expect(q.context).toBe('');
+    sameIdentity(q, plain(body));
   });
 });
 

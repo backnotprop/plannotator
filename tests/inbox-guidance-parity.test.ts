@@ -59,6 +59,7 @@ import { INBOX_MCP_INSTRUCTIONS } from "../packages/server/inbox-mcp";
 import { INBOX_NOTE_BODY } from "../packages/server/inbox-agent-notes";
 import { createAgentEnvironmentFor } from "../packages/server/inbox-agents";
 import { formatInboxHelp } from "../apps/hook/server/inbox-help";
+import { buildLlmsInbox } from "../apps/marketing/src/lib/llms";
 import { inboxCommandTurnText } from "../apps/opencode-plugin/cli-bridge";
 import { runDroidInboxCommand } from "./helpers/droid-inbox-command";
 
@@ -309,11 +310,11 @@ describe("Inbox guidance parity across harnesses", () => {
       "MCP send_message (Codex, Gemini, Cursor, MCP clients)": mcpBody,
       "plannotator inbox --help": SURFACES["plannotator inbox --help"]!,
       "plannotator skill": SURFACES["plannotator skill"]!,
-      "llms.txt": readFileSync(join(root, "apps/marketing/src/lib/llms.ts"), "utf8"),
+      // The page as served, so the bullet itself is checked (an import line alone would not count).
+      "llms.txt": buildLlmsInbox(),
     };
     for (const [surface, text] of Object.entries(surfaces)) {
-      const carries = surface === "llms.txt" ? text.includes("INBOX_CHANGE_RULE") : text.includes(INBOX_CHANGE_RULE);
-      expect([surface, carries]).toEqual([surface, true]);
+      expect([surface, text.includes(INBOX_CHANGE_RULE)]).toEqual([surface, true]);
     }
     // Right after the pictures rule on every body.
     for (const body of [toolBody, modBody, mcpBody]) expect(body).toContain(`${INBOX_PICTURES_RULE}\n${INBOX_CHANGE_RULE}`);

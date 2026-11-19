@@ -3776,6 +3776,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-control] { width: 20px; height: 20px; margin-top: 0; }
   :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
+  /* A choice's own version under its row lines up with its words past the 20 px control (9 + 20 + 10). */
+  :is(.ib-body, .ib-docscroll) .question-block { --qc-choice-indent: 39px; }
   :is(.ib-body, .ib-docscroll) [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-key] input[type="text"] { min-height: 40px; }
   /* The Other field (a textarea that grows with its lines): one line is 40 px with its words in the middle, as the
@@ -5544,6 +5546,10 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .question-block [data-question-tiles] > [data-question-tile] { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; }
 .pn-inbox .question-block [data-question-tiles] > [data-question-tile] > label { grid-row: 1 / span 2; display: grid; grid-template-rows: subgrid; row-gap: 0; }
 .pn-inbox .question-block [data-question-tile-caption] { grid-row: 2; align-self: start; padding: 10px 12px 12px; gap: 10px; }
+/* A choice's own version (change lines) under a tile's words: a third row, so the versions line up across tiles too. */
+.pn-inbox .question-block [data-question-tiles]:has(> [data-question-tile] > [data-question-choice-change]) > [data-question-tile] { grid-row: span 3; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile] > [data-question-choice-change] { grid-row: 3; align-self: start; padding: 0 12px 12px; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile]:has(> [data-question-choice-change]) [data-question-tile-caption] { padding-bottom: 6px; }
 .pn-inbox .question-block [data-question-tile] [data-question-part="choice"] { max-width: 68ch; }
 /* The picture's box is its own shape from the recorded size (16:10 when none was recorded), never past its natural width
    (a small icon is not blown up; an SVG has no recorded size and fills the box), at most 440 px tall, on a quiet ground.

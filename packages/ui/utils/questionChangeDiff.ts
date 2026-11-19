@@ -16,7 +16,18 @@
  *
  * Markdown in a value stays whole: a link, a picture or a code span is one
  * token (a changed link text marks the whole link), and `**bold**` / `*em*`
- * travel as flags on the words, so a mark never splits their syntax.
+ * travel as flags on the words, so a mark never splits their syntax. A token
+ * never splits a grapheme (an emoji sequence, a letter and its accents).
+ *
+ * Writing with no spaces between words (Chinese, Japanese, Thai and the
+ * like): a changed line carries no marks (both lines drawn whole), never one
+ * mark over the whole clause.
+ *
+ * Bounded: a pair over `QUESTION_CHANGE_MAX_DIFF_CHARS` (20,000 characters
+ * together) is never diffed, and a diff that would take over
+ * `QUESTION_CHANGE_MAX_EDITS` edits or 50 ms gives up; either way the lines
+ * are shown unmarked. Results are kept per pair (a pick or a keystroke never
+ * diffs again).
  *
  * Pure; never throws.
  */
@@ -24,6 +35,15 @@ import { diffArrays } from 'diff';
 
 /** Under this share of surviving words a changed line is drawn unmarked (see above). */
 export const QUESTION_CHANGE_WHOLE_LINE_SHARE = 0.4;
+
+/** Over this many characters (before and after together) the lines are shown unmarked, never diffed. */
+export const QUESTION_CHANGE_MAX_DIFF_CHARS = 20_000;
+/** A diff that would need more edits than this (or over 50 ms) gives up: the lines are shown unmarked. */
+export const QUESTION_CHANGE_MAX_EDITS = 2_000;
+const DIFF_LIMITS = { maxEditLength: QUESTION_CHANGE_MAX_EDITS, timeout: 50 } as const;
+
+/** Scripts written with no spaces between words: no word marks there. */
+const UNSPACED_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]/u;
 
 export interface QuestionChangeToken {
   /** The text: a word, a space run or a punctuation mark as written; a link's
@@ -59,8 +79,9 @@ export type QuestionChangeRow =
     /** Mostly rewritten (under the whole-line share): no marks on either side. */
     whole: boolean;
   }
-  | { type: 'del'; before: QuestionChangeLine }
-  | { type: 'add'; after: QuestionChangeLine };
+  /** `unmarked`: the pair was too big to diff, so the line is shown as written, never marked. */
+  | { type: 'del'; before: QuestionChangeLine; unmarked?: boolean }
+  | { type: 'add'; after: QuestionChangeLine; unmarked?: boolean };
 
 const LIST_RE = /^\s*([-*+]|\d{1,3}[.)])\s+(.*)$/;
 const HEADING_RE = /^\s*#{1,6}\s+(.*)$/;
@@ -88,10 +109,17 @@ export function questionChangeLine(line: string): QuestionChangeLine {
   const tokens: QuestionChangeToken[] = [];
   let bold = false;
   let em = false;
+  const starts = graphemeStarts(text);
   for (const m of text.matchAll(TOKEN_RE)) {
     const t = m[0];
     if ((t === '**' || t === '__') && boldMarks % 2 === 0) { bold = !bold; continue; }
     if (t === '*' && emMarks % 2 === 0) { em = !em; continue; }
+    // Inside a grapheme (an emoji's joiner or skin tone, an accent): the token before it goes on.
+    const last = tokens[tokens.length - 1];
+    if (starts && last && !starts.has(m.index!)) {
+      last.text += t;
+      continue;
+    }
     const base = { bold, em };
     if (m[1] !== undefined) tokens.push({ text: m[1] || 'picture', kind: 'image', ...base });
     else if (m[2] !== undefined) tokens.push({ text: m[2], kind: 'link', ...base });
@@ -104,6 +132,18 @@ export function questionChangeLine(line: string): QuestionChangeLine {
   return { kind, ...(marker ? { marker } : {}), tokens, raw };
 }
 
+const graphemes = typeof Intl !== 'undefined' && 'Segmenter' in Intl
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  : null;
+
+/** Where each grapheme of the text starts, or null (no segmenter, or nothing past plain ASCII to split). */
+function graphemeStarts(text: string): Set<number> | null {
+  if (!graphemes || !/[^\x00-\x7f]/.test(text)) return null;
+  const out = new Set<number>();
+  for (const g of graphemes.segment(text)) out.add(g.index);
+  return out;
+}
+
 /** The lines of a value (blank lines dropped: a value is drawn line by line). */
 export function questionChangeLines(text: string | null | undefined): QuestionChangeLine[] {
   if (!text) return [];
@@ -113,61 +153,56 @@ export function questionChangeLines(text: string | null | undefined): QuestionCh
 const counts = (t: QuestionChangeToken) => t.kind !== 'space' && t.kind !== 'punct';
 const sameToken = (a: QuestionChangeToken, b: QuestionChangeToken) => a.text === b.text && a.kind === b.kind && a.bold === b.bold && a.em === b.em;
 
-/** A lone unchanged word between two changes joins them; spaces between two marks join too. */
-function absorb(tokens: QuestionChangeMarkedToken[]): QuestionChangeMarkedToken[] {
-  const out = tokens.map((t) => ({ ...t }));
-  let i = 0;
-  while (i < out.length) {
-    if (out[i].mark) { i++; continue; }
-    let j = i;
-    while (j < out.length && !out[j].mark) j++;
-    const run = out.slice(i, j);
-    const words = run.filter(counts).length;
-    const puncts = run.filter((t) => t.kind === 'punct').length;
-    const before = i > 0 && out[i - 1].mark;
-    const after = j < out.length && out[j].mark;
-    if (before && after && puncts === 0 && words <= 1) for (const t of run) t.mark = true;
-    i = j;
-  }
-  return out;
-}
+/** A changed pair drawn with no marks (mostly rewritten, unspaced writing, or too big to diff). */
+const unmarked = (before: QuestionChangeLine, after: QuestionChangeLine): Extract<QuestionChangeRow, { type: 'mod' }> => ({
+  type: 'mod',
+  before,
+  after,
+  beforeTokens: before.tokens.map((t) => ({ ...t, mark: false })),
+  afterTokens: after.tokens.map((t) => ({ ...t, mark: false })),
+  whole: true,
+});
 
-/** The word marks of one changed pair of lines. */
+/**
+ * The word marks of one changed pair of lines. A lone unchanged word between
+ * two changes joins them, as do the spaces between two changes: on both sides
+ * at once, so a kept word reads kept (or changed) on both.
+ */
 function wordMarks(before: QuestionChangeLine, after: QuestionChangeLine): Extract<QuestionChangeRow, { type: 'mod' }> {
-  const changes = diffArrays(before.tokens, after.tokens, { comparator: sameToken });
+  if (UNSPACED_RE.test(before.raw) || UNSPACED_RE.test(after.raw)) return unmarked(before, after);
+  const changes = diffArrays(before.tokens, after.tokens, { comparator: sameToken, ...DIFF_LIMITS });
+  if (!changes) return unmarked(before, after);
+  const changed = (k: number) => k >= 0 && k < changes.length && !!(changes[k].added || changes[k].removed);
   const beforeTokens: QuestionChangeMarkedToken[] = [];
   const afterTokens: QuestionChangeMarkedToken[] = [];
   let a = 0;
   let b = 0;
   let kept = 0;
-  for (const change of changes) {
+  changes.forEach((change, k) => {
     const n = change.count ?? change.value.length;
     if (change.removed) {
-      for (let k = 0; k < n; k++) beforeTokens.push({ ...before.tokens[a++], mark: true });
+      for (let x = 0; x < n; x++) beforeTokens.push({ ...before.tokens[a++], mark: true });
     } else if (change.added) {
-      for (let k = 0; k < n; k++) afterTokens.push({ ...after.tokens[b++], mark: true });
+      for (let x = 0; x < n; x++) afterTokens.push({ ...after.tokens[b++], mark: true });
     } else {
-      for (let k = 0; k < n; k++) {
-        if (counts(before.tokens[a])) kept++;
-        beforeTokens.push({ ...before.tokens[a++], mark: false });
-        afterTokens.push({ ...after.tokens[b++], mark: false });
+      const run = before.tokens.slice(a, a + n);
+      const joins = changed(k - 1) && changed(k + 1)
+        && run.filter(counts).length <= 1 && !run.some((t) => t.kind === 'punct');
+      for (let x = 0; x < n; x++) {
+        if (!joins && counts(before.tokens[a])) kept++;
+        beforeTokens.push({ ...before.tokens[a++], mark: joins });
+        afterTokens.push({ ...after.tokens[b++], mark: joins });
       }
     }
-  }
+  });
   const most = Math.max(before.tokens.filter(counts).length, after.tokens.filter(counts).length);
-  const whole = most > 0 && kept / most < QUESTION_CHANGE_WHOLE_LINE_SHARE;
-  if (whole) {
-    return {
-      type: 'mod',
-      before,
-      after,
-      beforeTokens: before.tokens.map((t) => ({ ...t, mark: false })),
-      afterTokens: after.tokens.map((t) => ({ ...t, mark: false })),
-      whole: true,
-    };
-  }
-  return { type: 'mod', before, after, beforeTokens: absorb(beforeTokens), afterTokens: absorb(afterTokens), whole: false };
+  if (most > 0 && kept / most < QUESTION_CHANGE_WHOLE_LINE_SHARE) return unmarked(before, after);
+  return { type: 'mod', before, after, beforeTokens, afterTokens, whole: false };
 }
+
+/** Rows already worked out, by their pair (most recent last): a re-render never diffs again. */
+const rowsCache = new Map<string, QuestionChangeRow[]>();
+const ROWS_CACHE_SIZE = 200;
 
 /**
  * The rows of a before and after: unchanged lines, changed pairs with their
@@ -175,9 +210,35 @@ function wordMarks(before: QuestionChangeLine, after: QuestionChangeLine): Extra
  * within a run of changed lines, removed and added lines pair in order.
  */
 export function diffQuestionChange(before: string | null | undefined, after: string | null | undefined): QuestionChangeRow[] {
+  const key = `${before ?? ''}\u0000${after ?? ''}`;
+  const known = rowsCache.get(key);
+  if (known) {
+    rowsCache.delete(key);
+    rowsCache.set(key, known);
+    return known;
+  }
+  const rows = computeRows(before, after);
+  rowsCache.set(key, rows);
+  if (rowsCache.size > ROWS_CACHE_SIZE) rowsCache.delete(rowsCache.keys().next().value!);
+  return rows;
+}
+
+function computeRows(before: string | null | undefined, after: string | null | undefined): QuestionChangeRow[] {
   const a = questionChangeLines(before);
   const b = questionChangeLines(after);
-  const changes = diffArrays(a, b, { comparator: (x, y) => x.raw === y.raw });
+  const tooBig = (before?.length ?? 0) + (after?.length ?? 0) > QUESTION_CHANGE_MAX_DIFF_CHARS;
+  const changes = tooBig ? undefined : diffArrays(a, b, { comparator: (x, y) => x.raw === y.raw, ...DIFF_LIMITS });
+  if (!changes) {
+    // Too big to diff: every line shown as written, none marked (same lines still read as same).
+    const rows: QuestionChangeRow[] = [];
+    const n = Math.max(a.length, b.length);
+    for (let k = 0; k < n; k++) {
+      if (a[k] && b[k]) rows.push(a[k].raw === b[k].raw ? { type: 'same', before: a[k], after: b[k] } : unmarked(a[k], b[k]));
+      else if (a[k]) rows.push({ type: 'del', before: a[k], unmarked: true });
+      else rows.push({ type: 'add', after: b[k], unmarked: true });
+    }
+    return rows;
+  }
   const rows: QuestionChangeRow[] = [];
   let i = 0;
   let j = 0;

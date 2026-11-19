@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import {
+  QUESTION_CHANGE_MAX_DIFF_CHARS,
   QUESTION_CHANGE_WHOLE_LINE_SHARE,
   diffQuestionChange,
   questionChangeMarkedRuns,
@@ -39,9 +40,10 @@ describe('word marks', () => {
     expect(side(row, 'after')).toBe('A soft doorbell when an agent {+sends+} you something and this tab is hidden.');
   });
 
-  test('a lone unchanged word between two changes joins them, so a rewrite reads as one run', () => {
+  test('a lone unchanged word between two changes joins them on both sides, so a rewrite reads as one run and a word is kept on both or neither', () => {
     const [row] = diffQuestionChange('When an agent asks you', 'When an agent sends you something');
     expect(side(row, 'after')).toBe('When an agent {+sends you something+}');
+    expect(side(row, 'before')).toBe('When an agent [-asks you-]');
     // Punctuation between two changes is never swallowed.
     const [comma] = diffQuestionChange('red, blue', 'green, yellow');
     expect(comma.type === 'mod' && comma.whole).toBe(true);
@@ -91,6 +93,40 @@ describe('word marks', () => {
   test('no Before or no After: every line is on one side', () => {
     expect(diffQuestionChange(null, 'New line').map((r) => r.type)).toEqual(['add']);
     expect(diffQuestionChange('Old line', null).map((r) => r.type)).toEqual(['del']);
+  });
+});
+
+describe('writing systems and size', () => {
+  test('writing with no spaces between words carries no marks: both lines whole, never one mark over the clause', () => {
+    const [row] = diffQuestionChange('设置已保存到草稿。', '设置已保存到你的草稿。');
+    expect(row.type === 'mod' && row.whole).toBe(true);
+    const [thai] = diffQuestionChange('บันทึกแล้ว', 'บันทึกลงร่างแล้ว');
+    expect(thai.type === 'mod' && thai.whole).toBe(true);
+  });
+
+  test('a mark never splits an emoji sequence or a letter from its accent', () => {
+    const [row] = diffQuestionChange('Ship it 👍🏽 today, team 👩‍💻 ready', 'Ship it 👍🏽 tomorrow, team 👩‍💻 ready');
+    if (row.type !== 'mod') throw new Error('not a changed pair');
+    expect(row.afterTokens.map((t) => t.text)).toContain('👍🏽');
+    expect(row.afterTokens.map((t) => t.text)).toContain('👩‍💻');
+    expect(side(row, 'after')).toBe('Ship it 👍🏽 {+tomorrow+}, team 👩‍💻 ready');
+    const [accent] = diffQuestionChange('Cafe\u0301 open', 'Cafe\u0301 closed');
+    if (accent.type !== 'mod') throw new Error('not a changed pair');
+    expect(accent.beforeTokens[0]!.text).toBe('Cafe\u0301');
+  });
+
+  test(`a pair over ${QUESTION_CHANGE_MAX_DIFF_CHARS} characters is never diffed: its lines are shown unmarked, quickly`, () => {
+    const big = (word: string) => Array.from({ length: 900 }, (_, i) => `Line ${i} says ${word} ${'lorem ipsum '.repeat(2)}`).join('\n');
+    const started = performance.now();
+    const rows = diffQuestionChange(big('old'), big('new'));
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(rows.length).toBe(900);
+    expect(rows.every((r) => r.type === 'same' || (r.type === 'mod' && r.whole) || ((r.type === 'del' || r.type === 'add') && r.unmarked))).toBe(true);
+  });
+
+  test('the same pair is worked out once: a re-render (a pick, a keystroke) gets the same rows back', () => {
+    const a = diffQuestionChange('One two three four', 'One two five four');
+    expect(diffQuestionChange('One two three four', 'One two five four')).toBe(a);
   });
 });
 

@@ -6,13 +6,15 @@
  * HOME, and a Claude Code agent asks through `plannotator inbox mcp`
  * (scripts/inbox-sim.ts) with real PNGs beside the project.
  *
- * Words: the Where shows first with See it, Now and After sit in a quiet
- * list, the removed word is struck and the added words marked, the choice
- * that keeps today's words carries them (no separate Now), and a pick sends
- * the plain label the agent reads back. Pictures: each pick-any choice's Now
- * and After load from the message image route, side by side (two across on a
- * phone too, like picture tiles, inside the card), and a picture opens the thread's viewer without
- * picking. Screenshots, light and dark, land in
+ * Words: the Where shows first with See it; a choice's version sits under
+ * its row with the added words marked; the choice that keeps today's words
+ * carries them (no separate Now); the radio is named by its label alone and
+ * described by its version; and a pick sends the plain label the agent reads
+ * back. Pictures: each pick-any choice's Now and After load from the message
+ * image route, side by side (two across on a phone too, like picture tiles,
+ * inside the card), and a picture opens the thread's viewer without picking.
+ * Picture choices: a tile shows its choice's own After under its words.
+ * Screenshots, light and dark, land in
  * PLANNOTATOR_BEFORE_AFTER_SHOTS (default .local/proof/before-after/).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -46,6 +48,28 @@ const WORDS = [
   'Recommended: Say what you are viewing',
   ':::',
 ].join('\n');
+
+const TILES = [
+  ':::question',
+  'Which toolbar button?',
+  '',
+  'Before: Button "Sync" · tooltip "Syncs your stuff."',
+  '',
+  '- [ ] A · Sync with team — ![Sync A](shots/sync-a.png) Keeps the word',
+  '    After: Button "Sync with team" · tooltip "Sends your edits to the team."',
+  '- [ ] B · Share — ![Share B](shots/share-b.png) Shorter',
+  '    After: Button "Share" · tooltip "Syncs your stuff."',
+  '',
+  'Recommended: A · Sync with team',
+  ':::',
+].join('\n');
+
+/** The card's text as drawn on screen: the screen reader's sentences (`.qc-sr`) left out. */
+const shownText = (card: ReturnType<Page['locator']>) => card.evaluate((el) => {
+  const copy = el.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('.qc-sr').forEach((n) => n.remove());
+  return copy.textContent ?? '';
+});
 
 const PICTURES = [
   ':::question-multi',
@@ -110,6 +134,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'shots', 'tags-after.png'), png(640, 400, [37, 99, 235]));
   writeFileSync(join(project, 'shots', 'links-now.png'), png(640, 400, [88, 28, 135]));
   writeFileSync(join(project, 'shots', 'links-after.png'), png(640, 400, [22, 163, 74]));
+  writeFileSync(join(project, 'shots', 'sync-a.png'), png(640, 480, [14, 116, 144]));
+  writeFileSync(join(project, 'shots', 'share-b.png'), png(640, 480, [190, 18, 60]));
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -139,14 +165,22 @@ test('words: the Where first, Now and After marked, the kept choice carries toda
   const where = card.locator('[data-question-part="where"]');
   await expect(where).toContainText('The line above a file you open from a thread');
   await expect(card.locator('[data-question-shows]')).toHaveCount(0);
-  await expect(card).not.toContainText('Where:');
-  await expect(card).not.toContainText('After:');
+  // The labels are drawn, never written out (the screen reader's sentences say them).
+  expect(await shownText(card)).not.toContain('Where:');
+  expect(await shownText(card)).not.toContain('After:');
 
-  const [version, keep] = [card.locator('label[data-question-option]').nth(0), card.locator('label[data-question-option]').nth(1)];
-  await expect(version.locator('del.qc-del')).toHaveText(['The']);
+  // Versions: the version shows only what it adds (the Now line goes, so nothing is struck); "Leave it" shows today's words.
+  const rows = card.locator('[data-question-option-with-change]');
+  await expect(rows).toHaveCount(2);
+  const [version, keep] = [rows.nth(0), rows.nth(1)];
+  await expect(version.locator('del.qc-del')).toHaveCount(0);
   await expect(version.locator('ins.qc-ins')).toHaveText(['You are viewing the']);
   await expect(keep.locator('[data-question-choice-keeps]')).toContainText('The version Claude Code sent at 5:40 PM.');
   await expect(card.locator('[data-question-change-now]')).toHaveCount(0);
+  // The radio's name is its label; its version is its description.
+  const radio = version.locator('input[type="radio"]');
+  await expect(radio).toHaveAccessibleName(/^Say what you are viewing(?: Recommended)?$/);
+  await expect(radio).toHaveAccessibleDescription(/After: You are viewing the version Claude Code sent at 5:40 PM\./);
   await shot(page, 'words-desktop', card);
 
   // See it opens the place picture in the thread's viewer.
@@ -171,19 +205,19 @@ test('pictures: each choice\'s Now and After load side by side, on a phone too, 
   await page.goto(`${world.url}#thread=${threadId}`);
   const card = page.locator('section.ib-pane fieldset.question-block');
   await expect(card).toBeVisible();
-  const rows = card.locator('[data-question-option-with-pictures]');
+  const rows = card.locator('[data-question-option-with-change]');
   await expect(rows).toHaveCount(2);
   const pictures = rows.nth(0).locator('[data-question-choice-pictures] img[data-question-picture]');
   await expect(pictures).toHaveCount(2);
   for (const i of [0, 1]) {
     await expect.poll(() => pictures.nth(i).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(640);
   }
-  const top = async (p: Page) => p.locator('section.ib-pane [data-question-option-with-pictures]').first().locator('figure').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+  const top = async (p: Page) => p.locator('section.ib-pane [data-question-option-with-change]').first().locator('figure').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
   const desktop = await top(page);
   expect(desktop[0]).toBe(desktop[1]);
   await shot(page, 'pictures-desktop', card);
 
-  await rows.nth(0).getByRole('button', { name: 'Open the picture: After' }).click();
+  await rows.nth(0).getByRole('button', { name: 'Open the picture: After, Tags on dark themes' }).click();
   await expect(page.locator('.ib-view')).toBeVisible();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
@@ -205,5 +239,23 @@ test('pictures: each choice\'s Now and After load side by side, on a phone too, 
   } finally {
     await phone.close();
   }
+  expect(world.errors).toEqual([]);
+});
+
+test('picture choices: each tile shows its choice\'s own After under its words, marked against today\'s', async () => {
+  const { page, claude, project } = world;
+  const sent = await claude.send({ project_path: project, subject: 'Toolbar button', body: TILES }, { wakes: true });
+  const threadId = sent.thread_id as string;
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const card = page.locator('section.ib-pane fieldset.question-block');
+  await expect(card).toBeVisible();
+  const tiles = card.locator('[data-question-tile]');
+  await expect(tiles).toHaveCount(2);
+  await expect(tiles.nth(0).locator('[data-question-choice-change]')).toContainText('Button "Sync with team" · tooltip "Sends your edits to the team."');
+  await expect(tiles.nth(1).locator('ins.qc-ins')).toHaveText(['Share']);
+  const radio = tiles.nth(0).locator('input[type="radio"]');
+  await expect(radio).not.toHaveAccessibleName(/After|tooltip/);
+  await expect(radio).toHaveAccessibleDescription(/After: Button "Sync with team"/);
+  await shot(page, 'tiles-desktop', card);
   expect(world.errors).toEqual([]);
 });

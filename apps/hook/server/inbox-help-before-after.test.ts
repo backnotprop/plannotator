@@ -13,7 +13,8 @@ import { parseQuestionBlock, type ParsedQuestion } from "@plannotator/core/quest
 import { INBOX_CHANGE_RULE } from "@plannotator/shared/inbox/connection";
 import { INBOX_CHANGE_RULE as MOD_INBOX_CHANGE_RULE } from "../hooks/mod/inbox-contract";
 import { createAgentEnvironmentFor } from "../../../packages/server/inbox-agents";
-import { formatInboxHelp } from "./inbox-help";
+import { diffQuestionChange } from "@plannotator/ui/utils/questionChangeDiff";
+import { INBOX_BEFORE_AFTER_EXAMPLE, formatInboxHelp } from "./inbox-help";
 import {
   INBOX_BEFORE_AFTER_FORMS,
   INBOX_BEFORE_AFTER_HELP,
@@ -90,6 +91,20 @@ describe("every form in the topic reads as its card", () => {
     const place = form("A picture of the place, and where it is in the code");
     expect(place.shows).toMatchObject({ kind: "image", src: "shots/settings.png" });
     expect(place.change?.source).toBe("packages/inbox/components/Settings.tsx:392");
+  });
+});
+
+describe("the main help's example", () => {
+  test("shows what the card marks: each choice's version keeps most of today's words, so its changed words are marked", () => {
+    const q = parse(INBOX_BEFORE_AFTER_EXAMPLE, true);
+    const before = q.change?.groups[0]?.before;
+    expect(before?.kind).toBe("text");
+    const versions = q.choices.filter((c) => c.after?.kind === "text");
+    expect(versions.length).toBeGreaterThan(1);
+    for (const c of versions) {
+      const rows = diffQuestionChange((before as { text: string }).text, (c.after as { text: string }).text);
+      expect([c.label, rows.some((r) => r.type === "mod" && !r.whole && r.afterTokens.some((t) => t.mark))]).toEqual([c.label, true]);
+    }
   });
 });
 

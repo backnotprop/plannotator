@@ -9,7 +9,10 @@
  * choice that keeps them; a choice's own pictures stop opening, or opening one
  * picks the choice; a screen reader stops hearing "Where … Now … After …"
  * and which words change; an Inbox that does not read the lines stops showing
- * them as text.
+ * them as text; a line the card does not draw whole (a lone Where or
+ * Before under a choice) disappears; a picture choice's own version is
+ * dropped from its tile; a choice's version becomes part of its radio's name
+ * (a screen reader reads the whole comparison on every arrow key).
  *
  * DOM-gated (DOM_TESTS=1).
  */
@@ -97,7 +100,7 @@ const loads: ImageResolver = (src) => ({ kind: 'src', src: `data:image/gif;name=
 let latest: Annotation[] = [];
 const opened: Array<[string, string]> = [];
 
-function Harness({ markdown, changeLines = true }: { markdown: string; changeLines?: boolean }) {
+function Harness({ markdown, changeLines = true, opens = true }: { markdown: string; changeLines?: boolean; opens?: boolean }) {
   const blocks = parseMarkdownToBlocks(markdown);
   const index = indexQuestionBlocks(blocks, { contractLines: true, optionLines: true, ...(changeLines ? { changeLines: true } : {}) });
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -116,7 +119,8 @@ function Harness({ markdown, changeLines = true }: { markdown: string; changeLin
               questionTotal={index.length}
               questionAnswer={question ? answers.get(question.question.key) : undefined}
               onAnswerQuestion={(blockId, answer, key) => setAnnotations((current) => upsertQuestionAnswerAnnotation(current, blockId, answer, key))}
-              onImageClick={(src, alt) => opened.push([src, alt])}
+              onImageClick={opens ? (src, alt) => opened.push([src, alt]) : undefined}
+              questionPictureChoices
             />
           );
         })}
@@ -152,6 +156,12 @@ afterEach(async () => {
 const answer = (): QuestionAnswer | undefined => latest.find((a) => a.questionAnswer)?.questionAnswer;
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
 const srText = (el: Element) => [...el.querySelectorAll('.qc-sr')].map(text).join(' ');
+/** A choice's row with its own change under it, by its label. */
+const changeRow = (el: Element, label: string) =>
+  [...el.querySelectorAll('[data-question-option-with-change]')].find((r) => text(r.querySelector('label [data-question-part="choice"] > span')) === label)!;
+/** What a choice's input is described by. */
+const description = (el: Element, input: Element) =>
+  (input.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean).map((id) => text(el.ownerDocument.getElementById(id))).join(' ');
 // React's useId differs between two mounts: compare markup with its ids folded.
 const markup = (el: Element) => el.innerHTML.replace(/«[^»]*»|:r[0-9a-z]+:|_r_[0-9a-z]+_/g, 'ID');
 
@@ -187,14 +197,21 @@ describe('the Versions card', () => {
   test.skipIf(!hasDom)('the choice without its own After carries today\'s words, so the separate Now line goes; the version shows its changed line', async () => {
     const el = await mount(<Harness markdown={AGENT_LINE} />);
     expect(el.querySelector('[data-question-change-now]')).toBeNull();
-    const [narrow, leave] = [...el.querySelectorAll('label[data-question-option]')];
-    const version = narrow!.querySelector('[data-question-choice-change]')!;
+    const narrow = changeRow(el, 'Narrow it');
+    const leave = changeRow(el, 'Leave it');
+    const version = narrow.querySelector('[data-question-choice-change]')!;
     expect(text(version.querySelector('[aria-hidden="true"]'))).toBe('•Flag missing tests only when the change alters behaviour and nothing tests it');
-    const kept = leave!.querySelector('[data-question-choice-keeps]')!;
-    expect(text(kept.querySelector('[aria-hidden="true"]'))).toBe('•Never flag missing test coverage unless guidance files say to');
-    // What a screen reader hears on each choice.
-    expect(srText(narrow!)).toContain('After: Never comment on formatting unless guidance files say to. Flag missing tests only when');
-    expect(srText(leave!)).toBe('Now: Never comment on formatting unless guidance files say to. Never flag missing test coverage unless guidance files say to.');
+    // "Leave it" shows today's words in full, so each version can be compared with today.
+    const kept = leave.querySelector('[data-question-choice-keeps]')!;
+    expect([...kept.querySelectorAll('.qc-line')].map(text)).toEqual(['•Never comment on formatting unless guidance files say to', '•Never flag missing test coverage unless guidance files say to']);
+    // The radio is named by its label alone; the version is its description.
+    for (const row of [narrow, leave]) {
+      const label = row.querySelector('label')!;
+      expect(label.querySelector('[data-question-choice-change], .qc-sr')).toBeNull();
+    }
+    const narrowInput = narrow.querySelector('input')!;
+    expect(description(el, narrowInput)).toContain('After: Never comment on formatting unless guidance files say to. Flag missing tests only when');
+    expect(description(el, leave.querySelector('input')!)).toBe('Now: Never comment on formatting unless guidance files say to. Never flag missing test coverage unless guidance files say to.');
     // The words are the choice's: a click on them still picks it.
     await act(async () => (version as HTMLElement).click());
     expect(answer()?.selected).toEqual(['Narrow it']);
@@ -220,13 +237,15 @@ describe('the Versions card', () => {
   test.skipIf(!hasDom)('pick any: each choice\'s own Now and After pictures sit under its row, outside its label; a picture opens and never picks', async () => {
     const el = await mount(<Harness markdown={CONTRAST} />);
     expect(el.querySelector('[data-question-tiles]')).toBeNull();
-    const rows = [...el.querySelectorAll('[data-question-option-with-pictures]')];
+    const rows = [...el.querySelectorAll('[data-question-option-with-change]')];
     expect(rows).toHaveLength(2);
     const pictures = rows[0]!.querySelector('[data-question-choice-pictures]')!;
     expect(pictures.closest('label')).toBeNull();
     expect([...pictures.querySelectorAll('figcaption')].map(text)).toEqual(['Now', 'After']);
+    // Each picture button is told apart by its choice.
     const open = [...pictures.querySelectorAll<HTMLButtonElement>('button')];
-    expect(open.map((b) => b.getAttribute('aria-label'))).toEqual(['Open the picture: Now', 'Open the picture: After']);
+    expect(open.map((b) => b.getAttribute('aria-label'))).toEqual(['Open the picture: Now, Tags on dark themes', 'Open the picture: After, Tags on dark themes']);
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Open the picture: Now, Links in Dracula', 'Open the picture: After, Links in Dracula']);
     await act(async () => open[1]!.click());
     expect(opened[0]![0]).toContain('tags-after.png');
     expect(answer()).toBeUndefined();
@@ -251,12 +270,113 @@ What should the Sync button and its tooltip say?
 
 Recommended: Sync with team
 :::`} />);
-    const [first, leave] = [...el.querySelectorAll('label[data-question-option]')];
-    expect([...first!.querySelectorAll('.qc-cw')].map(text)).toEqual(['the button at the top right of the toolbar', 'the tooltip under that button']);
+    const first = changeRow(el, 'Sync with team');
+    const leave = [...el.querySelectorAll('label[data-question-option]')][1]!;
+    expect([...first.querySelectorAll('.qc-cw')].map(text)).toEqual(['the button at the top right of the toolbar', 'the tooltip under that button']);
     // "Sync" → "Sync with team" keeps one word in three: mostly new, so unmarked. The tooltip is a small edit: marked.
-    expect([...first!.querySelectorAll('ins.qc-ins')].map(text)).toEqual(['with the team']);
-    expect(srText(first!)).toBe('Where: the button at the top right of the toolbar. Now: Sync. After: Sync with team. Where: the tooltip under that button. Now: Syncs your stuff. After: Syncs your stuff with the team. Added: “with the team”.');
-    expect(leave!.querySelector('[data-question-choice-change]')).toBeNull();
+    expect([...first.querySelectorAll('ins.qc-ins')].map(text)).toEqual(['with the team']);
+    expect(description(el, first.querySelector('input')!)).toBe('Where: the button at the top right of the toolbar. Now: Sync. After: Sync with team. Where: the tooltip under that button. Now: Syncs your stuff. After: Syncs your stuff with the team. Added: “with the team”.');
+    expect(leave.querySelector('[data-question-choice-change]')).toBeNull();
+    expect(leave.closest('[data-question-option-with-change]')).toBeNull();
+  });
+});
+
+describe('what the card does not draw whole stays as written', () => {
+  test.skipIf(!hasDom)('a lone Where or Before under a choice stays in its description, and a lone Before at the block\'s indent in the context', async () => {
+    const el = await mount(<Harness markdown={`:::question
+Where should the nightly export run?
+
+Before: we used cron, which missed runs.
+
+- [ ] Host it ourselves
+    Where: our own box in a rented rack
+- [ ] Migrate now
+    Before: the Friday freeze
+- [ ] Use the hosted runner
+:::`} />);
+    expect(el.querySelector('[data-question-choice-change], [data-question-part="change"], [data-question-part="where"]')).toBeNull();
+    const labels = [...el.querySelectorAll('label[data-question-option]')].map(text);
+    expect(labels).toEqual(['Host it ourselves — Where: our own box in a rented rack', 'Migrate now — Before: the Friday freeze', 'Use the hosted runner']);
+    expect(text(el.querySelector('[data-question-part="context"]'))).toBe('Before: we used cron, which missed runs.');
+  });
+
+  test.skipIf(!hasDom)('a Source with no place picture to open shows as written under the Where', async () => {
+    const el = await mount(<Harness opens={false} markdown={AGENT_LINE} />);
+    expect(text(el.querySelector('[data-question-change-source]'))).toBe('Source: packages/server/claude-review.ts:180');
+  });
+});
+
+describe('picture choices', () => {
+  test.skipIf(!hasDom)('a picture choice\'s own After is drawn in its tile, under its words; it describes the tile\'s input and a click on it picks', async () => {
+    const el = await mount(<Harness markdown={`:::question
+Which toolbar button?
+
+Before: Button "Sync" · tooltip "Syncs your stuff."
+
+- [ ] A · Sync with team — ![Sync A](sync-a.png) Keeps the word
+    After: Button "Sync with team" · tooltip "Sends your edits to the team."
+- [ ] B · Share — ![Share B](share-b.png) Shorter
+    After: Button "Share" · tooltip "Syncs your stuff."
+- [ ] Leave it
+
+Recommended: A · Sync with team
+:::`} />);
+    const tiles = [...el.querySelectorAll('[data-question-tile]')];
+    expect(tiles).toHaveLength(3);
+    const version = tiles[0]!.querySelector('[data-question-choice-change]')!;
+    expect(version.closest('label')).toBeNull();
+    expect(text(version.querySelector('[aria-hidden="true"]'))).toBe('Button "Sync with team" · tooltip "Sends your edits to the team."');
+    expect(text(tiles[1]!.querySelector('[data-question-choice-change] [aria-hidden="true"]'))).toBe('Button "Share" · tooltip "Syncs your stuff."');
+    expect([...tiles[1]!.querySelectorAll('ins.qc-ins')].map(text)).toEqual(['Share']);
+    // The third keeps today's words.
+    expect(text(tiles[2]!.querySelector('[data-question-choice-keeps] [aria-hidden="true"]'))).toBe('Button "Sync" · tooltip "Syncs your stuff."');
+    const input = tiles[0]!.querySelector('input')!;
+    expect(description(el, input)).toContain('After: Button "Sync with team"');
+    await act(async () => (version as HTMLElement).click());
+    expect(answer()?.selected).toEqual(['A · Sync with team']);
+  });
+});
+
+describe('long values', () => {
+  const list = (n: number, changed: number) => Array.from({ length: n }, (_, i) => `> - Rule ${i + 1}${i === changed ? ' now changed' : ''}`).join('\n');
+  test.skipIf(!hasDom)('unchanged lines show one on each side of a change, a longer run a quiet "…"', async () => {
+    const el = await mount(<Harness markdown={`:::question
+Change the rule?
+
+Before:
+${list(6, -1)}
+After:
+${list(6, 1)}
+
+- [ ] Yes
+- [ ] No
+:::`} />);
+    const now = el.querySelector('[data-question-change-now]')!;
+    expect([...now.querySelectorAll('.qc-line')].map(text)).toEqual(['•Rule 1', '•Rule 2', '•Rule 3', '…']);
+    const after = el.querySelector('[data-question-change-after]')!;
+    expect([...after.querySelectorAll('.qc-line')].map(text)).toEqual(['•Rule 1', '•Rule 2 now changed', '•Rule 3', '…']);
+  });
+
+  test.skipIf(!hasDom)('a value over twelve lines shows its first twelve and "Show more"', async () => {
+    const el = await mount(<Harness markdown={`:::question
+Add these rules?
+
+Before: none
+After:
+${list(20, -1)}
+
+- [ ] Yes
+- [ ] No
+:::`} />);
+    const after = () => el.querySelector('[data-question-change-after]')!;
+    expect(after().querySelectorAll('.qc-line')).toHaveLength(12);
+    const more = el.querySelector<HTMLButtonElement>('[data-question-change-more]')!;
+    expect(text(more)).toBe('Show more');
+    await act(async () => more.click());
+    expect(after().querySelectorAll('.qc-line')).toHaveLength(20);
+    expect(text(more)).toBe('Show less');
+    // The screen reader hears every line either way.
+    expect(srText(el.querySelector('[data-question-change-group]')!)).toContain('Rule 20.');
   });
 });
 

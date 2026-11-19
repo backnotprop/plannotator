@@ -33,7 +33,7 @@ export const INBOX_BEFORE_AFTER_FORMS: readonly InboxBeforeAfterForm[] = [
       "- [ ] Leave it",
       ":::",
     ].join("\n"),
-    card: "the Where with a pin, then Now \"When an agent ~~asks~~ you\" and After \"When an agent **sends you something**\".",
+    card: "the Where with a pin, then Now \"When an agent ~~asks you~~\" and After \"When an agent **sends you something**\".",
   },
   {
     title: "A block, with the lines around the change",
@@ -53,7 +53,7 @@ export const INBOX_BEFORE_AFTER_FORMS: readonly InboxBeforeAfterForm[] = [
       "- [ ] Leave it",
       ":::",
     ].join("\n"),
-    card: "every line shows; the unchanged ones dimmed, only \"asks\" → \"sends\" marked. `Before:` alone on its line, then `> ` lines (a paragraph, a list, a heading).",
+    card: "the changed line with the nearest line on each side, those dimmed (a longer run of unchanged lines shows as \"…\"); only \"asks\" → \"sends\" marked. `Before:` alone on its line, then `> ` lines (a paragraph, a list, a heading).",
   },
   {
     title: "An added line, inside its surroundings",
@@ -138,7 +138,7 @@ export const INBOX_BEFORE_AFTER_FORMS: readonly InboxBeforeAfterForm[] = [
       "Recommended: Short",
       ":::",
     ].join("\n"),
-    card: "each choice shows its version under its label (marked against today's words); the one choice without an After shows today's words, and the separate Now goes.",
+    card: "each choice shows its version under its label (marked against today's words); the one choice without an After shows today's words in full, and the separate Now goes. The question's `Before:` needs no `After:` of its own here: the choices' are its After.",
   },
   {
     title: "Versions over several places",
@@ -171,7 +171,7 @@ export const INBOX_BEFORE_AFTER_FORMS: readonly InboxBeforeAfterForm[] = [
       "  After: ![After](shots/links-after.png)",
       ":::",
     ].join("\n"),
-    card: "each choice's Now and After pictures side by side under its row; a picture opens full size and never picks. Text works the same way.",
+    card: "each choice's Now and After pictures side by side under its row; a picture opens full size and never picks. Text works the same way. A picture choice (`- [ ] A — ![alt](path)`) shows its own `After:` in its tile, under its words.",
   },
   {
     title: "Pictures and clips, with words",
@@ -201,7 +201,7 @@ export const INBOX_BEFORE_AFTER_FORMS: readonly InboxBeforeAfterForm[] = [
       "- [ ] Leave it",
       ":::",
     ].join("\n"),
-    card: "\"See it\" beside the Where opens the picture; Source shows only with it, never on the card.",
+    card: "\"See it\" beside the Where opens the picture, with the Source; with no `Shows:` picture, `Source:` stays a plain line.",
   },
 ];
 
@@ -211,10 +211,15 @@ export const INBOX_BEFORE_AFTER_HELP = [
   "",
   "Printed by `plannotator inbox --help before-after`. For a `:::question` that proposes a change the person can see: words, a screen, code, a setting.",
   "",
-  "- `Where: <place>`: what it is and where the person sees it, in their words. Drawn first, with a pin.",
+  "- `Where: <place>`: what it is and where the person sees it, in their words. Drawn under the question (and its Stakes), with a pin.",
   "- `Before:` / `After:`: the whole sentence, block or screenshot it sits in. The card strikes removed words (red) in Now and marks added words (green) in After; a line that keeps under 40% of its words is shown unmarked, Now dimmed.",
-  "- A value is one line; or the label alone, then `> ` lines; or `![alt](path)` (a GIF for a clip; words after it are its caption); or `none`.",
-  "- At the question's indent, or indented under a `- [ ]` choice where a form says so. Each line is read once, is never context, and never changes the question's key; an Inbox without this shows the lines as text.",
+  "",
+  "What is read:",
+  "",
+  "- At the question's indent, a place is drawn when it has a `Before:` and an `After:` (its `Where:` first, optional). A question-level `Before:` with no `After:` is drawn only when choices carry their own `After:` (Versions).",
+  "- Under a `- [ ]` choice, a place needs an `After:`; its `Where:` and `Before:` are optional. Indent the lines under the choice; lines right under the choice line without an indent count too.",
+  "- A value: the words after the label, going on over the lines right under it until a blank line, another label or other markdown (a list, a heading, a quote); or the label alone, then `> ` lines (keeps lists and headings); or `![alt](path)` (a GIF for a clip; words after it are its caption); or `none`.",
+  "- Anything else stays plain text where you wrote it: a `Where:` alone, a `Before:` with no `After:`, an `After:` with no `Before:` at the question's indent. The lines never change the question's key, and an Inbox without this shows them as text.",
   "",
   ...INBOX_BEFORE_AFTER_FORMS.flatMap((form) => [`## ${form.title}`, "", "```markdown", form.markdown, "```", "", `Card: ${form.card}`, ""]),
   "## Not this",
