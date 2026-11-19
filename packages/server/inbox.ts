@@ -235,7 +235,7 @@ import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-d
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -5241,10 +5241,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
   const pullRiskAutoPick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, [...[...pullOwners.all().values()].map((owner) => owner.thread_id), ...pullOwners.started().keys()]) };
-  const pullRiskAutoAgentWords = async () => {
+  const pullRiskAutoAgentWords = async (on: boolean): Promise<Pick<InboxPullRiskAnswer, "auto_agent" | "auto_agent_unavailable">> => {
+    if (!on) return { auto_agent: null };
     const configured = (loadConfig().inboxPullRisk as { auto?: { agent?: unknown } } | undefined)?.auto?.agent;
     const picked = await pullRiskAutoAgent(pullRiskAutoPick, typeof configured === "string" && configured.trim() ? configured.trim() : null);
-    return picked ? { agent: picked.agent, name: picked.name } : null;
+    if (picked && "unavailable" in picked) return { auto_agent: null, auto_agent_unavailable: picked.unavailable };
+    return { auto_agent: picked ? { agent: picked.agent, name: picked.name } : null };
   };
   pullRiskAuto = createPullRiskAuto({
     dataDir,
@@ -6112,7 +6114,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pullRisk.save(body);
           pullRiskAuto?.resume();
         }
-        return json({ serverSession, ...pullRisk.answer(), auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 }, auto_agent: await pullRiskAutoAgentWords() });
+        const answer = pullRisk.answer();
+        return json({ serverSession, ...answer, auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 }, ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.

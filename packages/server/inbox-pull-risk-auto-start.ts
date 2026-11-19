@@ -1,6 +1,7 @@
 import { handoffPushable, openLayers, pullHandoffMessage, pullHandoffThreadName, pullNounOf } from "@plannotator/core/inbox-pull-handoff";
-import type { InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
-import { type InboxLaunchAgent, type InboxPull, type InboxProject, type InboxPullRiskAutoMake, type InboxPullRiskAutoRun } from "@plannotator/core/inbox-types";
+import { initialLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
+import { type InboxComposeLaunch, type InboxLaunchAgent, type InboxPull, type InboxProject, type InboxPullRiskAutoMake, type InboxPullRiskAutoRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxLaunch } from "./inbox-launch";
@@ -42,14 +43,24 @@ export function lastStartedReviewAgent(store: Pick<InboxStore, "message">, threa
   return last?.agent ?? null;
 }
 
-export async function pullRiskAutoAgent(deps: Pick<PullRiskAutoStartDeps, "launch" | "lastReviewAgent">, configured: string | null): Promise<{ agent: InboxLaunchAgent; name: string; choice?: InboxLaunchChoice } | null> {
+export type PullRiskAutoAgent = { agent: InboxLaunchAgent; name: string; choice?: InboxLaunchChoice } | { unavailable: string };
+
+export async function pullRiskAutoAgent(deps: Pick<PullRiskAutoStartDeps, "launch" | "lastReviewAgent">, configured: string | null): Promise<PullRiskAutoAgent | null> {
   if (!deps.launch.enabled()) return null;
-  const agents = (await deps.launch.composeBlock())?.agents ?? [];
+  const block = await deps.launch.composeBlock();
+  const agents = block?.agents ?? [];
   const wanted = configured ?? deps.lastReviewAgent();
   const found = agents.find((one) => one.agent === wanted) ?? (configured ? undefined : agents[0]);
-  if (!found) return null;
-  const last = found.choices?.last;
-  return { agent: found.agent, name: found.name, ...(last ? { choice: last } : {}) };
+  if (!found) return configured ? { unavailable: configuredUnavailable(configured, block?.not_ready) } : null;
+  const choice = initialLaunchChoice(found.choices);
+  return { agent: found.agent, name: found.name, ...(Object.keys(choice).length > 0 ? { choice } : {}) };
+}
+
+function configuredUnavailable(configured: string, notReady: InboxComposeLaunch["not_ready"]): string {
+  const why = notReady?.find((one) => one.agent === configured);
+  if (!why) return `${configured} can't be started here.`;
+  const words = inboxLaunchNotReadyWords({ agent: why.name, code: why.code, machine: null, overSsh: why.over_ssh === true });
+  return `${words.line}.${words.fix ? ` ${words.fix}` : ""}`;
 }
 
 export function pullRiskAutoSettled(store: InboxPullLinkStore, run: Pick<InboxPullRiskAutoRun, "made" | "at" | "started_at"> & { thread_id: string }): boolean {
@@ -72,6 +83,7 @@ export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAu
     if (!projectId) throw new InboxError("project_not_found", "No project here is this pull request's repository.");
     const picked = await pullRiskAutoAgent(deps, job.agent);
     if (!picked) throw new InboxError("agent_unavailable", "No agent can be started here.");
+    if ("unavailable" in picked) throw new InboxError("agent_unavailable", `${picked.unavailable} Nothing was sent.`);
     const { handed, name, body } = pullRiskAutoBody(job, deps.skillsBlock);
     const prepared = await deps.launch.prepare({ agent: picked.agent, project_id: projectId, ...(picked.choice ? { choice: picked.choice } : {}) }, { name, body, resolveProject: deps.resolveProject, background: true, keepLastChoice: true });
     let result: ReturnType<InboxStore["startPersonThread"]>;
