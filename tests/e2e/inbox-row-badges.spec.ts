@@ -562,6 +562,70 @@ test('an iPhone (WebKit): the marks only, no card; three lines, the agents\' til
   }
 });
 
+test('an iPhone in other row looks: a row with no preview keeps its marks beside the line above it; time under the preview keeps them on the time line', async () => {
+  const health = (await (await fetch(new URL('/api/inbox/health', world.url))).json()) as { serverSession: string };
+  const rows = async (look: string[]) => {
+    const res = await fetch(new URL('/api/inbox/settings', world.url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: look, serverSession: health.serverSession }) });
+    expect(res.ok, `settings: ${res.status}`).toBe(true);
+  };
+  /** A phone row: what its marks sit beside (the title, its letter mark wrapper, or the agents and project line), its count, and whether it is the two-column row. */
+  const measure = (id: string) => `(() => {
+    const r = document.querySelector('.ib-mrow[data-thread-id="${id}"]');
+    const box = (el) => (el ? el.getBoundingClientRect().toJSON() : null);
+    const beside = r.querySelector(':scope > .ib-m1-lead') ?? r.querySelector(':scope > .ib-lm-tt') ?? r.querySelector(':scope > .ib-m2');
+    const count = r.querySelector('.ib-qn');
+    const book = r.querySelector('[data-guide-mark]');
+    return { grid: getComputedStyle(r).display === 'grid', beside: box(beside), count: box(count), countLine: count ? count.parentElement.className.split(' ')[0] : null, book: box(book), bookLine: book ? book.parentElement.className.split(' ')[0] : null, preview: !!r.querySelector('.ib-pv') };
+  })()`;
+  type Row = { grid: boolean; beside: DOMRect; count: DOMRect; countLine: string; book: DOMRect | null; bookLine: string | null; preview: boolean };
+  const own = await webkit.launch({ args: [] });
+  try {
+    const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: 'light', reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    const LOOKS: [string, string[], string[]][] = [
+      // [the look, its options, the rows with no preview in it]
+      ['Thread name first', ['smallNames', 'titleFirst'], [world.lone]],
+      ['Grey line under the name: None', ['smallNames', 'hidePreview'], [world.lone, world.holding, world.guided]],
+      ['Letter marks, Inline', ['smallNames', 'marksThreads', 'markInline'], [world.lone]],
+    ];
+    for (const [look, options, ids] of LOOKS) {
+      await rows(options);
+      await page.goto('about:blank');
+      await page.goto(world.url);
+      await expect(page.locator(`.ib-mrow[data-thread-id="${world.lone}"] .ib-qn`)).toBeVisible();
+      await page.waitForTimeout(600);
+      for (const id of ids) {
+        const r = (await page.evaluate(measure(id))) as Row;
+        const name = `${look}: row ${id}`;
+        expect(r.preview, `${name}: no preview`).toBe(false);
+        expect(r.grid, `${name}: the marks beside the line above`).toBe(true);
+        expect(r.count.left, `${name}: the count right of that line`).toBeGreaterThanOrEqual(r.beside.right - 0.5);
+        const mid = (r.count.top + r.count.bottom) / 2;
+        expect(mid >= r.beside.top && mid <= r.beside.bottom, `${name}: the count on that line: ${JSON.stringify(r)}`).toBe(true);
+        // The title keeps at least half the row.
+        expect(r.beside.right - r.beside.left, `${name}: the title's room`).toBeGreaterThanOrEqual((r.count.right - r.beside.left) / 2 - 8);
+        if (r.book) expect(r.bookLine, `${name}: the book with the count`).toBe(r.countLine);
+      }
+    }
+    // Time under the preview: the row's end is on the time's own line, so nothing moves up, and a guided review's book
+    // stays on its line 3, never alone beside the title above a count left below.
+    await rows(['smallNames', 'timeBelow']);
+    await page.goto('about:blank');
+    await page.goto(world.url);
+    await expect(page.locator(`.ib-mrow[data-thread-id="${world.lone}"] .ib-m4 .ib-qn`)).toBeVisible();
+    await page.waitForTimeout(600);
+    for (const id of [world.lone, world.guided]) {
+      const r = (await page.evaluate(measure(id))) as Row;
+      expect(r.grid, `time under the preview: row ${id} keeps its lines`).toBe(false);
+      expect(r.countLine, `time under the preview: row ${id}'s count on the time line`).toBe('ib-m4');
+    }
+    await context.close();
+  } finally {
+    await rows(['smallNames']);
+    await own.close();
+  }
+});
+
 test('a small phone (320, 360): the preview gives way first; ?N stays whole; the title is never cut; a long project is cut on one line after its tiles, never dropped', async () => {
   const own = await webkit.launch({ args: [] });
   try {
