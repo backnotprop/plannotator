@@ -3,7 +3,8 @@
  * docs/agent-guides/mobile.md): every entry of the window's surface has a row
  * that decides it for the phone, no entry carries two decisions that disagree,
  * and a feature the app built is marked owed when the window changes it.
- * tests/mobile-parity.test.ts runs them on the real ledger. The clock (an
+ * scripts/mobile/check.ts runs them on the real ledger (never a unit test);
+ * tests/mobile-parity.test.ts checks them on fixed ledgers. The clock (an
  * undecided row or a debt older than 14 days) is parity-debts.ts, run apart.
  *
  * The one command, `bun scripts/mobile/all.ts`, keeps the ledger in step

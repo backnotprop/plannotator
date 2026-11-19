@@ -6,9 +6,12 @@
  * entry needs a row in apps/mobile/contract/parity/ledger.json that decides it
  * for the phone (v1, rethink, later, never) or leaves it undecided, dated.
  *
+ * Whether the committed ledger is in step with the live surface is
+ * scripts/mobile/check.ts (the mobile-contract workflow), never a unit lane,
+ * so an Inbox pull request never fails for a new entry. These tests check the
+ * rules and the one command on fixed ledgers.
+ *
  * What can regress, and the test that says so:
- *  - the window gains an entry with no row, or loses one a row still names
- *    ("the ledger decides");
  *  - a row with a mark that is not one of the five, later or never with no
  *    why, undecided with no date, one entry with two decisions, a built
  *    feature the window changed without it being marked owed ("the rules");
@@ -21,16 +24,7 @@
  * builds nothing.
  */
 import { describe, expect, test } from 'bun:test';
-import { deferNew, entryFingerprints, gained, ledgerInStep, markOwed, parityProblems, readLedger, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
-import { buildSurface, surfaceEntries } from '../scripts/mobile/surface';
-
-describe('the ledger decides', () => {
-  test('every entry of the window has one decision, and every row names entries that exist', () => {
-    const surface = buildSurface();
-    const problems = parityProblems(readLedger(), surfaceEntries(surface), surface.check ?? [], entryFingerprints());
-    if (problems.length) throw new Error(`${problems.length} parity problem(s):\n${problems.join('\n')}`);
-  }, 10_000);
-});
+import { deferNew, gained, ledgerInStep, markOwed, parityProblems, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
 
 const row = (over: Partial<Ledger['rows'][number]>): Ledger['rows'][number] => ({
   id: 'r', title: 't', surface: [], flows: [], mobile: 'v1', why: '', ios: { state: 'not-started' }, ...over,
