@@ -376,13 +376,13 @@ const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.
 
 /**
  * An artifact's path under its plan's `files/`: relative, `/`-separated, each segment a plain name that every disk
- * can hold (no `.` or `..`, no leading dot, no trailing dot or space, no backslash, no control character, none of
- * `<>:"|?*`, no Windows device name such as `CON` or `com1.txt`), at most 200 characters. Anything else names no
- * artifact.
+ * can hold (no `.` or `..`, no leading dot (so no `.git`), no trailing dot or space, no backslash, no control
+ * character, none of `<>:"|?*#%`, no Windows device name such as `CON` or `com1.txt`), at most 200 characters.
+ * Anything else names no artifact. `#` and `%` are refused because a hosted space refuses them in a path.
  */
 export function isPlanAssetPath(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 200) return false;
-  if (/[\\\u0000-\u001f\u007f<>:"|?*]/.test(value)) return false;
+  if (/[\\\u0000-\u001f\u007f<>:"|?*#%]/.test(value)) return false;
   return value
     .split("/")
     .every((segment) => segment.length > 0 && !segment.startsWith(".") && !/[. ]$/.test(segment) && !WINDOWS_DEVICE_NAME.test(segment));

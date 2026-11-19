@@ -1,0 +1,164 @@
+/**
+ * The Spaces REST calls a share makes, and nothing else. One JSON error shape on every call
+ * (`{ error: { code, message, details? } }`), read into `SpacesError`; a call that never got an answer is
+ * `SpacesError` with code `offline`. The sign-in token, when there is one, goes in the Authorization header only.
+ * A redirect is never followed (the header would go with it).
+ *
+ * Answers are read leniently: a record may come bare or under its name (`{ document: … }`), since only the fields a
+ * share keeps are relied on (ids, versions, `share_url`).
+ */
+import type { SpacePageKind } from "@plannotator/core/space-share";
+
+export class SpacesError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly details: Record<string, unknown> = {},
+    /** Seconds the space asked to wait (`Retry-After`), when it did. */
+    readonly retryAfter: number | null = null,
+  ) {
+    super(message);
+    this.name = "SpacesError";
+  }
+}
+
+export interface SpacesSpace {
+  id: string;
+  share_url: string | null;
+  owner_name: string | null;
+  documents: { id: string; doc_path: string; version: string | null }[];
+}
+
+export interface SpacesClient {
+  readonly host: string;
+  readonly signedIn: boolean;
+  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null }): Promise<{ space: SpacesSpace; document: { id: string; version: string } | null }>;
+  getSpace(id: string): Promise<SpacesSpace>;
+  addPage(spaceId: string, body: { doc_path: string; kind: SpacePageKind; title: string; body: string }): Promise<{ id: string; version: string }>;
+  /** Replace a page's text; `ifMatch` is the version the space is expected to hold (412 `version_conflict` otherwise). */
+  savePage(spaceId: string, docId: string, bytes: Uint8Array, kind: SpacePageKind, ifMatch: string): Promise<{ version: string }>;
+  putFile(spaceId: string, path: string, bytes: Uint8Array, contentType: string, title?: string | null): Promise<{ id: string | null; content_hash: string | null }>;
+  addComment(spaceId: string, docId: string, body: { anchor: unknown; body: string; document_version: string }, key: string): Promise<{ id: string }>;
+  addReply(spaceId: string, docId: string, annotationId: string, body: { body: string }, key: string): Promise<{ id: string }>;
+  claim(spaceId: string): Promise<SpacesSpace>;
+  approve(spaceId: string, docId: string, version: string): Promise<void>;
+  deleteSpace(spaceId: string): Promise<void>;
+}
+
+/** The media type a page's raw bytes are sent as. */
+export const SPACE_PAGE_MEDIA_TYPE: Record<SpacePageKind, string> = {
+  markdown: "text/markdown; charset=utf-8",
+  html: "text/html; charset=utf-8",
+  mermaid: "text/vnd.mermaid; charset=utf-8",
+  graphviz: "text/vnd.graphviz; charset=utf-8",
+};
+
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const text = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null);
+/** A record under its name, or bare. */
+const under = (body: unknown, name: string): Record<string, unknown> => (isObject(body) && isObject(body[name]) ? (body[name] as Record<string, unknown>) : isObject(body) ? body : {});
+
+function spaceOf(value: Record<string, unknown>): SpacesSpace {
+  const documents = Array.isArray(value.documents) ? value.documents : [];
+  return {
+    id: text(value.id) ?? "",
+    share_url: text(value.share_url),
+    owner_name: text(value.owner_name),
+    documents: documents.filter(isObject).map((d) => ({ id: text(d.id) ?? "", doc_path: text(d.doc_path) ?? "", version: text(d.version) })),
+  };
+}
+
+const segment = (value: string) => encodeURIComponent(value);
+
+export function createSpacesClient(options: { host: string; token?: string | null; fetch?: typeof fetch; signal?: AbortSignal }): SpacesClient {
+  const doFetch = options.fetch ?? fetch;
+  const token = options.token ?? null;
+
+  async function call(method: string, path: string, init: { json?: unknown; bytes?: Uint8Array; headers?: Record<string, string> } = {}): Promise<{ body: unknown; headers: Headers }> {
+    const headers: Record<string, string> = { Accept: "application/json", ...init.headers };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (init.json !== undefined) headers["Content-Type"] = "application/json";
+    let response: Response;
+    try {
+      response = await doFetch(`${options.host}${path}`, {
+        method,
+        headers,
+        body: init.json !== undefined ? JSON.stringify(init.json) : (init.bytes as BodyInit | undefined),
+        redirect: "error",
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      throw new SpacesError(0, "offline", "Spaces could not be reached.");
+    }
+    let body: unknown = null;
+    try {
+      const raw = await response.text();
+      body = raw ? JSON.parse(raw) : null;
+    } catch {
+      body = null;
+    }
+    if (!response.ok) {
+      const error = isObject(body) && isObject(body.error) ? body.error : {};
+      const after = Number(response.headers.get("retry-after"));
+      throw new SpacesError(
+        response.status,
+        text(error.code) ?? `http_${response.status}`,
+        text(error.message) ?? `Spaces answered ${response.status}.`,
+        isObject(error.details) ? error.details : {},
+        Number.isFinite(after) && after > 0 ? after : null,
+      );
+    }
+    return { body, headers: response.headers };
+  }
+
+  const versionOf = (record: Record<string, unknown>, headers: Headers): string => text(record.version) ?? (headers.get("etag") ?? "").replace(/^W\//, "").replace(/"/g, "");
+  const ws = (id: string) => `/v1/workspaces/${segment(id)}`;
+
+  return {
+    host: options.host,
+    signedIn: token !== null,
+    async createSpace(input) {
+      const { body } = await call("POST", "/v1/workspaces", { json: input });
+      const space = spaceOf(under(body, "workspace"));
+      const document = isObject(body) && isObject(body.document) ? body.document : null;
+      return { space, document: document && text(document.id) && text(document.version) ? { id: document.id as string, version: document.version as string } : null };
+    },
+    async getSpace(id) {
+      return spaceOf(under((await call("GET", ws(id))).body, "workspace"));
+    },
+    async addPage(spaceId, input) {
+      const { body, headers } = await call("POST", `${ws(spaceId)}/documents`, { json: input });
+      const document = under(body, "document");
+      return { id: text(document.id) ?? "", version: versionOf(document, headers) };
+    },
+    async savePage(spaceId, docId, bytes, kind, ifMatch) {
+      const { body, headers } = await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}`, { bytes, headers: { "Content-Type": SPACE_PAGE_MEDIA_TYPE[kind], "If-Match": `"${ifMatch}"` } });
+      return { version: versionOf(under(body, "document"), headers) };
+    },
+    async putFile(spaceId, path, bytes, contentType, title) {
+      const query = title ? `?title=${encodeURIComponent(title)}` : "";
+      const { body } = await call("PUT", `${ws(spaceId)}/assets/${path.split("/").map(segment).join("/")}${query}`, { bytes, headers: { "Content-Type": contentType || "application/octet-stream" } });
+      const asset = under(body, "asset");
+      return { id: text(asset.id), content_hash: text(asset.content_hash) };
+    },
+    async addComment(spaceId, docId, input, key) {
+      const { body } = await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/annotations`, { json: input, headers: { "Idempotency-Key": key } });
+      return { id: text(under(body, "annotation").id) ?? "" };
+    },
+    async addReply(spaceId, docId, annotationId, input, key) {
+      const { body } = await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/annotations/${segment(annotationId)}/replies`, { json: input, headers: { "Idempotency-Key": key } });
+      return { id: text(under(body, "reply").id) ?? "" };
+    },
+    async claim(spaceId) {
+      return spaceOf(under((await call("POST", `${ws(spaceId)}/claim`, { json: {} })).body, "workspace"));
+    },
+    async approve(spaceId, docId, version) {
+      await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/approval`, { json: { version } });
+    },
+    async deleteSpace(spaceId) {
+      await call("DELETE", ws(spaceId));
+    },
+  };
+}

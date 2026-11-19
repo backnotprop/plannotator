@@ -86,6 +86,7 @@
     "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
     "./plans": "./plans.ts",
+    "./space-share": "./space-share.ts",
     "./shape-scene": "./shape-scene.ts",
     "./shape-animate": "./shape-animate.ts",
     "./shape-skill": "./shape-skill.ts",

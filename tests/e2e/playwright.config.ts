@@ -13,6 +13,8 @@ import { defineConfig } from '@playwright/test';
 import { quarantineFilter } from './quarantine';
 
 process.env.PLANNOTATOR_RELAY_URL ??= 'http://127.0.0.1:9';
+// Share this space never reaches a Spaces host from a spec (tests/spaces-host-pin.test.ts).
+process.env.PLANNOTATOR_SPACES_URL ??= 'http://127.0.0.1:9';
 
 /** Specs that their own config runs, never this one: the thread parity harness (inbox-thread-parity.config.ts). */
 const OWN_CONFIG = ['inbox-thread-parity.spec.ts'];
