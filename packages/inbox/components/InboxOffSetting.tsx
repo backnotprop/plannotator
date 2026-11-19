@@ -8,6 +8,7 @@
  */
 import { useState } from 'react';
 import { apiPost } from '../api';
+import { inboxUrl } from '../inboxUrl';
 
 /** What the person reads after turning it off: the server's lines (the first says it is off, the last how to turn it back on). */
 export function InboxOffScreen({ lines }: { lines: readonly string[] }) {
@@ -55,7 +56,7 @@ export function InboxOffSetting({ post = apiPost }: { post?: typeof apiPost }) {
     setBusy(true);
     setFailed(null);
     try {
-      const answer = await post<{ ok: boolean; lines?: string[] }>('/api/inbox/off', {});
+      const answer = await post<{ ok: boolean; lines?: string[] }>(inboxUrl('/off'), {});
       setOff(answer.lines ?? ['The Plannotator Inbox is off on this computer.']);
     } catch (error) {
       setFailed(error instanceof Error ? error.message : String(error));

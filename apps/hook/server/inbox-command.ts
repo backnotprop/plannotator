@@ -97,9 +97,9 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
-import { assertInboxOn, inboxOffCommand, inboxOffLine, inboxOnCommand, inboxRunMayStart } from "./inbox-on-command";
+import { assertInboxOn, inboxOffCommand, inboxOffLine, inboxOnCommand, inboxOnStatus, inboxOnStatusLines, inboxRunMayStart } from "./inbox-on-command";
 import { settleInboxOn } from "@plannotator/server/inbox-on-settle";
-import { isInboxOn } from "@plannotator/shared/inbox/inbox-on";
+import { INBOX_SLASH_COMMAND_FLAG, isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
@@ -584,6 +584,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       data_dir: dataDir,
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
+      inbox_on: inboxOnStatus(dataDir),
     };
     await writeWholeToStdout(`${JSON.stringify(report, null, 2)}\n`);
     return code;
@@ -606,6 +607,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
     out(`  version:  ${status.state === "running" ? status.health.version : live.version}`);
     out(`  started:  ${live.startedAt}`);
   }
+  for (const line of inboxOnStatusLines(dataDir)) out(line);
   out(`  data dir: ${dataDir}`);
   if (status.state === "running" && status.health.version !== cliVersion) {
     // Restart runs this binary, so it is advised only when that is an update, never a downgrade.
@@ -792,7 +794,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(await inboxOffCommand(dataDir, (line) => void process.stdout.write(`${line}\n`)));
   }
   // `migrate`: not for people or agents (not in --help). The Claude Code mod runs it once when state.json has no
-  // record, so an install from before the rule is decided by the process that can read the store; prints on or off.
+  // record, so an install from before the rule is decided by the process that can read the store (bounded:
+  // INBOX_SCAN_BUDGET_MS); prints on or off, which also tells the mod this plannotator has the rule.
   if (args[0] === "migrate") {
     process.stdout.write(`${isInboxOn(dataDir) ? "on" : "off"}\n`);
     process.exit(0);
@@ -894,9 +897,12 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   /** `--open <thread>`: the thread to show (a thread or message id, or a `#thread=` link). */
   let thread: string | null = null;
   let tailscale = false;
+  /** Plannotator's own `/plannotator-inbox` (INBOX_SLASH_COMMAND_FLAG, hidden): the person typed it. */
+  let slashCommand = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === "--background") background = true;
+    if (arg === INBOX_SLASH_COMMAND_FLAG) slashCommand = true;
+    else if (arg === "--background") background = true;
     else if (arg === "--no-open") noOpen = true;
     else if (arg === "--open") {
       open = true;
@@ -917,7 +923,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   }
 
   // The person's own run turns the Inbox on; any other run while it is off starts and opens nothing.
-  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background });
+  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background, slashCommand });
   if (!mayStart.ok) {
     process.stderr.write(`${mayStart.line}\n`);
     process.exit(1);

@@ -94,6 +94,7 @@ import { PlannotatorMod } from './controller'
 import {
   isPanelSession,
   promptOriginKind,
+  commandByPerson,
   sessionKindOf,
   SESSION_KIND_FEATURES,
   t3ThreadOf,
@@ -1190,7 +1191,8 @@ export function register(on: On) {
     // which shows the text and drops `context` (2.1.287 through 2.1.312): the
     // person gets the address, the model no briefing. The installer's skill
     // holds the name, so a queued command takes the normal path.
-    if (!isModCommand(name)) return await instance.openInbox(inboxToolName)
+    // Only a command the person typed turns the Inbox on; one the model invoked opens an Inbox that is already on.
+    if (!isModCommand(name)) return await instance.openInbox(inboxToolName, commandByPerson(e?.origin, !!allowed?.panel || !!allowed?.t3Thread))
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }

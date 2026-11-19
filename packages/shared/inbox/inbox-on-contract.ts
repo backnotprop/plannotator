@@ -6,8 +6,8 @@
  * use inbox." So the Inbox (its process, the agents' `plannotator_inbox` tool,
  * the reminder, the note in agents' instruction files, the MCP server's tools)
  * exists for a person only after THEY turned it on here: their own
- * `plannotator inbox` in a terminal, their `/plannotator-inbox`, `plannotator
- * inbox on`, or the Turn on switch in a Plannotator page's Settings. Nothing an
+ * `plannotator inbox` in their own terminal, their `/plannotator-inbox`, or
+ * `plannotator inbox on` in their own terminal. Nothing an
  * agent, a hook, the MCP server, an installer, an update or a restart does
  * turns it on, and `inbox/inbox.json` existing says nothing about it.
  *
@@ -35,11 +35,14 @@ export const INBOX_ON_FILE = 'state.json'
 /**
  * What last set the record. The person's acts: `command` (their own
  * `plannotator inbox`), `slash-command` (`/plannotator-inbox`), `inbox-on`
- * (`plannotator inbox on`), `settings` (a Turn on switch). `off`: Turn the
+ * (`plannotator inbox on`), `settings` (an earlier build's Settings switch). `off`: Turn the
  * Inbox off. The one-time decision for an install from before the rule:
  * `update-used` (the person used the window), `update-ran` (the person ran
  * `plannotator inbox`), `update-agent-only` (only agents ever started it),
- * `update-never-ran`.
+ * `update-never-ran`. `record-lost`: a record existed here once (the decided
+ * mark, INBOX_ON_DECIDED_FILE) and is gone (state.json deleted or set aside as
+ * corrupt): off, never decided again, so a lost record never undoes the
+ * person's off.
  */
 export type InboxOnBy =
   | 'command'
@@ -51,17 +54,27 @@ export type InboxOnBy =
   | 'update-ran'
   | 'update-agent-only'
   | 'update-never-ran'
+  | 'record-lost'
+
+/**
+ * Beside state.json in the data dir: written with the first record and never
+ * removed, so an install is decided once even when state.json is lost.
+ */
+export const INBOX_ON_DECIDED_FILE = 'inbox-on-decided'
 
 /**
  * The record. `notes: 'remove'`: Plannotator's own untouched notes in agents'
  * instruction files are still to be removed (an install decided off before a
- * process that can edit them ran); cleared once they are.
+ * process that can edit them ran); cleared once they are. `notes: 'left'`:
+ * some could not be removed (a damaged or read-only file); nothing retries by
+ * itself, `plannotator inbox status` says so, and `plannotator inbox off`
+ * tries again.
  */
 export interface InboxOnRecord {
   on: boolean
   at: string
   by: string
-  notes?: 'remove'
+  notes?: 'remove' | 'left'
 }
 
 /** The record in `state.json`'s text, or null when there is none (not decided yet) or it cannot be read. */
@@ -82,7 +95,7 @@ export function inboxOnRecord(stateText: string | null | undefined): InboxOnReco
     on: record.on,
     at: typeof record.at === 'string' ? record.at : '',
     by: typeof record.by === 'string' ? record.by : '',
-    ...(record.notes === 'remove' ? { notes: 'remove' as const } : {}),
+    ...(record.notes === 'remove' || record.notes === 'left' ? { notes: record.notes } : {}),
   }
 }
 
@@ -96,11 +109,15 @@ export const INBOX_OFF_LEAD = 'The Plannotator Inbox is off on this computer'
 
 /**
  * The one line an agent gets when it tries to use or start the Inbox while it
- * is off: a tool call, the MCP server, a CLI command that would start it.
+ * is off: a tool call, the MCP server, a CLI command that would start it. It
+ * never names what turns the Inbox on: only the person does that.
  */
-export const INBOX_OFF_AGENT_LINE = `${INBOX_OFF_LEAD}: ask the person in the chat instead, and do not turn the Inbox on yourself (only the person does, by running \`plannotator inbox\` in their own terminal).`
+export const INBOX_OFF_AGENT_LINE = `${INBOX_OFF_LEAD}: ask the person in the chat instead. Only the person can turn the Inbox on; do not try to turn it on yourself.`
 
-/** The same refusal for a person at their own terminal. */
+/**
+ * The same refusal for a person at their own terminal: only a run with no
+ * agent's marker and a terminal on stdin and stdout gets it (inbox-on-command.ts).
+ */
 export const INBOX_OFF_PERSON_LINE = `${INBOX_OFF_LEAD}. Run \`plannotator inbox\` to turn it on.`
 
 /** Whether a CLI's output is the Inbox-off refusal. */
@@ -109,12 +126,14 @@ export function isInboxOffAnswer(text: string | null | undefined): boolean {
 }
 
 /**
- * Set by Plannotator's own `/plannotator-inbox` commands (the Claude Code mod,
- * Pi, OpenCode, Gemini, Droid, Amp and the `plannotator-inbox` skill) on the
- * `plannotator inbox --open` they run: the person typed the command, so it
- * turns the Inbox on. Not a switch; never documented to agents.
+ * Passed by Plannotator's own `/plannotator-inbox` commands (the Claude Code
+ * mod for a command the person typed, Pi, OpenCode, Gemini, Droid, Amp and the
+ * model-disabled `plannotator-inbox` skills) to the `plannotator inbox --open`
+ * they run: the person typed the command, so it turns the Inbox on. A flag,
+ * not an environment variable, so it works in PowerShell and cmd too. Hidden:
+ * never in `--help` and never in words an agent is told to run.
  */
-export const INBOX_SLASH_COMMAND_ENV = 'PLANNOTATOR_INBOX_SLASH_COMMAND'
+export const INBOX_SLASH_COMMAND_FLAG = '--from-slash-command'
 
 /** What a pre-rule install shows of the person's own use of the Inbox. */
 export type InboxUseEvidence = 'used' | 'ran'

@@ -24,6 +24,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -957,4 +958,43 @@ test('the Update button follows health ("ready"), and pressing it brings the new
   // The page reloaded onto the new Inbox: the same store (the holding row, unfolded; named is Quiet now), the update line gone.
   await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.ib-upd')).toHaveCount(0);
+});
+
+// The Inbox is off until the person turns it on (packages/shared/inbox/inbox-on.ts). Every other proof here runs
+// with it on (an undecided scratch data dir counts as on for a test); this one runs the compiled binary with the
+// real rule (PLANNOTATOR_TEST_INBOX_ON=0) on a fresh computer, as an agent's shell would.
+test('Inbox off (a fresh computer, an agent\'s shell): no start, no tools, the one line', async () => {
+  const root = inboxScratch('plannotator-inbox-off-e2e-');
+  try {
+    const dataDir = join(root, 'data');
+    const home = join(root, 'home');
+    mkdirSync(home, { recursive: true });
+    const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_INBOX_ON: '0', CLAUDECODE: '1' };
+    const line = 'The Plannotator Inbox is off on this computer: ask the person in the chat instead. Only the person can turn the Inbox on; do not try to turn it on yourself.';
+    for (const args of [['inbox', '--background'], ['inbox'], ['inbox', '--no-open'], ['inbox', 'on']]) {
+      const run = spawnSync(builtBinary, args, { env, encoding: 'utf8', timeout: 30_000 });
+      expect([args.join(' '), run.status]).toEqual([args.join(' '), 1]);
+      expect(`${run.stdout}${run.stderr}`).toContain(line);
+    }
+    const mcp = spawnSync(builtBinary, ['inbox', 'mcp'], {
+      env,
+      encoding: 'utf8',
+      timeout: 30_000,
+      input: [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } } },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'send_message', arguments: { body: 'Ship it?' } } },
+      ].map((m) => JSON.stringify(m)).join('\n') + '\n',
+    });
+    const answers = mcp.stdout.trim().split('\n').map((l) => JSON.parse(l) as { id?: number; result?: { tools?: unknown[]; instructions?: string }; error?: { message: string } });
+    expect(answers.find((a) => a.id === 1)?.result?.instructions).toBe(line);
+    expect(answers.find((a) => a.id === 2)?.result?.tools).toEqual([]);
+    expect(answers.find((a) => a.id === 3)?.error?.message).toContain(line);
+    // Nothing started and nothing was decided for the person.
+    expect(existsSync(join(dataDir, 'inbox', 'inbox.json'))).toBe(false);
+    expect(existsSync(join(dataDir, 'state.json')) && readFileSync(join(dataDir, 'state.json'), 'utf8').includes('"inboxOn"')).toBe(false);
+  } finally {
+    await removeInboxScratch(root);
+  }
 });

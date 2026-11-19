@@ -991,7 +991,7 @@ describe.skipIf(process.platform === "win32")("V2 /plannotator-inbox", () => {
   test("opens the Inbox and posts its address as a notice, with no model turn", async () => {
     const calls = stubCli("echo 'http://localhost:61234/'");
     const { synthetic, prompt, marked } = await runInbox();
-    expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open");
+    expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open --from-slash-command");
     expect(synthetic).toHaveBeenCalledTimes(1);
     const notice = synthetic.mock.calls[0]![0] as { description: string; resume: boolean };
     // Says it is the Inbox, never the review's "session ready" line.

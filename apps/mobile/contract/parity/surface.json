@@ -246,6 +246,7 @@
       "/api/inbox/messages/:id/send-now",
       "/api/inbox/messages/:id/take-back",
       "/api/inbox/messages/:id/to",
+      "/api/inbox/off",
       "/api/inbox/open-in",
       "/api/inbox/open-in/apps",
       "/api/inbox/open-in/file",

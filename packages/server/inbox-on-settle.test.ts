@@ -62,6 +62,17 @@ describe("turn the Inbox off", () => {
     expect(report.some((line) => line.startsWith("Left the note for Gemini CLI") && line.endsWith(": you edited it."))).toBe(true);
   });
 
+  // H1: the routines' start at login would bring the Inbox back at the next login.
+  test("removes the routines' start at login and says it comes back with routines", async () => {
+    turnInboxOn("command", dataDir);
+    const unit = join(fake.home, ".config", "systemd", "user", "plannotator-inbox.service");
+    mkdirSync(join(unit, ".."), { recursive: true });
+    writeFileSync(unit, "[Service]\n");
+    const off = await turnInboxOff(dataDir, { environment: e });
+    expect(existsSync(unit)).toBe(false);
+    expect(inboxOffReport(off)).toContain("Removed the Inbox's start at login; it comes back with routines when you turn the Inbox on.");
+  });
+
   test("off twice is the same as once", async () => {
     await turnInboxOff(dataDir, { environment: e });
     const again = await turnInboxOff(dataDir, { environment: e });
@@ -84,6 +95,37 @@ describe("an install from before the rule, settled once", () => {
     expect(readFileSync(geminiNote(), "utf8")).toContain("a fact of mine");
   });
 
+  // M3: each file on its own (Codex reads AGENTS.override.md first; the person edited the note in AGENTS.md).
+  test("C with a Codex note in two files: the untouched one goes (the file keeps its other text), the edited one stays", () => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), "{}");
+    const codex = join(fake.home, ".codex");
+    mkdirSync(codex, { recursive: true });
+    writeFileSync(join(codex, "AGENTS.override.md"), `# Mine\n\n${INBOX_NOTE_BLOCK}\n`);
+    const edited = `# Rules\n\n${INBOX_NOTE_BLOCK.replace("\n## Plannotator Inbox", "\n- my own line\n## Plannotator Inbox")}\n`;
+    writeFileSync(join(codex, "AGENTS.md"), edited);
+
+    expect(settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(false);
+    expect(readFileSync(join(codex, "AGENTS.override.md"), "utf8")).toBe("# Mine\n");
+    expect(readFileSync(join(codex, "AGENTS.md"), "utf8")).toBe(edited);
+  });
+
+  // M7: a note that cannot go (damaged markers) is tried once, recorded as left, and never retried by itself.
+  test("C with a damaged note: tried once, the record says left, the next settle touches nothing", () => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), "{}");
+    mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+    const damaged = `# Mine\n\n${INBOX_NOTE_BLOCK.split("\n").slice(0, -1).join("\n")}\n`;
+    writeFileSync(geminiNote(), damaged);
+
+    expect(settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(false);
+    const record = readInboxOnRecord(dataDir);
+    expect(record).toMatchObject({ on: false, by: "update-agent-only", notes: "left" });
+    expect(settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(false);
+    expect(readInboxOnRecord(dataDir)).toEqual(record);
+    expect(readFileSync(geminiNote(), "utf8")).toBe(damaged);
+  });
+
   test("B, the person ran it: stays on and no note is touched", () => {
     mkdirSync(join(dataDir, "inbox"), { recursive: true });
     writeFileSync(join(dataDir, "inbox", "agents.json"), "{}");
@@ -94,15 +136,10 @@ describe("an install from before the rule, settled once", () => {
     expect(existsSync(claudeNote())).toBe(true);
   });
 
-  test("D, never ran: off, nothing to remove; a second settle changes nothing", () => {
+  test("D, never ran: off, nothing to remove, nothing written", () => {
     expect(settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(false);
-    const first = readInboxOnRecord(dataDir);
-    expect(first).toMatchObject({ on: false, by: "update-never-ran" });
-    // Something the person did since then does not reopen the decision: only their act turns it on.
-    mkdirSync(join(dataDir, "inbox"), { recursive: true });
-    writeFileSync(join(dataDir, "inbox", "agents.json"), "{}");
-    expect(settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(false);
-    expect(readInboxOnRecord(dataDir)).toEqual(first);
+    expect(readInboxOnRecord(dataDir)).toBeNull();
+    expect(existsSync(join(dataDir, "inbox"))).toBe(false);
   });
 
   test("decided on by the person later: settle leaves it on", () => {

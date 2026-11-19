@@ -14,6 +14,13 @@ import { join } from "node:path";
 export const INBOX_LOGIN_LABEL = "ai.plannotator.inbox";
 export const INBOX_LOGIN_UNIT = "plannotator-inbox.service";
 
+/**
+ * Set on the login item's start: it is never the person's act, so it starts the Inbox only while the person has it
+ * on and never turns it on (apps/hook/server/inbox-on-command.ts, INBOX_HOST_START_MARKERS). With no terminal it would
+ * be refused anyway; this names it, and covers a login item written before (launchd's job label is the other name).
+ */
+export const INBOX_LOGIN_ITEM_ENV = "PLANNOTATOR_INBOX_LOGIN_ITEM";
+
 export type LoginRunner = (argv: string[]) => Promise<{ code: number }>;
 
 /** The real runner: `launchctl` or `systemctl`, its exit code only, bounded so a hung one never holds Settings. */
@@ -47,6 +54,7 @@ export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; l
     "  <key>EnvironmentVariables</key>",
     "  <dict>",
     `    <key>PLANNOTATOR_DATA_DIR</key>${string(o.dataDir)}`,
+    `    <key>${INBOX_LOGIN_ITEM_ENV}</key>${string("1")}`,
     "  </dict>",
     "  <key>RunAtLoad</key><true/>",
     "  <key>ProcessType</key><string>Background</string>",
@@ -65,7 +73,7 @@ export function inboxLoginUnit(o: { argv: readonly string[]; dataDir: string }):
     "",
     "[Service]",
     `ExecStart=${[...o.argv, "inbox", "--no-open"].map(unitArg).join(" ")}`,
-    `Environment=${unitArg(`PLANNOTATOR_DATA_DIR=${o.dataDir}`)}`,
+    `Environment=${unitArg(`PLANNOTATOR_DATA_DIR=${o.dataDir}`)} ${unitArg(`${INBOX_LOGIN_ITEM_ENV}=1`)}`,
     "",
     "[Install]",
     "WantedBy=default.target",

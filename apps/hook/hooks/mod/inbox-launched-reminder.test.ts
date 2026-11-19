@@ -52,6 +52,8 @@ function engineOver(command: InboxReplyCommand, config?: Record<string, unknown>
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
+    // The person turned the Inbox on here (inbox-on-contract.ts).
+    [`${DATA}/state.json`, JSON.stringify({ inboxOn: { on: true, at: '2026-11-18T00:00:00.000Z', by: 'command' } })],
     ...(config ? ([[`${DATA}/config.json`, JSON.stringify(config)]] as [string, string][]) : []),
   ])
   const store = new Map<string, unknown>()

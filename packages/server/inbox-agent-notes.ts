@@ -59,6 +59,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
   agentHomeAllowed,
@@ -813,7 +814,8 @@ export interface RefreshInboxNotesOptions {
  * Never throws for one file: the rest still run. Off with PLANNOTATOR_INBOX_NOTES=0.
  */
 export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options: RefreshInboxNotesOptions = {}): NoteRefresh[] {
-  if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env)) return [];
+  // Only while the person has the Inbox on (packages/shared/inbox/inbox-on.ts), whatever started this process.
+  if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env) || !isInboxOn(dataDir)) return [];
   const file = readInboxAgentNotes(dataDir);
   const current = sha256(INBOX_NOTE_BLOCK);
   const byPath = new Map<string, InboxNoteAgentId[]>();
@@ -980,6 +982,56 @@ export function removeInboxNote(agent: InboxNoteAgentId, dataDir: string, e: Age
     if (hit) return hit;
   }
   return results[0]!;
+}
+
+/** What turning the Inbox off did with one agent's note, file by file (paths with `~`). */
+export interface UntouchedNoteRemoval {
+  removed: string[];
+  /** Files whose block the person edited: left as they are. */
+  kept: string[];
+  failed: { path: string; reason: string }[];
+}
+
+/**
+ * Turning the Inbox off and an agent-only install (packages/server/inbox-on-settle.ts): this agent's note goes from
+ * each file that holds it exactly as Plannotator wrote it, each file judged on its own (Codex's AGENTS.override.md
+ * and AGENTS.md, Pi's AGENTS.md and CLAUDE.md). A block the person edited stays, named; a damaged one is named and
+ * left. Only the block goes: a file is deleted only when Plannotator created it and nothing else is left in it.
+ */
+export function removeUntouchedInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment): UntouchedNoteRemoval {
+  const out: UntouchedNoteRemoval = { removed: [], kept: [], failed: [] };
+  if (agent === "cursor" || !agentHomeAllowed(e)) return out;
+  const record = readInboxAgentNotes(dataDir).notes[agent];
+  const seen = new Set<string>();
+  for (const file of [record?.path, noteTarget(agent, e).path, ...candidatePaths(agent, e)]) {
+    if (!file) continue;
+    const read = readAgentFile(file);
+    if (read.kind === "missing") continue;
+    const real = resolved(read.kind === "file" ? read.target : file);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    const shown = displayPath(file, e) ?? file;
+    if (read.kind === "refused") {
+      if (record && resolved(record.path) === real) out.failed.push({ path: shown, reason: `${shown} can't be edited: ${read.reason}` });
+      continue;
+    }
+    const found = findBlock(read.text);
+    if (found.kind === "none") continue;
+    if (found.kind === "damaged") {
+      out.failed.push({ path: shown, reason: `the Plannotator section in ${shown} is damaged; fix or delete it by hand` });
+      continue;
+    }
+    const hash = sha256(found.block);
+    const owner = record && resolved(record.path) === real ? record : null;
+    if (!(owner ? ownedBy(owner.block_sha256, hash) : isPlannotatorBlock(hash))) {
+      out.kept.push(shown);
+      continue;
+    }
+    const change = removeNoteFrom(agent, dataDir, e, file);
+    if (!change.ok) out.failed.push({ path: shown, reason: change.reason });
+    else if (change.action === "removed" || change.action === "deleted") out.removed.push(shown);
+  }
+  return out;
 }
 
 function removeNoteFrom(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, path: string | undefined): NoteChange {
@@ -1189,7 +1241,8 @@ export async function markNotesAsked(ids: readonly InboxNoteAgentId[], options: 
  */
 export async function autoAddInboxNotes(options: ConnectOptions): Promise<InboxNoteAutoAdd[]> {
   const e = options.environment;
-  if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env)) return [];
+  // Only while the person has the Inbox on (packages/shared/inbox/inbox-on.ts), whatever started this process.
+  if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env) || !isInboxOn(options.dataDir)) return [];
   const asked = new Set(await notesAsked(options));
   const candidates = (await noteCandidateIds(options)).filter((id) => INBOX_NOTE_AUTO_AGENT_IDS.includes(id) && !asked.has(id));
   const written: InboxNoteAgentId[] = [];

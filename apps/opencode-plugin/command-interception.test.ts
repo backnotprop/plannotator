@@ -106,7 +106,7 @@ describe("OpenCode 1 command interception", () => {
     await plugin["command.execute.before"]({ command: "plannotator-inbox", sessionID: "ses_1", arguments: "" }, { parts });
 
     // The CLI, never the embedded runtime (which cannot host the Inbox).
-    expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open");
+    expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open --from-slash-command");
     // No second prompt: the address rides the command's own message.
     expect(sent).toHaveLength(0);
     const turn = parts.map((part) => part.text).join("\n");

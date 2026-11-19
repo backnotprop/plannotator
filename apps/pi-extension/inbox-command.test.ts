@@ -99,7 +99,7 @@ describe.skipIf(process.platform === "win32")("/plannotator-inbox", () => {
 	test("opens the Inbox through plannotator inbox --open and shows its address", async () => {
 		const { calls } = fakePlannotator("echo 'http://localhost:61234/'");
 		const notices = await runInboxCommand();
-		expect(readFileSync(calls, "utf8").trim()).toBe(`inbox --open | ${process.env.PLANNOTATOR_DATA_DIR}`);
+		expect(readFileSync(calls, "utf8").trim()).toBe(`inbox --open --from-slash-command | ${process.env.PLANNOTATOR_DATA_DIR}`);
 		expect(notices).toHaveLength(1);
 		expect(notices[0]!.type).toBe("info");
 		expect(notices[0]!.message).toContain("http://localhost:61234/");

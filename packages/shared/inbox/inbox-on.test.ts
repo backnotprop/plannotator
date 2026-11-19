@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isInboxActionReport, isInboxNote } from "@plannotator/core/inbox-types";
@@ -78,8 +78,37 @@ describe("the record", () => {
 
   test("a write for another folder than this process's data dir is refused", () => {
     const other = mkdtempSync(join(tmpdir(), "inbox-on-other-"));
-    expect(writeInboxOnRecord(other, { on: true, at: NOW.toISOString(), by: "command" })).toBe(false);
+    expect(writeInboxOnRecord(other, { on: true, at: NOW.toISOString(), by: "command" }).ok).toBe(false);
     expect(readInboxOnRecord(other)).toBeNull();
+  });
+
+  // M1: config.json is the person's settings; when they broke it by hand, the record still lands in state.json.
+  test("a hand-broken config.json never blocks the record, and is left as it is", () => {
+    write(join(dataDir, "config.json"), "{ broken");
+    expect(turnInboxOn("command", dataDir, NOW)).toBe(true);
+    expect(isInboxOn(dataDir, REAL)).toBe(true);
+    expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe("{ broken");
+  });
+
+  // M4: the one-time decision is a compare-and-set: a person's on or off written while it scanned stays.
+  test("a decision that lands after the person's act keeps the person's record", () => {
+    expect(turnInboxOn("command", dataDir, NOW)).toBe(true);
+    const late = writeInboxOnRecord(dataDir, { on: false, at: "2026-11-18T09:00:01.000Z", by: "update-agent-only", notes: "remove" }, { ifAbsent: true });
+    expect(late).toEqual({ ok: true, record: { on: true, at: NOW.toISOString(), by: "command" } });
+    recordInboxOff(dataDir, NOW);
+    write(inbox("inbox.json"), "{}");
+    write(inbox("agents.json"), "{}");
+    expect(decideExistingInstall(dataDir, NOW)).toMatchObject({ on: false, by: "off" });
+  });
+
+  // L4: state.json deleted or set aside as corrupt: the evidence never decides again (it would undo the person's off).
+  test("a lost record is off (record-lost), never decided again from the evidence", () => {
+    write(inbox("inbox.json"), "{}");
+    write(inbox("agents.json"), "{}");
+    expect(recordInboxOff(dataDir, NOW)).toBe(true);
+    rmSync(join(dataDir, "state.json"));
+    expect(isInboxOn(dataDir, REAL)).toBe(false);
+    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "record-lost" });
   });
 
   test("the refusal lines start with one lead a host can recognise", () => {
@@ -106,10 +135,12 @@ describe("the test knob", () => {
 });
 
 describe("an install from before the rule", () => {
-  test("D, never ran here: off, written once, nothing to remove", () => {
+  // L5: an agent's `plannotator inbox --help` or `status` on a fresh computer writes nothing.
+  test("D, never ran here: off, and nothing is written", () => {
     expect(isInboxOn(dataDir, REAL)).toBe(false);
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "update-never-ran" });
-    expect(readInboxOnRecord(dataDir)?.notes).toBeUndefined();
+    expect(decideExistingInstall(dataDir, NOW)).toEqual({ on: false, at: NOW.toISOString(), by: "update-never-ran" });
+    expect(readInboxOnRecord(dataDir)).toBeNull();
+    expect(existsSync(join(dataDir, "state.json"))).toBe(false);
   });
 
   test("C, only agents started it: off, with Plannotator's notes still to remove", () => {
@@ -149,6 +180,13 @@ describe("an install from before the rule", () => {
     write(inbox("agents.json"), "{}");
     expect(decideExistingInstall(dataDir, new Date("2026-12-01T00:00:00.000Z"))).toEqual(first);
     expect(isInboxOn(dataDir, REAL)).toBe(false);
+  });
+
+  // M7: the decision is bounded in time; a store it cannot read in time is kept on (in doubt, on).
+  test("a store not read by the deadline counts as used", () => {
+    write(inbox("projects", "p1", "messages.jsonl"), line(agentMessage) + "\n");
+    expect(storeShowsPersonUse(inbox(), Date.now() + 60_000)).toBe(false);
+    expect(storeShowsPersonUse(inbox(), Date.now() - 1)).toBe(true);
   });
 
   test("a person's message far into a large store, across a multi-byte boundary, is found", () => {
@@ -194,10 +232,12 @@ describe("personWroteIt matches core's notes and action reports", () => {
 
 // Settings' Plannotator Inbox row, on every server (POST /api/config { inboxOn }).
 describe("the Settings write", () => {
-  test("on is the person's click (settings); off answers how to turn it back on, or the error when it did not save", async () => {
-    const { inboxOnConfigWrite, INBOX_TURN_ON_AGAIN, INBOX_OFF_NOT_SAVED } = await import("./inbox-on-config");
-    expect(await inboxOnConfigWrite(true, async () => true)).toEqual({ status: 200, body: { ok: true } });
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "settings" });
+  // An agent's curl to the local server looks like the page's request: a page never turns the Inbox on.
+  test("on is refused and writes nothing; off answers how to turn it back on, or the error when it did not save", async () => {
+    const { inboxOnConfigWrite, INBOX_TURN_ON_AGAIN, INBOX_OFF_NOT_SAVED, INBOX_ON_NOT_HERE } = await import("./inbox-on-config");
+    expect(await inboxOnConfigWrite(true, async () => true)).toEqual({ status: 403, body: { error: INBOX_ON_NOT_HERE } });
+    expect(readInboxOnRecord(dataDir)).toBeNull();
+    turnInboxOn("command", dataDir, NOW);
     let offAsked = 0;
     expect(await inboxOnConfigWrite(false, async () => (offAsked++, recordInboxOff(dataDir, NOW)))).toEqual({ status: 200, body: { ok: true, inboxOnLine: INBOX_TURN_ON_AGAIN } });
     expect(offAsked).toBe(1);

@@ -181,8 +181,12 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
     },
     async (ctx) => {
       // Starts a stopped Inbox in the background, opens it and prints its URL; returns at once.
-      // The person typed /plannotator-inbox: this run turns the Inbox on (PLANNOTATOR_INBOX_SLASH_COMMAND, inbox-on-contract.ts).
-      const result = await runPlannotator(amp, ctx, ["inbox", "--open"], { env: { PLANNOTATOR_INBOX_SLASH_COMMAND: "1" } });
+      // The person typed /plannotator-inbox: this run turns the Inbox on (the hidden --from-slash-command, inbox-on-contract.ts).
+      // A plannotator older than that flag keeps no such rule: the plain open, as before.
+      let result = await runPlannotator(amp, ctx, ["inbox", "--open", "--from-slash-command"]);
+      if (result.status !== 0 && /unknown inbox option:?\s*--from-slash-command/i.test(`${result.stderr}${result.stdout}`)) {
+        result = await runPlannotator(amp, ctx, ["inbox", "--open"]);
+      }
       await ctx.ui.notify(inboxOpenedMessage(result));
     },
   );

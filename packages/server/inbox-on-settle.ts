@@ -5,35 +5,40 @@
  *
  *  - settleInboxOn: decide an install from before the rule (once) and, for one
  *    decided off with `notes: 'remove'` (only agents ever started its Inbox),
- *    remove Plannotator's own untouched notes. The CLI runs it at the start of
- *    every `plannotator inbox` command and in `plannotator inbox migrate`,
- *    which the Claude Code mod runs once when the record is missing.
+ *    remove Plannotator's own untouched notes, once: what cannot go is
+ *    recorded as `notes: 'left'` and never retried by itself. The CLI runs it
+ *    at the start of every `plannotator inbox` command and in `plannotator
+ *    inbox migrate`, which the Claude Code mod runs once when the record is
+ *    missing.
  *  - turnInboxOff: Turn the Inbox off (`plannotator inbox off`, the Settings
  *    switches): the record says off first, so nothing can start the Inbox
- *    again, then the Inbox stops, then the untouched notes go.
+ *    again, then the Inbox stops, its start at login goes, then the untouched
+ *    notes go.
  *
- * A note the person edited is never touched (noteStatus `edited`); it stays,
- * named in the result. A removed note's agent is taken out of
- * `inboxAgentNotes.asked`, so turning the Inbox on again writes it back.
+ * A note the person edited is never touched: each file is judged on its own
+ * (removeUntouchedInboxNote), and the edited one stays, named in the result.
+ * A removed note's agent is taken out of `inboxAgentNotes.asked`, so turning
+ * the Inbox on again writes it back. Every decision and every Turn off leaves
+ * one line in `inbox/inbox.log` (`ev: "inbox_on"`).
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
-import { resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { isInboxOn, readInboxOnRecord, recordInboxOff, writeInboxOnRecord, type InboxOnRecord } from "@plannotator/shared/inbox/inbox-on";
 import { stopInbox, type InboxStopResult } from "@plannotator/shared/inbox/registry";
 import { INBOX_OFF_NOT_SAVED, INBOX_TURN_ON_AGAIN, inboxOnConfigWrite } from "@plannotator/shared/inbox/inbox-on-config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-
-export { INBOX_TURN_ON_AGAIN };
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { createAgentEnvironment, type AgentEnvironment } from "./inbox-agents";
-import { noteStatus, removeInboxNote } from "./inbox-agent-notes";
+import { removeUntouchedInboxNote } from "./inbox-agent-notes";
+import { inboxLoginItem } from "./inbox-scheduled-login";
+
+export { INBOX_TURN_ON_AGAIN };
 
 export interface InboxNotesCleared {
-  /** Notes removed (paths with `~`). */
+  /** Notes removed, one per file (paths with `~`). */
   removed: { agent: InboxNoteAgentId; path: string }[];
   /** Notes the person edited, left as they are. */
   kept: { agent: InboxNoteAgentId; path: string }[];
@@ -41,52 +46,56 @@ export interface InboxNotesCleared {
   failed: { agent: InboxNoteAgentId; reason: string }[];
 }
 
-/** Remove Plannotator's own notes that are still exactly as it wrote them; never one the person edited. */
+/** Remove Plannotator's own notes that are still exactly as it wrote them, file by file; never one the person edited. */
 export function removeUntouchedInboxNotes(dataDir: string, e: AgentEnvironment = createAgentEnvironment()): InboxNotesCleared {
   const out: InboxNotesCleared = { removed: [], kept: [], failed: [] };
   for (const agent of INBOX_NOTE_AGENT_IDS) {
-    if (agent === "cursor") continue;
-    let status;
+    let one;
     try {
-      status = noteStatus(agent, dataDir, e);
+      one = removeUntouchedInboxNote(agent, dataDir, e);
     } catch (error) {
       out.failed.push({ agent, reason: error instanceof Error ? error.message : String(error) });
       continue;
     }
-    if (status.state === "edited") {
-      out.kept.push({ agent, path: status.path ?? "" });
-      continue;
-    }
-    if (status.state !== "added") continue;
-    const change = removeInboxNote(agent, dataDir, e);
-    if (change.ok) out.removed.push({ agent, path: change.path });
-    else out.failed.push({ agent, reason: change.reason });
+    for (const path of one.removed) out.removed.push({ agent, path });
+    for (const path of one.kept) out.kept.push({ agent, path });
+    for (const failed of one.failed) out.failed.push({ agent, reason: failed.reason });
   }
   if (out.removed.length > 0) {
     // Un-asked, so the Inbox writes these again by itself once the person turns it on.
-    const notes = loadConfig().inboxAgentNotes;
+    const notes = loadConfig({ quiet: true }).inboxAgentNotes;
     const removed = new Set<string>(out.removed.map((note) => note.agent));
     if (Array.isArray(notes?.asked)) saveConfig({ inboxAgentNotes: { ...notes, asked: notes.asked.filter((id) => !removed.has(id)) } });
   }
   return out;
 }
 
-/** One line in `inbox/inbox.log` with the Inbox's debug log on (the start trace's file: every writer appends). */
-export function logInboxOn(dataDir: string, record: Record<string, unknown>, env: Record<string, string | undefined> = process.env): void {
+/**
+ * One line in `inbox/inbox.log` (the start trace's file: every writer appends), always, so what the decision and a
+ * Turn off did can be read later. Only where an Inbox ran (the folder exists): a log line never creates it.
+ */
+export function logInboxOn(dataDir: string, record: Record<string, unknown>): void {
   try {
-    if (!resolveInboxDebug(loadConfig({ quiet: true }), env)) return;
     const dir = inboxDir(dataDir);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (!existsSync(dir)) return;
     appendFileSync(join(dir, "inbox.log"), `${JSON.stringify({ t: Date.now(), ev: "inbox_on", ...record, pid: process.pid })}\n`, { mode: 0o600 });
   } catch {
     // The log never gets in the way.
   }
 }
 
+function notesLine(cleared: InboxNotesCleared): Record<string, unknown> {
+  return {
+    notes_removed: cleared.removed.map((note) => note.path),
+    notes_kept: cleared.kept.map((note) => note.path),
+    notes_failed: cleared.failed.map((note) => note.reason),
+  };
+}
+
 /**
  * Decide this install once (an install from before the rule) and finish what
- * an off record left to do. Idempotent: a decided record with nothing pending
- * is only read. Answers whether the Inbox is on.
+ * an agent-only decision left to do, once. Idempotent: a decided record with
+ * nothing pending is only read. Answers whether the Inbox is on.
  */
 export function settleInboxOn(dataDir: string, options: { environment?: AgentEnvironment; env?: Readonly<Record<string, string | undefined>> } = {}): boolean {
   const before = readInboxOnRecord(dataDir);
@@ -97,9 +106,10 @@ export function settleInboxOn(dataDir: string, options: { environment?: AgentEnv
   if (!before) logInboxOn(dataDir, { decided: record.by, on: record.on });
   if (record.on || record.notes !== "remove") return record.on;
   const cleared = removeUntouchedInboxNotes(dataDir, options.environment);
-  logInboxOn(dataDir, { notes_removed: cleared.removed.length, notes_kept: cleared.kept.length, notes_failed: cleared.failed.length });
-  // A note that could not go is tried again next time; otherwise nothing is pending any more.
-  if (cleared.failed.length === 0) writeInboxOnRecord(dataDir, withoutNotes(record));
+  // Once: what could not go is recorded and named by `plannotator inbox status`, never retried by itself.
+  const next: InboxOnRecord = { ...withoutNotes(record), ...(cleared.failed.length > 0 ? { notes: "left" as const } : {}) };
+  writeInboxOnRecord(dataDir, next, { ifCurrent: record });
+  logInboxOn(dataDir, { settled: record.by, ...notesLine(cleared) });
   return false;
 }
 
@@ -113,28 +123,60 @@ export interface InboxTurnedOff {
   recorded: boolean;
   /** What stopping the Inbox did (absent when the caller stops it itself). */
   stop?: InboxStopResult;
+  /** The routines' start at login that was removed (its path), if there was one. */
+  loginItem?: string;
   notes: InboxNotesCleared;
+}
+
+function underTest(): boolean {
+  return !!process.env.PLANNOTATOR_TEST_SANDBOX || process.env.NODE_ENV === "test";
+}
+
+/** Remove the routines' start at login (inbox-scheduled-login.ts), if there is one; its path, or null. */
+async function removeLoginItem(dataDir: string, e: AgentEnvironment): Promise<string | null> {
+  try {
+    const login = inboxLoginItem({
+      platform: e.platform,
+      home: e.homeDir,
+      argv: [],
+      dataDir,
+      run: underTest() ? async () => ({ code: 0 }) : async (argv) => ({ code: (await e.run(argv, { timeoutMs: 10_000 })).exitCode }),
+    });
+    if (!login.path || !existsSync(login.path)) return null;
+    await login.remove();
+    return existsSync(login.path) ? null : login.path;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Turn the Inbox off: the record says off (with the notes still to remove),
  * the Inbox stops (`stop: false` when the caller is the Inbox itself and stops
- * after answering), then Plannotator's untouched notes go.
+ * after answering), the routines' start at login goes (it comes back when the
+ * person turns the Inbox on and it starts with routines on), then
+ * Plannotator's untouched notes go.
  */
 export async function turnInboxOff(dataDir: string, options: { stop?: boolean; environment?: AgentEnvironment; now?: Date } = {}): Promise<InboxTurnedOff> {
   const now = options.now ?? new Date();
+  const e = options.environment ?? createAgentEnvironment();
   const recorded = recordInboxOff(dataDir, now, "remove");
   const stop = options.stop === false ? undefined : await stopInbox(dataDir, { escalate: true });
-  const notes = removeUntouchedInboxNotes(dataDir, options.environment);
-  if (recorded && notes.failed.length === 0) recordInboxOff(dataDir, now);
-  logInboxOn(dataDir, { decided: "off", notes_removed: notes.removed.length, notes_kept: notes.kept.length, notes_failed: notes.failed.length });
-  return { recorded, ...(stop ? { stop } : {}), notes };
+  const loginItem = await removeLoginItem(dataDir, e);
+  const notes = removeUntouchedInboxNotes(dataDir, e);
+  const pending = readInboxOnRecord(dataDir);
+  if (recorded && pending && !pending.on && pending.notes === "remove") {
+    writeInboxOnRecord(dataDir, { ...withoutNotes(pending), ...(notes.failed.length > 0 ? { notes: "left" as const } : {}) }, { ifCurrent: pending });
+  }
+  logInboxOn(dataDir, { decided: "off", ...(loginItem ? { login_item_removed: loginItem } : {}), ...notesLine(notes) });
+  return { recorded, ...(stop ? { stop } : {}), ...(loginItem ? { loginItem } : {}), notes };
 }
 
 /** The lines `plannotator inbox off` prints (and the Settings switches show the first and last of). */
 export function inboxOffReport(off: InboxTurnedOff): string[] {
   const lines = [off.recorded ? "The Plannotator Inbox is off on this computer: agents lose it from their next session, and nothing starts it." : INBOX_OFF_NOT_SAVED];
   if (off.stop?.state === "still_running") lines.push(`The running Inbox (pid ${off.stop.pid}) did not stop; stop it with plannotator inbox stop.`);
+  if (off.loginItem) lines.push("Removed the Inbox's start at login; it comes back with routines when you turn the Inbox on.");
   for (const note of off.notes.removed) lines.push(`Removed Plannotator's note for ${INBOX_AGENT_LABELS[note.agent]} from ${note.path}.`);
   for (const note of off.notes.kept) lines.push(`Left the note for ${INBOX_AGENT_LABELS[note.agent]} in ${note.path}: you edited it.`);
   for (const note of off.notes.failed) lines.push(`Could not remove the note for ${INBOX_AGENT_LABELS[note.agent]}: ${note.reason}`);

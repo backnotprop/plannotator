@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 ## Inbox address
 
-!`PLANNOTATOR_INBOX_SLASH_COMMAND=1 plannotator inbox --open`
+!`plannotator inbox --open --from-slash-command`
 
 ## Using the Inbox
 

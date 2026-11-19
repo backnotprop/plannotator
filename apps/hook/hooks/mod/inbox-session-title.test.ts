@@ -376,7 +376,8 @@ async function freshHooks(name: string) {
 }
 
 function engineOn(configDir: string, folder: string) {
-  const files = new Map<string, string>([['/bin/sh', ''], [inboxRegistryPathOf(DATA), REGISTRY]])
+  // The person turned the Inbox on here (inbox-on-contract.ts).
+  const files = new Map<string, string>([['/bin/sh', ''], [inboxRegistryPathOf(DATA), REGISTRY], [`${DATA}/state.json`, JSON.stringify({ inboxOn: { on: true, at: '2026-11-18T00:00:00.000Z', by: 'command' } })]])
   const store = new Map<string, unknown>()
   const timers = new Set<() => void>()
   const polls: unknown[] = []

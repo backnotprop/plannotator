@@ -1591,6 +1591,37 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
 }
 
 /**
+ * Compare-and-set one machine-state key in state.json, under config.json's lock, without reading or needing
+ * config.json (a hand-broken config.json never blocks it). `update` gets the key's current value in state.json and
+ * returns the value to write, or `undefined` to leave it as it is. Returns whether state.json now holds what
+ * `update` asked for (true when nothing needed writing) and the value it holds. Used for the Inbox's on/off record
+ * (inbox/inbox-on.ts), where a person's on or off must never be overwritten by a write that read an older value.
+ */
+export function updateMachineState(key: MachineStateKey, update: (current: unknown) => unknown): { ok: boolean; value: unknown } {
+  let lockPath: string | null = null;
+  let locked = false;
+  try {
+    mkdirSync(getConfigDir(), { recursive: true });
+    lockPath = getConfigLockPath();
+    locked = acquireConfigLock(lockPath);
+    if (!locked) {
+      process.stderr.write(`[plannotator] Warning: config.json lock unavailable after ${configLockWaitBudgetMs}ms; saving state.json without it.\n`);
+    }
+    const read = readState();
+    const current = read.state[key];
+    const next = update(current);
+    if (next === undefined) return { ok: true, value: current };
+    const ok = writeState({ ...read.state, [key]: next }, read);
+    return { ok, value: ok ? next : current };
+  } catch (e) {
+    process.stderr.write(`[plannotator] Warning: failed to write state.json: ${e}\n`);
+    return { ok: false, value: undefined };
+  } finally {
+    if (locked && lockPath) releaseConfigLock(lockPath);
+  }
+}
+
+/**
  * Detect the git user name from `git config user.name`.
  * Returns null if git is unavailable, not in a repo, or user.name is not set.
  */

@@ -31,6 +31,8 @@ test("macOS: a launchd item that starts the Inbox with no window; removing it de
   const plist = readFileSync(item.path!, "utf8");
   expect(plist).toContain("<string>/opt/plannotator &amp; co/plannotator</string>\n    <string>inbox</string>\n    <string>--no-open</string>");
   expect(plist).toContain(`<key>PLANNOTATOR_DATA_DIR</key><string>${w.dataDir}</string>`);
+  // Never the person's act: the start at login cannot turn the Inbox on (inbox-on-command.ts).
+  expect(plist).toContain("<key>PLANNOTATOR_INBOX_LOGIN_ITEM</key><string>1</string>");
   expect(plist).toContain("<key>RunAtLoad</key><true/>");
   // Writing it starts nothing now: launchd reads it at the next login.
   expect(w.ran).toEqual([]);
@@ -50,7 +52,7 @@ test("Linux: a user unit only where systemctl --user answers", async () => {
   expect(await item.add()).toBe("added");
   const unit = readFileSync(item.path!, "utf8");
   expect(unit).toContain('ExecStart="/usr/local/bin/plannotator" "inbox" "--no-open"');
-  expect(unit).toContain('Environment="PLANNOTATOR_DATA_DIR=/srv/100%%/data"');
+  expect(unit).toContain('Environment="PLANNOTATOR_DATA_DIR=/srv/100%%/data" "PLANNOTATOR_INBOX_LOGIN_ITEM=1"');
   expect(w.ran).toEqual(["systemctl --user show-environment", "systemctl --user enable plannotator-inbox.service"]);
   await item.remove();
   expect(w.ran.at(-1)).toBe("systemctl --user disable plannotator-inbox.service");

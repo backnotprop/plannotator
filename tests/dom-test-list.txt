@@ -851,3 +851,5 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/ui/components/Settings.inboxOn.test.tsx
+packages/inbox/inboxOffSetting.test.tsx

@@ -428,11 +428,12 @@ function InboxOnSettingRow({ on, line, onChange }: {
       <ToggleSwitch
         checked={on}
         onChange={(next) => void change(next)}
-        disabled={saving}
+        // Off here is final for this page: only the person's own terminal turns it on (no page request can prove a click).
+        disabled={saving || !on}
         label="Plannotator Inbox"
         description={
           on
-            ? 'On for this computer: agents can leave you messages and questions in it. Off stops it, and nothing starts it again until you turn it on.'
+            ? 'On for this computer: agents can leave you messages and questions in it. Off stops it, and nothing starts it again until you turn it on in your terminal.'
             : 'Off for this computer: agents do not get it, and nothing starts it.'
         }
       />

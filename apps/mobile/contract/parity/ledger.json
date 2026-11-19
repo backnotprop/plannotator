@@ -19840,6 +19840,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-off",
+      "title": "window:/api/inbox/off",
+      "surface": [
+        "window:/api/inbox/off"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

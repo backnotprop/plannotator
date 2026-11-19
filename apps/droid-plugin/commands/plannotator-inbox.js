@@ -29,8 +29,12 @@ const GUIDE = [
 ].join("\n");
 
 // The CLI waits up to 20 s for an Inbox it starts; never wait much longer.
-// The person typed /plannotator-inbox: this run turns the Inbox on (PLANNOTATOR_INBOX_SLASH_COMMAND, inbox-on-contract.ts).
-const result = runPlannotator(["inbox", "--open"], { timeout: 30_000, env: { PLANNOTATOR_INBOX_SLASH_COMMAND: "1" } });
+// The person typed /plannotator-inbox: this run turns the Inbox on (the hidden --from-slash-command, inbox-on-contract.ts).
+// A plannotator older than that flag keeps no such rule: the plain open, as before.
+let result = runPlannotator(["inbox", "--open", "--from-slash-command"], { timeout: 30_000 });
+if (result.status !== 0 && /unknown inbox option:?\s*--from-slash-command/i.test(`${result.stderr || ""}${result.stdout || ""}`)) {
+  result = runPlannotator(["inbox", "--open"], { timeout: 30_000 });
+}
 
 if (result.error || result.status !== 0) {
   exitWithFailure(result, "plannotator inbox --open");

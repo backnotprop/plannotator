@@ -14,13 +14,14 @@
  *  - it never ran here: off.
  */
 
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { saveConfig } from "../config";
+import { updateMachineState } from "../config";
 import { getPlannotatorDataDir } from "../data-dir";
 import {
+  INBOX_ON_DECIDED_FILE,
   INBOX_ON_FILE,
   INBOX_ON_KEY,
   inboxOnRecord,
@@ -36,12 +37,13 @@ export * from "./inbox-on-contract";
  * For test suites only, never a switch: a scratch data dir (inside the OS temp
  * folder or /tmp) with no record counts as on under the test sandbox
  * (`PLANNOTATOR_TEST_SANDBOX`, which every test sandbox and child of one
- * carries) or with `PLANNOTATOR_TEST_INBOX_ON=1` (the Inbox's browser proofs,
- * whose specs do not all carry the sandbox). So the suites that start an
- * Inbox in a fresh scratch data dir keep doing so, while a test that turns the
- * Inbox off (a record) or sets `PLANNOTATOR_TEST_INBOX_ON=0` sees the real
- * rule. A person's real data dir is never a scratch folder, so neither can
- * turn their Inbox on.
+ * carries), with `PLANNOTATOR_TEST_INBOX_ON=1`, or when HOME is a scratch
+ * folder too (the browser specs give the binary their own env, always with a
+ * scratch HOME). So the suites that start an Inbox in a fresh scratch data dir
+ * keep doing so, while a test that turns the Inbox off (a record) or sets
+ * `PLANNOTATOR_TEST_INBOX_ON=0` sees the real rule. A person's real data dir
+ * and home are never scratch folders, so none of this can turn their Inbox
+ * on, write their agents' notes or connect their agents.
  */
 export const INBOX_TEST_ON_ENV = "PLANNOTATOR_TEST_INBOX_ON";
 
@@ -74,7 +76,8 @@ export function isScratchFolder(dir: string): boolean {
 function testRunCountsOn(dataDir: string, env: Readonly<Record<string, string | undefined>>): boolean {
   const knob = env[INBOX_TEST_ON_ENV]?.trim();
   if (knob === "0") return false;
-  if (knob !== "1" && !env.PLANNOTATOR_TEST_SANDBOX) return false;
+  const home = env.HOME?.trim();
+  if (knob !== "1" && !env.PLANNOTATOR_TEST_SANDBOX && !(home && isScratchFolder(home))) return false;
   return isScratchFolder(dataDir);
 }
 
@@ -96,38 +99,83 @@ export function isInboxOn(dataDir: string = getPlannotatorDataDir(), env: Readon
   return decideExistingInstall(dataDir).on;
 }
 
+/** Decisions this process made whose write did not land (state.json unwritable): never scanned twice. */
+const decidedHere = new Map<string, InboxOnRecord>();
+
 /**
  * The one-time decision for an install from before the rule, written to
- * state.json. Returns the record (unchanged when one is already there).
+ * state.json. Returns the record (the one already there when there is one,
+ * also when another process wrote it while this one scanned: the write is a
+ * compare-and-set under config.json's lock, so a person's on or off made
+ * meanwhile is never overwritten).
+ *
+ * A computer where no Inbox ever ran (no `inbox/` folder) is off and nothing
+ * is written: only the person's act writes the first record there. Where a
+ * record existed once (INBOX_ON_DECIDED_FILE) and is gone, it is off
+ * (`record-lost`), never decided again from the evidence.
  */
 export function decideExistingInstall(dataDir: string = getPlannotatorDataDir(), now: Date = new Date()): InboxOnRecord {
   const known = readInboxOnRecord(dataDir);
   if (known) return known;
-  const ranHere = existsSync(join(dataDir, "inbox"));
-  const use = ranHere ? inboxUseOnDisk(dataDir) : null;
-  const by: InboxOnBy = use === "used" ? "update-used" : use === "ran" ? "update-ran" : ranHere ? "update-agent-only" : "update-never-ran";
-  const record: InboxOnRecord = { on: use !== null, at: now.toISOString(), by, ...(by === "update-agent-only" ? { notes: "remove" as const } : {}) };
-  writeInboxOnRecord(dataDir, record);
-  return record;
+  const key = realOr(dataDir);
+  const earlier = decidedHere.get(key);
+  if (earlier) return earlier;
+  const at = now.toISOString();
+  let record: InboxOnRecord;
+  if (existsSync(join(dataDir, INBOX_ON_DECIDED_FILE))) record = { on: false, at, by: "record-lost" };
+  else if (!existsSync(join(dataDir, "inbox"))) return { on: false, at, by: "update-never-ran" };
+  else {
+    const use = inboxUseOnDisk(dataDir);
+    const by: InboxOnBy = use === "used" ? "update-used" : use === "ran" ? "update-ran" : "update-agent-only";
+    record = { on: use !== null, at, by, ...(by === "update-agent-only" ? { notes: "remove" as const } : {}) };
+  }
+  const stored = writeInboxOnRecord(dataDir, record, { ifAbsent: true });
+  const result = stored.record ?? record;
+  if (!stored.ok) decidedHere.set(key, result);
+  return result;
 }
 
-/** The person turned the Inbox on (their own `plannotator inbox`, `/plannotator-inbox`, `plannotator inbox on`, a Turn on switch). */
+/** The person turned the Inbox on (their own `plannotator inbox`, `/plannotator-inbox`, `plannotator inbox on`). */
 export function turnInboxOn(by: InboxOnBy, dataDir: string = getPlannotatorDataDir(), now: Date = new Date()): boolean {
   const known = readInboxOnRecord(dataDir);
   if (known?.on === true && !known.notes) return true;
-  return writeInboxOnRecord(dataDir, { on: true, at: now.toISOString(), by });
+  return writeInboxOnRecord(dataDir, { on: true, at: now.toISOString(), by }).ok;
 }
 
 /** Turn the Inbox off: the record says off (the caller stops the Inbox and removes the notes). */
-export function recordInboxOff(dataDir: string = getPlannotatorDataDir(), now: Date = new Date(), notes?: "remove"): boolean {
-  return writeInboxOnRecord(dataDir, { on: false, at: now.toISOString(), by: "off", ...(notes ? { notes } : {}) });
+export function recordInboxOff(dataDir: string = getPlannotatorDataDir(), now: Date = new Date(), notes?: "remove" | "left"): boolean {
+  return writeInboxOnRecord(dataDir, { on: false, at: now.toISOString(), by: "off", ...(notes ? { notes } : {}) }).ok;
 }
 
-/** Write the record (state.json, under config.json's lock). Only this file's functions call it. */
-export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord): boolean {
-  // saveConfig writes the data dir this process resolves; every caller passes that same folder.
-  if (realOr(dataDir) !== realOr(getPlannotatorDataDir())) return false;
-  return saveConfig({ [INBOX_ON_KEY]: record });
+/**
+ * Write the record: state.json only, under config.json's lock, and never
+ * needing config.json (a hand-broken config.json does not block it). With
+ * `ifAbsent`, only when there is still no record (the one-time decision);
+ * with `ifCurrent`, only while the record is still that one (a follow-up
+ * write never undoes an on or off made meanwhile). `ok`: the write landed or
+ * was not needed; `record`: what state.json holds now. Also
+ * leaves the decided mark (INBOX_ON_DECIDED_FILE). Only this file's functions
+ * and inbox-on-settle.ts call it.
+ */
+export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord, options: { ifAbsent?: boolean; ifCurrent?: InboxOnRecord } = {}): { ok: boolean; record: InboxOnRecord | null } {
+  // state.json is the data dir this process resolves; every caller passes that same folder.
+  if (realOr(dataDir) !== realOr(getPlannotatorDataDir())) return { ok: false, record: null };
+  const read = (value: unknown) => inboxOnRecord(JSON.stringify({ [INBOX_ON_KEY]: value }));
+  const same = (x: InboxOnRecord | null, y: InboxOnRecord) => !!x && x.on === y.on && x.at === y.at && x.by === y.by;
+  const written = updateMachineState(INBOX_ON_KEY, (current) => {
+    if (options.ifAbsent && read(current)) return undefined;
+    if (options.ifCurrent && !same(read(current), options.ifCurrent)) return undefined;
+    return record;
+  });
+  const now = read(written.value);
+  if (written.ok && now) {
+    try {
+      if (!existsSync(join(dataDir, INBOX_ON_DECIDED_FILE))) writeFileSync(join(dataDir, INBOX_ON_DECIDED_FILE), `${now.at}\n`, { mode: 0o600 });
+    } catch {
+      // The mark only keeps a lost record from being decided again.
+    }
+  }
+  return { ok: written.ok, record: now };
 }
 
 /**
@@ -135,14 +183,14 @@ export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord): bool
  * Inbox: the cheap files (inboxUseFromFiles), then the store itself. null:
  * nothing the person did (only agents started it, or it never ran).
  */
-export function inboxUseOnDisk(dataDir: string): InboxUseEvidence | null {
+export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BUDGET_MS): InboxUseEvidence | null {
   const files = inboxUseFromFiles({
     config: readText(join(dataDir, "config.json")),
     state: readText(join(dataDir, INBOX_ON_FILE)),
     agentsFile: existsSync(join(dataDir, "inbox", "agents.json")),
   });
   if (files === "used") return "used";
-  if (storeShowsPersonUse(join(dataDir, "inbox"))) return "used";
+  if (storeShowsPersonUse(join(dataDir, "inbox"), Date.now() + budgetMs)) return "used";
   return files;
 }
 
@@ -152,14 +200,18 @@ export function inboxUseOnDisk(dataDir: string): InboxUseEvidence | null {
  * `person_read_seq`; only the window's `/seen` and `/read` routes write them),
  * a message the person wrote (not one of the Inbox's own notes or action
  * reports, not a routine's line), an answered question (`picked_at`), a pin,
- * a draft, or a paired device. A store not yet returned from SQLite
- * (`inbox.db`) counts as used, so no user of it is cut off. Stops at the
- * first hit.
+ * a draft, a paired device, a linked machine or the relay, a snooze, a
+ * search. A store not yet returned from SQLite (`inbox.db`) counts as used, so
+ * no user of it is cut off. Stops at the first hit. A store too large to read
+ * by `deadline` counts as used (kept on when in doubt), so the decision is
+ * bounded in time.
  */
-export function storeShowsPersonUse(inboxDir: string): boolean {
+export function storeShowsPersonUse(inboxDir: string, deadline: number = Date.now() + INBOX_SCAN_BUDGET_MS): boolean {
   if (existsSync(join(inboxDir, "inbox.db"))) return true;
   if (nonEmptyFile(join(inboxDir, "devices.jsonl"))) return true;
-  if (nonEmptyJson(join(inboxDir, "pins.json"))) return true;
+  for (const name of ["pins.json", "machines.json", "relay.json", "snoozes.json", "recent-searches.json"]) {
+    if (nonEmptyJson(join(inboxDir, name))) return true;
+  }
   for (const folder of ["drafts", "reply-drafts"]) {
     try {
       if (readdirSync(join(inboxDir, folder)).some((name) => name.endsWith(".json"))) return true;
@@ -174,11 +226,15 @@ export function storeShowsPersonUse(inboxDir: string): boolean {
     return false;
   }
   for (const project of projects) {
-    if (linesMatch(join(inboxDir, "projects", project, "messages.jsonl"), personMessageLine)) return true;
-    if (linesMatch(join(inboxDir, "projects", project, "questions.jsonl"), pickedQuestionLine)) return true;
+    if (Date.now() > deadline) return true;
+    if (linesMatch(join(inboxDir, "projects", project, "messages.jsonl"), personMessageLine, deadline)) return true;
+    if (linesMatch(join(inboxDir, "projects", project, "questions.jsonl"), pickedQuestionLine, deadline)) return true;
   }
   return false;
 }
+
+/** How long the one-time decision may read the store (the Claude Code mod waits on it once). */
+export const INBOX_SCAN_BUDGET_MS = 5_000;
 
 function nonEmptyFile(path: string): boolean {
   try {
@@ -244,8 +300,8 @@ function pickedQuestionLine(line: string): boolean {
   return typeof record?.picked_at === "string" && record.picked_at !== "";
 }
 
-/** Whether any line of a JSONL file passes `test`, read in chunks so a large store stops at the first hit. */
-function linesMatch(path: string, test: (line: string) => boolean): boolean {
+/** Whether any line of a JSONL file passes `test`, read in chunks so a large store stops at the first hit; past `deadline`, true. */
+function linesMatch(path: string, test: (line: string) => boolean, deadline: number): boolean {
   let fd: number;
   try {
     fd = openSync(path, "r");
@@ -259,6 +315,7 @@ function linesMatch(path: string, test: (line: string) => boolean): boolean {
     for (;;) {
       const read = readSync(fd, chunk, 0, chunk.length, null);
       if (read <= 0) break;
+      if (Date.now() > deadline) return true;
       const text = rest + decoder.write(chunk.subarray(0, read));
       const lines = text.split("\n");
       rest = lines.pop() ?? "";

@@ -92,6 +92,16 @@ describe('Settings Plannotator Inbox row', () => {
     });
   }
 
+  // An agent's curl looks like this page's request, so a page never turns the Inbox on: once off, the switch is inert.
+  test.skipIf(!hasDom)('once off, the switch cannot turn it back on from the page', async () => {
+    const saved: boolean[] = [];
+    await mount({ mode: 'plan', initial: true, save: async (on) => (saved.push(on), on ? undefined : 'Turn it back on any time with plannotator inbox.') });
+    await act(async () => toggle()?.click());
+    await act(async () => toggle()?.click());
+    expect(saved).toEqual([false]);
+    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+  });
+
   test.skipIf(!hasDom)('no row for someone who never turned the Inbox on', async () => {
     await mount({ mode: 'plan', initial: undefined, save: async () => undefined });
     expect(document.querySelector(ROW)).toBeNull();

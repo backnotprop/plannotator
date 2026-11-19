@@ -11,7 +11,7 @@ import { runDroidInboxCommand } from "./helpers/droid-inbox-command";
 describe.skipIf(process.platform === "win32")("Droid /plannotator-inbox", () => {
   test("opened: prints the address, the CLI's note, then the briefing", () => {
     const run = runDroidInboxCommand("echo 'http://127.0.0.1:61234/'; echo 'No browser opened: this is a remote session.' >&2");
-    expect(run.argv).toBe("inbox --open");
+    expect(run.argv).toBe("inbox --open --from-slash-command");
     expect(run.status).toBe(0);
     const lines = run.stdout.split("\n");
     expect(lines[0]).toBe("Plannotator Inbox: http://127.0.0.1:61234/");

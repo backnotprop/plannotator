@@ -42,6 +42,8 @@ function engineOver(sessionId: string, installed: string) {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
+    // The person turned the Inbox on here (inbox-on-contract.ts).
+    [`${DATA}/state.json`, JSON.stringify({ inboxOn: { on: true, at: '2026-11-18T00:00:00.000Z', by: 'command' } })],
     [`${ROOT}/.claude-plugin/plugin.json`, JSON.stringify({ name: 'plannotator', version: '0.28.50' })],
   ])
   const store = new Map<string, unknown>()

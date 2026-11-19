@@ -470,7 +470,7 @@ export function inboxT3EntryIdle(t3Flag: boolean, env: Record<string, string | u
  * tools, prompts or resources as an error and mark it disconnected. That is
  * harmless: they go on without it.
  */
-export function toolessReply(message: JsonRpc, refusal: string = INBOX_ASK_AI_CHILD_REFUSAL): string | null {
+export function toolessReply(message: JsonRpc, refusal: string = INBOX_ASK_AI_CHILD_REFUSAL, instructions?: string): string | null {
   if (!message || typeof message !== "object" || !("id" in message) || typeof message.method !== "string") return null;
   const result = (value: Record<string, unknown>) => JSON.stringify({ jsonrpc: "2.0", id: message.id ?? null, result: value });
   switch (message.method) {
@@ -480,6 +480,8 @@ export function toolessReply(message: JsonRpc, refusal: string = INBOX_ASK_AI_CH
         protocolVersion: typeof requested === "string" ? requested : "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "plannotator-inbox", version: "1.0.0" },
+        // Why it has no tools (the Inbox is off): an MCP client shows the server's instructions to the agent.
+        ...(instructions ? { instructions } : {}),
       });
     }
     case "tools/list":
@@ -528,7 +530,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       return;
     }
     if (options.askAiChild || options.t3EntryIdle || options.inboxOff) {
-      const reply = toolessReply(message, options.inboxOff ? INBOX_OFF_AGENT_LINE : options.askAiChild ? INBOX_ASK_AI_CHILD_REFUSAL : INBOX_T3_ENTRY_REFUSAL);
+      const reply = toolessReply(message, options.inboxOff ? INBOX_OFF_AGENT_LINE : options.askAiChild ? INBOX_ASK_AI_CHILD_REFUSAL : INBOX_T3_ENTRY_REFUSAL, options.inboxOff ? INBOX_OFF_AGENT_LINE : undefined);
       if (reply) write(reply);
       return;
     }

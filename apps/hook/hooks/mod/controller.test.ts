@@ -1648,6 +1648,21 @@ describe('/plannotator-inbox', () => {
     expect(host.runs.filter(isLaunch)).toEqual([])
   })
 
+  // Only the person's own /plannotator-inbox turns the Inbox on (register.ts reads the command's origin).
+  test("typed by the person: the run carries the hidden flag; a plannotator older than it gets the plain open", async () => {
+    const host = fakeHost()
+    host.onRun = (call) =>
+      call.argv.includes('--from-slash-command')
+        ? { exitCode: 1, stdout: '', stderr: 'Unknown inbox option: --from-slash-command\n' }
+        : { exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: '' }
+    const { text } = await new PlannotatorMod(host, SESSION).openInbox(null, true)
+    expect(host.runs.filter((run) => run.argv[1] === 'inbox').map((run) => run.argv)).toEqual([
+      ['plannotator', 'inbox', '--open', '--from-slash-command'],
+      ['plannotator', 'inbox', '--open'],
+    ])
+    expect(text).toContain('http://localhost:59812/')
+  })
+
   test('over SSH the CLI opens no browser and says how to reach the Inbox: the answer passes that on', async () => {
     const host = fakeHost()
     host.onRun = () => ({ exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: 'No browser opened: this is a remote session. Forward the port (ssh -L 59812:127.0.0.1:59812 <this host>) and open the URL, or run plannotator inbox --tailscale.\n' })

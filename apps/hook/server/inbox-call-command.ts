@@ -41,6 +41,7 @@
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
+import { isInboxOffAnswer } from "@plannotator/shared/inbox/inbox-on-contract";
 import { resolve } from "node:path";
 import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
@@ -240,7 +241,9 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    return refused("inbox_not_running", inboxEnsureFailedWords(error));
+    // Off (inbox-on-contract.ts): its own code, so nothing reads "not running" as "start it".
+    const words = inboxEnsureFailedWords(error);
+    return refused(isInboxOffAnswer(words) ? "inbox_off" : "inbox_not_running", words);
   }
   let answer: ReturnType<typeof mcpAnswerOfResponse>;
   try {
