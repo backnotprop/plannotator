@@ -441,6 +441,9 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
 test('the automatic run off, picking what to make names the agent it would start, read once, and the sheet still fits a phone', async () => {
   mkdirSync(join(dataDir, 'agents-home', '.pi', 'agent'), { recursive: true });
   writeFileSync(join(dataDir, 'agents-home', '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
+  await expect
+    .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
+    .toContain('"agent":"pi"');
   const reads: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes('/api/inbox/pulls/risk?auto_agent=1')) reads.push(request.url());
