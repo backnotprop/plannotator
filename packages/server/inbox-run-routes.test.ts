@@ -24,7 +24,7 @@ import { createInboxRunRoutes, inboxRunFolder } from "./inbox-run-routes";
 import { inboxRunArgv, inboxRunShellNote, isPowerShellOwnVariable, posixRunShell, powerShellEncoded, runShellFor, WINDOWS_CLIPBOARD_SCRIPT, type InboxRunShell } from "./inbox-run-shell";
 import { keptLoginEnv, lostRunStillRunning, macTmp, processStartedAt } from "./inbox-run-setup";
 import { checkSecretValue, createInboxSecrets, hideSecretPrefixTail, loginEnvCredentials, redactSecrets } from "./inbox-secrets";
-import { inboxSecretStorePlace, memoryVault } from "./inbox-secret-vault";
+import { inboxSecretKeptWords, inboxSecretStorePlace, memoryVault } from "./inbox-secret-vault";
 
 const SENTINEL = "TEST_ONLY_NOT_A_KEY_123";
 const SESSION = "srv_session_1";
@@ -516,6 +516,9 @@ describe("the review's second round", () => {
     // Where a saved value is kept, the same words before and after Save: "your" in its own window, "its" once the computer is named.
     expect((await w.read()).store).toBe("in your Keychain");
     expect((await w.read({}, { device_id: "dev_p", name: "Phone", platform: "ios", window: false })).store).toBe("in its Keychain");
+    // What Save does names the computer that keeps it: this one's own, or the named one seen from a phone.
+    expect((await w.read()).kept).toContain("your Mac's Keychain");
+    expect((await w.read({}, { device_id: "dev_p", name: "Phone", platform: "ios", window: false })).kept).toContain("Studio Mac's Keychain");
     expect(macTmp("/private/tmp/qa/proj", "darwin")).toBe("/tmp/qa/proj");
     expect(macTmp("/private/tmp/qa/proj", "linux")).toBe("/private/tmp/qa/proj");
     expect(macTmp("/private/var/x", "darwin")).toBe("/private/var/x");
@@ -719,4 +722,9 @@ test("each store, in the words the card says before and after Save", () => {
     ["in your Keychain", "in your system keyring", "protected by Windows for your account", "in a file only you can read"],
     ["in its Keychain", "in its system keyring", "protected by Windows for your account", "in a file only you can read"],
   ]);
+  // Under the field: the store by its plain name, on the computer that keeps it (no computer for the file store).
+  const kept = (["keychain", "secret-service", "dpapi", "file"] as const).map((kind) => inboxSecretKeptWords(kind, "Studio Mac"));
+  for (const [words, store] of kept.map((words, i) => [words, ["Keychain", "system keyring", "Windows", "a file only you can read"][i]!] as const)) expect(words).toContain(store);
+  for (const words of kept.slice(0, 3)) expect(words).toContain("Studio Mac");
+  expect(inboxSecretKeptWords("keychain", "Mike Jones")).toContain("Mike Jones' Keychain");
 });

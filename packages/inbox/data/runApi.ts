@@ -60,6 +60,8 @@ export interface RunStateWire {
   computer: string;
   /** Where a saved value is kept, in words, the same before and after Save ("in your Keychain"; "in its Keychain" when `computer` is a name). */
   store: string;
+  /** What Save does, in words, under a secret field ("Saved to your Mac's Keychain."). Absent from an older Inbox. */
+  kept?: string;
   /** The shell a command runs in ("zsh", "Git Bash", "PowerShell"); null before the computer has read it. */
   shell: string | null;
   blocks: Record<string, RunBlockView>;

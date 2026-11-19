@@ -189,7 +189,7 @@ export function RunCard({ messageId, block, state, agent, cardRef }: { messageId
                       : {})}
                   />
                   <p className="ib-rb-hint" data-secret-kept="">
-                    {secretKeptWords(state, agent, needs.length === 1 ? 'Then this command runs with it.' : 'This command gets it when it runs.')}
+                    {secretKeptWords(state, agent)}
                   </p>
                   </>
                 )}

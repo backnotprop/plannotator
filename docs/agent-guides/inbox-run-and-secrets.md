@@ -47,7 +47,7 @@ Two Inbox-only blocks an agent writes in a message (owner's picks, 2026-11-17: "
 
 ### What agents are told
 
-`packages/core/inbox-run-guide.ts`. send_message's `body` description (inbox-mcp.ts) carries the short `INBOX_RUN_TOOL_TEXT` (618 characters: every tool listing carries it), which points to `plannotator inbox --help`. The help ("Commands the person runs, and secrets") and `/llms/inbox.md` carry the whole `INBOX_RUN_GUIDE` with `INBOX_RUN_EXAMPLE` and `INBOX_SECRET_EXAMPLE`. The Claude Code mod's bundled tool list (`apps/hook/hooks/mod/inbox-default-tools.ts`) has the short text byte for byte.
+`packages/core/inbox-run-guide.ts`. send_message's `body` description (inbox-mcp.ts) carries the short `INBOX_RUN_TOOL_TEXT` (617 characters: every tool listing carries it), which points to `plannotator inbox --help`. The help ("Commands the person runs, and secrets") and `/llms/inbox.md` carry the whole `INBOX_RUN_GUIDE` with `INBOX_RUN_EXAMPLE` and `INBOX_SECRET_EXAMPLE`. The Claude Code mod's bundled tool list (`apps/hook/hooks/mod/inbox-default-tools.ts`) has the short text byte for byte.
 
 ### Accepted, not defended
 

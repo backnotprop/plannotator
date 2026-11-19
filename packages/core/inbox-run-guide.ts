@@ -35,8 +35,8 @@ export const INBOX_SECRET_EXAMPLE = [
  * to write each block and its shape. The full text is INBOX_RUN_GUIDE, in `plannotator inbox --help` and /llms.
  */
 export const INBOX_RUN_TOOL_TEXT = [
-  "`:::run` (Inbox only): a command the person runs on their computer with one press (it needs their machine, sign-in or secret). Lines: title; why; optional `Folder: <path in the project>`; optional `Uses: NAME` for a secret the program reads itself; the command in one ``` fence (POSIX shell). You get the exit code and last output lines. A command needing typing goes in a plain code block.",
-  "`:::secret`: first line NAME, then why, optional `Where: <url>`. They save it on their computer; you hear only that. A run gets it only by naming it: `$NAME` in the command, or `Uses: NAME`. Details: `plannotator inbox --help`.",
+  "`:::run` (Inbox only): a command the person runs on their computer with one press (it needs their machine, sign-in or secret). Only these lines: title; why; optional `Folder: <project path>`; optional `Uses: NAME` for a secret the program reads itself; the command in one ``` fence (POSIX shell). You get its exit code and output tail. A command needing typing goes in a plain code block.",
+  "`:::secret`, only these lines: NAME; why; optional `Where: <url>`. They save it on their computer; you hear only that. A run gets it only by naming it: `$NAME` in its command or `Uses: NAME`. Details: `plannotator inbox --help`.",
 ].join("\n");
 
 /** When to write each block, and what comes back: `plannotator inbox --help` and /llms carry it whole. */

@@ -68,6 +68,15 @@ describe(":::run blocks", () => {
     expect(inboxRunUnusableWords([])).toBeNull();
   });
 
+  test("Uses: none (no, -, empty) is no Uses line: nothing it cannot use, no warning, and not part of the why", () => {
+    for (const value of ["none", "no", "-", "", "None."]) {
+      const [block] = parseInboxRunBlocks(run(`Deploy\nShips it.\nUses: ${value}\n\`\`\`\nls\n\`\`\`\n`));
+      expect(block!.uses).toEqual([]);
+      expect(block!.uses_unusable).toEqual([]);
+      expect(block!.why).toBe("Ships it.");
+    }
+  });
+
   test("a Uses word that is not a name is said once, as written; a trust-file name gets its own true reason", () => {
     const [block] = parseInboxRunBlocks(run("Deploy\nUses: not-a-name, SSL_CERT_FILE, NODE_OPTIONS, A_KEY.\n```\nls\n```"));
     expect(block!.uses).toEqual(["A_KEY"]);

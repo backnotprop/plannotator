@@ -48,7 +48,7 @@ import { INBOX_RUN_TOO_LONG_WORDS, type InboxRunEnded, type InboxRuns } from "./
 import type { InboxRunRecord } from "./inbox-run-journal";
 import { inboxRunArgv, inboxRunShellNote, inboxRunTooLong, type InboxRunShell } from "./inbox-run-shell";
 import { checkSecretValue, loginEnvCredentials, type InboxSecrets } from "./inbox-secrets";
-import { INBOX_SECRET_STORE_FROM, INBOX_SECRET_STORE_IN, inboxSecretStorePlace, scrubSecret, type InboxSecretVault } from "./inbox-secret-vault";
+import { INBOX_SECRET_STORE_FROM, INBOX_SECRET_STORE_IN, inboxSecretKeptWords, inboxSecretStorePlace, scrubSecret, type InboxSecretVault } from "./inbox-secret-vault";
 
 export const INBOX_RUN_WINDOW_ONLY_BODY = { error: "A command runs, and a secret is saved, only from the person's own Inbox window or phone.", code: "window_only" } as const;
 
@@ -218,6 +218,7 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
     return {
       computer,
       store: inboxSecretStorePlace(options.vault.kind, !viaDoor),
+      kept: inboxSecretKeptWords(options.vault.kind, computer),
       shell: shell?.name ?? null,
       blocks,
       runs: options.runs.views(message.id),

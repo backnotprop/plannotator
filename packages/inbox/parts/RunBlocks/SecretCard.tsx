@@ -20,9 +20,11 @@ const hostOf = (url: string) => {
   }
 };
 
-/** What Save does, under every secret field: "Stays on your Mac, in your Keychain. Claude gets only the name." and what comes next. */
-export function secretKeptWords(state: RunStateWire | null, agent: string, next: string): string {
-  return `Stays on ${state?.computer ?? 'your computer'}, ${state?.store ?? 'where only you can read it'}. ${agent} gets only the name. ${next}`;
+/** What Save does, under every secret field: "Saved to your Mac's Keychain. Claude never sees it." */
+export function secretKeptWords(state: RunStateWire | null, agent: string): string {
+  // An older Inbox (a linked machine not yet updated) sends no `kept`: its store words still say where.
+  const kept = state?.kept ?? (state ? `Saved ${state.store}.` : 'Saved where only you can read it.');
+  return `${kept} ${agent} never sees it.`;
 }
 
 export function SecretCard({ messageId, secret, state, agent, cardRef }: { messageId: string; secret: ParsedInboxSecret; state: RunStateWire | null; agent: string; cardRef?: (element: Element | null) => (() => void) | undefined }) {
@@ -99,7 +101,7 @@ export function SecretCard({ messageId, secret, state, agent, cardRef }: { messa
               focusReplace.current = true;
               setReplacing(false);
             }} {...(replacing ? { onCancel: () => setReplacing(false) } : {})} />
-          <p className="ib-rb-hint" data-secret-kept="">{secretKeptWords(state, agent, 'Commands you run here that name it will have it.')}</p>
+          <p className="ib-rb-hint" data-secret-kept="">{secretKeptWords(state, agent)}</p>
         </>
       )}
       {error && (

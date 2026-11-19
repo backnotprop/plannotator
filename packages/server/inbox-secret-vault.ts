@@ -24,9 +24,8 @@ import { join } from "node:path";
 export type InboxSecretStoreKind = "keychain" | "secret-service" | "dpapi" | "file";
 
 /**
- * Where a saved value is kept, as the card says it before and after Save ("Stays on your Mac, in your Keychain.",
- * "Saved 10:12 AM · in your Keychain"). `own`: the computer's own window ("your Keychain"); a phone or a linked
- * machine names the computer, so its store is "its" ("Stays on MacBook Pro, in its Keychain.").
+ * Where a saved value is kept, as the card says it after Save ("Saved 10:12 AM · in your Keychain"). `own`: the
+ * computer's own window ("your Keychain"); a phone or a linked machine names the computer, so its store is "its".
  */
 export function inboxSecretStorePlace(kind: InboxSecretStoreKind, own: boolean): string {
   const whose = own ? "your" : "its";
@@ -35,6 +34,20 @@ export function inboxSecretStorePlace(kind: InboxSecretStoreKind, own: boolean):
     "secret-service": `in ${whose} system keyring`,
     dpapi: "protected by Windows for your account",
     file: "in a file only you can read",
+  }[kind];
+}
+
+/**
+ * What Save does, in words, under every secret field: "Saved to your Mac's Keychain.", "Saved to Studio Mac's
+ * Keychain." (a phone or a linked machine names the computer). The card adds that the agent never sees it.
+ */
+export function inboxSecretKeptWords(kind: InboxSecretStoreKind, computer: string): string {
+  const whose = computer.endsWith("s") ? `${computer}'` : `${computer}'s`;
+  return {
+    keychain: `Saved to ${whose} Keychain.`,
+    "secret-service": `Saved to ${whose} system keyring.`,
+    dpapi: `Saved on ${computer}, protected by Windows.`,
+    file: "Saved to a file only you can read.",
   }[kind];
 }
 

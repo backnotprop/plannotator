@@ -40,11 +40,14 @@ const runView = (key: string, run: Partial<RunView>): RunView => ({
 const state = (key: string, extra: Partial<RunBlockView> = {}, run?: Partial<RunView>): RunStateWire => ({
   computer: 'your Mac',
   store: 'in your Keychain',
+  kept: "Saved to your Mac's Keychain.",
   shell: 'zsh',
   blocks: { [key]: blockView(extra) },
   runs: run ? { [key]: runView(key, run) } : {},
   secrets: [],
 });
+/** The words under a secret field (data-secret-kept), as text. */
+const keptLine = (html: string) => /<p[^>]*data-secret-kept=""[^>]*>([^<]*)<\/p>/.exec(html)?.[1]?.replace(/&#x27;/g, "'") ?? null;
 const draw = (command: string, extra?: Partial<RunBlockView>, run?: Partial<RunView>, extraLines: string[] = []) => {
   const b = block(command, extraLines);
   return renderToStaticMarkup(<RunCard messageId="msg_1" block={b} state={state(b.key, extra, run)} agent="Claude" />);
@@ -162,7 +165,9 @@ describe('the secret card', () => {
     expect(html).toContain('data-secret-state="empty"');
     expect(html).toContain('type="password"');
     expect(html).toContain('Find it on example.com');
-    expect(html).toContain('Stays on your Mac, in your Keychain. Claude gets only the name. Commands you run here that name it will have it.');
+    // Where it is kept and that the agent never sees it: the store and the agent by name.
+    expect(keptLine(html)).toContain("your Mac's Keychain");
+    expect(keptLine(html)).toContain('Claude');
   });
 
   test('saved: when and where, Replace and Remove, no field and no part of the value', () => {
@@ -192,13 +197,19 @@ describe('the review\'s second round', () => {
     expect(html).toContain('Needs API_TOKEN');
     expect(html).toContain('Save and run');
     // What Save does, under the field itself, naming the store the saved line names after.
-    expect(html).toContain('Stays on your Mac, in your Keychain. Claude gets only the name. Then this command runs with it.');
+    expect(keptLine(html)).toContain("your Mac's Keychain");
+    expect(keptLine(html)).toContain('Claude');
   });
 
   test('seen from a phone, the field says the computer by name and its store', () => {
     const b = block('curl -H "Bearer $API_TOKEN" x');
-    const named = { ...state(b.key, { uses: ['API_TOKEN'], needs: ['API_TOKEN'] }), computer: 'Studio Mac', store: 'in its Keychain' };
-    expect(renderToStaticMarkup(<RunCard messageId="msg_1" block={b} state={named} agent="Claude" />)).toContain('Stays on Studio Mac, in its Keychain. Claude gets only the name. Then this command runs with it.');
+    const named = { ...state(b.key, { uses: ['API_TOKEN'], needs: ['API_TOKEN'] }), computer: 'Studio Mac', store: 'in its Keychain', kept: "Saved to Studio Mac's Keychain." };
+    const line = keptLine(renderToStaticMarkup(<RunCard messageId="msg_1" block={b} state={named} agent="Codex" />));
+    expect(line).toContain("Studio Mac's Keychain");
+    expect(line).toContain('Codex');
+    // A linked machine on an older Inbox sends no `kept`: the line still says where, from its store words.
+    const { kept: _kept, ...older } = named;
+    expect(keptLine(renderToStaticMarkup(<RunCard messageId="msg_1" block={b} state={older} agent="Codex" />))).toContain('in its Keychain');
   });
 
   test('one field per secret: a card whose field is elsewhere says Needs and offers to go there', () => {

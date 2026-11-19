@@ -40,6 +40,7 @@
  */
 
 import { blockKeyHash8, findDirectiveBlocks } from "./question-block";
+import { isNegativeWaitValue } from "./inbox-questions";
 
 export const INBOX_RUN_DIRECTIVE = "run";
 export const INBOX_SECRET_DIRECTIVE = "secret";
@@ -199,6 +200,8 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
       continue;
     }
     const usesLine = USES_RE.exec(line);
+    // `Uses: none` (no, -, empty) is no Uses line, as `Stopped: no` is no stop: nothing it cannot use, and not the why.
+    if (usesLine && uses === null && (usesLine[1]!.trim() === "" || isNegativeWaitValue(usesLine[1]!))) continue;
     if (usesLine && uses === null) {
       uses = [];
       // Split where a person would (spaces, commas, semicolons, bars), so a word that is not a name is said as written.
