@@ -748,7 +748,7 @@ const QuestionAnswerControls: React.FC<{
                 value={answer.customAnswer}
                 onChange={(event) => updateCustomOption(event.target.value)}
                 placeholder="Other…"
-                className="goal-answer-focus goal-custom-input min-w-0 flex-1 bg-transparent text-[13px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+                className="goal-answer-focus goal-custom-input min-w-0 flex-1 bg-transparent text-[13px] leading-snug text-foreground outline-none placeholder:text-muted-foreground"
               />
               <kbd className="goal-shortcut-pill ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/40 font-mono text-[10px] text-muted-foreground">/</kbd>
             </label>

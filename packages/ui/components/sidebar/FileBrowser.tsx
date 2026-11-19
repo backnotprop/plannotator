@@ -572,7 +572,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               spellCheck={false}
               data-lpignore="true"
               data-1p-ignore
-              className="file-browser-filter-input h-full min-w-0 flex-1 bg-transparent p-0 text-[16px] leading-4 text-foreground outline-none placeholder:text-muted-foreground/45 sm:text-[11px]"
+              className="file-browser-filter-input h-full min-w-0 flex-1 bg-transparent p-0 text-[16px] leading-4 text-foreground outline-none placeholder:text-muted-foreground sm:text-[11px]"
             />
             {filterQuery && (
               <button

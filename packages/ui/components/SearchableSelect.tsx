@@ -116,7 +116,7 @@ export function SearchableSelect<T extends { id: string }>({
             }}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none"
+            className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
           />
         </div>
 

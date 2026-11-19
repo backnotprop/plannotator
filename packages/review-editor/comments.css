@@ -449,7 +449,7 @@ html:has([data-selection-chooser]) { --review-selection-plus: none; }
 
 .suggested-code-input::placeholder {
   color: var(--muted-foreground);
-  opacity: 0.5;
+  opacity: 1;
 }
 
 .suggested-code-input:focus {

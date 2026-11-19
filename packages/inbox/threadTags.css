@@ -12,7 +12,7 @@
 .ib-tagm-find { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 8px; color: var(--muted-foreground); cursor: text; }
 .pn-inbox .ib-tagm-find svg.ib-ic { flex: none; }
 .ib-tagm-find input { flex: 1; min-width: 0; height: 26px; padding: 0 2px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; }
-.ib-tagm-find input::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-tagm-find input::placeholder { color: var(--muted-foreground); }
 .ib-pm .ib-tagm-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-pmi .ib-tagm-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-zsub .ib-tagm-n { margin-left: 0; padding: 0 6px 0 0; }
@@ -121,7 +121,7 @@
 .ib-tagc-hex { display: flex; align-items: center; gap: 6px; height: 30px; margin: 0 8px 8px; padding: 0 8px; border-radius: 6px; background: var(--ib-hover); font-size: var(--ib-fs-13, 13px); }
 .ib-tagc-hexl { color: var(--muted-foreground); }
 .ib-tagc-hex input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-variant-numeric: tabular-nums; }
-.ib-tagc-hex input::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-tagc-hex input::placeholder { color: var(--muted-foreground); }
 .ib-tagc-hex:focus-within { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent); }
 .ib-tagc-cap { padding: 0 8px 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 

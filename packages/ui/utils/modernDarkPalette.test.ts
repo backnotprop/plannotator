@@ -2,8 +2,9 @@
  * Plannotator Modern's dark palette is the PaulMillr palette (owner, 2026-11-09). The two live in two files,
  * because the palette sweeps read each theme from its own file (softGround.test.ts, diffCountColors.test.ts).
  * What regresses if this fails: one of the two is edited and Modern dark stops being PaulMillr's dark, in its
- * colors or in the syntax theme its code is drawn in, or its blue stops being the blue of its light half. Its quiet
- * surfaces' greys are its own (owner's report, 2026-11-10: the list's bands and the Reply button did not show).
+ * colors or in the syntax theme its code is drawn in, or its blue stops being the blue of its light half (its hue and
+ * chroma; lighter, so a link reads at 4.5:1 on the black ground, themeContrast.test.ts). Its quiet surfaces' greys are
+ * its own (owner's report, 2026-11-10: the list's bands and the Reply button did not show).
  */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -26,11 +27,17 @@ function tokens(file: string, selector: string): Record<string, string> {
 const colors = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).filter(([name]) => !name.startsWith('--font-')));
 
 /** The only tokens where Modern dark is not PaulMillr's: its blue (PaulMillr's primary and ring, one colour there). */
+/** `oklch(L C h)` as numbers. */
+const oklch = (value: string) => {
+  const m = /^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\)$/.exec(value);
+  if (!m) throw new Error(`not oklch(L C h): ${value}`);
+  return { L: Number(m[1]), C: Number(m[2]), h: Number(m[3]) };
+};
 const MODERN_BLUE_TOKENS = ['--primary', '--ring'];
 /** And the greys of its quiet surfaces, a step off the card (modernDarkSurfaces.test.ts says how far). */
 const MODERN_SURFACE_TOKENS = ['--muted', '--input', '--popover', '--border'];
 
-test("Plannotator Modern's dark colors are PaulMillr's, token for token, except the blue, which is its light half's, and the quiet surfaces' greys", () => {
+test("Plannotator Modern's dark colors are PaulMillr's, token for token, except the blue, which is its light half's lightened, and the quiet surfaces' greys", () => {
   const paulmillr = colors(tokens('paulmillr.css', '.theme-paulmillr'));
   const all = colors(tokens('plannotator-modern.css', '.theme-plannotator-modern'));
   for (const name of MODERN_SURFACE_TOKENS) expect(all[name], name).not.toBe(paulmillr[name]);
@@ -40,7 +47,12 @@ test("Plannotator Modern's dark colors are PaulMillr's, token for token, except 
   // PaulMillr's blue is one colour on both tokens; so is Modern's.
   for (const name of MODERN_BLUE_TOKENS) expect(paulmillr[name]).toBe(paulmillr['--primary']!);
   expect(lightBlue).toBeTruthy();
-  expect(dark).toEqual({ ...paulmillr, ...Object.fromEntries(MODERN_BLUE_TOKENS.map((name) => [name, lightBlue])) });
+  // One blue on both tokens, the light half's hue and chroma, lighter (never darker) than the light half's.
+  const darkBlue = all['--primary']!;
+  expect(all['--ring']).toBe(darkBlue);
+  expect({ C: oklch(darkBlue).C, h: oklch(darkBlue).h }).toEqual({ C: oklch(lightBlue).C, h: oklch(lightBlue).h });
+  expect(oklch(darkBlue).L).toBeGreaterThanOrEqual(oklch(lightBlue).L);
+  expect(dark).toEqual({ ...paulmillr, ...Object.fromEntries(MODERN_BLUE_TOKENS.map((name) => [name, darkBlue])) });
 });
 
 test("Plannotator Modern's dark code is drawn in the syntax theme PaulMillr's is", () => {

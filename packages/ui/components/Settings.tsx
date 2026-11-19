@@ -814,7 +814,7 @@ const FontFamilyField: React.FC<{
             maxLength={MAX_FONT_FAMILY_LENGTH}
             autoFocus={!customFontDraft}
             spellCheck={false}
-            className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             style={stackStyle(previewStack(customFontDraft))}
           />
           <div className="text-[11px]" aria-live="polite">
@@ -1910,7 +1910,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                 }
                               }}
                               placeholder="Enter agent name..."
-                              className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/50"
+                              className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
                             />
                           )}
                           <div className="text-[10px] text-muted-foreground/70">
@@ -2347,7 +2347,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             value={planSave.customPath || ''}
                             onChange={(e) => handlePlanSaveChange({ customPath: e.target.value || null })}
                             placeholder="Leave empty for default"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground/70">
                             Leave empty to use default location
@@ -2544,7 +2544,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                 if (e.key === 'Enter') addDirectory();
                               }}
                               placeholder="/path/to/directory"
-                              className="flex-1 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                              className="flex-1 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                             />
                             <button
                               onClick={addDirectory}
@@ -2624,7 +2624,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                       value={obsidian.customPath || ''}
                                       onChange={(e) => handleObsidianChange({ customPath: e.target.value })}
                                       placeholder="/path/to/vault"
-                                      className="w-full mt-2 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                                      className="w-full mt-2 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                                     />
                                   )}
                                 </>
@@ -2634,7 +2634,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                   value={obsidian.vaultPath}
                                   onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
                                   placeholder="/path/to/vault"
-                                  className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                                  className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                                 />
                               )}
                             </div>
@@ -2646,7 +2646,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                 value={obsidian.folder}
                                 onChange={(e) => handleObsidianChange({ folder: e.target.value })}
                                 placeholder="plannotator"
-                                className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                                className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                               />
                             </div>
                           </div>
@@ -2658,7 +2658,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                               value={obsidian.filenameFormat || ''}
                               onChange={(e) => handleObsidianChange({ filenameFormat: e.target.value || undefined })}
                               placeholder={DEFAULT_FILENAME_FORMAT}
-                              className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                              className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                             />
                             <div className="text-[10px] text-muted-foreground/70">
                               Variables: <code className="text-[10px]">{'{title}'}</code> <code className="text-[10px]">{'{YYYY}'}</code> <code className="text-[10px]">{'{MM}'}</code> <code className="text-[10px]">{'{DD}'}</code> <code className="text-[10px]">{'{Mon}'}</code> <code className="text-[10px]">{'{D}'}</code> <code className="text-[10px]">{'{HH}'}</code> <code className="text-[10px]">{'{h}'}</code> <code className="text-[10px]">{'{hh}'}</code> <code className="text-[10px]">{'{mm}'}</code> <code className="text-[10px]">{'{ss}'}</code> <code className="text-[10px]">{'{ampm}'}</code>
@@ -2804,7 +2804,7 @@ tags: [${mode === 'annotate' ? 'plannotator' : 'plan'}, ...]
                             onChange={(e) => handleBearChange({ customTags: e.target.value })}
                             onBlur={(e) => handleBearChange({ customTags: normalizeTags(e.target.value) })}
                             placeholder="plan, work"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground">
                             Comma-separated, kebab-case. Leave empty for auto-generated tags.
@@ -2885,7 +2885,7 @@ tags: [${mode === 'annotate' ? 'plannotator' : 'plan'}, ...]
                             value={octarine.workspace}
                             onChange={(e) => handleOctarineChange({ workspace: e.target.value })}
                             placeholder="My Workspace"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground">
                             The Octarine workspace name to save plans into.
@@ -2898,7 +2898,7 @@ tags: [${mode === 'annotate' ? 'plannotator' : 'plan'}, ...]
                             value={octarine.folder}
                             onChange={(e) => handleOctarineChange({ folder: e.target.value })}
                             placeholder="plannotator"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground">
                             Subfolder within the workspace for saved plans.
@@ -2972,7 +2972,7 @@ tags: [${mode === 'annotate' ? 'plannotator' : 'plan'}, ...]
                             value={notion.parentPageId}
                             onChange={(e) => handleNotionChange({ parentPageId: e.target.value })}
                             placeholder="https://www.notion.so/..."
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground">
                             A page link or ID. Each save adds a page under it. Share it with your Notion integration first.

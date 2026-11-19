@@ -583,7 +583,7 @@ button.ib-mut { border-radius: 6px; }
 /* Rename… in the project menu: the row's name as a field, in the row's own place and size, with the window's
    text-field look (.ib-fbk-contact: the border, the page's background, the ring on focus). */
 .pn-inbox .ib-proj-rename { display: block; width: 100%; height: 30px; padding: 0 8px; border-radius: var(--ib-rl-sm-s, 7px); border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); }
-.pn-inbox .ib-proj-rename::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.pn-inbox .ib-proj-rename::placeholder { color: var(--muted-foreground); }
 /* Inside the field, as the rows' rings are: .ib-sidescroll clips sideways, and the field fills its width. */
 .pn-inbox .ib-proj-rename:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .pn-inbox .ib-proj-rename[aria-invalid] { border-color: var(--destructive); }
@@ -4512,7 +4512,7 @@ dialog.ib-sp::backdrop { background: oklch(0.1 0.012 260 / 0.72); }
 .ib-sp-inrow > svg.ib-ic { width: 16px; height: 16px; color: var(--foreground); }
 .pn-inbox .ib-sp-input { flex: 1; min-width: 0; height: 48px; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-15-5, 15.5px); padding: 0; }
 .pn-inbox .ib-sp-input:focus-visible { outline: none; }
-.ib-sp-input::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.ib-sp-input::placeholder { color: var(--muted-foreground); }
 .pn-inbox .ib-sp-cancel { display: none; color: var(--primary); font-weight: 550; font-size: var(--ib-fs-15, 15px); height: 44px; padding: 0 2px 0 8px; background: none; border: 0; }
 /* The filter row (approval "inbox-search-calm", filter row "Up"): the four filters and Clear filters, always one line.
    On a desktop it never wraps: with every filter set and a long project name, the project gives way first (cut with
@@ -4915,7 +4915,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-cp-body { padding: 12px 16px 10px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
 /* Compose's message: the Inbox composer field (.ib-rtext and its mirror) at compose's metrics; both must match. */
 .pn-inbox .ib-cp-field .ib-rtext, .pn-inbox .ib-cp-field .ib-rmirror { min-height: 150px; max-height: 320px; font-size: var(--ib-fs-15, 15px); line-height: 1.6; padding: 0; }
-.ib-cp-field .ib-rtext::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.ib-cp-field .ib-rtext::placeholder { color: var(--muted-foreground); }
 .ib-cp-field [data-skill-human-only-notice] { padding: 6px 0 0; }
 .ib-cp-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 10px; }
 .ib-cp-file { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); min-width: 0; }
@@ -4980,7 +4980,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-key.ib-cp-tname:focus-within { border-color: var(--ring); border-style: solid; box-shadow: 0 0 0 1px var(--ring); }
 .ib-key.ib-cp-tname[data-invalid] { border-color: var(--destructive); border-style: solid; }
 .pn-inbox .ib-cp-tname-in { min-width: 0; max-width: 100%; border: 0; outline: none; background: transparent; color: inherit; font: inherit; font-size: var(--ib-fs-12, 12px); padding: 0; text-overflow: ellipsis; }
-.pn-inbox .ib-cp-tname-in::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.pn-inbox .ib-cp-tname-in::placeholder { color: var(--muted-foreground); }
 /* While it follows the message: muted words and a small "auto" (aria-describedby says the same). */
 .ib-key.ib-cp-tname[data-auto] .ib-cp-tname-in { font-style: italic; }
 .ib-cp-tname-auto { flex: none; margin-left: 6px; padding: 0 4px; border-radius: 3px; font-family: var(--font-sans, inherit); font-size: var(--ib-fs-10, 10px); font-style: normal; line-height: 15px; letter-spacing: 0.02em; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 80%, transparent); }
@@ -6217,7 +6217,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 /* A Done or Can't do it waiting in the reply draft (approval "inbox-action-items-in-reply"): its note under the row, then "Done 3:12 PM · in your draft". */
 .pn-inbox .ib-chk-draft { margin: -2px 10px 8px 38px; display: flex; flex-direction: column; gap: 3px; }
 .pn-inbox .ib-chk-dnote { width: 100%; min-height: 32px; resize: none; overflow: hidden; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); border-radius: 8px; background: var(--card); padding: 6px 10px; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.45; color: inherit; }
-.pn-inbox .ib-chk-dnote::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.pn-inbox .ib-chk-dnote::placeholder { color: var(--muted-foreground); }
 .pn-inbox .ib-chk-dnote:focus { outline: none; border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); }
 .pn-inbox .ib-chk-dline { margin: 0; padding-left: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .pn-inbox .ib-chk-foot { display: flex; align-items: flex-start; gap: 7px; margin: 8px 10px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; }
@@ -8243,7 +8243,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .pn-inbox .ib-fbk-cat:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .pn-inbox .ib-fbk-cat:disabled { opacity: 0.5; }
 .ib-fbk-contact { flex: 1 1 180px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
-.ib-fbk-contact::placeholder, .ib-fbk-msg::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-fbk-contact::placeholder, .ib-fbk-msg::placeholder { color: var(--muted-foreground); }
 .ib-fbk-contact:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
 .ib-fbk-row .ib-fbk-contact { padding: 0 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); }
 .ib-fbk-what { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); line-height: 1.5; color: var(--muted-foreground); text-wrap: pretty; }
@@ -10292,7 +10292,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 }
 .ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
 .ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
-.ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-riskd-t::placeholder { color: var(--muted-foreground); }
 /* The model list opens over the dialog's edge: a dialog that scrolls would clip it. */
 .ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
 .ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -11425,7 +11425,7 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .pn-inbox .ib-sys-add:hover { background: var(--ib-hover); }
 .ib-sys-addrow { display: flex; gap: 8px; margin-top: 8px; }
 .ib-sys-inp { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
-.ib-sys-inp::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-sys-inp::placeholder { color: var(--muted-foreground); }
 .ib-sys-inp:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
 .ib-sys-err { margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
 .ib-sys-agentrow { border-radius: 10px; }

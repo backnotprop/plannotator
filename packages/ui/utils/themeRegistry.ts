@@ -28,7 +28,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     modeSupport: 'both',
     colors: {
       dark: { primary: 'oklch(0.75 0.18 280)', secondary: 'oklch(0.65 0.15 180)', accent: 'oklch(0.70 0.20 60)', background: 'oklch(0.15 0.02 260)', foreground: 'oklch(0.90 0.01 260)' },
-      light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.60 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
+      light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.605 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
     },
   },
   {
@@ -38,7 +38,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     modeSupport: 'both',
     colors: {
       dark: { primary: 'oklch(0.765 0.124 283)', secondary: 'oklch(0.740 0.123 180)', accent: 'oklch(0.765 0.156 60)', background: 'oklch(0.225 0.006 286)', foreground: 'oklch(0.945 0.003 286)' },
-      light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.60 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
+      light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.605 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
     },
   },
   {
@@ -48,7 +48,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     modeSupport: 'both',
     syntaxHighlighting: true,
     colors: {
-      dark: { primary: 'oklch(0.515 0.245 263)', secondary: '#414141', accent: '#66ccff', background: '#000000', foreground: '#f2f2f2' },
+      dark: { primary: 'oklch(0.58 0.245 263)', secondary: '#414141', accent: '#66ccff', background: '#000000', foreground: '#f2f2f2' },
       light: { primary: 'oklch(0.515 0.245 263)', secondary: 'oklch(0.45 0.085 224.283)', accent: 'oklch(0.47 0.157 37.304)', background: '#f7f7f7', foreground: '#0a0a0a' },
     },
   },

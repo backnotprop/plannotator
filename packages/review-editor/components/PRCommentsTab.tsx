@@ -328,7 +328,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search comments..."
-            className="w-full h-7 pl-8 pr-20 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/50"
+            className="w-full h-7 pl-8 pr-20 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
           <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
             {searchQuery.trim() && (

@@ -44,7 +44,8 @@
   --secondary: #E6E2CC;
   --secondary-foreground: #5C6A72;
   --muted: #E6E2CC;
-  --muted-foreground: #939F91;
+  /* Was #939F91: darker, same hue and chroma, so it reads at 4.5:1 on the background. */
+  --muted-foreground: #697467;
   --accent: #35A77C;
   --accent-foreground: #FDF6E3;
   --destructive: #F85552;

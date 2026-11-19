@@ -495,7 +495,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                   rows={3}
                   spellCheck={false}
                   placeholder={'Standing preferences for guide generation, e.g. "prefer product vocabulary over internal codenames".'}
-                  className="w-full resize-y rounded-md border border-border/50 bg-background p-2.5 text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-border"
+                  className="w-full resize-y rounded-md border border-border/50 bg-background p-2.5 text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
                 />
                 <p className="mt-1 text-xs leading-snug text-muted-foreground/60">
                   Added on top of the built-in guide methodology for every guide you generate. Saved for next time.
