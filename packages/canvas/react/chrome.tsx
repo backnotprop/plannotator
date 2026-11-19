@@ -3,7 +3,20 @@
  * follows the selection. Buttons only. There are no keyboard shortcuts.
  */
 import {
+  CircleDot,
+  CircleOff,
+  CornerDownRight,
+  Droplet,
   ExternalLink,
+  Hash,
+  MoreHorizontal,
+  MoveHorizontal,
+  MoveRight,
+  PaintBucket,
+  PenLine,
+  Shapes,
+  Slash,
+  Map as MapIcon,
   Group,
   Hand,
   ImagePlus,
@@ -21,13 +34,14 @@ import {
   Undo2,
   Ungroup,
 } from 'lucide-react';
-import React, { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
-import { NAMED_COLORS, type CanvasColor, type NamedColor } from '../model/color';
+import { NAMED_COLORS, type CanvasColor, type NamedColor, isCustomColor } from '../model/color';
 import { boundsOf } from '../model/document';
 import { createId } from '../model/ids';
 import type { Rect } from '../model/geometry';
-import type { CanvasDocument, ObjectId } from '../model/types';
+import { BOX_SHAPES, type ArrowRouting, type BoxShape, type CanvasDocument, type CanvasObject, type ObjectId, type ObjectStyle } from '../model/types';
+import { shapeOutline, toPath } from '../view/shape-outline';
 import { type CameraController, worldRectToScreen } from '../view/camera';
 import type { EditorState, Tool } from './editor-state';
 
@@ -47,12 +61,24 @@ export const CANVAS_STRINGS = {
   zoomIn: 'Zoom in',
   zoomFit: 'Zoom to fit',
   zoomReset: 'Zoom to 100%',
+  map: 'Map',
+  mapLabel: 'Map of the board. Press to go to a place.',
   addToPlan: 'Add to plan',
   group: 'Group',
   ungroup: 'Ungroup',
   delete: 'Delete',
   open: 'Open',
   customColor: 'Custom colour',
+  color: 'Colour',
+  anyColor: 'Any colour',
+  anyColorHint: '#0e9aa7, teal, rgb(…)',
+  style: 'Style',
+  clean: 'Clean',
+  sketch: 'Sketch',
+  dashed: 'Dashed',
+  routing: { elbow: 'Right angles', straight: 'Straight' },
+  ends: { arrow: 'Arrow', none: 'No ends', dot: 'Dot', 'bar-arrow': 'Measure' },
+  fills: { tint: 'Tint', solid: 'Solid', hachure: 'Hatched', cross: 'Cross-hatched', none: 'No fill' },
   textNotKept: 'That text is too long to keep',
   pictureProblems: {
     unavailable: 'Pictures cannot be added here',
@@ -127,7 +153,7 @@ export function HistoryBar({ store }: { store: CanvasStore }) {
   );
 }
 
-export function ZoomBar({ camera, onZoom, onFit, onReset }: { camera: CameraController; onZoom: (factor: number) => void; onFit: () => void; onReset: () => void }) {
+export function ZoomBar({ camera, onZoom, onFit, onReset, map, onMap }: { camera: CameraController; onZoom: (factor: number) => void; onFit: () => void; onReset: () => void; map?: boolean; onMap?: () => void }) {
   const label = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const write = () => {
@@ -153,6 +179,11 @@ export function ZoomBar({ camera, onZoom, onFit, onReset }: { camera: CameraCont
       <IconButton label={CANVAS_STRINGS.zoomFit} onClick={onFit}>
         <Maximize />
       </IconButton>
+      {onMap ? (
+        <IconButton label={CANVAS_STRINGS.map} pressed={!!map} onClick={onMap}>
+          <MapIcon />
+        </IconButton>
+      ) : null}
     </div>
   );
 }
@@ -172,6 +203,16 @@ export function placeSelectionBar(target: Rect, bar: { w: number; h: number }, v
   return { x, y };
 }
 
+/** Six more colours picked to sit beside the six named ones. Any other colour is one field away. */
+export const PALETTE_EXTRA = ['#0e9aa7', '#d6336c', '#e8590c', '#5c940d', '#495057', '#8d6e63'] as const;
+
+export interface StyleChange {
+  shape?: BoxShape;
+  routing?: ArrowRouting;
+  /** Style values to set; `undefined` takes one away. */
+  style?: Partial<Record<keyof ObjectStyle, ObjectStyle[keyof ObjectStyle] | undefined>>;
+}
+
 export interface SelectionBarProps {
   store: CanvasStore;
   camera: CameraController;
@@ -182,6 +223,7 @@ export interface SelectionBarProps {
   hidden: boolean;
   /** `gesture`: picks sharing one are one undo step (dragging through the colour well). */
   onRecolor: (color: CanvasColor | null, gesture?: string) => void;
+  onStyle: (change: StyleChange) => void;
   onDelete: () => void;
   onGroup: () => void;
   onUngroup: () => void;
@@ -191,22 +233,155 @@ export interface SelectionBarProps {
   addToPlan?: { onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void; onClick: (event: React.MouseEvent<HTMLButtonElement>) => void };
 }
 
-export function SelectionBar({ camera, doc, selection, region, hidden, onRecolor, onDelete, onGroup, onUngroup, onOpen, addToPlan }: SelectionBarProps) {
-  const bar = useRef<HTMLDivElement>(null);
+/** A small picture of a shape, drawn from the same outline the board uses. */
+function ShapeGlyph({ shape }: { shape: BoxShape }) {
+  const made = shapeOutline(shape, 22, shape === 'actor' ? 30 : 16, shape === 'container' ? 2 : 0);
+  return (
+    <svg viewBox={shape === 'actor' ? '-1 -1 24 26' : '-1 -3 24 22'} aria-hidden="true" style={{ fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }}>
+      <path d={toPath(made.outline)} />
+      {made.details.map((segs, i) => (
+        <path key={i} d={toPath(segs)} />
+      ))}
+    </svg>
+  );
+}
+
+const SHAPE_LABELS: Record<BoxShape, string> = {
+  process: 'Box',
+  decision: 'Decision',
+  database: 'Database',
+  document: 'Document',
+  queue: 'Queue',
+  actor: 'Actor',
+  cloud: 'Cloud',
+  pill: 'Start or end',
+  container: 'Container',
+};
+
+/** Colour: the six named ones, six more, then any colour at all. */
+function ColorPopover({ current, onRecolor }: { current: CanvasColor | undefined; onRecolor: SelectionBarProps['onRecolor'] }) {
   // One id for each time the colour well is opened: every colour passed over on the way is one undo step.
   const pick = useRef('');
+  const custom = typeof current === 'object' ? current.custom : '';
+  const [typed, setTyped] = useState(custom);
+  useEffect(() => setTyped(custom), [custom]);
+  const swatch = (key: string, label: string, value: CanvasColor | null, css: string | undefined, pressed: boolean) => (
+    <button key={key} type="button" className="pcv-swatch" aria-label={label} title={label} aria-pressed={pressed} style={css ? { ['--pcv-swatch' as string]: css } : undefined} onClick={() => onRecolor(value)} />
+  );
+  return (
+    <div className="pcv-popover pcv-popover-color" role="group" aria-label={CANVAS_STRINGS.color}>
+      <div className="pcv-popover-row">
+        {NAMED_COLORS.map((name) => swatch(name, CANVAS_STRINGS.colors[name], name === 'neutral' ? null : name, name === 'neutral' ? undefined : `var(--pcv-${name})`, name === 'neutral' ? !current || current === 'neutral' : current === name))}
+      </div>
+      <div className="pcv-popover-row">{PALETTE_EXTRA.map((hex) => swatch(hex, hex, { custom: hex }, hex, custom.toLowerCase() === hex))}</div>
+      <div className="pcv-popover-row pcv-popover-any">
+        <label className="pcv-swatch pcv-swatch-custom" title={CANVAS_STRINGS.customColor}>
+          <input
+            type="color"
+            aria-label={CANVAS_STRINGS.customColor}
+            value={/^#[0-9a-f]{6}$/i.test(custom) ? custom : '#8a8f9c'}
+            onPointerDown={() => (pick.current = createId('pick'))}
+            onFocus={() => (pick.current ||= createId('pick'))}
+            onBlur={() => (pick.current = '')}
+            onChange={(event) => onRecolor({ custom: event.target.value }, (pick.current ||= createId('pick')))}
+          />
+        </label>
+        <input
+          className="pcv-field"
+          type="text"
+          spellCheck={false}
+          autoCapitalize="off"
+          aria-label={CANVAS_STRINGS.anyColor}
+          placeholder={CANVAS_STRINGS.anyColorHint}
+          value={typed}
+          onChange={(event) => {
+            setTyped(event.target.value);
+            // Applied as soon as what is typed is a colour; until then nothing changes.
+            if (isCustomColor(event.target.value)) onRecolor({ custom: event.target.value.trim() }, (pick.current ||= createId('pick')));
+          }}
+          onBlur={() => (pick.current = '')}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Style: what shape a box is, whether it is clean or sketched and how it is filled; how a connector runs and ends. */
+function StylePopover({ first, onStyle }: { first: CanvasObject; onStyle: (change: StyleChange) => void }) {
+  const option = (key: string, label: string, pressed: boolean, change: StyleChange, glyph: React.ReactNode) => (
+    <button key={key} type="button" className="pcv-btn pcv-btn-icon" aria-label={label} title={label} aria-pressed={pressed} onClick={() => onStyle(change)}>
+      {glyph}
+    </button>
+  );
+  const style = first.style ?? {};
+  if (first.type === 'arrow') {
+    const routing = first.routing ?? 'elbow';
+    const ends = style.ends ?? 'arrow';
+    return (
+      <div className="pcv-popover" role="group" aria-label={CANVAS_STRINGS.style}>
+        <div className="pcv-popover-row">
+          {option('elbow', CANVAS_STRINGS.routing.elbow, routing === 'elbow', { routing: 'elbow' }, <CornerDownRight />)}
+          {option('straight', CANVAS_STRINGS.routing.straight, routing === 'straight', { routing: 'straight' }, <Minus />)}
+          <span className="pcv-sep" aria-hidden="true" />
+          {option('dash', CANVAS_STRINGS.dashed, !!style.dash, { style: { dash: style.dash ? undefined : true } }, <MoreHorizontal />)}
+          {option('sketch', CANVAS_STRINGS.sketch, style.look === 'sketch', { style: { look: style.look === 'sketch' ? undefined : 'sketch' } }, <PenLine />)}
+        </div>
+        <div className="pcv-popover-row">
+          {option('arrow', CANVAS_STRINGS.ends.arrow, ends === 'arrow', { style: { ends: undefined } }, <MoveRight />)}
+          {option('none', CANVAS_STRINGS.ends.none, ends === 'none', { style: { ends: 'none' } }, <Minus />)}
+          {option('dot', CANVAS_STRINGS.ends.dot, ends === 'dot', { style: { ends: 'dot' } }, <CircleDot />)}
+          {option('bar-arrow', CANVAS_STRINGS.ends['bar-arrow'], ends === 'bar-arrow', { style: { ends: 'bar-arrow' } }, <MoveHorizontal />)}
+        </div>
+      </div>
+    );
+  }
+  if (first.type !== 'box') return null;
+  const shape = first.shape ?? 'process';
+  const sketched = style.look === 'sketch';
+  const fill = style.fill ?? (sketched ? 'hachure' : 'tint');
+  return (
+    <div className="pcv-popover" role="group" aria-label={CANVAS_STRINGS.style}>
+      <div className="pcv-popover-grid">{BOX_SHAPES.map((kind) => option(kind, SHAPE_LABELS[kind], shape === kind, { shape: kind }, <ShapeGlyph shape={kind} />))}</div>
+      <div className="pcv-popover-row">
+        {option('clean', CANVAS_STRINGS.clean, !sketched, { style: { look: undefined, fill: fill === 'hachure' || fill === 'cross' ? undefined : style.fill } }, <Square />)}
+        {option('sketch', CANVAS_STRINGS.sketch, sketched, { style: { look: 'sketch' } }, <PenLine />)}
+        <span className="pcv-sep" aria-hidden="true" />
+        {option('tint', CANVAS_STRINGS.fills.tint, fill === 'tint', { style: { fill: sketched ? 'tint' : undefined } }, <Droplet />)}
+        {option('solid', CANVAS_STRINGS.fills.solid, fill === 'solid', { style: { fill: 'solid' } }, <PaintBucket />)}
+        {sketched ? option('hachure', CANVAS_STRINGS.fills.hachure, fill === 'hachure', { style: { fill: undefined } }, <Slash />) : null}
+        {sketched ? option('cross', CANVAS_STRINGS.fills.cross, fill === 'cross', { style: { fill: 'cross' } }, <Hash />) : null}
+        {option('none', CANVAS_STRINGS.fills.none, fill === 'none', { style: { fill: 'none' } }, <CircleOff />)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The bar that goes with what is selected: colour, style, and what can be
+ * done with it. Icons only, but for the one action that leaves the canvas.
+ */
+export function SelectionBar({ camera, doc, selection, region, hidden, onRecolor, onStyle, onDelete, onGroup, onUngroup, onOpen, addToPlan }: SelectionBarProps) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState<'color' | 'style' | null>(null);
   const ids = [...selection];
   const target = region ?? boundsOf(doc, ids);
   const show = !hidden && !!target;
+  const key = ids.join(' ');
+  // A new selection starts with its popovers closed.
+  useEffect(() => setOpen(null), [key]);
 
   useLayoutEffect(() => {
-    const el = bar.current;
+    const el = anchor.current;
     if (!el || !show || !target) return;
     const place = () => {
       const view = el.parentElement;
-      if (!view) return;
-      const at = placeSelectionBar(worldRectToScreen(camera.get(), target), { w: el.offsetWidth, h: el.offsetHeight }, { w: view.clientWidth, h: view.clientHeight });
+      const bar = el.firstElementChild as HTMLElement | null;
+      if (!view || !bar) return;
+      const at = placeSelectionBar(worldRectToScreen(camera.get(), target), { w: bar.offsetWidth, h: bar.offsetHeight }, { w: view.clientWidth, h: view.clientHeight });
       el.style.transform = `translate(${Math.round(at.x)}px, ${Math.round(at.y)}px)`;
+      // The popover opens downward, or upward when the bar sits in the lower part of the view.
+      el.dataset.up = at.y > view.clientHeight * 0.55 ? '' : undefined;
+      if (at.y <= view.clientHeight * 0.55) delete el.dataset.up;
     };
     place();
     return camera.subscribe(place);
@@ -217,62 +392,52 @@ export function SelectionBar({ camera, doc, selection, region, hidden, onRecolor
   const current = first?.color;
   const groups = new Set(ids.map((id) => doc.objects[id]?.group).filter(Boolean));
   const oneGroup = groups.size === 1 && ids.every((id) => doc.objects[id]?.group);
+  const styled = first && (first.type === 'box' || first.type === 'arrow');
+  const dot = !current || current === 'neutral' ? undefined : typeof current === 'string' ? `var(--pcv-${current})` : current.custom;
 
   return (
-    <div ref={bar} className="pcv-bar pcv-bar-selection" role="toolbar" aria-label={CANVAS_STRINGS.selection}>
-      {ids.length > 0 ? (
-        <>
-          {NAMED_COLORS.map((name) => (
-            <button
-              key={name}
-              type="button"
-              className="pcv-swatch"
-              aria-label={CANVAS_STRINGS.colors[name]}
-              title={CANVAS_STRINGS.colors[name]}
-              aria-pressed={name === 'neutral' ? !current || current === 'neutral' : current === name}
-              style={name === 'neutral' ? undefined : { ['--pcv-swatch' as string]: `var(--pcv-${name})` }}
-              onClick={() => onRecolor(name === 'neutral' ? null : name)}
-            />
-          ))}
-          <label className="pcv-swatch pcv-swatch-custom" title={CANVAS_STRINGS.customColor}>
-            <input
-              type="color"
-              aria-label={CANVAS_STRINGS.customColor}
-              value={typeof current === 'object' && /^#[0-9a-f]{6}$/i.test(current.custom) ? current.custom : '#8a8f9c'}
-              onPointerDown={() => (pick.current = createId('pick'))}
-              onFocus={() => (pick.current ||= createId('pick'))}
-              onBlur={() => (pick.current = '')}
-              onChange={(event) => onRecolor({ custom: event.target.value }, (pick.current ||= createId('pick')))}
-            />
-          </label>
-          <span className="pcv-sep" aria-hidden="true" />
-          {oneGroup ? (
-            <IconButton label={CANVAS_STRINGS.ungroup} onClick={onUngroup}>
-              <Ungroup />
+    <div ref={anchor} className="pcv-selection">
+      <div className="pcv-bar pcv-bar-selection" role="toolbar" aria-label={CANVAS_STRINGS.selection}>
+        {ids.length > 0 ? (
+          <>
+            <button type="button" className="pcv-btn pcv-btn-icon" aria-label={CANVAS_STRINGS.color} title={CANVAS_STRINGS.color} aria-expanded={open === 'color'} onClick={() => setOpen(open === 'color' ? null : 'color')}>
+              <span className="pcv-color-dot" style={dot ? { ['--pcv-swatch' as string]: dot } : undefined} />
+            </button>
+            {styled ? (
+              <IconButton label={CANVAS_STRINGS.style} aria-expanded={open === 'style'} onClick={() => setOpen(open === 'style' ? null : 'style')}>
+                <Shapes />
+              </IconButton>
+            ) : null}
+            {oneGroup ? (
+              <IconButton label={CANVAS_STRINGS.ungroup} onClick={onUngroup}>
+                <Ungroup />
+              </IconButton>
+            ) : ids.length > 1 ? (
+              <IconButton label={CANVAS_STRINGS.group} onClick={onGroup}>
+                <Group />
+              </IconButton>
+            ) : null}
+            {onOpen ? (
+              <IconButton label={CANVAS_STRINGS.open} onClick={onOpen}>
+                <ExternalLink />
+              </IconButton>
+            ) : null}
+            <IconButton label={CANVAS_STRINGS.delete} onClick={onDelete}>
+              <Trash2 />
             </IconButton>
-          ) : ids.length > 1 ? (
-            <IconButton label={CANVAS_STRINGS.group} onClick={onGroup}>
-              <Group />
-            </IconButton>
-          ) : null}
-          {onOpen ? (
-            <IconButton label={CANVAS_STRINGS.open} onClick={onOpen}>
-              <ExternalLink />
-            </IconButton>
-          ) : null}
-          <IconButton label={CANVAS_STRINGS.delete} onClick={onDelete}>
-            <Trash2 />
-          </IconButton>
-        </>
-      ) : null}
-      {addToPlan ? (
-        <>
-          {ids.length > 0 ? <span className="pcv-sep" aria-hidden="true" /> : null}
-          <button type="button" className="pcv-btn pcv-btn-primary" onPointerDown={addToPlan.onPointerDown} onClick={addToPlan.onClick}>
-            {CANVAS_STRINGS.addToPlan}
-          </button>
-        </>
-      ) : null}
+          </>
+        ) : null}
+        {addToPlan ? (
+          <>
+            {ids.length > 0 ? <span className="pcv-sep" aria-hidden="true" /> : null}
+            <button type="button" className="pcv-btn pcv-btn-primary" onPointerDown={addToPlan.onPointerDown} onClick={addToPlan.onClick}>
+              {CANVAS_STRINGS.addToPlan}
+            </button>
+          </>
+        ) : null}
+      </div>
+      {open === 'color' ? <ColorPopover current={current} onRecolor={onRecolor} /> : null}
+      {open === 'style' && first ? <StylePopover first={first} onStyle={onStyle} /> : null}
     </div>
   );
 }

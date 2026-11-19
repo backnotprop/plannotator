@@ -18,9 +18,10 @@ import { portPoint } from '../view/routes';
 import { indexFor } from '../view/document-index';
 import { snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { CanvasView } from './CanvasView';
-import { CANVAS_STRINGS, HistoryBar, SelectionBar, ToolDock, ZoomBar } from './chrome';
+import { CANVAS_STRINGS, HistoryBar, SelectionBar, type StyleChange, ToolDock, ZoomBar } from './chrome';
 import { EditorState } from './editor-state';
 import { GestureController, firstEditGesture } from './gestures';
+import { Minimap } from './Minimap';
 import { addPicture, looksLikePicture } from './pictures';
 import { type PlanDropTarget, beginPlanDrag } from './plan-drop';
 import { type PasteResolver, addReference, referenceFromPaste } from './references';
@@ -75,6 +76,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
   const size = useRef<Size>({ w: 0, h: 0 });
   const fitted = useRef(!!givenCamera);
   const filePicker = useRef<HTMLInputElement>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const userCamera = useRef(onUserCamera);
   userCamera.current = onUserCamera;
 
@@ -160,6 +162,26 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
 
   const selected = [...ui.selection];
   const recolor = (color: CanvasColor | null, gesture?: string) => store.dispatch({ type: 'recolor', ids: selected, color }, { gesture });
+  /** A shape, a routing or style values for everything selected that can take them: one undo step. */
+  const restyle = (change: StyleChange) => {
+    const gesture = createId('style');
+    for (const id of selected) {
+      const object = store.getDocument().objects[id];
+      if (!object) continue;
+      const patch: Record<string, unknown> = {};
+      if (change.shape && object.type === 'box') patch.shape = change.shape === 'process' ? null : change.shape;
+      if (change.routing && object.type === 'arrow') patch.routing = change.routing === 'elbow' ? null : change.routing;
+      if (change.style) {
+        const next: Record<string, unknown> = { ...object.style };
+        for (const [name, value] of Object.entries(change.style)) {
+          if (value === undefined) delete next[name];
+          else next[name] = value;
+        }
+        patch.style = Object.keys(next).length ? next : null;
+      }
+      if (Object.keys(patch).length) store.dispatch({ type: 'edit', id, patch }, { gesture });
+    }
+  };
   const remove = () => store.dispatch({ type: 'delete', ids: selected });
   const group = () => store.dispatch({ type: 'group', id: createId('group'), ids: selected });
   const ungroup = () => store.dispatch({ type: 'ungroup', ids: [...new Set(selected.map((id) => doc.objects[id]?.group).filter((id): id is string => !!id))] });
@@ -295,7 +317,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
         return;
       }
       if (event.key !== 'Tab') return;
-      const bar = root.current?.querySelector<HTMLElement>('.pcv-bar-selection button, .pcv-bar-selection input');
+      const bar = root.current?.querySelector<HTMLElement>('.pcv-selection button, .pcv-selection input');
       if (!event.shiftKey && bar) {
         event.preventDefault();
         bar.focus();
@@ -308,7 +330,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
       }
       return;
     }
-    const bar = target.closest<HTMLElement>('.pcv-bar-selection');
+    const bar = target.closest<HTMLElement>('.pcv-selection');
     if (event.key === 'Tab' && bar && selected.length === 1) {
       const stops = [...bar.querySelectorAll<HTMLElement>('button, input')];
       if (event.shiftKey && target === stops[0]) {
@@ -434,6 +456,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
             region={ui.region}
             hidden={!!ui.marquee || !!ui.editingId || ui.tool === 'region' || ui.carried.size > 0}
             onRecolor={recolor}
+            onStyle={restyle}
             onDelete={remove}
             onGroup={group}
             onUngroup={ungroup}
@@ -442,7 +465,8 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
           />
           <ToolDock state={state} tool={ui.tool} onPickImage={assets ? () => filePicker.current?.click() : undefined} canSnapshot={!!onAddToPlan} />
           <HistoryBar store={store} />
-          <ZoomBar camera={camera} onZoom={zoomBy} onFit={fit} onReset={() => zoomBy(1 / camera.get().z)} />
+          <ZoomBar camera={camera} onZoom={zoomBy} onFit={fit} onReset={() => zoomBy(1 / camera.get().z)} map={mapOpen} onMap={() => setMapOpen((open) => !open)} />
+          {mapOpen ? <Minimap store={store} camera={camera} viewSize={() => size.current} label={CANVAS_STRINGS.mapLabel} /> : null}
           {children}
         </>
       )}

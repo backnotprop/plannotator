@@ -93,7 +93,7 @@ export class GestureController {
     // The right button belongs to the browser's menu. It never drags.
     if (event.button === 2) return;
     const target = event.target as HTMLElement;
-    if (target.closest?.('.pcv-bar')) return;
+    if (target.closest?.('.pcv-bar, .pcv-minimap, .pcv-popover')) return;
     const p = this.local(event);
     this.pointers.set(event.pointerId, p);
     (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);

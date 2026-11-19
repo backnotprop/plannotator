@@ -10,3 +10,4 @@ export * from './plan-drop';
 export * from './memory-assets';
 export * from './pictures';
 export * from './people';
+export * from './Minimap';

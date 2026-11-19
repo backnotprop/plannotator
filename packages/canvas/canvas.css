@@ -1464,3 +1464,125 @@
     inset: calc(-17px / var(--pcv-z));
   }
 }
+
+/* ── The map ───────────────────────────────────────────────────────────── */
+
+.pcv-minimap {
+  position: absolute;
+  right: 16px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+  z-index: 3;
+}
+.pcv-minimap canvas {
+  display: block;
+}
+.pcv-minimap-view {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  border: 1.5px solid var(--pcv-accent);
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--pcv-accent) 12%, transparent);
+  pointer-events: none;
+}
+@container pcv-board (max-width: 640px) {
+  .pcv-minimap {
+    right: 8px;
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+}
+
+/* ── The selection's bar and its popovers ──────────────────────────────── */
+
+.pcv-selection {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  max-width: calc(100% - 12px);
+  will-change: transform;
+}
+.pcv-selection > .pcv-bar-selection {
+  position: relative;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.pcv-color-dot {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid var(--pcv-swatch, var(--pcv-rule));
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--pcv-swatch, var(--pcv-card)) 60%, var(--pcv-card));
+}
+.pcv-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+}
+.pcv-selection[data-up] > .pcv-popover {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+.pcv-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pcv-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 36px);
+  gap: 2px;
+}
+.pcv-popover-grid svg {
+  width: 22px;
+  height: 20px;
+}
+.pcv-popover-any {
+  gap: 6px;
+  padding-top: 4px;
+}
+.pcv-field {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  width: 140px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 8px;
+  color: var(--pcv-ink);
+  font: 12.5px/1 var(--pcv-font);
+  cursor: text;
+}
+.pcv-field::placeholder {
+  color: var(--pcv-muted);
+}
+.pcv-field:focus-visible {
+  border-color: var(--pcv-accent);
+  box-shadow: 0 0 0 1px var(--pcv-accent);
+}
+@media (forced-colors: active) {
+  .pcv-field:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
