@@ -185,6 +185,10 @@ export const SLICE_RULES: SliceRule[] = [
       'packages/server/inbox-agents*',
       'packages/server/inbox-sessions*',
       'packages/server/inbox-first-seen*',
+      'packages/server/inbox-agent-mark*',
+      'packages/server/inbox-agent-status*',
+      'packages/inbox/agents/agentStatus*',
+      'packages/inbox/agents/AgentStatus*',
     ],
     specs: [
       'inbox-ended-session.spec.ts',
@@ -192,6 +196,7 @@ export const SLICE_RULES: SliceRule[] = [
       'inbox-session-*.spec.ts',
       'inbox-agents.spec.ts',
       'inbox-agent-rename.spec.ts',
+      'inbox-agent-status.spec.ts',
       'inbox-reply-foot-phone.spec.ts',
       'inbox-sidebar-spacing.spec.ts',
     ],
