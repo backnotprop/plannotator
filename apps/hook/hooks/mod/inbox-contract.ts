@@ -490,7 +490,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls', 'canvas']
 
 /**
  * Before saying something was never discussed (approved 2026-11-15): the MCP search tool's description and --help's
@@ -510,7 +510,6 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
   search: 'Find messages by words, older ones too (read-only).',
   get_guide_brief: "How to write a guided review, with a worked submit_guide call.",
-  canvas: "Read or change a thread's canvas, the drawing the person sketches on.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
   steps: INBOX_STEPS_ACTION_LINE,
 }

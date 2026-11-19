@@ -171,7 +171,7 @@ export function createInboxCanvas(options: {
     const size = `${Math.round(reading.box.w)}x${Math.round(reading.box.h)}`;
     const lines = [...head, `Canvas of thread ${threadId}, rev ${meta.rev}, ${frame ? `frame ${frame}` : countWords(things)}, ${size}:`, ...reading.lines];
     if (reading.cutAfter) {
-      const next = { thread_id: threadId, ...(frame ? { in: frame } : {}), after: reading.cutAfter };
+      const next = { thread_id: threadId, ...(frame ? { in: frame } : {}), after_thing: reading.cutAfter };
       lines.push(`${reading.total - reading.lines.length} more. Next: canvas ${JSON.stringify(next)}`);
     }
     return lines.join("\n");
@@ -347,7 +347,7 @@ export function createInboxCanvas(options: {
       const name = id ? pictures.get(id) : undefined;
       return name ? `${line} [picture: ${name}]` : line;
     });
-    if (reading.cutAfter) lines.push(`${reading.total - reading.lines.length} more: canvas ${JSON.stringify({ thread_id: threadId, after: reading.cutAfter })}`);
+    if (reading.cutAfter) lines.push(`${reading.total - reading.lines.length} more: canvas ${JSON.stringify({ thread_id: threadId, after_thing: reading.cutAfter })}`);
     return { kind, rev: readCanvasMeta(dir, threadId).rev, things: [...only], reading: lines.join("\n") };
   };
 
@@ -436,8 +436,8 @@ export function createInboxCanvas(options: {
           inputSchema: z
             .object({
               thread_id: z.string().describe("Thread or message id."),
-              in: z.string().optional().describe("Read only this frame (its id or title)."),
-              after: z.string().optional().describe("Continue a long reading after this thing id (a cut reading ends with the exact call)."),
+              in: z.string().optional().describe("The canvas action: read only this frame (its id or title). With only thread_id the action answers the thread's canvas (the drawing the person sketches on) as text, one line per thing, and its rev."),
+              after_thing: z.string().optional().describe("Continue a long reading of the canvas after this thing id (a cut reading ends with the exact call)."),
               picture: z.union([z.boolean(), z.string(), z.array(z.string())]).optional().describe('true: a PNG of the whole canvas. A thing or a list of things: a PNG of that part. The answer gives the file path.'),
               base: z.number().int().optional().describe('With "do": the rev your last answer about this canvas gave.'),
               do: z.array(z.record(z.string(), z.unknown())).optional().describe(INBOX_CANVAS_DO_DESCRIPTION),
@@ -471,7 +471,7 @@ export function createInboxCanvas(options: {
                 const head = `Picture${drawn.only ? ` of ${drawn.named.slice(0, 8).join(", ")}` : " of the whole canvas"}: ${drawn.path}${drawn.note}`;
                 return okComplete(`${head}\n${text}`, { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: drawn.path });
               }
-              return okComplete(read(threadId, viewer, { in: input.in, after: input.after }), { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev });
+              return okComplete(read(threadId, viewer, { in: input.in, after: input.after_thing }), { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev });
             } catch (error) {
               if (error instanceof RefError) throw new InboxError("validation_error", error.message);
               throw error;

@@ -20,7 +20,7 @@ Every thread of this computer's Inbox can hold one canvas: a real Excalidraw sce
 
 One Inbox tool, `canvas` (`packages/server/inbox-canvas.ts`; `plannotator inbox call canvas '<json>'` prints its text):
 
-- `{thread_id}` reads; `in` one frame; `after` the next page of a cut reading.
+- `{thread_id}` reads; `in` one frame; `after_thing` the next page of a cut reading.
 - `picture: true | <thing> | [things]` writes a PNG and answers its path. A window draws it (`event: canvas-job`); with no window open the last stored picture is cut to the part and the answer says which revision it shows.
 - `do: [...]` with `base` changes the canvas, all or nothing (`packages/shared/inbox/canvas/apply.ts`): `add` (box, ellipse, diamond, note, text, frame, mermaid), `connect`, `set`, `move`, `remove`, `frame`, `replace`. Things are named by id or words; a name that fits two things is refused with both. Mermaid text is converted by an open window with Excalidraw's own `mermaid-to-excalidraw`; with no window open the change is refused.
 - **An agent never replaces the person's change unseen.** `do` without `base` is refused. A change to a thing someone else changed after `base` is refused whole, with their change shown and the base to send again. Every answer opens with what others changed since that agent's last look (kept per session in `meta.json`).
