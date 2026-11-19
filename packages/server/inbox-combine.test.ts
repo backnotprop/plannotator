@@ -130,6 +130,37 @@ test("nothing is archived until the new thread arrives; then every picked thread
   expect(store.message(made.id)!.resolved_at).toBeNull();
 });
 
+test("a thread that came back from the archive is combined like an open one, and archived again with a new archive line; Undo brings it back", async () => {
+  const { store, send, route, a1, a2 } = setup();
+  // a2 is archived, then the agent writes in it: the list shows it as open (New) again.
+  store.resolveThread(a2.id, true, "person");
+  const reply = store.sendMessage({ project_id: store.message(a1.id)!.project_id, author: agent("ses_a"), reply_to: a2.id, body: "Refund totals changed." }).message;
+  const cameBack = store.listRow(a2.id)!;
+  expect([cameBack.resolved_at !== null, cameBack.back_from_archive, cameBack.section]).toEqual([true, true, "new"]);
+  // The picker asks about it like any open thread.
+  const plan = (await route("GET", `/api/inbox/combine?threads=${a1.id},${a2.id}`)) as unknown as InboxCombinePlan;
+  expect(plan.agents!.map((a) => a.session)).toEqual(["ses_a"]);
+
+  const record = (await route("POST", "/api/inbox/combine", { thread_ids: [a1.id, a2.id], session: "ses_a", idempotency_key: "k-came-back" })).combine as InboxCombineRecord;
+  expect(record.state).toBe("asked");
+  const made = send("ses_a", "Retry policy", "One thread.", { idempotency_key: record.id });
+  await Promise.resolve();
+
+  // Archived again: Quiet, not came back, and its archive line is after the reply that brought it back.
+  const row = store.listRow(a2.id)!;
+  expect([row.resolved_at !== null, row.back_from_archive, row.section]).toEqual([true, false, "quiet"]);
+  const thread = store.windowThread(a2.id)!;
+  expect(thread.archive_seq!).toBeGreaterThan(thread.messages.find((m) => m.id === reply.id)!.seq!);
+  expect(store.listRow(a1.id)!.section).toBe("quiet");
+
+  // Undo still brings them back.
+  const undone = (await route("POST", `/api/inbox/combine/${record.id}/undo`, {})).combine as InboxCombineRecord;
+  expect(undone.state).toBe("undone");
+  expect(store.listRow(a2.id)!.resolved_at).toBeNull();
+  expect(store.listRow(a1.id)!.resolved_at).toBeNull();
+  expect(store.message(made.id)!.resolved_at).toBeNull();
+});
+
 test("the session ends, or ends its turn without the thread: the Combine fails, nothing is archived, and a wake not delivered is withdrawn", async () => {
   const first = setup();
   const record = await first.start();
