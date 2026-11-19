@@ -229,7 +229,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       <div
         data-pn-image-annotator-stage
         data-pn-image-annotator-zoomable={zoomable ? '' : undefined}
-        className={zoomable ? 'relative flex h-full w-full touch-none flex-col items-center gap-3 px-4 py-3' : 'relative flex max-w-full flex-col items-center gap-3'}
+        className={zoomable ? 'relative flex h-full w-full touch-none flex-col items-center gap-3 px-3 py-3' : 'relative flex max-w-full flex-col items-center gap-3'}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar - above image */}

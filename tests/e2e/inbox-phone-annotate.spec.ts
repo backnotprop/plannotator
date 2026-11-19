@@ -147,8 +147,13 @@ for (const width of [393, 320])
           c.height = pic.naturalHeight;
           const ctx = c.getContext('2d')!;
           ctx.drawImage(pic, 0, 0);
-          const [r, g, b] = ctx.getImageData(Math.round(p.x * c.width), Math.round(p.y * c.height), 1, 1).data;
-          return r! > 200 && g! < 110 && b! < 110;
+          // A 7 × 7 window on the finger's point: the line is about 2 picture pixels wide at this zoom, so one pixel
+          // can be only partly covered (red blended into the blue); a stroke that missed is far outside the window.
+          const x0 = Math.max(0, Math.floor(p.x * c.width) - 3);
+          const y0 = Math.max(0, Math.floor(p.y * c.height) - 3);
+          const data = ctx.getImageData(x0, y0, 7, 7).data;
+          for (let i = 0; i < data.length; i += 4) if (data[i]! > 200 && data[i + 1]! < 110 && data[i + 2]! < 110) return true;
+          return false;
         }, at);
         expect(red, 'the stroke lands under the finger at this zoom').toBe(true);
 

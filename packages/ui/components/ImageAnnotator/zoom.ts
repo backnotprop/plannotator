@@ -31,17 +31,20 @@ function valid(size: ZoomSize | null | undefined): size is ZoomSize {
 }
 
 /**
- * The base size: the whole picture fitted into the area (less its padding), never above its own pixels, in whole
- * CSS pixels. Whole, so the laid-out image's `clientWidth` (an integer, what the export scales strokes by) is the
- * base exactly: a fractional base put a stroke up to 0.3% of the picture off where it was drawn. Taken once when the
- * screen opens and kept while it is open (`ZoomableCanvas`): strokes are in base pixels, so a base that followed a
- * rotation or a resize would move every stroke already drawn.
+ * The base size: the whole picture fitted into the area (less its padding), never above its own pixels. Its width is
+ * whole CSS pixels and its height follows the picture's own shape, fractional: the export scales both axes by
+ * `naturalWidth / clientWidth` (`clientWidth` an integer), which is then exactly natural / base on each axis; a
+ * fractional width, or a height rounded on its own, put a stroke off where it was drawn. Taken once when the screen
+ * opens and kept while it is open (`ZoomableCanvas`): strokes are in base pixels, so a base that followed a rotation
+ * or a resize would move every stroke already drawn.
  */
 export function annotatorBase(natural: ZoomSize, area: ZoomSize, pad = ANNOTATOR_BASE_PAD): ZoomSize {
   if (!valid(natural) || !valid(area)) return { width: 0, height: 0 };
   const room = { width: Math.max(1, area.width - 2 * pad), height: Math.max(1, area.height - 2 * pad) };
   const scale = Math.min(1, room.width / natural.width, room.height / natural.height);
-  return { width: Math.max(1, Math.round(natural.width * scale)), height: Math.max(1, Math.round(natural.height * scale)) };
+  // Down to a whole pixel (never over the room), the tiny float error of an exact fit not costing one.
+  const width = Math.max(1, Math.floor(natural.width * scale + 1e-6));
+  return { width, height: (width * natural.height) / natural.width };
 }
 
 /**

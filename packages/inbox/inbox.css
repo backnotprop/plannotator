@@ -12632,3 +12632,10 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
 .ib-topen[data-ghost-says] { visibility: hidden; }
 .pn-inbox span.ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: none; }
+
+/* Under 360 px the drawing screen's tools take three rows whatever the gaps (the colours and the history need 201 px
+   of a 193 px strip at 320): tools and size, the colours, then Undo, Redo and Clear together, never one left alone
+   (the 2026-11-19 phone audit). The divider before Undo becomes the break. */
+@media (max-width: 359px) {
+  .pn-inbox [data-pn-image-toolbar-scroll] > div > div:has(+ button[aria-label="Undo"]) { flex-basis: 100%; width: 0; height: 0; }
+}

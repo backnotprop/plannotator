@@ -419,7 +419,7 @@ for (const phone of [
   });
 }
 
-test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (hidden, its box kept), and moves when the tools come back", async () => {
+test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (from the moment the tools tuck, its box kept), and moves when they come back", async () => {
   phoneWindow(true);
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
   const page = document.createElement('div');
@@ -436,7 +436,6 @@ test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (hid
   dock.appendChild(handle);
   const card = document.createElement('div');
   card.className = 'ib-fcomp ib-mode-reply ib-phone';
-  card.style.visibility = 'hidden';
   boxAt(card, 8, 644, 377, 200);
   view.append(dock, card);
   page.appendChild(view);
@@ -444,7 +443,6 @@ test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (hid
   // Only the corner control is on screen: the toast sits over it, not 200 px up over an invisible card.
   expect(toast.style.bottom).toBe(`${852 - 790 + 8}px`);
   // The tools come back (an attribute, no node added): the card is measured again.
-  card.style.visibility = '';
   act(() => view.setAttribute('data-tools', 'shown'));
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));

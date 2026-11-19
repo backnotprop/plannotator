@@ -74,12 +74,19 @@ describe('the drawing screen on a phone: how a picture opens', () => {
   test('the base fits the whole picture inside the area, never above its own pixels', () => {
     const wide = annotatorBase({ width: 2400, height: 576 }, AREA);
     expect(wide.width).toBe(AREA.width - 2 * ANNOTATOR_BASE_PAD);
-    // Whole pixels (the laid-out image's clientWidth is the base exactly), the aspect kept within a pixel.
-    expect(Math.abs(wide.height - (wide.width * 576) / 2400)).toBeLessThanOrEqual(0.5);
     const tall = annotatorBase({ width: 900, height: 3367 }, AREA);
-    expect(tall.height).toBe(AREA.height - 2 * ANNOTATOR_BASE_PAD);
-    expect(Number.isInteger(tall.width)).toBe(true);
-    expect(Math.abs(tall.width - (tall.height * 900) / 3367)).toBeLessThanOrEqual(0.5);
+    expect(tall.height).toBeLessThanOrEqual(AREA.height - 2 * ANNOTATOR_BASE_PAD);
+    expect(tall.height).toBeGreaterThan(AREA.height - 2 * ANNOTATOR_BASE_PAD - 5);
+    // The export scales both axes by naturalWidth / clientWidth (an integer): that has to be the picture's own
+    // scale on Y too, or a stroke at the foot of a tall picture lands pixels off (a 900 × 3367 screenshot).
+    for (const [natural, base] of [
+      [{ width: 2400, height: 576 }, wide],
+      [{ width: 900, height: 3367 }, tall],
+    ] as const) {
+      expect(Number.isInteger(base.width)).toBe(true);
+      const exportScale = natural.width / base.width;
+      expect(base.height * exportScale).toBeCloseTo(natural.height, 9);
+    }
     expect(annotatorBase({ width: 120, height: 80 }, AREA)).toEqual({ width: 120, height: 80 });
   });
 
