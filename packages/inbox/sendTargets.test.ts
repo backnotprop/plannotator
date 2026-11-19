@@ -284,6 +284,18 @@ describe("a script's post does not take the words from the session that wrote (n
     expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_a');
   });
 
+  test("no script: a routine's change line last, or a permission prompt left open last: the Send's words and the session that asked are the agent's own message", () => {
+    const change = { ...message('msg_c', 'ses_a', []), scheduled_change: { scheduled_id: 'r', name: 'nightly', op: 'create' } } as unknown as InboxMessageWire;
+    const v1 = [message('msg_a', 'ses_a', []), change];
+    expect(wordsMessage(thread(v1)).id).toBe('msg_a');
+    expect(inboxAskingMessage(v1, statesOf, false)?.id).toBe('msg_a');
+    expect(askingSessionOf(thread(v1), { skip: new Set(), carries: false })?.message.id).toBe('msg_a');
+    const v2 = [message('msg_b', 'ses_b', []), message('msg_p', 'perm:ses_b', ['open'])];
+    expect(wordsMessage(thread(v2)).id).toBe('msg_b');
+    expect(inboxAskingMessage(v2, statesOf, false)?.id).toBe('msg_b');
+    expect(askingSessionOf(thread(v2), { skip: new Set(), carries: false })?.session).toBe('ses_b');
+  });
+
   test('a sender with a session id and no host (a stdio shim outside a session), or one with a host and no session, keeps it, as before', () => {
     const shim = { ...script('msg_shim'), author: { kind: 'agent', host: null, session: 'ses_shim', name: null } } as unknown as InboxMessageWire;
     expect(wordsMessage(thread([message('msg_a', 'ses_a', []), shim])).id).toBe('msg_shim');

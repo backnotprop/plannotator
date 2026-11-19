@@ -33,14 +33,16 @@ test("anything else is as before: another id is refused, a shell that names no s
  * session variable): `inbox call` writes as that agent, by name, so the window never takes its post for a script's
  * (`inboxSessionlessSend`) and passes a reply over it. A plain shell (a script, a hook, cron) is still nobody.
  */
-test("the one agent marker a shell with no session carries names its sender; none, or two, name nobody", () => {
+test("the agent marker a shell with no session carries names its sender; with two, the one inside Claude Code; none names nobody", () => {
   expect(inboxShellAgentOf({ GEMINI_CLI: "1" })).toEqual({ name: "Gemini CLI" });
   expect(inboxShellAgentOf({ COPILOT_CLI: "1" })).toEqual({ name: "Copilot CLI" });
   expect(inboxShellAgentOf({ CURSOR_AGENT: "1" })).toEqual({ name: "Cursor" });
   expect(inboxShellAgentOf({ CLAUDECODE: "1" })).toEqual({ name: "Claude Code", host: "claude-code" });
   expect(inboxShellAgentOf({ OPENCODE: "1" })).toEqual({ name: "OpenCode", host: "opencode" });
   expect(inboxShellAgentOf({})).toBeNull();
-  expect(inboxShellAgentOf({ CLAUDECODE: "1", GEMINI_CLI: "1" })).toBeNull();
+  // Gemini CLI started from a Claude Code with the mod off: Gemini's own post.
+  expect(inboxShellAgentOf({ CLAUDECODE: "1", GEMINI_CLI: "1" })).toEqual({ name: "Gemini CLI" });
+  expect(inboxShellAgentOf({ CLAUDECODE: "1", OPENCODE: "1" })).toEqual({ name: "OpenCode", host: "opencode" });
 });
 
 test("send_message from a Gemini CLI shell carries its name; from a plain shell, no name and no host; a read carries neither", async () => {

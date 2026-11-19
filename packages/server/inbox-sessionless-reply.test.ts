@@ -148,6 +148,30 @@ describe("a script's post does not steal the thread", () => {
     expect(w.row(first.thread_id).session_ended).toBeUndefined();
   });
 
+  test("the person answers the script's own question after the session that wrote ended: the reply is the script's, and its line says so, never that session's ended line", async () => {
+    const w = world();
+    const first = w.tool("ses-ops", "The nightly sync is green.");
+    const posted = w.script(":::question\nRotate the disk on node 3 now?\n\n- [ ] Yes\n- [ ] No\n:::", first.id);
+    w.later(INBOX_ASKER_RESTART_GRACE_MS + 1_000);
+    await w.poll("ses-other");
+    const q = w.store.questionsOf(posted.id)[0]!;
+    w.store.savePicks(posted.id, [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: "single", prompt: q.prompt, selected: ["Yes"] } }]);
+    const sent = w.store.sendReply(posted.id, { idempotency_key: "k-pick", words: "Go ahead.", questions: [{ key: q.key, revision: q.revision + 1 }] }).reply!;
+    expect(sent.reply_to).toBe(posted.id);
+    expect(w.row(first.thread_id).delivery).toMatchObject({ state: "saved", reason: "reads" });
+    expect(w.line(first.thread_id)).toBe("Saved for An agent. It sees it when it next reads this thread.");
+  });
+
+  test("no script: a routine's change line last, its session ended: the row's mark is that session's, as the Send's words are", async () => {
+    const w = world();
+    const first = w.tool("ses-ops", "Set up the nightly sync.");
+    w.store.sendMessage({ project_id: first.project_id, author: { kind: "agent", host: "claude-code", session: "ses-ops", name: "Claude Code" }, body: "Made routine nightly.", reply_to: first.id, scheduled_change: { scheduled_id: "sch_1", name: "nightly", op: "create" } } as Parameters<InboxStore["sendMessage"]>[0]);
+    expect(sendTargetsOf(w.store.thread(first.thread_id)!).at(-1)!.message.id).toBe(first.id);
+    w.later(INBOX_ASKER_RESTART_GRACE_MS + 1_000);
+    await w.poll("ses-other");
+    expect(w.row(first.thread_id).session_ended).toBe(true);
+  });
+
   test("a thread only a script wrote in: the reply is the script's and its line is as before, while a session is live in the project", async () => {
     const w = world();
     await w.poll("ses-ops");

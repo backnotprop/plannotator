@@ -84,15 +84,17 @@ const SESSIONLESS_HOSTS: readonly { variable: string; name: string; host?: strin
 ];
 
 /**
- * The agent a shell that names no session belongs to, by its one marker (`SESSIONLESS_HOSTS`: GEMINI_CLI, COPILOT_CLI,
+ * The agent a shell that names no session belongs to, by its marker (`SESSIONLESS_HOSTS`: GEMINI_CLI, COPILOT_CLI,
  * CURSOR_AGENT, OPENCODE, CLAUDECODE, OMPCODE, QWEN_CODE, DSH_SHELL): its name, and its host when it has one. A
- * message it sends then reads as that agent's, never as a script's (`inboxSessionlessSend`). Null for a shell with no
- * marker (a script, a hook, a cron job) and for one with two, which cannot say which of them is calling.
+ * message it sends then reads as that agent's, never as a script's (`inboxSessionlessSend`). With two markers the
+ * shell was started inside another agent: Claude Code's `CLAUDECODE` is taken as the outer one, then the table's
+ * order decides, so the post still carries a name. Null for a shell with no marker (cron, launchd, a plain terminal).
  */
 export function inboxShellAgentOf(env: Record<string, string | undefined>): { name: string; host?: string } | null {
   const markers = SESSIONLESS_HOSTS.filter(({ variable }) => env[variable]);
-  if (markers.length !== 1) return null;
-  const { name, host } = markers[0]!;
+  const inner = markers.find(({ variable }) => variable !== "CLAUDECODE") ?? markers[0];
+  if (!inner) return null;
+  const { name, host } = inner;
   return host ? { name, host } : { name };
 }
 

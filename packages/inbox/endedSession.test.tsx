@@ -1351,3 +1351,11 @@ test.skipIf(!hasDom)('a thread only a script wrote in: the reply is the script\'
   const after = await render(threadOf(only, personReply({ body: WORDS })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for An agent. It sees it when it next reads this thread.');
 });
+
+test.skipIf(!hasDom)('the script\'s own question answered after the session that wrote ended: the sent line is the script\'s, never "That session has ended"', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  liveness = { ses_asker: false };
+  const answered = scripted({ body: BODY, questions: questions(false, SCRIPT_ID).map((q) => ({ ...q, state: 'sent' as const, revision: 1, sent_revision: 1 })) });
+  const el = await render(threadOf(asking(), answered, personReply({ reply_to: SCRIPT_ID })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(el.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe('Saved for An agent. It sees it when it next reads this thread.');
+});
