@@ -3609,17 +3609,19 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
 public struct InboxLaunchRex: Codable, Hashable, Sendable {
   public var line: String?
   public var unavailable: Bool?
+  public var why: InboxLaunchRexWhy?
   public var refused: Bool?
   public var session: String?
   public var block: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["line", "unavailable", "refused", "session", "block"]
+  static let knownKeys: Set<String> = ["line", "unavailable", "why", "refused", "session", "block"]
 
-  public init(line: String? = nil, unavailable: Bool? = nil, refused: Bool? = nil, session: String? = nil, block: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(line: String? = nil, unavailable: Bool? = nil, why: InboxLaunchRexWhy? = nil, refused: Bool? = nil, session: String? = nil, block: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.line = line
     self.unavailable = unavailable
+    self.why = why
     self.refused = refused
     self.session = session
     self.block = block
@@ -3630,6 +3632,7 @@ public struct InboxLaunchRex: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.line = try c.decodeIfPresent(String.self, forKey: WireKey("line"))
     self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.why = try c.decodeIfPresent(InboxLaunchRexWhy.self, forKey: WireKey("why"))
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
     self.session = try c.decodeIfPresent(String.self, forKey: WireKey("session"))
     self.block = try c.decodeIfPresent(String.self, forKey: WireKey("block"))
@@ -3640,11 +3643,40 @@ public struct InboxLaunchRex: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encodeIfPresent(self.line, forKey: WireKey("line"))
     try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
     try c.encodeIfPresent(self.session, forKey: WireKey("session"))
     try c.encodeIfPresent(self.block, forKey: WireKey("block"))
     try WireKey.write(unknownFields, to: &c)
   }
+}
+
+public enum InboxLaunchRexWhy: Codable, Hashable, Sendable, RawRepresentable {
+  case server
+  case shared
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxLaunchRexWhy] = [.server, .shared]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "server": self = .server
+    case "shared": self = .shared
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .server: return "server"
+    case .shared: return "shared"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
 /// From `packages/core/inbox-types.ts`.
@@ -6712,6 +6744,7 @@ public enum InboxRunCloneError: Codable, Hashable, Sendable, RawRepresentable {
 public struct InboxRunRex: Codable, Hashable, Sendable {
   public var line: String?
   public var unavailable: Bool?
+  public var why: InboxRunRexWhy?
   public var refused: Bool?
   public var waiting: InboxRunRexWaiting?
   public var held: InboxRunRexHeld?
@@ -6719,11 +6752,12 @@ public struct InboxRunRex: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["line", "unavailable", "refused", "waiting", "held", "stops"]
+  static let knownKeys: Set<String> = ["line", "unavailable", "why", "refused", "waiting", "held", "stops"]
 
-  public init(line: String? = nil, unavailable: Bool? = nil, refused: Bool? = nil, waiting: InboxRunRexWaiting? = nil, held: InboxRunRexHeld? = nil, stops: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(line: String? = nil, unavailable: Bool? = nil, why: InboxRunRexWhy? = nil, refused: Bool? = nil, waiting: InboxRunRexWaiting? = nil, held: InboxRunRexHeld? = nil, stops: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.line = line
     self.unavailable = unavailable
+    self.why = why
     self.refused = refused
     self.waiting = waiting
     self.held = held
@@ -6735,6 +6769,7 @@ public struct InboxRunRex: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.line = try c.decodeIfPresent(String.self, forKey: WireKey("line"))
     self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.why = try c.decodeIfPresent(InboxRunRexWhy.self, forKey: WireKey("why"))
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
     self.waiting = try c.decodeIfPresent(InboxRunRexWaiting.self, forKey: WireKey("waiting"))
     self.held = try c.decodeIfPresent(InboxRunRexHeld.self, forKey: WireKey("held"))
@@ -6746,6 +6781,7 @@ public struct InboxRunRex: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.line, forKey: WireKey("line"))
     try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
     try c.encodeIfPresent(self.waiting, forKey: WireKey("waiting"))
     try c.encodeIfPresent(self.held, forKey: WireKey("held"))
@@ -6808,6 +6844,34 @@ public enum InboxRunRexWaiting: Codable, Hashable, Sendable, RawRepresentable {
     case .other: return "other"
     case .permission: return "permission"
     case .question: return "question"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public enum InboxRunRexWhy: Codable, Hashable, Sendable, RawRepresentable {
+  case server
+  case shared
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxRunRexWhy] = [.server, .shared]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "server": self = .server
+    case "shared": self = .shared
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .server: return "server"
+    case .shared: return "shared"
     case .unknown(let value): return value
     }
   }
