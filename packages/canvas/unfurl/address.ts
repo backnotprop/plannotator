@@ -74,6 +74,9 @@ function privateV6(bytes: number[]): boolean {
   const zeros = (from: number, to: number) => bytes.slice(from, to).every((byte) => byte === 0);
   const embedded = bytes.slice(12, 16);
   if (zeros(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) return privateV4(embedded); // IPv4-mapped
+  if (zeros(0, 8) && bytes[8] === 0xff && bytes[9] === 0xff && bytes[10] === 0 && bytes[11] === 0) return true; // IPv4-translated (::ffff:0:a.b.c.d): a translator's own form, not an address on the internet
+  if (bytes[0] === 0x01 && zeros(1, 8)) return true; // discard-only (100::/64)
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x02 && bytes[4] === 0 && bytes[5] === 0) return true; // benchmarking (2001:2::/48)
   if (zeros(0, 12)) return true; // unspecified, loopback, and the old IPv4-compatible form
   if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zeros(4, 12)) return privateV4(embedded); // NAT64
   // NAT64 for local use (64:ff9b:1::/48): a translator on someone's own network, never a public address.

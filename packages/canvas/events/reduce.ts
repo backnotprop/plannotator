@@ -63,8 +63,9 @@ export function setEvent(before: CanvasObject, after: CanvasObject): Extract<Can
   const b = after as unknown as ObjectFields;
   const set: ObjectFields = {};
   const unset: string[] = [];
-  for (const key of Object.keys(b)) if (key !== 'id' && key !== 'type' && !same(a[key], b[key])) set[key] = b[key];
-  for (const key of Object.keys(a)) if (!(key in b)) unset.push(key);
+  // `by` is said once, when an object is added: no change names it, however the two objects came to differ in it.
+  for (const key of Object.keys(b)) if (key !== 'id' && key !== 'type' && key !== 'by' && !same(a[key], b[key])) set[key] = b[key];
+  for (const key of Object.keys(a)) if (key !== 'by' && !(key in b)) unset.push(key);
   if (Object.keys(set).length === 0 && unset.length === 0) return null;
   return { type: 'object-set', id: before.id, set, ...(unset.length ? { unset } : {}) };
 }

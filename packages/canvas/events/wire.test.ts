@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { createDocument } from '../model/document';
 import { parseDocument, serializeDocument } from '../model/codec';
-import { applyEvents } from './reduce';
+import { applyEvents, setEvent } from './reduce';
 import { CanvasStore } from './store';
-import { type SyncPort, connectSync } from './sync';
+import { SYNC_HOLD_LIMIT, type SyncGap, type SyncPort, connectSync } from './sync';
 import type { Actor } from '../model/types';
 import type { Envelope } from './types';
-import { decodeCommand, decodeDelivery, decodeEnvelope } from './wire';
+import { decodeCommand, decodeEnvelope } from './wire';
 
 const AGENT = { kind: 'agent', id: 'agent-1' } as const;
 
@@ -100,33 +100,53 @@ describe('an agent hears what a person does', () => {
 describe('the sync seam', () => {
   /**
    * A backend as the seam asks for one: it puts every envelope in one
-   * order, counts them from 1, says who sent each from the connection it
-   * came in on (never from what the envelope claims), and hands each, as
-   * JSON, to every peer, the sender included. `flush` delivers what has
-   * been published; until then peers have not heard each other, which is
-   * how two people change something "at the same moment".
+   * order under one name (`stream`), counts them from 1, says who sent each
+   * from the connection it came in on (never from what the envelope
+   * claims), orders an envelope it has already ordered only once, and hands
+   * each, as JSON, to every peer, the sender included. `flush` delivers
+   * what has been published; until then peers have not heard each other,
+   * which is how two people change something "at the same moment".
    */
   function backend() {
     const peers: ((delivery: unknown) => void)[] = [];
-    const queue: { actor: Actor; envelope: unknown }[] = [];
+    const queue: { actor: unknown; envelope: unknown }[] = [];
     /** Every delivery made so far, in order: what a backend replays from. */
-    const log: string[] = [];
-    const deliver = (actor: Actor, envelope: unknown, twice = false) => {
-      const json = JSON.stringify({ order: log.length + 1, actor, envelope });
+    let log: string[] = [];
+    let stream = 'stream-1';
+    const ordered = new Set<string>();
+    const resends: number[] = [];
+    const count = (actor: unknown, envelope: unknown): string | null => {
+      const id = (envelope as { id?: unknown } | null)?.id;
+      const key = typeof id === 'string' ? `${JSON.stringify(actor)} ${id}` : null;
+      if (key && ordered.has(key)) return null;
+      if (key) ordered.add(key);
+      const json = JSON.stringify({ stream, order: log.length + 1, actor, envelope });
       log.push(json);
+      return json;
+    };
+    const deliver = (actor: unknown, envelope: unknown, twice = false) => {
+      const json = count(actor, envelope);
+      if (!json) return;
       for (const peer of [...peers]) {
         peer(json);
         if (twice) peer(JSON.parse(json));
       }
     };
     return {
-      log,
-      port: (actor: Actor): SyncPort => ({
+      get log() {
+        return log;
+      },
+      resends,
+      port: (actor: unknown, quiet = false): SyncPort => ({
         publish: (envelope) => void queue.push({ actor, envelope: JSON.parse(JSON.stringify(envelope)) }),
         subscribe: (onDelivery, after) => {
-          for (const json of log.slice(after)) onDelivery(json);
+          if (!quiet) for (const json of log.slice(after)) onDelivery(json);
           peers.push(onDelivery);
           return () => void peers.splice(peers.indexOf(onDelivery), 1);
+        },
+        resend: (after) => {
+          resends.push(after);
+          for (const json of log.slice(after)) onDeliveryOf(peers, json);
         },
       }),
       /** Deliver everything published so far. `twice`: each envelope is handed over two times. */
@@ -136,24 +156,43 @@ describe('the sync seam', () => {
           deliver(actor, envelope, twice);
         }
       },
+      /** Order and count what has been published, and hand it to nobody: for a test that delivers by hand. */
+      order() {
+        while (queue.length) {
+          const { actor, envelope } = queue.shift()!;
+          count(actor, envelope);
+        }
+      },
+      /** What was published and never reached the backend: a connection that dropped. */
+      lose: () => void (queue.length = 0),
       /** Something a peer signed in as `actor` sent: ordered, counted and delivered like anything else. */
-      inject: (envelope: unknown, actor: Actor = MALLORY) => deliver(actor, envelope),
+      inject: (envelope: unknown, actor: unknown = MALLORY) => deliver(actor, envelope),
       /** Hand every peer the whole history again, from the first envelope. */
       replay: () => log.forEach((json) => [...peers].forEach((peer) => peer(json))),
+      /** Hand every peer one delivery of the history again (by its count). */
+      again: (order: number) => [...peers].forEach((peer) => peer(log[order - 1])),
       /** Hand a peer something as it is, outside the order (a broken or lying backend). */
       raw: (delivery: unknown) => [...peers].forEach((peer) => peer(delivery)),
+      /** The backend lost its count and starts again from 1, as it must: under a new name. */
+      restart() {
+        log = [];
+        ordered.clear();
+        stream = 'stream-2';
+      },
     };
   }
+  const onDeliveryOf = (peers: ((delivery: unknown) => void)[], json: string) => [...peers].forEach((peer) => peer(json));
 
   const ONE = { kind: 'person', id: 'one' } as const;
   const TWO = { kind: 'person', id: 'two' } as const;
   const MALLORY = { kind: 'person', id: 'mallory' } as const;
+  const S = 'stream-1';
 
   const pair = () => {
     const net = backend();
     const one = new CanvasStore(createDocument('board'), { actor: ONE });
     const two = new CanvasStore(createDocument('board'), { actor: TWO });
-    const stopOne = connectSync(one, net.port(ONE));
+    const stopOne = connectSync(one, net.port(ONE)).stop;
     connectSync(two, net.port(TWO));
     one.dispatch({ type: 'add', objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' }] });
     net.flush();
@@ -310,42 +349,152 @@ describe('the sync seam', () => {
     expect(one.syncedTo).toBe(net.log.length);
   });
 
-  test('a deleted object does not come back when the backend delivers again from the very beginning', () => {
+  test('a deleted object does not come back when the backend delivers its adding again, however long ago that was', () => {
     const { net, one, two } = pair();
     one.dispatch({ type: 'delete', ids: ['a'] });
     net.flush();
-    // More envelopes than any window of remembered ids would hold, then the whole history again.
+    // More envelopes than any window of remembered ids would hold.
     for (let i = 0; i < 5200; i++) two.dispatch({ type: 'retitle', title: `t${i}` });
     net.flush();
     const settled = one.getDocument();
-    net.replay();
+    // The very first delivery, the one that added `a`, alone and out of nowhere; then the whole history.
+    net.again(1);
     expect(one.getDocument()).toBe(settled);
     expect(one.getDocument().objects.a).toBeUndefined();
+    net.replay();
+    expect(one.getDocument()).toBe(settled);
     expect(two.getDocument()).toEqual(one.getDocument());
   });
 
-  test('a delivery that skips ahead is not applied: the host is told once per hole, and nothing later is applied on top of it', () => {
+  const adding = (id: string) => ({ id: `e-${id}`, events: [{ type: 'object-added', object: { id, type: 'note', x: 0, y: 0, w: 10, h: 10, text: '' } }] });
+
+  test('deliveries that arrive out of order are held and applied in order; the host is told while the board is not live', () => {
     const net = backend();
     const one = new CanvasStore(createDocument('board'), { actor: ONE });
-    const gaps: { have: number; got: number }[] = [];
-    connectSync(one, net.port(ONE), { onGap: (gap) => gaps.push(gap) });
-    const add = (id: string) => ({ id: `e-${id}`, events: [{ type: 'object-added', object: { id, type: 'note', x: 0, y: 0, w: 10, h: 10, text: '' } }] });
-    net.raw({ order: 1, actor: TWO, envelope: add('first') });
-    net.raw({ order: 3, actor: TWO, envelope: add('third') });
-    net.raw({ order: 4, actor: TWO, envelope: add('fourth') });
+    const told: string[] = [];
+    const link = connectSync(one, net.port(ONE), { onGap: (gap) => told.push(`${gap.reason} ${gap.have}>${gap.got}`), onCaughtUp: () => told.push('live') });
+    const at = (order: number, id: string) => ({ stream: S, order, actor: TWO, envelope: adding(id) });
+    net.raw(at(1, 'first'));
+    expect(link.stalled).toBeNull();
+    // 3, 5 and 4 before 2: a replay and live delivery crossing.
+    net.raw(at(3, 'third'));
+    net.raw(at(5, 'fifth'));
+    net.raw(at(4, 'fourth'));
     expect(Object.keys(one.getDocument().objects)).toEqual(['first']);
-    expect(gaps).toEqual([{ have: 1, got: 3 }]);
-    expect(one.syncedTo).toBe(1);
-    // The missing one arriving late puts things right, and what follows is taken again.
-    net.raw({ order: 2, actor: TWO, envelope: add('second') });
-    net.raw({ order: 3, actor: TWO, envelope: add('third') });
-    expect(Object.keys(one.getDocument().objects)).toEqual(['first', 'second', 'third']);
-    // A second hole is told of too.
-    net.raw({ order: 9, actor: TWO, envelope: add('ninth') });
-    expect(gaps).toEqual([{ have: 1, got: 3 }, { have: 3, got: 9 }]);
-    // No count, or one that is not a whole number from 1, is not a delivery at all.
-    for (const order of [undefined, 0, -1, 4.5, '4', Number.MAX_SAFE_INTEGER + 1]) net.raw({ order, actor: TWO, envelope: add('never') });
+    expect(link.stalled).toEqual({ reason: 'gap', have: 1, got: 3 });
+    expect(told).toEqual(['gap 1>3']);
+    net.raw(at(2, 'second'));
+    expect(Object.keys(one.getDocument().objects)).toEqual(['first', 'second', 'third', 'fourth', 'fifth']);
+    expect(one.syncedTo).toBe(5);
+    expect(link.stalled).toBeNull();
+    expect(told).toEqual(['gap 1>3', 'live']);
+    // Two holes: filling the first tells of the second.
+    net.raw(at(7, 'seventh'));
+    net.raw(at(9, 'ninth'));
+    net.raw(at(6, 'sixth'));
+    expect(one.syncedTo).toBe(7);
+    expect(link.stalled).toEqual({ reason: 'gap', have: 7, got: 9 });
+    expect(told).toEqual(['gap 1>3', 'live', 'gap 5>7', 'gap 7>9']);
+    // No count, or one that is not a whole number from 1, is not a delivery at all; nor is one with no stream.
+    for (const order of [undefined, 0, -1, 8.5, '8', Number.MAX_SAFE_INTEGER + 1]) net.raw({ stream: S, order, actor: TWO, envelope: adding('never') });
+    net.raw({ order: 8, actor: TWO, envelope: adding('never') });
     expect(one.getDocument().objects.never).toBeUndefined();
+    expect(one.syncedTo).toBe(7);
+  });
+
+  test('what is held while a hole is filled is bounded, and the nearest deliveries are the ones kept', () => {
+    const net = backend();
+    const one = new CanvasStore(createDocument('board'), { actor: ONE });
+    connectSync(one, net.port(ONE));
+    // Far more than is held, furthest first.
+    for (let order = SYNC_HOLD_LIMIT * 3; order >= 2; order--) net.raw({ stream: S, order, actor: TWO, envelope: { id: `e${order}`, events: [{ type: 'title-set', title: `t${order}` }] } });
+    net.raw({ stream: S, order: 1, actor: TWO, envelope: { id: 'e1', events: [{ type: 'title-set', title: 't1' }] } });
+    // Everything next to the hole was kept and applied; the rest is asked for again, not held without end.
+    expect(one.syncedTo).toBe(SYNC_HOLD_LIMIT + 1);
+    expect(one.getDocument().title).toBe(`t${SYNC_HOLD_LIMIT + 1}`);
+  });
+
+  test('a delivery lost on the way is asked for again and the board catches up', () => {
+    const net = backend();
+    const one = new CanvasStore(createDocument('board'), { actor: ONE });
+    const told: string[] = [];
+    const link = connectSync(one, net.port(ONE), { onGap: (gap) => told.push(`${gap.reason} ${gap.have}>${gap.got}`), onCaughtUp: () => told.push('live') });
+    // Someone else's changes, as they reach the backend.
+    const sender = net.port(TWO);
+    const send = (id: string, set: Record<string, unknown>) => sender.publish({ id, events: [{ type: 'object-set', id: 'a', set }] } as never);
+    sender.publish({ id: 'add', events: [{ type: 'object-added', object: { id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' } }] } as never);
+    net.flush();
+    expect(one.syncedTo).toBe(1);
+    // The backend orders two more and they are lost on the way to this store.
+    send('move', { x: 10 });
+    send('colour', { color: 'green' });
+    net.order();
+    // The next one arrives, ahead of its count. The store asks once, the backend sends again, and it is whole.
+    send('words', { text: 'Later' });
+    net.order();
+    net.raw(net.log[3]);
+    expect(net.resends).toEqual([1]);
+    expect(told).toEqual(['gap 1>4', 'live']);
+    expect(link.stalled).toBeNull();
+    expect(one.getDocument().objects.a).toMatchObject({ x: 10, color: 'green', text: 'Later' });
+    expect(one.syncedTo).toBe(4);
+  });
+
+  test('a connection made again sends what was not confirmed, once, and loses nothing: sent before the drop, lost on the way, or made while down', () => {
+    const net = backend();
+    const one = new CanvasStore(createDocument('board'), { actor: ONE });
+    const two = new CanvasStore(createDocument('board'), { actor: TWO });
+    connectSync(two, net.port(TWO));
+    let link = connectSync(one, net.port(ONE));
+    one.dispatch({ type: 'add', objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' }] });
+    net.flush();
+    // Reached the backend, but the connection dropped before it came back.
+    one.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 0 });
+    net.order();
+    link.stop();
+    // Sent into a dead connection: never reached the backend.
+    link = connectSync(one, net.port(ONE, true));
+    one.dispatch({ type: 'recolor', ids: ['a'], color: 'red' });
+    net.lose();
+    link.stop();
+    // Made while down.
+    one.dispatch({ type: 'edit', id: 'a', patch: { text: 'Offline' } });
+    two.dispatch({ type: 'edit', id: 'a', patch: { detail: 'Meanwhile' } });
+    net.flush();
+    expect(one.unconfirmed).toHaveLength(3);
+    expect(one.getDocument().objects.a).toMatchObject({ x: 10, color: 'red', text: 'Offline' });
+    // Back.
+    connectSync(one, net.port(ONE));
+    net.flush();
+    expect(one.unconfirmed).toHaveLength(0);
+    expect(one.getDocument().objects.a).toMatchObject({ x: 10, color: 'red', text: 'Offline', detail: 'Meanwhile' });
+    expect(two.getDocument()).toEqual(one.getDocument());
+    // The move that had already been ordered was not ordered a second time.
+    expect(net.log.filter((json) => json.includes('"dx":10'))).toHaveLength(1);
+    // And what the person did is still theirs to undo.
+    one.undo();
+    net.flush();
+    expect(one.getDocument().objects.a).toMatchObject({ text: 'A' });
+    expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('a backend whose count starts again is noticed: nothing of the new count is taken for an old repeat or applied', () => {
+    const { net, one, two } = pair();
+    two.dispatch({ type: 'move', ids: ['a'], dx: 5, dy: 0 });
+    net.flush();
+    const gaps: SyncGap[] = [];
+    const three = new CanvasStore(one.getDocument(), { actor: { kind: 'person', id: 'three' } });
+    const link = connectSync(three, net.port({ kind: 'person', id: 'three' }, true), { at: 2, stream: S, onGap: (gap) => gaps.push(gap) });
+    const before = three.getDocument();
+    net.restart();
+    // The new count's 1 and 2 are at or below where the store is; its 3 is the very next number.
+    for (const title of ['x', 'y', 'z']) net.inject({ id: `r-${title}`, events: [{ type: 'title-set', title }] }, TWO);
+    expect(three.getDocument()).toBe(before);
+    expect(gaps).toEqual([{ reason: 'restarted', have: 2, got: 1 }]);
+    expect(link.stalled?.reason).toBe('restarted');
+    // The old stream turning up again does not un-stall it: the host loads the canvas again.
+    net.raw({ stream: S, order: 3, actor: TWO, envelope: { id: 'late', events: [{ type: 'title-set', title: 'late' }] } });
+    expect(three.getDocument()).toBe(before);
   });
 
   test('a store that connects later catches up from the count that came with its document', () => {
@@ -374,22 +523,137 @@ describe('the sync seam', () => {
     net.inject({ id: 'liar', actor: ONE, events: [{ type: 'object-set', id: 'a', set: { text: 'Not by one' } }] }, MALLORY);
     expect(heard).toHaveLength(1);
     expect(heard[0].actor).toEqual(MALLORY);
-    // A delivery the backend did not sign is not one.
-    expect(decodeDelivery({ order: 1, envelope: { id: 'e', actor: ONE, events: [] } }).ok).toBe(false);
-    expect(decodeDelivery({ order: 1, actor: { kind: 'root', id: 'x' }, envelope: { id: 'e', events: [] } }).ok).toBe(false);
   });
 
-  test('who added an object cannot be rewritten by a later change, from a peer or from anywhere', () => {
+  test('a stamp the backend got wrong is counted and skipped: it does not stop the board for everyone', () => {
+    const { net, one, two } = pair();
+    const before = one.getDocument();
+    const change = { id: 'c', events: [{ type: 'object-set', id: 'a', set: { text: 'unsigned' } }] };
+    // A kind this package does not know, an id too long, no stamp at all.
+    net.inject(change, { kind: 'system', id: 'cron' });
+    net.inject({ ...change, id: 'c2' }, { kind: 'person', id: 'x'.repeat(129) });
+    net.inject({ ...change, id: 'c3' }, null);
+    expect(one.getDocument()).toBe(before);
+    expect(one.syncedTo).toBe(net.log.length);
+    two.dispatch({ type: 'edit', id: 'a', patch: { text: 'still live' } });
+    net.flush();
+    expect(one.getDocument().objects.a).toMatchObject({ text: 'still live' });
+    expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('who added an object cannot be rewritten by a later change, and an honest change that names it is not thrown away with it', () => {
     const { net, one, two } = pair();
     expect(one.getDocument().objects.a.by).toEqual(ONE);
     net.inject({ id: 'f1', events: [{ type: 'object-set', id: 'a', set: { by: { kind: 'person', id: 'mallory' } } }] });
     net.inject({ id: 'f2', events: [{ type: 'object-set', id: 'a', set: {}, unset: ['by'] }] });
-    // An honest field in the same envelope does not carry the forged one through.
-    net.inject({ id: 'f3', events: [{ type: 'object-set', id: 'a', set: { text: 'kept?', by: { kind: 'agent', id: 'x' } } }] });
     for (const store of [one, two]) expect(store.getDocument().objects.a).toMatchObject({ by: ONE, text: 'A' });
+    // The field beside it in the same change is taken; only `by` is dropped.
+    net.inject({ id: 'f3', events: [{ type: 'object-set', id: 'a', set: { text: 'kept', by: { kind: 'agent', id: 'x' } } }] });
+    for (const store of [one, two]) expect(store.getDocument().objects.a).toMatchObject({ by: ONE, text: 'kept' });
     // The reducer holds it too, for events that never crossed the wire's decoder.
     const direct = applyEvents(one.getDocument(), [{ type: 'object-set', id: 'a', set: { by: { kind: 'agent', id: 'x' }, text: 'B' }, unset: ['by'] }]);
     expect(direct.doc.objects.a).toMatchObject({ by: ONE, text: 'B' });
+  });
+
+  test("a host's own object for a person, with more on it than an actor has, does not leave that person out of step", () => {
+    const net = backend();
+    // As a host would: the session's user, passed straight in.
+    const user = { kind: 'person' as const, id: 'ana', name: 'Ana', avatar: 'https://example.test/a.png' };
+    const ana = new CanvasStore(createDocument('board'), { actor: user });
+    const two = new CanvasStore(createDocument('board'), { actor: TWO });
+    connectSync(ana, net.port({ kind: 'person', id: 'ana' }));
+    connectSync(two, net.port(TWO));
+    expect(ana.actor).toEqual({ kind: 'person', id: 'ana' });
+    ana.dispatch({ type: 'add', objects: [{ id: 'n', type: 'note', x: 0, y: 0, w: 100, h: 60, text: 'N' }] });
+    ana.dispatch({ type: 'group', id: 'g', ids: ['n', 'n'] });
+    net.flush();
+    expect(ana.getDocument().objects.n.by).toEqual({ kind: 'person', id: 'ana' });
+    // A drag, an edit and a resize: each rebuilds the object, and none of them names `by`.
+    const sent: Envelope[] = [];
+    ana.onCommit((envelope) => sent.push(envelope));
+    ana.dispatch({ type: 'move', ids: ['n'], dx: 25, dy: 5 });
+    ana.dispatch({ type: 'edit', id: 'n', patch: { text: 'Dragged' } }, { actor: user });
+    ana.dispatch({ type: 'resize', id: 'n', rect: { x: 25, y: 5, w: 120, h: 80 } });
+    expect(JSON.stringify(sent)).not.toContain('"by"');
+    net.flush();
+    expect(two.getDocument().objects.n).toMatchObject({ x: 25, y: 5, w: 120, text: 'Dragged' });
+    expect(two.getDocument()).toEqual(ana.getDocument());
+    expect(ana.unconfirmed).toHaveLength(0);
+    // Peers move it afterwards and she sees it: nothing of hers is still laid over theirs.
+    two.dispatch({ type: 'move', ids: ['n'], dx: 100, dy: 0 });
+    net.flush();
+    expect(ana.getDocument().objects.n).toMatchObject({ x: 125 });
+    // Whatever two objects differ in, the change between them never names who added it.
+    const note = ana.getDocument().objects.n;
+    expect(setEvent({ ...note, by: user } as never, { ...note, x: 500 })).toEqual({ type: 'object-set', id: 'n', set: { x: 500 } });
+    expect(setEvent({ ...note, by: user } as never, note)).toBeNull();
+    const { by: _by, ...unsigned } = note;
+    expect(setEvent(note, unsigned as never)).toBeNull();
+    // An actor that is not one is refused when the store is made, not found out later.
+    expect(() => new CanvasStore(createDocument('board'), { actor: { kind: 'root', id: 'x' } as never })).toThrow();
+  });
+
+  test('a change of its own that never comes back is let go of, not laid over every later change for ever', () => {
+    const net = backend();
+    // The store was made with another name than the backend stamps on its connection: none of its own
+    // changes will ever be known as its own.
+    const one = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'local' } });
+    const two = new CanvasStore(createDocument('board'), { actor: TWO });
+    connectSync(one, net.port(ONE));
+    connectSync(two, net.port(TWO));
+    one.dispatch({ type: 'add', objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' }] });
+    for (let i = 0; i < 1500; i++) one.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 });
+    net.flush();
+    // What it holds on to is bounded.
+    expect(one.unconfirmed.length).toBeLessThanOrEqual(1000);
+    expect(two.getDocument().objects.a).toMatchObject({ x: 1500 });
+    // One of its own that is confirmed lets go of everything older: here, sent under the right name.
+    const lost = new CanvasStore(createDocument('board'), { actor: ONE });
+    const net2 = backend();
+    connectSync(lost, net2.port(ONE));
+    lost.dispatch({ type: 'add', objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' }] });
+    net2.flush();
+    lost.dispatch({ type: 'move', ids: ['a'], dx: 50, dy: 0 });
+    net2.lose();
+    lost.dispatch({ type: 'recolor', ids: ['a'], color: 'blue' });
+    net2.flush();
+    expect(lost.unconfirmed).toHaveLength(0);
+    // The move never reached anyone, so it is not what the board says, here or anywhere.
+    expect(lost.getDocument().objects.a).toMatchObject({ x: 0, color: 'blue' });
+    net2.inject({ id: 'peer-move', events: [{ type: 'object-set', id: 'a', set: { x: 7 } }] }, TWO);
+    expect(lost.getDocument().objects.a).toMatchObject({ x: 7 });
+  });
+
+  test('a peer cannot add an object signed as someone else; an undo of a delete still puts the name back', () => {
+    const { net, one, two } = pair();
+    // Signed as the other person, as an agent, and not at all.
+    net.inject({ id: 'forge', events: [
+      { type: 'object-added', object: { id: 'f1', type: 'note', x: 0, y: 0, w: 100, h: 60, text: 'Approved, ship it', by: ONE } },
+      { type: 'object-added', object: { id: 'f2', type: 'note', x: 0, y: 0, w: 100, h: 60, text: 'x', by: { kind: 'agent', id: 'planner' } } },
+      { type: 'object-added', object: { id: 'f3', type: 'note', x: 0, y: 0, w: 100, h: 60, text: 'x' } },
+    ] });
+    for (const store of [one, two]) for (const id of ['f1', 'f2', 'f3']) expect(store.getDocument().objects[id].by).toEqual(MALLORY);
+    // Deleting someone's object and adding it again under another name, in one envelope or in two: it keeps the name it had.
+    net.inject({ id: 'swap', events: [{ type: 'object-removed', id: 'a' }, { type: 'object-added', object: { id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A', by: MALLORY } }] });
+    for (const store of [one, two]) expect(store.getDocument().objects.a.by).toEqual(ONE);
+    // An honest undo: two deletes what one made, then takes it back. It is still one's.
+    two.dispatch({ type: 'delete', ids: ['a'] });
+    net.flush();
+    expect(one.getDocument().objects.a).toBeUndefined();
+    two.undo();
+    net.flush();
+    for (const store of [one, two]) expect(store.getDocument().objects.a).toMatchObject({ by: ONE, text: 'A' });
+    expect(two.getDocument()).toEqual(one.getDocument());
+    expect(reloads(one)).toBe(true);
+  });
+
+  test("an agent's change sent over a person's connection is that person's to every peer, and to the sender once confirmed", () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'add', objects: [{ id: 'by-agent', type: 'note', x: 0, y: 0, w: 100, h: 60, text: 'x' }] }, { actor: { kind: 'agent', id: 'planner' } });
+    expect(one.getDocument().objects['by-agent'].by).toEqual({ kind: 'agent', id: 'planner' });
+    net.flush();
+    expect(two.getDocument().objects['by-agent'].by).toEqual(ONE);
+    expect(one.getDocument()).toEqual(two.getDocument());
   });
 
   test("a peer cannot confirm away a change made here by sending something under that change's id", () => {

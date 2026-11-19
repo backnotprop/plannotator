@@ -109,16 +109,17 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
       // The fields are checked against the object they land on, when they are applied (`applyEvents` with `check`).
       if (typeof value.id !== 'string' || !isRecord(value.set)) return fail('object-set needs "id" and "set"');
       const names = Object.keys(value.set);
-      // Who added an object is said once, when it is added. No later change may rewrite it.
-      if (names.length > 32 || names.includes('id') || names.includes('type') || names.includes('by')) return fail('object-set may not set that');
+      if (names.length > 32 || names.includes('id') || names.includes('type')) return fail('object-set may not set that');
       // Only names an object can have are carried on, each copied by name: `__proto__` and any other name
-      // that is not a field is dropped here and never reaches an object.
+      // that is not a field is dropped here and never reaches an object. `by` is dropped the same way: who
+      // added an object is said once, when it is added. Dropped, not refused: the rest of the change is
+      // honest, and an envelope refused whole is a change its own sender would never see confirmed.
+      const carried = (name: string) => name !== 'by' && OBJECT_FIELDS.has(name);
       const set: Record<string, unknown> = {};
-      for (const name of names) if (OBJECT_FIELDS.has(name)) set[name] = (value.set as Record<string, unknown>)[name];
+      for (const name of names) if (carried(name)) set[name] = (value.set as Record<string, unknown>)[name];
       const unset = value.unset;
       if (unset !== undefined && (!Array.isArray(unset) || unset.length > 32 || !unset.every((key) => typeof key === 'string' && key.length <= 32))) return fail('unset must be a list of field names');
-      if ((unset as string[] | undefined)?.includes('by')) return fail('object-set may not set that');
-      const cleared = (unset as string[] | undefined)?.filter((key) => OBJECT_FIELDS.has(key));
+      const cleared = (unset as string[] | undefined)?.filter(carried);
       return { ok: true, value: { type: 'object-set', id: value.id, set, ...(cleared?.length ? { unset: cleared } : {}) } };
     }
     case 'object-removed':
@@ -183,25 +184,29 @@ export function decodeEnvelope(input: unknown): Checked<DecodedEnvelope> {
 }
 
 /**
- * One envelope as a sync backend hands it over: `{ order, actor, envelope }`
- * (see `SyncDelivery`). `order` and `actor` are the backend's own words; the
- * envelope inside is a peer's and is checked like any other, except that the
- * actor it names for itself is never read.
+ * One envelope as a sync backend hands it over: `{ stream, order, actor,
+ * envelope }` (see `SyncDelivery`). `stream`, `order` and `actor` are the
+ * backend's own words; the envelope inside is a peer's and is checked like
+ * any other, except that the actor it names for itself is never read.
  *
- * A delivery whose inside does not pass is still a delivery: the backend
- * counted it, so every peer must count it too or the next one would look
- * like a gap. It comes back with `envelope: null` (and `refused`, the
- * reason), to be counted and otherwise ignored.
+ * A delivery whose count can be read is a delivery, whatever else is wrong
+ * with it: the backend counted it, so every peer must count it too or the
+ * next one would look like a gap. When the envelope inside does not pass,
+ * or the backend's own stamp is not an actor (a kind this package does not
+ * know, an id too long), it comes back with `envelope: null` and `refused`,
+ * the reason: to be counted and otherwise ignored.
  */
-export function decodeDelivery(input: unknown): Checked<{ order: number; actor: Actor; envelope: DecodedEnvelope | null; refused?: string }> {
+export function decodeDelivery(input: unknown): Checked<{ stream: string; order: number; envelope: DecodedEnvelope | null; refused?: string }> {
   const raw = parsed(input);
   if (raw === undefined) return fail('not JSON');
   if (!isRecord(raw)) return fail('a delivery must be a JSON object');
+  if (typeof raw.stream !== 'string' || !raw.stream || raw.stream.length > 128) return fail('a delivery needs "stream", the name of the backend\'s count');
   if (typeof raw.order !== 'number' || !Number.isSafeInteger(raw.order) || raw.order < 1) return fail('a delivery needs "order", a whole number from 1');
+  const counted = { stream: raw.stream, order: raw.order };
   const actor = decodeActor(raw.actor);
-  if (!actor) return fail('a delivery needs the backend\'s "actor"');
+  if (!actor) return { ok: true, value: { ...counted, envelope: null, refused: 'the backend\'s "actor" is not a person or an agent with an id of at most 128 characters' } };
   const inner = parsed(raw.envelope);
   const body = inner === undefined ? fail('not JSON') : decodeBody(inner);
-  if (!body.ok) return { ok: true, value: { order: raw.order, actor, envelope: null, refused: body.error } };
-  return { ok: true, value: { order: raw.order, actor, envelope: { ...body.value, actor } } };
+  if (!body.ok) return { ok: true, value: { ...counted, envelope: null, refused: body.error } };
+  return { ok: true, value: { ...counted, envelope: { ...body.value, actor } } };
 }

@@ -63,14 +63,23 @@ function midpoint(a: string, b: string | null): string {
 /**
  * A key that sorts after `below` and before `above`. Null for either means
  * "no neighbour on that side": on top of everything, or under everything.
+ *
+ * Two neighbours may hold the SAME key (two people each put something on
+ * top at the same moment; their ids settle which is drawn first). Nothing
+ * lies between them, so the new key goes just above both. Then the caller
+ * passes `next`: the lowest key on the board that is above the pair, or
+ * null when the pair is on top. The key returned lies strictly between the
+ * pair and `next`, so it is no key the board already holds and it passes
+ * nothing else. Without `next` the key is the pair's with one more digit:
+ * above the pair and below every key that does not start with theirs, but
+ * possibly one the board already has.
  */
-export function keyBetween(below: string | null, above: string | null): string {
+export function keyBetween(below: string | null, above: string | null, next?: string | null): string {
   if (below === null && above === null) return fromInt(Math.floor(MAX / 2));
-  // Two neighbours with the same key (two people who each put something on top at the same moment) have
-  // nothing between them: the new key goes JUST above both, by one more digit, so it passes nothing else
-  // on the board (halfway to the top would jump over whatever lies above them). Every key that sorts above
-  // the pair and does not start with their key still sorts above the new one.
   if (below !== null && above !== null && below >= above) {
+    // Handed over the wrong way round counts as the same: just above the higher of the two.
+    if (next !== undefined && (next === null || next > below)) return next === null ? keyBetween(below, null) : midpoint(below, next);
+    // One more digit, not halfway to the top, which would jump over whatever lies above them.
     const key = below + DIGITS[BASE >> 1];
     return ORDER_KEY_RE.test(key) ? key : midpoint(below, null);
   }

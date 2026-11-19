@@ -26,6 +26,7 @@ import type { Actor, CanvasDocument } from '../model/types';
 import { planCommand } from './plan';
 import { applyEvents, compactSets } from './reduce';
 import type { CanvasEvent, Command, Envelope, EnvelopeOrigin } from './types';
+import { decodeActor } from './wire';
 
 export type DispatchResult = { ok: true; envelope: Envelope | null } | { ok: false; error: string };
 
@@ -85,6 +86,17 @@ const sameActor = (a: Actor, b: Actor): boolean => a.kind === b.kind && a.id ===
  */
 const SEEN_LIMIT = 5000;
 
+/**
+ * How many of its own unconfirmed changes a syncing store keeps. Past this the oldest are let go: the
+ * screen falls back to what all peers agree on for them, and should one still come back from the backend
+ * it is applied like anyone's. Letting go is always safe; holding on for ever to a change the backend will
+ * never hand back (lost on the way, or stamped with another name) is what parts a store from its peers.
+ */
+const PENDING_LIMIT = 1000;
+
+/** How many removed objects a syncing store remembers the author of, so that putting one back keeps the name. */
+const REMOVED_LIMIT = 5000;
+
 /** A backend's count of an envelope: a whole number from 1. */
 const isOrder = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 
@@ -119,10 +131,18 @@ export class CanvasStore {
   private readonly pending: Envelope[] = [];
   /** While syncing: the backend's count of the last envelope applied to `agreed`. */
   private agreedAt = 0;
+  /** While syncing: the name of the backend's count (`SyncDelivery.stream`), once known. */
+  private stream: string | null = null;
+  /** While syncing: who had added each object the agreed document has seen removed. */
+  private readonly removedBy = new Map<string, Actor | undefined>();
 
   constructor(doc: CanvasDocument, options: CanvasStoreOptions = {}) {
     this.doc = withIdMaps(doc);
-    this.actor = options.actor ?? { kind: 'person', id: 'local' };
+    // Exactly an actor: a kind and an id. A host's own object for a person may carry more (a name, a
+    // picture); none of it belongs in a document or on the wire, where it would not compare equal.
+    const actor = decodeActor(options.actor ?? { kind: 'person', id: 'local' });
+    if (!actor) throw new Error('CanvasStore: actor must be { kind: "person" or "agent", id } with an id of 1 to 128 characters');
+    this.actor = actor;
     this.undoLimit = options.undoLimit ?? 500;
     this.logLimit = options.logLimit ?? 2000;
   }
@@ -183,7 +203,8 @@ export class CanvasStore {
   private readonly firstSeq = new WeakMap<Envelope, number>();
 
   dispatch(command: Command, options: DispatchOptions = {}): DispatchResult {
-    const actor = options.actor ?? this.actor;
+    const actor = options.actor ? decodeActor(options.actor) : this.actor;
+    if (!actor) return { ok: false, error: 'actor must be { kind: "person" or "agent", id }' };
     const planned = planCommand(this.doc, command, actor);
     if (!planned.ok) return planned;
     if (planned.value.length === 0) return { ok: true, envelope: null };
@@ -224,18 +245,31 @@ export class CanvasStore {
    * here on `receive` expects every envelope in the backend's one order,
    * this store's own included, each with the backend's count of it. `at` is
    * that count for the document this store holds now: 0 for a canvas nobody
-   * has changed yet, otherwise the number the backend gave with the document.
+   * has changed yet, otherwise the number the backend gave with the
+   * document; `stream` is the name of that count, when the host knows it.
+   *
+   * A store that is already syncing (a connection dropped and is being made
+   * again) is left exactly as it is: the document all peers agree on, the
+   * count reached, and its own changes still waiting to be confirmed
+   * (`unconfirmed`) all carry over, and `at` is not read. Starting again
+   * from what is on screen would take changes no peer has for agreed.
    */
-  beginSync(at = 0): void {
+  beginSync(at = 0, stream?: string): void {
+    if (this.agreed) return;
     this.agreed = this.doc;
     this.agreedAt = isOrder(at) ? at : 0;
+    this.stream = stream ?? null;
     this.pending.length = 0;
+    this.removedBy.clear();
   }
 
+  /** Stop syncing for good: the document on screen is kept, and what was waiting to be confirmed is forgotten. */
   endSync(): void {
     this.agreed = null;
     this.agreedAt = 0;
+    this.stream = null;
     this.pending.length = 0;
+    this.removedBy.clear();
   }
 
   /**
@@ -245,6 +279,16 @@ export class CanvasStore {
    */
   get syncedTo(): number | null {
     return this.agreed ? this.agreedAt : null;
+  }
+
+  /** While syncing: the name of the backend's count this store is following, once it has heard it. */
+  get syncStream(): string | null {
+    return this.stream;
+  }
+
+  /** While syncing: this store's own changes the backend has not handed back yet, oldest first. Sent again when a connection is made again. */
+  get unconfirmed(): readonly Envelope[] {
+    return this.pending;
   }
 
   /**
@@ -257,10 +301,12 @@ export class CanvasStore {
    * applied and is ignored, however long ago that was, so a backend may
    * deliver again from any point. One that skips ahead is not applied
    * either (what lies between is missing, and applying out of order would
-   * part this store from its peers): `connectSync` reports it (`onGap`) and
-   * the host fetches the document again. A store that is not syncing takes
-   * envelopes as they come and spots a repeat by its id, among the last
-   * few thousand.
+   * part this store from its peers): `connectSync` holds it until the hole
+   * is filled. `null` for the envelope is a delivery that is counted and
+   * changes nothing (what a peer sent did not pass). `stream` names the
+   * backend's count; a delivery from another stream than the one this store
+   * follows is not applied. A store that is not syncing takes envelopes as
+   * they come and spots a repeat by its id, among the last few thousand.
    *
    * While syncing, peers converge like this. The backend puts every
    * envelope in one order and hands all of them to every peer, the sender
@@ -272,9 +318,14 @@ export class CanvasStore {
    * is simply confirmed. Two people who set one field at the same moment
    * both end on the value the backend ordered last.
    */
-  receive(envelope: RemoteEnvelope, order?: number): Envelope | null {
-    if (this.agreed) return isOrder(order) && order === this.agreedAt + 1 ? this.receiveOrdered(envelope, order) : null;
-    if (this.seen.has(envelope.id)) return null;
+  receive(envelope: RemoteEnvelope | null, order?: number, stream?: string): Envelope | null {
+    if (this.agreed) {
+      if (!isOrder(order) || order !== this.agreedAt + 1) return null;
+      if (stream !== undefined && this.stream !== null && stream !== this.stream) return null;
+      if (stream !== undefined) this.stream = stream;
+      return this.receiveOrdered(envelope ?? { id: `refused-${order}`, actor: { kind: 'agent', id: 'nobody' }, events: [] }, order);
+    }
+    if (!envelope || this.seen.has(envelope.id)) return null;
     const result = applyEvents(this.doc, envelope.events, { check: true });
     this.remembered(envelope.id);
     if (result.applied.length === 0) return null;
@@ -286,22 +337,64 @@ export class CanvasStore {
     // (`connectSync`), so a peer cannot confirm away a change made here by sending something under its id.
     const mine = sameActor(envelope.actor, this.actor) ? this.pending.findIndex((own) => own.id === envelope.id) : -1;
     const before = this.agreed!;
-    const agreedNow = applyEvents(before, envelope.events, { check: true });
+    const events = this.signed(envelope, before);
+    const agreedNow = applyEvents(before, events, { check: true });
     this.agreed = agreedNow.doc;
     this.agreedAt = order;
-    if (mine !== -1) this.pending.splice(mine, 1);
-    // The common cases need no second look: an own envelope confirmed in turn, or a peer's with nothing of ours waiting.
-    if (mine === 0) return null;
-    if (mine === -1 && this.pending.length === 0) {
-      if (agreedNow.applied.length === 0) return null;
-      return this.commit(this.agreed, envelope.actor, 'remote', agreedNow.applied, envelope.command, envelope.gesture, envelope.id);
+    // Own changes older than the one that has just come back never will: the backend keeps one connection's
+    // changes in the order they were sent. They are let go of, and so are the oldest past the limit, so a
+    // change that was lost or refused on the way is not laid over every later change for ever.
+    // An own change the backend signed otherwise than this store did (an agent's, sent over a person's
+    // connection, is that person's to every peer) is shown as all peers have it, not as it was sent.
+    let letGo = mine > 0 || (mine !== -1 && events.some((event, i) => event !== envelope.events[i]));
+    if (mine !== -1) this.pending.splice(0, mine + 1);
+    if (this.pending.length > PENDING_LIMIT) {
+      this.pending.splice(0, this.pending.length - PENDING_LIMIT);
+      letGo = true;
     }
-    // Nothing all peers agree on changed (a repeat of what is already so, or an envelope that was refused): neither did the screen.
-    if (mine === -1 && agreedNow.applied.length === 0) return null;
+    if (!letGo) {
+      // The common cases need no second look: an own envelope confirmed in turn, or a peer's with nothing of ours waiting.
+      if (mine === 0) return null;
+      if (this.pending.length === 0) {
+        if (agreedNow.applied.length === 0) return null;
+        return this.commit(this.agreed, envelope.actor, 'remote', agreedNow.applied, envelope.command, envelope.gesture, envelope.id);
+      }
+      // Nothing all peers agree on changed (a repeat of what is already so, or an envelope that was refused): neither did the screen.
+      if (agreedNow.applied.length === 0) return null;
+    }
     let doc = this.agreed;
     for (const own of this.pending) doc = applyEvents(doc, own.events, { check: true }).doc;
     if (doc === this.doc) return null;
     return this.commit(doc, envelope.actor, 'remote', agreedNow.applied, envelope.command, envelope.gesture, envelope.id, true);
+  }
+
+  /**
+   * A peer's events with who added each new object said by the backend, not by the peer: `by` on an
+   * object it adds is the actor the backend stamped the envelope with. The one exception is an object
+   * the agreed document has seen removed: putting it back (an undo of a delete) keeps the name it had,
+   * whoever puts it back. So nobody can add something signed as someone else, and an undo still
+   * restores the author.
+   */
+  private signed(envelope: RemoteEnvelope, before: CanvasDocument): CanvasEvent[] {
+    const by: Actor = { kind: envelope.actor.kind, id: envelope.actor.id };
+    const added = new Map<string, Actor | undefined>();
+    return envelope.events.map((event) => {
+      if (event.type === 'object-removed') {
+        const gone = added.has(event.id) ? { by: added.get(event.id) } : before.objects[event.id];
+        if (gone) {
+          this.removedBy.delete(event.id);
+          this.removedBy.set(event.id, gone.by);
+          if (this.removedBy.size > REMOVED_LIMIT) this.removedBy.delete(this.removedBy.keys().next().value as string);
+        }
+        return event;
+      }
+      if (event.type !== 'object-added') return event;
+      const author = this.removedBy.has(event.object.id) ? this.removedBy.get(event.object.id) : by;
+      added.set(event.object.id, author);
+      if (author ? event.object.by && sameActor(event.object.by, author) : !event.object.by) return event;
+      const { by: _claimed, ...rest } = event.object;
+      return { type: 'object-added', object: (author ? { ...rest, by: author } : rest) as typeof event.object };
+    });
   }
 
   private remembered(id: string): void {

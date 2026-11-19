@@ -398,6 +398,8 @@ describe('drawing order', () => {
       // Everything that was above the pair is still above the new key.
       expect(key < keys[at + 1]).toBe(true);
     }
+    // That key is one more digit, and a board can already hold it: halving the room above a key gets there.
+    expect(keyBetween('AAAAAB', 'AAAAAC')).toBe(keyBetween('AAAAAB', 'AAAAAB'));
     // Neighbours handed over the wrong way round are treated the same: just above the higher.
     const swapped = keyBetween('V1', 'V');
     expect(swapped > 'V1' && swapped < 'V2').toBe(true);
@@ -425,6 +427,37 @@ describe('drawing order', () => {
       const next: string = keyBetween(null, bottom);
       expect(next < bottom!).toBe(true);
       bottom = next;
+    }
+  });
+});
+
+describe('a key between two neighbours with the same key', () => {
+  test('given the next key above them, it is a key the board does not hold, above the pair and below everything else', () => {
+    let seed = 0x9e3779b1;
+    const random = (n: number) => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0), seed % n);
+    for (let round = 0; round < 60; round++) {
+      // A board built the hard way: mostly by squeezing between close neighbours, so keys grow long and
+      // sit as near each other as keys can; and now and then by twinning a key, as two people at once do.
+      const keys: string[] = round % 3 === 0 ? ['AAAAAB', 'AAAAAC'] : [keyBetween(null, null)];
+      for (let i = 0; i < 300; i++) {
+        const at = random(keys.length);
+        const twin = keys[at];
+        // The lowest key above the pair that is not the pair's own.
+        let up = at + 1;
+        while (up < keys.length && keys[up] === twin) up++;
+        const next = up < keys.length ? keys[up] : null;
+        if (random(4) === 0) {
+          keys.splice(at, 0, twin);
+          continue;
+        }
+        const key = random(2) === 0 ? keyBetween(twin, twin, next) : keyBetween(twin, next);
+        if (!isOrderKey(key)) throw new Error(`${key} is not a key`);
+        if (keys.includes(key)) throw new Error(`${key} is already on the board (above ${twin}, under ${next})`);
+        if (!(key > twin)) throw new Error(`${key} is not above ${twin}`);
+        if (next !== null && !(key < next)) throw new Error(`${key} is not below ${next}`);
+        keys.splice(up, 0, key);
+        for (let j = 1; j < keys.length; j++) if (keys[j - 1] > keys[j]) throw new Error('the board is out of order');
+      }
     }
   });
 });
