@@ -20,6 +20,7 @@ import { useEffect, useRef } from 'react';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { isPersonLook } from './folding';
 import { pageInFront } from './sound';
+import { usePaneScope } from './panes/scope';
 
 /** How long the first lines must stay on screen. */
 export const SEEN_DWELL_MS = 1000;
@@ -199,10 +200,12 @@ export interface SeenOnSightOptions {
 /**
  * Watches the candidates and calls `onSeen` for each once its first lines
  * have been on screen for SEEN_DWELL_MS in a row with the window in front and
- * the thread uncovered. Any break (scrolled away, the tab hidden, the window
- * behind, a cover) restarts that message's dwell.
+ * the thread uncovered, in the active pane (panes/model.ts). Any break (scrolled
+ * away, the tab hidden, the window behind, a cover, another pane made active)
+ * restarts that message's dwell.
  */
-export function useSeenOnSight({ bodyRef, candidates, covered, pill, onSeen }: SeenOnSightOptions): void {
+export function useSeenOnSight({ bodyRef, candidates, covered: cover, pill, onSeen }: SeenOnSightOptions): void {
+  const covered = cover || !usePaneScope().active;
   const onSeenRef = useRef(onSeen);
   onSeenRef.current = onSeen;
   const state = useRef({ covered, pill });

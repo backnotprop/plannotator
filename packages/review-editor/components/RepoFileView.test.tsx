@@ -100,6 +100,18 @@ describe.skipIf(!hasDom)('RepoFileView: a file the review does not change', () =
   });
 });
 
+describe.skipIf(!hasDom)('RepoFileView: moving to the next file', () => {
+  test('keeps the previous file on screen, dimmed, until the next one arrives: no empty flash', async () => {
+    answer({ content: 'export const first = 1;\n', revision: { kind: 'worktree', label: 'working tree' } });
+    const el = await mount(view({ filePath: 'a.ts' }));
+    expect(el.querySelector('[data-stale-file]')).toBeNull();
+    globalThis.fetch = mock(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    await act(async () => root?.render(view({ filePath: 'b.ts' })));
+    expect(el.querySelector('[data-stale-file]')?.getAttribute('data-stale-file')).toBe('a.ts');
+    expect(el.textContent).not.toContain('Reading the file');
+  });
+});
+
 describe.skipIf(!hasDom)('FileViewSwitch', () => {
   test('Changes | Whole file, and Whole file disabled with the reason where there is none', async () => {
     const onSelect = mock((_view: string) => {});
@@ -113,5 +125,7 @@ describe.skipIf(!hasDom)('FileViewSwitch', () => {
     const disabled = el.querySelector<HTMLButtonElement>('[data-file-view="whole"]')!;
     expect(disabled.disabled).toBe(true);
     expect(disabled.title).toBe('The diff deletes this file');
+    await act(async () => root?.render(<FileViewSwitch view="changes" onSelect={onSelect} originalUnavailableReason="The diff adds this file: it has no original" />));
+    expect(el.querySelector<HTMLButtonElement>('[data-file-view="original"]')!.disabled).toBe(true);
   });
 });

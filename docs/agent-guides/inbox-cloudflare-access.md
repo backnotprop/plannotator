@@ -25,7 +25,7 @@ Opt-in reach for the Inbox and for `--cloudflare-access` sessions through the pe
 4. The `kid` is among the team's certs (`https://<team>/cdn-cgi/access/certs`: RSA, 2048-bit or more, kept 1 h; an unknown kid refetches at most once a minute; with no keys a fetch is tried at most every 5 s; no redirects, 10 s timeout). An unknown kid is `403 access_token_invalid`; no usable keys is `503 access_keys_unavailable`.
 5. The signature, `iss` (the team), `aud` (the app's tag), and `exp`, `nbf`, `iat` with 60 s skew: `403 access_token_invalid`.
 6. Not a service token (`common_name`), a non-empty `email`, on the allowlist (case-insensitive): `403 access_identity_refused`.
-7. `Sec-Fetch-Site`: the tailnet's rule on the Inbox's name; on the sessions' name, cross-site and same-site are refused except a top-level navigation to `/s/<key>/`: `403 cross_site`.
+7. `Sec-Fetch-Site`: the tailnet's rule on the Inbox's name (so an attached page's folder loads cross-site there too, `/api/html-assets/` and a linked machine's `/api/inbox/m/<machine id>/html-assets/`); on the sessions' name, cross-site and same-site are refused except a top-level navigation to `/s/<key>/`: `403 cross_site`.
 
 After the checks, `Cf-*`, `Tailscale-*`, `X-Forwarded-*`, `Plannotator-Door*` and the `CF_Authorization` cookie are dropped. The window's port refuses any request that carries `cf-access-jwt-assertion`, `cf-connecting-ip`, `cf-ray`, `cf-access-authenticated-user-email`, `cf-ipcountry` or `cf-visitor` (`403 local_only`).
 

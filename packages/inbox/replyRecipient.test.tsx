@@ -336,7 +336,7 @@ test.skipIf(!hasDom)('two sessions titled alike carry their names after it, on a
   });
 });
 
-test.skipIf(!hasDom)('rows are named as the sidebar names their agents: a session with no title of its own by the thread its agent got first; a title over that; alike names still carry their fallback names', async () => {
+test.skipIf(!hasDom)('rows are named by the thread context of the name ladder: a session\'s own name, else its agent\'s (numbered), never the thread its agent got first', async () => {
   const { setInboxAgents } = await import('./agentsList');
   const agent = (session: string, host: string, name: string) => ({ id: session, session, host, project: { id: PROJECT.id, name: PROJECT.name }, state: 'idle' as const, waiting: 0, live: true, started_at: null, last_seen_at: null, first_thread: { id: M1, name } });
   taggable.push(tagged('ses_claude2', 'claude-code'));
@@ -346,7 +346,7 @@ test.skipIf(!hasDom)('rows are named as the sidebar names their agents: a sessio
       const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 43), agentMessage(M3, PI, 45)));
       await write(el, 'Use the old totals.');
       await openList(el);
-      expect(named(el).map((r) => r[0])).toEqual(['Invoice retries (Claude Code)', 'Invoice retries (Claude Code 2)', 'Pi tidy']);
+      expect(named(el).map((r) => r[0])).toEqual(['Claude Code', 'Claude Code 2', 'Pi tidy']);
     });
   } finally {
     act(() => setInboxAgents(null));
@@ -646,6 +646,31 @@ test.skipIf(!hasDom)('a computer: the open list marks its .pn-inbox (data-ib-rpi
   await only(el, 'ses_claude');
   expect(el.querySelector('[data-recipient-list]')).toBeNull();
   expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
+});
+
+// #3427: both pickers render outside the composer's own boxes, so no scrolling foot or stacking context can cut or
+// cover them: the `@` picker out of the reply box's scroll region, the "to" list out of the foot.
+test.skipIf(!hasDom)('the tag picker and the recipient list render outside the reply box scroll region and foot', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const text = await write(el, 'Queue it. ');
+  await typeBox(text, `${text.value}@`);
+  for (let i = 0; i < 40 && !document.querySelector('[data-tag-picker]'); i++) await settle(25);
+  const picker = document.querySelector('[data-tag-picker]') as HTMLElement;
+  expect(picker).not.toBeNull();
+  expect(picker.closest('.ib-rscroll')).toBeNull();
+  expect(picker.closest('.ib-pfoot')).toBeNull();
+  await key(text, 'Escape');
+  await settle();
+  expect(document.querySelector('[data-tag-picker]')).toBeNull();
+  await openList(el);
+  const list = el.querySelector('[data-recipient-list]') as HTMLElement;
+  expect(list).not.toBeNull();
+  expect(list.closest('.ib-rscroll')).toBeNull();
+  expect(list.closest('.ib-pfoot')).toBeNull();
+  expect(rows(el)).toEqual([
+    ['Claude Code', null],
+    ['Pi', null],
+  ]);
 });
 
 /** A phone's sheet (approval "inbox-phone-composer-picker"): each row's session, title, quiet line, and whether it gets the reply. */

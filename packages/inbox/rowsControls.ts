@@ -101,7 +101,21 @@ export const ROWS_MAIN_CONTROLS: readonly RowsControl[] = [
     get: (look) => (look.statusMark ? 'mark' : 'count'),
     set: (value) => ({ statusMark: value === 'mark' }),
   }),
-  showSwitch('agents', 'hideAgents', 'Agent icons'),
+  // Agent icons (approval "inbox-generated-agent-icons"): once a switch (show or hide), now one three-way choice.
+  // "From the project name" also changes the Agents list and threads; a face picked for one agent stays.
+  seg({
+    id: 'agents',
+    label: 'Agent icons',
+    keys: ['hideAgents', 'agentProjectIcons'],
+    desc: (look) => (look.agentProjectIcons && !look.hideAgents ? 'Also the Agents list and threads. A face picked for one agent stays.' : undefined),
+    choices: [
+      { id: 'own', label: "Each agent's own" },
+      { id: 'project', label: 'From the project name' },
+      { id: 'hidden', label: 'Hidden' },
+    ],
+    get: (look) => (look.hideAgents ? 'hidden' : look.agentProjectIcons ? 'project' : 'own'),
+    set: (value) => ({ hideAgents: value === 'hidden', agentProjectIcons: value === 'project' }),
+  }),
   showSwitch('project', 'hideProject', 'Project name'),
   showSwitch('pulls', 'hidePulls', 'Pull requests', 'Their state at the end of the row'),
 ];

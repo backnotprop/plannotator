@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
@@ -64,6 +64,8 @@ export interface CardPanelProps {
   onAsk: () => Promise<string | null>;
   onNotes: (notes: string | null) => Promise<boolean>;
   onLink: (ref: string) => Promise<string | null>;
+  /** Remove a link (by its URL) from the card: an error to say, or null. Absent: the links have no Remove. */
+  onUnlink?: (url: string) => Promise<string | null>;
   onOpenThread: (threadId: string) => void;
   /** Create thread (a card with no thread): compose to the card's agent (or a live session in its project); the Send links the thread. */
   onCreateThread: (opener: HTMLElement) => void;
@@ -122,6 +124,14 @@ export function CardPanel(props: CardPanelProps) {
   const foot = cardFoot(card);
   const sent = sentTo(card);
   const refs = inboxCardRefsOf(card);
+  // A link removed: its row goes, and focus goes to the field that adds one (never lost with the row).
+  const linkField = useRef<HTMLInputElement>(null);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const unlink = async (url: string) => {
+    const failed = await props.onUnlink!(url);
+    setUnlinkError(failed);
+    if (!failed) linkField.current?.focus();
+  };
   const agent = card.agent?.kind === 'agent' ? card.agent : null;
   const liveInitiatives = (props.initiatives ?? []).filter((i) => i.deleted_at === null);
   const notSent = card.column === 'backlog' && !agent && !card.sent;
@@ -274,11 +284,23 @@ export function CardPanel(props: CardPanelProps) {
           {refs.length > 0 && (
             <ul className="ib-crdp-refs">
               {refs.map((ref) => (
-                <RefRow key={ref.url} cardId={card.id} refItem={ref} resolved={props.refs?.find((r) => r.ref.url === ref.url)?.result ?? null} loading={props.refs === null} />
+                <RefRow
+                  key={ref.url}
+                  cardId={card.id}
+                  refItem={ref}
+                  resolved={props.refs?.find((r) => r.ref.url === ref.url)?.result ?? null}
+                  loading={props.refs === null}
+                  onRemove={props.onUnlink ? () => void unlink(ref.url) : undefined}
+                />
               ))}
             </ul>
           )}
-          <LinkField onLink={props.onLink} phone={props.phone} />
+          {unlinkError && (
+            <p className="ib-error" role="alert">
+              {unlinkError}
+            </p>
+          )}
+          <LinkField ref={linkField} onLink={props.onLink} phone={props.phone} />
         </section>
         <section className="ib-crdp-sec" aria-label="History">
           <h3 className="ib-crdp-hhead">
@@ -640,7 +662,7 @@ function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row
 const LINK_ONLY_KIND: Record<string, string> = { jira: 'Jira issue', youtrack: 'YouTrack issue', web: 'Link' };
 
 /** One link: its number and, once read, its title and live state (open, draft, checks, merged or closed, with dates). */
-function RefRow({ cardId, refItem, resolved, loading }: { cardId: string; refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
+function RefRow({ cardId, refItem, resolved, loading, onRemove }: { cardId: string; refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean; onRemove?: () => void }) {
   const data = resolved?.ok ? resolved.data : null;
   const state = data ? refState(data) : null;
   // A link-only source (a Jira or YouTrack issue, any web link): the key or label links, beside the source's mark; no state is read.
@@ -681,6 +703,13 @@ function RefRow({ cardId, refItem, resolved, loading }: { cardId: string; refIte
           {state.label}
           {data?.pull?.checks && state.tone === 'open' && <> · {checksText(data.pull.checks, data.platform)}</>}
         </span>
+      )}
+      {onRemove && (
+        <Tip content="Remove link">
+          <button type="button" className="ib-crdp-rx" onClick={onRemove} aria-label={`Remove the link ${web ? number : refItem.ref}`} data-card-unlink={refItem.url}>
+            <Icon name="x" size={12} />
+          </button>
+        </Tip>
       )}
     </li>
   );
@@ -829,7 +858,7 @@ function CardText({ text, repo }: { text: string; repo: InboxProjectRepo | null 
 }
 
 /** Link an issue or PR from the opened card. */
-function LinkField({ onLink, phone }: { onLink: (ref: string) => Promise<string | null>; phone: boolean }) {
+function LinkField({ ref, onLink, phone }: { ref?: Ref<HTMLInputElement>; onLink: (ref: string) => Promise<string | null>; phone: boolean }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   return (
@@ -847,6 +876,7 @@ function LinkField({ onLink, phone }: { onLink: (ref: string) => Promise<string 
         Add a link
       </label>
       <input
+        ref={ref}
         id="ib-card-link"
         type="text"
         // Any web link, or GitHub's owner/repo#123; a phone's narrow field keeps the short form whole.

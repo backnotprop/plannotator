@@ -21,4 +21,12 @@ rm -rf "$stage/hooks/mod/testing"
 find "$stage/hooks/mod" -name '*.test.ts' -delete
 cp -R "$plugin/tests" "$stage/tests"
 
+# The version under test, for the tests that hold an engine to what its version
+# offers (tests/engine-under-test.ts): a test's own `$` cannot tell.
+version=$(claude --version 2>/dev/null | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1)
+echo "Claude Code under test: ${version:-unknown}"
+if [ -n "$version" ]; then
+  printf "export const CLAUDE_CODE_VERSION: string | undefined = '%s'\n" "$version" > "$stage/tests/engine-under-test.ts"
+fi
+
 claude plugin test "$stage"

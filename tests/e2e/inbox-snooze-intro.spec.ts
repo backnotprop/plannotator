@@ -29,6 +29,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { join, resolve } from 'node:path';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'snooze-intro');
@@ -119,7 +120,7 @@ async function world(): Promise<World> {
 }
 
 function saved(w: World): { firstUseAt?: string; snoozedAt?: string; shownAt?: string } | undefined {
-  return JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')).inboxSnoozeIntro;
+  return savedConfig(w.dataDir).inboxSnoozeIntro;
 }
 
 async function context(browser: Browser, options: { phone?: boolean; dark?: boolean } = {}): Promise<BrowserContext> {

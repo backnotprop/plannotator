@@ -86,6 +86,15 @@ test("an agent's name, one rung at a time: its own name, its host's title, the t
   expect(agentRowName(agent('ses_a', { project: null, host: null }))).toBe('An agent');
 });
 
+test("inside a thread an agent is named by its own name, else its agent's name: never the thread it got first, nor its project", () => {
+  const first = { id: 't_first', name: 'Retry policy for the nightly ledger sync' };
+  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect', title: 'Login redirect loop', first_thread: first }), 'thread')).toBe('Fix login redirect');
+  expect(agentRowName(agent('ses_a', { title: 'Login redirect loop', first_thread: first }), 'thread')).toBe('Login redirect loop');
+  expect(agentRowName(agent('ses_a', { host: 'pi', first_thread: first }), 'thread')).toBe('Pi');
+  expect(agentRowName(agent('ses_a', { host: 'pi', first_thread: first }), 'list')).toBe('Retry policy for the nightly ledger sync');
+  expect(agentRowName(agent('ses_a', { host: null }), 'thread')).toBe('An agent');
+});
+
 test("an unnamed agent's row keeps its first thread's name while another thread waits on the person or gets newer activity", () => {
   const rows = [
     row('t_first', 'ses_a', { subject: 'Invoice retries', last_at: '2026-11-09T08:00:00.000Z' }),
@@ -202,4 +211,14 @@ test("a launched agent's filter has its launch's thread before it writes; an age
   // A link from before: the agent ended and is not listed.
   const ended = agentListFilter('ses_x', [group([])], flat, rows);
   expect(ids(filterAgentRows(listOf(rows), ended, null))).toEqual(['t_other']);
+});
+
+// The owner's truth rules (2026-11-18), with "Agent status" off as with it on (the card reads no setting): a resting
+// agent of a host that reports turns still says "Idle" in words (no idle mark is ever drawn), and one whose host
+// reports nothing says so, never "Idle".
+test('the hover card: "Idle" in words for a host that reports turns; "Doesn\'t say when it\'s working" for one that does not', () => {
+  const now = new Date('2026-11-18T12:00:00.000Z');
+  const resting = agentFacts({ agent: agent('ses_cc', { state: 'idle' }), machine: null, name: 'Claude Code', thread: null }, null, now);
+  const quiet = agentFacts({ agent: agent('ses_codex', { state: 'idle', host: 'codex', turns_unknown: true }), machine: null, name: 'Codex', thread: null }, null, now);
+  expect([resting.state, quiet.state]).toEqual(['Idle', "Doesn't say when it's working"]);
 });

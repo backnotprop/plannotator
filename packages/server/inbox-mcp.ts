@@ -24,13 +24,15 @@ import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-che
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
+import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
+import { readInboxPictureItPage } from "@plannotator/shared/inbox/picture-it-page";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -56,6 +58,8 @@ import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } fr
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
+import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type BranchSendPlan, type InboxBranchMcpContext } from "./inbox-mcp-branch";
+import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
@@ -80,27 +84,21 @@ export function inboxServedTools(switches: { board: boolean; steps: boolean; sch
 }
 
 
-/**
- * Under Claude Code's 2,048-character cap on server instructions. Room for
- * INBOX_THREAD_RULE (in INBOX_AGENT_RULES) came from the attachments line's
- * examples, which the field's own description gives. Room for the pictures
- * clause of INBOX_USE_RULE and the attachments line's "pictures go in the
- * body" (2026-11-02) came from the first line's "without blocking your
- * session" and the result line's "with your work".
- */
-export const INBOX_MCP_INSTRUCTIONS = [
-  "Plannotator Inbox: a local window where the person reads what you send and answers later; nothing blocks.",
-  "",
-  INBOX_AGENT_RULES,
-  "",
-  "- send_message posts markdown. With no reply_to or thread, a message starts a new thread; to add to a thread, reply_to its latest message (an id from the Inbox, never from memory) or use the same `thread` name. Question syntax: send_message's description.",
-  "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
-  "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on and read the thread later.",
-  "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages by words. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
-  "- A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
-  "",
-  "A reply is the person's own: their words, then \"Answers to your questions\"; no tool answers or approves for them.",
-].join("\n");
+export {
+  INBOX_MCP_INSTRUCTIONS,
+  INBOX_MCP_INSTRUCTIONS_MAX_CHARS,
+  INBOX_MCP_RULES_ROOMS,
+  INBOX_MCP_TIERS,
+  inboxMcpInitializeClient,
+  inboxMcpInstructions,
+  inboxMcpSent,
+  inboxMcpTierOf,
+  resolveInboxMcpReminder,
+  type InboxMcpClient,
+  type InboxMcpReminder,
+  type InboxMcpSent,
+  type InboxMcpTier,
+} from "./inbox-mcp-instructions";
 
 /**
  * Claude Code passes an MCP description to the model up to its first 2,048
@@ -214,6 +212,7 @@ export const SEND_BODY_DESCRIPTION = [
   "",
   INBOX_SHOWING_RULE,
   INBOX_PICTURES_RULE,
+  INBOX_CHANGE_RULE,
   "",
   "Optional lines after the question, for a decision that needs them. Most questions need none of these:",
   "- `Stakes: <one sentence>`: what the choice affects, in product terms. Give one whenever you write `Stopped:` or `Holds up:`.",
@@ -261,7 +260,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -362,6 +361,21 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * Absent: off.
    */
   codeReviewOn?: () => boolean;
+  /**
+   * The person's shared Inbox rules and reminder (config.json
+   * `prompts.inbox.rules` / `prompts.inbox.reminder`, read on every
+   * connection, so a change applies at the next session). Null when neither
+   * is configured: the built-in instructions stand unchanged. Absent: the
+   * built-in instructions, as before.
+   */
+  inboxReminder?: () => InboxMcpReminder | null;
+  /**
+   * The connecting client's `initialize` `clientInfo` (name, version), for an
+   * initialize request: the room the person's text gets follows what that
+   * client keeps of the instructions (inboxMcpTierOf). Absent: the tightest
+   * room, Claude Code's before 2.1.296.
+   */
+  mcpClient?: InboxMcpClient;
   /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
   walkthroughThread?: (threadId: string) => boolean;
   /**
@@ -870,6 +884,7 @@ export async function sendAgentMessage(
   }
   // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
   const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
+  const pictureIt = attachments && attachments.length > 0 ? await readInboxPictureItPage(store.dir, attachments) : null;
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
   // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
@@ -913,6 +928,7 @@ export async function sendAgentMessage(
       ...(attachmentQuestions.length > 0 ? { attachment_questions: attachmentQuestions } : {}),
       inline_images: captured?.images,
       ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
+      ...(pictureIt ? { picture_it: pictureIt } : {}),
       guide: guide ?? null,
       base_path: basePath,
       from_project: fromProject,
@@ -1183,7 +1199,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const clock = () => context.now?.() ?? Date.now();
   const server = new McpServer(
     { name: "plannotator-inbox", version: "1.0.0" },
-    { instructions: INBOX_MCP_INSTRUCTIONS, capabilities: { tools: {} } },
+    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient)), capabilities: { tools: {} } },
   );
   // Every tool's result carries a Tidy waiting on an agent no connection wakes (MCP only), once, at its end.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (input: never, ctx: unknown) => Promise<ToolResult>) => unknown;
@@ -1213,6 +1229,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           priority: PRIORITY_FIELD.optional(),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
+          // Branch reviews (inbox-mcp-branch.ts): the agent reports its branch ready for review, only while it is on.
+          ...(context.branches?.on() ? { branch: BRANCH_FIELD.optional() } : {}),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -1227,11 +1245,39 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         }
         // PRs that do not read are refused before anything is sent, so a message never lands without them.
         let pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
-        const project = await sendProject(context, input);
+        const branchInput = (input as { branch?: unknown }).branch;
+        const branchField = branchInput === undefined ? null : checkBranchSend(context, branchInput);
+        let project = await sendProject(context, input);
+        // A branch report: its own project and thread, and a head already reported sends nothing.
+        let branchPlan: BranchSendPlan | null = null;
+        if (branchField) {
+          // The thread the agent's own reply_to or thread name points at: a first report never lands in another report's.
+          const agentThread = input.reply_to ? (context.store.message(ownMessageId(context.store, input.reply_to))?.thread_id ?? null) : input.thread?.trim() ? context.store.threadRoutedBy(project.id, input.thread) : null;
+          branchPlan = await planBranchSend(context, project, branchField, callerWorkingFolder(ctx), agentThread);
+          if (branchPlan.step === "same") {
+            const kept = branchPlan.existing!;
+            return ok(inboxBranchSameLine(kept.branch, kept.head, kept.thread_id), { thread_id: kept.thread_id, message_id: kept.message_id, branch: kept.branch, head: kept.head, reported: false });
+          }
+          project = branchPlan.project;
+        }
         if (pullRefs.length > 0) pullRefs = await checkProjectPullRefs(context, input.pulls, "pulls", project.id);
         const wakes = await senderWakes(context, ctx, input);
-        const { steps: _steps, pulls: _pulls, ...message } = input as typeof input & { steps?: unknown };
-        const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        const { steps: _steps, pulls: _pulls, branch: _branch, ...message } = input as typeof input & { steps?: unknown; branch?: unknown };
+        // A report goes in its branch's thread, or (detached) starts its own: the agent's reply_to and thread then go.
+        const placed = branchPlan && (branchPlan.replyTo || branchPlan.detach) ? { reply_to: branchPlan.replyTo ?? undefined, thread: undefined } : {};
+        // A report's own new thread with no subject (a detached reply, say) is titled with its branch.
+        const startsThread = !!branchPlan && !branchPlan.replyTo && (branchPlan.detach || (!input.reply_to && !input.thread?.trim()));
+        const titled = startsThread && !input.subject?.trim() ? { subject: branchPlan!.field.name } : {};
+        const sent = await sendAgentMessage(context, project, { ...message, ...placed, ...titled, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        // The report is kept once it is in its thread (a replay keeps the first one's record).
+        let branchLine = "";
+        if (branchPlan && context.branches && !sent.replayed) {
+          const at = String(context.store.message(String(sent.structured.message_id))?.created_at ?? new Date().toISOString());
+          const agent = { host: input.agent_host?.trim() || null, session: input.agent_session?.trim() || null, name: input.agent_name?.trim() || null };
+          const report = branchReportOf(branchPlan, { thread_id: String(sent.structured.thread_id), message_id: String(sent.structured.message_id), at }, agent, context.branches.canonicalId(project.id));
+          context.branches.recorded(report, branchPlan.reachable);
+          branchLine = inboxBranchReportedLine(report.branch, report.head, branchPlan.step === "update");
+        }
         // A replay (the same idempotency key) answers the first send and writes nothing: a list the session sent
         // since (the steps action) is never put back to this older one.
         const stepsLine =
@@ -1322,7 +1368,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }, 0);
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),

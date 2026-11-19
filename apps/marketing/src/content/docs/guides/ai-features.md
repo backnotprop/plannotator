@@ -36,7 +36,7 @@ You pick a provider as before (see below) when:
 - the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`)
 - you run the `plannotator` CLI yourself, outside an agent session
 
-Review Agents, Code Tour and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
+Review Agents and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
 
 ## Supported providers
 
@@ -44,13 +44,13 @@ Review Agents, Code Tour and Guided Review are separate from Ask AI. They always
 
 Requires the `claude` CLI installed and authenticated. Uses Claude Code's full system prompt, so the AI has the same capabilities as a Claude Code session — file reading, search, web access — plus the diff context.
 
-**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
+**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent and Guided Review pickers show the same list.
 
 ### Codex (via Codex SDK)
 
 Requires the `codex` CLI installed and authenticated. The AI operates in a sandboxed read-only mode with the diff context injected as a system prompt prefix.
 
-**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
+**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent and Guided Review pickers show the same list.
 
 ### Pi (via RPC subprocess)
 

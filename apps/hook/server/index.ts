@@ -83,6 +83,9 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
+// First import: loopback requests ignore a proxy from here on (loopback-no-proxy.ts).
+import "./loopback-no-proxy";
+import { postReviewLiveDecision, reviewLiveDecisionWords, reviewLiveSessionOf, reviewLiveTargetOf, reviewLiveTargetOfOpenCode } from "@plannotator/shared/review-live";
 import { childEnv, GIT_REPO_ENV, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -155,7 +158,23 @@ import {
 } from "./host-result";
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
+import { exitWhenParentGone } from "./orphan-plan-review";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
+import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
+import { isInboxSessionId } from "@plannotator/core/inbox-types";
+import { plansOn } from "@plannotator/shared/plans/switch";
+
+/**
+ * The agent session a plan review is for, recorded with its history version (the Spaces home's "<agent> is working"),
+ * only while Plans is on (off, plan review writes nothing new): the session this process runs in (its session tag or
+ * host marker), else Claude Code's own `session_id` from the hook's event; null when neither is known (never guessed).
+ */
+function planHistoryAgent(claudeSession?: unknown): { host: string; session: string; name: string | null } | null {
+  if (!plansOn()) return null;
+  const own = inboxHostSessionFromEnv(process.env);
+  if (own) return own;
+  return isInboxSessionId(claudeSession) ? { host: "claude-code", session: claudeSession, name: INBOX_SESSION_HOST_NAMES["claude-code"] ?? null } : null;
+}
 import { LIVE_APP_REMOTE_MESSAGE, LIVE_APP_REQUIRES_URL_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
 // @plannotator/server never imports @plannotator/ui (mirrors the existing
@@ -242,7 +261,8 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
-import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
+import { ensureInboxRunning, inboxRemoteOpenHint, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
+import { runPlansCommand } from "./plans-command";
 import { runCardCommand } from "./card-command";
 import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
 // @ts-expect-error a text import of the optional helper file
@@ -253,7 +273,9 @@ import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
-import { routineCallArgs, runInboxCallCommand } from "./inbox-call-command";
+import { inboxHelpTopic } from "./inbox-help-before-after";
+import { runInboxCallCommand } from "./inbox-call-command";
+import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
@@ -311,6 +333,7 @@ const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unk
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
+import { loadEmbeddedSemDiff } from "./sem-diff";
 
 // The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash
 // call of a Claude session that loads it. Only an Agent SDK session can be a
@@ -432,6 +455,22 @@ if (isReviewDrawCommand(rawArgs, () => {
     );
   }
 }
+// `plannotator plans …`: Plans' switch and list (plans-command.ts; unreleased, HIDDEN_SUBCOMMANDS). Bare `plans`
+// turns Plans on and opens the Inbox on its Plans page; `plans off` turns it off; anything else runs only while it
+// is on (off, one line naming `plannotator plans`, exit 1, nothing started). Before the strict-annotate parse.
+{
+  const args = rawArgs;
+  if (args[0] === "plans") {
+    process.exit(
+      await runPlansCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        ensureInbox: () => ensureInboxRunning(getPlannotatorDataDir()),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        remoteHint: inboxRemoteOpenHint,
+      }),
+    );
+  }
+}
 // `plannotator system …`: System's drawing of a project (system-command.ts;
 // unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
 // job that keeps it current. Before the strict-annotate parse: it takes its own
@@ -474,22 +513,20 @@ if (isReviewDrawCommand(rawArgs, () => {
     process.exit(await runInboxAntigravityCommand(args.slice(2), { env: process.env, dataDir: getPlannotatorDataDir() }));
   }
 }
-// `plannotator routine <op> ['<json>']`: sugar over `inbox call routine` (inbox-call-command.ts).
-if (rawArgs[0] === "routine") {
-  const routineArgs = routineCallArgs(rawArgs.slice(1));
-  if (!Array.isArray(routineArgs)) {
-    process.stderr.write(`${routineArgs.code}: ${routineArgs.error}\n`);
-    process.exit(2);
+// `plannotator routine <command> [options]`: sugar over `inbox call routine` (routine-command.ts). Its --help needs no Inbox.
+{
+  const args = rawArgs;
+  if (args[0] === "routine") {
+    const routineDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runRoutineCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(routineDataDir),
+      }),
+    );
   }
-  const routineDataDir = getPlannotatorDataDir();
-  process.exit(
-    await runInboxCallCommand(routineArgs, {
-      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-      env: process.env,
-      askAiChild: isAskAiChild(process.env),
-      ensureRunning: () => ensureInboxRunning(routineDataDir),
-    }),
-  );
 }
 // `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
 {
@@ -923,11 +960,14 @@ if (isVersionInvocation(args)) {
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
 // Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
 const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned routines on (config.json `inboxScheduledThreads`; never on Windows): only then does either help name them. */
+// Read quietly: a broken config.json is routines off, and the help's other read already warns once.
+const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ quiet: true }).inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
-  console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
+  console.log(formatTopLevelHelp({ board: boardOnForHelp(), scheduled: scheduledOnForHelp() }));
   process.exit(0);
 }
 
@@ -935,12 +975,18 @@ if (isTopLevelHelpInvocation(args)) {
 // otherwise `plannotator review --help` (commonly run by agents probing the
 // CLI) falls through to local review mode and launches the browser UI,
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
+// `inbox --help before-after` (inbox-help-before-after.ts): one topic of the guide, printed alone.
+const inboxTopic = args[0] === "inbox" ? inboxHelpTopic(args.slice(1)) : null;
+if (inboxTopic) {
+  await writeWholeToStdout(`${inboxTopic}\n`);
+  process.exit(0);
+}
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: process.platform !== "win32" && loadConfig().inboxScheduledThreads === true, codeReview: codeReviewOnForHelp() })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
       : formatSubcommandHelp(helpSubcommand);
   await writeWholeToStdout(`${help}\n`);
   process.exit(0);
@@ -1783,7 +1829,10 @@ if (args[0] === "sessions") {
   setServerReadyTarget(reviewTarget);
 
   // Start review server (even if empty - user can switch diff types in local mode)
+  const liveSession = reviewLiveSessionOf(process.env);
   const server = await startReviewServer({
+    liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
+    liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,
     gitRef,
     error: diffError,
@@ -1814,6 +1863,7 @@ if (args[0] === "sessions") {
     approvalNotesSupported: supportsReviewApprovalNotes(detectedOrigin),
     htmlContent: reviewHtmlContent(),
     diagramEngine: loadEmbeddedDiagramEngine,
+    semDiff: loadEmbeddedSemDiff,
     tailnetPublished: tailscaleFlag || cloudflareAccessFlag,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
@@ -1852,6 +1902,11 @@ if (args[0] === "sessions") {
 
   // Cleanup
   server.stop();
+
+  if (liveSession) {
+    const words = reviewLiveDecisionWords(result);
+    if (words) await postReviewLiveDecision(getPlannotatorDataDir(), liveSession, words);
+  }
 
   // Output feedback (captured by slash command)
   result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
@@ -2563,6 +2618,7 @@ if (args[0] === "sessions") {
   const bridgePasteApiUrl = getBridgePasteApiUrl(input);
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(),
     origin: "opencode",
     // The plugin's submit_plan executor turns an approval's feedback into the
     // approved-with-notes prompt (every plugin version that calls this).
@@ -2642,6 +2698,7 @@ if (args[0] === "sessions") {
   const planProject = (await detectProjectName()) ?? "_unknown";
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(),
     origin: "dsh",
     // The plugin steers the approved-with-notes message dsh-plan composes
     // into the agent after approving.
@@ -2696,7 +2753,7 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown; inboxSession?: unknown }>(
     "opencode-review",
     inputJson,
   );
@@ -2856,6 +2913,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    liveReviewAgent: reviewLiveTargetOfOpenCode(input.inboxSession),
     project: reviewProject,
     includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
@@ -2885,6 +2943,7 @@ if (args[0] === "sessions") {
       supportsReviewApprovalNotes("opencode") && input.supportsApprovalNotes === true,
     htmlContent: reviewHtmlContent(),
     diagramEngine: loadEmbeddedDiagramEngine,
+    semDiff: loadEmbeddedSemDiff,
     opencodeClient: makeOpenCodeBridgeClient(input.agents),
     onReady: (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);
@@ -3056,6 +3115,7 @@ if (args[0] === "sessions") {
 
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(),
     origin: "copilot-cli",
     sharingEnabled,
     shareBaseUrl,
@@ -3245,6 +3305,7 @@ if (args[0] === "sessions") {
   setServerReadyTarget(input.planFilePath);
   const server = await startPlannotatorServer({
     plan: input.plan,
+    historyAgent: planHistoryAgent(),
     origin: "claude-code",
     planFilePath: input.planFilePath,
     permissionMode: input.permissionMode,
@@ -3332,6 +3393,10 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
 
+  // The agent that ran this hook reads the decision from stdout: if it dies,
+  // stop instead of holding the port open forever (orphan-plan-review.ts).
+  exitWhenParentGone(takeHostResultPath() !== undefined);
+
   if (event.hook_event_name === "Stop") {
     const transcriptPath = typeof event.transcript_path === "string" && event.transcript_path
       ? event.transcript_path
@@ -3380,6 +3445,7 @@ if (args[0] === "sessions") {
     const planProject = (await detectProjectName()) ?? "_unknown";
     const server = await startPlannotatorServer({
       plan: latestPlan.text,
+      historyAgent: planHistoryAgent(),
       origin: "codex",
       sharingEnabled,
       shareBaseUrl,
@@ -3450,6 +3516,7 @@ if (args[0] === "sessions") {
     const vibePlanProject = (await detectProjectName()) ?? "_unknown";
     const vibeServer = await startPlannotatorServer({
       plan: vibePlanContent,
+      historyAgent: planHistoryAgent(),
       origin: "mistral-vibe",
       sharingEnabled,
       shareBaseUrl,
@@ -3554,6 +3621,7 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(!isQwen && !isGemini && detectedOrigin === "claude-code" ? event.session_id : undefined),
     origin: isQwen ? "qwen-code" : isGemini ? "gemini-cli" : detectedOrigin,
     // No approvalNotesSupported: Claude Code's PermissionRequest allow carries
     // no message, Gemini CLI shows a systemMessage to the person, not the

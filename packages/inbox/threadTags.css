@@ -16,6 +16,8 @@
 .ib-pm .ib-tagm-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-pmi .ib-tagm-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-zsub .ib-tagm-n { margin-left: 0; padding: 0 6px 0 0; }
+/* The Color item's dot: the tag's colour where the menu's icons sit, a hairline so a pale one shows on the menu. */
+.ib-pmi .ib-tagm-dot { flex: none; width: 13px; height: 13px; margin: 0 1px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 18%, transparent); }
 .ib-pmi .ib-tagm-slot { flex: none; width: 15px; margin-left: auto; }
 .ib-pmi .ib-tagm-n + .ib-tagm-tick, .ib-pmi .ib-tagm-n + .ib-tagm-slot { margin-left: 8px; }
 .ib-pmi.ib-tagm-quiet { color: var(--muted-foreground); }
@@ -46,42 +48,35 @@
 }
 
 /* ---------- tag colours (tagColours.ts; approval step 3, look C): the whole row tinted, the tag's name on it. ---------- */
-/* The tint over the list's ground, plain, hover, selected, selected under the pointer: 14 / 18 / 22 / 25% of the
-   colour in dark, 10 / 15 / 20 / 25% in light. Past 25% in dark a row's quieter text (the muted grey) falls under
-   4.5:1 on the default theme, for some preset or own colour. A preset is a theme token; an own colour brings its two
-   theme colours on the element (`--ib-tint-l`, `-d`). */
-.pn-inbox, .ib-lightscope { --ib-tint-a: 14%; --ib-tint-h: 18%; --ib-tint-s: 22%; --ib-tint-sh: 25%; }
-:root.light .pn-inbox, .ib-lightscope.light { --ib-tint-a: 10%; --ib-tint-h: 15%; --ib-tint-s: 20%; --ib-tint-sh: 25%; }
-.pn-inbox [data-tint="accent"] { --ib-tint: var(--primary); }
-.pn-inbox [data-tint="green"] { --ib-tint: var(--success); }
-.pn-inbox [data-tint="amber"] { --ib-tint: var(--warning); }
-.pn-inbox [data-tint="red"] { --ib-tint: var(--destructive); }
-.pn-inbox [data-tint="grey"] { --ib-tint: var(--muted-foreground); }
-.pn-inbox [data-tint="custom"] { --ib-tint: var(--ib-tint-d); }
-:root.light .pn-inbox [data-tint="custom"] { --ib-tint: var(--ib-tint-l); }
+/* The row follows the pick (approval "inbox-tag-colors-picker"): `data-tint` carries the stored colour, and
+   tagTintSheet.ts writes that colour's four fills for the theme on screen: `--ib-tint-0` at rest, `-1` under the
+   pointer or with its menu open, `-2` selected, `-3` both. Each is held so the row's text is never harder to read than
+   on the theme's plain row in that state, and keeps 4.5:1 wherever the plain row does (tagTintTheme.test.ts walks
+   every theme). */
+.pn-inbox [data-tint] { --ib-tint-fill: var(--ib-tint-0); }
 
-/* Wide and three-line rows: the row's own pill, so hover, the open menu and the selection are stronger steps of the
-   same colour. !important because the pill's hover and selected fills are !important (inbox.css), and a tinted
-   row's steps must replace them; the focus ring stays on top. */
-.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint] { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--card)); }
+/* Wide and three-line rows: the row's own pill, so hover, the open menu and the selection are steps of the same
+   colour. !important because the pill's hover and selected fills are !important (inbox.css), and a tinted row's
+   steps must replace them; the focus ring stays on top. */
+.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint] { --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint]:hover,
-.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint] { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-h), var(--card)); }
-.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-s), var(--card)); }
+.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint] { --ib-tint-fill: var(--ib-tint-1); --ib-row-fill: var(--ib-tint-fill); }
+.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-tint-fill: var(--ib-tint-2); --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel:hover,
-.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-sh), var(--card)); }
+.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-tint-fill: var(--ib-tint-3); --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint]::before { background: var(--ib-row-fill) !important; }
 /* A phone's row: the whole row, edge to edge, as its press and its open menu are. */
-.pn-inbox .ib-mrow[data-tint] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--card)) !important; }
+.pn-inbox .ib-mrow[data-tint] { background: var(--ib-tint-fill) !important; }
 .pn-inbox .ib-mrow[data-tint]:active,
-.pn-inbox .ib-mrow[data-tint][data-menu] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-h), var(--card)) !important; }
+.pn-inbox .ib-mrow[data-tint][data-menu] { --ib-tint-fill: var(--ib-tint-1); }
 /* A tinted row brought in by Show does not light up: the glow is a fill, and the tint is the row's fill. The row
    still slides into place, as every new row does. */
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint][data-lit]::before,
 .pn-inbox .ib-mrow[data-tint][data-lit] { animation: none; }
 
 /* A thread in search's results, as its row in the list: the tint over the panel, the chosen result a stronger step. */
-.pn-inbox .ib-sp-row[data-tint] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--popover)); }
-.pn-inbox .ib-sp-row[data-tint][aria-selected="true"] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-sh), var(--popover)); }
+.pn-inbox .ib-sp-row[data-tint] { background: var(--ib-tint-fill); }
+.pn-inbox .ib-sp-row[data-tint][aria-selected="true"] { --ib-tint-fill: var(--ib-tint-3); background: var(--ib-tint-fill); }
 .ib-sp-row > .ib-rtag { margin-left: auto; align-self: flex-start; margin-top: 1px; }
 .ib-sp-row > .ib-rtag + .ib-sp-time { margin-left: 0; }
 .ib-sp-row > .ib-rtag + .ib-sp-time::before { content: "·"; margin: 0 6px; color: var(--muted-foreground); }
@@ -98,23 +93,28 @@
 .pn-inbox .ib-nrow .ib-l1 > .ib-rtag + .ib-t, .pn-inbox .ib-mrow .ib-m1 > .ib-rtag + .ib-t { margin-left: 0; }
 .ib-l1 > .ib-rtag + .ib-t::before, .ib-m1 > .ib-rtag + .ib-t::before { content: "·"; margin: 0 6px; color: var(--muted-foreground); font-weight: 400; }
 
-/* The sidebar: a tag's row wears its colour, so the sidebar is the key to the list's. Open, the stronger step stands
-   in for the usual selected fill. */
-.pn-inbox .ib-tags .ib-proj[data-tint] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), transparent); }
+/* The sidebar: a tag's row wears its row's colour, so the sidebar is the key to the list's. Open, the selected step
+   stands in for the usual selected fill. */
+.pn-inbox .ib-tags .ib-proj[data-tint] { background: var(--ib-tint-fill); }
 .pn-inbox .ib-tags .ib-proj[data-tint]:not(.ib-on):hover,
-.pn-inbox .ib-tags .ib-proj[data-tint][data-menu]:not(.ib-on) { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-h), transparent); }
-.pn-inbox .ib-tags .ib-proj.ib-on[data-tint] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-s), transparent); color: var(--foreground); box-shadow: none; }
+.pn-inbox .ib-tags .ib-proj[data-tint][data-menu]:not(.ib-on) { --ib-tint-fill: var(--ib-tint-1); background: var(--ib-tint-fill); }
+.pn-inbox .ib-tags .ib-proj.ib-on[data-tint] { --ib-tint-fill: var(--ib-tint-2); background: var(--ib-tint-fill); color: var(--foreground); box-shadow: none; }
 
-/* ---------- the colour menu (components/TagColourMenu.tsx): swatches, the own colours, the hue strip, Hex. ---------- */
+/* ---------- the colour menu (components/TagColourMenu.tsx, ColorSquare.tsx): the twelve swatches, the own colours,
+   the square, the hue strip, Hex. Each swatch is the picked colour itself; the one on has the accent's ring. ---------- */
+.ib-pm [data-tag-colour-list] { width: 224px; }
 .ib-tagc-sw { display: flex; gap: 6px; padding: 6px 8px 8px; }
 .ib-tagc-sw2 { padding-top: 0; }
-.ib-pm .ib-tagc-swb { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; outline: 0; cursor: default; background: color-mix(in oklab, var(--ib-tint) 30%, var(--popover)); color: color-mix(in oklab, var(--ib-tint) 80%, var(--foreground)); }
-:root.light .pn-inbox .ib-pm .ib-tagc-swb { background: color-mix(in oklab, var(--ib-tint) 22%, var(--popover)); }
-.ib-pm .ib-tagc-swb:hover { background: color-mix(in oklab, var(--ib-tint) 32%, var(--popover)); }
-.ib-pm .ib-tagc-swb[data-highlighted], .ib-pm .ib-tagc-swb:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
-.ib-pm .ib-tagc-swb svg { width: 15px; height: 15px; stroke-width: 2; }
+.ib-pm .ib-tagc-swb { display: grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; outline: 0; cursor: default; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); }
+.ib-pm .ib-tagc-swb[data-on] { box-shadow: 0 0 0 2px var(--popover), 0 0 0 4px var(--primary); }
+.ib-pm .ib-tagc-swb[data-highlighted], .ib-pm .ib-tagc-swb:focus-visible { box-shadow: 0 0 0 2px var(--popover), 0 0 0 4px var(--ring); }
+.ib-pm .ib-tagc-swb svg { width: 15px; height: 15px; stroke-width: 2.4; }
+.ib-tagc-sqw { padding: 2px 8px 8px; }
+.ib-tagc-sq { position: relative; height: 120px; border-radius: 6px; outline: 0; touch-action: none; cursor: crosshair; }
+.ib-tagc-sq:focus-visible { box-shadow: 0 0 0 2px var(--popover), 0 0 0 4px var(--ring); }
+.ib-tagc-sqt { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgb(0 0 0 / 0.35); }
 .ib-tagc-hue { padding: 2px 8px 8px; }
-.ib-tagc-hue input { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 16px; margin: 0; border-radius: 8px; outline: 0; background: linear-gradient(90deg, oklch(0.72 0.13 0), oklch(0.72 0.13 30), oklch(0.72 0.13 60), oklch(0.72 0.13 90), oklch(0.72 0.13 120), oklch(0.72 0.13 150), oklch(0.72 0.13 180), oklch(0.72 0.13 210), oklch(0.72 0.13 240), oklch(0.72 0.13 270), oklch(0.72 0.13 300), oklch(0.72 0.13 330), oklch(0.72 0.13 360)); }
+.ib-tagc-hue input { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 16px; margin: 0; border-radius: 8px; outline: 0; touch-action: none; background: linear-gradient(90deg, #f00, #ff0 16.67%, #0f0 33.33%, #0ff 50%, #00f 66.67%, #f0f 83.33%, #f00); }
 .ib-tagc-hue input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--popover); box-shadow: 0 0 0 2px var(--foreground), 0 1px 3px color-mix(in oklch, var(--foreground) 30%, transparent); }
 .ib-tagc-hue input::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: var(--popover); box-shadow: 0 0 0 2px var(--foreground), 0 1px 3px color-mix(in oklch, var(--foreground) 30%, transparent); }
 .ib-tagc-hue input:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
@@ -123,12 +123,16 @@
 .ib-tagc-hex input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-variant-numeric: tabular-nums; }
 .ib-tagc-hex input::placeholder { color: var(--muted-foreground); opacity: 0.8; }
 .ib-tagc-hex:focus-within { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent); }
-.ib-tagc-cap { max-width: 260px; padding: 0 8px 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+.ib-tagc-cap { padding: 0 8px 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-pm-pos[data-phone] .ib-tagc-sw { gap: 10px; padding: 8px 12px 10px; }
   .ib-pm-pos[data-phone] .ib-tagc-sw2 { padding-top: 0; }
+  .ib-pm-pos[data-phone] .ib-pm [data-tag-colour-list] { width: auto; }
   .ib-pm-pos[data-phone] .ib-pm .ib-tagc-swb { width: 40px; height: 40px; }
+  .ib-pm-pos[data-phone] .ib-tagc-sqw { padding: 4px 12px 12px; }
+  .ib-pm-pos[data-phone] .ib-tagc-sq { height: 160px; }
+  .ib-pm-pos[data-phone] .ib-tagc-sqt { width: 28px; height: 28px; margin: -14px 0 0 -14px; }
   .ib-pm-pos[data-phone] .ib-tagc-hue { padding: 4px 12px 12px; }
   .ib-pm-pos[data-phone] .ib-tagc-hue input { height: 24px; border-radius: 12px; }
   .ib-pm-pos[data-phone] .ib-tagc-hue input::-webkit-slider-thumb { width: 30px; height: 30px; }

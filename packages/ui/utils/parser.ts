@@ -791,8 +791,9 @@ export interface ExportAnnotationsOptions {
   sourceConverted?: boolean;
 }
 
-/** Compute the end line of a block from its content and type. */
-const blockEndLine = (block: Block): number => {
+/** Compute the end line of a block from its content and type.
+ *  Same span exported annotations print as `(line N)` / `(lines A–B)`. */
+export const blockEndLine = (block: Block): number => {
   if (block.sourceLineCount && block.sourceLineCount > 0) {
     return block.startLine + block.sourceLineCount - 1;
   }
@@ -803,6 +804,15 @@ const blockEndLine = (block: Block): number => {
   if (block.alertKind) return block.startLine + contentLines;
   return block.startLine + contentLines - 1;
 };
+
+/** Quiet gutter label for one rendered block: `42` or `42–45`. Null when
+ *  the block has no document id (inner quote/callout pieces) or no line. */
+export function formatBlockSourceLineLabel(block: Pick<Block, 'id' | 'startLine' | 'sourceLineCount' | 'type' | 'content' | 'alertKind'>): string | null {
+  if (!block.id) return null;
+  if (typeof block.startLine !== 'number' || block.startLine < 1) return null;
+  const end = blockEndLine(block as Block);
+  return end <= block.startLine ? String(block.startLine) : `${block.startLine}–${end}`;
+}
 
 /** Resolve the source-line label for a single annotation.
  *  Returns null for global comments, diff-view annotations, or missing blocks. */

@@ -5,9 +5,9 @@
 import {
   inboxActionInDraft,
   inboxPullIsOpen,
-  inboxPullRepoKey,
   type InboxMessageWire,
   type InboxPull,
+  type InboxPullLink,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -15,17 +15,19 @@ import {
 import { plural } from '@plannotator/core/inbox-format';
 import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
-import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, requestedParts, type PullFilter } from './model';
+import { checksWords, inboxPullLabel, isPullThread, linkAgentName, openLayers, pullInProject, pullViewOf, requestedParts, type PullFilter } from './model';
 import { person, wordsText, type Words } from './words';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
+import { branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type BranchNote } from './branchReviews';
 
 /** The rows a project and a view keep: a local review is the person's own, and belongs to its thread's project. */
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
   const inProject = (row: InboxReviewRow) => {
     if (!project) return true;
-    if (reviewRowProject(row) === project) return true;
-    return row.stacks.some((stack) => (answer.projects[inboxPullRepoKey(stack.host, stack.repo)] ?? []).includes(project));
+    const own = reviewRowProject(row);
+    if (own === project) return true;
+    return row.stacks.some((stack) => stack.layers.some((pull) => pullInProject(pull, project, answer.projects, own)));
   };
   const inView = (row: InboxReviewRow) => {
     if (filter === 'all') return true;
@@ -53,7 +55,8 @@ export function reviewRowProjects(answer: InboxReviewsAnswer): Set<string> {
  * of several its stack page).
  */
 export function reviewRowLaunchpad(row: InboxReviewRow): string | null {
-  if (row.stacks.length !== 1) return null;
+  // A thread started from the PR's page (Start a thread) is that PR's page from then on: the row opens it.
+  if (row.stacks.length !== 1 || (row.reviewed && row.thread_id && isPullThread(row.link))) return null;
   const stack = row.stacks[0]!;
   return stack.layers.length === 1 && startLayer(stack) ? stack.id : null;
 }
@@ -79,6 +82,8 @@ export interface ReviewRowLine {
   /** The same words in parts: the people it names are drawn with their faces (`words.ts`). */
   parts: Words;
   tone: 'ok' | 'warn' | null;
+  /** A reported branch's mark (Branch reviews): this computer's, a linked machine's, a cloud agent's. Absent: the kind's own. */
+  mark?: 'gitBranch' | 'laptop' | 'cloud';
 }
 
 const lower = (words: string) => words.replace(/^./, (c) => c.toLowerCase());
@@ -105,6 +110,8 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
   switch (row.reason) {
     case 'review_ready':
       return { status: ['Review ready'], tone: null };
+    case 'branch_ready':
+      return { status: ['Ready for review'], tone: null };
     case 'curating':
       return { status: ['Curating…'], tone: null };
     case 'feedback_sent': {
@@ -170,6 +177,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const linked = row.started?.pull;
   if (linked) return { kind: 'pr', lead: `${linked.platform === 'gitlab' ? '!' : '#'}${linked.number}`, agent, status, parts, tone };
   const source = row.review?.source;
+  const report = source ? null : branchReportOf(row);
+  if (report) return { kind: 'local', lead: branchRowLead(report), agent, status, parts, tone, mark: report.machine ? 'laptop' : report.place === 'cloud' ? 'cloud' : 'gitBranch' };
   if (source?.pr?.number) return { kind: 'pr', lead: `${source.pr.platform === 'gitlab' ? '!' : '#'}${source.pr.number}`, agent, status, parts, tone };
   return { kind: 'local', lead: source?.branch ?? row.started?.branch ?? '', agent, status, parts, tone };
 }
@@ -179,8 +188,10 @@ export function reviewContextLine(row: InboxReviewRow, projectName: string | nul
   const source = row.review?.source;
   const line = reviewRowLine(row);
   const started = row.started;
-  const what =
-    line.kind !== 'local' || reviewIsWalkthrough(row)
+  const report = branchReportOf(row);
+  const what = report && !source
+    ? branchContextWords(report)
+    : line.kind !== 'local' || reviewIsWalkthrough(row)
       ? line.lead
       : source?.branch
         ? `Local changes on ${source.branch}${source.base ? `, against ${source.base.replace(/^origin\//, '')}` : ''}`
@@ -225,6 +236,17 @@ export interface ReviewView {
   onOpenPull: (() => void) | null;
   /** A landed PR, on its forge. */
   pullUrl: string | null;
+  /**
+   * A thread started from the PR's page (Start a thread): the PR's line over the messages (`PullContextLine`) in place of
+   * the context line, with Guided review (asked for in this thread, `usePullThreadGuide`, or opened once it is in), The
+   * diff (`onDiff`) and the PR on its forge. `link`: the PR's, this thread's. Null otherwise.
+   */
+  pullLine?: { pull: InboxPull; stack: InboxPullStack; link: InboxPullLink; onDiff: () => void; onAsked: () => void } | null;
+  /**
+   * A reported branch with no review yet (Branch reviews): what the agent reported, and the message a review request
+   * replies to, so the review stays in this thread. Null for every other thread, and once a review is in.
+   */
+  branch: (BranchNote & { projectName: string | null; replyTo: string | null }) | null;
 }
 
 /**
@@ -286,16 +308,20 @@ export function reviewOpenPlan(input: {
 export function reviewViewOf(
   row: InboxReviewRow,
   thread: { messages: readonly { id: string }[]; subject: string | null; thread_name?: string | null },
-  options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void },
+  options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void; onOpenDiff?: (stackId: string, layerKey: string) => void; onAsked?: () => void },
 ): ReviewView {
   const line = reviewRowLine(row);
   const started = row.link?.via === 'owner' || !!row.started;
-  const ask = row.started?.ask ?? (row.link?.via === 'owner' ? row.link.ask : null);
+  // A reported branch's first message is the agent's report, no New review request.
+  const pullThread = isPullThread(row.link);
+  const ask = row.started?.kind === 'branch' || pullThread ? null : (row.started?.ask ?? (row.link?.via === 'owner' ? row.link.ask : null));
   const first = row.review?.first_review_id ?? null;
   const earlier = first ? thread.messages.findIndex((message) => message.id === first) : -1;
   const folds = !started && first !== null && earlier > 0;
   const stack = row.stacks[0];
+  const report = row.review ? null : branchReportOf(row);
   return {
+    branch: report ? { ...branchNoteOf(report), projectName: options.projectName, replyTo: thread.messages[thread.messages.length - 1]?.id ?? null } : null,
     context: reviewContextLine(row, options.projectName),
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
@@ -308,8 +334,14 @@ export function reviewViewOf(
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
     pullUrl: reviewRowLanding(row)?.url ?? null,
+    pullLine:
+      pullThread && stack && startLayer(stack) && row.link?.thread_id === row.thread_id && options.onOpenDiff
+        ? { pull: startLayer(stack)!, stack, link: row.link, onDiff: () => options.onOpenDiff!(stack.id, startLayer(stack)!.key), onAsked: options.onAsked ?? (() => {}) }
+        : null,
   };
 }
+
+export { ReviewViewNote } from './ReviewViewNote';
 
 /** The groups that start folded, and the person's own choice for each, kept in this browser. */
 export const REVIEW_FOLDS_KEY = 'plannotator-inbox-reviews-folds';

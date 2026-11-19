@@ -57,14 +57,14 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
           />
         }
       >
-          <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
+          <span className="text-xs opacity-60 flex-shrink-0">
             from
           </span>
           <span className="truncate flex-1 text-left font-mono">
             {(selected?.commitId ?? selectedCommitId).slice(0, 8)}
           </span>
           {selected?.age && (
-            <span className="text-[10px] text-muted-foreground truncate">
+            <span className="text-xs text-muted-foreground truncate">
               {selected.age}
             </span>
           )}
@@ -82,7 +82,7 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
         <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
           <Popover.Popup className="w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           <div className="px-3 py-2 border-b border-border/50">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Evolution history — pick a previous state to compare against
             </p>
           </div>
@@ -112,7 +112,7 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
                     )}
                   </span>
                   <span className="flex-1 min-w-0">
-                    <span className="font-mono text-[10px] text-muted-foreground">
+                    <span className="font-mono text-xs text-muted-foreground">
                       {entry.commitId.slice(0, 8)}
                     </span>
                     {entry.description && (
@@ -121,18 +121,18 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
                   </span>
                   <span className="flex-shrink-0 flex flex-col items-end gap-1 max-w-[40%]">
                     {entry.age && (
-                      <span className="text-[10px] text-muted-foreground truncate max-w-full">
+                      <span className="text-xs text-muted-foreground truncate max-w-full">
                         {entry.age}
                       </span>
                     )}
                     <span className="flex gap-1">
                       {isCurrent && (
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 py-0.5 rounded bg-muted">
+                        <span className="text-xs text-muted-foreground px-1 py-0.5 rounded bg-muted">
                           current
                         </span>
                       )}
                       {isDetected && !isCurrent && (
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 py-0.5 rounded bg-muted">
+                        <span className="text-xs text-muted-foreground px-1 py-0.5 rounded bg-muted">
                           default
                         </span>
                       )}

@@ -29,6 +29,11 @@ test("the last choice is kept per agent on this machine; Default clears it; a ha
   const file = join(dir, "inbox", "launch", "last-choice.json");
   writeFileSync(file, JSON.stringify({ "claude-code": { model: "--dangerously-skip-permissions", effort: "max" } }));
   expect(readLastLaunchChoice(dir, "claude-code")).toEqual({ effort: "max" });
+  // OpenCode's primary agent is kept with its model, and checked as a token like them.
+  writeLastLaunchChoice(dir, "opencode", { model: "opencode/big-pickle", primary_agent: "plan" });
+  expect(readLastLaunchChoice(dir, "opencode")).toEqual({ model: "opencode/big-pickle", primary_agent: "plan" });
+  writeFileSync(file, JSON.stringify({ opencode: { primary_agent: "-x" } }));
+  expect(readLastLaunchChoice(dir, "opencode")).toEqual({});
   writeFileSync(file, "not json");
   expect(readLastLaunchChoice(dir, "claude-code")).toEqual({});
   // A broken file never stops the next Send from keeping its choice.

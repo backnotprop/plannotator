@@ -9,7 +9,7 @@ import { SparklesIcon } from './SparklesIcon';
 import { Icon } from './inbox-thread/icons';
 import { commentCardAimX, getCommentCardEnabled, getCommentCardLayout } from '../utils/commentCardPolicy';
 import { hasUnsavedCommentContent } from '../utils/commentContent';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { useSkillReferenceAutocomplete } from '../hooks/useSkillReferenceAutocomplete';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from './SkillReferenceMenu';
@@ -157,10 +157,17 @@ interface CommentPopoverProps {
   /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
    *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
   errorText?: string;
+  /** Opt-in: drawn under the header, above the words (Shape: what was asked or changed on this part, and the
+   *  answers). Absent → nothing, as always. */
+  before?: React.ReactNode;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
   placement?: 'below' | 'side';
+  /** Opt-in: the box the popover stays inside (Shape: the board, in a thread's pane), placed and clamped by its
+   *  edges rather than only the window's; with no room above or below it there, a sheet at the box's foot rather
+   *  than the window's dialog. Absent → the window, as always. */
+  within?: HTMLElement | null;
   /** Opt-in: the stacking level, for a composer over a surface that is
    *  itself above the page (the image viewer is z-200). Absent → 100. */
   zIndex?: number;
@@ -209,6 +216,23 @@ interface CommentPopoverPosition {
   width: number;
   maxHeight: number;
   requiresExpanded: boolean;
+}
+
+/** `bounds` cut to `el`'s box, `inset` in from its edges (the window's bounds when `el` is absent or not laid out). */
+export function boundsWithin(bounds: VisibleViewportBounds, el: HTMLElement | null | undefined, inset = 8): VisibleViewportBounds {
+  const r = el?.getBoundingClientRect();
+  if (!r || r.width <= 0 || r.height <= 0) return bounds;
+  const top = Math.max(bounds.top, r.top + inset);
+  const left = Math.max(bounds.left, r.left + inset);
+  const right = Math.max(left, Math.min(bounds.right, r.right - inset));
+  const bottom = Math.max(top, Math.min(bounds.bottom, r.bottom - inset));
+  return { top, left, right, bottom, width: right - left, height: bottom - top };
+}
+
+/** A popover with no room by its anchor inside `bounds`: a sheet at their foot, as wide as a popover may be. */
+export function sheetWithin(bounds: VisibleViewportBounds): CommentPopoverPosition {
+  const width = Math.min(MAX_POPOVER_WIDTH, bounds.width);
+  return { top: bounds.bottom, left: bounds.left + (bounds.width - width) / 2, flipAbove: true, width, maxHeight: Math.max(0, bounds.height * 0.75), requiresExpanded: false };
 }
 
 export function computeCommentPopoverPosition(
@@ -372,7 +396,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   yieldState,
   headerText,
   errorText,
+  before,
   placement = 'below',
+  within,
   zIndex,
   autoFocus = true,
 }) => {
@@ -510,7 +536,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     const update = () => {
       const rect = anchorEl?.getBoundingClientRect() ?? anchorRect;
       if (!rect) return;
-      const nextPosition = computeCommentPopoverPosition(rect, visibleBounds, placement);
+      const bounds = within ? boundsWithin(visibleBounds, within) : visibleBounds;
+      const nextPosition = computeCommentPopoverPosition(rect, bounds, placement);
+      if (nextPosition.requiresExpanded && within) {
+        setPosition(sheetWithin(bounds));
+        return;
+      }
       if (nextPosition.requiresExpanded) {
         setDialogIsForced(true);
         setMode('dialog');
@@ -524,7 +555,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     return () => {
       window.removeEventListener('scroll', update, true);
     };
-  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card]);
+  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card, within]);
 
   // Surface a "jump back" arrow when an open popover scrolls out of view.
   // Re-measures whenever the popover repositions (position updates every scroll
@@ -842,6 +873,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   const enterSavesComment = useConfigValue('enterSavesComment');
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Escape during composition belongs to the IME. Leave its default alone
+    // and keep it from reaching the comment dialog or the app's close shortcut.
+    if (e.key === 'Escape' && isImeCompositionKey(e)) {
+      e.stopPropagation();
+      return;
+    }
     if (skillAc.onKeyDown(e)) return;
     if (mentionAc.onKeyDown(e)) return;
     if (e.key === 'Escape') {
@@ -1021,6 +1058,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {isGlobal ? 'Global comment' : on ?? 'Comment'}
           </div>
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
           <div className="pn-cbox-field">
@@ -1186,6 +1224,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </div>
 
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
 
@@ -1358,6 +1397,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
 
       {errorRow}
+      {before}
           {draftConflictRow}
       {chipsRow}
 

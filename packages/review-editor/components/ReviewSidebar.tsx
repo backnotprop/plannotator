@@ -1,3 +1,5 @@
+import { ReviewSidebarTabs, REVIEW_SIDEBAR_BODY_ID } from './ReviewSidebarTabs';
+import { PanelEmptyState } from './PanelEmptyState';
 import React, { useRef, useState } from 'react';
 import { CodeAnnotation, type CodeAnnotationScope, type EditorAnnotation, type Annotation, type CommentAnnotation } from '@plannotator/ui/types';
 import { Button } from '@plannotator/ui/components/ui/button';
@@ -13,6 +15,7 @@ import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 import { FileNameChip } from './FileNameChip';
 import { AITab } from './AITab';
 import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plannotator/ui/components/AgentsTab';
+import type { FindingLike } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
@@ -26,7 +29,16 @@ import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
-export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
+export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents' | (string & {});
+
+export interface ReviewSidebarExtraTab {
+  id: string;
+  label: string;
+  title?: string;
+  count?: number;
+  attention?: boolean;
+  render: () => React.ReactNode;
+}
 
 
 interface ReviewSidebarProps {
@@ -34,6 +46,8 @@ interface ReviewSidebarProps {
   onClose: () => void;
   presentation?: 'panel' | 'overlay';
   activeTab: ReviewSidebarTab;
+  onSelectTab?: (tab: ReviewSidebarTab) => void;
+  extraTabs?: readonly ReviewSidebarExtraTab[];
   annotations: CodeAnnotation[];
   files: DiffFile[];
   selectedAnnotationId: string | null;
@@ -96,7 +110,10 @@ interface ReviewSidebarProps {
   onAgentLaunch?: (params: AgentLaunchParams) => AgentLaunchResult | Promise<AgentLaunchResult>;
   onAgentKillJob?: (id: string) => void;
   onAgentKillAll?: () => void;
-  externalAnnotations?: Array<{ source?: string }>;
+  externalAnnotations?: ReadonlyArray<FindingLike>;
+  onOpenFinding?: (finding: FindingLike) => void;
+  agentsScope?: React.ReactNode;
+  agentsGuides?: () => React.ReactNode;
   onOpenJobDetail?: (jobId: string) => void;
   onOpenGuide?: (jobId: string) => void;
   /** Pass-through to AgentsTab — gates the sidebar's Guided Review mode on
@@ -122,7 +139,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
         </svg>
         Suggestion
         {diffStats && (
-          <span className="ml-auto text-[9px] font-mono">
+          <span className="ml-auto text-xs font-mono">
             <span style={{ color: 'var(--success)' }}>+{diffStats.added}</span>
             {' '}
             <span style={{ color: 'var(--destructive)' }}>-{diffStats.removed}</span>
@@ -158,7 +175,7 @@ const GeneralCommentComposer: React.FC<{
   onTextChange: (text: string) => void;
   /** Popover alignment relative to the button: section header anchors right,
    *  the centered empty-state button anchors center. */
-  align: 'right' | 'center';
+  align: 'right' | 'center' | 'left';
   /** The sidebar panel's width when it is a fixed-width panel; undefined in
    *  the full-screen overlay presentation (the 100vw class guard covers it). */
   panelWidth?: number;
@@ -200,14 +217,14 @@ const GeneralCommentComposer: React.FC<{
         aria-expanded={open}
         aria-haspopup="dialog"
         title="Add global comment"
-        className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         + Global comment
       </button>
       {open && (
         <div
           className={`absolute top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover p-2 shadow-xl ${
-            align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'
+            align === 'right' ? 'right-0' : align === 'left' ? 'left-0' : 'left-1/2 -translate-x-1/2'
           }`}
           style={clampStyle}
         >
@@ -250,9 +267,13 @@ function compareCodeAnnotations(a: CodeAnnotation, b: CodeAnnotation): number {
 }
 
 
+const NO_EXTRA_TABS: readonly ReviewSidebarExtraTab[] = [];
+
 export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   isOpen,
   onClose,
+  onSelectTab,
+  extraTabs = NO_EXTRA_TABS,
   presentation = 'panel',
   activeTab,
   annotations,
@@ -302,6 +323,9 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onAgentKillJob,
   onAgentKillAll,
   externalAnnotations,
+  onOpenFinding,
+  agentsScope,
+  agentsGuides,
   onOpenJobDetail,
   onOpenGuide,
   guideLaunchable,
@@ -407,11 +431,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         <CommentMeta
           leading={
             isGeneralScope && annotation.callFlowTargets?.length ? (
-              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
               </span>
             ) : isGeneralScope ? (
-              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 global
               </span>
             ) : isFileScope ? (
@@ -420,20 +444,20 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.markdownPreview && (
                   <span
                     data-annotation-markdown-preview=""
-                    className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary"
+                    className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary"
                     title="Made in the rendered Markdown (Changes or Read)"
                   >
                     rendered
                   </span>
                 )}
                 {annotation.callFlowTargets?.length ? (
-                  <span className="text-[9px] text-primary/80">
+                  <span className="text-xs text-primary/80">
                     flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
                   </span>
                 ) : null}
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-muted-foreground">
+              <span className="text-xs font-mono text-muted-foreground">
                 {annotation.callFlowTargets?.length ? (
                   <span className="mr-1 text-primary/80">
                     flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'} ·
@@ -448,7 +472,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.outdated && (
                   <span
                     data-annotation-outdated="true"
-                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground"
+                    className="ml-1.5 font-sans text-xs px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground"
                     title="The code changed after this comment was written; its line numbers refer to an earlier version"
                   >
                     Outdated
@@ -457,7 +481,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.outsideDiff && (
                   <span
                     data-annotation-outside-diff="true"
-                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
+                    className="ml-1.5 font-sans text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
                     title="To the agent: sent with the file, lines and code. On a PR: goes in the review's main comment with the code quoted and a link, since the platform cannot post a comment outside the diff."
                   >
                     not in the diff
@@ -474,7 +498,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           createdAt={annotation.createdAt}
         />
         {annotation.markdownPreview && (
-          <div className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 line-clamp-2">
+          <div className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-xs italic text-muted-foreground/80 line-clamp-2">
             {annotation.markdownPreview.originalText}
           </div>
         )}
@@ -557,7 +581,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       >
         <CommentMeta
           leading={
-            <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+            <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
               {label}
             </span>
           }
@@ -566,7 +590,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           createdAt={createdAt}
         />
         {quote && (
-          <div className={`mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 ${quoteClamp}`}>
+          <div className={`mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-xs italic text-muted-foreground/80 ${quoteClamp}`}>
             {quote}
           </div>
         )}
@@ -617,34 +641,26 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
       className={presentation === 'overlay'
         ? 'absolute inset-0 z-40 flex min-w-0 flex-col bg-background'
-        : 'border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0'
+        : 'border-l border-border bg-card/30 flex flex-col flex-shrink-0 min-w-0 overflow-hidden'
       }
       style={presentation === 'overlay' ? undefined : { width: width ?? 288 }}
     >
         {/* Header */}
         <div
-          className={`px-3 flex items-center border-b border-border/50 ${presentation === 'overlay' ? 'min-h-[52px]' : ''}`}
+          className={`px-3 flex items-stretch border-b border-border ${presentation === 'overlay' ? 'min-h-[52px]' : ''}`}
           style={presentation === 'overlay' ? undefined : { height: 'var(--panel-header-h)' }}
         >
-          <div className="flex items-center gap-2 w-full min-w-0">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
-              {activeTab === 'annotations' ? 'Annotations' : activeTab === 'ai' ? 'AI' : 'Review Agents'}
-            </h2>
-            {activeTab === 'annotations' && totalCount > 0 && (
-              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                {totalCount}
-              </span>
-            )}
-            {activeTab === 'agents' && (agentJobs?.length ?? 0) > 0 && (
-              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                {agentJobs!.length}
-              </span>
-            )}
-            {activeTab === 'ai' && aiMessages.length > 0 && (
-              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                {aiMessages.length}
-              </span>
-            )}
+          <div className="flex items-stretch gap-2 w-full min-w-0">
+            <ReviewSidebarTabs
+              active={activeTab}
+              onSelect={(tab) => onSelectTab?.(tab)}
+              tabs={[
+                { id: 'annotations', label: 'Comments', count: totalCount },
+                ...(aiAvailable ? [{ id: 'ai' as const, label: 'AI', attention: aiMessages.length > 0 }] : []),
+                ...(agentCapabilities?.available ? [{ id: 'agents' as const, label: 'Agents', count: agentJobs?.length ?? 0, attention: (agentJobs ?? []).some((job) => job.status === 'running' || job.status === 'starting') }] : []),
+                ...extraTabs.map(({ id, label, title, count, attention }) => ({ id, label, title, count, attention })),
+              ]}
+            />
             {presentation === 'overlay' && (
               <button
                 data-pn-touch-target
@@ -664,35 +680,30 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         </div>
 
         {/* Content */}
-        <OverlayScrollArea className="flex-1 min-h-0">
+        <OverlayScrollArea className="flex-1 min-h-0" id={REVIEW_SIDEBAR_BODY_ID} role="tabpanel" aria-labelledby={`review-sidebar-tab-${activeTab}`}>
           {/* Annotations tab */}
           {activeTab === 'annotations' && (
             <div className="p-2 space-y-1.5">
               {totalCount === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 text-center px-4">
-                  <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
-                    <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                    </svg>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {presentation === 'overlay' ? 'Tap a line to add an annotation' : 'Click on lines to add annotations'}
+                <PanelEmptyState>
+                  <p>
+                    {presentation === 'overlay' ? 'No comments yet. Tap a line to comment on it.' : 'No comments yet. Click a line, or drag across lines, to comment on them.'}
                   </p>
                   {onAddGeneralComment && (
-                    <div className="mt-3">
+                    <div className="mt-2">
                       <GeneralCommentComposer
                         onAdd={onAddGeneralComment}
                         open={generalComposerOpen}
                         onOpenChange={setGeneralComposerOpen}
                         text={generalDraft}
                         onTextChange={setGeneralDraft}
-                        align="center"
+                        align="left"
                         panelWidth={generalComposerPanelWidth}
                         touchTarget={presentation === 'overlay'}
                       />
                     </div>
                   )}
-                </div>
+                </PanelEmptyState>
               ) : (
                 <div className="p-2 space-y-4">
                   {(generalAnnotations.length > 0 || onAddGeneralComment) && (
@@ -701,7 +712,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                           anchored composer popover is never painted under a
                           later section's header. */}
                       <div className="sticky top-0 z-[25] bg-background/95 backdrop-blur-sm px-2 py-1 flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">Global comments</span>
+                        <span className="flex-none whitespace-nowrap text-xs font-medium text-muted-foreground">Global comments</span>
                         {onAddGeneralComment && (
                           <GeneralCommentComposer
                             onAdd={onAddGeneralComment}
@@ -729,7 +740,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                         `${sample?.prRepo ? `${sample.prRepo}` : ''}#${sample?.prNumber ?? '?'} ${sample?.prTitle ?? ''}`;
                       return (
                         <div key={prUrl}>
-                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-[10px] font-medium text-accent/80 border-b border-border/30 mb-1">
+                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-xs font-medium text-accent-text/80 border-b border-border/30 mb-1">
                             {prLabel}
                           </div>
                           <div className="space-y-4">
@@ -768,7 +779,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   {annotations.length > 0 && (
                     <div className="flex items-center gap-2 pt-2 pb-1">
                       <div className="flex-1 border-t border-border/30" />
-                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">Editor</span>
+                      <span className="text-xs font-semibold text-muted-foreground/60">Editor</span>
                       <div className="flex-1 border-t border-border/30" />
                     </div>
                   )}
@@ -789,7 +800,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   {(annotations.length > 0 || (editorAnnotations?.length ?? 0) > 0) && (
                     <div className="flex items-center gap-2 pt-2 pb-1">
                       <div className="flex-1 border-t border-border/30" />
-                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">PR description</span>
+                      <span className="text-xs font-semibold text-muted-foreground/60">PR description</span>
                       <div className="flex-1 border-t border-border/30" />
                     </div>
                   )}
@@ -805,7 +816,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   {(annotations.length > 0 || (editorAnnotations?.length ?? 0) > 0 || (descriptionAnnotations?.length ?? 0) > 0) && (
                     <div className="flex items-center gap-2 pt-2 pb-1">
                       <div className="flex-1 border-t border-border/30" />
-                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">PR comments</span>
+                      <span className="text-xs font-semibold text-muted-foreground/60">PR comments</span>
                       <div className="flex-1 border-t border-border/30" />
                     </div>
                   )}
@@ -852,11 +863,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               externalAnnotations={externalAnnotations ?? []}
               onOpenJobDetail={onOpenJobDetail}
               onOpenGuide={onOpenGuide}
+              onOpenFinding={onOpenFinding}
               guideLaunchable={guideLaunchable}
               canOpenGuideJob={canOpenGuideJob}
+              scope={agentsScope}
+              guides={agentsGuides}
             />
           )}
 
+          {extraTabs.find((tab) => tab.id === activeTab)?.render()}
         </OverlayScrollArea>
 
         {/* Quick Copy Footer — annotations tab only */}

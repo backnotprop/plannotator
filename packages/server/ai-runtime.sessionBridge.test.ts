@@ -150,7 +150,7 @@ describe("createAIRuntime (Bun) with a session bridge", () => {
     });
   }, 15_000);
 
-  // The agent-job launchers (Review Agents, Code Tour, Guided Review) read
+  // The agent-job launchers (Review Agents, Guided Review) read
   // their Claude / Codex model lists from ?activate=<id>. A bridge makes Ask
   // AI bridge-only, but those launchers must keep the discovered lists; the
   // SDK providers are reported under `catalogProviders` and still refuse

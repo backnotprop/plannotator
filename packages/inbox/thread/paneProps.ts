@@ -19,6 +19,8 @@ export interface ThreadPaneProps {
   reviewView?: ReviewView | null;
   onInReviews?: () => void;
   threadAlone?: boolean;
+  /** Beside another thread pane: its ✕ closes this pane, so it stays beside ‹ Inbox (full screen, a stacked window). */
+  paired?: boolean;
   fullSidebar?: boolean;
   onFull?: (on: boolean) => void;
   notice?: ReactNode;
@@ -53,6 +55,8 @@ export interface ThreadPaneProps {
   seenThrough?: number | null;
   onSeen?: (throughSeq: number) => void;
   covered?: boolean;
+  /** Kept off the page by a free layout (ThreadPanes): a recording in its reply box stops. */
+  parked?: boolean;
   onScreenChange?: (state: { threadId: string; covered: boolean } | null) => void;
   row?: InboxListRow | null;
   drawn?: InboxListGroupId | null;
@@ -70,6 +74,8 @@ export interface ThreadPaneProps {
   replyRequest?: string | null;
   onReplyOpened?: () => void;
   shapeButton?: ReactNode;
+  /** The thread's open board (ThreadShapeLayer): it takes the messages' and the reply's place under the header. */
+  board?: ReactNode;
   onSide?: (selected: string, source?: string) => void;
   onSideWords?: (words: string, taken?: () => void) => void;
   replyWords?: string | null;

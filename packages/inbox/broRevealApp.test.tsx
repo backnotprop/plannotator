@@ -13,10 +13,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { savedConfig, writeOldConfig } from '../../tests/helpers/saved-config';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -147,7 +148,7 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-const config = () => JSON.parse(readFileSync(join(server!.dataDir, 'config.json'), 'utf8')) as Record<string, any>;
+const config = () => savedConfig(server!.dataDir);
 const openDialogs = () => [...document.querySelectorAll('dialog[open]')].map((dialog) => dialog.getAttribute('data-dialog'));
 const card = () => document.querySelector<HTMLDialogElement>('dialog[open][data-dialog="bro-intro"]');
 
@@ -186,7 +187,7 @@ test.skipIf(!hasDom)('a tab loaded inside the gap after another dialog and left 
   // The line's last dialog showed 40 minutes ago less two seconds (config.json, read live): this load may arm nothing
   // yet, and the Inbox names the moment the gap ends (`reveal.again_in`).
   const stamp = new Date(Date.now() - 40 * 60_000 + 2_000).toISOString();
-  writeFileSync(join(server!.dataDir, 'config.json'), JSON.stringify({ ...config(), inboxReveals: { ...config().inboxReveals, lastShownAt: stamp, dayShownAt: stamp } }));
+  writeOldConfig(server!.dataDir, { ...config(), inboxReveals: { ...config().inboxReveals, lastShownAt: stamp, dayShownAt: stamp } });
   reveal.REVEAL_TIMES.lineReadSlackMs = 100;
   let settingsReads = 0;
   const counted = globalThis.fetch;

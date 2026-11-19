@@ -6,7 +6,8 @@ import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
-import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
+import { isLocalLinkTarget, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
+import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
 
 interface HtmlBlockProps {
   block: Block;
@@ -130,6 +131,7 @@ function rewriteRelativeRefs(
   onNavigateAnchor?: (hash: string) => void,
   resolveLocalLink?: LocalLinkResolver | null,
   resolveImage?: ImageResolver | null,
+  matchLocalLink: (href: string) => boolean = isLocalLinkTarget,
 ): (() => void) {
   const cleanups: (() => void)[] = [];
 
@@ -167,7 +169,8 @@ function rewriteRelativeRefs(
       a.setAttribute('rel', 'noopener noreferrer');
       return;
     }
-    if (/^(mailto:|tel:)/i.test(href)) return;
+    // A host's wider link test (`LocalLinkMatchContext`) may claim these too; by default they are left as written.
+    if (/^(mailto:|tel:)/i.test(href) && !(resolveLocalLink && matchLocalLink(href))) return;
     // In-page anchor: native browser jump doesn't target the scroll viewport,
     // so route through onNavigateAnchor to match InlineMarkdown's behavior.
     if (href.startsWith('#')) {
@@ -182,7 +185,7 @@ function rewriteRelativeRefs(
     }
     // A host's resolver (Viewer `resolveLocalLink`) decides local paths
     // first, as InlineMarkdown does; null keeps the rules below.
-    const localLink = resolveLocalLink && isLocalLinkTarget(href) ? resolveLocalLink(href) : null;
+    const localLink = resolveLocalLink && matchLocalLink(href) ? resolveLocalLink(href) : null;
     if (localLink?.kind === 'open') {
       const openLink = localLink.open;
       const hostHref = localLink.href;
@@ -250,6 +253,7 @@ function rewriteRelativeRefs(
 const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor }) => {
   const ref = useRef<HTMLDivElement>(null);
   const resolveLocalLink = useLocalLinkResolver();
+  const matchLocalLink = useLocalLinkMatch();
   const resolveImage = useImageResolver();
   const preserveVideos = useContext(PreserveResolvedVideosContext);
   const responsiveImages = useContext(ResolvedResponsiveImagesContext);
@@ -269,20 +273,22 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     } else if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }
-    const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage);
+    const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink);
     const stopColors = paintAuthorColors(ref.current);
     return () => {
       cleanup();
       stopColors();
     };
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos, responsiveImages]);
+  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink, preserveVideos, responsiveImages]);
   return (
-    <div
-      ref={ref}
-      data-block-id={block.id}
-      data-block-type="html"
-      className="html-block my-4 text-[15px] leading-relaxed text-foreground/90"
-    />
+    <div className="relative my-4" {...sourceLineAttrs(block)}>
+      <div
+        ref={ref}
+        data-block-id={block.id}
+        data-block-type="html"
+        className="html-block text-[15px] leading-relaxed text-foreground/90"
+      />
+    </div>
   );
 };
 export const HtmlBlock = React.memo(

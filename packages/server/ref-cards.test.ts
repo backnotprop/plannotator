@@ -375,10 +375,10 @@ describe("fetching", () => {
     expect(self.args.find((s) => s.startsWith("query="))).toContain("issue(iid: $iid)");
   });
 
-  test("an unknown host is never fetched; the CLI missing reads quietly", async () => {
+  test("an unknown host is never fetched; the CLI missing says so, on a self-managed host too", async () => {
     const r = runner(() => err("", 127));
     const cards = createRefCards({ run: r.run });
-    expect(await cards.get("https://github.acme.dev/acme/widgets/pull/1")).toMatchObject({ ok: false, error: "unsupported" });
+    expect(await cards.get("https://github.acme.dev/acme/widgets/pull/1")).toMatchObject({ ok: false, error: "cli_missing", problem: { code: "tool.missing" } });
     expect(await cards.get("https://example.com/acme/widgets/pull/1")).toBeNull();
     expect(r.queries()).toHaveLength(0);
     expect(await cards.get(PR_URL)).toMatchObject({ ok: false, error: "cli_missing" });

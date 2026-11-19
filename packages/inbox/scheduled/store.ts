@@ -9,6 +9,8 @@ import type { InboxEvent, SettingsModel } from '../api';
 import { scheduledApi } from './client';
 
 export interface ScheduledSnapshot {
+  /** Routines' switch: null while the window's settings are not read yet (the list filter waits on it). */
+  on: boolean | null;
   rows: readonly InboxScheduledRow[] | null;
   /** False: "Start agents from New message" is off, so nothing runs. */
   launchOn: boolean;
@@ -17,8 +19,8 @@ export interface ScheduledSnapshot {
   version: number;
 }
 
-const EMPTY: ScheduledSnapshot = { rows: null, launchOn: true, error: null, version: 0 };
-let on = false;
+const EMPTY: ScheduledSnapshot = { on: false, rows: null, launchOn: true, error: null, version: 0 };
+let on: boolean | null = false;
 let snap = EMPTY;
 let reading: Promise<void> | null = null;
 let again = false;
@@ -49,11 +51,15 @@ export function readScheduled(): Promise<void> {
   });
 }
 
-export function setScheduledOn(next: boolean): void {
+/** `null`: the settings are not read yet, so whether Routines are on is not known (nothing is read). */
+export function setScheduledOn(next: boolean | null): void {
   if (on === next) return;
   on = next;
-  if (!on) emit({ ...EMPTY, version: snap.version + 1 });
-  else if (listeners.size > 0) void readScheduled();
+  if (!on) emit({ ...EMPTY, on, version: snap.version + 1 });
+  else {
+    emit({ on });
+    if (listeners.size > 0) void readScheduled();
+  }
 }
 
 /** From the event stream (eventFrames.ts): `null` is a `deliveries` frame. */
@@ -85,24 +91,31 @@ export function useScheduledPage(): ScheduledSnapshot {
   return useScheduled();
 }
 
-/** The window's switch, from its settings: the store reads only while it is on. */
-export function useScheduledOn(settings: Pick<SettingsModel, 'scheduled_threads'> | null): boolean {
+/**
+ * The window's switch, from its settings: the store reads only while it is on. Until the settings are read it is not
+ * known (`null` in the store); `settingsFailed`: they could not be read, so it is off.
+ */
+export function useScheduledOn(settings: Pick<SettingsModel, 'scheduled_threads'> | null, settingsFailed = false): boolean {
   const value = settings?.scheduled_threads?.on === true;
-  useEffect(() => setScheduledOn(value), [value]);
+  const known = settings !== null || settingsFailed;
+  useEffect(() => setScheduledOn(known ? value : null), [known, value]);
   return value;
 }
 
 /** Saved rows go in at once, before the read again. */
 export function putScheduled(row: InboxScheduledRow | null, removed?: string): void {
+  // An answer that comes back after a newer one (two writes in flight) never puts the older row back.
+  const held = row ? snap.rows?.find((r) => r.id === row.id) : undefined;
+  if (row && held && held.updated_at > row.updated_at) return;
   const rows = (snap.rows ?? []).filter((r) => r.id !== (row?.id ?? removed));
   emit({ rows: row ? [...rows, row] : rows, version: snap.version + 1 });
 }
 
 /** Tests: a fresh store. */
-export function resetScheduledForTests(rows: readonly InboxScheduledRow[] | null = null, isOn = rows !== null): void {
+export function resetScheduledForTests(rows: readonly InboxScheduledRow[] | null = null, isOn: boolean | null = rows !== null): void {
   on = isOn;
   reading = null;
   again = false;
   pages = 0;
-  snap = { ...EMPTY, rows };
+  snap = { ...EMPTY, on: isOn, rows };
 }

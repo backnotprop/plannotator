@@ -1,0 +1,196 @@
+name: Browser slice
+
+# The browser specs a PR can break (issue #3455): every non-draft PR runs a
+# small slice of tests/e2e/*.spec.ts, about ten minutes, with no label. The
+# plan job picks it (scripts/e2e-slice.ts, rules in tests/e2e/slice-rules.ts):
+# the spec files the PR edits, the specs on an `e2e:` line in the PR body, then
+# the specs its changed paths map to, shortest first, within a budget of
+# spec-minutes from tests/e2e/shard-times.json. What it drops over the budget,
+# and the changed paths no rule matches, go to the run summary; neither fails
+# the run. The specs Browser smoke runs on every PR (SMOKE_SPECS) are left out.
+#
+# The whole suite still runs on main every two hours (inbox-e2e.yml), and on a
+# PR with the `ci:e2e` or `ci:e2e-all` label, exactly as before; this workflow
+# does not read labels.
+#
+# The slice runs when a PR is ready for review: a draft runs the plan only (its
+# summary shows the slice), and marking it ready (`ready_for_review`) starts
+# the shards. An empty slice (a docs-only PR) skips the
+# shards, so the run is green in seconds.
+#
+# Each shard is one job, as in browser-smoke.yml: the apps and the binary are
+# built on the runner while the Playwright image is pulled, then the shard's
+# specs run in that image with the e2e shards' user and flags
+# (scripts/ci-e2e-in-image.sh), split by measured time as the full run splits
+# them (scripts/ci-e2e-shard.ts), at most 4 shards (8 when the specs the PR
+# edits or names are alone over the budget: those always run). A spec file that fails is
+# retried once; one that passes on the retry passes the shard and is named in
+# the summary.
+#
+# Forks: the jobs run on GitHub's own ubuntu-24.04, never on the E2E_RUNNER
+# machines (a self-hosted runner must never run a fork's code, see
+# inbox-e2e.yml), with a read-only token and no secrets, on `pull_request`
+# (never `pull_request_target`), so a fork's code never runs with secrets.
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+# One run per PR: a newer push cancels the older run.
+concurrency:
+  group: e2e-slice-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Browser slice (pick the specs)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      count: ${{ steps.plan.outputs.count }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      release: ${{ steps.plan.outputs.release }}
+      timeout: ${{ steps.plan.outputs.timeout }}
+      # A rerun of failed shards alone reuses this job's outputs, so the shards download the plan of this attempt.
+      attempt: ${{ github.run_attempt }}
+    steps:
+      # Full history without blobs, for the PR's merge base; the specs and
+      # their times are read from the checked-out merge commit.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Pick the slice
+        id: plan
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+        run: bun run scripts/e2e-slice.ts plan
+
+      - name: Keep the plan for the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-slice-plan-${{ github.run_attempt }}
+          path: |
+            .local/e2e-slice/plan.json
+            .local/e2e-slice/slice.json
+          if-no-files-found: error
+          retention-days: 7
+
+  slice:
+    name: Browser slice (${{ matrix.shard }}/${{ needs.plan.outputs.count }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.count != '0' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    # From the plan (shardTimeout in scripts/e2e-slice.ts): 5 minutes of setup
+    # and build, 3 for the update specs' release pass, and 2.5 x the longest
+    # shard's measured spec-minutes (its run, a retry of every file at worst,
+    # 25% slack on the times); at least 30, at most 180. A full 10-minute
+    # shard: 5 + 3 + 25 = 33 minutes.
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # In the background: the image is ready by the time the build is.
+      - name: Pull the Playwright image while the apps build
+        run: |
+          version="$(jq -r '.devDependencies["@playwright/test"]' package.json)"
+          nohup docker pull --quiet "mcr.microsoft.com/playwright:v${version}-noble" > "$RUNNER_TEMP/playwright-pull.log" 2>&1 &
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the apps
+        run: bun run build:review && bun run build:hook
+
+      - name: Compile the binary
+        run: >-
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
+          --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
+
+      # The update specs skip themselves on a 0.0.0-dev binary: the same build
+      # numbered 0.28.10, as shard 1 of the full run uses.
+      - name: Compile the release-numbered binary (the update specs)
+        if: needs.plan.outputs.release == 'true'
+        run: |
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
+            --define '__CLI_VERSION__="0.28.10"' --outfile .local/plannotator-0.28.10
+          echo "E2E_SLICE_RELEASE_BINARY=$PWD/.local/plannotator-0.28.10" >> "$GITHUB_ENV"
+
+      # Code review's Go to Definition (review-explorer.spec.ts) searches with
+      # ripgrep: the release's static build, checked; ci-e2e-in-image.sh takes
+      # it into the image. No token: without GH_TOKEN the script fetches the
+      # plain release URL, with curl's retries.
+      - name: Install ripgrep
+        env:
+          RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/rg"
+          tarball="$RUNNER_TEMP/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz"
+          mkdir -p "$dir"
+          bash scripts/ci-fetch-release-asset.sh https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz "$tarball"
+          echo "$RG_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir" --strip-components=1
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Get the slice plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-slice-plan-${{ needs.plan.outputs.attempt }}
+          path: .local/e2e-slice
+
+      - name: Run this shard's specs in the Playwright image (one retry per failed spec file)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: bash scripts/ci-e2e-in-image.sh . bun run scripts/e2e-slice.ts shard "$SHARD"
+
+      - name: Write the retries to the summary
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          notes=".local/e2e-slice/notes-${SHARD}.md"
+          if [ -f "$notes" ]; then cat "$notes" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-slice-proof-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: .local/proof/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # A failed test's page as Playwright left it, as the full run keeps it.
+      - name: Keep the failed tests' snapshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-slice-failed-tests-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            .local/test-results/**/error-context.md
+            .local/test-results/**/test-failed-*.png
+          if-no-files-found: ignore
+          retention-days: 7

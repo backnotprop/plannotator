@@ -146,7 +146,7 @@ describe('DraftTransport seam', () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       fetchCalls.push(String(input));
-      return new Response(JSON.stringify({ found: false }), { status: 404 });
+      return new Response(null, { status: 204 });
     }) as typeof fetch;
 
     const session = await mountHook({

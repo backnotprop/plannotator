@@ -22,6 +22,7 @@ const hasDom = typeof document !== 'undefined';
 let reader: { onShowGlobalComment?: (id: string) => void; draftScope: string } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
+    PullChangesTree: () => null,
     default: (props: { comments?: typeof reader }) => {
       reader = props.comments;
       return null;

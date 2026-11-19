@@ -51,6 +51,7 @@ import {
   inboxPullRepoKey,
   inboxPullStacks,
   inboxPullUrlsIn,
+  splitPullThreadDetails,
   type InboxCard,
   type InboxFileContents,
   type InboxMessage,
@@ -705,6 +706,8 @@ export class InboxPullsError extends Error {
   }
 }
 
+const READ_CLOSED = new InboxPullsError("pull_diff_failed", "The request was closed.");
+
 export interface InboxPulls {
   /**
    * The PRs of these repositories, with the hosts asked, what each CLI asked was found to be (`clis`), and the
@@ -744,7 +747,7 @@ export interface InboxPulls {
   /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or a compare up to that layer (`InboxPullDiffScope`; `from` for a range or a commit). Throws InboxPullsError. */
-  diff(key: string, scope: InboxPullDiffScope, from?: string): Promise<InboxPullDiffAnswer>;
+  diff(key: string, scope: InboxPullDiffScope, from?: string, pinnedHead?: string): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The PR's own text as the details read answered it, for the PR media route. Throws InboxPullsError. */
@@ -787,7 +790,7 @@ export interface InboxPulls {
    * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string, signal?: AbortSignal): Promise<InboxFileContents>;
 }
 
 export type PullFileCheck = PatchBlobIds | { patch: string };
@@ -1045,6 +1048,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const budgetHold = new Map<string, number>();
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
+  const diffsInFlight = new Map<string, Promise<InboxPullDiffAnswer>>();
   const readHeads = new Map<string, string>();
   /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
   const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean; context?: PRContext }>();
@@ -1170,7 +1174,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
   // never changes, so a settled answer stays until the bound. A failed read is forgotten, for the next look to retry.
   const mergeBases = new Map<string, Promise<string | null>>();
-  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number }>();
+  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number; callers: (AbortSignal | undefined)[]; settled: boolean }>();
   let fileTextBytes = 0;
   let readsRunning = 0;
   const readsWaiting: (() => void)[] = [];
@@ -1787,7 +1791,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         readWorkingTree: readRepoWorkingTreeFile,
       });
     },
-    async diff(key, scope, from) {
+    async diff(key, scope, from, pinnedHead) {
       const pull = findKnown(key);
       if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
@@ -1815,74 +1819,85 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
       // head the forge did not pin down.
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
-      if (compare && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
-      const state = hosts.get(pull.host);
-      const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
-      if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
-      const parts = splitPath(pull.repo)!;
-      let forkProjects: GitlabForkProjects | null = null;
-      const argsFor = (base: string): string[] => {
-        if (pull.platform === "github") {
-          const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
-          return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
+      if (hit && pinnedHead && hit.answer.head_sha === pinnedHead) return hit.answer;
+      const flying = diffsInFlight.get(cacheKey);
+      if (flying) return flying;
+      const reading = (async (): Promise<InboxPullDiffAnswer> => {
+        if (compare && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
+        const state = hosts.get(pull.host);
+        const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+        if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
+        const parts = splitPath(pull.repo)!;
+        let forkProjects: GitlabForkProjects | null = null;
+        const argsFor = (base: string): string[] => {
+          if (pull.platform === "github") {
+            const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
+            return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
+          }
+          const endpoint = scope === "layer" ? `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
+          return ["api", "--hostname", pull.host, endpoint];
+        };
+        // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
+        // leaves it unknown; a layer posts nothing), and its description.
+        // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
+        const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null } | null> => {
+          const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+          const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
+          if (!read || read.exitCode !== 0) return null;
+          try {
+            const answer = obj(JSON.parse(read.stdout));
+            if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
+            return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer) };
+          } catch {
+            return null;
+          }
+        };
+        const before = await pullNow();
+        if (compare && fork && pull.platform === "gitlab") {
+          forkProjects = before?.fork ?? null;
+          if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
         }
-        const endpoint = scope === "layer" ? `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
-        return ["api", "--hostname", pull.host, endpoint];
-      };
-      // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
-      // leaves it unknown; a layer posts nothing), and its description.
-      // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
-      const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null } | null> => {
-        const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
-        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
-        if (!read || read.exitCode !== 0) return null;
-        try {
-          const answer = obj(JSON.parse(read.stdout));
-          if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
-          return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer) };
-        } catch {
-          return null;
+        let base = bases[0]!;
+        let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
+        if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
+          base = bases[1]!;
+          result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
         }
-      };
-      const before = await pullNow();
-      if (compare && fork && pull.platform === "gitlab") {
-        forkProjects = before?.fork ?? null;
-        if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
-      }
-      let base = bases[0]!;
-      let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
-      if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
-        base = bases[1]!;
-        result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
-      }
-      if (result.tooLarge) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
-      if (result.exitCode !== 0) {
-        const error = refErrorOf(cli, result);
-        if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
-        if (/too_large|maximum number of (lines|files)|diff is taking too long|\b406\b/i.test(`${result.stderr}\n${result.stdout}`)) {
-          throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+        if (result.tooLarge) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+        if (result.exitCode !== 0) {
+          const error = refErrorOf(cli, result);
+          if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+          if (/too_large|maximum number of (lines|files)|diff is taking too long|\b406\b/i.test(`${result.stderr}\n${result.stdout}`)) {
+            throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+          }
+          throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
         }
-        throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
-      }
-      let patch = result.stdout;
-      if (pull.platform === "gitlab" && compare) {
-        try {
-          const diffsOf = obj(JSON.parse(result.stdout)).diffs;
-          patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
-        } catch {
-          throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
+        let patch = result.stdout;
+        if (pull.platform === "gitlab" && compare) {
+          try {
+            const diffsOf = obj(JSON.parse(result.stdout)).diffs;
+            patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
+          } catch {
+            throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
+          }
         }
+        const headBefore = before?.sha ?? null;
+        const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
+        const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+        const description = before?.description ?? null;
+        if (head_sha) readHeads.set(key, head_sha);
+        const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha };
+        diffs.set(cacheKey, { at: now(), answer });
+        // Bounded: only the last few diffs are kept.
+        while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
+        return answer;
+      })();
+      diffsInFlight.set(cacheKey, reading);
+      try {
+        return await reading;
+      } finally {
+        diffsInFlight.delete(cacheKey);
       }
-      const headBefore = before?.sha ?? null;
-      const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
-      const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
-      const description = before?.description ?? null;
-      if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha };
-      diffs.set(cacheKey, { at: now(), answer });
-      // Bounded: only the last few diffs are kept.
-      while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
-      return answer;
     },
     async wholeDiff(key, signal, roots = []) {
       const pull = findKnown(key);
@@ -1939,7 +1954,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
       return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
-    async fileContents(key, scope, path, roots, ids, oldPath, from) {
+    async fileContents(key, scope, path, roots, ids, oldPath, from, signal) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       if (!ids) return none;
       // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
@@ -2005,6 +2020,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
         return read;
       };
+      const stillWanted = (read: Promise<string | null>, sha: string, filePath: string): Promise<string | null> =>
+        read.catch((cause: unknown) => (cause === READ_CLOSED && !signal?.aborted ? textAt(sha, filePath) : Promise.reject(cause)));
       const textAt = (sha: string, filePath: string): Promise<string | null> => {
         const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${filePath}`;
         const hit = fileTexts.get(textKey);
@@ -2012,9 +2029,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           // Used again: the last to go.
           fileTexts.delete(textKey);
           fileTexts.set(textKey, hit);
-          return hit.read;
+          if (!hit.settled) hit.callers.push(signal);
+          return stillWanted(hit.read, sha, filePath);
         }
+        const callers: (AbortSignal | undefined)[] = [signal];
         const read = inTurn(async () => {
+          if (callers.every((caller) => caller?.aborted)) throw READ_CLOSED;
           for (const root of roots) {
             const local = await gitRead(root, sha, filePath, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
             if (local === "none") return null;
@@ -2027,10 +2047,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
           return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
         });
-        const entry = { read, bytes: 0 };
+        const entry = { read, bytes: 0, callers, settled: false };
         fileTexts.set(textKey, entry);
         read.then(
           (text) => {
+            entry.settled = true;
+            entry.callers.length = 0;
             // Still the one kept (the bound may have dropped it while it ran).
             if (fileTexts.get(textKey) !== entry) return;
             // Only a text is kept: an empty answer or a 404 can be a passing sign-in problem, and the next click asks again.
@@ -2048,10 +2070,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             }
           },
           () => {
+            entry.settled = true;
+            entry.callers.length = 0;
             if (fileTexts.get(textKey) === entry) fileTexts.delete(textKey);
           },
         );
-        return read;
+        return stillWanted(read, sha, filePath);
       };
       try {
         const newContent = await textAt(head, path);
@@ -2085,6 +2109,32 @@ export interface InboxPullLinkStore {
   sessionLive?(session: string): boolean;
   /** A launched thread whose start failed, or whose agent never connected. */
   launchDead?(threadId: string): boolean;
+  /**
+   * Which threads may own a PR now, read once per call: the rule the person's hand-offs follow (`pullOwnersNow`): not
+   * archived, unless it holds a review. Absent: every thread may.
+   */
+  ownable?(): (threadId: string) => boolean;
+}
+
+/**
+ * The PR a thread started from a PR's page is about (Start a thread): from its first message's details, only their
+ * `- Link: ` line, and only when that line is the whole link and the `- Number: ` and `- Repository: ` lines name the
+ * same PR. Nothing else in the details (a title may hold another PR's link) or in the person's words counts.
+ */
+export function startedThreadPullKey(details: string, byKey: ReadonlyMap<string, InboxPull>): string | null {
+  const lines = details.split("\n");
+  const value = (name: string) => {
+    const found = lines.filter((line) => line.startsWith(`- ${name}: `));
+    return found.length === 1 ? found[0]!.slice(name.length + 4).trim() : null;
+  };
+  const link = value("Link");
+  const ref = link ? parseForgeRefUrl(link) : null;
+  if (!link || !ref || ref.kind !== "pull" || inboxPullUrlsIn(link)[0] !== link) return null;
+  const pull = byKey.get(forgeRefKey(ref));
+  if (!pull) return null;
+  const repository = pull.host === "github.com" ? pull.repo : `${pull.host}/${pull.repo}`;
+  if (value("Number") !== inboxPullLabel(pull) || value("Repository")?.toLowerCase() !== repository.toLowerCase()) return null;
+  return pull.key;
 }
 
 /**
@@ -2151,7 +2201,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2165,8 +2215,22 @@ export function linkInboxPulls(
 
   // The PR links in agents' own messages, per project of the PR's repository.
   const urlThread = new Map<string, { thread: string; project: string; at: string }>();
+  // Threads the person started from a PR's page (Start a thread): their first message carries that PR's details with
+  // the thread's step (`splitPullThreadDetails`), the PR named by their Link line (`startedThreadPullKey`). The PR's own
+  // thread even when the window could not keep it as the PR's owner (a failed tie, a window reloaded or closed before
+  // the tie), so no second thread starts. The first one counts. Never one the person took back (its message is a draft
+  // again), nor one a hand-off could not own either (archived with no review: archiving frees the PR).
+  const startedThread = new Map<string, { thread: string; project: string; at: string }>();
+  const ownable = store.ownable?.() ?? (() => true);
   for (const projectId of new Set([...projectsByRepo.values()].flat())) {
     for (const summary of store.threadsOf(projectId)) {
+      const root = store.message(summary.thread_id);
+      const details = root && root.author.kind === "person" && !root.taken_back_at ? splitPullThreadDetails(root.body)?.details : undefined;
+      const key = details ? startedThreadPullKey(details, byKey) : null;
+      if (key && projectsOf(byKey.get(key)!).includes(projectId) && ownable(summary.thread_id)) {
+        const seen = startedThread.get(key);
+        if (!seen || root!.created_at < seen.at) startedThread.set(key, { thread: summary.thread_id, project: projectId, at: root!.created_at });
+      }
       for (const id of store.threadMessageIds(summary.thread_id)) {
         const message = store.message(id);
         if (!message || message.author.kind !== "agent") continue;
@@ -2202,7 +2266,12 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
+      continue;
+    }
+    const started = startedThread.get(pull.key);
+    if (started) {
+      links[pull.key] = { ...linkOf("owner", started.thread, started.project), ask: "thread", page: true };
       continue;
     }
     const url = urlThread.get(pull.key);

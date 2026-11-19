@@ -174,6 +174,16 @@ describe("inboxReviewRows", () => {
     expect(byId.get(theirs.key)).toMatchObject({ reviewed: false, move: "on_you", reason: "requested" });
   });
 
+  test("a thread started from the PR's page (ask `thread`) is no curating: the PR keeps the group its own state gives it; a guided review asked there moves it to the agents", () => {
+    const theirs = pr({ number: 880, mine: false, requested: true, author: "tomas" });
+    const own = pr({ number: 412 });
+    const owner = (ask: InboxPullLink["ask"], page?: true): InboxPullLink => ({ ...link("t_pr", "owner"), ask, ...(page ? { page } : {}) });
+    const rowFor = (pull: InboxPull, l: InboxPullLink) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([pull]), links: { [pull.key]: l } })[0];
+    expect(rowFor(theirs, owner("thread"))).toMatchObject({ reviewed: true, thread_id: "t_pr", move: "on_you", reason: "requested" });
+    expect(rowFor(own, owner("thread"))).toMatchObject({ reviewed: true, thread_id: "t_pr", move: "not_reviewed" });
+    expect(rowFor(theirs, owner("guide", true))).toMatchObject({ reviewed: true, move: "agents", reason: "curating" });
+  });
+
   test("a URL link to a thread with no review leaves the PR not reviewed, naming that thread", () => {
     const pull = pr({ number: 412 });
     const [row] = inboxReviewRows({ threads: [], stacks: inboxPullStacks([pull]), links: { [pull.key]: link("t_agent") } });

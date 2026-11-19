@@ -77,7 +77,7 @@ async function press(el: Element) {
 }
 
 /** Draws the launched thread on the owner's page over the tailnet, with `run` as its run line. */
-async function draw(run: InboxRun | null) {
+async function draw(run: InboxRun | null, thread: InboxThread = LAUNCHED) {
   const savedFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: RequestInfo | URL) => Response.json({})) as typeof fetch;
   restore.push(() => {
@@ -90,7 +90,7 @@ async function draw(run: InboxRun | null) {
   act(() => {
     root!.render(
       <ThreadPane
-        thread={LAUNCHED}
+        thread={thread}
         sent={null}
         onQuestions={() => {}}
         onChanged={async () => {}}
@@ -114,8 +114,8 @@ function undraw() {
 }
 
 /** The launch items of the open thread's ⋯ (`data-launch-item`), top to bottom. A resting agent (no run line): the owner's ⋯ offers Stop then too. */
-async function launchItems(): Promise<string[]> {
-  await draw(null);
+async function launchItems(thread: InboxThread = LAUNCHED): Promise<string[]> {
+  await draw(null, thread);
   await press(host!.querySelector('[data-thread-more]')!);
   await until(() => !!document.querySelector('[data-thread-menu]'), 'the ⋯ menu');
   const items = [...document.querySelectorAll('[data-thread-menu] [data-launch-item]')].map((el) => el.getAttribute('data-launch-item')!);
@@ -125,6 +125,12 @@ async function launchItems(): Promise<string[]> {
 
 test.skipIf(!hasDom)("the owner's ⋯ over the tailnet has Stop and Delete for a launched agent", async () => {
   expect(await launchItems()).toEqual(['stop', 'delete']);
+});
+
+test.skipIf(!hasDom)("an agent that runs in Rex: its ⋯ has Delete only (no Stop: Rex owns it)", async () => {
+  const [first] = LAUNCHED.messages;
+  const inRex = { ...LAUNCHED, messages: [{ ...first!, launch: { ...first!.launch!, rex: { line: 'Rex · app / Claude Code' } } }] };
+  expect(await launchItems(inRex)).toEqual(['delete']);
 });
 
 const runOf = (over: Partial<InboxRun>): InboxRun =>

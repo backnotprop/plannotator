@@ -17,12 +17,11 @@ import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { labelOf, type SessionLabels } from '../sessionLabels';
 import { agentName, namesList } from '../tags';
-import { recipientNames, useRecipientLabels } from '../thread/recipientNames';
+import { recipientNames } from '../thread/recipientNames';
 import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
 
-const TITLE = 'Who gets this reply';
 
 const AtSign = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
@@ -41,6 +40,7 @@ export function PhoneReplyRecipient({
   section,
   labels,
   folderOf,
+  noun = 'reply',
 }: {
   /** Every agent the sheet offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -49,18 +49,21 @@ export function PhoneReplyRecipient({
   open: boolean;
   onOpen: (open: boolean) => void;
   onOnly: (row: RecipientRow) => void;
-  onToggle: (row: RecipientRow) => void;
-  onTagAnother: () => void;
+  /** Add a second recipient. Absent (a PR's new thread): one recipient only, a row's circle only shows the choice. */
+  onToggle?: (row: RecipientRow) => void;
+  /** The last row, "Tag another agent". Absent: no such row. */
+  onTagAnother?: () => void;
   /** The thread's pane: the sheet is drawn in it. */
   section: HTMLElement | null;
   /** Each session's title, where it has one. */
   labels: SessionLabels;
   /** The folder a session works in, as the thread knows it. */
   folderOf: (session: string) => string;
+  /** What is sent: a reply, or a PR's new thread's first message (`PullThreadStart`), as the sheet and names say it. */
+  noun?: 'reply' | 'message';
 }) {
-  const titles = useRecipientLabels(labels);
-  const titleOf = (row: RecipientRow) => labelOf(titles, row.session);
-  const names = recipientNames(rows, titles, folderOf);
+  const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
+  const names = recipientNames(rows, labels, folderOf);
   const chosenIds = chosen.map((r) => r.session);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
@@ -70,7 +73,7 @@ export function PhoneReplyRecipient({
     open,
     keepFocus: true,
     onClick: () => onOpen(!open),
-    ariaLabel: `Reply goes to ${spoken || 'nobody yet'}${ended ? ', ended' : ''}. Change`,
+    ariaLabel: `${noun === 'reply' ? 'Reply' : 'Message'} goes to ${spoken || 'nobody yet'}${ended ? ', ended' : ''}. Change`,
     attrs: { 'data-recipient': '', 'data-recipient-chosen': chosenIds.join(' ') },
   };
   return (
@@ -82,8 +85,8 @@ export function PhoneReplyRecipient({
       ) : (
         <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}
-      <BottomSheet open={open} onClose={() => onOpen(false)} title={TITLE} host={section} attrs={{ 'data-recipient-list': '' }}>
-        <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable>
+      <BottomSheet open={open} onClose={() => onOpen(false)} title={`Who gets this ${noun}`} host={section} attrs={{ 'data-recipient-list': '' }}>
+        <div className="ib-sheet-list" role="listbox" aria-label={`Who gets this ${noun}`} aria-multiselectable={onToggle ? true : undefined}>
           {rows.map((row) => {
             const on = chosenIds.includes(row.session);
             if (row.start) {
@@ -128,6 +131,11 @@ export function PhoneReplyRecipient({
                 attrs={{ 'data-recipient-row': row.session }}
                 onClick={() => onOnly(row)}
                 end={
+                  !onToggle ? (
+                    <span role="checkbox" aria-checked={on} aria-hidden="true" className="ib-sheet-tick">
+                      <Icon name="check" size={13} />
+                    </span>
+                  ) : (
                   <button
                     type="button"
                     role="checkbox"
@@ -143,12 +151,17 @@ export function PhoneReplyRecipient({
                   >
                     <Icon name="check" size={13} />
                   </button>
+                  )
                 }
               />
             );
           })}
-          <SheetLine />
-          <SheetRow quiet lead={<AtSign />} title="Tag another agent" attrs={{ 'data-recipient-tag': '' }} onClick={onTagAnother} />
+          {onTagAnother && (
+            <>
+              <SheetLine />
+              <SheetRow quiet lead={<AtSign />} title="Tag another agent" attrs={{ 'data-recipient-tag': '' }} onClick={onTagAnother} />
+            </>
+          )}
         </div>
       </BottomSheet>
     </>
