@@ -148,6 +148,9 @@
       "id",
       "thread_id"
     ],
+    "InboxAgentMark": [
+      "state"
+    ],
     "InboxAgentPlace": [
       "kind",
       "line"
@@ -310,6 +313,11 @@
       "machine",
       "name"
     ],
+    "InboxLaunchInner": [
+      "agent",
+      "model",
+      "provider"
+    ],
     "InboxLaunchRecord": [
       "agent",
       "folder",
@@ -343,6 +351,9 @@
     "InboxListRowAck": [
       "at",
       "label"
+    ],
+    "InboxListRowLastAgent": [
+      "host"
     ],
     "InboxListRowProject": [
       "id",
@@ -403,6 +414,10 @@
     "InboxPicker": [
       "id",
       "name"
+    ],
+    "InboxPictureItPage": [
+      "attachment_id",
+      "title"
     ],
     "InboxProject": [
       "created_at",

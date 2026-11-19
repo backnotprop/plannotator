@@ -53,6 +53,19 @@ export const INBOX_RUN_IN_REX_ELSEWHERE = "It runs in a tab the Inbox didn't ope
 export const INBOX_RUN_IN_REX_COULDNT = "Couldn't stop it. Stop it in its tab.";
 /** A reply to a session that ran in Rex, while Rex is not on this computer: the failed line's cause. */
 export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer.";
+/**
+ * The same where Rex is a server with no app on that computer (Linux, FreeBSD) and it did not answer. The owner
+ * approved these words and the shared ones below (2026-11-18); the Mac's lines above and in RunLine.tsx are untouched.
+ * No computer is named: the person usually reads this from another one.
+ */
+export const INBOX_REX_SERVER_AWAY_AGAIN = "Rex's server isn't running.";
+/** The run line's note for a start that went to the background for that reason. */
+export const INBOX_REX_SERVER_AWAY = "Rex's server isn't running, so it started in the background.";
+/** Settings → Agents, Rex chosen, for that reason. */
+export const INBOX_REX_SERVER_AWAY_SETTINGS = "Rex's server isn't running now, so new agents start in the background until it is.";
+/** The Rex server there is another account's (a shared server): the Inbox never starts an agent on it. */
+export const INBOX_REX_SHARED = "Rex here runs as another account, so it started in the background.";
+export const INBOX_REX_SHARED_AGAIN = "Rex here runs as another account.";
 /** A reply to a session that ran in Rex, when Rex said no to its new tab (an error answer): the failed line's cause. */
 export const INBOX_REX_REFUSED_AGAIN = "Rex didn't open a tab for it.";
 /** Open in Terminal for a session that runs in Rex (its line offers none; an older window's press). */

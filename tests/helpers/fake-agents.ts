@@ -268,6 +268,8 @@ export function createFakeAgents(prefix = "plannotator-agents-"): FakeAgents {
     TMPDIR: tmpdir(),
     FAKE_AGENT_LOG: log,
     FAKE_AGENT_PIDS: pids,
+    // A plannotator run with this env counts its scratch data dir as turned on (packages/shared/inbox/turned-on.ts).
+    PLANNOTATOR_TEST_INBOX_ON: "1",
   };
   return {
     root,

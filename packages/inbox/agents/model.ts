@@ -196,6 +196,12 @@ function rexStateWords(agent: InboxAgent): string | null {
   return null;
 }
 
+/**
+ * A live agent whose host reports nothing about its turns (`turns_unknown`: Codex, Qwen Code, T3 Code, Antigravity, an
+ * MCP-only agent): the card says so instead of "Idle", which the Inbox cannot know.
+ */
+export const TURNS_UNKNOWN_WORDS = "Doesn't say when it's working";
+
 /** What an agent's hover card says, line by line; a fact the window does not have is left out. */
 export interface AgentFacts {
   title: string;
@@ -222,7 +228,9 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
       : agent.state === 'working'
         ? 'Working'
         : agent.state === 'idle'
-          ? 'Idle'
+          ? agent.turns_unknown
+            ? TURNS_UNKNOWN_WORDS
+            : 'Idle'
           : 'Ended');
   const rows: [string, string][] = [];
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
@@ -232,6 +240,11 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };
+}
+
+/** What a session's line says it is doing: nothing for a live agent whose host reports no turns (never "idle"). */
+export function agentSessionState(agent: InboxAgent): InboxAgent['state'] | null {
+  return agent.turns_unknown && agent.state === 'idle' ? null : agent.state;
 }
 
 /**
@@ -292,7 +305,7 @@ export function threadSessions(
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);
       continue;
     }
-    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agent.state : group ? 'ended' : null });
+    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agentSessionState(agent) : group ? 'ended' : null });
   }
   return out;
 }

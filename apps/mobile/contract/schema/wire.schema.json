@@ -1003,6 +1003,9 @@
                 }
               ]
             },
+            "inner": {
+              "$ref": "#/$defs/InboxLaunchInner"
+            },
             "rex": {
               "type": "boolean",
               "const": true
@@ -1144,6 +1147,13 @@
         },
         "rex_mark": {
           "$ref": "#/$defs/InboxRexMark"
+        },
+        "status_mark": {
+          "$ref": "#/$defs/InboxAgentMark"
+        },
+        "turns_unknown": {
+          "type": "boolean",
+          "const": true
         }
       },
       "required": [
@@ -1191,6 +1201,40 @@
       "required": [
         "face",
         "sessions"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxAgentMark": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "blocked",
+            "working"
+          ],
+          "x-open": true
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "permission",
+            "question"
+          ],
+          "x-open": true
+        },
+        "where": {
+          "type": "string",
+          "enum": [
+            "inbox",
+            "terminal"
+          ],
+          "x-open": true
+        }
+      },
+      "required": [
+        "state"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
@@ -1246,6 +1290,10 @@
           "type": "integer"
         },
         "face_tiles": {
+          "type": "boolean",
+          "const": true
+        },
+        "status_marks": {
           "type": "boolean",
           "const": true
         }
@@ -2230,7 +2278,8 @@
         "claude-code",
         "codex",
         "opencode",
-        "pi"
+        "pi",
+        "t3"
       ],
       "x-open": true,
       "x-source": "packages/core/inbox-types.ts"
@@ -2339,6 +2388,27 @@
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxLaunchInner": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "agent"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxLaunchRecord": {
       "type": "object",
       "properties": {
@@ -2401,6 +2471,9 @@
         "effort": {
           "type": "string"
         },
+        "inner": {
+          "$ref": "#/$defs/InboxLaunchInner"
+        },
         "primary_agent": {
           "type": "string"
         },
@@ -2444,6 +2517,14 @@
         "unavailable": {
           "type": "boolean",
           "const": true
+        },
+        "why": {
+          "type": "string",
+          "enum": [
+            "server",
+            "shared"
+          ],
+          "x-open": true
         },
         "refused": {
           "type": "boolean",
@@ -2668,6 +2749,35 @@
               "type": "null"
             }
           ]
+        },
+        "last_agent": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "host"
+          ],
+          "additionalProperties": true
         },
         "guide": {
           "type": "boolean"
@@ -3107,6 +3217,9 @@
             "$ref": "#/$defs/InboxLiveSiteRef"
           }
         },
+        "picture_it": {
+          "$ref": "#/$defs/InboxPictureItPage"
+        },
         "delivery": {
           "anyOf": [
             {
@@ -3230,6 +3343,10 @@
           ]
         },
         "turn_error": {
+          "type": "boolean",
+          "const": true
+        },
+        "launch_note": {
           "type": "boolean",
           "const": true
         },
@@ -3669,6 +3786,23 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxPictureItPage": {
+      "type": "object",
+      "properties": {
+        "attachment_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "title"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/picture-it-page.ts"
     },
     "InboxProject": {
       "type": "object",
@@ -4811,6 +4945,10 @@
           "type": "boolean",
           "const": true
         },
+        "no_retry": {
+          "type": "boolean",
+          "const": true
+        },
         "home_folder": {
           "type": "boolean",
           "const": true
@@ -4974,6 +5112,14 @@
             "unavailable": {
               "type": "boolean",
               "const": true
+            },
+            "why": {
+              "type": "string",
+              "enum": [
+                "server",
+                "shared"
+              ],
+              "x-open": true
             },
             "refused": {
               "type": "boolean",
@@ -6320,6 +6466,12 @@
             "gitlab"
           ],
           "x-open": true
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "id": {
           "type": "string"

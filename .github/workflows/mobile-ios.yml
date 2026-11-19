@@ -11,7 +11,9 @@ name: Mobile iOS
 #
 # It starts for the iOS app (apps/mobile/ios), the contract's generated Swift
 # (apps/mobile/contract/generated/swift) and this file: not for Android files
-# or the contract's JSON data, which no step here reads.
+# or the contract's JSON data, which no step here reads. The contract's check
+# and the ledger's clock have their own workflow, mobile-contract.yml, so
+# recording a ledger row never starts a macOS build.
 #
 # Concurrency is per job, so the two kinds of run never cancel each other.
 # `ios` runs in a group per branch: a new push cancels only the same pull
@@ -85,3 +87,4 @@ jobs:
 
       - name: Build and test the app
         run: bash apps/mobile/ios/ci.sh nightly
+
