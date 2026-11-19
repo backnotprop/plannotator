@@ -62,14 +62,18 @@ export function inboxListingRunsSession(listing: string, session: string): boole
 }
 
 /**
- * A command line up to its `--name` argument. Every command the Inbox builds names its session before the thread's
- * name (`--session-id <id> --name <thread name> …`, `--resume <id>`), and `ps` gives one flat line, so what follows
- * `--name` may be the person's own words: a thread named "--resume <another session's id>" must never read as that
- * session's process.
+ * A command line up to the `--name` argument that follows its session. Every command the Inbox builds names its
+ * session before the thread's name (`--session-id <id> --name <thread name> …`, `--resume <id>`), and `ps` gives one
+ * flat line, so what follows that `--name` may be the person's own words: a thread named "--resume <another session's
+ * id>" must never read as that session's process. A `--name` before any session (one the person typed,
+ * `claude --name foo --resume <id>`) cuts nothing, so that process is still found.
  */
 export function inboxCommandBeforeName(command: string): string {
-  const at = command.search(/(?:^|\s)'?--name'?(?:\s|$)/);
-  return at < 0 ? command : command.slice(0, at);
+  const session = /(?:^|\s)'?(?:--session-id|--session|--resume)'?\s+\S/.exec(command);
+  if (!session) return command;
+  const from = session.index + session[0].length;
+  const at = command.slice(from).search(/\s'?--name'?(?:\s|$)/);
+  return at < 0 ? command : command.slice(0, from + at);
 }
 
 /** The rows of `listing` (`pid ppid command`) whose command line names `session`, by pid: its parent and command. */

@@ -48,7 +48,7 @@ async function until(check: () => boolean) {
 type OpenRequest = { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] };
 const opened: InboxRexOpened = { opened: true, session: "session:x", window: "window:y", block: "block:z", line: "Rex · my-app / Fake Agent" };
 
-function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean; headless?: boolean } = {}) {
+function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean; headless?: boolean; shared?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-rex-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -98,6 +98,7 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
       open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)),
       appAttachedNow: async () => (asked.attached++, options.attached ?? true),
       ...(options.headless ? { headless: true } : {}),
+      ...(options.shared !== undefined ? { shared: () => options.shared === true } : {}),
       paneGone: async (place) => (panes.asked.push(`${place.session}/${place.block}`), await panes.hold, panes.gone),
       closePane: async (place) => (panes.closed.push(`${place.session}/${place.block}`), panes.closes),
     },
@@ -333,6 +334,36 @@ describe("Start in Rex", () => {
     const stopped = (await (await post(id, "stop"))!.json()) as { run: { state: string; stopped_by_person?: boolean } };
     expect(panes.closed).toEqual(["session:x/block:z"]);
     expect(stopped.run).toMatchObject({ state: "stopped", stopped_by_person: true });
+  });
+
+  test("Stopped before it ever connected (held at a prompt in its tab), then a reply: it really starts again, in a new Rex tab on its own id as a first start (nothing to resume); never without the Stop", async () => {
+    const { clock, fake, store, opens, panes, send, post, launch } = setup({ answer: async () => (opens.length > 1 ? { ...opened, block: "block:new" } : opened) });
+    const { root, id } = await send();
+    // Never connected: a reply waits for it (its line says to look at its tab), and starts nothing by itself.
+    clock.now += 5_000;
+    store.sendReply(root.id, { words: "Are you there?", idempotency_key: "reply-unconnected-0" });
+    launch.sweep(false);
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(1);
+    expect((await (await post(id, "stop"))!.json()) as { run: unknown }).toMatchObject({ run: { state: "stopped", stopped_by_person: true } });
+    expect(panes.closed).toEqual(["session:x/block:z"]);
+    panes.gone = true;
+    // Nothing written since the Stop: nothing starts (the reply before it stays for the person's next one).
+    launch.sweep(false);
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(1);
+    // "Your reply starts it again": it does.
+    store.sendReply(root.id, { words: "Go on, please.", idempotency_key: "reply-unconnected-1" });
+    await until(() => opens.length === 2);
+    expect(fake.calls.filter((call) => /^(rexCommand|start|resume) /.test(call))).toEqual(["rexCommand new", "rexCommand fresh"]);
+    expect(opens[1]!.command).toContain("--session session-r1");
+    // Addressed as before (the root and the reply reach it once it connects), and Stop closes its new pane.
+    await until(() => store.message(root.id)!.launch!.rex?.block === "block:new");
+    expect(store.message(root.id)!.to).toEqual({ host: FAKE, session: "session-r1" });
+    expect((await launch.runOf(root.thread_id))?.state).toBe("starting");
+    launch.sweep(false);
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(2);
   });
 
   test("Stop in Rex that cannot work: no pane known (Rex never asked), or Rex said no; each with its own true words, and nothing counts as stopped", async () => {
@@ -593,6 +624,18 @@ describe("Settings → Agents: Start new agents in", () => {
     expect(asked.attached).toBe(2);
     expect(((await (await read("tailnet", { platform: "ios", window: false }))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
     expect(asked.attached).toBe(2);
+  });
+
+  test("a Rex server that answered but is another account's (a shared one): Settings' read says so, so the row never says the server isn't running; never while Rex is here, and never on a read that does not ask Rex", async () => {
+    const read = async (launch: ReturnType<typeof setup>["launch"], url = "http://127.0.0.1/api/inbox/launch/settings") =>
+      ((await (await launch.route(new Request(url, { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "local"))!.json()) as { launch: Record<string, unknown> }).launch;
+    const shared = setup({ headless: true, attached: false, shared: true });
+    expect(await read(shared.launch)).toMatchObject({ rex_here: false, rex_headless: true, rex_shared: true });
+    expect("rex_shared" in (await read(shared.launch, "http://127.0.0.1/api/inbox/launch/settings?ahead=1"))).toBe(false);
+    const away = setup({ headless: true, attached: false, shared: false });
+    expect("rex_shared" in (await read(away.launch))).toBe(false);
+    const here = setup({ headless: true, attached: true, shared: true });
+    expect("rex_shared" in (await read(here.launch))).toBe(false);
   });
 
   test("Rex is asked whether its app is here only for this computer's own Settings answer: never for the routines' clock or the tailnet", async () => {

@@ -795,14 +795,15 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return out;
     },
 
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       const session = input.resume && launch.session ? launch.session : randomUUID();
       const dataDir = dataDirArg();
       const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });
       const env = ["PLANNOTATOR_INBOX_TOOL=1", ...(dataDir ? [`PLANNOTATOR_DATA_DIR=${dataDir}`] : [])];
       // Named for its thread, as a background start is (`piArgv`): without it Pi names the session itself, and the list's
       // row reads that name. A session started again keeps the name it has (the person may have renamed it), as Claude's.
-      const named = input.resume ? [] : ["--name", input.name.trim() || "Inbox"];
+      // One that never took a turn (`fresh`) is named as a first start is.
+      const named = input.resume && !input.fresh ? [] : ["--name", input.name.trim() || "Inbox"];
       const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...named, ...choice].map(shellQuote).join(" ")}`;
       return { ok: true as const, session, ref: session, command };
     },

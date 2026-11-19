@@ -452,6 +452,11 @@ describe("Claude Code as a launch host", () => {
     // Started again, it keeps the name it has (the person may have renamed it).
     expect(again.ok && again.command).not.toContain("--name");
     expect(again.ok && again.command).toContain("'--permission-mode' 'auto'");
+    // One that never took a turn (stopped at a prompt in its tab): nothing to resume, so a first start on its own id, named.
+    const fresh = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true, fresh: true });
+    expect(fresh.ok && fresh.session).toBe(made.session);
+    expect(fresh.ok && fresh.command).toContain(`'--session-id' '${made.session}' '--name' 'Tidy'`);
+    expect(fresh.ok && fresh.command).not.toContain("--resume");
   });
 
   test("a login env that can't reach `claude` (a shell read that failed) still starts it, from Claude's install folders", async () => {

@@ -41,12 +41,23 @@ export const INBOX_REX_SERVER_ENV = "PLANNOTATOR_INBOX_REX_SERVER";
 
 /**
  * The unix socket a `REX_SERVER` value names, or null: a full path, `unix://<path>` or `unix:<path>`. Anything else
- * (an `https://`, `ssh://` or tailnet address, a host's label) is another computer's server, never this one's.
+ * (an `https://`, `ssh://` or tailnet address, a host's label) is another computer's server, never this one's. The
+ * `unix:` forms are URLs, percent-encoded as Rex writes them in every tab (`unix:///Users/ada/Library/Application%20Support/rex/server.sock`),
+ * so they are decoded; a bad escape names nothing (the next place is looked at). A bare path is taken as it is.
  */
 export function inboxRexServerSocket(value: string | undefined): string | null {
   const text = (value ?? "").trim();
   if (!text || /[\0\n\r]/.test(text)) return null;
-  const path = text.startsWith("unix://") ? text.slice("unix://".length) : text.startsWith("unix:") ? text.slice("unix:".length) : text;
+  const url = text.startsWith("unix://") ? text.slice("unix://".length) : text.startsWith("unix:") ? text.slice("unix:".length) : null;
+  let path = text;
+  if (url !== null) {
+    try {
+      path = decodeURIComponent(url);
+    } catch {
+      return null;
+    }
+    if (/[\0\n\r]/.test(path)) return null;
+  }
   return path.startsWith("/") && path.length > 1 ? path : null;
 }
 
@@ -78,6 +89,16 @@ export function inboxRexSockets(platform: string, homeDir: string, env: Readonly
   if (xdgState) add(join(xdgState, "rex", "run", SOCKET_NAME));
   if (homeDir) add(join(homeDir, ".local", "state", "rex", "run", SOCKET_NAME));
   return out;
+}
+
+/**
+ * The socket this computer's Rex is reached on, from `inboxRexSockets`' list: the first that is a socket of this user's
+ * own (named or found by convention), else the first named one that is a socket at all (another account's, such as a
+ * shared server: read, never started on). So a shared server named by `REX_SERVER` never hides the person's own
+ * personal server, where agents can start. `isSocket(path, uid)`: a socket there, owned by `uid` (null: anyone).
+ */
+export function inboxRexSocketPick(sockets: readonly InboxRexSocket[], isSocket: (path: string, uid: number | null) => boolean, uid: number | null): string | null {
+  return sockets.find((socket) => isSocket(socket.path, uid))?.path ?? sockets.find((socket) => socket.named && isSocket(socket.path, null))?.path ?? null;
 }
 
 /**

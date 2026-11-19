@@ -39,7 +39,7 @@ import { dirname, join } from "node:path";
 import { graphemesOf } from "@plannotator/core/inbox-format";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 import { connectRex, RexCallError, RexUnavailable, type RexConnection } from "./inbox-rex-socket";
-import type { InboxRexSocket } from "./inbox-rex-where";
+import { inboxRexSocketPick, type InboxRexSocket } from "./inbox-rex-where";
 
 /** The longest a background read (where agents live) may take, connecting included; past it nothing is shown. */
 export const INBOX_REX_READ_TIMEOUT_MS = 400;
@@ -250,8 +250,10 @@ export function createInboxRex(options: InboxRexOptions) {
   const kept = sessionsKept(options.sessionsFile ?? null);
   const headless = options.headless === true;
   const sockets: readonly InboxRexSocket[] = typeof options.socketPath === "string" ? [{ path: options.socketPath }] : (options.socketPath ?? []);
-  // A place the person named (`REX_SERVER`, such as a shared server's socket) may be another account's; one found by convention is this user's own.
-  const socketPath = () => sockets.find((socket) => inboxRexSocketOk(socket.path, socket.named ? null : uid))?.path ?? null;
+  // A place the person named (`REX_SERVER`, such as a shared server's socket) may be another account's; one found by
+  // convention is this user's own. This user's own comes first (`inboxRexSocketPick`): a shared server named in the
+  // profile never hides the person's own personal server, where agents can start.
+  const socketPath = () => inboxRexSocketPick(sockets, inboxRexSocketOk, uid);
   /**
    * The socket in use is this user's own (its owner, not who named it). Only there are agents started, and only
    * there is a tailnet login taken for this person's: another account's server (a shared one) is read, never more.
@@ -656,6 +658,8 @@ export function createInboxRex(options: InboxRexOptions) {
   const appHere = () => seen.here;
   /** Rex is here, for starting agents: on a Mac its app is attached; a headless Rex's server answered and is this user's own. */
   const rexHere = () => (headless ? seen.answered && seen.own : seen.here !== null);
+  /** The Rex server that answered is another account's (a shared server, and no server of this user's own): read, never started on. */
+  const rexShared = () => seen.answered && !seen.own;
 
   return {
     /**
@@ -720,6 +724,11 @@ export function createInboxRex(options: InboxRexOptions) {
       refresh(lastHints);
       if (reading) await reading;
       return rexHere();
+    },
+
+    /** The Rex server the last read reached is another account's (`rexShared`): Settings says so after `appAttachedNow`. */
+    shared(): boolean {
+      return rexShared();
     },
 
     /**

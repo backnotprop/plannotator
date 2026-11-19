@@ -268,7 +268,7 @@ export function createInboxLaunch(options: {
    * Rex (a tab of the Inbox's own Rex session for the project), and `appAttached` for that setting's row; Stop closes
    * its pane, and a reply finds out at once when that pane is gone. Absent: no Rex.
    */
-  rex?: Pick<InboxRex, "open" | "appAttachedNow" | "paneGone" | "closePane"> & { headless?: boolean };
+  rex?: Pick<InboxRex, "open" | "appAttachedNow" | "paneGone" | "closePane"> & Partial<Pick<InboxRex, "shared">> & { headless?: boolean };
   /** Where a live session says it runs (its polls' place hint): Stop of a launch in Rex finds out whether it is still in its own pane. */
   placeOf?: (session: string) => InboxPlace | null;
   /** What a session's confirmed Rex pane says it is doing (inbox-rex.ts `statuses`), for a launch that runs in Rex. */
@@ -870,7 +870,7 @@ export function createInboxLaunch(options: {
     root: InboxMessage,
     host: LaunchHost,
     launch: InboxLaunchRecord,
-    input: { name: string; login: LaunchEnv; resume: boolean },
+    input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean },
   ): Promise<{ ok: true; session: string; ref: string; line: string | null; pane: InboxPlace | null } | ({ ok: false } & LaunchStartFailure) | { away: "absent" | "server" | "shared" | "refused" }> => {
     // Why Rex is not here: a Mac's app is not open; a headless Rex's server is not running.
     const absent = options.rex?.headless ? ("server" as const) : ("absent" as const);
@@ -1154,11 +1154,15 @@ ${result.text}`);
         stateOf(host).view = null;
       });
   };
-  /** A reply to a session that ran in Rex and ended: a new tab of Rex runs it again, as the same session. */
+  /**
+   * A reply to a session that ran in Rex and ended: a new tab of Rex runs it again, as the same session. One that never
+   * took a turn (it never connected: stopped at a prompt in its tab) has nothing to resume: it starts on its own id as a
+   * first start does (`fresh`), and takes the root, then the reply.
+   */
   const resumeInRex = async (root: InboxMessage, host: LaunchHost, launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null }> => {
     const login = await readLogin();
     const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
-    const made = await startInRex(root, host, launch, { name: head.thread_name ?? head.subject ?? "Inbox", login, resume: true });
+    const made = await startInRex(root, host, launch, { name: head.thread_name ?? head.subject ?? "Inbox", login, resume: true, ...(root.delivery ? {} : { fresh: true }) });
     if ("away" in made) return { exitCode: 1, text: `rex: ${made.away}`, failure: { code: "failed", text: made.away === "refused" ? INBOX_REX_REFUSED_AGAIN : made.away === "server" ? INBOX_REX_SERVER_AWAY_AGAIN : made.away === "shared" ? INBOX_REX_SHARED_AGAIN : INBOX_REX_NOT_HERE_AGAIN } };
     if (made.ok) {
       // Its new tab is where it runs now (Stop closes that pane). No answer: the old pane is not it any more.
@@ -1294,8 +1298,9 @@ ${result.text}`);
     if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
     // A host that owns the process is the exception once that process ended (its line says a reply continues it).
-    // One in Rex: Rex owns its process, so only once it connected.
-    if (!root.delivery && (inboxLaunchInRex(launch) || host.processEnded?.(launch.session_ref) !== true)) return;
+    // One in Rex: Rex owns its process, so only once it connected, or once the person stopped it (Stop closed its
+    // tab, and its line says "Your reply starts it again"): it starts again on its own id (`fresh`, `resumeInRex`).
+    if (!root.delivery && (inboxLaunchInRex(launch) ? memoOf(launch).stoppedAt === null : host.processEnded?.(launch.session_ref) !== true)) return;
     // A Stop or a Delete under way: the session is going, never started again meanwhile (a host's `live` may
     // read null as soon as its stop begins).
     if (stopping.has(launch.id) || deleting.has(launch.id)) return;
@@ -1451,7 +1456,7 @@ ${result.text}`);
    * switch (Claude Code's words, `settingsState`) and the scratch root. Off, those rows are hidden, so nothing else is
    * read (no Claude settings, no login shell).
    */
-  const settingsState = (rexHere?: boolean): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
+  const settingsState = (rexHere?: boolean, rexShared?: boolean): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
     // Windows: launch has no support there (off unless config.json says true), so Settings shows no switch.
     ...(options.platform === "win32" ? { unsupported: true } : {}),
     ...(enabled()
@@ -1469,6 +1474,8 @@ ${result.text}`);
           ...(rexHere !== undefined ? { rex_here: rexHere } : {}),
           // Rex there is a server with no app beside it: "not here" means its server is not running (the row's words).
           ...(options.rex?.headless ? { rex_headless: true as const } : {}),
+          // Not here because the Rex server that answered is another account's (a shared server): the row says that, not "isn't running".
+          ...(rexShared ? { rex_shared: true as const } : {}),
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
         }
       : { enabled: false, full_permissions: false }),
@@ -1637,7 +1644,7 @@ ${result.text}`);
       // such a machine is used from another computer, and the row has to show there for Rex to be chosen at all.
       const rexAsked = here || (options.rex?.headless === true && !door);
       const rexHere = rexAsked && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
-      return json({ launch: settingsState(rexHere) });
+      return json({ launch: settingsState(rexHere, rexHere === false && options.rex?.shared?.() === true) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
     const body = await options.readBody(req);

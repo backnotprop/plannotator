@@ -30,6 +30,14 @@ describe("which process runs a session", () => {
     expect(inboxListingRunsSession(named, ID)).toBe(true);
   });
 
+  test("a session the person resumed by hand with `--name` first (`claude --name foo --resume <id>`) is still that session's process, so a reply never opens a second copy", () => {
+    for (const line of [`  404     1 claude --name foo --resume ${ID}`, `  405     1 claude --name 'my fix' --session-id ${ID} --settings /tmp/s.json`]) {
+      expect(inboxListingRunsSession(line, ID)).toBe(true);
+    }
+    // A line that names no session is left whole.
+    expect(inboxCommandBeforeName("claude --name foo")).toBe("claude --name foo");
+  });
+
   test("another session, a longer id that starts the same, the id only elsewhere on the line, or a Pi (its argv is not listed): not by the listing alone", () => {
     expect(inboxListingRunsSession(CLAUDE.replace(ID, "11111111-2222-4333-8444-555555555555"), ID)).toBe(false);
     expect(inboxListingRunsSession(CLAUDE.replace(ID, `${ID}0`), ID)).toBe(false);

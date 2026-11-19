@@ -762,7 +762,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
      * prompts come to the Inbox's card as well as its own dialog in the tab). The plugin connects it at its start,
      * as that id, and takes the root as its first turn: the message is never on the command line.
      */
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       const person = personSettings();
       if (person && !person.ok) {
         ctx.startLog(launch.id, person.text);
@@ -770,12 +770,14 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       }
       const settingsPath = writeSettings(launch, input.login, person?.settings ?? null);
       const session = input.resume && launch.session ? launch.session : randomUUID();
+      // The same session again: resumed, unless it never took a turn (`fresh`: no conversation to resume yet).
+      const resume = input.resume && !input.fresh;
       const mode = modeOf(launch);
       const args = [
-        input.resume ? "--resume" : "--session-id",
+        resume ? "--resume" : "--session-id",
         session,
         // Named for its thread, as a background start is (`--bg --name`); a session started again keeps the name it has.
-        ...(input.resume ? [] : ["--name", input.name.replace(/^-+/, "").trim() || "Inbox"]),
+        ...(resume ? [] : ["--name", input.name.replace(/^-+/, "").trim() || "Inbox"]),
         "--settings",
         settingsPath,
         ...launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),

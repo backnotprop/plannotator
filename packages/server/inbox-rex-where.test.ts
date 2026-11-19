@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
 import { createInboxRex, type InboxRex } from "./inbox-rex";
-import { inboxRexHeadless, inboxRexServerSocket, inboxRexSockets } from "./inbox-rex-where";
+import { inboxRexHeadless, inboxRexServerSocket, inboxRexSocketPick, inboxRexSockets } from "./inbox-rex-where";
 
 const paths = (...args: Parameters<typeof inboxRexSockets>) => inboxRexSockets(...args).map((socket) => socket.path);
 
@@ -44,6 +44,37 @@ describe("the places a Rex server may listen", () => {
       expect(inboxRexServerSocket(elsewhere)).toBeNull();
     }
     expect(paths("linux", "/home/ada", { REX_SERVER: "ssh://ada@build.example.com" }, 1000)[0]).toBe("/run/user/1000/rex/server.sock");
+  });
+
+  test("REX_SERVER as Rex writes it in every tab (a percent-encoded URL) names the real path; a bad escape names nothing, and the next place is looked at", () => {
+    const app = "/Users/ada/Library/Application Support/rex/server.sock";
+    expect(inboxRexServerSocket("unix:///Users/ada/Library/Application%20Support/rex/server.sock")).toBe(app);
+    expect(inboxRexServerSocket("unix:/srv/my%20rex/server.sock")).toBe("/srv/my rex/server.sock");
+    // A bare path is a path: a literal `%20` in a folder's name stays.
+    expect(inboxRexServerSocket("/srv/100%20off/server.sock")).toBe("/srv/100%20off/server.sock");
+    for (const bad of ["unix:///srv/rex%/server.sock", "unix:///srv/rex%zz/server.sock", "unix:///srv/rex%0A/server.sock", "unix:///srv/rex%00/server.sock"]) {
+      expect(() => inboxRexServerSocket(bad)).not.toThrow();
+      expect(inboxRexServerSocket(bad)).toBeNull();
+    }
+    expect(paths("linux", "/home/ada", { REX_SERVER: "unix:///srv/rex%/server.sock" }, 1000)[0]).toBe("/run/user/1000/rex/server.sock");
+    // The detached Inbox's own name for it (the decoded path) is read as a path again, never decoded twice.
+    expect(inboxRexSockets("linux", "/home/ada", { PLANNOTATOR_INBOX_REX_SERVER: inboxRexServerSocket("unix:///srv/a%2520b/server.sock")! }, 1000)[0]).toEqual({ path: "/srv/a%20b/server.sock", named: true });
+  });
+
+  test("which place is used: this user's own socket first, named or not, so a shared server named in the profile never hides the person's own server; else a named one of another account; never another account's found by convention", () => {
+    const me = 1000;
+    // Sockets that exist here, and whose they are.
+    const owners = new Map([["/run/rex/server.sock", 0], ["/run/user/1000/rex/server.sock", me], ["/home/ada/.local/state/rex/run/server.sock", me], ["/tmp/other/server.sock", 1001]]);
+    const isSocket = (at: string, uid: number | null) => owners.has(at) && (uid === null || owners.get(at) === uid);
+    const shared = { path: "/run/rex/server.sock", named: true as const };
+    const own = { path: "/run/user/1000/rex/server.sock" };
+    expect(inboxRexSocketPick([shared, own], isSocket, me)).toBe(own.path);
+    expect(inboxRexSocketPick([shared, { path: "/nothing/server.sock" }], isSocket, me)).toBe(shared.path);
+    expect(inboxRexSocketPick([{ path: "/tmp/other/server.sock" }], isSocket, me)).toBeNull();
+    // An own named one keeps its place before a later own one.
+    expect(inboxRexSocketPick([{ path: own.path, named: true }, { path: "/home/ada/.local/state/rex/run/server.sock" }], isSocket, me)).toBe(own.path);
+    // No uid known: the first socket at all, as listed.
+    expect(inboxRexSocketPick([shared, own], isSocket, null)).toBe(shared.path);
   });
 
   test("a Mac with REX_SERVER or REX_RUNTIME_DIR set (an Inbox started from a Rex tab keeps them): the app's own server still comes first", () => {
@@ -85,6 +116,7 @@ describe("which of them is this computer's Rex", () => {
     fakes.push(fake);
     const rex = rexOn([{ path: join(fake.socketPath, "..", "nothing-here.sock") }, { path: fake.socketPath }]);
     expect(await rex.appAttachedNow()).toBe(true);
+    expect(rex.shared()).toBe(false);
     expect(fake.connections().opened).toBe(1);
   });
 
@@ -103,6 +135,8 @@ describe("which of them is this computer's Rex", () => {
     expect(shared.places(hints).get("ses_1")).toBe("Rex · team / shell");
     // But it is not "Rex here" for starting agents, and a start asks it nothing: the agent would run as that account.
     expect(await shared.appAttachedNow()).toBe(false);
+    // Settings says why: another account's server answered (not "isn't running").
+    expect(shared.shared()).toBe(true);
     const before = fake.calls.length;
     expect(await shared.open({ project: "billing-svc", projectKey: "prj_bill", tab: "Claude Code", command: "cd /work && exec claude" })).toEqual({ opened: false, sent: false, shared: true });
     expect(fake.calls.slice(before)).toEqual([]);
