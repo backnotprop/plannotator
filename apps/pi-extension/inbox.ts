@@ -49,6 +49,7 @@ import {
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
 import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { isInboxTurnedOn } from "./generated/inbox/turned-on.ts";
 import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
@@ -178,7 +179,8 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	// With the Inbox tool on or off: the Inbox must never start a second Pi on a session this one runs.
 	claimPiSessions(pi, dataDir);
 	const config = loadConfig();
-	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
+	// Only once the person turned the Inbox on here (turned-on.ts).
+	if (!resolveInboxTool(config, process.env, "pi") || !isInboxTurnedOn(dataDir)) return undefined;
 	// Decided with the tool, once per extension instance (each session, /reload):
 	// the line (the person's own from config.json prompts.inbox, else
 	// INBOX_REMINDER_TEXT), or null when the reminder is off.

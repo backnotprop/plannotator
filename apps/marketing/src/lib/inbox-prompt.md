@@ -34,8 +34,7 @@ Do only your host's line below, and tell the person what you install. "Before st
 
 ## 2. Start the Inbox and open it
 
-1. Run `plannotator inbox --background`. It starts the Inbox without a browser (or finds the running one), prints its URL and exits.
-2. Run `plannotator inbox`. With the Inbox running, it opens the window in the browser, connects the agents it finds on this computer that are not connected yet, and exits. Its stderr names them ("Connected Codex and Gemini CLI to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL from step 2.1 and tell them to open it on this machine.
+Run `{{TURN_ON}}`. It turns the Inbox on, starts it in the background (or finds the running one), opens the window in the browser, prints its URL, then connects the agents it finds on this computer that are not connected yet, and exits. Its stderr names them ("Connected Codex and Gemini CLI to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL it printed and tell them to open it on this machine.
 
 ## 3. Read the guide and connect yourself
 
@@ -43,8 +42,8 @@ Run `plannotator inbox --help` and read all of it. It is the installed release's
 
 Use the host you named in step 1b.
 
-- If step 2.2 already connected you, or your host's config already has a `plannotator-inbox` server that runs the `plannotator` binary, you are done here.
-- Otherwise follow the guide's "Connecting yourself" section for your host. Do this even when you are an editor's agent (VS Code, Zed, JetBrains, Goose): `plannotator inbox` never changes editors by itself, so you add the entry for yourself. Use the absolute path from step 1 wherever a command names `plannotator`.
+- If step 2 already connected you, or your host's config already has a `plannotator-inbox` server that runs the `plannotator` binary, you are done here.
+- Otherwise follow the guide's "Connecting yourself" section for your host. Do this even when you are an editor's agent (VS Code, Zed, JetBrains, Goose): `{{TURN_ON}}` never changes editors by itself, so you add the entry for yourself. Use the absolute path from step 1 wherever a command names `plannotator`.
 - If you notice other editors or agents on this computer that are not connected, ask the person before you add an entry for any of them, and add only the ones they agree to.
 
 Tell the person when a restart is needed. A connection takes effect when a session starts, never in the session that is running now. Do not wait for it: step 4 works without it.

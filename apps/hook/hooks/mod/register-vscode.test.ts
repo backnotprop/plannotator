@@ -65,6 +65,8 @@ function machine() {
     files: new Map<string, string>([
       ['/bin/sh', ''],
       [inboxRegistryPathOf(DATA), REGISTRY],
+      // The person turned the Inbox on here (inbox-turned-on.ts).
+      [`${DATA}/inbox/turned-on`, '{"on":true,"by":"command"}'],
     ]),
     /** Ids the Inbox heard `delivered` for. */
     delivered: [] as string[],
