@@ -89,6 +89,30 @@ test("a change moves the Agents signature (the windows read the list again)", as
   expect(live.agentsSignature(0)).not.toBe(up);
 });
 
+test("a prompt set and answered between two looks still moves the signature (a window that read it in between reads again)", async () => {
+  const { live, poll, state } = world();
+  await poll({});
+  const before = live.agentsSignature(0);
+  state({ [INBOX_BLOCKED_FIELD]: { kind: "permission" } });
+  state({});
+  const after = live.agentsSignature(0);
+  expect(after).not.toBe(before);
+  // The timer keeps no sample while no window listens: any number of changes since its last one still differ.
+  state({ [INBOX_BLOCKED_FIELD]: { kind: "permission" } });
+  state({});
+  expect(live.agentsSignature(0)).not.toBe(before);
+  expect(live.agentsSignature(0)).not.toBe(after);
+  // A turn that ends and starts again between two looks: moved too. Nothing changed: not moved.
+  const turned = live.agentsSignature(0);
+  state({ busy: false });
+  state({ busy: true });
+  expect(live.agentsSignature(0)).not.toBe(turned);
+  const still = live.agentsSignature(0);
+  await poll({});
+  state({});
+  expect(live.agentsSignature(0)).toBe(still);
+});
+
 test("a body whose word is older than the one held changes nothing; one without blocked_at (an older connection) stands", async () => {
   const { live, poll, state, blocked } = world();
   await poll({});
