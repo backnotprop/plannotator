@@ -13,6 +13,8 @@ const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as co
 /** What the engine names a plugin's registered tool (the mock answers with this). */
 const TOOL_PREFIX = 'mcp__plugin_plannotator_tools__'
 const TOOL = `${TOOL_PREFIX}plannotator`
+/** The Inbox's gate (packages/shared/inbox/turned-on.ts): the person's own `plannotator inbox` writes it. */
+const TURNED_ON = '/home/me/.plannotator/inbox/turned-on'
 
 /** The world beneath the mod: a session, a file map, and a CLI that comes up at once. */
 function world(
@@ -38,9 +40,12 @@ function world(
     /** Holds every `$.tool.register` until it settles; `onRegister` runs as each one arrives. */
     toolRegistered?: Promise<void>
     onRegister?: (name: string) => void
+    /** The person never ran `plannotator inbox` here: no `inbox/turned-on` mark (by default there is one). */
+    noMark?: boolean
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
+  if (!options.noMark && !files.has(TURNED_ON)) files.set(TURNED_ON, '{"on":true,"by":"command"}')
   const runs: string[][] = []
   const submits: string[] = []
   const logs: string[] = []
@@ -636,8 +641,31 @@ describe('register', () => {
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
     expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'snooze_thread', 'thread_pulls', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
-    expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
+    expect([...w.files.keys()].filter((path) => path.includes('/inbox') && path !== TURNED_ON)).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+  })
+
+  // The Inbox is off until the person runs it (inbox-turned-on.ts): no tool, no reminder, nothing asked or started.
+  test('the person never ran plannotator inbox here: no plannotator_inbox, no reminder, nothing run', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { fetch: inbox(TOOLS, calls), noMark: true })
+    await $.session.start(SESSION)
+    await $.prompt.submit({ text: 'Refactor the handler.' })
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(w.contexts).toEqual([null])
+    expect(calls).toEqual([])
+    expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
+    expect(w.files.has(TURNED_ON)).toBe(false)
+  })
+
+  // An install from before the mark that only agents ever started: decided off once, and written.
+  test('an Inbox only agents ever started (inbox.json, no person files, no mark): no plannotator_inbox, decided off', async ($: any, on: any) => {
+    const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), noMark: true })
+    await $.session.start(SESSION)
+
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
+    expect(JSON.parse(w.files.get(TURNED_ON)!)).toMatchObject({ on: false, by: 'update-agent-only' })
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {

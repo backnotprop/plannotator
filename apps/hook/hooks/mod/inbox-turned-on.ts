@@ -29,6 +29,7 @@ export async function inboxTurnedOnHere(host: Host, dataDir: string, testOn: boo
     const path = `${dataDir}/inbox/${file.name}`
     if (file.read) inbox[file.name] = await readOf(host, path)
     else if (file.dir) inbox[file.name] = (await host.exists(path).catch(() => true)) ? '' : undefined
+    else if (!(await host.exists(path).catch(() => true))) inbox[file.name] = undefined
     else {
       const size = await host.fileSize(path).catch(() => -1)
       inbox[file.name] = size === null || size === 0 ? undefined : size < 0 ? null : ''
