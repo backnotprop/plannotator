@@ -4,7 +4,7 @@
  * `<root>/data` inboxScratch marks as turned on). Registered by inbox.spec.ts, so Browser smoke runs them on every PR.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test } from './inbox-test';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -133,6 +133,34 @@ export function turnedOnCases(binary: string): void {
       } finally {
         await removeInboxScratch(root);
       }
+    }
+  });
+
+  // --open connects the agents it finds, but only after its URL is out, and returns within its callers' 30 s wait.
+  test('Inbox --open prints its URL before it connects the agents it finds, and returns within 30 s', async () => {
+    const root = inboxScratch('plannotator-inbox-open-connect-e2e-');
+    try {
+      const { PLANNOTATOR_INBOX_CONNECT: _off, ...env } = realRuleEnv(root, SSH);
+      // An agent the connect finds: Cursor, in the sandbox's agent home.
+      mkdirSync(join(env.PLANNOTATOR_DATA_DIR, 'agents-home', '.cursor'), { recursive: true });
+      // stdout and stderr into one file, so their order is kept.
+      const out = join(root, 'open.out');
+      const fd = openSync(out, 'w');
+      const started = Date.now();
+      let run: ReturnType<typeof spawnSync>;
+      try {
+        run = spawnSync(binary, ['inbox', '--open'], { env, timeout: 30_000, stdio: ['ignore', fd, fd] });
+      } finally {
+        closeSync(fd);
+      }
+      expect([run.error?.message ?? null, run.status]).toEqual([null, 0]);
+      expect(Date.now() - started).toBeLessThan(30_000);
+      const lines = readFileSync(out, 'utf8').split('\n');
+      const urlAt = lines.findIndex((line) => URL_LINE.test(line.trim()));
+      const connectedAt = lines.findIndex((line) => /^Connected .*Cursor/.test(line));
+      expect([urlAt >= 0, connectedAt > urlAt]).toEqual([true, true]);
+    } finally {
+      await removeInboxScratch(root);
     }
   });
 

@@ -368,13 +368,16 @@ function reportConnect(report: InboxConnectReport | undefined): void {
  * computer, through its token-guarded connection route. An Inbox that
  * predates the route answers 404, and connects nothing.
  */
-async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
+/** `--open` returns within this, the connect included (its callers wait 30 s). */
+const OPEN_DONE_WITHIN_MS = 25_000;
+
+async function connectRunningInbox(entry: InboxRegistryEntry, timeoutMs = 40_000): Promise<void> {
   try {
     const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/connect`, {
       method: "POST",
       headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
       body: "{}",
-      signal: AbortSignal.timeout(40_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return;
     const body = (await response.json()) as { connect?: InboxConnectReport };
@@ -898,6 +901,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
+    const startedAt = Date.now();
     try {
       const before = await inboxStatus(dataDir);
       const entry = await ensureInboxRunning(dataDir, { tailscale });
@@ -923,6 +927,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
       process.stdout.write(`${url}\n`);
+      // --open is the setup's one step: after the URL is out, it connects the agents it finds, as the person's bare
+      // run does, within the wait of the callers that run it (the mod's /plannotator-inbox and Droid give the whole
+      // command 30 s). What is not done by then is done at the next run.
+      if (open && connect) await connectRunningInbox(entry, Math.max(1_000, OPEN_DONE_WITHIN_MS - (Date.now() - startedAt)));
       process.exit(0);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
