@@ -64,7 +64,7 @@ test("the Settings switch writes config.json's key, answers with it, and refuses
   expect(((await off.json()) as { split_view?: unknown }).split_view).toEqual({ on: false });
   expect(saved()).toBe(false);
   for (const bad of [{ on: "yes" }, true, { on: true, extra: 1 }]) {
-    expect((await save({ split_view: bad })).status).toBe(400);
+    expect((await save({ split_view: bad })).status).toBe(422);
   }
   expect(saved()).toBe(false);
 });
