@@ -24,6 +24,14 @@ struct PlannotatorInboxApp: App {
 
 struct RootView: View {
   @Environment(AppModel.self) private var model
+  /// The pairing link the sheet shows, once its words are measured, and their height.
+  @State private var offered: PairLink?
+  @State private var offeredHeight: CGFloat = 0
+  /// The width the pairing sheet was last shown at, as the sheet tells it, so its words are measured at the width
+  /// they are shown at; the screen's width before it was ever shown (an iPhone sheet's content is as wide).
+  @State private var rootWidth: CGFloat = 0
+  @State private var sheetWidth: CGFloat?
+  private var measureWidth: CGFloat { sheetWidth ?? rootWidth }
 
   var body: some View {
     Group {
@@ -37,7 +45,25 @@ struct RootView: View {
       }
     }
     .background(Token.background.ignoresSafeArea())
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rootWidth = $0 }
     .animation(.default, value: model.session?.computer.id)
-    .sheet(item: Bindable(model).offered) { link in OfferedPairingSheet(link: link).environment(model) }
+    // A link offered is measured off screen first, at the sheet's width, so the sheet opens at its own height.
+    .background(alignment: .top) {
+      if let link = model.offered, offered?.id != link.id, measureWidth > 0 {
+        OfferedPairingContent(link: link)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(width: measureWidth)
+          .hidden()
+          .accessibilityHidden(true)
+          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            offeredHeight = height
+            offered = link
+          }
+      }
+    }
+    .onChange(of: model.offered?.id) { _, now in if now == nil { offered = nil } }
+    .sheet(item: Binding(get: { offered }, set: { if $0 == nil { model.offered = nil; offered = nil } })) { link in
+      OfferedPairingSheet(link: link, initial: offeredHeight) { sheetWidth = $0 }.environment(model)
+    }
   }
 }
