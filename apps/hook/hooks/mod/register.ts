@@ -147,6 +147,7 @@ import {
   withSessionTitles,
 } from './inbox'
 import { inboxAgentTool, inboxPlaceFromEnv, inboxReminderFor, type InboxPlace, type InboxToolInfo } from './inbox-contract'
+import { inboxTurnedOnHere } from './inbox-turned-on'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
 import { isAbsolutePath } from './paths'
@@ -943,14 +944,25 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     setBy: await $.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY'),
     sessionId: String(await $.session.id()),
   })
+  const debugPath = debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null
+  // The Inbox only once the person turned it on here (inbox-turned-on.ts), and only where its switch allows it.
+  // A test run's knob, or the test sandbox for a scratch data dir (in the temp folder) only (turned-on.ts testRunCountsOn).
+  const testKnob = await $.env.get('PLANNOTATOR_TEST_INBOX_ON')
+  const tmp = (await $.env.get('TMPDIR'))?.replace(/\/+$/, '')
+  const scratch = /^(?:\/private)?\/(?:tmp|var\/folders)\//.test(dataDir) || (!!tmp && dataDir.startsWith(`${tmp}/`))
+  const testOn = testKnob === '1' || (testKnob !== '0' && !!(await $.env.get('PLANNOTATOR_TEST_SANDBOX')) && scratch)
+  const inboxOn =
+    features.inboxTool &&
+    resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText) &&
+    (await inboxTurnedOnHere(hostOf($, debugPath), dataDir, testOn).catch(() => true))
   return {
     dataDir,
-    debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
+    debugPath,
     agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
     // Another session's `0` (its marker names that session) counts as unset here.
     planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(planSwitch === 'clear' ? undefined : planSwitchValue, configText),
-    inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
-    inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    inboxTool: inboxOn,
+    inboxReminder: features.wake && inboxOn && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
     panel: host.panel,
@@ -1004,9 +1016,10 @@ async function registerTool($: Engine): Promise<void> {
 }
 
 /**
- * Register `plannotator_inbox` (inbox.ts): its actions are the tools the Inbox
- * offers, so an older Inbox gives fewer actions; before any Inbox ran here,
- * the list bundled with the mod (the first call starts the Inbox).
+ * Register `plannotator_inbox` (inbox.ts), once the person turned the Inbox on
+ * here (resolveAllowed): its actions are the tools the Inbox offers, so an
+ * older Inbox gives fewer actions; before any Inbox ran here, the list bundled
+ * with the mod (the first call starts the Inbox).
  */
 async function registerInboxTool($: Engine, settings: Allowed): Promise<void> {
   const host = hostOf($, settings.debugPath)

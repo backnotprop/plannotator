@@ -30,6 +30,7 @@ packages/ui/components/CodeFilePopout.commentFolds.test.tsx
 packages/ui/hooks/useVimSelection.test.tsx
 packages/ui/hooks/useVimSelection.selectionScope.test.tsx
 packages/ui/hooks/useModelCatalogs.dom.test.tsx
+packages/ui/hooks/useAgentJobs.dom.test.tsx
 packages/ui/hooks/useAIProviderActivation.dom.test.tsx
 packages/ui/components/ModelSourceHint.dom.test.tsx
 packages/ui/components/ai/AIProviderBar.dom.test.tsx
@@ -525,11 +526,6 @@ packages/editor/App.sessionTitle.test.tsx
 packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
-packages/ui/components/blocks/directiveRenderer.seam.test.tsx
-packages/canvas/react/objects.dom.test.tsx
-packages/canvas/snapshot/CanvasStage.dom.test.tsx
-packages/canvas/react/HtmlItem.dom.test.tsx
-packages/canvas/react/ChartView.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx

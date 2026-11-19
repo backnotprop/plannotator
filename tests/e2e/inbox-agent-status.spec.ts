@@ -16,7 +16,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from './in
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
+import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxBlockedField } from '../../packages/shared/inbox/connection';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -38,11 +38,16 @@ function bridge(path: string, body: Record<string, unknown>) {
   return fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 }
 
-/** One live session: the bridge's long-poll, saying `busy` (or not, for a host that reports no turns) and `blocked`. */
+/**
+ * One live session: the bridge's long-poll, saying `busy` (or not, for a host that reports no turns) and `blocked`
+ * with `blocked_at` as the real connections do, so a poll built before a `state` event and answered after it never
+ * undoes it.
+ */
 class Poll {
   private stopped = false;
   private readonly loop: Promise<void>;
   blocked: 'permission' | 'question' | null = null;
+  private blockedAt = Date.now();
   constructor(
     readonly session: string,
     readonly host: string,
@@ -53,7 +58,7 @@ class Poll {
   }
 
   private body(): Record<string, unknown> {
-    return { session: this.session, host: this.host, project_path: this.projectPath, ...(this.busy === null ? {} : { busy: this.busy }), ...(this.blocked ? { blocked: { kind: this.blocked } } : {}) };
+    return { session: this.session, host: this.host, project_path: this.projectPath, ...(this.busy === null ? {} : { busy: this.busy }), ...inboxBlockedField(this.blocked, this.blockedAt) };
   }
 
   private async run(): Promise<void> {
@@ -66,6 +71,7 @@ class Poll {
   /** What a plugin does the moment a prompt comes up or goes: a `state` event. */
   async say(blocked: 'permission' | 'question' | null): Promise<void> {
     this.blocked = blocked;
+    this.blockedAt = Math.max(Date.now(), this.blockedAt + 1);
     const response = await bridge(INBOX_BRIDGE_EVENT_PATH, { ...this.body(), type: 'state' });
     expect(response.ok).toBe(true);
   }
