@@ -2,12 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxPullStacks, type InboxPull } from "@plannotator/core/inbox-types";
+import { inboxPullStacks, type InboxLaunchAgent, type InboxPull } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
 import { readLastLaunchChoice, writeLastLaunchChoice } from "./inbox-launch-choice";
-import { pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
+import type { LaunchHost } from "./inbox-launch-host";
+import { lastStartedReviewAgent, pullRiskAutoAgent, pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -51,7 +52,16 @@ const pull: InboxPull = {
   merged_at: null,
 };
 
-function setup(full: boolean) {
+const CODEX = "codex" as InboxLaunchAgent;
+const codexHost = (available = true): LaunchHost => ({
+  ...fakeLaunchHost().host,
+  agent: CODEX,
+  name: "Codex",
+  available: async () => (available ? { ok: true, version: "1.0.0" } : { ok: false, code: "not_installed", text: "Codex isn't installed." }),
+  choices: async () => ({ models: ["gpt-5", "gpt-5-mini"], efforts: ["low", "high"], effort_word: "Reasoning" }),
+});
+
+function setup(full: boolean, more: LaunchHost[] = []) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-pull-risk-auto-launch-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -80,19 +90,22 @@ function setup(full: boolean) {
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
-    hosts: () => [host],
+    hosts: () => [host, ...more],
   });
   restore.push(() => launch.stop());
+  const pick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, store.threadsOf(project.id).map((thread) => thread.thread_id)) };
   const start = pullRiskAutoStart({
+    ...pick,
     store,
-    launch,
     resolveProject: async () => project,
     projectOf: async () => project.id,
     skillsBlock: () => "",
     own: () => {},
   });
   const job = { key: pull.key, stack: inboxPullStacks([pull])[0]!, made: "picture_it" as const, agent: FAKE, level: "high" as const };
-  return { dataDir, store, project, fake, start, job };
+  const reviewOn = (agent: InboxLaunchAgent, at: string, key = `review-${agent}`) =>
+    store.startPersonThread({ project_id: project.id, body: `Review on ${agent}`, to: { host: agent, session: `launch:${key}` }, idempotency_key: key, launch: { id: key, agent, session_ref: null, folder, scratch: false, started_at: at } });
+  return { dataDir, store, project, fake, start, job, pick, reviewOn };
 }
 
 test("an automatic start keeps the person's remembered model and effort, and its thread says the Inbox sent it", async () => {
@@ -149,4 +162,33 @@ test("an automatic run whose thread was deleted is done, so the next one can sta
   expect(pullRiskAutoSettled(links, run)).toBe(false);
   w.store.deleteThread(thread_id);
   expect(pullRiskAutoSettled(links, run)).toBe(true);
+});
+
+test("with no agent set, the run starts the agent of the review the person started last, with its remembered model, and names it", async () => {
+  const w = setup(false, [codexHost()]);
+  writeLastLaunchChoice(w.dataDir, FAKE, { model: "sonnet", effort: "low" });
+  w.reviewOn(CODEX, "2026-11-18T08:00:00.000Z");
+  w.reviewOn(FAKE, "2026-11-18T09:00:00.000Z");
+  w.reviewOn(CODEX, "2026-11-18T10:00:00.000Z", "pull-risk-auto:github.com/northwind/web-app#1");
+  const named = await pullRiskAutoAgent(w.pick, null);
+  const { thread_id } = await w.start({ ...w.job, agent: null });
+  const launched = w.store.message(thread_id)!.launch!;
+  expect([launched.agent, launched.model, launched.effort]).toEqual([FAKE, "sonnet", "low"]);
+  expect(named).toMatchObject({ agent: launched.agent, name: "Fake Agent" });
+  expect(readLastLaunchChoice(w.dataDir, FAKE)).toEqual({ model: "sonnet", effort: "low" });
+});
+
+test("the agent set in config wins over the last review's", async () => {
+  const w = setup(false, [codexHost()]);
+  w.reviewOn(CODEX, "2026-11-18T09:00:00.000Z");
+  const { thread_id } = await w.start(w.job);
+  expect(w.store.message(thread_id)!.launch?.agent).toBe(FAKE);
+});
+
+test("the last review's agent no longer available: the first one that is", async () => {
+  const w = setup(false, [codexHost(false)]);
+  w.reviewOn(CODEX, "2026-11-18T09:00:00.000Z");
+  const { thread_id } = await w.start({ ...w.job, agent: null });
+  expect(w.store.message(thread_id)!.launch?.agent).toBe(FAKE);
+  expect(await pullRiskAutoAgent(w.pick, null)).toMatchObject({ agent: FAKE, name: "Fake Agent" });
 });

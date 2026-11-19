@@ -339,6 +339,7 @@ test("a start run again after a restart replays the same thread: no second agent
     resolveProject: async () => ({}) as never,
     projectOf: async () => "prj_web",
     skillsBlock: () => "",
+    lastReviewAgent: () => null,
     own: (layers, threadId, made) => owned.push([layers.map((layer) => layer.key), threadId, made]),
   });
   const job = { key: pr(880).key, stack: inboxPullStacks([pr(880)])[0]!, made: "picture_it" as const, agent: null, level: "high" as const };
@@ -413,6 +414,7 @@ test("the thread is the start: a PR link that can't be kept leaves it started, i
     resolveProject: async () => ({}) as never,
     projectOf: async () => "prj_web",
     skillsBlock: () => "",
+    lastReviewAgent: () => null,
     own: () => {
       throw new Error("pull-links.json can't be written");
     },

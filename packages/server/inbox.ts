@@ -347,7 +347,7 @@ import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
-import { pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
+import { lastStartedReviewAgent, pullRiskAutoAgent, pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
@@ -5240,6 +5240,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
   const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
+  const pullRiskAutoPick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, [...[...pullOwners.all().values()].map((owner) => owner.thread_id), ...pullOwners.started().keys()]) };
+  const pullRiskAutoAgentWords = async () => {
+    const configured = (loadConfig().inboxPullRisk as { auto?: { agent?: unknown } } | undefined)?.auto?.agent;
+    const picked = await pullRiskAutoAgent(pullRiskAutoPick, typeof configured === "string" && configured.trim() ? configured.trim() : null);
+    return picked ? { agent: picked.agent, name: picked.name } : null;
+  };
   pullRiskAuto = createPullRiskAuto({
     dataDir,
     settings: () => (codeReviewOn() ? inboxPullRiskAutoOf((loadConfig().inboxPullRisk as { auto?: unknown } | undefined)?.auto) : null),
@@ -5250,8 +5256,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hasThread: async (pull) => machines?.pullLinkedThere(pull.key) === true || !!linkInboxPulls([pull], pullLinkStore, new Map([[`${pull.host}/${pull.repo}`.toLowerCase(), await pullRepoProjects(pull)]]), pullOwnersNow())[pull.key],
     settled: (run) => pullRiskAutoSettled(pullLinkStore, run),
     start: pullRiskAutoStart({
+      ...pullRiskAutoPick,
       store,
-      launch,
       resolveProject,
       projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
       skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
@@ -6106,7 +6112,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pullRisk.save(body);
           pullRiskAuto?.resume();
         }
-        return json({ serverSession, ...pullRisk.answer(), auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 } });
+        return json({ serverSession, ...pullRisk.answer(), auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 }, auto_agent: await pullRiskAutoAgentWords() });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.
