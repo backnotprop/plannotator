@@ -50,7 +50,7 @@ A word the window shows that is not in `words.json` is written inside a componen
 `scripts/ci-affected.ts` selects it when a file the generators import or name changes. That means:
 - the door (`packages/server/inbox-devices.ts` and what it imports);
 - the outbox's write kinds;
-- every file the schema reads (`SCHEMA_SOURCES`: `packages/core/inbox-types.ts`, `packages/core/inbox-wire-models.ts`, `packages/core/question-block.ts` and the core files they reach);
+- every file the schema reads (`SCHEMA_SOURCES` in the generated `scripts/mobile/schema-sources.ts`: `packages/core/inbox-types.ts`, `packages/core/inbox-wire-models.ts`, `packages/core/question-block.ts` and the core files they reach). When a wire type starts importing a new file, the list is stale and `bun scripts/mobile/all.ts` rewrites it;
 - the window's error table in `packages/server/inbox.ts`;
 - the default theme, `packages/ui/themes/plannotator.css` (another theme file does not select it);
 - a module a word comes from (`scripts/mobile/words.ts` imports them);

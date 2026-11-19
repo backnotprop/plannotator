@@ -39,7 +39,7 @@ const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\
 describe('the contract is up to date', () => {
   for (const [name, generate] of GENERATORS) {
     test(`${name} is up to date (else: ${REGENERATE})`, async () => {
-      expect(emit(await generate(), true)).toEqual([]);
+      expect(emit(await generate(), true), `stale files: run \`${REGENERATE}\` and commit them`).toEqual([]);
     }, 10_000);
   }
 
@@ -56,10 +56,10 @@ describe('the contract is up to date', () => {
     expect(schemaWith({ [file]: edited })).toEqual(buildSchema());
   }, 10_000);
 
-  test('the schema names what it reads', () => {
+  test(`the schema names what it reads (else: ${REGENERATE})`, () => {
     const schema = buildSchema() as { $defs: Record<string, { 'x-source'?: string }> };
     const sources = new Set(Object.values(schema.$defs).map((d) => d['x-source']).filter((s): s is string => !!s));
-    for (const s of sources) expect(SCHEMA_SOURCES as readonly string[], s).toContain(s);
+    for (const s of sources) expect(SCHEMA_SOURCES as readonly string[], `${s} is read but not listed: run \`${REGENERATE}\` and commit`).toContain(s);
   });
 
   test('the check finds a stale or a missing file', () => {
