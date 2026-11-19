@@ -143,8 +143,8 @@ async function review(): Promise<{ url: string; close: () => Promise<void> }> {
   return { url, close };
 }
 
-async function open(browser: Browser, url: string, viewport = { width: 1280, height: 900 }) {
-  const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
+async function open(browser: Browser, url: string, viewport = { width: 1280, height: 900 }, touch = false) {
+  const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...(touch ? { hasTouch: true, isMobile: true } : {}) });
   const seen = [
     ['plannotator-plan-look-choice-resolved', 'true'],
     ['plannotator-edit-mode-announcement-seen', '3'],
@@ -187,6 +187,22 @@ async function shot(page: Page, name: string) {
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(shots, `${name}.png`) });
 }
+
+async function headerShot(page: Page, header: Locator, name: string) {
+  await page.waitForTimeout(300);
+  const boxes = [(await header.boundingBox())!];
+  const popover = page.locator('[data-semantic-file-popover]');
+  if (await popover.count()) boxes.push((await popover.last().boundingBox())!);
+  const view = page.viewportSize()!;
+  const x = Math.max(0, Math.min(...boxes.map((b) => b.x)) - 12);
+  const y = Math.max(0, Math.min(...boxes.map((b) => b.y)) - 12);
+  const right = Math.min(view.width, Math.max(...boxes.map((b) => b.x + b.width)) + 12);
+  const bottom = Math.min(view.height, Math.max(...boxes.map((b) => b.y + b.height)) + 12);
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), clip: { x, y, width: right - x, height: bottom - y } });
+}
+
+const struck = (page: Page) => page.evaluate(() => [...document.querySelectorAll('[data-file-header] *')].filter((el) => getComputedStyle(el).textDecorationLine.includes('line-through')).length);
+const outlined = (chip: Locator) => chip.locator('span').last().evaluate((el) => getComputedStyle(el).boxShadow !== 'none');
 
 let browser: Browser;
 test.beforeAll(async () => {
@@ -281,6 +297,60 @@ test("the diff display switch and a file's switch in its sem chip each bring bac
     await expect(note(page, 'semantic')).toHaveCount(0);
     await expect(page.getByText('Moved 4 lines')).toHaveCount(0);
     await context.close();
+  } finally {
+    await session.close();
+  }
+});
+
+test("a file's sem chip keeps its popover open while its switch flips the file, by mouse and by a tap on a phone", async () => {
+  const session = await review();
+  try {
+    const { context, page } = await open(browser, session.url);
+    await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
+    const header = page.locator('[data-file-header]').filter({ hasText: 'users.ts' }).first();
+    const chip = header.locator('[data-semantic-note]');
+    const popover = page.locator('[data-semantic-file-popover]');
+    const toggle = popover.getByRole('switch', { name: 'Show in the diff' });
+    await chip.scrollIntoViewIfNeeded();
+    expect(await outlined(chip)).toBe(false);
+    await headerShot(page, header, 'chip-a-on');
+    await chip.hover();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await headerShot(page, header, 'chip-b-popover-switch-on');
+    await toggle.click();
+    await expect(chip).toHaveAttribute('data-semantic-note', 'off');
+    await page.waitForTimeout(600);
+    await expect(popover).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(await outlined(chip)).toBe(true);
+    expect(await struck(page)).toBe(0);
+    await headerShot(page, header, 'chip-c-flipped-popover-open-switch-off');
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    await chip.hover();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await page.mouse.move(5, 895);
+    await expect(popover).toHaveCount(0);
+    await context.close();
+
+    const phone = await open(browser, session.url, { width: 390, height: 844 }, true);
+    await phone.page.locator('[data-changes-tree] [data-type="item"][data-item-path$="users.ts"]').first().tap({ timeout: 10_000 });
+    await phone.page.getByText('All changes', { exact: true }).first().tap({ timeout: 10_000 });
+    const small = phone.page.locator('[data-file-header]').filter({ hasText: 'users.ts' }).first();
+    const tapped = small.locator('[data-semantic-note]');
+    await expect(tapped).toHaveAttribute('data-semantic-note', /^(semantic|off)$/, { timeout: 30_000 });
+    const was = await tapped.getAttribute('data-semantic-note');
+    await tapped.scrollIntoViewIfNeeded();
+    await tapped.tap();
+    const phoneToggle = phone.page.locator('[data-semantic-file-popover]').getByRole('switch', { name: 'Show in the diff' });
+    await expect(phoneToggle).toHaveAttribute('aria-checked', String(was === 'semantic'));
+    await phoneToggle.tap();
+    await expect(tapped).toHaveAttribute('data-semantic-note', was === 'semantic' ? 'off' : 'semantic');
+    await phone.page.waitForTimeout(600);
+    await expect(phoneToggle).toHaveAttribute('aria-checked', String(was !== 'semantic'));
+    expect(await struck(phone.page)).toBe(0);
+    await headerShot(phone.page, small, 'chip-d-phone-390-popover-open');
+    await phone.context.close();
   } finally {
     await session.close();
   }
