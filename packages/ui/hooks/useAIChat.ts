@@ -674,9 +674,12 @@ export function useAIChat({
       pendingAbortRef.current = postServerAbort();
     }
     setSessionId(null);
+    updateMessages(prev => prev.map(m => m.response.isStreaming || m.response.status
+      ? { ...m, response: { ...m.response, isStreaming: false, status: undefined } }
+      : m));
     setIsCreatingSession(false);
     setIsStreaming(false);
-  }, [postServerAbort, setSessionId]);
+  }, [postServerAbort, setSessionId, updateMessages]);
 
   const resetThread = useCallback(() => {
     sessionEpochRef.current += 1;

@@ -270,6 +270,30 @@ describe.if(hasDom)('useAIChat reload persistence', () => {
     expect(chat.current!.messages[0].response.text).toBe('answer 1');
   });
 
+  test('a provider change stops the old answer immediately without losing its partial text', async () => {
+    const fake = fakeTransport();
+    let stream: ReadableStreamDefaultController<Uint8Array>;
+    setAITransport({ ...fake.transport, query: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        stream = controller;
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'text_delta', delta: 'partial' })}\n\n`));
+      },
+    })) });
+    const chat = await mount();
+    let asked = Promise.resolve();
+    await act(async () => { asked = chat.current!.ask({ prompt: 'old provider' }); });
+    expect(chat.current!.messages[0].response.isStreaming).toBe(true);
+    await act(async () => { chat.current!.resetSession(); });
+    expect(chat.current!.messages[0].response.text).toBe('partial');
+    expect(chat.current!.messages[0].response.isStreaming).toBe(false);
+    expect(chat.current!.sessionId).toBeNull();
+    await act(async () => { stream!.error(new Error('Old provider failed')); await asked; });
+    expect(chat.current!.error).toBeNull();
+    setAITransport(fake.transport);
+    await act(async () => { await chat.current!.ask({ prompt: 'new provider' }); });
+    expect(fake.sessions).toHaveLength(2);
+  });
+
   test('a question awaiting the previous abort cannot enter the next server chat', async () => {
     const fake = fakeTransport();
     let stream: ReadableStreamDefaultController<Uint8Array>;
