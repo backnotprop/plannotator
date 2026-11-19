@@ -193,6 +193,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Undo go to each machine that holds it (approval "inbox-thread-tags").
   "POST threads/:id/tags": "set",
   "POST initiatives/:id": "set",
+  // A project's tags live on the project's own machine, named by the tag's name, as a thread's do.
+  "POST projects/:id/tags": "set",
   // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
   "POST tag-colours": "set",
   // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,

@@ -7531,7 +7531,7 @@
     },
     {
       "id": "files-027",
-      "title": "Changed chip: \"Changed since sent · Open the version it sent\" / \"Showing the sent version\" / \"The file is gone; showing the sent copy\"",
+      "title": "Changed chip: \"Changed since sent · View sent version\" / \"Showing the sent version · View current file\" / \"The file is gone; showing the sent copy\"",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -19837,6 +19837,272 @@
       "why": "L-door: after v1, slice S9 (owner, 2026-11-18: managing the computer comes later): reading the update state belongs with doing the update (foundation-036).",
       "reason": "L-door",
       "source": "seed: the door's table (F1)",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-projects-id-tags",
+      "title": "door:POST projects/:id/tags",
+      "surface": [
+        "door:POST projects/:id/tags"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-projects-id-tags",
+      "title": "window:/api/inbox/projects/:id/tags",
+      "surface": [
+        "window:/api/inbox/projects/:id/tags"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-projectfolder-tags",
+      "title": "field:ProjectFolder.tags",
+      "surface": [
+        "field:ProjectFolder.tags"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-last-agent",
+      "title": "field:InboxListRow.last_agent",
+      "surface": [
+        "field:InboxListRow.last_agent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-kind-permission",
+      "title": "enum:InboxAgentMark.kind.permission",
+      "surface": [
+        "enum:InboxAgentMark.kind.permission"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-kind-question",
+      "title": "enum:InboxAgentMark.kind.question",
+      "surface": [
+        "enum:InboxAgentMark.kind.question"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-state-blocked",
+      "title": "enum:InboxAgentMark.state.blocked",
+      "surface": [
+        "enum:InboxAgentMark.state.blocked"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-state-working",
+      "title": "enum:InboxAgentMark.state.working",
+      "surface": [
+        "enum:InboxAgentMark.state.working"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-where-inbox",
+      "title": "enum:InboxAgentMark.where.inbox",
+      "surface": [
+        "enum:InboxAgentMark.where.inbox"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-where-terminal",
+      "title": "enum:InboxAgentMark.where.terminal",
+      "surface": [
+        "enum:InboxAgentMark.where.terminal"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-status-mark",
+      "title": "field:InboxAgent.status_mark",
+      "surface": [
+        "field:InboxAgent.status_mark"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-turns-unknown",
+      "title": "field:InboxAgent.turns_unknown",
+      "surface": [
+        "field:InboxAgent.turns_unknown"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentmark-kind",
+      "title": "field:InboxAgentMark.kind",
+      "surface": [
+        "field:InboxAgentMark.kind"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentmark-state",
+      "title": "field:InboxAgentMark.state",
+      "surface": [
+        "field:InboxAgentMark.state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentmark-where",
+      "title": "field:InboxAgentMark.where",
+      "surface": [
+        "field:InboxAgentMark.where"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentsgroup-status-marks",
+      "title": "field:InboxAgentsGroup.status_marks",
+      "surface": [
+        "field:InboxAgentsGroup.status_marks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-setting-agent-status",
+      "title": "setting:agent_status",
+      "surface": [
+        "setting:agent_status"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-sound",
+      "title": "frame:sound",
+      "surface": [
+        "frame:sound"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-launch-note",
+      "title": "field:InboxMessageWire.launch_note",
+      "surface": [
+        "field:InboxMessageWire.launch_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
       "ios": {
         "state": "not-started"
       }

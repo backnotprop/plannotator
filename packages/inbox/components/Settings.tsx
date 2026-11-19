@@ -12,6 +12,7 @@ import { ConnectPicker } from './ConnectPicker';
 import { AccountsRefresh, AccountsSection } from './Accounts';
 import { LinearKeySettings } from './LinearKeySettings';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
+import { AgentStatusRow } from '../agents/AgentStatusSwitch';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
@@ -109,7 +110,7 @@ export interface SettingsPageProps {
   onToggleBro?: (next: boolean) => void;
   /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
   onToggleFloatDrafts?: (next: boolean) => void;
-  /** Settings → General → When an agent asks you → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
+  /** Settings → General → When an agent sends you something → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
   onToggleMarkReadWarning?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -141,7 +142,7 @@ export interface SettingsPageProps {
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none.
    */
   updateRow?: ReactNode;
-  /** The question sound's row, under the notifications switch (sound.ts). */
+  /** The sound's row, under the notifications switch (sound.ts). */
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
@@ -357,6 +358,8 @@ function GeneralSection({
               </button>
             </span>
           </div>
+          {/* Agent status (agents/agentStatus.ts, owner 2026-11-18): every agent's mark; the ⋮ menu has the same switch. */}
+          <AgentStatusRow />
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>
@@ -389,7 +392,7 @@ function GeneralSection({
       </section>
       <KeyboardSettings />
       <section className="ib-sgroup" data-settings-notifications="" aria-labelledby="ib-g-attention">
-        <h2 id="ib-g-attention">When an agent asks you</h2>
+        <h2 id="ib-g-attention">When an agent sends you something</h2>
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-txt">

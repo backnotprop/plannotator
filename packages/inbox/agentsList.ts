@@ -45,15 +45,26 @@ export function setInboxAgents(next: unknown): void {
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
             // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
             ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
+            // The person's "Agent status" setting (agents/agentStatus.ts): this Inbox's own group says it.
+            ...(group.status_marks === true ? { status_marks: true as const } : {}),
           };
         })
     : null;
   const json = JSON.stringify(clean);
-  if (json === currentJson) return;
-  current = clean === null ? null : Object.freeze(clean);
-  currentJson = json;
-  for (const listener of listeners) listener();
-  for (const listener of quiet) listener();
+  if (json !== currentJson) {
+    current = clean === null ? null : Object.freeze(clean);
+    currentJson = json;
+    for (const listener of listeners) listener();
+    for (const listener of quiet) listener();
+  }
+  for (const listener of reads) listener();
+}
+
+const reads = new Set<() => void>();
+/** Hear every list read, one that changes nothing included (agents/agentStatus.ts: a landed press yields to the list). */
+export function onInboxAgentsRead(listener: () => void): () => void {
+  reads.add(listener);
+  return () => reads.delete(listener);
 }
 
 const quiet = new Set<() => void>();

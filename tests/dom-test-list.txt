@@ -261,6 +261,7 @@ packages/inbox/tabCountWindow.test.tsx
 packages/inbox/phoneList.test.tsx
 packages/inbox/listHeaderPath.test.tsx
 packages/inbox/heldNoticeLine.test.tsx
+packages/inbox/heldBar.test.tsx
 packages/inbox/listLabels.test.tsx
 packages/inbox/projectLabelRows.test.tsx
 packages/inbox/projectLabelHeld.test.tsx
@@ -282,6 +283,7 @@ packages/inbox/listGroups.test.tsx
 packages/inbox/showOpensGroups.test.tsx
 packages/inbox/listNewPill.test.tsx
 packages/inbox/showLight.test.tsx
+packages/inbox/holdView.test.tsx
 packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
@@ -326,6 +328,7 @@ packages/ui/components/blocks/QuestionContext.lines.test.tsx
 packages/ui/components/blocks/QuestionBlock.host.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx
+packages/ui/components/blocks/QuestionBlock.change.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
 packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
@@ -521,6 +524,10 @@ packages/editor/App.sessionTitle.test.tsx
 packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
+packages/ui/components/blocks/directiveRenderer.seam.test.tsx
+packages/canvas/react/objects.dom.test.tsx
+packages/canvas/snapshot/CanvasStage.dom.test.tsx
+packages/canvas/react/HtmlItem.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx
@@ -775,6 +782,7 @@ packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
+packages/inbox/agents/agentStatusMark.test.tsx
 packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
@@ -851,3 +859,6 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/inbox/projectTagMenu.test.tsx
+packages/inbox/projectTagsFilter.test.tsx
+packages/inbox/tagWritesPending.test.tsx

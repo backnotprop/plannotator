@@ -1077,7 +1077,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{actionLabel(action)}</span>
                     <span className="ib-sp-s">
-                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)}${busyWord(action.target) ? ` · ${busyWord(action.target)!.toLowerCase()}` : ''}`}
                     </span>
                   </span>
                 </div>
