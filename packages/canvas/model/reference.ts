@@ -4,12 +4,72 @@
  */
 import type { ReferenceObject, ReferenceTarget } from './types';
 
+/** One `xn--` label of a host name as the letters it stands for (RFC 3492), or null when it is not well formed. */
+function decodeLabel(label: string): string | null {
+  const input = label.slice(4);
+  const out: number[] = [];
+  const split = input.lastIndexOf('-');
+  for (let i = 0; i < Math.max(split, 0); i++) out.push(input.charCodeAt(i));
+  let n = 128;
+  let bias = 72;
+  let i = 0;
+  for (let at = split > 0 ? split + 1 : 0; at < input.length; ) {
+    const start = i;
+    for (let w = 1, k = 36; ; k += 36) {
+      if (at >= input.length) return null;
+      const c = input.charCodeAt(at++);
+      const digit = c >= 48 && c <= 57 ? c - 22 : c >= 97 && c <= 122 ? c - 97 : c >= 65 && c <= 90 ? c - 65 : 36;
+      if (digit >= 36) return null;
+      i += digit * w;
+      const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias;
+      if (digit < t) break;
+      w *= 36 - t;
+      if (!Number.isSafeInteger(w) || !Number.isSafeInteger(i)) return null;
+    }
+    const size = out.length + 1;
+    let delta = start === 0 ? Math.floor((i - start) / 700) : (i - start) >> 1;
+    delta += Math.floor(delta / size);
+    let k = 0;
+    for (; delta > 455; k += 36) delta = Math.floor(delta / 35);
+    bias = k + Math.floor((36 * delta) / (delta + 38));
+    n += Math.floor(i / size);
+    i %= size;
+    if (n > 0x10ffff) return null;
+    out.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...out);
+}
+
+/**
+ * A host name as a person would write it: `xn--mnchen-3ya.example` as `münchen.example`. A label that mixes
+ * Latin letters with Greek or Cyrillic ones stays as it was sent, because that mix is how one name is made to
+ * look like another.
+ */
+export function readableHost(host: string): string {
+  return host
+    .split('.')
+    .map((label) => {
+      if (!/^xn--/i.test(label)) return label;
+      const decoded = decodeLabel(label.toLowerCase());
+      if (!decoded || (/[a-z]/i.test(decoded) && /[\u0370-\u03ff\u0400-\u052f]/.test(decoded))) return label;
+      return decoded;
+    })
+    .join('.');
+}
+
+/** A file name short enough for one line, cut in the middle so that both its start and its ending (the version, the type) stay. */
+export function shortName(name: string, max = 34): string {
+  if (name.length <= max) return name;
+  const tail = Math.ceil((max - 1) * 0.55);
+  return `${name.slice(0, max - 1 - tail)}…${name.slice(-tail)}`;
+}
+
 /** A web address without its scheme or a trailing slash: what a bare card shows. */
 export function displayUrl(url: string): string {
   try {
     const parsed = new URL(url);
     const rest = `${parsed.pathname}${parsed.search}`.replace(/\/$/, '');
-    return `${parsed.hostname.replace(/^www\./, '')}${rest}`;
+    return `${readableHost(parsed.hostname.replace(/^www\./, ''))}${rest}`;
   } catch {
     return url;
   }
@@ -17,7 +77,7 @@ export function displayUrl(url: string): string {
 
 export function hostOf(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, '');
+    return readableHost(new URL(url).hostname.replace(/^www\./, ''));
   } catch {
     return '';
   }
@@ -26,7 +86,7 @@ export function hostOf(url: string): string {
 /** The plainest words for where a card points, used when it has no title yet. */
 export function referenceAddress(target: ReferenceTarget): string {
   if (target.kind === 'web') return displayUrl(target.url);
-  if (target.kind === 'artifact') return target.artifact.split('/').pop() || target.artifact;
+  if (target.kind === 'artifact') return shortName(target.artifact.split('/').pop() || target.artifact);
   return target.anchor || target.document || '';
 }
 

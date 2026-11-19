@@ -20,7 +20,7 @@
  */
 import type { CanvasStore } from '../events/store';
 import type { CanvasEvent } from '../events/types';
-import { isBoundEnd } from '../model/document';
+import { arrowPoints, isBoundEnd, selfLoop } from '../model/document';
 import { type Point, type Rect, rectsIntersect } from '../model/geometry';
 import { type ArrowEnd, type ArrowObject, type CanvasDocument, type CanvasObject, type ObjectId, type Side, isPlaced } from '../model/types';
 import type { DocumentIndex } from './document-index';
@@ -300,6 +300,11 @@ export class Router {
     const toRect = rectOf(doc, arrow.to);
     if (isBoundEnd(arrow.from) && !fromRect) return null;
     if (isBoundEnd(arrow.to) && !toRect) return null;
+    if (fromRect && isBoundEnd(arrow.from) && isBoundEnd(arrow.to) && arrow.from.object === arrow.to.object) {
+      // From an object back to itself: a loop round its corner, not a route.
+      const points = arrowPoints(selfLoop(fromRect));
+      return { points, bounds: boundsOfPoints(points), fromSide: 'e', toSide: 'n' };
+    }
     const sides = this.sidesOf(arrow, fromRect, toRect);
     const from: Anchor = fromRect
       ? { rect: fromRect, side: sides.from, point: portPoint(fromRect, sides.from!, this.along((arrow.from as { object: ObjectId }).object, fromRect, sides.from!, arrow.id)) }
@@ -324,7 +329,9 @@ export class Router {
       obstacles.push({ x: object.x, y: object.y, w: object.w, h: object.h, far: Math.abs(object.x + object.w / 2 - mid.x) + Math.abs(object.y + object.h / 2 - mid.y) });
     }
     if (obstacles.length > MAX_OBSTACLES) obstacles = obstacles.sort((a, b) => a.far - b.far).slice(0, MAX_OBSTACLES);
-    const points = routeOrthogonal(from, to, obstacles);
+    const found = routeOrthogonal(from, to, obstacles);
+    // A line always has two ends, even when they are the same place (an arrow of no length).
+    const points = found.length >= 2 ? found : [from.point, to.point];
     return { points, bounds: boundsOfPoints(points), fromSide: sides.from, toSide: sides.to };
   }
 

@@ -33,11 +33,57 @@ import { CanvasRegistry, CanvasRegistryProvider } from '../snapshot/registry';
 import type { SnapshotOpenRequest } from '../snapshot/SnapshotFigure';
 import { indexFor } from '../view/document-index';
 import { PlanPane } from './PlanPane';
+import { DATA_SETS, type DataSet, EMPTY_PLAN, FAR_PLAN, ONE_PLAN, STACKED_PLAN, bigPlan, createBigStore, createEmptyStore, createFarStore, createOneStore, createStackedStore, createWorstStore, worstPlan } from './worst';
 import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
 
 const params = new URLSearchParams(location.search);
 const bench = params.get('bench');
 const count = Number(params.get('n')) || (bench === 'plan' ? 50 : 2000);
+
+/** Dev only: which dataset the demo draws (`?data=worst`, see `worst.ts`). */
+const data = (DATA_SETS.some((set) => set.id === params.get('data')) ? params.get('data') : 'demo') as DataSet;
+
+function storeFor(set: DataSet): CanvasStore {
+  if (set === 'worst') return createWorstStore();
+  if (set === 'empty') return createEmptyStore();
+  if (set === 'one') return createOneStore();
+  if (set === 'huge') return createBigStore(2000);
+  if (set === 'max') return createBigStore(10_000);
+  if (set === 'stacked') return createStackedStore();
+  if (set === 'far') return createFarStore();
+  return createSampleStore();
+}
+function planFor(set: DataSet): string {
+  if (set === 'worst') return worstPlan();
+  if (set === 'empty') return EMPTY_PLAN;
+  if (set === 'one') return ONE_PLAN;
+  if (set === 'huge') return bigPlan(2000);
+  if (set === 'max') return bigPlan(10_000);
+  if (set === 'stacked') return STACKED_PLAN;
+  if (set === 'far') return FAR_PLAN;
+  return SAMPLE_PLAN;
+}
+
+/** The dev-only dataset switch: bottom centre, plain chrome, kept in the URL. */
+function DataToggle() {
+  const pick = (set: DataSet) => {
+    const next = new URLSearchParams(location.search);
+    if (set === 'demo') next.delete('data');
+    else next.set('data', set);
+    location.search = next.toString();
+  };
+  return (
+    <div role="radiogroup" aria-label="Data" style={{ position: 'fixed', left: '50%', bottom: 6, transform: 'translateX(-50%)', zIndex: 900, display: 'flex', gap: 2, padding: 2, background: '#e5e7eb', borderRadius: 8, font: '12px system-ui, sans-serif', maxWidth: 'calc(100vw - 12px)', overflowX: 'auto' }}>
+      {DATA_SETS.map((set) => (
+        <button key={set.id} type="button" role="radio" aria-checked={data === set.id} onClick={() => pick(set.id)} style={{ border: 0, borderRadius: 6, padding: '4px 8px', whiteSpace: 'nowrap', cursor: 'pointer', color: '#111', background: data === set.id ? '#fff' : 'transparent', boxShadow: data === set.id ? '0 1px 2px rgb(0 0 0 / 0.15)' : 'none' }}>
+          {set.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const snapshotCount = (count: number) => (count === 1 ? '1 snapshot' : `${count} snapshots`);
 
 const registry = new CanvasRegistry();
 
@@ -90,15 +136,20 @@ function BenchCanvas() {
 }
 
 export function App() {
-  return bench === 'canvas' ? <BenchCanvas /> : <PlanAndCanvas />;
+  return bench === 'canvas' ? <BenchCanvas /> : (
+    <>
+      <PlanAndCanvas />
+      {import.meta.env.DEV && params.get('toggle') !== '0' ? <DataToggle /> : null}
+    </>
+  );
 }
 
 function PlanAndCanvas() {
   const [dark, toggleTheme] = useTheme();
-  const store = useMemo<CanvasStore>(() => (bench === 'plan' ? createLargeStore(2000, count) : createSampleStore()), []);
+  const store = useMemo<CanvasStore>(() => (bench === 'plan' ? createLargeStore(2000, count) : storeFor(data)), []);
   const canvasId = store.getDocument().id;
   const [available, setAvailable] = useState(true);
-  const [markdown, setMarkdown] = useState(() => (bench === 'plan' ? createLongPlan(count) : SAMPLE_PLAN));
+  const [markdown, setMarkdown] = useState(() => (bench === 'plan' ? createLongPlan(count) : planFor(data)));
   const [request, setRequest] = useState<SnapshotOpenRequest | null>(null);
   const [arrived, setArrived] = useState<string | null>(null);
   // The plan alone is the product's case: the canvas is reached through a figure. Side by side is for
@@ -240,7 +291,7 @@ function PlanAndCanvas() {
               {SNAPSHOT_STRINGS.updateAll(behind.length)}
             </button>
           ) : null}
-          <span data-count>{findSnapshotBlocks(markdown).length} snapshots</span>
+          <span data-count>{snapshotCount(findSnapshotBlocks(markdown).length)}</span>
           <button type="button" className="pcv-btn" aria-pressed={dark} onClick={toggleTheme}>
             Dark
           </button>

@@ -9,7 +9,7 @@
  */
 import type { CanvasColor } from '../model/color';
 import { captureDocument } from '../model/capture';
-import { resolveArrow } from '../model/document';
+import { arrowPoints, resolveArrow } from '../model/document';
 import type { CanvasDocument, CanvasObject, SnapshotId } from '../model/types';
 import { isPlaced } from '../model/types';
 import { shapeOutline, toPath } from '../view/shape-outline';
@@ -89,11 +89,13 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
     const g = resolveArrow(doc, object);
     if (!g) return '';
     const stroke = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.arrow;
-    const angle = Math.atan2(g.to.y - g.from.y, g.to.x - g.from.x);
+    const points = arrowPoints(g);
+    const before = points[points.length - 2];
+    const angle = Math.atan2(g.to.y - before.y, g.to.x - before.x);
     const head = [0.42, -0.42]
       .map((spread) => `${n(g.to.x - 10 * Math.cos(angle + spread))},${n(g.to.y - 10 * Math.sin(angle + spread))}`)
       .join(' ');
-    return `<line x1="${n(g.from.x)}" y1="${n(g.from.y)}" x2="${n(g.to.x)}" y2="${n(g.to.y)}" stroke="${stroke}" stroke-width="1.5"/><polygon points="${n(g.to.x)},${n(g.to.y)} ${head}" fill="${stroke}"/>`;
+    return `<polyline points="${points.map((p) => `${n(p.x)},${n(p.y)}`).join(' ')}" fill="none" stroke="${stroke}" stroke-width="1.5"/><polygon points="${n(g.to.x)},${n(g.to.y)} ${head}" fill="${stroke}"/>`;
   }
   if (!isPlaced(object)) return '';
   const { x, y, w, h } = object;

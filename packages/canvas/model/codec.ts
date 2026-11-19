@@ -45,6 +45,12 @@ export const LIMITS = {
   title: 300,
   coordinate: 10_000_000,
   size: 20_000,
+  /**
+   * The widest or tallest a snapshot's rectangle can be: everything on a board at once, from an object at one
+   * end of the coordinate range to one at the other, with its padding. What a snapshot can capture and what
+   * a saved document may hold are this one bound (`readArea`), so a canvas that saved always loads.
+   */
+  area: 2 * 10_000_000 + 2 * 20_000,
   /** As many as have been measured (`bench/run.ts`): at 10,000 a pan with the whole board in view drops frames. */
   objects: 10_000,
   snapshots: 2_000,
@@ -220,7 +226,8 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       return { ok: true, value: { ...base, ...r, type, src: value.src, alt: value.alt, frames, fps } };
     }
     case 'html':
-      if (!isText(value.html, HTML_ITEM_MAX_LENGTH)) return fail(`${id}: html is missing or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
+      // An empty item would be an object nobody can see and anybody can hit.
+      if (!isText(value.html, HTML_ITEM_MAX_LENGTH) || !value.html.trim()) return fail(`${id}: html is missing, empty or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
       if (value.alt !== undefined && !isText(value.alt, LIMITS.title)) return fail(`${id}: alt is too long`);
       return { ok: true, value: { ...base, ...r, type, html: value.html, ...(value.alt ? { alt: value.alt as string } : {}) } };
     case 'stamp': {
@@ -262,6 +269,15 @@ function checkIdList(value: unknown, what: string): Checked<string[]> {
   return { ok: true, value: [...seen] };
 }
 
+/** A snapshot's rectangle, asked for or captured: anywhere objects can be, as large as all of them together. */
+function readArea(value: Record<string, unknown>): { x: number; y: number; w: number; h: number } | null {
+  const { x, y, w, h } = value;
+  const reach = LIMITS.coordinate + LIMITS.size;
+  const ok = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+  if (!ok(x, -reach, reach) || !ok(y, -reach, reach) || !ok(w, 1, LIMITS.area) || !ok(h, 1, LIMITS.area)) return null;
+  return { x, y, w, h };
+}
+
 /** A snapshot as someone asks for it: an id, a title, a source. Anything else on it is ignored. */
 export function checkSnapshotInput(value: unknown): Checked<SnapshotInput> {
   if (!isRecord(value)) return fail('a snapshot must be a JSON object');
@@ -279,7 +295,7 @@ export function checkSnapshotInput(value: unknown): Checked<SnapshotInput> {
     if (ids.value.length === 0) return fail(`${value.id}: source.objects is empty`);
     checked = { kind: 'objects', objects: ids.value };
   } else if (source.kind === 'region') {
-    const r = isRecord(source.rect) ? readRect(source.rect) : null;
+    const r = isRecord(source.rect) ? readArea(source.rect) : null;
     if (!r) return fail(`${value.id}: source.rect is not a rectangle`);
     checked = { kind: 'region', rect: r };
   } else {
@@ -294,7 +310,7 @@ export function checkSnapshot(value: unknown): Checked<Snapshot> {
   if (!input.ok) return input;
   const capture = (value as Record<string, unknown>).capture;
   if (!isRecord(capture)) return fail(`${input.value.id}: capture is missing`);
-  const rect = isRecord(capture.rect) ? readRect(capture.rect) : null;
+  const rect = isRecord(capture.rect) ? readArea(capture.rect) : null;
   if (!rect) return fail(`${input.value.id}: capture.rect is not a rectangle`);
   if (!Array.isArray(capture.objects) || capture.objects.length > LIMITS.objects) return fail(`${input.value.id}: capture.objects must be a list`);
   const objects: CanvasObject[] = [];

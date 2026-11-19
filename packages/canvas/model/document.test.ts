@@ -3,6 +3,7 @@ import { checkObject, parseDocument, serializeDocument } from './codec';
 import { isCustomColor, parseColor } from './color';
 import { boundsOf, objectBounds, resolveArrow, selectionUnit } from './document';
 import { isPictureRef, pictureResolver } from './assets';
+import { displayUrl, readableHost, shortName } from './reference';
 import { HTML_ITEM_CSP, HTML_ITEM_MAX_LENGTH, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from './html-item';
 import { CANVAS_DOCUMENT_VERSION, type CanvasDocument } from './types';
 
@@ -166,5 +167,25 @@ describe('the sandbox contract for custom HTML', () => {
     const huge = 'x'.repeat(HTML_ITEM_MAX_LENGTH + 1);
     expect(checkObject({ id: 'h', type: 'html', x: 0, y: 0, w: 10, h: 10, html: huge }).ok).toBe(false);
     expect(htmlItemSrcdoc(huge)).not.toContain('xxxx');
+  });
+});
+
+describe('what a card shows for where it points', () => {
+  test('a host is shown in its own letters, unless they are mixed to look like other letters', () => {
+    expect(readableHost('xn--mnchen-3ya.example')).toBe('münchen.example');
+    expect(readableHost('xn--80ak6aa92e.example')).toBe('аррӏе.example');
+    // Latin mixed with Cyrillic: left as it was sent.
+    expect(readableHost('xn--pple-43d.example')).toBe('xn--pple-43d.example');
+    expect(readableHost('xn--!!.example')).toBe('xn--!!.example');
+    expect(displayUrl('https://www.xn--mnchen-3ya.example/a/')).toBe('münchen.example/a');
+  });
+
+  test('a long file name is cut in the middle, so its version and its type stay', () => {
+    const name = 'Q3-Abschlussbericht-Zahlungsabgleich-EU-West-final-v12-wirklich-final.html';
+    const short = shortName(name);
+    expect(short.length).toBeLessThanOrEqual(34);
+    expect(short.startsWith('Q3-Abschluss')).toBe(true);
+    expect(short.endsWith('wirklich-final.html')).toBe(true);
+    expect(shortName('report.html')).toBe('report.html');
   });
 });

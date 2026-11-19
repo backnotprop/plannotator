@@ -10,6 +10,7 @@ import { decodeCommand } from './events/wire';
 import { parseSnapshotBlock } from './snapshot/block';
 import { resolveSnapshot } from './snapshot/resolve';
 import { hitTest } from './view/hit-test';
+import { routesFor } from './view/routes';
 import { indexFor } from './view/document-index';
 import { captureOf } from './model/capture';
 import { parseDocument, serializeDocument } from './model/codec';
@@ -171,5 +172,72 @@ describe('ids that are also names on Object.prototype', () => {
     const plain = new CanvasStore({ version: 1, id: 'p', title: '', objects: {}, order: [], snapshots: {} });
     expect(plain.getDocument().objects.constructor).toBeUndefined();
     expect(resolveSnapshot(plain.getDocument(), null, 'constructor')).toEqual({ found: false, problem: 'no-snapshot' });
+  });
+});
+
+describe('a canvas at its limits saves and loads again', () => {
+  const reload = (store: CanvasStore) => parseDocument(JSON.parse(serializeDocument(store.getDocument())));
+
+  test('a snapshot of a frame at its widest, and of notes at the two ends of the board', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({
+      type: 'add',
+      objects: [
+        { id: 'wide', type: 'frame', x: 0, y: 0, w: 20_000, h: 20_000, title: 'The whole year' },
+        { id: 'west', type: 'note', x: -1_000_000, y: -1_000_000, w: 200, h: 120, text: 'west' },
+        { id: 'east', type: 'note', x: 1_000_000, y: 1_000_000, w: 200, h: 120, text: 'east' },
+        { id: 'first', type: 'note', x: -10_000_000, y: -10_000_000, w: 20_000, h: 20_000, text: 'first' },
+        { id: 'last', type: 'note', x: 10_000_000, y: 10_000_000, w: 20_000, h: 20_000, text: 'last' },
+      ] as CanvasObject[],
+    });
+    const taken = [
+      store.dispatch({ type: 'add-snapshot', snapshot: { id: 'frame', title: '', source: { kind: 'frame', frame: 'wide' } } }),
+      store.dispatch({ type: 'add-snapshot', snapshot: { id: 'far', title: '', source: { kind: 'objects', objects: ['west', 'east'] } } }),
+      store.dispatch({ type: 'add-snapshot', snapshot: { id: 'ends', title: '', source: { kind: 'objects', objects: ['first', 'last'] } } }),
+      store.dispatch({ type: 'add-snapshot', snapshot: { id: 'all', title: '', source: { kind: 'region', rect: { x: -10_000_000, y: -10_000_000, w: 20_020_000, h: 20_020_000 } } } }),
+    ];
+    expect(taken.map((result) => result.ok)).toEqual([true, true, true, true]);
+    expect(store.getDocument().snapshots.far.capture.rect.w).toBeGreaterThan(2_000_000);
+    const loaded = reload(store);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(Object.keys(loaded.value.snapshots).sort()).toEqual(['all', 'ends', 'far', 'frame']);
+  });
+
+  test('a rectangle no board could hold is still refused, when asked for and when loaded', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [box('a')] });
+    expect(store.dispatch({ type: 'add-snapshot', snapshot: { id: 's', title: '', source: { kind: 'region', rect: { x: 0, y: 0, w: 30_000_000, h: 10 } } } }).ok).toBe(false);
+    store.dispatch({ type: 'add-snapshot', snapshot: { id: 's', title: '', source: { kind: 'objects', objects: ['a'] } } });
+    const saved = JSON.parse(serializeDocument(store.getDocument()));
+    saved.snapshots.s.capture.rect.w = 30_000_000;
+    expect(parseDocument(saved).ok).toBe(false);
+  });
+
+  test('an HTML item with nothing in it is refused: it would be an object nobody can see', () => {
+    const store = new CanvasStore(createDocument('board'));
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'h', type: 'html', x: 0, y: 0, w: 100, h: 60, html: '  \n' } as CanvasObject] }).ok).toBe(false);
+  });
+});
+
+describe('an arrow from an object back to itself', () => {
+  test('is a loop outside the object, not a point in the middle of its words', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [box('a', { x: 100, y: 100, w: 170, h: 76 }), arrow('loop', 'a', 'a', { label: 'retry' })] });
+    const doc = store.getDocument();
+    const g = resolveArrow(doc, doc.objects.loop as ArrowObject)!;
+    const points = [g.from, ...(g.via ?? []), g.to];
+    expect(points.length).toBe(5);
+    // It starts and ends on the object's edge, and every corner between is outside the object.
+    expect(g.from.x).toBe(270);
+    expect(g.to.y).toBe(100);
+    for (const p of g.via!) expect(p.x > 270 || p.y < 100).toBe(true);
+    // Each piece runs straight across or straight up and down.
+    for (let i = 1; i < points.length; i++) expect(points[i].x === points[i - 1].x || points[i].y === points[i - 1].y).toBe(true);
+    const bounds = objectBounds(doc, 'loop')!;
+    expect(bounds.w).toBeGreaterThan(20);
+    expect(bounds.h).toBeGreaterThan(20);
+    expect(routesFor(store).get('loop')!.points).toEqual(points);
+    // It can be picked up by its line, outside the box.
+    expect(hitTest(doc, indexFor(store), { x: g.via![1].x, y: g.via![0].y - 10 }, 6, routesFor(store))).toBe('loop');
   });
 });

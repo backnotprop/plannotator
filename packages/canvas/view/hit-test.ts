@@ -3,7 +3,7 @@
  * spatial index first, so neither looks at the whole canvas.
  */
 import { FRAME_TITLE_HEIGHT } from '../model/capture';
-import { resolveArrow } from '../model/document';
+import { arrowPoints, resolveArrow } from '../model/document';
 import {
   type Point,
   type Rect,
@@ -26,7 +26,7 @@ function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: nu
     const routed = routes && (object.routing ?? 'elbow') === 'elbow' ? routes.get(object.id) : null;
     if (routed) return distanceToRoute(p, routed.points) <= tolerance;
     const geometry = resolveArrow(doc, object);
-    return !!geometry && distanceToSegment(p, geometry.from, geometry.to) <= tolerance;
+    return !!geometry && (geometry.via ? distanceToRoute(p, arrowPoints(geometry)) : distanceToSegment(p, geometry.from, geometry.to)) <= tolerance;
   }
   if (!isPlaced(object)) return false;
   if (object.type === 'frame') {

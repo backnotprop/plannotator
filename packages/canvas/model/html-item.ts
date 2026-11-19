@@ -67,7 +67,12 @@ export function htmlItemSrcdoc(html: string, scheme: 'light' | 'dark' | null = n
     '<meta charset="utf-8">' +
     '<style>html,body{margin:0;background:transparent;overflow:hidden}' +
     'body{font:14px/1.45 system-ui,sans-serif;color:CanvasText}' +
-    `:root{color-scheme:${scheme ?? 'light dark'}}</style>` +
+    `:root{color-scheme:${scheme ?? 'light dark'}}` +
+    // More below than the item's box shows: its foot fades out, so the cut is not mistaken for the end. The
+    // item runs no script, so this is asked of CSS: the fade is tied to there being something to scroll to.
+    '@supports (animation-timeline:scroll()){html::after{content:"";position:fixed;left:0;right:0;bottom:0;height:28px;pointer-events:none;opacity:0;' +
+    'background:linear-gradient(transparent,Canvas);animation:pcv-more linear both;animation-timeline:scroll(root block)}' +
+    '@keyframes pcv-more{from{opacity:1}to{opacity:1}}}</style>' +
     `</head><body>${body}</body></html>`
   );
 }

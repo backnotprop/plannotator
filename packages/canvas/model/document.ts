@@ -88,7 +88,24 @@ export const isBoundEnd = (end: ArrowEnd): end is { object: ObjectId } => 'objec
 export interface ArrowGeometry {
   from: Point;
   to: Point;
+  /** Corners between the two, for an arrow from an object back to itself: a loop round one of its corners. */
+  via?: Point[];
 }
+
+/** How far a loop stands off the object it leaves and comes back to. */
+export const LOOP_REACH = 26;
+
+/** The loop an arrow makes from an object back to itself: out of its right side, round the corner, in at the top. */
+export function selfLoop(r: Rect): ArrowGeometry {
+  const from = { x: r.x + r.w, y: r.y + Math.min(r.h * 0.35, 40) };
+  const to = { x: r.x + r.w - Math.min(r.w * 0.25, 48), y: r.y };
+  const out = r.x + r.w + LOOP_REACH;
+  const up = r.y - LOOP_REACH;
+  return { from, to, via: [{ x: out, y: from.y }, { x: out, y: up }, { x: to.x, y: up }] };
+}
+
+/** Every point of an arrow's line, end to end. */
+export const arrowPoints = (g: ArrowGeometry): Point[] => [g.from, ...(g.via ?? []), g.to];
 
 /** The rect of a group's placed members, nested groups included. Arrows are not asked. */
 function placedBounds(doc: CanvasDocument, groupId: ObjectId): Rect | null {
@@ -158,6 +175,7 @@ export function resolveArrow(doc: CanvasDocument, arrow: ArrowObject): ArrowGeom
   const a = endRect(doc, arrow.from);
   const b = endRect(doc, arrow.to);
   if (!a || !b) return null;
+  if (isBoundEnd(arrow.from) && isBoundEnd(arrow.to) && arrow.from.object === arrow.to.object && 'w' in a) return selfLoop(a);
   const ca = anchorCenter(a);
   const cb = anchorCenter(b);
   return {
@@ -195,7 +213,12 @@ export function objectBounds(doc: CanvasDocument, id: ObjectId): Rect | null {
   if (isPlaced(object)) return { x: object.x, y: object.y, w: object.w, h: object.h };
   if (object.type === 'arrow') {
     const geometry = resolveArrow(doc, object);
-    return geometry ? rectFromPoints(geometry.from, geometry.to) : null;
+    if (!geometry) return null;
+    if (!geometry.via) return rectFromPoints(geometry.from, geometry.to);
+    const points = arrowPoints(geometry);
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
   }
   const rects: Rect[] = [];
   for (const member of groupMembers(doc, id)) {

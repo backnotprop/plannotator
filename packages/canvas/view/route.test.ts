@@ -6,7 +6,7 @@ import type { CanvasObject } from '../model/types';
 import { type Anchor, CLEARANCE, routeEnters, routeOrthogonal } from './route';
 import { BOX_SHAPES } from '../model/types';
 import { flatten, hachure, roughStrokes, seedOf } from './rough';
-import { findHops, pointAlong, routePath } from './route-path';
+import { endAngles, findHops, pointAlong, routePath } from './route-path';
 import { shapeOutline } from './shape-outline';
 import { facingSide, portPoint, routesFor } from './routes';
 
@@ -134,6 +134,15 @@ describe('routes kept current', () => {
     expect(routes.counts.stale).toBeGreaterThanOrEqual(1);
     // The next line along has one end that moved and one that did not: it is worked out afresh, from the moved box.
     expect(routes.get('a41')!.points[0]).toEqual({ x: before.points[0].x + 260 + 25, y: before.points[0].y + 40 });
+  });
+
+  test('an arrow of no length still has two ends, so nothing that draws it falls over', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [{ id: 'zero', type: 'arrow', from: { x: 520, y: 600 }, to: { x: 520, y: 600 }, label: 'zero-length' }] });
+    const points = routesFor(store).get('zero')!.points;
+    expect(points.length).toBeGreaterThanOrEqual(2);
+    expect(Number.isFinite(endAngles(points).end)).toBe(true);
+    expect(pointAlong(points, 0.5)).toMatchObject({ x: 520, y: 600 });
   });
 
   test('an object dropped onto a line makes that line go round it, and taking it away lets it straighten', () => {

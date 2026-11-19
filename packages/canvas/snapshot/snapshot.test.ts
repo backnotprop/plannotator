@@ -73,7 +73,7 @@ describe('a snapshot is a capture taken at one moment', () => {
     // The rectangle hugs the frame; its title, drawn above it, falls outside and the caption carries the name.
     expect(capture.rect).toEqual({ x: -2, y: -2, w: 604, h: 304 });
     // The frozen document resolves its arrow without the canvas.
-    expect(snapshotToSvg(store.getDocument(), 'by-frame')!.match(/<line /g)).toHaveLength(1);
+    expect(snapshotToSvg(store.getDocument(), 'by-frame')!.match(/<polyline /g)).toHaveLength(1);
   });
 
   test('the capture is taken by the planner; one sent from outside is ignored', () => {
