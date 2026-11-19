@@ -381,7 +381,7 @@ describe('the sync seam', () => {
     net.raw(at(5, 'fifth'));
     net.raw(at(4, 'fourth'));
     expect(Object.keys(one.getDocument().objects)).toEqual(['first']);
-    expect(link.stalled).toEqual({ reason: 'gap', have: 1, got: 3 });
+    expect(link.stalled).toEqual({ reason: 'gap', have: 1, got: 3, asked: true });
     expect(told).toEqual(['gap 1>3']);
     net.raw(at(2, 'second'));
     expect(Object.keys(one.getDocument().objects)).toEqual(['first', 'second', 'third', 'fourth', 'fifth']);
@@ -393,7 +393,7 @@ describe('the sync seam', () => {
     net.raw(at(9, 'ninth'));
     net.raw(at(6, 'sixth'));
     expect(one.syncedTo).toBe(7);
-    expect(link.stalled).toEqual({ reason: 'gap', have: 7, got: 9 });
+    expect(link.stalled).toEqual({ reason: 'gap', have: 7, got: 9, asked: true });
     expect(told).toEqual(['gap 1>3', 'live', 'gap 5>7', 'gap 7>9']);
     // No count, or one that is not a whole number from 1, is not a delivery at all; nor is one with no stream.
     for (const order of [undefined, 0, -1, 8.5, '8', Number.MAX_SAFE_INTEGER + 1]) net.raw({ stream: S, order, actor: TWO, envelope: adding('never') });
@@ -402,16 +402,59 @@ describe('the sync seam', () => {
     expect(one.syncedTo).toBe(7);
   });
 
-  test('what is held while a hole is filled is bounded, and the nearest deliveries are the ones kept', () => {
+  test('what is held while a hole is filled is bounded; what was let go of is asked for again, and the board is not called live until it has come', () => {
+    const titled = (order: number) => ({ stream: S, order, actor: TWO, envelope: { id: `e${order}`, events: [{ type: 'title-set', title: `t${order}` }] } });
+    const last = SYNC_HOLD_LIMIT * 3;
+    for (const canResend of [true, false]) {
+      const one = new CanvasStore(createDocument('board'), { actor: ONE });
+      const asked: number[] = [];
+      const told: string[] = [];
+      let hand: (delivery: unknown) => void = () => {};
+      const port: SyncPort = {
+        publish: () => {},
+        subscribe: (onDelivery) => ((hand = onDelivery), () => {}),
+        ...(canResend ? { resend: (after: number) => void asked.push(after) } : {}),
+      };
+      const link = connectSync(one, port, { onGap: (gap) => told.push(`gap ${gap.have}>${gap.got} asked=${gap.asked}`), onCaughtUp: () => told.push('live') });
+      // Far more than is held, furthest first, then the one that was missing.
+      for (let order = last; order >= 2; order--) hand(titled(order));
+      hand(titled(1));
+      // Everything next to the hole was kept and applied.
+      expect(one.syncedTo).toBe(SYNC_HOLD_LIMIT + 1);
+      expect(one.getDocument().title).toBe(`t${SYNC_HOLD_LIMIT + 1}`);
+      // The rest was let go of. The store knows it, says so, and asks again from where it now is.
+      expect(link.stalled).toEqual({ reason: 'gap', have: SYNC_HOLD_LIMIT + 1, got: last, asked: canResend });
+      expect(told).toEqual([`gap 0>${last} asked=${canResend}`, `gap ${SYNC_HOLD_LIMIT + 1}>${last} asked=${canResend}`]);
+      expect(asked).toEqual(canResend ? [0, SYNC_HOLD_LIMIT + 1] : []);
+      // In order now, as a backend sends again: not live until the last one that was dropped is in.
+      for (let order = SYNC_HOLD_LIMIT + 2; order < last; order++) hand(titled(order));
+      expect(link.stalled).not.toBeNull();
+      expect(told).toHaveLength(2);
+      hand(titled(last));
+      expect(link.stalled).toBeNull();
+      expect(told[2]).toBe('live');
+      expect(one.syncedTo).toBe(last);
+      expect(asked).toHaveLength(canResend ? 2 : 0);
+    }
+  });
+
+  test('a store that starts from a count must name the stream the count belongs to', () => {
     const net = backend();
-    const one = new CanvasStore(createDocument('board'), { actor: ONE });
-    connectSync(one, net.port(ONE));
-    // Far more than is held, furthest first.
-    for (let order = SYNC_HOLD_LIMIT * 3; order >= 2; order--) net.raw({ stream: S, order, actor: TWO, envelope: { id: `e${order}`, events: [{ type: 'title-set', title: `t${order}` }] } });
-    net.raw({ stream: S, order: 1, actor: TWO, envelope: { id: 'e1', events: [{ type: 'title-set', title: 't1' }] } });
-    // Everything next to the hole was kept and applied; the rest is asked for again, not held without end.
-    expect(one.syncedTo).toBe(SYNC_HOLD_LIMIT + 1);
-    expect(one.getDocument().title).toBe(`t${SYNC_HOLD_LIMIT + 1}`);
+    const store = () => new CanvasStore(createDocument('board'), { actor: ONE });
+    expect(() => connectSync(store(), net.port(ONE), { at: 500 } as never)).toThrow(/stream/);
+    expect(() => connectSync(store(), net.port(ONE), { at: 500, stream: '' })).toThrow(/stream/);
+    expect(() => connectSync(store(), net.port(ONE), { at: 0 })).not.toThrow();
+    expect(() => connectSync(store(), net.port(ONE))).not.toThrow();
+    // With it, a backend that started again is noticed at its very first delivery, though that count is far below the store's.
+    const late = store();
+    const link = connectSync(late, net.port(ONE), { at: 500, stream: 'an-older-stream' });
+    net.inject({ id: 'n', events: [{ type: 'title-set', title: 'new count' }] }, TWO);
+    expect(link.stalled).toMatchObject({ reason: 'restarted', have: 500, got: 1, asked: false });
+    expect(late.getDocument().title).toBe('');
+    // A store already syncing is connected again without either: it has both.
+    const again = store();
+    connectSync(again, net.port(ONE), { at: 1, stream: S }).stop();
+    expect(() => connectSync(again, net.port(ONE))).not.toThrow();
   });
 
   test('a delivery lost on the way is asked for again and the board catches up', () => {
@@ -490,7 +533,7 @@ describe('the sync seam', () => {
     // The new count's 1 and 2 are at or below where the store is; its 3 is the very next number.
     for (const title of ['x', 'y', 'z']) net.inject({ id: `r-${title}`, events: [{ type: 'title-set', title }] }, TWO);
     expect(three.getDocument()).toBe(before);
-    expect(gaps).toEqual([{ reason: 'restarted', have: 2, got: 1 }]);
+    expect(gaps).toEqual([{ reason: 'restarted', have: 2, got: 1, asked: false }]);
     expect(link.stalled?.reason).toBe('restarted');
     // The old stream turning up again does not un-stall it: the host loads the canvas again.
     net.raw({ stream: S, order: 3, actor: TWO, envelope: { id: 'late', events: [{ type: 'title-set', title: 'late' }] } });
@@ -508,7 +551,7 @@ describe('the sync seam', () => {
     one.dispatch({ type: 'recolor', ids: ['a'], color: 'green' });
     net.flush();
     const late = new CanvasStore(saved.value, { actor: { kind: 'person', id: 'late' } });
-    connectSync(late, net.port({ kind: 'person', id: 'late' }), { at });
+    connectSync(late, net.port({ kind: 'person', id: 'late' }), { at, stream: S });
     expect(late.getDocument()).toEqual(one.getDocument());
     // And one that starts from nothing takes the whole history.
     const fresh = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'fresh' } });

@@ -99,18 +99,35 @@ export interface SyncGap {
   have: number;
   /** The count of the delivery that could not be applied. */
   got: number;
+  /**
+   * Whether the backend was asked to send what is missing again
+   * (`SyncPort.resend`). False for a port that cannot be asked, and for
+   * `restarted`: then nothing brings the board back by itself, and it stays
+   * stalled until the backend happens to deliver what is missing or the
+   * host connects again or loads the canvas again.
+   */
+  asked: boolean;
 }
 
-export interface SyncOptions {
-  /** For a store that has not synced before: the backend's count for the document it holds. Absent: 0, a canvas nobody has changed. */
-  at?: number;
-  /** For a store that has not synced before: the stream that count belongs to, when the host knows it. */
-  stream?: string;
+interface SyncCallbacks {
   /** The connection stalled. Called once per hole, not once per delivery beyond it. */
   onGap?: (gap: SyncGap) => void;
   /** What was missing arrived and everything held has been applied. */
   onCaughtUp?: () => void;
 }
+
+/**
+ * Where a store that has not synced before starts. A canvas nobody has
+ * changed starts at 0 and learns the stream from the first delivery. A
+ * document loaded from the backend starts at the count that came with it,
+ * and must name the stream that count belongs to: a count with no stream
+ * could not tell a backend that has started again from old repeats, and
+ * would ignore its first `at` changes in silence. `connectSync` throws on a
+ * count above 0 with no stream.
+ */
+export type SyncStart = { at?: 0; stream?: string } | { at: number; stream: string };
+
+export type SyncOptions = SyncStart & SyncCallbacks;
 
 export interface SyncConnection {
   /** Not null while deliveries are arriving that cannot be applied: the board on screen is not live. */
@@ -128,19 +145,24 @@ export const SYNC_HOLD_LIMIT = 256;
 
 /** Connect a store to a backend, or connect it again after a drop. */
 export function connectSync(store: CanvasStore, port: SyncPort, options: SyncOptions = {}): SyncConnection {
+  if (store.syncedTo === null && (options.at ?? 0) > 0 && !options.stream) throw new Error('connectSync: a store that starts at a count above 0 must name the stream that count belongs to');
   store.beginSync(options.at, options.stream);
   let stalled: SyncGap | null = null;
+  /** The highest count let go of because there was no room to hold it. It has to arrive again before the board is live. */
+  let dropped = 0;
+  const ask = (after: number): boolean => {
+    port.resend?.(after);
+    return !!port.resend;
+  };
   type Decoded = Extract<ReturnType<typeof decodeDelivery>, { ok: true }>['value'];
   const held = new Map<number, Decoded>();
 
-  const stall = (gap: SyncGap) => {
-    // One hole is told of once, as it was first met: later deliveries beyond it add nothing to say.
-    const fresh = !stalled || stalled.reason !== gap.reason;
-    if (fresh) {
-      stalled = gap;
-      options.onGap?.(gap);
-    }
-    return fresh;
+  /** Stall for a hole, once: later deliveries beyond the same hole add nothing to say. The host is told before the backend is asked. */
+  const stall = (reason: SyncGap['reason'], have: number, got: number) => {
+    if (stalled && stalled.reason === reason) return;
+    stalled = { reason, have, got, asked: reason === 'gap' && !!port.resend };
+    options.onGap?.(stalled);
+    if (reason === 'gap') ask(have);
   };
 
   const take = (raw: unknown) => {
@@ -152,21 +174,23 @@ export function connectSync(store: CanvasStore, port: SyncPort, options: SyncOpt
     if (following !== null && delivery.stream !== following) {
       // The backend's count started again under another name: nothing of it lines up with this store.
       held.clear();
-      stall({ reason: 'restarted', have, got: delivery.order });
+      stall('restarted', have, delivery.order);
       return;
     }
     if (stalled?.reason === 'restarted' || delivery.order <= have) return;
     if (delivery.order > have + 1) {
       // Ahead of the count: keep it for when the hole is filled, the nearest first when there is no more room.
       if (!held.has(delivery.order)) {
+        let room = true;
         if (held.size >= SYNC_HOLD_LIMIT) {
           const furthest = Math.max(...held.keys());
-          if (delivery.order > furthest) return;
-          held.delete(furthest);
+          room = delivery.order < furthest;
+          if (room) held.delete(furthest);
+          dropped = Math.max(dropped, room ? furthest : delivery.order);
         }
-        held.set(delivery.order, delivery);
+        if (room) held.set(delivery.order, delivery);
       }
-      if (stall({ reason: 'gap', have, got: delivery.order })) port.resend?.(have);
+      stall('gap', have, delivery.order);
       return;
     }
     // What a peer sent did not pass: it is counted, as every peer counts it, and changes nothing.
@@ -179,18 +203,27 @@ export function connectSync(store: CanvasStore, port: SyncPort, options: SyncOpt
       drained = true;
     }
     if (!stalled) return;
-    if (held.size === 0) {
-      stalled = null;
-      options.onCaughtUp?.();
+    const reached = store.syncedTo ?? 0;
+    if (held.size > 0) {
+      // That hole is filled and there is another further on: it is told of, and asked for, in its turn.
+      if (drained) {
+        stalled = null;
+        stall('gap', reached, Math.min(...held.keys()));
+      }
       return;
     }
-    // That hole is filled and there is another further on: it is told of, and asked for, in its turn.
-    const reached = store.syncedTo ?? 0;
-    if (drained) {
-      stalled = { reason: 'gap', have: reached, got: Math.min(...held.keys()) };
-      options.onGap?.(stalled);
-      port.resend?.(reached);
+    if (dropped > reached) {
+      // Everything held has been applied, but deliveries beyond it were let go of for want of room. The board
+      // is not live until they have arrived again: they are asked for once, from the count reached now.
+      if (drained || stalled.got !== dropped) {
+        stalled = null;
+        stall('gap', reached, dropped);
+      }
+      return;
     }
+    dropped = 0;
+    stalled = null;
+    options.onCaughtUp?.();
   };
 
   const stopOut = store.onCommit((envelope) => {
