@@ -7,7 +7,9 @@
  * a time cap, a size cap (only the start of the page is read), and no
  * address on the machine's own network unless the host's policy says so
  * (`allowPrivate`). Each host name is resolved, checked, and then connected
- * to at the address that was checked. When a page
+ * to at the address that was checked; where that cannot be done (no way to
+ * pin, or the lookup turned off) and the policy is "no private address",
+ * the fetcher refuses to be made at all (`unfurlFault`). When a page
  * gives nothing, or cannot be reached, the answer is still a preview: the
  * bare address, so the card always has something to show.
  *
@@ -19,8 +21,8 @@ import { type LinkPreview, parseLinkPreview } from './parse';
 
 export { isPrivateAddress };
 
-/** The addresses a host name resolves to. */
-export type HostLookup = (hostname: string) => Promise<string[]>;
+/** The addresses a host name resolves to. `signal` aborts when the preview's time is up or its asker has gone. */
+export type HostLookup = (hostname: string, signal?: AbortSignal) => Promise<string[]>;
 
 /**
  * Connect to `address` and ask it for `url`: the request goes to the address
@@ -33,11 +35,17 @@ export interface UnfurlOptions {
   fetch?: typeof fetch;
   /**
    * Absent: the system resolver (`node:dns`, which Bun has too). `false`
-   * turns the lookup off, on purpose: then only addresses written as numbers
-   * are checked.
+   * turns the lookup off, on purpose: no name is resolved, so no name can
+   * be checked. Allowed only together with `allowPrivate`.
    */
   lookup?: HostLookup | false;
-  /** Absent: Bun's own way when running under Bun with no `fetch` given; otherwise the request goes by name. */
+  /**
+   * Absent: Bun's own way when running under Bun with no `fetch` given.
+   * Otherwise (Node, or a `fetch` of the host's own) there is none, the
+   * request would go by name after the check, and that is allowed only
+   * together with `allowPrivate`. Under Node pass one, for example an undici
+   * agent whose `connect.lookup` answers with the address given.
+   */
   pin?: PinnedFetch;
   /**
    * The host's policy for this machine and its private network. Default
@@ -70,6 +78,39 @@ export function parseWebUrl(value: string): URL | null {
   }
 }
 
+/**
+ * Why a fetcher with these options could not keep to "never a private
+ * address", or null when it can. With `allowPrivate` false a host name must
+ * be resolved, judged, and then connected to at the very address that was
+ * judged. A name that is not resolved (`lookup: false`), or a request that
+ * goes by name after the check (no `pin`: Node, or a custom `fetch`), lets a
+ * name answer with a public address when it is checked and with 127.0.0.1
+ * when it is connected to. Every way of making a fetcher throws on a fault.
+ */
+export function unfurlFault(options: UnfurlOptions = {}): string | null {
+  if (options.allowPrivate) return null;
+  if (options.lookup === false) return 'link previews: with allowPrivate false, host names must be looked up (lookup: false leaves a name unchecked)';
+  if (!pinFor(options)) return 'link previews: with allowPrivate false, a request must go to the address that was checked. Pass `pin` (under Node, or with a custom fetch), or set allowPrivate for a server one person runs for themselves';
+  return null;
+}
+
+function assertSound(options: UnfurlOptions): void {
+  const fault = unfurlFault(options);
+  if (fault) throw new Error(fault);
+}
+
+/** `promise`, or a rejection as soon as `signal` aborts: for work that cannot be told to stop. */
+function orAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    // The listener is left on the signal (it lives as long as one preview). Taking it off again is not safe:
+    // under Bun 1.3 an `AbortSignal.timeout` whose last listener is removed never fires at all.
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    promise.then(resolve, reject);
+  });
+}
+
 const systemLookup: HostLookup = async (hostname) => {
   const dns = await import('node:dns/promises');
   return (await dns.lookup(hostname, { all: true })).map((entry) => entry.address);
@@ -84,6 +125,11 @@ const bunPin: PinnedFetch = (url, address, init) => {
   return fetch(direct.href, { ...init, headers, tls: { serverName: url.hostname } } as RequestInit);
 };
 
+/** How a request is tied to the address that was checked under these options; null when it is not. */
+function pinFor(options: UnfurlOptions): PinnedFetch | null {
+  return options.pin ?? (!options.fetch && typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined' ? bunPin : null);
+}
+
 interface Resolved {
   /** The address to connect to, when one is known. */
   address: string | null;
@@ -92,18 +138,24 @@ interface Resolved {
 
 const LOCAL_NAME_RE = /(^|\.)(localhost|local|internal|home\.arpa|lan)$/;
 
-/** Where a host is, and whether that is private. A name that will not resolve is treated as private. */
-export async function resolveHost(url: URL, options: Pick<UnfurlOptions, 'lookup'> = {}): Promise<Resolved> {
+/**
+ * Where a host is, and whether that is private. A name that will not resolve
+ * is treated as private. The system resolver cannot be told to stop, so the
+ * wait for it is what `signal` ends: the rejection is passed on, never read
+ * as "private".
+ */
+export async function resolveHost(url: URL, options: Pick<UnfurlOptions, 'lookup'> = {}, signal?: AbortSignal): Promise<Resolved> {
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (isIpAddress(hostname)) return { address: hostname, private: isPrivateAddress(hostname) };
   const named = LOCAL_NAME_RE.test(hostname);
   if (options.lookup === false) return { address: null, private: named };
   try {
-    const addresses = await (options.lookup ?? systemLookup)(hostname);
+    const addresses = await orAborted((options.lookup ?? systemLookup)(hostname, signal), signal);
     if (addresses.length === 0) return { address: null, private: true };
     // Any private address among them makes the name private; connect to the first.
     return { address: addresses[0], private: named || addresses.some(isPrivateAddress) };
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return { address: null, private: true };
   }
 }
@@ -149,7 +201,7 @@ async function unfurl(address: string, options: UnfurlOptions): Promise<Unfurled
   const first = parseWebUrl(address);
   if (!first) return { preview: null, real: true };
   const { timeoutMs, maxBytes, maxRedirects } = { ...UNFURL_DEFAULTS, ...options };
-  const pin = options.pin ?? (!options.fetch && typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined' ? bunPin : null);
+  const pin = pinFor(options);
   const doFetch = options.fetch ?? fetch;
   const bare = (url: URL): LinkPreview => ({ url: url.href, site: url.hostname.replace(/^www\./, '') });
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -163,13 +215,13 @@ async function unfurl(address: string, options: UnfurlOptions): Promise<Unfurled
   const reachable = async (value: string | undefined): Promise<string | undefined> => {
     const url = value ? parseWebUrl(value) : null;
     if (!url) return undefined;
-    return options.allowPrivate || !(await resolveHost(url, options)).private ? url.href : undefined;
+    return options.allowPrivate || !(await resolveHost(url, options, signal)).private ? url.href : undefined;
   };
 
   let url = first;
   try {
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      const where = await resolveHost(url, options);
+      const where = await resolveHost(url, options, signal);
       if (where.private && !options.allowPrivate) return { preview: hop === 0 ? null : bare(first), real: true };
       const response = pin && where.address ? await pin(url, where.address, init) : await doFetch(url.href, init);
       if (response.status >= 300 && response.status < 400) {
@@ -212,17 +264,21 @@ async function unfurl(address: string, options: UnfurlOptions): Promise<Unfurled
  * preview can be made for (not http(s), or private while the host's policy
  * says no). Any other trouble (a timeout, an error page, a page with no
  * metadata, a PDF) gives the bare preview: `{ url }` with the site's name.
+ * Rejects when the options cannot keep to the policy (`unfurlFault`).
  */
 export async function unfurlUrl(address: string, options: UnfurlOptions = {}): Promise<LinkPreview | null> {
+  assertSound(options);
   return (await unfurl(address, options)).preview;
 }
 
 /**
  * A small cache in front of `unfurlUrl`: the same address asked twice is
  * fetched once. A fallback made because the site failed or timed out is not
- * kept, so the next paste tries again.
+ * kept, so the next paste tries again. Throws, here and not at the first
+ * paste, when the options cannot keep to the policy (`unfurlFault`).
  */
 export function createUnfurler(options: UnfurlOptions & { cacheSize?: number; cacheMs?: number } = {}): (address: string) => Promise<LinkPreview | null> {
+  assertSound(options);
   const size = options.cacheSize ?? 300;
   const ttl = options.cacheMs ?? 30 * 60 * 1000;
   const cache = new Map<string, { at: number; value: Promise<Unfurled> }>();

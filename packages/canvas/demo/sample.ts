@@ -8,6 +8,7 @@ import type { Command } from '../events/types';
 import { createDocument } from '../model/document';
 import type { CanvasObject, SnapshotInput } from '../model/types';
 import { serializeSnapshotBlock } from '../snapshot/block';
+import { seeded } from '../view/rough';
 
 const AGENT = { kind: 'agent', id: 'demo-agent' } as const;
 
@@ -299,4 +300,44 @@ export function createLongPlan(count: number): string {
     parts.push('- It keeps the current behaviour behind a flag.', '- It is safe to roll back.', '');
   }
   return parts.join('\n');
+}
+
+/**
+ * Marks laid over a bench board (`?bench=canvas&n=2000&ink=600`, `&curves=400`, `&html=12`): lines drawn by
+ * hand of 120 points each, curved connectors between neighbours, and HTML items that move (a CSS animation;
+ * an item runs no script), spread evenly so that all of them are in view when the whole board is.
+ */
+export function addBenchMarks(store: CanvasStore, marks: { ink?: number; curves?: number; html?: number }): void {
+  const doc = store.getDocument();
+  const placed = doc.order.map((id) => doc.objects[id]).filter((object): object is Extract<CanvasObject, { type: 'box' }> => object.type === 'box');
+  if (placed.length < 2) return;
+  const random = seeded(7);
+  const objects: Record<string, unknown>[] = [];
+  const at = (i: number, of: number) => placed[Math.floor(((i + 0.5) / of) * placed.length) % placed.length];
+  for (let i = 0; i < (marks.ink ?? 0); i++) {
+    const near = at(i, marks.ink!);
+    const points: number[] = [];
+    // A ring, an underline or a scribble, by turns: 120 points each.
+    for (let p = 0; p < 120; p++) {
+      const t = p / 119;
+      if (i % 3 === 0) points.push(0.5 + 0.5 * Math.cos(t * 6.4), 0.5 + 0.5 * Math.sin(t * 6.4));
+      else if (i % 3 === 1) points.push(t, 0.5 + 0.4 * Math.sin(t * 20 + i));
+      else points.push(Math.abs(Math.sin(t * 9 + i)), t);
+    }
+    objects.push({ id: `ink${i}`, type: 'ink', x: near.x - 14, y: near.y - 10, w: near.w + 28, h: near.h + 20, points: points.map((v) => Math.round(Math.min(1, Math.max(0, v)) * 1000) / 1000), pen: (['fine', 'marker', 'highlighter'] as const)[i % 3], ...(i % 4 === 0 ? { color: { custom: '#ffd23f' } } : i % 4 === 1 ? { color: 'violet' } : {}) });
+  }
+  for (let i = 0; i < (marks.curves ?? 0); i++) {
+    const from = placed[Math.floor(random() * placed.length)];
+    const to = placed[(placed.indexOf(from) + 1 + Math.floor(random() * 12)) % placed.length];
+    if (from.id !== to.id) objects.push({ id: `curve${i}`, type: 'arrow', from: { object: from.id }, to: { object: to.id }, routing: 'curve', ...(i % 5 === 0 ? { label: 'feeds' } : {}) });
+  }
+  const moving =
+    '<style>@keyframes s{to{transform:translateX(120px)}}@keyframes b{50%{height:36px}}</style><div style="font:600 13px system-ui;color:#ECE7DC;background:#0F0D16;height:78px;padding:10px;box-sizing:border-box;overflow:hidden">live<div style="width:14px;height:14px;background:#A79AEC;animation:s 1.2s linear infinite alternate"></div><div style="display:flex;gap:3px;align-items:end;height:36px">' +
+    Array.from({ length: 12 }, (_, k) => `<i style="width:8px;height:10px;background:#B4DA94;animation:b ${0.6 + k * 0.07}s ease-in-out infinite"></i>`).join('') +
+    '</div></div>';
+  for (let i = 0; i < (marks.html ?? 0); i++) {
+    const near = at(i, marks.html!);
+    objects.push({ id: `live${i}`, type: 'html', x: near.x, y: near.y + 60, w: 176, h: 78, html: moving, alt: `Live readout ${i + 1}` });
+  }
+  for (let i = 0; i < objects.length; i += 500) store.dispatch({ type: 'add', objects: objects.slice(i, i + 500) as unknown as CanvasObject[] });
 }

@@ -325,7 +325,8 @@ export class Router {
     for (const id of this.index.spatial.query(area)) {
       if (skip.has(id)) continue;
       const object: CanvasObject | undefined = doc.objects[id];
-      if (!object || !isPlaced(object) || object.type === 'frame' || (object.type === 'box' && object.shape === 'container')) continue;
+      // Frames and containers hold things, and a drawn line lies over things: none of them is in a connector's way.
+      if (!object || !isPlaced(object) || object.type === 'frame' || object.type === 'ink' || (object.type === 'box' && object.shape === 'container')) continue;
       obstacles.push({ x: object.x, y: object.y, w: object.w, h: object.h, far: Math.abs(object.x + object.w / 2 - mid.x) + Math.abs(object.y + object.h / 2 - mid.y) });
     }
     if (obstacles.length > MAX_OBSTACLES) obstacles = obstacles.sort((a, b) => a.far - b.far).slice(0, MAX_OBSTACLES);

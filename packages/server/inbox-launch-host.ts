@@ -126,6 +126,8 @@ export function writeLaunchNote(
       body: note.body,
       reply_to: latest,
       idempotency_key: note.key,
+      // The Inbox's own note: the sound never rings for it, except a failed turn's (`InboxMessage.launch_note`).
+      launch_note: true,
       // A failed turn's note: the window notifies for it (`InboxMessage.turn_error`).
       ...(note.turnError ? { turn_error: true } : {}),
     });

@@ -86,6 +86,8 @@ import {
   isCodexThreadId,
   isInboxId,
   isInboxSoundVolume,
+  inboxSoundWhen,
+  INBOX_SOUND_WHEN,
   isInboxTextSize,
   type InboxTextSize,
   isInboxReactionEmoji,
@@ -1326,6 +1328,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
+  /** The sound's settings were saved (config.json `inboxSound`): the windows' streams say `event: sound`, so a window in the background rings by the new choice at once. */
+  const soundListeners = new Set<(sound: unknown, rev: number) => void>();
+  /**
+   * The sound's save count, for ordering only (a window never takes an older save's frame over a newer one): it starts at
+   * this start's clock and only grows, so it stays ahead of an earlier start's. In memory.
+   */
+  let soundRev = Date.now();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
@@ -2720,8 +2729,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * The question sound (the "Ding-dong"), resolved from config.json: on, at
-   * 60, unless set. `dialog_shown_for`: the version the one-time dialog was
+   * The Inbox's sound (the "Ding-dong"), resolved from config.json: on, at
+   * 60, for every agent message, unless set. `dialog_shown_for`: the version the one-time dialog was
    * shown for, or that a fresh install was marked with; null while it never
    * was. `dialog_due`: the dialog waits for a page on this computer to claim it.
    */
@@ -2732,6 +2741,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       enabled: saved.enabled !== false,
       volume: isInboxSoundVolume(saved.volume) ? saved.volume : INBOX_SOUND_DEFAULT_VOLUME,
+      // Nothing chosen yet (an update included): every agent message rings, the owner's default.
+      when: inboxSoundWhen(saved.when),
       dialog_shown_for: shownFor,
       dialog_due: shownFor === null && typeof saved.dialogDueFor === "string" && saved.dialogDueFor !== "",
     };
@@ -2761,17 +2772,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           next.volume = value;
           break;
+        case "when":
+          if (!INBOX_SOUND_WHEN.includes(value as never)) throw new InboxError("validation_error", 'sound.when: "messages" or "asks".', { field: "sound.when" });
+          next.when = value as NonNullable<typeof next.when>;
+          break;
         default:
           // The dialog's marks are the server's to write (below), never the page's.
-          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume).`, { field: `sound.${field}` });
+          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume, when).`, { field: `sound.${field}` });
       }
     }
     if (validateOnly) return soundState();
     saveConfig({ inboxSound: next });
-    if (loadConfig().inboxSound?.enabled !== next.enabled || loadConfig().inboxSound?.volume !== next.volume) {
+    const kept = loadConfig().inboxSound;
+    if (kept?.enabled !== next.enabled || kept?.volume !== next.volume || kept?.when !== next.when) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
-    return soundState();
+    const state = soundState();
+    soundRev = Math.max(soundRev + 1, Date.now());
+    for (const listener of soundListeners) listener(state, soundRev);
+    return state;
   };
 
   /**
@@ -3961,7 +3980,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     notifications: notificationsState(),
     /** Whether a notification can reach the person now: the windows open and how many may notify. */
     notify_reach: windows.reach(notificationsState().enabled),
-    /** The question sound: the Settings row, and whether the one-time dialog was shown. */
+    /** The Inbox's sound: the Settings row, and whether the one-time dialog was shown. */
     sound: soundState(),
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
@@ -4212,6 +4231,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // The sound's switch, volume or choice was saved (any window's, a phone's too): every window rings by it at once. Windows only.
+        const onSound = (sound: unknown, rev: number) => send(`event: sound\ndata: ${JSON.stringify({ sound, rev })}\n\n`);
+        if (windowId) soundListeners.add(onSound);
         // "Show archived" was saved here or taken from a linked machine: every window, and a linked machine that asks
         // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
         const stopShowArchived =
@@ -4289,6 +4311,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
+          soundListeners.delete(onSound);
           stopShowArchived();
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);
@@ -6953,7 +6976,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

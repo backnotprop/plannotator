@@ -3307,6 +3307,10 @@
           "type": "boolean",
           "const": true
         },
+        "launch_note": {
+          "type": "boolean",
+          "const": true
+        },
         "guide": {
           "anyOf": [
             {

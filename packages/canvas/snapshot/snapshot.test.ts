@@ -331,6 +331,38 @@ describe('the still picture fallback', () => {
     expect(svg).not.toContain('Elsewhere');
   });
 
+  test('a drawn line, a curved connector and a heading are drawn as themselves', () => {
+    const store = board();
+    store.dispatch({
+      type: 'add',
+      objects: [
+        { id: 'ring', type: 'ink', x: 300, y: 100, w: 100, h: 50, points: [0, 0, 0.5, 1, 1, 0], pen: 'highlighter', color: { custom: '#ffd23f' } },
+        { id: 'under', type: 'ink', x: 300, y: 200, w: 100, h: 10, points: [0, 0, 1, 1] },
+        { id: 'name', type: 'text', x: 20, y: 120, w: 400, h: 50, text: 'Parcel <alerts>', size: 'title', face: 'serif' },
+        { id: 'bend', type: 'arrow', from: { x: 40, y: 280 }, to: { x: 440, y: 280 }, routing: 'curve' },
+      ] as CanvasObject[],
+    });
+    store.dispatch({ type: 'update-snapshot', id: 'by-frame' });
+    const svg = snapshotToSvg(store.getDocument(), 'by-frame')!;
+    // The highlighter: its own colour, its width, see-through; the points across its box, in board units.
+    expect(svg).toContain('<path transform="translate(300 100)" d="M0 0L25 25Q50 50 75 25L100 0" fill="none" stroke="#ffd23f" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.4"/>');
+    expect(svg).toContain('d="M0 0L100 10" fill="none" stroke="#10131c" stroke-width="4.5"');
+    expect(svg).toContain('font-size="40" font-weight="700" font-family="Georgia, serif"');
+    expect(svg).toContain('Parcel &lt;alerts&gt;');
+    // The curve as a curve, with the bow the board draws.
+    expect(svg).toContain('<path d="M40 280Q240 152 440 280"');
+    expect(svg).not.toMatch(/NaN|undefined/);
+    // A snapshot of the line alone is its box and the room round it, and goes behind when the line is redrawn.
+    store.dispatch({ type: 'add-snapshot', snapshot: { id: 'the-ring', title: 'Ring', source: { kind: 'objects', objects: ['ring'] } } });
+    // The capture holds the stroke, which runs nine units past a highlighter's box, and the room round that.
+    expect(captured(store, 'the-ring').rect).toEqual({ x: 267, y: 67, w: 166, h: 116 });
+    expect(standing(store, 'the-ring')).toBe('current');
+    store.dispatch({ type: 'edit', id: 'ring', patch: { points: [0, 0, 1, 1] } });
+    expect(standing(store, 'the-ring')).toBe('behind');
+    store.undo();
+    expect(standing(store, 'the-ring')).toBe('current');
+  });
+
   test('it pictures the capture, not the canvas as it is now', () => {
     const store = board();
     store.dispatch({ type: 'edit', id: 'b', patch: { text: 'Changed' } });

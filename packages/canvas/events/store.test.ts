@@ -3,8 +3,11 @@ import { parseDocument, serializeDocument } from '../model/codec';
 import { createDocument } from '../model/document';
 import { isOrderKey, keyBetween } from '../model/order-key';
 import type { CanvasDocument, CanvasObject } from '../model/types';
+import { OBJECT_FIELDS } from '../model/codec';
+import { PATCH_FIELDS } from './plan';
 import { CanvasStore } from './store';
 import type { Command } from './types';
+import { decodeEnvelope } from './wire';
 
 const AGENT = { kind: 'agent', id: 'agent-1' } as const;
 
@@ -175,6 +178,19 @@ describe('undo and redo', () => {
     expect(steps()).toBe(1);
   });
 
+  test('a late change to a field its step also set is undone back to what the field was before the step', () => {
+    const store = seeded();
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Pasted' } }, { gesture: 'paste-2' });
+    store.dispatch({ type: 'move', ids: ['b'], dx: 5, dy: 0 });
+    // The same field again, later, as part of the first step.
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Pasted, with its title' } }, { gesture: 'paste-2', amend: true });
+    store.undo();
+    store.undo();
+    expect(store.getDocument().objects.a).toMatchObject({ text: 'a' });
+    store.redo();
+    expect(store.getDocument().objects.a).toMatchObject({ text: 'Pasted, with its title' });
+  });
+
   test("an agent's change is not on the person's undo stack", () => {
     const store = seeded();
     store.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 0 });
@@ -315,6 +331,101 @@ describe('stamps', () => {
   });
 });
 
+describe('bare text', () => {
+  test('its size and its face are words from short lists, kept through edits, a save and an undo', () => {
+    const store = seeded();
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'name', type: 'text', x: 0, y: 200, w: 600, h: 90, text: 'Saltmarsh', size: 'display', face: 'serif' }] }).ok).toBe(true);
+    const loaded = parseDocument(serializeDocument(store.getDocument()));
+    expect(loaded.ok && loaded.value.objects.name).toMatchObject({ size: 'display', face: 'serif' });
+    const edited = store.dispatch({ type: 'edit', id: 'name', patch: { size: 'title', face: 'hand' } });
+    expect(edited.ok && edited.envelope?.events).toEqual([{ type: 'object-set', id: 'name', set: { size: 'title', face: 'hand' } }]);
+    // The board's own face is no field at all, whether it is named or taken away.
+    const plain = store.dispatch({ type: 'edit', id: 'name', patch: { face: 'sans' } });
+    expect(plain.ok && plain.envelope?.events).toEqual([{ type: 'object-set', id: 'name', set: {}, unset: ['face'] }]);
+    store.undo();
+    expect(store.dispatch({ type: 'edit', id: 'name', patch: { face: null } }).ok).toBe(true);
+    expect('face' in store.getDocument().objects.name).toBe(false);
+    store.undo();
+    expect(store.getDocument().objects.name).toMatchObject({ size: 'title', face: 'hand' });
+    // Not on the lists, a name every object has, or on something that is not bare text: refused.
+    for (const patch of [{ size: 'enormous' }, { size: 'constructor' }, { face: 'papyrus' }, { face: '__proto__' }, { face: 'toString' }, { face: ['serif'] }]) {
+      expect(store.dispatch({ type: 'edit', id: 'name', patch: patch as never }).ok).toBe(false);
+    }
+    expect(store.dispatch({ type: 'edit', id: 'a', patch: { face: 'serif' } }).ok).toBe(false);
+    expect(store.getDocument().objects.name).toMatchObject({ size: 'title', face: 'hand' });
+  });
+
+  test('a heading that comes with no size gets a box its words fit, however long they are', () => {
+    const store = seeded();
+    const add = (id: string, extra: object) => store.dispatch({ type: 'add', objects: [{ id, type: 'text', x: 0, y: 0, ...extra }] as never }, { actor: AGENT });
+    expect(add('t', { text: 'ferrite.', size: 'display' }).ok).toBe(true);
+    const t = store.getDocument().objects.t as { w: number; h: number };
+    // Eight letters at 84: wider than the 200 a line of small text gets, and one line tall.
+    expect(t.w).toBeGreaterThan(8 * 84 * 0.5);
+    expect(t.w).toBeLessThan(8 * 84);
+    expect(t.h).toBeGreaterThanOrEqual(84);
+    expect(t.h).toBeLessThan(84 * 1.5);
+    expect(add('two', { text: 'Act one\nThe relay wakes', size: 'title' }).ok).toBe(true);
+    expect((store.getDocument().objects.two as { h: number }).h).toBeGreaterThanOrEqual(80);
+    // Wide letters are counted wide (capitals in bold run past six-tenths of their height), and a mono face by its own measure.
+    expect(add('caps', { text: 'MOOD BOARD', size: 'display' }).ok).toBe(true);
+    expect((store.getDocument().objects.caps as { w: number }).w).toBeGreaterThan(600);
+    expect(add('thin', { text: 'illicit jiji', size: 'display', face: 'mono' }).ok).toBe(true);
+    expect((store.getDocument().objects.thin as { w: number }).w).toBeGreaterThan(12 * 84 * 0.6);
+    // Small text keeps the box it always had; a given size is kept; the longest text still makes a box a file may hold.
+    expect(add('s', { text: 'ferrite.' }).ok).toBe(true);
+    expect(store.getDocument().objects.s).toMatchObject({ w: 200, h: 28 });
+    expect(add('given', { text: 'x', size: 'title', w: 50, h: 50 }).ok).toBe(true);
+    expect(store.getDocument().objects.given).toMatchObject({ w: 50, h: 50 });
+    expect(add('long', { text: `${'W'.repeat(9000)}\n`.repeat(2), size: 'display' }).ok).toBe(true);
+    expect(add('tall', { text: '\n'.repeat(19_000), size: 'display' }).ok).toBe(true);
+    expect(parseDocument(serializeDocument(store.getDocument())).ok).toBe(true);
+  });
+});
+
+describe('a line drawn by hand', () => {
+  const points = [0, 0.5, 0.5, 0, 1, 0.5, 0.5, 1, 0, 0.5];
+
+  test('moves and resizes as a box: its points are never rewritten, nor copied', () => {
+    const store = seeded();
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'ring', type: 'ink', x: 0, y: 200, w: 120, h: 80, points, color: { custom: '#ffd23f' } }] }).ok).toBe(true);
+    const drawn = (store.getDocument().objects.ring as { points: number[] }).points;
+    const moved = store.dispatch({ type: 'move', ids: ['ring'], dx: 30, dy: -10 });
+    expect(moved.ok && moved.envelope?.events).toEqual([{ type: 'object-set', id: 'ring', set: { x: 30, y: 190 } }]);
+    const resized = store.dispatch({ type: 'resize', id: 'ring', rect: { x: 30, y: 190, w: 240, h: 160 } });
+    expect(resized.ok && resized.envelope?.events).toEqual([{ type: 'object-set', id: 'ring', set: { w: 240, h: 160 } }]);
+    // The same list, not an equal one: the path drawn from it is kept while it is dragged.
+    expect((store.getDocument().objects.ring as { points: number[] }).points).toBe(drawn);
+    const loaded = parseDocument(serializeDocument(store.getDocument()));
+    expect(loaded.ok && loaded.value.objects.ring).toMatchObject({ x: 30, y: 190, w: 240, h: 160, points, color: { custom: '#ffd23f' } });
+    store.undo();
+    store.undo();
+    expect(store.getDocument().objects.ring).toMatchObject({ x: 0, y: 200, w: 120, h: 80, points });
+  });
+
+  test('its pen and its points are edited like any field, and undone; what is not a line is refused and changes nothing', () => {
+    const store = seeded();
+    store.dispatch({ type: 'add', objects: [{ id: 'ring', type: 'ink', x: 0, y: 200, w: 120, h: 80, points }] });
+    expect(store.dispatch({ type: 'edit', id: 'ring', patch: { pen: 'highlighter' } }).ok).toBe(true);
+    expect(store.dispatch({ type: 'edit', id: 'ring', patch: { points: [0, 0, 1, 1] } }).ok).toBe(true);
+    expect(store.getDocument().objects.ring).toMatchObject({ pen: 'highlighter', points: [0, 0, 1, 1] });
+    const usual = store.dispatch({ type: 'edit', id: 'ring', patch: { pen: 'marker' } });
+    expect(usual.ok && usual.envelope?.events).toEqual([{ type: 'object-set', id: 'ring', set: {}, unset: ['pen'] }]);
+    store.undo();
+    store.undo();
+    expect(store.getDocument().objects.ring).toMatchObject({ pen: 'highlighter', points });
+    const before = store.getDocument();
+    for (const patch of [{ points: [0, 0, 2, 2] }, { points: null }, { points: [] }, { points: 'M0 0' }, { pen: 'spray' }, { text: 'words' }, { style: { fill: 'solid' } }]) {
+      expect(store.dispatch({ type: 'edit', id: 'ring', patch: patch as never }).ok).toBe(false);
+    }
+    expect(store.getDocument()).toBe(before);
+    // An arrow can stick to a drawing, as to anything with a place, and an agent draws one with the same command.
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'to-ring', type: 'arrow', from: { object: 'a' }, to: { object: 'ring' } }] }).ok).toBe(true);
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'under', type: 'ink', x: 0, y: 0, points: [0, 1, 1, 1], pen: 'fine' }] as never }, { actor: AGENT }).ok).toBe(true);
+    expect(store.getDocument().objects.under).toMatchObject({ w: 160, h: 120, by: AGENT });
+  });
+});
+
 describe('drawing order', () => {
   test('a new object goes on top, and coming back from a delete it is where it was', () => {
     const store = seeded();
@@ -361,9 +472,37 @@ describe('drawing order', () => {
     expect(isOrderKey('A0')).toBe(false);
     expect(isOrderKey('0')).toBe(false);
     expect(isOrderKey('A1')).toBe(true);
-    // Two neighbours with the same key: the new one goes above both, and is a key.
-    const twin = keyBetween('V', 'V');
-    expect(twin > 'V' && isOrderKey(twin)).toBe(true);
+  });
+
+  test('a key asked for between two neighbours with the same key lands just above them, passing nothing else', () => {
+    // Two people each put something on top at the same moment: both got the same key. Above them sit
+    // other things, some close.
+    let seed = 0x51ed27;
+    const random = (n: number) => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0), seed % n);
+    for (let round = 0; round < 200; round++) {
+      const keys: string[] = [keyBetween(null, null)];
+      for (let i = 0; i < 30; i++) {
+        const at = random(keys.length + 1);
+        keys.splice(at, 0, keyBetween(at > 0 ? keys[at - 1] : null, at < keys.length ? keys[at] : null));
+      }
+      const at = random(keys.length - 1);
+      const twin = keys[at];
+      const key = keyBetween(twin, twin);
+      expect(isOrderKey(key)).toBe(true);
+      expect(key > twin).toBe(true);
+      // Everything that was above the pair is still above the new key.
+      expect(key < keys[at + 1]).toBe(true);
+    }
+    // That key is one more digit, and a board can already hold it: halving the room above a key gets there.
+    expect(keyBetween('AAAAAB', 'AAAAAC')).toBe(keyBetween('AAAAAB', 'AAAAAB'));
+    // Neighbours handed over the wrong way round are treated the same: just above the higher.
+    const swapped = keyBetween('V1', 'V');
+    expect(swapped > 'V1' && swapped < 'V2').toBe(true);
+    // A key already as long as a key may be still gets a key above it.
+    const longest = `${'V'.repeat(95)}1`;
+    expect(isOrderKey(longest)).toBe(true);
+    const over = keyBetween(longest, longest);
+    expect(isOrderKey(over) && over > longest).toBe(true);
   });
 
   test('there is always a key between two keys, and keys stay short for a board that is added to', () => {
@@ -384,6 +523,100 @@ describe('drawing order', () => {
       expect(next < bottom!).toBe(true);
       bottom = next;
     }
+  });
+});
+
+describe('a key between two neighbours with the same key', () => {
+  test('given the next key above them, it is a key the board does not hold, above the pair and below everything else', () => {
+    let seed = 0x9e3779b1;
+    const random = (n: number) => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0), seed % n);
+    for (let round = 0; round < 60; round++) {
+      // A board built the hard way: mostly by squeezing between close neighbours, so keys grow long and
+      // sit as near each other as keys can; and now and then by twinning a key, as two people at once do.
+      const keys: string[] = round % 3 === 0 ? ['AAAAAB', 'AAAAAC'] : [keyBetween(null, null)];
+      for (let i = 0; i < 300; i++) {
+        const at = random(keys.length);
+        const twin = keys[at];
+        // The lowest key above the pair that is not the pair's own.
+        let up = at + 1;
+        while (up < keys.length && keys[up] === twin) up++;
+        const next = up < keys.length ? keys[up] : null;
+        if (random(4) === 0) {
+          keys.splice(at, 0, twin);
+          continue;
+        }
+        const key = random(2) === 0 ? keyBetween(twin, twin, next) : keyBetween(twin, next);
+        if (!isOrderKey(key)) throw new Error(`${key} is not a key`);
+        if (keys.includes(key)) throw new Error(`${key} is already on the board (above ${twin}, under ${next})`);
+        if (!(key > twin)) throw new Error(`${key} is not above ${twin}`);
+        if (next !== null && !(key < next)) throw new Error(`${key} is not below ${next}`);
+        keys.splice(up, 0, key);
+        for (let j = 1; j < keys.length; j++) if (keys[j - 1] > keys[j]) throw new Error('the board is out of order');
+      }
+    }
+  });
+});
+
+describe('the two lists of field names', () => {
+  test('every field an edit may change is a field a change may carry', () => {
+    // A name in PATCH_FIELDS and not in OBJECT_FIELDS could be edited here and would then be dropped
+    // from the event on every peer and from undo.
+    const missing: string[] = [];
+    for (const [type, fields] of Object.entries(PATCH_FIELDS)) for (const field of fields) if (!OBJECT_FIELDS.has(field)) missing.push(`${type}.${field}`);
+    expect(missing).toEqual([]);
+  });
+
+  test('an edit of each editable field reaches a peer and is undone, field by field', () => {
+    // One object of every type, and for each a value for every field `edit` may change on it.
+    const SAMPLES: Record<string, unknown> = {
+      text: 'New words', detail: 'More', title: 'A title', label: 'A label', alt: 'In words', description: 'About it', site: 'example.test',
+      image: 'asset:pic', icon: 'asset:icon', target: { kind: 'web', url: 'https://example.test/other' }, src: 'asset:other', html: '<b>new</b>',
+      size: 'display', face: 'serif', points: [0, 0, 0.5, 1, 1, 0.25], pen: 'highlighter', frames: 3, fps: 9, from: { x: 1, y: 2 }, to: { x: 30, y: 40 }, link: { kind: 'plan', anchor: 'intro' },
+      shape: 'container', lanes: ['one', 'two'], kind: 'ask', count: 4, routing: 'straight',
+    };
+    const STYLES: Record<string, unknown> = { arrow: { ends: 'dot' }, default: { look: 'sketch' } };
+    const objects: CanvasObject[] = [
+      { id: 'box', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'b' },
+      { id: 'note', type: 'note', x: 0, y: 0, w: 100, h: 40, text: 'n' },
+      { id: 'text', type: 'text', x: 0, y: 0, w: 100, h: 40, text: 't' },
+      { id: 'frame', type: 'frame', x: 0, y: 0, w: 100, h: 40, title: 'f' },
+      { id: 'image', type: 'image', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '' },
+      { id: 'sprite', type: 'sprite', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '', frames: 2, fps: 4 },
+      { id: 'html', type: 'html', x: 0, y: 0, w: 100, h: 40, html: '<i>h</i>' },
+      { id: 'reference', type: 'reference', x: 0, y: 0, w: 100, h: 40, target: { kind: 'web', url: 'https://example.test/' } },
+      { id: 'stamp', type: 'stamp', x: 0, y: 0, w: 30, h: 30, kind: 'check' },
+      { id: 'ink', type: 'ink', x: 0, y: 0, w: 100, h: 40, points: [0, 0, 1, 1] },
+      { id: 'arrow', type: 'arrow', from: { x: 0, y: 0 }, to: { x: 9, y: 9 } },
+    ];
+    const store = new CanvasStore(createDocument('board'));
+    const peer = new CanvasStore(createDocument('board'));
+    store.onCommit((envelope) => {
+      const decoded = decodeEnvelope(JSON.stringify(envelope));
+      if (!decoded.ok) throw new Error(decoded.error);
+      peer.receive(decoded.value);
+    });
+    store.dispatch({ type: 'add', objects });
+    store.dispatch({ type: 'group', id: 'group', ids: ['box', 'note'] });
+    const checked = new Set<string>();
+    for (const [type, fields] of Object.entries(PATCH_FIELDS)) {
+      expect(store.getDocument().objects[type]?.type).toBe(type as CanvasObject['type']);
+      for (const field of fields) {
+        // Lanes belong to a container, so the shape goes first; the order in the list has it so.
+        const value = field === 'style' ? (STYLES[type] ?? STYLES.default) : SAMPLES[field];
+        if (value === undefined) throw new Error(`no sample for ${field}`);
+        const before = store.getDocument().objects[type];
+        const result = store.dispatch({ type: 'edit', id: type, patch: { [field]: value } });
+        if (!result.ok) throw new Error(`${type}.${field}: ${result.error}`);
+        expect((store.getDocument().objects[type] as unknown as Record<string, unknown>)[field]).toEqual(value);
+        expect(peer.getDocument().objects[type]).toEqual(store.getDocument().objects[type]);
+        store.undo();
+        expect(store.getDocument().objects[type]).toEqual(before);
+        expect(peer.getDocument().objects[type]).toEqual(before);
+        store.redo();
+        checked.add(field);
+      }
+    }
+    expect(checked.size).toBeGreaterThan(20);
   });
 });
 

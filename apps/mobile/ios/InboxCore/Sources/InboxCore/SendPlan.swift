@@ -20,12 +20,16 @@ public enum SendPlan {
   /// `INBOX_PERMISSION_SESSION_PREFIX` (packages/core/inbox-permission.ts:23): a permission prompt's own session.
   static let permissionSessionPrefix = "perm:"
 
-  /// `INBOX_PERMISSION_FULL` (packages/core/inbox-permission.ts:393). The Inbox takes it only with the window's own
-  /// confirmation (`confirm_full`), which the phone does not give: the choice is shown, and answered on the computer.
-  public static let permissionFull = "Allow and switch to Full permissions"
-
   public static func isPermissionPrompt(_ message: InboxMessageWire) -> Bool {
     message.author.kind == .agent && (message.author.session ?? "").hasPrefix(permissionSessionPrefix)
+  }
+
+  /// `liveMessage` (packages/inbox/components/Thread.tsx): in an archived thread, only what an agent wrote after
+  /// the archive line is still live (its action items can be marked); everything before it is read only.
+  public static func live(_ message: InboxMessageWire, in thread: InboxThread) -> Bool {
+    guard thread.resolvedAt != nil else { return true }
+    guard let line = thread.archiveSeq else { return false }
+    return (message.seq ?? 0) > line
   }
 
   static func group(of message: InboxMessageWire) -> String {
@@ -78,7 +82,7 @@ public enum SendPlan {
     var order: [String] = []
     for message in thread.messages where message.author.kind == .agent {
       let picked = (message.questions ?? []).filter { $0.state == .picked && $0.kind != .action }
-      let drafted = (message.actions ?? []).filter(actionInDraft)
+      let drafted = ActionMarks.items(of: message).filter(actionInDraft)
       if picked.isEmpty && drafted.isEmpty { continue }
       let key = group(of: message)
       if groups[key] == nil { order.append(key) }
