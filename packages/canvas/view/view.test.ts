@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { CanvasStore } from '../events/store';
-import { createDocument, resolveArrow } from '../model/document';
+import { createDocument, objectBounds, resolveArrow } from '../model/document';
+import { strokeFromPoints } from '../model/ink';
 import { parseDocument, serializeDocument } from '../model/codec';
 import type { ArrowObject, CanvasObject } from '../model/types';
-import { cameraPlacing, fitRect, lerpCamera, screenToWorld, viewportRect, worldRectToScreen, worldToScreen, zoomAt } from './camera';
+import { cameraPlacing, fitPadding, fitRect, lerpCamera, screenToWorld, viewportRect, worldRectToScreen, worldToScreen, zoomAt } from './camera';
 import { lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from './cull';
 import { BOX_SHAPES } from '../model/types';
 import { snapToGuides } from './guides';
@@ -69,6 +70,47 @@ describe('the camera', () => {
   });
 });
 
+describe('fitting a whole board into an editor', () => {
+  const board = { x: 0, y: 0, w: 2400, h: 1200 };
+
+  test('a wide view keeps the room it always had, so nothing moves on a desktop', () => {
+    expect(fitPadding({ w: 1440, h: 900 })).toEqual({ x: 72, y: 72 });
+    expect(fitRect(board, { w: 1440, h: 900 }, fitPadding({ w: 1440, h: 900 }), 1)).toEqual(fitRect(board, { w: 1440, h: 900 }, 72, 1));
+  });
+
+  test('a phone gives a board its width: the room at the sides is a twentieth of it, not 72 px', () => {
+    const phone = { w: 390, h: 844 };
+    const before = fitRect(board, phone, 72, 1).z;
+    const after = fitRect(board, phone, fitPadding(phone), 1).z;
+    expect(after / before).toBeGreaterThan(1.4);
+    // The whole board is still in view, clear of both edges, and centred.
+    const camera = fitRect(board, phone, fitPadding(phone), 1);
+    const view = viewportRect(camera, phone);
+    expect(view.x).toBeLessThan(board.x);
+    expect(view.x + view.w).toBeGreaterThan(board.x + board.w);
+    close(view.x + view.w / 2, board.x + board.w / 2);
+    close(view.y + view.h / 2, board.y + board.h / 2);
+  });
+
+  test('above and below, the room clears the bars at every size, and a tiny view still leaves some of itself', () => {
+    expect(fitPadding({ w: 390, h: 844 }).y).toBe(72);
+    // A short editor (a split pane, a small window) keeps the same room for the bars as a tall one.
+    for (const h of [216, 320, 480, 599, 600]) expect(fitPadding({ w: 1200, h }).y).toBe(72);
+    expect(fitPadding({ w: 1200, h: 150 }).y).toBe(50);
+    expect(fitPadding({ w: 2560, h: 1440 })).toEqual({ x: 72, y: 72 });
+    for (const size of [{ w: 1, h: 1 }, { w: 120, h: 90 }, { w: 320, h: 480 }, { w: 0, h: 0 }]) {
+      const pad = fitPadding(size);
+      expect(pad.x).toBeGreaterThanOrEqual(12);
+      expect(pad.y).toBeGreaterThanOrEqual(12);
+      const camera = fitRect(board, size, pad, 1);
+      expect(Number.isFinite(camera.x) && Number.isFinite(camera.y) && camera.z > 0).toBe(true);
+    }
+    // A tall board on a phone is bound by its height, and keeps clear of the bars.
+    const tall = { x: 0, y: 0, w: 300, h: 3000 };
+    expect(fitRect(tall, { w: 390, h: 844 }, fitPadding({ w: 390, h: 844 }), 1).z).toBeCloseTo((844 - 144) / 3000, 6);
+  });
+});
+
 describe('the spatial index', () => {
   test('finds what overlaps a rect and nothing else, after moves and removals', () => {
     const index = new SpatialIndex(100);
@@ -129,6 +171,60 @@ describe('hit-testing', () => {
     expect(hitTest(doc, index, { x: 300, y: 90 })).toBeNull();
     store.dispatch({ type: 'reorder', ids: ['a'], to: 'front' });
     expect(hitTest(store.getDocument(), index, { x: 120, y: 70 })).toBe('a');
+  });
+
+  test('a drawn line is grabbed along the line, as wide as its pen, and what it was drawn round stays open', () => {
+    const store = new CanvasStore(createDocument('board', 'Board'));
+    // A ring drawn round a box: four strokes through the middle of each side of the ring's own box.
+    const ring = { id: 'ring', type: 'ink', x: 0, y: 0, w: 200, h: 200, points: [0.5, 0, 1, 0.5, 0.5, 1, 0, 0.5, 0.5, 0] };
+    store.dispatch({ type: 'add', objects: [{ id: 'inside', type: 'box', x: 80, y: 80, w: 40, h: 40, text: 'in' }, ring] as CanvasObject[] });
+    const index = indexFor(store);
+    const at = (x: number, y: number) => hitTest(store.getDocument(), index, { x, y });
+    expect(at(100, 100)).toBe('inside');
+    expect(at(150, 50)).toBe('ring');
+    expect(at(10, 10)).toBeNull();
+    expect(at(150, 110)).toBeNull();
+    // Eight units off the line: past a marker, inside a highlighter, well past a fine pen.
+    const off = { x: 150 + 8 * Math.SQRT1_2, y: 50 - 8 * Math.SQRT1_2 };
+    expect(hitTest(store.getDocument(), index, off, 0)).toBeNull();
+    store.dispatch({ type: 'edit', id: 'ring', patch: { pen: 'highlighter' } });
+    expect(hitTest(store.getDocument(), index, off, 0)).toBe('ring');
+    store.dispatch({ type: 'edit', id: 'ring', patch: { pen: 'fine' } });
+    expect(hitTest(store.getDocument(), index, { x: 150 + 3 * Math.SQRT1_2, y: 50 - 3 * Math.SQRT1_2 }, 0)).toBeNull();
+    // A marquee takes it by its box, and it moves with a frame it lies in.
+    expect(objectsInRect(store.getDocument(), index, { x: -10, y: -10, w: 60, h: 60 })).toEqual(['ring']);
+  });
+
+  test('a drawn line is grabbed wherever it is drawn, the half of its stroke that lies outside its box included', () => {
+    const store = new CanvasStore(createDocument('board', 'Board'));
+    // A dead straight highlighter stroke: its box is one unit tall, the stroke eighteen.
+    const line = strokeFromPoints([{ x: 0, y: 40 }, { x: 300, y: 40 }])!;
+    expect(line).toMatchObject({ y: 40, h: 1 });
+    const ring = { id: 'ring', type: 'ink', x: 600, y: 0, w: 200, h: 200, points: [0.5, 0, 1, 0.5, 0.5, 1, 0, 0.5, 0.5, 0], pen: 'highlighter' };
+    store.dispatch({ type: 'add', objects: [{ id: 'hl', type: 'ink', ...line, pen: 'highlighter' }, ring] as CanvasObject[] });
+    const index = indexFor(store);
+    // At 100% the pointer is given five units of tolerance; with none at all the stroke itself must still answer.
+    for (const tolerance of [5, 0]) {
+      const at = (x: number, y: number) => hitTest(store.getDocument(), index, { x, y }, tolerance);
+      expect(at(150, 47)).toBe('hl');
+      expect(at(150, 33)).toBe('hl');
+      expect(at(150, 49)).toBe('hl');
+      expect(at(-6, 40)).toBe('hl');
+      // The outer half of a ring's stroke, where the ring touches the edge of its own box.
+      expect(at(700, -7)).toBe('ring');
+      expect(at(806, 100)).toBe('ring');
+    }
+    expect(hitTest(store.getDocument(), index, { x: 150, y: 56 }, 5)).toBeNull();
+    expect(hitTest(store.getDocument(), index, { x: 150, y: 50 }, 0)).toBeNull();
+    // What is mounted, captured and fitted is what is drawn: the box and the stroke round it.
+    expect(objectBounds(store.getDocument(), 'hl')).toEqual({ x: -9, y: 31, w: 318, h: 19 });
+    expect(visibleIds(store.getDocument(), index, { x: 100, y: 44, w: 10, h: 4 })).toEqual(['hl']);
+    // It still follows its box when the line moves or changes pen.
+    store.dispatch({ type: 'move', ids: ['hl'], dx: 0, dy: 100 });
+    expect(hitTest(store.getDocument(), index, { x: 150, y: 147 }, 0)).toBe('hl');
+    expect(hitTest(store.getDocument(), index, { x: 150, y: 47 }, 5)).toBeNull();
+    store.dispatch({ type: 'edit', id: 'hl', patch: { pen: 'fine' } });
+    expect(hitTest(store.getDocument(), index, { x: 150, y: 147 }, 0)).toBeNull();
   });
 
   test('a frame is grabbed by its edge or title; its inside is open board', () => {

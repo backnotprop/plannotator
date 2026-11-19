@@ -503,6 +503,18 @@ try {
   frameRow('Same board at 100% (pictures and HTML items drawn): pan across it', await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
   frameRow('Same board at 100%: drag an object with the pointer', await pointerDrag(), interval);
 
+  // ── Marks: lines drawn by hand, curved connectors ───────────────────────
+  for (const [query, what] of [['ink=600', '600 lines drawn by hand of 120 points'], ['curves=400', '400 curved connectors']] as const) {
+    await open(page, `${server.url}/?bench=canvas&n=2000&${query}`);
+    await page.waitForTimeout(600);
+    frameRow(`Canvas, 2000 objects and ${what}, whole board in view: pan`, await wheel(4000, fitPan), interval);
+    frameRow(`Canvas, 2000 objects and ${what}: zoom in and out through every level of detail`, await wheel(5000, 'send({ ctrlKey: true, deltaY: Math.sin(t / 5000 * Math.PI * 4) > 0 ? -4 : 4 });'), interval);
+    await zoomTo100();
+    await page.waitForTimeout(500);
+    frameRow(`Canvas, 2000 objects and ${what}, at 100%: pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+    frameRow(`Canvas, 2000 objects and ${what}, at 100%: drag an object with the pointer`, await pointerDrag(), interval);
+  }
+
   // ── Typed shapes and routed connectors ──────────────────────────────────
   await open(page, `${server.url}/?bench=canvas&n=2000&typed&connectors=1500`);
   await page.waitForTimeout(600);
