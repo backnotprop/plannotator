@@ -1546,6 +1546,48 @@
   --pcv-stroke: var(--pcv-custom);
 }
 
+/* A chart: our own SVG (view/chart.ts). Its shapes name a role; these are the roles' colours. The accent is
+   the object's own colour where it has one (--pcv-stroke is already the readable shade of a custom colour),
+   else the theme's. Nothing here moves: a chart has no transition and no animation. */
+.pcv-chart {
+  --pcv-chart-accent: var(--pcv-accent);
+  border: 1px solid var(--pcv-rule);
+  border-radius: 4px;
+  background: var(--pcv-card);
+  overflow: hidden;
+}
+.pcv-chart[data-color]:not([data-color='neutral']) {
+  --pcv-chart-accent: var(--pcv-stroke);
+}
+.pcv-chart-svg {
+  display: block;
+  pointer-events: none;
+}
+.pcv-ch-f-none { fill: none; }
+.pcv-ch-f-ink { fill: var(--pcv-ink); }
+.pcv-ch-f-muted { fill: var(--pcv-muted); }
+.pcv-ch-f-rule { fill: var(--pcv-rule); }
+.pcv-ch-f-accent { fill: var(--pcv-chart-accent); }
+.pcv-ch-s-ink { stroke: var(--pcv-ink); }
+.pcv-ch-s-muted { stroke: var(--pcv-muted); }
+.pcv-ch-s-rule { stroke: var(--pcv-rule); }
+.pcv-ch-s-accent { stroke: var(--pcv-chart-accent); }
+.pcv-chart-svg path { stroke-linejoin: round; stroke-linecap: round; }
+.pcv-ch-mono { font-family: var(--font-mono, ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace); }
+.pcv-ch-sans { font-family: var(--pcv-font); letter-spacing: -0.8px; }
+.pcv-flat-chart {
+  background: color-mix(in oklab, var(--pcv-ink) 8%, var(--pcv-card));
+  box-shadow: none;
+}
+@media (forced-colors: active) {
+  .pcv-chart { border-color: CanvasText; }
+  .pcv-ch-f-ink, .pcv-ch-f-muted, .pcv-ch-f-accent { fill: CanvasText; }
+  .pcv-ch-s-ink, .pcv-ch-s-muted, .pcv-ch-s-accent { stroke: CanvasText; }
+  /* The rules stay lighter than the marks they sit behind. */
+  .pcv-ch-s-rule { stroke: GrayText; }
+  .pcv-ch-f-rule { fill: GrayText; }
+}
+
 /* A stamp: a small token. */
 .pcv-stamp {
   display: flex;

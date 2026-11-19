@@ -573,6 +573,9 @@ describe('the two lists of field names', () => {
       image: 'asset:pic', icon: 'asset:icon', target: { kind: 'web', url: 'https://example.test/other' }, src: 'asset:other', html: '<b>new</b>',
       size: 'display', face: 'serif', points: [0, 0, 0.5, 1, 1, 0.25], pen: 'highlighter', frames: 3, fps: 9, from: { x: 1, y: 2 }, to: { x: 30, y: 40 }, link: { kind: 'plan', anchor: 'intro' },
       shape: 'container', lanes: ['one', 'two'], kind: 'ask', count: 4, routing: 'straight',
+      // A chart's fields, in the order `edit` lists them: each must be a whole chart with the ones before it.
+      mark: 'line', fields: ['week', 'minutes', 'target'], rows: [['W1', 4, 9], ['W2', 2, 8]], encode: { x: 'week', y: ['minutes', 'target'] },
+      stack: true, flip: true, dash: ['target'], rules: [{ at: 5, label: 'limit' }, { at: 'W2', on: 'x' }], unit: 'min',
     };
     const STYLES: Record<string, unknown> = { arrow: { ends: 'dot' }, default: { look: 'sketch' } };
     const objects: CanvasObject[] = [
@@ -583,6 +586,7 @@ describe('the two lists of field names', () => {
       { id: 'image', type: 'image', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '' },
       { id: 'sprite', type: 'sprite', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '', frames: 2, fps: 4 },
       { id: 'html', type: 'html', x: 0, y: 0, w: 100, h: 40, html: '<i>h</i>' },
+      { id: 'chart', type: 'chart', x: 0, y: 0, w: 100, h: 40, mark: 'bar', fields: ['week', 'minutes', 'plan'], rows: [['W1', 5, 9]], encode: { x: 'week', y: 'minutes' } },
       { id: 'reference', type: 'reference', x: 0, y: 0, w: 100, h: 40, target: { kind: 'web', url: 'https://example.test/' } },
       { id: 'stamp', type: 'stamp', x: 0, y: 0, w: 30, h: 30, kind: 'check' },
       { id: 'ink', type: 'ink', x: 0, y: 0, w: 100, h: 40, points: [0, 0, 1, 1] },
@@ -617,6 +621,33 @@ describe('the two lists of field names', () => {
       }
     }
     expect(checked.size).toBeGreaterThan(20);
+  });
+});
+
+describe('what a change did not touch keeps its identity', () => {
+  test('a peer moving a chart, and an undo of a move, leave its rows the very same rows', () => {
+    // A reader that skips unchanged fields by identity (the chart's drawing is worked out again only when
+    // its table changed) depends on this: a checked change rebuilds the object, and must not rebuild its rows.
+    const chart = { id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, mark: 'line', fields: ['week', 'v'], rows: [['W1', 4], ['W2', 2]], encode: { x: 'week', y: 'v' }, rules: [{ at: 3 }], dash: ['v'] };
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [chart as unknown as CanvasObject] });
+    const before = store.getDocument().objects.c as unknown as Record<string, unknown>;
+    const moved = decodeEnvelope(JSON.stringify({ id: 'peer-1', actor: { kind: 'person', id: 'peer' }, events: [{ type: 'object-set', id: 'c', set: { x: 40, y: 10 } }] }));
+    if (!moved.ok) throw new Error(moved.error);
+    store.receive(moved.value);
+    const after = store.getDocument().objects.c as unknown as Record<string, unknown>;
+    expect(after.x).toBe(40);
+    for (const field of ['rows', 'fields', 'encode', 'rules', 'dash']) expect(after[field]).toBe(before[field]);
+    store.dispatch({ type: 'move', ids: ['c'], dx: 5, dy: 5 });
+    store.undo();
+    const undone = store.getDocument().objects.c as unknown as Record<string, unknown>;
+    for (const field of ['rows', 'fields', 'encode', 'rules', 'dash']) expect(undone[field]).toBe(before[field]);
+    // A change that does touch the rows gives new rows.
+    const edited = decodeEnvelope(JSON.stringify({ id: 'peer-2', actor: { kind: 'person', id: 'peer' }, events: [{ type: 'object-set', id: 'c', set: { rows: [['W1', 4], ['W2', 9]] } }] }));
+    if (!edited.ok) throw new Error(edited.error);
+    store.receive(edited.value);
+    expect((store.getDocument().objects.c as unknown as Record<string, unknown>).rows).not.toBe(before.rows);
+    expect((store.getDocument().objects.c as unknown as Record<string, unknown>).fields).toBe(before.fields);
   });
 });
 

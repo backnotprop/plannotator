@@ -10,3 +10,4 @@ export * from './reference';
 export * from './capture';
 export * from './assets';
 export * from './order-key';
+export * from './chart';

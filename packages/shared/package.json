@@ -205,6 +205,7 @@
     "./inbox/inline-images": "./inbox/inline-images.ts",
     "./inbox/attached-images": "./inbox/attached-images.ts",
     "./inbox/attachment-questions": "./inbox/attachment-questions.ts",
+    "./inbox/picture-it-page": "./inbox/picture-it-page.ts",
     "./inbox/question-openers": "./inbox/question-openers.ts",
     "./inbox/questions-to-check": "./inbox/questions-to-check.ts",
     "./inbox/markups": "./inbox/markups.ts",

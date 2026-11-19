@@ -3739,17 +3739,19 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
 public struct InboxLaunchRex: Codable, Hashable, Sendable {
   public var line: String?
   public var unavailable: Bool?
+  public var why: InboxLaunchRexWhy?
   public var refused: Bool?
   public var session: String?
   public var block: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["line", "unavailable", "refused", "session", "block"]
+  static let knownKeys: Set<String> = ["line", "unavailable", "why", "refused", "session", "block"]
 
-  public init(line: String? = nil, unavailable: Bool? = nil, refused: Bool? = nil, session: String? = nil, block: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(line: String? = nil, unavailable: Bool? = nil, why: InboxLaunchRexWhy? = nil, refused: Bool? = nil, session: String? = nil, block: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.line = line
     self.unavailable = unavailable
+    self.why = why
     self.refused = refused
     self.session = session
     self.block = block
@@ -3760,6 +3762,7 @@ public struct InboxLaunchRex: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.line = try c.decodeIfPresent(String.self, forKey: WireKey("line"))
     self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.why = try c.decodeIfPresent(InboxLaunchRexWhy.self, forKey: WireKey("why"))
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
     self.session = try c.decodeIfPresent(String.self, forKey: WireKey("session"))
     self.block = try c.decodeIfPresent(String.self, forKey: WireKey("block"))
@@ -3770,11 +3773,40 @@ public struct InboxLaunchRex: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encodeIfPresent(self.line, forKey: WireKey("line"))
     try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
     try c.encodeIfPresent(self.session, forKey: WireKey("session"))
     try c.encodeIfPresent(self.block, forKey: WireKey("block"))
     try WireKey.write(unknownFields, to: &c)
   }
+}
+
+public enum InboxLaunchRexWhy: Codable, Hashable, Sendable, RawRepresentable {
+  case server
+  case shared
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxLaunchRexWhy] = [.server, .shared]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "server": self = .server
+    case "shared": self = .shared
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .server: return "server"
+    case .shared: return "shared"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
 /// From `packages/core/inbox-types.ts`.
@@ -4361,6 +4393,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   public var attachments: [InboxAttachment]?
   public var inlineImages: [InboxInlineImage]?
   public var liveSites: [InboxLiveSiteRef]?
+  public var pictureIt: InboxPictureItPage?
   public var delivery: InboxDelivery?
   public var takenBackAt: String?
   public var readByAgent: InboxMessageWireReadByAgent?
@@ -4408,9 +4441,9 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "live_sites", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved"]
+  static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "live_sites", "picture_it", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "launch_note", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved"]
 
-  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, liveSites: [InboxLiveSiteRef]? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, liveSites: [InboxLiveSiteRef]? = nil, pictureIt: InboxPictureItPage? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, launchNote: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.questions = questions
     self.actions = actions
     self.seq = seq
@@ -4442,6 +4475,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.attachments = attachments
     self.inlineImages = inlineImages
     self.liveSites = liveSites
+    self.pictureIt = pictureIt
     self.delivery = delivery
     self.takenBackAt = takenBackAt
     self.readByAgent = readByAgent
@@ -4522,6 +4556,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.attachments = try c.decodeIfPresent([InboxAttachment].self, forKey: WireKey("attachments"))
     self.inlineImages = try c.decodeIfPresent([InboxInlineImage].self, forKey: WireKey("inline_images"))
     self.liveSites = try c.decodeIfPresent([InboxLiveSiteRef].self, forKey: WireKey("live_sites"))
+    self.pictureIt = try c.decodeIfPresent(InboxPictureItPage.self, forKey: WireKey("picture_it"))
     self.delivery = try c.decodeIfPresent(InboxDelivery.self, forKey: WireKey("delivery"))
     self.takenBackAt = try c.decodeIfPresent(String.self, forKey: WireKey("taken_back_at"))
     self.readByAgent = try c.decodeIfPresent(InboxMessageWireReadByAgent.self, forKey: WireKey("read_by_agent"))
@@ -4602,6 +4637,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.attachments, forKey: WireKey("attachments"))
     try c.encodeIfPresent(self.inlineImages, forKey: WireKey("inline_images"))
     try c.encodeIfPresent(self.liveSites, forKey: WireKey("live_sites"))
+    try c.encodeIfPresent(self.pictureIt, forKey: WireKey("picture_it"))
     try c.encodeIfPresent(self.delivery, forKey: WireKey("delivery"))
     try c.encodeIfPresent(self.takenBackAt, forKey: WireKey("taken_back_at"))
     try c.encodeIfPresent(self.readByAgent, forKey: WireKey("read_by_agent"))
@@ -5036,6 +5072,36 @@ public struct InboxPicker: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.id, forKey: WireKey("id"))
     try c.encode(self.name, forKey: WireKey("name"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/picture-it-page.ts`.
+public struct InboxPictureItPage: Codable, Hashable, Sendable {
+  public var attachmentId: AttachmentID
+  public var title: String
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["attachment_id", "title"]
+
+  public init(attachmentId: AttachmentID, title: String, unknownFields: [String: JSONValue] = [:]) {
+    self.attachmentId = attachmentId
+    self.title = title
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.attachmentId = try c.decode(AttachmentID.self, forKey: WireKey("attachment_id"))
+    self.title = try c.decode(String.self, forKey: WireKey("title"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.attachmentId, forKey: WireKey("attachment_id"))
+    try c.encode(self.title, forKey: WireKey("title"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -6879,6 +6945,7 @@ public enum InboxRunCloneError: Codable, Hashable, Sendable, RawRepresentable {
 public struct InboxRunRex: Codable, Hashable, Sendable {
   public var line: String?
   public var unavailable: Bool?
+  public var why: InboxRunRexWhy?
   public var refused: Bool?
   public var waiting: InboxRunRexWaiting?
   public var held: InboxRunRexHeld?
@@ -6886,11 +6953,12 @@ public struct InboxRunRex: Codable, Hashable, Sendable {
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["line", "unavailable", "refused", "waiting", "held", "stops"]
+  static let knownKeys: Set<String> = ["line", "unavailable", "why", "refused", "waiting", "held", "stops"]
 
-  public init(line: String? = nil, unavailable: Bool? = nil, refused: Bool? = nil, waiting: InboxRunRexWaiting? = nil, held: InboxRunRexHeld? = nil, stops: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(line: String? = nil, unavailable: Bool? = nil, why: InboxRunRexWhy? = nil, refused: Bool? = nil, waiting: InboxRunRexWaiting? = nil, held: InboxRunRexHeld? = nil, stops: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.line = line
     self.unavailable = unavailable
+    self.why = why
     self.refused = refused
     self.waiting = waiting
     self.held = held
@@ -6902,6 +6970,7 @@ public struct InboxRunRex: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.line = try c.decodeIfPresent(String.self, forKey: WireKey("line"))
     self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
+    self.why = try c.decodeIfPresent(InboxRunRexWhy.self, forKey: WireKey("why"))
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
     self.waiting = try c.decodeIfPresent(InboxRunRexWaiting.self, forKey: WireKey("waiting"))
     self.held = try c.decodeIfPresent(InboxRunRexHeld.self, forKey: WireKey("held"))
@@ -6913,6 +6982,7 @@ public struct InboxRunRex: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.line, forKey: WireKey("line"))
     try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
     try c.encodeIfPresent(self.waiting, forKey: WireKey("waiting"))
     try c.encodeIfPresent(self.held, forKey: WireKey("held"))
@@ -6975,6 +7045,34 @@ public enum InboxRunRexWaiting: Codable, Hashable, Sendable, RawRepresentable {
     case .other: return "other"
     case .permission: return "permission"
     case .question: return "question"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public enum InboxRunRexWhy: Codable, Hashable, Sendable, RawRepresentable {
+  case server
+  case shared
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxRunRexWhy] = [.server, .shared]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "server": self = .server
+    case "shared": self = .shared
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .server: return "server"
+    case .shared: return "shared"
     case .unknown(let value): return value
     }
   }
@@ -9931,6 +10029,8 @@ public enum DoorRoutes {
   public static let postLaunchTrust = DoorRoute(name: "POST launch/:id/trust", method: .post, path: "launch/{launch}/trust", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST launch/:id/delete`: the window's `/api/inbox/launch/{launch}/delete`.
   public static let postLaunchDelete = DoorRoute(name: "POST launch/:id/delete", method: .post, path: "launch/{launch}/delete", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  /// `POST rex/show`: the window's `/api/inbox/rex/show`.
+  public static let postRexShow = DoorRoute(name: "POST rex/show", method: .post, path: "rex/show", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `GET open-in/file/view`: the window's `/api/inbox/open-in/file/view`.
   public static let getOpenInFileView = DoorRoute(name: "GET open-in/file/view", method: .get, path: "open-in/file/view", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET open-in/file/raw`: the window's `/api/inbox/open-in/file/raw`.
@@ -9957,7 +10057,7 @@ public enum DoorRoutes {
   public static let getUpdate = DoorRoute(name: "GET update", method: .get, path: "update", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST update`.
   public static let postUpdate = DoorRoute(name: "POST update", method: .post, path: "update", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
-  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, postPullsLooked, getThreadPulls, postThreadPulls, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postMessageAction, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, postPair, postRevoke, getAccounts, postLinkBack, postUnlink, getUpdate, postUpdate]
+  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, postPullsLooked, getThreadPulls, postThreadPulls, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postMessageAction, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, postPair, postRevoke, getAccounts, postLinkBack, postUnlink, getUpdate, postUpdate]
 }
 
 /// The door's routes as requests: `Door.postThreadSeen(thread: id)`.
@@ -10079,6 +10179,7 @@ public enum Door {
   public static func postLaunchRetry(launch: String) -> DoorRequest { DoorRequest(route: DoorRoutes.postLaunchRetry, path: "launch/\(segment(launch))/retry") }
   public static func postLaunchTrust(launch: String) -> DoorRequest { DoorRequest(route: DoorRoutes.postLaunchTrust, path: "launch/\(segment(launch))/trust") }
   public static func postLaunchDelete(launch: String) -> DoorRequest { DoorRequest(route: DoorRoutes.postLaunchDelete, path: "launch/\(segment(launch))/delete") }
+  public static func postRexShow() -> DoorRequest { DoorRequest(route: DoorRoutes.postRexShow, path: "rex/show") }
   public static func getOpenInFileView() -> DoorRequest { DoorRequest(route: DoorRoutes.getOpenInFileView, path: "open-in/file/view") }
   public static func getOpenInFileRaw() -> DoorRequest { DoorRequest(route: DoorRoutes.getOpenInFileRaw, path: "open-in/file/raw") }
   public static func postOpenInFileAttach() -> DoorRequest { DoorRequest(route: DoorRoutes.postOpenInFileAttach, path: "open-in/file/attach") }

@@ -155,6 +155,11 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
           object = checked.value;
           // A field this object's type does not have was dropped by the check: nothing changed after all.
           if (same(before, object)) break;
+          // The check rebuilds what it reads. Whatever came out the same as it went in keeps the value the
+          // object already had, so a reader that skips unchanged fields by identity (a chart's rows, a
+          // box's lanes) still can after a peer's change, an undo or a replay that touched other fields.
+          const rebuilt = object as unknown as ObjectFields;
+          for (const key of Object.keys(rebuilt)) if (rebuilt[key] !== from[key] && typeof rebuilt[key] === 'object' && same(from[key], rebuilt[key])) rebuilt[key] = from[key];
         }
         if (unsound(now(), object, touched)) break;
         if (touched.includes('z')) {
