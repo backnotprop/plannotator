@@ -159,6 +159,36 @@ When main moves ahead of the contract (an Inbox pull request changed a wire type
 - None of these is a required check.
 - A generator never lists a folder of the checkout. Every path it reads or writes is a literal in `scripts/mobile/lib.ts` or in the generator, so the picker can see it.
 
+## The app's look
+
+The native app is the same product as the window, made native: not a web view and not a generic iOS form. Its look lives in two files under `apps/mobile/ios/App/Sources/`: `Look.swift` (the scale, the roles and the pieces every card uses) and `LookKit.swift` (the pieces the next screens are built from). A new screen takes its numbers and its pieces from there. A screen that needs more grows the piece in the kit; it never keeps a copy beside itself. `PairingScreen.swift` is older than the kit and is not yet moved onto it.
+
+The scale and the roles (`Look.swift`):
+
+- `Space` is the room between things and inside them (2, 4, 6, 8, 10, 12, 14, 16, 20, 24, and 44 for a touch). `Size` holds a control's own measure (a button's height, Send's disc, a mark). `Radius` is the corners: a shape inside a card sits 4 points in from its edge and has a radius 4 less, so the two keep one centre. A fraction of a mark's own side is written where the mark is drawn.
+- `TextRole` is the type roles. All are system text styles, so each follows the person's text size. A card has one heavy line, its prompt; everything else steps down in size and weight.
+- `Role` is what a colour says: the accent is what the person can do or has done, amber is work held up or a caution, red is an agent stopped or a thing destroyed, green is a thing finished. Colour is never decoration. `Role.inkOnTint` and `Role.tint` are a role's words on a tint of itself (a chip, a count): the words keep 4.5:1 on a card, the page and a well, in dark and light.
+- `Motion` is the three motions (`settle`, `fade`, `press`); `.motion(_:value:)` applies one and reads Reduce Motion for its timing. A thing that also changes size (a mark filling, a button giving under a touch) reads Reduce Motion where it is drawn and keeps its size then. Motion carries meaning only: a pick settles, Send takes the accent when there is something to send.
+- `@MarkSide` is the one size of a choice's mark (22 points, growing with the text to 32); `$side` is the column of the words beside it. Ticks, notices and fields under a row all read it.
+- `.touchTarget()` makes a thing 44 points both ways and all of it answer, its padding too. Put it after the padding.
+- `.barSized()` is for a line of a bar or of the foot: it grows with the text to `Size.barText` and offers the Large Content Viewer past that. Cards and messages grow all the way.
+
+The pieces (`Look.swift`): `cardSurface()` is the one card (a card that holds an unsent pick has an accent edge); `ChoiceRow` and `PickMark` are a choice and its mark; `CardNotice` is a line about what happened to a pick; `Chip` and `RoleLine` are the small marks (a chip wraps to two lines before it widens its row); `actionGround()` is a button (`filled`, `neutral`, `destructive`, `bare`, `off`); `PressStyle` is how a thing answers a touch; `fieldGround(focused:)` is a field, its hairline in the ring colour while it has the focus; `Hairline` parts two things. A hairline parts things; a ground (a well) is kept for what the person chose.
+
+The thread's foot is one piece (`ThreadFoot.swift`): what still waits is a line across the top of the reply field, and Send (`SendDisc`) keeps the field's own centre.
+
+A thread lands on its newest question and keeps that place while rows above measure themselves again (they are built as they scroll; VoiceOver or a UI test builds them all). The place is the person's to take: any scroll that is not the page's own landing lets it go (a finger, a tap on the status bar, VoiceOver), and so does a touch on a card, a Send or the jump control (`ThreadScreen.swift`: `landingMarks`, `keepPlace`, `ScrollBox.rest`). `testAThreadLandsOnItsQuestionAtTheLargestTextSize` and `testALandedThreadLetsGoWhenThePageIsMoved` guard the two halves. The simulator UI suite runs nowhere in CI yet: it is run by hand before an app pull request.
+
+For the next screens (`LookKit.swift`):
+
+- Rows: `RowStyle(selected:)` gives a row its pressed and selected grounds. `RowAction` (`quiet`, `act`, `destructive`) gives a swipe action its tint and a menu item or confirmation its button role, by what the action does. `selectionRing(_:)` rings a selected thing (an annotation, a thumbnail) in `Token.ring`.
+- Raised surfaces: `Surface.sheet`, `Surface.popover`, `Surface.scrim` and the one `Surface.shadow`; `popoverSurface()`; `floatingBar()` for a tool bar. Glass is for what floats over content that moves under it (a tool bar over a file or a picture). A sheet and a popover are solid. The thread's foot is the one exception today: its glass sits on the page's solid ground and shows little; it is kept as the system's look for a reply field.
+- Media: `thumbnail(_:)` (`Media.thumb`, `Media.rowThumb`, `Radius.thumb`) and `mediaGround()`, the viewer's ground, dark in both appearances. The viewer's chrome is `floatingBar()` over it.
+- `CountBadge` is a count with its mark, tinted by role or quiet.
+- States: `Waiting` (loading), `Trouble` (a line about what went wrong, where it happened), `Standing` (a whole-screen state, empty included, with at most one `WideButton`).
+
+Code is drawn in one colour. The window colours code with Shiki grammars and a theme chosen per palette (`packages/ui/utils/syntaxTheme.ts`), which a phone cannot run. The plan: the computer sends each code block already cut into coloured runs with the block tree the app reads from S2 on (`message.blocks`, brief F4), each run naming one of a small fixed set of kinds (keyword, string, number, comment, name, punctuation); the contract carries one colour per kind, dark and light, taken from the theme the window resolves for the default palette (`tokens.ts`); the app draws runs with `TextRole.code()` and those colours. Until then no colours are guessed on the phone: a second highlighter would disagree with the window's.
+
 ## What the first app slice (S1) must know
 
 - Use `Wire.swift` and its `Door` routes. Never hand-write a route.
