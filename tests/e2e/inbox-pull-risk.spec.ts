@@ -248,6 +248,7 @@ test.beforeAll(async ({ browser }) => {
   env = {
     // Fakes and the system's own folders only: no real agent can be found.
     PATH: `${fakes}:/usr/bin:/bin`,
+    PLANNOTATOR_TEST_LAUNCH_PATH: `${fakes}:/usr/bin:/bin`,
     // This Inbox's own: it never reads a person's real home.
     HOME: join(root, 'home'),
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
@@ -438,8 +439,8 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
 });
 
 test('the automatic run off, picking what to make names the agent it would start, read once, and the sheet still fits a phone', async () => {
-  mkdirSync(join(env.HOME, '.pi', 'agent'), { recursive: true });
-  writeFileSync(join(env.HOME, '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
+  mkdirSync(join(dataDir, 'agents-home', '.pi', 'agent'), { recursive: true });
+  writeFileSync(join(dataDir, 'agents-home', '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
   const reads: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes('/api/inbox/pulls/risk?auto_agent=1')) reads.push(request.url());
