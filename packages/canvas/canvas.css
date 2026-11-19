@@ -1,0 +1,850 @@
+/*
+ * The canvas's own stylesheet. Plain CSS under one prefix (pcv-), no
+ * Tailwind, so a host needs no @source entry for this package: it imports
+ * this file and nothing else.
+ *
+ * Colours come from the host's theme where it has one (Plannotator's
+ * --background, --card, --border, --foreground, --primary) and fall back to
+ * Plannotator Graphite. Dark is the default, as in the product; a `.light`
+ * ancestor or data-theme="light" turns on the light half.
+ */
+
+.pcv {
+  --pcv-stage: var(--background, oklch(0.225 0.006 286));
+  --pcv-card: var(--card, oklch(0.295 0.006 286));
+  --pcv-line: var(--border, oklch(0.36 0.006 286));
+  --pcv-rule: oklch(0.435 0.006 286);
+  --pcv-ink: var(--foreground, oklch(0.945 0.003 286));
+  --pcv-muted: var(--muted-foreground, oklch(0.78 0.007 286));
+  --pcv-arrow: oklch(0.66 0.007 286);
+  --pcv-accent: var(--primary, oklch(0.765 0.124 283));
+  --pcv-on-accent: var(--primary-foreground, oklch(0.2 0.01 286));
+  --pcv-note: oklch(0.8 0.135 64);
+  --pcv-on-note: oklch(0.2 0.02 60);
+  --pcv-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px rgb(0 0 0 / 0.28);
+  --pcv-blue: oklch(0.74 0.1 250);
+  --pcv-blue-soft: oklch(0.335 0.038 250);
+  --pcv-green: oklch(0.74 0.12 155);
+  --pcv-green-soft: oklch(0.335 0.042 155);
+  --pcv-amber: oklch(0.78 0.12 85);
+  --pcv-amber-soft: oklch(0.345 0.042 85);
+  --pcv-red: oklch(0.77 0.124 25);
+  --pcv-red-soft: oklch(0.335 0.048 25);
+  --pcv-violet: oklch(0.78 0.11 290);
+  --pcv-violet-soft: oklch(0.34 0.05 290);
+  --pcv-font: var(--font-sans, 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif);
+  --pcv-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color: var(--pcv-ink);
+  font-family: var(--pcv-font);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.light .pcv,
+.pcv[data-theme='light'] {
+  --pcv-stage: var(--background, oklch(0.97 0.005 260));
+  --pcv-card: var(--card, oklch(1 0 0));
+  --pcv-line: var(--border, oklch(0.885 0.009 260));
+  --pcv-rule: oklch(0.88 0.01 260);
+  --pcv-ink: var(--foreground, oklch(0.18 0.02 260));
+  --pcv-muted: var(--muted-foreground, oklch(0.4 0.02 260));
+  --pcv-arrow: oklch(0.5 0.02 260);
+  --pcv-accent: var(--primary, oklch(0.5 0.25 280));
+  --pcv-on-accent: var(--primary-foreground, oklch(1 0 0));
+  --pcv-note: oklch(0.83 0.125 66);
+  --pcv-on-note: oklch(0.22 0.03 60);
+  --pcv-shadow: 0 1px 2px rgb(15 20 40 / 0.06), 0 6px 18px rgb(15 20 40 / 0.1);
+  --pcv-blue: oklch(0.52 0.15 255);
+  --pcv-blue-soft: oklch(0.955 0.022 255);
+  --pcv-green: oklch(0.5 0.14 150);
+  --pcv-green-soft: oklch(0.955 0.032 150);
+  --pcv-amber: oklch(0.6 0.13 80);
+  --pcv-amber-soft: oklch(0.955 0.045 88);
+  --pcv-red: oklch(0.54 0.2 25);
+  --pcv-red-soft: oklch(0.955 0.026 25);
+  --pcv-violet: oklch(0.5 0.2 285);
+  --pcv-violet-soft: oklch(0.955 0.025 285);
+}
+
+/* ── The view ──────────────────────────────────────────────────────────── */
+
+.pcv-root {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  /* A plain, calm ground. No dots, no grid. */
+  background-color: var(--pcv-stage);
+  user-select: none;
+  -webkit-user-select: none;
+  contain: layout paint style;
+}
+.pcv-root[data-interactive] {
+  touch-action: none;
+  cursor: default;
+}
+.pcv-root[data-tool='hand'] {
+  cursor: grab;
+}
+.pcv-root[data-tool='hand'][data-dragging] {
+  cursor: grabbing;
+}
+.pcv-root[data-tool='box'],
+.pcv-root[data-tool='note'],
+.pcv-root[data-tool='text'],
+.pcv-root[data-tool='arrow'],
+.pcv-root[data-tool='region'] {
+  cursor: crosshair;
+}
+
+.pcv-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+.pcv-obj {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  --pcv-fill: var(--pcv-card);
+  --pcv-stroke: var(--pcv-rule);
+  --pcv-on-fill: var(--pcv-ink);
+}
+.pcv-obj[data-color='blue'] { --pcv-fill: var(--pcv-blue-soft); --pcv-stroke: var(--pcv-blue); }
+.pcv-obj[data-color='green'] { --pcv-fill: var(--pcv-green-soft); --pcv-stroke: var(--pcv-green); }
+.pcv-obj[data-color='amber'] { --pcv-fill: var(--pcv-amber-soft); --pcv-stroke: var(--pcv-amber); }
+.pcv-obj[data-color='red'] { --pcv-fill: var(--pcv-red-soft); --pcv-stroke: var(--pcv-red); }
+.pcv-obj[data-color='violet'] { --pcv-fill: var(--pcv-violet-soft); --pcv-stroke: var(--pcv-violet); }
+.pcv-obj[data-color='custom'] {
+  --pcv-fill: color-mix(in oklch, var(--pcv-custom) 14%, var(--pcv-card));
+  --pcv-stroke: var(--pcv-custom);
+}
+
+/* Selection outlines and handles live in the overlay, the one element that
+   is told the zoom (--pcv-z), so their lines stay the same width on screen. */
+.pcv-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  --pcv-z: 1;
+}
+.pcv-outline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: calc(4px / var(--pcv-z));
+  outline: calc(1.5px / var(--pcv-z)) solid var(--pcv-accent);
+  outline-offset: calc(3px / var(--pcv-z));
+}
+
+.pcv-words {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+}
+.pcv-words[contenteditable] {
+  outline: none;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pcv-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid var(--pcv-stroke);
+  border-radius: 8px;
+  background: var(--pcv-fill);
+  overflow: hidden;
+}
+.pcv-box-text {
+  font-weight: 600;
+  line-height: 1.35;
+}
+.pcv-box-detail {
+  color: var(--pcv-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.pcv-note {
+  padding: 8px 10px;
+  border-radius: 8px 8px 8px 2px;
+  background: var(--pcv-note);
+  color: var(--pcv-on-note);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: var(--pcv-shadow);
+  overflow: hidden;
+}
+.pcv-note[data-color]:not([data-color='neutral']) {
+  background: var(--pcv-stroke);
+}
+
+.pcv-text {
+  font-size: 15px;
+  line-height: 1.4;
+}
+.pcv-text[data-size='small'] { font-size: 12.5px; color: var(--pcv-muted); }
+.pcv-text[data-size='large'] { font-size: 22px; font-weight: 650; line-height: 1.25; }
+.pcv-text[data-color]:not([data-color='neutral']) { color: var(--pcv-stroke); }
+
+.pcv-frame {
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+}
+.pcv-frame[data-color]:not([data-color='neutral']) {
+  border-color: var(--pcv-stroke);
+  background: color-mix(in oklch, var(--pcv-fill) 35%, transparent);
+}
+.pcv-frame-title {
+  position: absolute;
+  left: 2px;
+  bottom: 100%;
+  max-width: 100%;
+  padding-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pcv-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.pcv-image,
+.pcv-sprite,
+.pcv-html {
+  border-radius: 6px;
+}
+.pcv-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.pcv-image[data-color]:not([data-color='neutral']),
+.pcv-sprite[data-color]:not([data-color='neutral']),
+.pcv-html[data-color]:not([data-color='neutral']) {
+  box-shadow: 0 0 0 1.5px var(--pcv-stroke);
+}
+.pcv-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px dashed var(--pcv-rule);
+  border-radius: inherit;
+  color: var(--pcv-muted);
+  font-size: 12px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.pcv-sprite {
+  background-repeat: no-repeat;
+  background-size: calc(var(--pcv-frames) * 100%) 100%;
+  image-rendering: pixelated;
+  animation: pcv-sprite calc(var(--pcv-frames) / var(--pcv-fps) * 1s) steps(var(--pcv-frames)) infinite;
+}
+@keyframes pcv-sprite {
+  to {
+    background-position-x: calc(var(--pcv-sprite-w) * var(--pcv-frames) * -1);
+  }
+}
+
+.pcv-html iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  color-scheme: inherit;
+}
+
+.pcv-arrows {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+.pcv-arrow {
+  color: var(--pcv-arrow);
+}
+.pcv-arrow[data-color='blue'] { color: var(--pcv-blue); }
+.pcv-arrow[data-color='green'] { color: var(--pcv-green); }
+.pcv-arrow[data-color='amber'] { color: var(--pcv-amber); }
+.pcv-arrow[data-color='red'] { color: var(--pcv-red); }
+.pcv-arrow[data-color='violet'] { color: var(--pcv-violet); }
+.pcv-arrow line {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.pcv-arrow polygon {
+  fill: currentColor;
+}
+.pcv-arrow text {
+  fill: var(--pcv-muted);
+  font-size: 11.5px;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--pcv-stage);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.pcv-arrow[data-selected] line {
+  stroke: var(--pcv-accent);
+  stroke-width: 2.5;
+}
+.pcv-arrow[data-selected] polygon {
+  fill: var(--pcv-accent);
+}
+
+/* Level of detail. The attribute is written with the camera, not by React. */
+.pcv-root[data-lod='plain'] .pcv-note,
+.pcv-root[data-lod='far'] .pcv-note {
+  box-shadow: none;
+}
+.pcv-root[data-lod='plain'] .pcv-box-detail,
+.pcv-root[data-lod='far'] .pcv-box-detail {
+  display: none;
+}
+.pcv-root[data-lod='far'] .pcv-words,
+.pcv-root[data-lod='far'] .pcv-arrow text {
+  visibility: hidden;
+}
+.pcv-root[data-lod='far'] .pcv-sprite,
+.pcv-root[data-lod='plain'] .pcv-sprite {
+  animation: none;
+}
+
+/* ── Editor overlays ───────────────────────────────────────────────────── */
+
+.pcv-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(9px / var(--pcv-z));
+  height: calc(9px / var(--pcv-z));
+  margin: calc(-4.5px / var(--pcv-z)) 0 0 calc(-4.5px / var(--pcv-z));
+  box-sizing: border-box;
+  border: calc(1.5px / var(--pcv-z)) solid var(--pcv-accent);
+  border-radius: calc(2.5px / var(--pcv-z));
+  background: var(--pcv-card);
+}
+.pcv-handle::after {
+  /* A finger-sized target around a small square. */
+  content: '';
+  position: absolute;
+  inset: calc(-10px / var(--pcv-z));
+}
+.pcv-handle[data-handle='nw'],
+.pcv-handle[data-handle='se'] { cursor: nwse-resize; }
+.pcv-handle[data-handle='ne'],
+.pcv-handle[data-handle='sw'] { cursor: nesw-resize; }
+
+.pcv-marquee,
+.pcv-region {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: 3px;
+}
+.pcv-marquee {
+  border: 1px solid var(--pcv-accent);
+  background: color-mix(in oklch, var(--pcv-accent) 9%, transparent);
+}
+.pcv-region {
+  border: 1.5px dashed var(--pcv-accent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--pcv-accent) 6%, transparent);
+}
+.pcv-draft-arrow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  color: var(--pcv-accent);
+}
+
+/* ── Chrome: floating bars ─────────────────────────────────────────────── */
+
+.pcv-bar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+  z-index: 3;
+}
+.pcv-bar-dock {
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pcv-bar-history {
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.pcv-bar-zoom {
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.pcv-bar-top {
+  left: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+}
+.pcv-bar-selection {
+  left: 0;
+  top: 0;
+  border-radius: 10px;
+  max-width: calc(100% - 12px);
+  will-change: transform;
+}
+.pcv-bar[hidden] {
+  display: none;
+}
+
+.pcv-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--pcv-muted);
+  font: 500 13px/1 var(--pcv-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 120ms var(--pcv-ease), color 120ms var(--pcv-ease), transform 120ms var(--pcv-ease);
+}
+/* One icon set (Lucide), one size, one stroke. A button holding only an icon
+   is an exact square, so every glyph sits in the centre of an equal slot. */
+.pcv-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  stroke-width: 1.75;
+}
+.pcv-btn-icon {
+  width: 36px;
+  padding: 0;
+}
+/* Two glyphs carry their weight in one corner; shifted so they look centred. */
+.pcv-btn svg.lucide-mouse-pointer-2 {
+  transform: translate(1px, 1px);
+}
+.pcv-btn svg.lucide-move-up-right {
+  transform: translate(-0.5px, 0.5px);
+}
+@media (hover: hover) {
+  .pcv-btn:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--pcv-ink) 7%, transparent);
+    color: var(--pcv-ink);
+  }
+}
+.pcv-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.pcv-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-accent);
+}
+.pcv-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.pcv-btn[aria-pressed='true'] {
+  background: color-mix(in oklch, var(--pcv-accent) 16%, transparent);
+  color: var(--pcv-accent);
+}
+.pcv-btn-primary {
+  padding: 0 12px;
+  background: var(--pcv-accent);
+  color: var(--pcv-on-accent);
+  touch-action: none;
+}
+@media (hover: hover) {
+  .pcv-btn.pcv-btn-primary:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--pcv-accent) 88%, var(--pcv-ink));
+    color: var(--pcv-on-accent);
+  }
+}
+.pcv-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--pcv-line);
+}
+
+.pcv-swatch {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 36px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pcv-swatch::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  box-sizing: border-box;
+  border: 2px solid var(--pcv-swatch, var(--pcv-rule));
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--pcv-swatch, var(--pcv-card)) 22%, var(--pcv-card));
+  transition: transform 120ms var(--pcv-ease);
+}
+@media (hover: hover) {
+  .pcv-swatch:hover::before {
+    transform: scale(1.15);
+  }
+}
+.pcv-swatch:focus-visible::before {
+  box-shadow: 0 0 0 2px var(--pcv-card), 0 0 0 4px var(--pcv-accent);
+}
+.pcv-swatch[aria-pressed='true']::before {
+  background: var(--pcv-swatch, var(--pcv-rule));
+}
+.pcv-swatch-custom::before {
+  border-color: transparent;
+  background: conic-gradient(oklch(0.7 0.18 25), oklch(0.8 0.16 90), oklch(0.72 0.16 150), oklch(0.7 0.14 250), oklch(0.65 0.2 300), oklch(0.7 0.18 25));
+}
+.pcv-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+@media (max-width: 520px) {
+  .pcv-bar-history {
+    left: 8px;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+  .pcv-bar-zoom {
+    right: 8px;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+  .pcv-bar-top {
+    left: 50%;
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    transform: translateX(-50%);
+  }
+  .pcv-bar-dock {
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .pcv-btn {
+    min-width: 40px;
+    height: 40px;
+  }
+  .pcv-btn-icon {
+    width: 40px;
+  }
+  .pcv-swatch {
+    height: 40px;
+  }
+}
+
+/* ── The figure in a plan ──────────────────────────────────────────────── */
+
+.pcv-figure {
+  display: block;
+  margin: 1.25rem 0;
+  padding: 0;
+}
+.pcv-figure-frame {
+  position: relative;
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--pcv-stage);
+  transition: border-color 160ms var(--pcv-ease), box-shadow 160ms var(--pcv-ease), transform 160ms var(--pcv-ease);
+}
+/* The button that opens the canvas covers the figure and has no look of its
+   own; the frame around it shows hover, press and focus. */
+.pcv-figure-hit {
+  all: unset;
+  position: absolute;
+  inset: 0;
+  cursor: zoom-in;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .pcv-figure-frame:has(.pcv-figure-hit:hover) {
+    border-color: color-mix(in oklch, var(--pcv-accent) 55%, var(--pcv-line));
+    box-shadow: var(--pcv-shadow);
+  }
+}
+.pcv-figure-frame:has(.pcv-figure-hit:active) {
+  transform: scale(0.995);
+}
+.pcv-figure-frame:has(.pcv-figure-hit:focus-visible) {
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 4px var(--pcv-accent);
+}
+.pcv-figure-view {
+  position: relative;
+  width: 100%;
+  /* Skipped by the browser while off screen; the size is kept. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+.pcv-figure-view > .pcv-root,
+.pcv-figure-view > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pcv-figure-view > img {
+  object-fit: contain;
+}
+.pcv-figure-view > .pcv-root {
+  pointer-events: none;
+}
+.pcv-figure-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  padding: 16px;
+  box-sizing: border-box;
+  color: var(--pcv-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.pcv-figure-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 2px 0;
+  color: var(--pcv-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.pcv-figure-title {
+  min-width: 0;
+  color: var(--pcv-ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.pcv-figure-note {
+  min-width: 0;
+  flex: 1;
+}
+.pcv-figure-hint {
+  flex: none;
+  margin-left: auto;
+}
+
+/* ── The opened canvas ─────────────────────────────────────────────────── */
+
+.pcv-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.pcv-stage-clip {
+  position: absolute;
+  inset: 0;
+  will-change: clip-path;
+}
+.pcv-stage[data-fade] {
+  transition: opacity 140ms linear;
+}
+/* The bars arrive after the canvas has nearly opened, and leave first. */
+.pcv-stage .pcv-bar {
+  opacity: var(--pcv-chrome, 1);
+}
+.pcv-stage[data-busy] .pcv-bar {
+  pointer-events: none;
+}
+
+/* ── Dragging a snapshot into the plan ─────────────────────────────────── */
+
+.pcv-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 10px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+  font: 500 13px/1.3 var(--pcv-font);
+  pointer-events: none;
+  will-change: transform;
+}
+.pcv-drop-line {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1099;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: var(--pcv-accent);
+  pointer-events: none;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pcv-sprite {
+    animation: none;
+  }
+  .pcv-btn,
+  .pcv-swatch::before,
+  .pcv-figure-frame {
+    transition: none;
+  }
+  .pcv-btn:active:not(:disabled),
+  .pcv-figure-frame:has(.pcv-figure-hit:active) {
+    transform: none;
+  }
+}
+
+.pcv-figure-still {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+/* ── Reference cards: a web page, an artifact, a place in a plan ───────── */
+
+.pcv-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pcv-stroke);
+  border-radius: 10px;
+  background: var(--pcv-fill);
+  overflow: hidden;
+}
+.pcv-card-image {
+  display: block;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  background: color-mix(in oklch, var(--pcv-ink) 5%, var(--pcv-card));
+  pointer-events: none;
+}
+.pcv-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 3px;
+  padding: 10px 12px 11px;
+  min-height: 0;
+}
+.pcv-card-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pcv-muted);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+.pcv-card-icon {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.pcv-card-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+/* The site's own icon covers the glyph when it loads; when it does not, the glyph is already there. */
+.pcv-card-favicon {
+  position: absolute;
+  inset: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--pcv-fill);
+  object-fit: contain;
+}
+.pcv-card-site {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcv-card-title,
+.pcv-card-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+}
+.pcv-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.pcv-card-description {
+  color: var(--pcv-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pcv-root[data-lod='plain'] .pcv-card-description,
+.pcv-root[data-lod='far'] .pcv-card-description,
+.pcv-root[data-lod='far'] .pcv-card-source {
+  display: none;
+}

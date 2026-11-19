@@ -1,0 +1,224 @@
+/**
+ * The renderer: a document and a camera in, DOM out. It reads the store and
+ * never writes to it; everything a person can do lives in `CanvasEditor`,
+ * which wraps this. A snapshot figure uses this component alone.
+ *
+ * Why DOM (with one SVG layer for arrows) and not a 2D canvas:
+ * - Text is the content. The browser wraps, shapes, hyphenates and renders
+ *   it sharply at any zoom, in any script, and keeps it selectable and
+ *   readable by a screen reader. On a 2D canvas all of that is ours to
+ *   rebuild.
+ * - Pictures, sprites and sandboxed HTML items are elements already. A 2D
+ *   canvas cannot hold an iframe.
+ * - Theming is the host's CSS variables, light and dark, with no redraw.
+ *
+ * The board is a plain ground: no dots, no grid.
+ *
+ * What makes DOM fast enough:
+ * - One element (`.pcv-world`) carries the camera as a CSS transform,
+ *   written straight from the camera's listener. Panning and zooming never
+ *   render React and never lay anything out.
+ * - That element is deliberately NOT promoted to its own layer
+ *   (`will-change: transform`). Measured: a promoted layer is rastered at
+ *   full scale however far out the board is zoomed, so 2,000 objects at 12%
+ *   zoom became a 60-megapixel layer and panned at 10 fps; unpromoted, the
+ *   browser paints only what the view shows and it holds the display rate.
+ * - Only objects in the render window are mounted (`view/cull.ts`), and the
+ *   window is recomputed only when the view leaves it.
+ * - Objects are placed with `transform`, so moving one is not a layout.
+ * - Far out, the stylesheet draws less of each object (`data-lod`).
+ */
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { CanvasStore } from '../events/store';
+import { resolveArrow } from '../model/document';
+import type { Rect } from '../model/geometry';
+import type { ObjectId } from '../model/types';
+import type { Camera, CameraController, Size } from '../view/camera';
+import { type Lod, OVERSCAN, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
+import { indexFor } from '../view/document-index';
+import { ArrowView, ObjectView } from './objects';
+
+const NONE: ReadonlySet<ObjectId> = new Set();
+
+export interface CanvasViewProps {
+  store: CanvasStore;
+  camera: CameraController;
+  /** Draw only these objects (a snapshot of a chosen set). */
+  only?: ReadonlySet<ObjectId> | null;
+  selection?: ReadonlySet<ObjectId>;
+  editingId?: ObjectId | null;
+  onEditEnd?: (id: ObjectId, text: string) => void;
+  /** Turn a relative picture address into one the browser can load. */
+  resolveImageSrc?: (src: string) => string;
+  /** Extra world rects to keep mounted (where a camera animation is heading). */
+  keepMounted?: Rect | null;
+  /** How far past the view objects stay mounted, as a share of its size. */
+  overscan?: number;
+  /** Called with the view's size in CSS pixels, once known and on resize. */
+  onSize?: (size: Size) => void;
+  /** Drawn inside the world: moves and scales with the board. */
+  worldOverlay?: React.ReactNode;
+  /** Drawn over the view in screen space. */
+  children?: React.ReactNode;
+  rootRef?: React.Ref<HTMLDivElement>;
+  rootProps?: React.HTMLAttributes<HTMLDivElement> & Record<`data-${string}`, string | undefined>;
+}
+
+function unionWindow(a: Rect, b: Rect | null | undefined): Rect {
+  if (!b) return a;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y };
+}
+
+export function CanvasView({
+  store,
+  camera,
+  only = null,
+  selection = NONE,
+  editingId = null,
+  onEditEnd,
+  resolveImageSrc,
+  keepMounted = null,
+  overscan = OVERSCAN,
+  onSize,
+  worldOverlay,
+  children,
+  rootRef,
+  rootProps,
+}: CanvasViewProps) {
+  const doc = useSyncExternalStore(store.subscribe, store.getDocument, store.getDocument);
+  const index = indexFor(store);
+  const root = useRef<HTMLDivElement | null>(null);
+  const world = useRef<HTMLDivElement | null>(null);
+  const overlay = useRef<HTMLDivElement | null>(null);
+  const zoomRef = useRef<number | null>(null);
+  const overscanRef = useRef(overscan);
+  const size = useRef<Size>({ w: 0, h: 0 });
+  const [window_, setWindow] = useState<Rect | null>(null);
+  const windowRef = useRef<Rect | null>(null);
+  const [lod, setLod] = useState<Lod>(() => lodForZoom(camera.get().z));
+  const lodRef = useRef(lod);
+  const onSizeRef = useRef(onSize);
+  onSizeRef.current = onSize;
+
+  const setRoot = useCallback(
+    (el: HTMLDivElement | null) => {
+      root.current = el;
+      if (typeof rootRef === 'function') rootRef(el);
+      else if (rootRef) (rootRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+    },
+    [rootRef],
+  );
+
+  /** Write the camera to the DOM. No React state unless the window or the detail level must change. */
+  const paint = useCallback(
+    (c: Camera) => {
+      const rootEl = root.current;
+      const worldEl = world.current;
+      if (!rootEl || !worldEl) return;
+      worldEl.style.transform = `translate(${-c.x * c.z}px, ${-c.y * c.z}px) scale(${c.z})`;
+      // The zoom is published only where it is read (the overlay's outlines
+      // and handles), and only when it changes. A custom property set on the
+      // root would be inherited by every object and restyle all of them on
+      // every frame of a pan.
+      if (zoomRef.current !== c.z) {
+        zoomRef.current = c.z;
+        overlay.current?.style.setProperty('--pcv-z', String(c.z));
+      }
+      const nextLod = lodForZoom(c.z);
+      if (nextLod !== lodRef.current) {
+        lodRef.current = nextLod;
+        rootEl.dataset.lod = nextLod;
+        setLod(nextLod);
+      }
+      if (size.current.w > 0 && windowIsStale(windowRef.current, c, size.current, overscanRef.current)) {
+        windowRef.current = renderWindow(c, size.current, overscanRef.current);
+        setWindow(windowRef.current);
+      }
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const measure = () => {
+      const next = { w: el.clientWidth, h: el.clientHeight };
+      if (next.w === size.current.w && next.h === size.current.h) return;
+      size.current = next;
+      windowRef.current = null;
+      onSizeRef.current?.(next);
+      paint(camera.get());
+    };
+    zoomRef.current = null;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    const stop = camera.subscribe(paint);
+    paint(camera.get());
+    return () => {
+      observer.disconnect();
+      stop();
+    };
+  }, [camera, paint]);
+
+  // A new overscan takes effect at once: the window is recomputed for it.
+  useLayoutEffect(() => {
+    if (overscanRef.current === overscan) return;
+    overscanRef.current = overscan;
+    windowRef.current = null;
+    paint(camera.get());
+  }, [overscan, camera, paint]);
+
+  const mounted = useMemo(() => {
+    if (!window_) return [];
+    const ids = visibleIds(doc, index, unionWindow(window_, keepMounted));
+    return only ? ids.filter((id) => only.has(id)) : ids;
+  }, [doc, index, window_, keepMounted, only]);
+
+  const placed: React.ReactNode[] = [];
+  const arrows: React.ReactNode[] = [];
+  const overlayNodes: React.ReactNode[] = [];
+  for (const id of mounted) {
+    const object = doc.objects[id];
+    if (!object) continue;
+    if (object.type === 'arrow') {
+      const g = resolveArrow(doc, object);
+      if (g) arrows.push(<ArrowView key={id} arrow={object} x1={g.from.x} y1={g.from.y} x2={g.to.x} y2={g.to.y} selected={selection.has(id)} />);
+    } else if (object.type !== 'group') {
+      placed.push(
+        <ObjectView
+          key={id}
+          object={object}
+          selected={selection.has(id)}
+          editing={editingId === id}
+          rich={object.type !== 'html' || lod === 'full'}
+          resolveImageSrc={resolveImageSrc}
+          onEditEnd={onEditEnd}
+        />,
+      );
+      // The selection outline is its own element in the overlay, so its
+      // width can follow the zoom without the object reading the zoom.
+      if (selection.has(id)) {
+        overlayNodes.push(<div key={id} className="pcv-outline" style={{ transform: `translate(${object.x}px, ${object.y}px)`, width: object.w, height: object.h }} />);
+      }
+    }
+  }
+
+  return (
+    <div {...rootProps} ref={setRoot} className={rootProps?.className ? `pcv pcv-root ${rootProps.className}` : 'pcv pcv-root'} data-lod={lod}>
+      <div ref={world} className="pcv-world">
+        {placed}
+        <svg className="pcv-arrows" aria-hidden="true">
+          {arrows}
+        </svg>
+        <div ref={overlay} className="pcv-overlay">
+          {overlayNodes}
+          {worldOverlay}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}

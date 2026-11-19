@@ -1,0 +1,285 @@
+/**
+ * Command → events. Pure: it reads the document and the command and returns
+ * the events that carry it out, or a reason it cannot be done. Every command
+ * goes through here whoever sent it, so a person's gesture and an agent's
+ * request are held to the same checks.
+ */
+import { checkObject, checkSnapshot, LIMITS, type Checked } from '../model/codec';
+import { parseColor } from '../model/color';
+import { groupMembers, isBoundEnd, objectBounds, resolveArrow } from '../model/document';
+import { isValidId } from '../model/ids';
+import {
+  type Actor,
+  type ArrowEnd,
+  type CanvasDocument,
+  type CanvasObject,
+  type ObjectId,
+  isPlaced,
+} from '../model/types';
+import type { CanvasEvent, Command, ObjectPatch } from './types';
+
+const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
+const done = (events: CanvasEvent[]): Checked<CanvasEvent[]> => ({ ok: true, value: events });
+
+/** The smallest an object may be resized to, in world units. */
+export const MIN_OBJECT_SIZE = 16;
+
+const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
+  box: ['text', 'detail', 'link'],
+  note: ['text', 'link'],
+  text: ['text', 'size', 'link'],
+  frame: ['title', 'link'],
+  image: ['src', 'alt', 'link'],
+  sprite: ['src', 'alt', 'frames', 'fps', 'link'],
+  html: ['html', 'link'],
+  reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link'],
+  arrow: ['from', 'to', 'label', 'link'],
+  group: ['label', 'link'],
+};
+
+/** Fields an edit removes when given `null` or an empty string. */
+const OPTIONAL_FIELDS = new Set(['link', 'detail', 'label', 'description', 'site', 'image', 'icon']);
+
+const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const moveEnd = (end: ArrowEnd, dx: number, dy: number): ArrowEnd =>
+  isBoundEnd(end) ? end : { x: end.x + dx, y: end.y + dy };
+
+function uniqueKnown(doc: CanvasDocument, ids: readonly ObjectId[]): ObjectId[] {
+  const seen = new Set<ObjectId>();
+  for (const id of ids) if (doc.objects[id]) seen.add(id);
+  return [...seen];
+}
+
+function planAdd(doc: CanvasDocument, objects: readonly unknown[], actor: Actor): Checked<CanvasEvent[]> {
+  if (!Array.isArray(objects) || objects.length === 0) return fail('nothing to add');
+  if (Object.keys(doc.objects).length + objects.length > LIMITS.objects) return fail(`a canvas holds at most ${LIMITS.objects} objects`);
+  const incoming = new Map<ObjectId, CanvasObject>();
+  for (const raw of objects) {
+    const checked = checkObject(raw);
+    if (!checked.ok) return checked;
+    const object = checked.value;
+    if (doc.objects[object.id] || incoming.has(object.id)) return fail(`${object.id}: that id is already used`);
+    incoming.set(object.id, object.by ? object : { ...object, by: actor.kind });
+  }
+  const known = (id: ObjectId) => incoming.get(id) ?? doc.objects[id];
+  for (const object of incoming.values()) {
+    if (object.group && known(object.group)?.type !== 'group') return fail(`${object.id}: group ${object.group} is not a group on this canvas`);
+    if (object.type === 'arrow') {
+      for (const end of [object.from, object.to]) {
+        if (isBoundEnd(end) && !known(end.object)) return fail(`${object.id}: there is no object ${end.object} to attach to`);
+      }
+    }
+  }
+  return done([...incoming.values()].map((object) => ({ type: 'object-added', object })));
+}
+
+function planDelete(doc: CanvasDocument, ids: readonly ObjectId[]): Checked<CanvasEvent[]> {
+  const doomed = new Set<ObjectId>();
+  for (const id of uniqueKnown(doc, ids)) {
+    doomed.add(id);
+    if (doc.objects[id].type === 'group') for (const member of groupMembers(doc, id)) doomed.add(member);
+  }
+  if (doomed.size === 0) return fail('nothing to delete');
+  // A group left with no member goes with them.
+  const remaining = new Map<ObjectId, number>();
+  for (const object of Object.values(doc.objects)) {
+    if (object.group && !doomed.has(object.id)) remaining.set(object.group, (remaining.get(object.group) ?? 0) + 1);
+  }
+  for (const id of [...doomed]) {
+    let group = doc.objects[id].group;
+    while (group && doc.objects[group] && !doomed.has(group) && !remaining.get(group)) {
+      doomed.add(group);
+      const parent: ObjectId | undefined = doc.objects[group].group;
+      if (parent) remaining.set(parent, (remaining.get(parent) ?? 1) - 1);
+      group = parent;
+    }
+  }
+  const events: CanvasEvent[] = [];
+  // An arrow that stays keeps its place: the end that was stuck to a deleted
+  // object becomes a free point where it was.
+  for (const object of Object.values(doc.objects)) {
+    if (object.type !== 'arrow' || doomed.has(object.id)) continue;
+    const fromLost = isBoundEnd(object.from) && doomed.has(object.from.object);
+    const toLost = isBoundEnd(object.to) && doomed.has(object.to.object);
+    if (!fromLost && !toLost) continue;
+    const geometry = resolveArrow(doc, object);
+    if (!geometry) {
+      doomed.add(object.id);
+      continue;
+    }
+    events.push({
+      type: 'object-changed',
+      object: { ...object, from: fromLost ? geometry.from : object.from, to: toLost ? geometry.to : object.to },
+    });
+  }
+  for (const id of doomed) events.push({ type: 'object-removed', id });
+  return done(events);
+}
+
+function planEdit(doc: CanvasDocument, id: ObjectId, patch: ObjectPatch): Checked<CanvasEvent[]> {
+  const object = doc.objects[id];
+  if (!object) return fail(`there is no object ${id}`);
+  if (!patch || typeof patch !== 'object') return fail('edit needs a patch');
+  const allowed = PATCH_FIELDS[object.type];
+  const next: Record<string, unknown> = { ...object };
+  let touched = false;
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    if (!allowed.includes(key as keyof ObjectPatch)) return fail(`${id}: a ${object.type} has no "${key}" to edit`);
+    if (value === null || value === '') {
+      if (OPTIONAL_FIELDS.has(key)) delete next[key];
+      else next[key] = value === null ? undefined : value;
+    } else {
+      next[key] = value;
+    }
+    touched = true;
+  }
+  if (!touched) return fail('edit changes nothing');
+  const checked = checkObject(next);
+  if (!checked.ok) return checked;
+  if (checked.value.type === 'arrow') {
+    for (const end of [checked.value.from, checked.value.to]) {
+      if (isBoundEnd(end) && (!doc.objects[end.object] || end.object === id)) return fail(`${id}: there is no object ${end.object} to attach to`);
+    }
+  }
+  return done([{ type: 'object-changed', object: checked.value }]);
+}
+
+function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectId[], label: string | undefined, actor: Actor): Checked<CanvasEvent[]> {
+  if (!isValidId(groupId)) return fail('the group needs a valid id');
+  if (doc.objects[groupId]) return fail(`${groupId}: that id is already used`);
+  const members = uniqueKnown(doc, ids).filter((id) => id !== groupId);
+  if (members.length < 2) return fail('a group needs at least two objects');
+  const group = checkObject({ id: groupId, type: 'group', by: actor.kind, ...(label ? { label } : {}) });
+  if (!group.ok) return group;
+  const events: CanvasEvent[] = [{ type: 'object-added', object: group.value }];
+  for (const id of members) events.push({ type: 'object-changed', object: { ...doc.objects[id], group: groupId } });
+  return done(events);
+}
+
+function planUngroup(doc: CanvasDocument, ids: readonly ObjectId[]): Checked<CanvasEvent[]> {
+  const groups = uniqueKnown(doc, ids).filter((id) => doc.objects[id].type === 'group');
+  if (groups.length === 0) return fail('nothing to ungroup');
+  const dissolved = new Set(groups);
+  const events: CanvasEvent[] = [];
+  for (const object of Object.values(doc.objects)) {
+    if (!object.group || !dissolved.has(object.group) || dissolved.has(object.id)) continue;
+    // A member moves up to the nearest group that stays.
+    let parent = doc.objects[object.group]?.group;
+    while (parent && dissolved.has(parent)) parent = doc.objects[parent]?.group;
+    const { group: _old, ...rest } = object;
+    events.push({ type: 'object-changed', object: (parent ? { ...rest, group: parent } : rest) as CanvasObject });
+  }
+  for (const id of groups) events.push({ type: 'object-removed', id });
+  return done(events);
+}
+
+export function planCommand(doc: CanvasDocument, command: Command, actor: Actor): Checked<CanvasEvent[]> {
+  switch (command.type) {
+    case 'add':
+      return planAdd(doc, command.objects, actor);
+
+    case 'move': {
+      if (!isNumber(command.dx) || !isNumber(command.dy)) return fail('move needs dx and dy');
+      const ids = uniqueKnown(doc, command.ids ?? []);
+      if (ids.length === 0) return fail('nothing to move');
+      if (command.dx === 0 && command.dy === 0) return done([]);
+      const events: CanvasEvent[] = [];
+      for (const id of ids) {
+        const object = doc.objects[id];
+        if (isPlaced(object)) {
+          events.push({ type: 'object-changed', object: { ...object, x: object.x + command.dx, y: object.y + command.dy } });
+        } else if (object.type === 'arrow' && (!isBoundEnd(object.from) || !isBoundEnd(object.to))) {
+          events.push({
+            type: 'object-changed',
+            object: { ...object, from: moveEnd(object.from, command.dx, command.dy), to: moveEnd(object.to, command.dx, command.dy) },
+          });
+        }
+      }
+      return done(events);
+    }
+
+    case 'resize': {
+      const object = doc.objects[command.id];
+      if (!object) return fail(`there is no object ${command.id}`);
+      if (!isPlaced(object)) return fail(`${command.id}: a ${object.type} has no size of its own`);
+      const r = command.rect;
+      if (!r || !isNumber(r.x) || !isNumber(r.y) || !isNumber(r.w) || !isNumber(r.h)) return fail('resize needs a rectangle');
+      const next = { ...object, x: r.x, y: r.y, w: Math.max(MIN_OBJECT_SIZE, r.w), h: Math.max(MIN_OBJECT_SIZE, r.h) };
+      const checked = checkObject(next);
+      if (!checked.ok) return checked;
+      return done([{ type: 'object-changed', object: checked.value }]);
+    }
+
+    case 'edit':
+      return planEdit(doc, command.id, command.patch);
+
+    case 'recolor': {
+      const ids = uniqueKnown(doc, command.ids ?? []);
+      if (ids.length === 0) return fail('nothing to recolour');
+      const color = command.color === null ? null : parseColor(command.color);
+      if (command.color !== null && !color) return fail('that is not a named colour or a CSS colour');
+      return done(
+        ids.map((id) => {
+          const { color: _old, ...rest } = doc.objects[id];
+          return { type: 'object-changed', object: (color ? { ...rest, color } : rest) as CanvasObject };
+        }),
+      );
+    }
+
+    case 'delete':
+      return planDelete(doc, command.ids ?? []);
+
+    case 'group':
+      return planGroup(doc, command.id, command.ids ?? [], command.label, actor);
+
+    case 'ungroup':
+      return planUngroup(doc, command.ids ?? []);
+
+    case 'reorder': {
+      const wanted = new Set(uniqueKnown(doc, command.ids ?? []));
+      if (wanted.size === 0) return fail('nothing to reorder');
+      if (command.to !== 'front' && command.to !== 'back') return fail('reorder goes to "front" or "back"');
+      // Keep the moved objects in their own relative order.
+      const moving = doc.order.filter((id) => wanted.has(id));
+      const last = doc.order.length - 1;
+      return done(
+        command.to === 'front'
+          ? moving.map((id) => ({ type: 'object-ordered', id, at: last }))
+          : [...moving].reverse().map((id) => ({ type: 'object-ordered', id, at: 0 })),
+      );
+    }
+
+    case 'retitle':
+      if (typeof command.title !== 'string' || command.title.length > LIMITS.title) return fail('the title is missing or too long');
+      return done([{ type: 'title-set', title: command.title }]);
+
+    case 'add-snapshot': {
+      const checked = checkSnapshot(command.snapshot);
+      if (!checked.ok) return checked;
+      const snapshot = checked.value;
+      if (doc.snapshots[snapshot.id]) return fail(`${snapshot.id}: that snapshot id is already used`);
+      if (Object.keys(doc.snapshots).length >= LIMITS.snapshots) return fail(`a canvas holds at most ${LIMITS.snapshots} snapshots`);
+      const source = snapshot.source;
+      if (source.kind === 'frame' && doc.objects[source.frame]?.type !== 'frame') return fail(`${snapshot.id}: ${source.frame} is not a frame on this canvas`);
+      if (source.kind === 'objects' && !source.objects.some((id) => objectBounds(doc, id))) return fail(`${snapshot.id}: none of those objects is on this canvas`);
+      return done([{ type: 'snapshot-put', snapshot }]);
+    }
+
+    case 'edit-snapshot': {
+      const before = doc.snapshots[command.id];
+      if (!before) return fail(`there is no snapshot ${command.id}`);
+      const checked = checkSnapshot({ id: before.id, title: command.title ?? before.title, source: command.source ?? before.source });
+      if (!checked.ok) return checked;
+      return done([{ type: 'snapshot-put', snapshot: checked.value }]);
+    }
+
+    case 'remove-snapshot':
+      if (!doc.snapshots[command.id]) return fail(`there is no snapshot ${command.id}`);
+      return done([{ type: 'snapshot-removed', id: command.id }]);
+
+    default:
+      return fail(`unknown command ${JSON.stringify((command as { type?: unknown }).type)}`);
+  }
+}

@@ -1,0 +1,296 @@
+/**
+ * Reading a document, an object or a snapshot from JSON someone else wrote
+ * (a file, a peer, an agent). Fail closed: anything not understood is
+ * refused with a reason, never guessed at, and nothing unknown is carried
+ * through. What passes here is safe to hand to the renderer.
+ */
+import { parseColor } from './color';
+import { isFiniteRect } from './geometry';
+import { HTML_ITEM_MAX_LENGTH, isSafeImageSrc, isWebUrl } from './html-item';
+import { isValidId } from './ids';
+import {
+  ARTIFACT_KINDS,
+  CANVAS_DOCUMENT_VERSION,
+  type ArrowEnd,
+  type ArtifactKind,
+  type CanvasDocument,
+  type CanvasLink,
+  type CanvasObject,
+  type ReferenceTarget,
+  type Snapshot,
+  type SnapshotSource,
+} from './types';
+
+export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };
+
+const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
+
+export const LIMITS = {
+  text: 20_000,
+  title: 300,
+  coordinate: 10_000_000,
+  size: 20_000,
+  objects: 20_000,
+  snapshots: 2_000,
+  spriteFrames: 512,
+  spriteFps: 60,
+} as const;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
+
+const isCoordinate = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= LIMITS.coordinate;
+
+function readRect(value: Record<string, unknown>): { x: number; y: number; w: number; h: number } | null {
+  const { x, y, w, h } = value;
+  if (!isCoordinate(x) || !isCoordinate(y) || typeof w !== 'number' || typeof h !== 'number') return null;
+  const r = { x, y, w, h };
+  if (!isFiniteRect(r) || w < 1 || h < 1 || w > LIMITS.size || h > LIMITS.size) return null;
+  return r;
+}
+
+function readEnd(value: unknown): ArrowEnd | null {
+  if (!isRecord(value)) return null;
+  if ('object' in value) return isValidId(value.object) ? { object: value.object } : null;
+  return isCoordinate(value.x) && isCoordinate(value.y) ? { x: value.x, y: value.y } : null;
+}
+
+function readLink(value: unknown): CanvasLink | null {
+  if (!isRecord(value) || value.kind !== 'plan' || !isText(value.anchor, LIMITS.title) || !value.anchor) return null;
+  return { kind: 'plan', anchor: value.anchor };
+}
+
+function readTarget(value: unknown): ReferenceTarget | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'web') return isWebUrl(value.url) ? { kind: 'web', url: value.url } : null;
+  if (value.kind === 'artifact') {
+    if (!isText(value.artifact, 512) || !value.artifact) return null;
+    if (!(ARTIFACT_KINDS as readonly unknown[]).includes(value.artifactKind)) return null;
+    return { kind: 'artifact', artifact: value.artifact, artifactKind: value.artifactKind as ArtifactKind };
+  }
+  if (value.kind === 'plan') {
+    if (!isText(value.anchor, LIMITS.title)) return null;
+    if (value.document !== undefined && !isText(value.document, 512)) return null;
+    return { kind: 'plan', anchor: value.anchor, ...(value.document ? { document: value.document } : {}) };
+  }
+  return null;
+}
+
+/** One object, checked field by field and rebuilt from only the known fields. */
+export function checkObject(value: unknown): Checked<CanvasObject> {
+  if (!isRecord(value)) return fail('an object must be a JSON object');
+  if (!isValidId(value.id)) return fail('id must be 1 to 64 of a-z, 0-9, "-" and "_", starting with a letter or digit');
+  const id = value.id;
+  const base: { id: string; color?: CanvasObject['color']; group?: string; link?: CanvasLink; by?: 'person' | 'agent' } = { id };
+  if (value.color !== undefined) {
+    const color = parseColor(value.color);
+    if (!color) return fail(`${id}: color is not a named colour or a CSS colour`);
+    base.color = color;
+  }
+  if (value.group !== undefined) {
+    if (!isValidId(value.group) || value.group === id) return fail(`${id}: group is not a valid id`);
+    base.group = value.group;
+  }
+  if (value.link !== undefined) {
+    const link = readLink(value.link);
+    if (!link) return fail(`${id}: link is not understood`);
+    base.link = link;
+  }
+  if (value.by !== undefined) {
+    if (value.by !== 'person' && value.by !== 'agent') return fail(`${id}: by must be "person" or "agent"`);
+    base.by = value.by;
+  }
+
+  const type = value.type;
+  if (type === 'arrow') {
+    const from = readEnd(value.from);
+    const to = readEnd(value.to);
+    if (!from || !to) return fail(`${id}: an arrow needs "from" and "to", each an object id or a point`);
+    if (value.label !== undefined && !isText(value.label, LIMITS.title)) return fail(`${id}: label is too long`);
+    return { ok: true, value: { ...base, type, from, to, ...(value.label ? { label: value.label as string } : {}) } };
+  }
+  if (type === 'group') {
+    if (value.label !== undefined && !isText(value.label, LIMITS.title)) return fail(`${id}: label is too long`);
+    return { ok: true, value: { ...base, type, ...(value.label ? { label: value.label as string } : {}) } };
+  }
+
+  const r = readRect(value);
+  if (!r) return fail(`${id}: x, y, w and h must be numbers, with w and h from 1 to ${LIMITS.size}`);
+  switch (type) {
+    case 'box': {
+      if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
+      if (value.detail !== undefined && !isText(value.detail, LIMITS.text)) return fail(`${id}: detail is too long`);
+      return { ok: true, value: { ...base, ...r, type, text: value.text, ...(value.detail ? { detail: value.detail as string } : {}) } };
+    }
+    case 'note':
+      if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
+      return { ok: true, value: { ...base, ...r, type, text: value.text } };
+    case 'text': {
+      if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
+      const size = value.size;
+      if (size !== undefined && size !== 'small' && size !== 'medium' && size !== 'large') return fail(`${id}: size must be small, medium or large`);
+      return { ok: true, value: { ...base, ...r, type, text: value.text, ...(size ? { size } : {}) } };
+    }
+    case 'frame':
+      if (!isText(value.title, LIMITS.title)) return fail(`${id}: title is missing or too long`);
+      return { ok: true, value: { ...base, ...r, type, title: value.title } };
+    case 'image':
+      if (!isSafeImageSrc(value.src)) return fail(`${id}: src must be http(s), blob, an image data URL or a relative path`);
+      if (!isText(value.alt, LIMITS.title)) return fail(`${id}: alt is missing or too long`);
+      return { ok: true, value: { ...base, ...r, type, src: value.src, alt: value.alt } };
+    case 'sprite': {
+      if (!isSafeImageSrc(value.src)) return fail(`${id}: src must be http(s), blob, an image data URL or a relative path`);
+      if (!isText(value.alt, LIMITS.title)) return fail(`${id}: alt is missing or too long`);
+      const { frames, fps } = value;
+      if (typeof frames !== 'number' || !Number.isInteger(frames) || frames < 1 || frames > LIMITS.spriteFrames) return fail(`${id}: frames must be a whole number from 1 to ${LIMITS.spriteFrames}`);
+      if (typeof fps !== 'number' || !(fps > 0) || fps > LIMITS.spriteFps) return fail(`${id}: fps must be above 0 and at most ${LIMITS.spriteFps}`);
+      return { ok: true, value: { ...base, ...r, type, src: value.src, alt: value.alt, frames, fps } };
+    }
+    case 'html':
+      if (!isText(value.html, HTML_ITEM_MAX_LENGTH)) return fail(`${id}: html is missing or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
+      return { ok: true, value: { ...base, ...r, type, html: value.html } };
+    case 'reference': {
+      const target = readTarget(value.target);
+      if (!target) return fail(`${id}: target must be a web address (http or https), an artifact or a place in a plan`);
+      const out: Record<string, unknown> = { ...base, ...r, type, target };
+      for (const key of ['title', 'description', 'site'] as const) {
+        const text = value[key];
+        if (text === undefined || text === '') continue;
+        if (!isText(text, key === 'description' ? 600 : LIMITS.title)) return fail(`${id}: ${key} is too long`);
+        out[key] = text;
+      }
+      for (const key of ['image', 'icon'] as const) {
+        const src = value[key];
+        if (src === undefined || src === '') continue;
+        if (!isSafeImageSrc(src)) return fail(`${id}: ${key} must be http(s), blob, an image data URL or a relative path`);
+        out[key] = src;
+      }
+      return { ok: true, value: out as unknown as CanvasObject };
+    }
+    default:
+      return fail(`${id}: unknown object type ${JSON.stringify(type)}`);
+  }
+}
+
+function checkIdList(value: unknown, what: string): Checked<string[]> {
+  if (!Array.isArray(value) || value.length > LIMITS.objects) return fail(`${what} must be a list of ids`);
+  const seen = new Set<string>();
+  for (const id of value) {
+    if (!isValidId(id)) return fail(`${what} holds something that is not an id`);
+    seen.add(id);
+  }
+  return { ok: true, value: [...seen] };
+}
+
+export function checkSnapshot(value: unknown): Checked<Snapshot> {
+  if (!isRecord(value)) return fail('a snapshot must be a JSON object');
+  if (!isValidId(value.id)) return fail('a snapshot needs a valid id');
+  if (!isText(value.title, LIMITS.title)) return fail(`${value.id}: title is missing or too long`);
+  const source = value.source;
+  if (!isRecord(source)) return fail(`${value.id}: source is missing`);
+  let checked: SnapshotSource;
+  if (source.kind === 'frame') {
+    if (!isValidId(source.frame)) return fail(`${value.id}: source.frame is not an id`);
+    checked = { kind: 'frame', frame: source.frame };
+  } else if (source.kind === 'objects') {
+    const ids = checkIdList(source.objects, `${value.id}: source.objects`);
+    if (!ids.ok) return ids;
+    if (ids.value.length === 0) return fail(`${value.id}: source.objects is empty`);
+    checked = { kind: 'objects', objects: ids.value };
+  } else if (source.kind === 'region') {
+    const r = isRecord(source.rect) ? readRect(source.rect) : null;
+    if (!r) return fail(`${value.id}: source.rect is not a rectangle`);
+    const ids = checkIdList(source.objects ?? [], `${value.id}: source.objects`);
+    if (!ids.ok) return ids;
+    checked = { kind: 'region', rect: r, objects: ids.value };
+  } else {
+    return fail(`${value.id}: unknown source kind ${JSON.stringify(source.kind)}`);
+  }
+  return { ok: true, value: { id: value.id, title: value.title, source: checked } };
+}
+
+/**
+ * Migrations from an older saved version to the next, keyed by the version
+ * they read. Empty today: version 1 is the first. A new version adds one
+ * entry here and bumps `CANVAS_DOCUMENT_VERSION`; old files keep opening.
+ */
+export const MIGRATIONS: Readonly<Record<number, (doc: Record<string, unknown>) => Record<string, unknown>>> = {};
+
+export function parseDocument(input: unknown): Checked<CanvasDocument> {
+  let raw: unknown = input;
+  if (typeof input === 'string') {
+    try {
+      raw = JSON.parse(input);
+    } catch {
+      return fail('not JSON');
+    }
+  }
+  if (!isRecord(raw)) return fail('a canvas document must be a JSON object');
+  let current = raw;
+  const saved = current.version;
+  if (typeof saved !== 'number' || !Number.isInteger(saved) || saved < 1) return fail('version is missing');
+  let version: number = saved;
+  if (version > CANVAS_DOCUMENT_VERSION) return fail(`this canvas was saved by a newer version (${version}); this one reads up to ${CANVAS_DOCUMENT_VERSION}`);
+  while (version < CANVAS_DOCUMENT_VERSION) {
+    const migrate = MIGRATIONS[version];
+    if (!migrate) return fail(`no migration from version ${version}`);
+    current = migrate(current);
+    version += 1;
+  }
+  if (!isValidId(current.id)) return fail('the canvas needs a valid id');
+  if (!isText(current.title, LIMITS.title)) return fail('title is missing or too long');
+  if (!isRecord(current.objects)) return fail('objects is missing');
+  const entries = Object.entries(current.objects);
+  if (entries.length > LIMITS.objects) return fail(`more than ${LIMITS.objects} objects`);
+  const objects: Record<string, CanvasObject> = {};
+  for (const [key, value] of entries) {
+    const checked = checkObject(value);
+    if (!checked.ok) return checked;
+    if (checked.value.id !== key) return fail(`object stored under ${JSON.stringify(key)} says its id is ${checked.value.id}`);
+    objects[key] = checked.value;
+  }
+  if (!Array.isArray(current.order)) return fail('order is missing');
+  const order: string[] = [];
+  const placed = new Set<string>();
+  for (const id of current.order) {
+    if (typeof id !== 'string' || !objects[id] || placed.has(id)) return fail('order must list each object once');
+    placed.add(id);
+    order.push(id);
+  }
+  if (order.length !== entries.length) return fail('order must list each object once');
+  const snapshots: Record<string, Snapshot> = {};
+  const rawSnapshots = current.snapshots ?? {};
+  if (!isRecord(rawSnapshots) || Object.keys(rawSnapshots).length > LIMITS.snapshots) return fail('snapshots is not understood');
+  for (const [key, value] of Object.entries(rawSnapshots)) {
+    const checked = checkSnapshot(value);
+    if (!checked.ok) return checked;
+    if (checked.value.id !== key) return fail(`snapshot stored under ${JSON.stringify(key)} says its id is ${checked.value.id}`);
+    snapshots[key] = checked.value;
+  }
+  return { ok: true, value: { version: CANVAS_DOCUMENT_VERSION, id: current.id, title: current.title, objects, order, snapshots } };
+}
+
+/** The same value with every object's keys in alphabetical order. */
+function sorted(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sorted);
+  if (!isRecord(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) out[key] = sorted(value[key]);
+  return out;
+}
+
+/**
+ * The saved form. Objects are written in drawing order, snapshots by id, and
+ * every key in a fixed order, so two saves of one document are the same text
+ * however the document came to be (a clean diff, a stable hash).
+ */
+export function serializeDocument(doc: CanvasDocument): string {
+  const objects: Record<string, unknown> = {};
+  for (const id of doc.order) if (doc.objects[id]) objects[id] = sorted(doc.objects[id]);
+  const snapshots: Record<string, unknown> = {};
+  for (const id of Object.keys(doc.snapshots).sort()) snapshots[id] = sorted(doc.snapshots[id]);
+  return JSON.stringify({ version: doc.version, id: doc.id, title: doc.title, objects, order: doc.order, snapshots });
+}

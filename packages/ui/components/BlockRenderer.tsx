@@ -10,6 +10,7 @@ import { BlockquoteBlock } from "./blocks/BlockquoteBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
 import { QuestionBlock, type QuestionBlockProps } from "./blocks/QuestionBlock";
+import { renderHostDirective } from "./blocks/directiveRenderer";
 import { sourceLineAttrs } from "../utils/sourceLineAttrs";
 import {
   indexQuestionBlocks,
@@ -242,6 +243,16 @@ const BlockRendererBody: React.FC<{
               repoHost={repoHost}
               onNavigateAnchor={onNavigateAnchor}
             />
+          );
+        }
+      } else {
+        // A host that owns this kind draws it (`directiveRenderer` seam).
+        const hosted = renderHostDirective(block);
+        if (hosted !== null) {
+          return (
+            <div data-block-id={block.id} data-block-type="directive" data-directive-kind={kind} {...sourceLineAttrs(block)}>
+              {hosted}
+            </div>
           );
         }
       }
