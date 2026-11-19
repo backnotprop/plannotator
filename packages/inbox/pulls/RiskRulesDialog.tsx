@@ -41,6 +41,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   // Branch reviews (present only while it is on): rank the branches agents report too. Off until the person ticks it.
   const [branches, setBranches] = useState(answer.branches === true);
   const [make, setMake] = useState<string>(answer.auto?.make ?? '');
+  const [autoAgent, setAutoAgent] = useState<Pick<InboxPullRiskAnswer, 'auto_agent' | 'auto_agent_unavailable'> | null>(answer.auto ? answer : null);
   const autoId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   // The words come first: the box takes the focus, not Save.
@@ -62,6 +63,17 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       });
     return () => controller.abort();
   }, [provider]);
+  useEffect(() => {
+    if (!make || autoAgent) return;
+    const controller = new AbortController();
+    inboxApi
+      .pullRisk(controller.signal, true)
+      .then((next) => {
+        if (!controller.signal.aborted) setAutoAgent(next);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [make, autoAgent]);
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -137,14 +149,14 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
         <div className="ib-riskd-row ib-riskd-auto" role="group" aria-labelledby={autoId} data-pull-risk-auto={make}>
           <span id={autoId}>When one ranks {riskFilterWords[answer.auto?.level ?? 'high']}, make</span>
           <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
-          {make && (
-            <span className="ib-riskd-with" data-pull-risk-auto-agent={answer.auto_agent?.agent ?? ''}>
-              {answer.auto_agent ? (
+          {make && autoAgent && (
+            <span className="ib-riskd-with" data-pull-risk-auto-agent={autoAgent.auto_agent?.agent ?? ''}>
+              {autoAgent.auto_agent ? (
                 <>
-                  with <HostMark host={answer.auto_agent.agent} /> {answer.auto_agent.name}
+                  with <HostMark host={autoAgent.auto_agent.agent} /> {autoAgent.auto_agent.name}
                 </>
               ) : (
-                'No agent can be started here.'
+                (autoAgent.auto_agent_unavailable ?? 'No agent can be started here.')
               )}
             </span>
           )}

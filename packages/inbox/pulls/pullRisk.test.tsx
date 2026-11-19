@@ -505,6 +505,23 @@ test.skipIf(!hasDom)('the automatic line saves what to make only when changed, k
   expect(saves.map((save) => ('auto' in save ? save.auto : 'kept'))).toEqual(['kept', { level: 'medium', make: 'picture_it', agent: 'codex' }, null]);
 });
 
+test.skipIf(!hasDom)('with the automatic run off, a pick reads the agent a run would start, and a set agent that cannot start says why', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  const reads = spy('pullRisk', async () => ({ ...JUDGED, auto: null, auto_agent: { agent: 'codex', name: 'Codex' } }));
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: null, auto_agent: null }} onSaved={() => {}} onClose={() => {}} />);
+  expect(reads).not.toHaveBeenCalled();
+  await pick('auto', 'a Picture page');
+  await settle();
+  expect(reads.mock.calls[0]?.[1]).toBe(true);
+  expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toMatch(/^with\s+Codex$/);
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  const why = "Codex isn't signed in on this computer.";
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'high', make: 'guide', agent: 'codex' }, auto_agent: null, auto_agent_unavailable: why }} onSaved={() => {}} onClose={() => {}} />);
+  expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toBe(why);
+});
+
 test.skipIf(!hasDom)('no agent installed: one line, and the rules can still be saved', async () => {
   const saves: unknown[] = [];
   spy('savePullRisk', async (input) => {

@@ -192,3 +192,20 @@ test("the last review's agent no longer available: the first one that is", async
   expect(w.store.message(thread_id)!.launch?.agent).toBe(FAKE);
   expect(await pullRiskAutoAgent(w.pick, null)).toMatchObject({ agent: FAKE, name: "Fake Agent" });
 });
+
+test("a remembered effort the agent no longer offers is dropped, and the run starts on its remembered model", async () => {
+  const w = setup(false);
+  writeLastLaunchChoice(w.dataDir, FAKE, { model: "opus", effort: "max" });
+  const { thread_id } = await w.start(w.job);
+  const launched = w.store.message(thread_id)!.launch!;
+  expect([launched.agent, launched.model, launched.effort]).toEqual([FAKE, "opus", undefined]);
+});
+
+test("the agent set in config can't start: the run says why in its name and starts no other", async () => {
+  const signedOut: LaunchHost = { ...codexHost(), available: async () => ({ ok: false, missing: false, reason: "signed out", code: "signed_out" }) };
+  const w = setup(false, [signedOut]);
+  const words = "Codex isn't signed in on this computer. Run `codex login` on this computer, then try again. Already signed in there? In Terminal on this computer itself, run `plannotator inbox restart`.";
+  expect(await pullRiskAutoAgent(w.pick, CODEX)).toEqual({ unavailable: words });
+  await expect(w.start({ ...w.job, agent: CODEX })).rejects.toThrow(words);
+  expect(w.store.threadsOf(w.project.id)).toEqual([]);
+});

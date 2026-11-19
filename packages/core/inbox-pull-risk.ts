@@ -77,6 +77,7 @@ export interface InboxPullRiskAnswer {
   auto_runs?: Record<string, InboxPullRiskAutoRun>;
   auto_would_start?: Record<InboxPullRiskAuto["level"], number>;
   auto_agent?: { agent: string; name: string } | null;
+  auto_agent_unavailable?: string;
 }
 
 export type InboxPullRiskAutoMake = "guide" | "picture_it";
