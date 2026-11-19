@@ -352,6 +352,14 @@ export interface ViewerProps {
    *  `QuestionBlock`). Default false: each line shows as text, as before
    *  (today's card). The Plannotator Inbox passes true. */
   questionOptionLines?: boolean;
+  /** Whether `:::question` cards read change lines (core
+   *  `ParseQuestionBlockOptions.changeLines`): `Where:`, `Before:`, `After:`
+   *  and `Source:` at the block's indent, and `Before:` / `After:` under a
+   *  `- [ ]` choice. The card then draws the Where with a pin, each place's
+   *  Now / After, and each choice's own version (see `QuestionChange`).
+   *  Default false: each line shows as text, as before (today's card). The
+   *  Plannotator Inbox passes true. */
+  questionChangeLines?: boolean;
   /** Host content right after a question's choices (the Plannotator Inbox's
    *  "Try prototype" tab; see `QuestionBlock` `renderAfterChoices`). Absent:
    *  today's card. */
@@ -945,6 +953,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionDecisionLines = true,
   questionContractLines = false,
   questionOptionLines = false,
+  questionChangeLines = false,
   renderQuestionAfterChoices,
   questionPictureChoices = true,
   questionPictureBadge,
@@ -1093,9 +1102,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // annotations that carry `questionAnswer` (matched by question key, so an
   // answer follows its question across re-parses).
   const questionIndex = useMemo(() => {
-    const list = indexQuestionBlocks(blocks, { decisionLines: questionDecisionLines, contractLines: questionContractLines, ...(questionOptionLines ? { optionLines: true } : {}) });
+    const list = indexQuestionBlocks(blocks, {
+      decisionLines: questionDecisionLines,
+      contractLines: questionContractLines,
+      ...(questionOptionLines ? { optionLines: true } : {}),
+      ...(questionChangeLines ? { changeLines: true } : {}),
+    });
     return { byBlock: new Map(list.map((q) => [q.blockId, q])), total: list.length };
-  }, [blocks, questionDecisionLines, questionContractLines, questionOptionLines]);
+  }, [blocks, questionDecisionLines, questionContractLines, questionOptionLines, questionChangeLines]);
   // A host that keeps answers itself (`questionAnswers`) replaces the
   // annotation-derived map; each entry is validated like any other reader.
   const answersByKey = useMemo(

@@ -597,6 +597,14 @@ export const INBOX_PICTURES_RULE =
   'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. When the person picks between looks (designs, variants, today\'s screen against a redesign), write about the options inside the question, not above it: each option is a picture choice, `- [ ] A · Label — ![alt](path) what it means`, its own picture inside it and what you would say about it as its description; a choice with nothing to show (both, none yet) stays plain text. Above the question, one or two sentences at most; the label comes back. A mock that ends on a screen the product already has shows a real screenshot of that screen.'
 
 /**
+ * A question that proposes a change (approval "before-after", the Versions card; words approved by the owner,
+ * 2026-11-18): `Where:`, `Before:` and `After:`, per place and per choice. On every copy of send_message's body,
+ * after the pictures rule.
+ */
+export const INBOX_CHANGE_RULE =
+  'A question that proposes a change (words, a screen, code, a setting) shows it: `Where: <what it is and where the person sees it>`, then `Before:` and `After:`, each the whole sentence, paragraph or screenshot it sits in (the card marks the change; `Before: none` when nothing is there). Several places: repeat the three lines per place. A choice that is its own version or change gets its own `After:` (and `Before:`) under it. A new feature or a prototype skips these (send pictures), and so does a choice the person never sees, such as a library. More forms (several places, pictures, a version per choice): `plannotator inbox --help before-after`.'
+
+/**
  * Options another agent designs (the owner approved these words 2026-11-11, from the clean-room eval of picture
  * choices): ask it for what each option needs, then send its options as one question, not its report. On every copy
  * of send_message's body, after the option lines.
@@ -670,6 +678,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       '',
       INBOX_SHOWING_RULE,
       INBOX_PICTURES_RULE,
+      INBOX_CHANGE_RULE,
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
       INBOX_OPTION_LINES_RULE,

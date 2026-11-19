@@ -3236,9 +3236,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * characters): the entry as the tool builds it from the default tool list, with Pi's wrapper, 13,084 → 13,869 bytes
  * (+785), Board on the same +785. Tokens scaled at the entry's bytes per token (3.7), +212, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13869, tokens: 3729 };
+/*
+ * Showing a proposed change (INBOX_CHANGE_RULE on send_message's `body`, approval "before-after", 2026-11-18; no line
+ * in the description): +653 bytes, measured on the real Pi and OpenCode 2 requests in CI (13,869 → 14,522). Board on
+ * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
+ * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 15466, tokens: 4226 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
