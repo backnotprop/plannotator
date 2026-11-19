@@ -42,6 +42,8 @@ import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
 import { ArrowView, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
+/** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
+const CROWDED = 500;
 
 /** A connector in the sketch look: its route drawn by hand, the same way every time. */
 const SKETCH_LINES = new Map<string, string>();
@@ -84,6 +86,8 @@ export interface CanvasViewProps {
    * editor moves focus between the rest. Undefined: nothing on the board takes focus (a figure).
    */
   tabStop?: ObjectId | null;
+  /** The objects being dragged right now. */
+  carried?: ReadonlySet<ObjectId>;
   onEditEnd?: (id: ObjectId, text: string) => void;
   /** Turn a relative picture address into one the browser can load. */
   resolveImageSrc?: (src: string) => string;
@@ -116,6 +120,7 @@ export function CanvasView({
   selection = NONE,
   editingId = null,
   tabStop,
+  carried,
   onEditEnd,
   resolveImageSrc,
   keepMounted = null,
@@ -136,6 +141,7 @@ export function CanvasView({
   const world = useRef<HTMLDivElement | null>(null);
   const overlay = useRef<HTMLDivElement | null>(null);
   const zoomRef = useRef<number | null>(null);
+  const chipRef = useRef(0);
   const overscanRef = useRef(overscan);
   const size = useRef<Size>({ w: 0, h: 0 });
   const [window_, setWindow] = useState<Rect | null>(null);
@@ -169,6 +175,13 @@ export function CanvasView({
       if (zoomRef.current !== c.z) {
         zoomRef.current = c.z;
         overlay.current?.style.setProperty('--pcv-z', String(c.z));
+      }
+      // Frame titles grow as the board shrinks, so they can still be read. One value, in steps, set on the
+      // board only when it changes step: it is inherited, and writing it every frame would restyle everything.
+      const chip = Math.round(Math.max(1, Math.min(3.3, 0.9 / c.z)) * 8) / 8;
+      if (chip !== chipRef.current) {
+        chipRef.current = chip;
+        worldEl.style.setProperty('--pcv-chip', String(chip));
       }
       const nextLod = lodForZoom(c.z);
       if (nextLod !== lodRef.current) {
@@ -257,6 +270,7 @@ export function CanvasView({
           resolveImageSrc={resolveImageSrc}
           onEditEnd={onEditEnd}
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}
+          carried={carried?.has(id) ?? false}
         />,
       );
       // The selection outline is its own element in the overlay, so its
@@ -300,7 +314,7 @@ export function CanvasView({
   }
 
   return (
-    <div {...rootProps} ref={setRoot} className={rootProps?.className ? `pcv pcv-root ${rootProps.className}` : 'pcv pcv-root'} data-lod={lod}>
+    <div {...rootProps} ref={setRoot} className={rootProps?.className ? `pcv pcv-root ${rootProps.className}` : 'pcv pcv-root'} data-lod={lod} data-crowded={mounted.length > CROWDED ? '' : undefined}>
       {lead}
       <div ref={world} className="pcv-world">
         {placed}

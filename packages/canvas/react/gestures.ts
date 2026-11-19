@@ -181,6 +181,7 @@ export class GestureController {
           const doc = store.getDocument();
           const ids = withFrameContents(doc, indexFor(store), [...state.get().selection]);
           this.gesture = { kind: 'move', id: createId('g'), ids, lastWorld: this.world(g.start), pending: null };
+          state.set({ carried: new Set(ids) });
           this.setDragging(true);
           this.onPointerMove(event);
         } else {
@@ -252,6 +253,7 @@ export class GestureController {
         return;
       case 'move':
         this.flush(g);
+        state.set({ carried: new Set() });
         return;
       case 'marquee':
         state.set({ marquee: null });
@@ -285,7 +287,7 @@ export class GestureController {
     this.gesture = null;
     this.setDragging(false);
     if (g?.kind === 'move') this.flush(g);
-    this.host.state.set({ marquee: null, draftArrow: null });
+    this.host.state.set({ marquee: null, draftArrow: null, carried: new Set() });
   };
 
   onDoubleClick = (event: React.MouseEvent | MouseEvent): void => {

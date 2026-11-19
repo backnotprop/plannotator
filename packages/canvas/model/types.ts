@@ -193,6 +193,16 @@ export interface ReferenceObject extends PlacedObject {
   icon?: string;
 }
 
+export const STAMP_KINDS = ['check', 'thumb', 'ask'] as const;
+
+/** A small mark left on something: agreed, liked (with a count), or in question. */
+export interface StampObject extends PlacedObject {
+  type: 'stamp';
+  kind: (typeof STAMP_KINDS)[number];
+  /** How many, shown beside the mark when more than one. */
+  count?: number;
+}
+
 /** An arrow's end: stuck to an object, or a free point. */
 export type ArrowEnd = { object: ObjectId } | Point;
 
@@ -219,6 +229,7 @@ export type CanvasObject =
   | SpriteObject
   | HtmlObject
   | ReferenceObject
+  | StampObject
   | ArrowObject
   | GroupObject;
 
@@ -234,6 +245,7 @@ export const PLACED_TYPES: ReadonlySet<CanvasObjectType> = new Set([
   'sprite',
   'html',
   'reference',
+  'stamp',
 ]);
 
 export const isPlaced = (object: CanvasObject): object is PlacedCanvasObject => PLACED_TYPES.has(object.type);
@@ -313,4 +325,5 @@ export const DEFAULT_SIZES: Readonly<Record<string, { w: number; h: number }>> =
   sprite: { w: 48, h: 48 },
   html: { w: 320, h: 120 },
   reference: { w: 252, h: 240 },
+  stamp: { w: 34, h: 34 },
 };

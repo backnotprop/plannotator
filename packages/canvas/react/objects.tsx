@@ -3,13 +3,15 @@
  * the reducer keeps an untouched object's identity, so a change to one
  * object re-renders one of these, however many are mounted.
  */
-import { File, FileCode, FileText, Film, Globe, Image as ImageIcon } from 'lucide-react';
+import { Check, CircleHelp, File, FileCode, FileText, Film, Globe, Image as ImageIcon, ThumbsUp } from 'lucide-react';
 import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CanvasColor } from '../model/color';
 import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
 import { referenceCard } from '../model/reference';
+import { seedOf, seeded } from '../view/rough';
+import { Face, usePerson } from './people';
 import type { ArrowObject, ArtifactKind, BoxObject, BoxShape, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
-import { flatten, hachure, roughLine, roughStrokes, seedOf } from '../view/rough';
+import { flatten, hachure, roughStrokes } from '../view/rough';
 import { CONTAINER_HEADER, type ShapeOutline, shapeOutline, toPath } from '../view/shape-outline';
 
 export interface ObjectViewProps {
@@ -26,6 +28,8 @@ export interface ObjectViewProps {
    * -1 for the rest (the editor moves focus between them in reading order). Absent: not focusable (a figure).
    */
   tabIndex?: 0 | -1;
+  /** Being dragged right now: a note lifts off the board while it is carried. */
+  carried?: boolean;
 }
 
 /** `data-color` and, for a custom colour, the variable the stylesheet reads. */
@@ -266,19 +270,64 @@ function ShapedBox({ object, editing, onEditEnd }: { object: BoxObject; editing:
 }
 
 /** What an object is called when it has no words of its own. */
-export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card' } as const;
+export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card', stamp: 'Stamp' } as const;
+export const STAMP_NAMES = { check: 'Agreed', thumb: 'Liked', ask: 'In question' } as const;
 
 /** What a screen reader says for an object: its own words, else what it is. */
 export function objectLabel(object: PlacedCanvasObject): string {
   const words =
-    object.type === 'frame' ? object.title : object.type === 'reference' ? referenceCard(object).title : 'text' in object ? object.text : 'alt' in object ? (object.alt ?? '') : '';
+    object.type === 'frame'
+      ? object.title
+      : object.type === 'reference'
+        ? referenceCard(object).title
+        : object.type === 'stamp'
+          ? `${STAMP_NAMES[object.kind]}${object.count ? ` ${object.count}` : ''}`
+          : 'text' in object
+            ? object.text
+            : 'alt' in object
+              ? (object.alt ?? '')
+              : '';
   const line = words.split('\n')[0].trim();
   const name = object.type === 'box' && object.shape ? SHAPE_NAMES[object.shape] : OBJECT_NAMES[object.type];
   const lanes = object.type === 'box' && object.lanes?.length ? ` (${object.lanes.join(', ')})` : '';
   return line ? `${name}: ${line}${lanes}` : `${name}${lanes}`;
 }
 
-export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex }: ObjectViewProps) {
+/**
+ * The slight turn a note rests at: worked out from its id and where it lies, so it is not stored, two people
+ * see the same, and a note set down somewhere new settles at a new angle.
+ */
+export function noteTilt(id: string, x: number, y: number): number {
+  const random = seeded(seedOf(id) ^ Math.imul(Math.round(x) | 0, 73856093) ^ Math.imul(Math.round(y) | 0, 19349663));
+  return Math.round((random() * 4.4 - 2.2) * 10) / 10;
+}
+
+/** Who added it: a face and a name, at the foot of a note or beside a caption. */
+function By({ actor }: { actor: PlacedCanvasObject['by'] }) {
+  const person = usePerson(actor);
+  if (!actor || !person) return null;
+  return (
+    <span className="pcv-by">
+      <Face actor={actor} label={person} />
+      <span className="pcv-by-name">{person.name}</span>
+    </span>
+  );
+}
+
+/** Who added it, as a face alone on a corner. */
+function ByBadge({ actor }: { actor: PlacedCanvasObject['by'] }) {
+  const person = usePerson(actor);
+  if (!actor || !person) return null;
+  return (
+    <span className="pcv-by-badge" title={person.name}>
+      <Face actor={actor} label={person} />
+    </span>
+  );
+}
+
+const STAMP_GLYPHS = { check: Check, thumb: ThumbsUp, ask: CircleHelp } as const;
+
+export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex, carried }: ObjectViewProps) {
   const color = colorAttrs(object.color);
   const style: React.CSSProperties = {
     ...color.style,
@@ -310,10 +359,21 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
       );
     case 'note':
       return (
-        <div className="pcv-obj pcv-note" {...common} style={style}>
+        // A note rests at a slight angle and lifts, level, while it is carried.
+        <div className="pcv-obj pcv-note" {...common} data-carried={carried ? '' : undefined} style={{ ...style, transform: `${style.transform} rotate(${carried || editing ? 0 : noteTilt(object.id, object.x, object.y)}deg)` }}>
           <Words id={object.id} text={object.text} editing={editing} onEditEnd={onEditEnd} />
+          <By actor={object.by} />
         </div>
       );
+    case 'stamp': {
+      const Glyph = STAMP_GLYPHS[object.kind];
+      return (
+        <div className="pcv-obj pcv-stamp" {...common} style={style}>
+          <Glyph />
+          {object.count ? <span>{object.count}</span> : null}
+        </div>
+      );
+    }
     case 'text':
       return (
         <div className="pcv-obj pcv-text" {...common} data-size={object.size} style={style}>
@@ -323,13 +383,21 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
     case 'frame':
       return (
         <div className="pcv-obj pcv-frame" {...common} style={style}>
-          <Words id={object.id} text={object.title} editing={editing} className="pcv-frame-title" onEditEnd={onEditEnd} />
+          {/* The title sits on a chip above the frame, which stays readable when the board is zoomed out. */}
+          <div className="pcv-frame-chip">
+            <Words id={object.id} text={object.title} editing={editing} className="pcv-frame-title" onEditEnd={onEditEnd} />
+          </div>
         </div>
       );
     case 'image':
       return (
         <div className="pcv-obj pcv-image" {...common} style={style}>
           <Picture object={object} resolveImageSrc={resolveImageSrc} />
+          {/* What the picture is, and who added it, under it. */}
+          <div className="pcv-caption">
+            <ByBadge actor={object.by} />
+            <span className="pcv-words">{object.alt}</span>
+          </div>
         </div>
       );
     case 'sprite':
@@ -344,6 +412,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
       return (
         <div className="pcv-obj pcv-card" {...common} data-target={object.target.kind} style={style}>
           <Card object={object} resolveImageSrc={resolveImageSrc} />
+          <ByBadge actor={object.by} />
         </div>
       );
     case 'html':

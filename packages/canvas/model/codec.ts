@@ -16,6 +16,7 @@ import {
   ARTIFACT_KINDS,
   BOX_SHAPES,
   CANVAS_DOCUMENT_VERSION,
+  STAMP_KINDS,
   STYLE_ENDS,
   STYLE_FILLS,
   STYLE_SIDES,
@@ -31,6 +32,7 @@ import {
   type ReferenceTarget,
   type Snapshot,
   type SnapshotInput,
+  type StampObject,
   type SnapshotSource,
 } from './types';
 
@@ -221,6 +223,12 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       if (!isText(value.html, HTML_ITEM_MAX_LENGTH)) return fail(`${id}: html is missing or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
       if (value.alt !== undefined && !isText(value.alt, LIMITS.title)) return fail(`${id}: alt is too long`);
       return { ok: true, value: { ...base, ...r, type, html: value.html, ...(value.alt ? { alt: value.alt as string } : {}) } };
+    case 'stamp': {
+      if (!(STAMP_KINDS as readonly unknown[]).includes(value.kind)) return fail(`${id}: kind must be one of ${STAMP_KINDS.join(', ')}`);
+      const count = value.count;
+      if (count !== undefined && (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 999)) return fail(`${id}: count must be a whole number from 1 to 999`);
+      return { ok: true, value: { ...base, ...r, type, kind: value.kind as StampObject['kind'], ...(count && count > 1 ? { count } : {}) } };
+    }
     case 'reference': {
       const target = readTarget(value.target);
       if (!target) return fail(`${id}: target must be a web address (http or https), an artifact or a place in a plan`);

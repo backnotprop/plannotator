@@ -236,21 +236,6 @@
   border-color: var(--pcv-stroke);
   background: color-mix(in oklab, var(--pcv-fill) 35%, transparent);
 }
-.pcv-frame-title {
-  position: absolute;
-  left: 2px;
-  bottom: 100%;
-  max-width: 100%;
-  padding-bottom: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--pcv-muted);
-  font-size: 12.5px;
-  font-weight: 500;
-  line-height: 1.2;
-}
-
 .pcv-image,
 .pcv-sprite,
 .pcv-html {
@@ -1178,4 +1163,234 @@
 /* Hatching is the costly part to paint and too fine to see when small: it goes first. */
 .pcv-root[data-lod='plain'] .pcv-sketch-hatch {
   display: none;
+}
+
+/* ── Surfaces: paper, panels, depth ────────────────────────────────────── */
+
+.pcv {
+  --pcv-paper: oklch(0.925 0.105 96);
+  --pcv-on-paper: oklch(0.24 0.03 80);
+  /* Shadows are drawn only close up on a board that is not crowded: see "Depth" below. */
+  --pcv-lift-1: 0 1px 1px rgb(20 20 40 / 0.08), 0 3px 8px rgb(20 20 40 / 0.1);
+  --pcv-lift-2: 0 2px 3px rgb(20 20 40 / 0.1), 0 14px 28px rgb(20 20 40 / 0.2);
+}
+
+/* A frame: a soft panel, its title on a chip above it. */
+.pcv-frame {
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--pcv-card) 55%, transparent);
+}
+.pcv-frame-chip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  background: var(--pcv-card);
+  /* Grows as the board is zoomed out, from its own corner, so it never leaves its frame's left edge. */
+  transform: scale(var(--pcv-chip, 1));
+  transform-origin: 0 100%;
+}
+.pcv-frame-chip::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pcv-muted);
+}
+.pcv-frame[data-color]:not([data-color='neutral']) .pcv-frame-chip::before {
+  background: var(--pcv-stroke);
+}
+.pcv-frame-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pcv-ink);
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.25;
+}
+
+/* A sticky note: paper, at a slight angle, that lifts level while it is carried. */
+.pcv-note {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 13px 10px;
+  border-radius: 2px;
+  background: linear-gradient(175deg, color-mix(in oklab, var(--pcv-paper) 96%, white), var(--pcv-paper) 62%, color-mix(in oklab, var(--pcv-paper) 92%, black));
+  color: var(--pcv-on-paper);
+  font-size: 13.5px;
+  line-height: 1.42;
+  box-shadow: none;
+  transition: box-shadow 140ms var(--pcv-ease);
+}
+.pcv-note > .pcv-words {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.pcv-obj.pcv-note[data-color]:not([data-color='neutral']) {
+  /* A named colour is the paper's colour: pale, so the words stay dark on it in either theme. */
+  --pcv-paper: color-mix(in oklab, var(--pcv-stroke) 34%, white);
+  background: linear-gradient(175deg, color-mix(in oklab, var(--pcv-paper) 96%, white), var(--pcv-paper) 62%, color-mix(in oklab, var(--pcv-paper) 92%, black));
+  color: var(--pcv-on-paper);
+}
+.pcv-obj.pcv-note[data-color='custom'] {
+  /* Any colour, exactly as chosen, with ink that can be read on it. */
+  background: var(--pcv-solid);
+  color: var(--pcv-on-solid);
+}
+.pcv-note[data-carried] {
+  z-index: 2;
+}
+
+/* Who added it. */
+.pcv-by {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  opacity: 0.78;
+}
+.pcv-face {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: oklch(0.52 0.17 28);
+  color: white;
+  font: 600 9.5px/1 var(--pcv-font);
+  overflow: hidden;
+}
+.pcv-face[data-kind='agent'] {
+  background: oklch(0.3 0.06 280);
+}
+.pcv-face svg {
+  width: 10px;
+  height: 10px;
+  stroke-width: 2;
+}
+.pcv-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pcv-by-badge {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  display: flex;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--pcv-card);
+}
+.pcv-by-badge .pcv-face {
+  width: 18px;
+  height: 18px;
+  font-size: 10.5px;
+}
+
+/* A picture: a card with its caption beneath. */
+.pcv-image {
+  border-radius: 8px;
+  background: var(--pcv-card);
+}
+.pcv-image img {
+  border-radius: 8px;
+}
+.pcv-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--pcv-muted);
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.pcv-caption .pcv-by-badge {
+  position: static;
+  padding: 0;
+  background: none;
+}
+.pcv-caption .pcv-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcv-card {
+  border-color: transparent;
+  overflow: visible;
+}
+.pcv-card > .pcv-card-image {
+  border-radius: 10px 10px 0 0;
+}
+.pcv-card[data-color]:not([data-color='neutral']) {
+  border-color: var(--pcv-stroke);
+}
+
+/* A stamp: a small token. */
+.pcv-stamp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: var(--pcv-card);
+  color: var(--pcv-stroke);
+  font: 600 13px/1 var(--pcv-font);
+}
+.pcv-stamp:not([data-color]),
+.pcv-stamp[data-color='neutral'] {
+  color: var(--pcv-accent);
+}
+.pcv-stamp svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+}
+
+/* Depth. Shadows are what costs frames when a board with very many objects on screen zooms, so they are
+   drawn only close up (full detail) and only while the board is not crowded. Elsewhere surfaces are flat. */
+.pcv-box {
+  box-shadow: none;
+}
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-box {
+  box-shadow: 0 1px 1.5px rgb(15 20 40 / 0.07);
+}
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-note,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-image,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-card,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-stamp,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-frame-chip,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-by-badge {
+  box-shadow: var(--pcv-lift-1);
+}
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-note[data-carried] {
+  box-shadow: var(--pcv-lift-2);
+}
+.pcv-root:not([data-lod='full']) .pcv-caption,
+.pcv-root:not([data-lod='full']) .pcv-by,
+.pcv-root[data-lod='far'] .pcv-by-badge {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pcv-note {
+    transition: none;
+  }
 }

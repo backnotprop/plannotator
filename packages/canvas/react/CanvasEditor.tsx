@@ -350,6 +350,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
       selection={ui.selection}
       editingId={ui.editingId}
       tabStop={tabStop}
+      carried={ui.carried}
       onEditEnd={onEditEnd}
       resolveImageSrc={resolvePicture}
       keepMounted={keepMounted}

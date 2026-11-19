@@ -35,6 +35,7 @@ import type {
   SnapshotId,
   SnapshotInput,
   SnapshotSource,
+  StampObject,
 } from '../model/types';
 
 /** The fields `edit` may change. Which apply depends on the object's type. */
@@ -62,6 +63,8 @@ export interface ObjectPatch {
   style?: ObjectStyle | null;
   shape?: BoxShape | null;
   lanes?: string[] | null;
+  kind?: StampObject['kind'];
+  count?: number | null;
   routing?: ArrowRouting | null;
 }
 

@@ -303,6 +303,18 @@ describe('what a move may do', () => {
   });
 });
 
+describe('stamps', () => {
+  test('a stamp is a kind from a short list, with a count when there is more than one', () => {
+    const store = seeded();
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'ok', type: 'stamp', kind: 'check', x: 0, y: 300 }, { id: 'liked', type: 'stamp', kind: 'thumb', count: 2, x: 60, y: 300 }] as never }).ok).toBe(true);
+    expect(store.getDocument().objects.ok).toMatchObject({ w: 34, h: 34 });
+    expect(store.dispatch({ type: 'edit', id: 'liked', patch: { count: 3 } }).ok).toBe(true);
+    expect(store.getDocument().objects.liked).toMatchObject({ count: 3 });
+    expect(store.dispatch({ type: 'add', objects: [{ id: 'bad', type: 'stamp', kind: 'skull', x: 0, y: 0 }] as never }).ok).toBe(false);
+    expect(store.dispatch({ type: 'edit', id: 'liked', patch: { count: 0 } }).ok).toBe(false);
+  });
+});
+
 describe('drawing order', () => {
   test('a new object goes on top, and coming back from a delete it is where it was', () => {
     const store = seeded();

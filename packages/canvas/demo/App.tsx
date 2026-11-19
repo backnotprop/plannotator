@@ -16,6 +16,7 @@ import type { CanvasStore } from '../events/store';
 import { createId } from '../model/ids';
 import type { ReferenceObject, Snapshot } from '../model/types';
 import { createMemoryAssets } from '../react/memory-assets';
+import { type People, PeopleProvider } from '../react/people';
 import type { PasteResolver } from '../react/references';
 import { pictureResolver } from '../model/assets';
 import { routeLinkPreview } from '../react/link-preview';
@@ -38,6 +39,9 @@ const bench = params.get('bench');
 const count = Number(params.get('n')) || (bench === 'plan' ? 50 : 2000);
 
 const registry = new CanvasRegistry();
+
+/** The demo's people: one person and one agent. A product host answers from its own accounts. */
+const people: People = (actor) => (actor.kind === 'agent' ? { name: 'Planner' } : actor.id === 'ana' ? { name: 'Ana' } : null);
 
 // Where the demo keeps pictures: in memory, by content hash. A product host stores them itself.
 const assets = createMemoryAssets();
@@ -209,6 +213,7 @@ function PlanAndCanvas() {
   };
 
   return (
+    <PeopleProvider people={people}>
     <CanvasRegistryProvider registry={registry}>
       <div ref={shell} className="demo-shell pcv">
         <header className="demo-head">
@@ -246,5 +251,6 @@ function PlanAndCanvas() {
       </div>
       <CanvasStage request={request} registry={registry} recede={() => shell.current} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
     </CanvasRegistryProvider>
+    </PeopleProvider>
   );
 }

@@ -70,6 +70,7 @@ export function createSampleStore(): CanvasStore {
     shape('cl', 'cloud', 1128, 140, 166, 112, 'Push provider', { color: 'green' }),
     shape('db', 'database', 1150, 338, 124, 124, 'Alert log', { color: '#0e9aa7' }),
     shape('doc', 'document', 667, 650, 160, 92, 'Dropped alerts', { detail: 'daily report' }),
+    { id: 's1', type: 'stamp', kind: 'check', x: 1076, y: 344, w: 34, h: 34, color: 'green' },
     { id: 'ct', type: 'text', x: 904, y: 520, w: 236, h: 36, size: 'small', text: 'At-least-once delivery.\nDedupe on parcel id + status.' },
     { id: 'n2', type: 'note', x: 266, y: 92, w: 184, h: 158, color: 'violet', text: 'Bulk spikes at 09:00. In the replay a shared queue held urgent alerts for 4 min.' },
     link('a1', 'ac', 'api', { label: 'scan' }),
@@ -105,6 +106,7 @@ export function createSampleStore(): CanvasStore {
   const byAna: Loose[] = [
     shape('pr', 'process', 40, 612, 206, 84, 'One queue,\npriority field?', { color: 'amber', style: { look: 'sketch', fill: 'hachure' } }),
     { id: 'n1', type: 'note', x: 52, y: 60, w: 184, h: 158, text: 'Why two queues? One queue with a priority field would do.' },
+    { id: 's2', type: 'stamp', kind: 'thumb', count: 2, x: 192, y: 202, w: 54, h: 32, color: 'violet' },
     { id: 'i3', type: 'image', x: 1990, y: 64, w: 230, h: 488, src: '/board/phone.svg', alt: 'What the customer sees' },
     { id: 'r1', type: 'reference', x: 1430, y: 930, w: 252, h: 240, target: { kind: 'web', url: 'https://fieldnotes.example/queues-or-a-sweep' }, title: 'Queues or a sweep? Timing alert pipelines', description: 'Why a nightly sweep ages badly once alerts matter.', site: 'fieldnotes.example', image: '/board/og1.svg', icon: '/board/fav1.svg' },
     { id: 'r4', type: 'reference', x: 1974, y: 1058, w: 256, h: 112, target: { kind: 'plan', anchor: 'Rollout' }, title: 'Rollout, step 2', description: 'Five percent of parcels in one region for a week. Roll back if p95 passes 5 min.' },

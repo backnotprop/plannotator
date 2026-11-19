@@ -18,12 +18,14 @@ export interface EditorSnapshot {
   region: Rect | null;
   /** An arrow being drawn, in world units. */
   draftArrow: { from: Point; to: Point } | null;
+  /** The objects being dragged right now. */
+  carried: ReadonlySet<ObjectId>;
 }
 
 const EMPTY: ReadonlySet<ObjectId> = new Set();
 
 export class EditorState {
-  private state: EditorSnapshot = { tool: 'select', selection: EMPTY, editingId: null, marquee: null, region: null, draftArrow: null };
+  private state: EditorSnapshot = { tool: 'select', selection: EMPTY, editingId: null, marquee: null, region: null, draftArrow: null, carried: EMPTY };
   private readonly listeners = new Set<() => void>();
 
   get = (): EditorSnapshot => this.state;
