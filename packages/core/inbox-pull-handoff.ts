@@ -186,6 +186,8 @@ export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): 
 /** "pull request" / "merge request". */
 export const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform === 'gitlab' ? 'merge request' : 'pull request');
 
+export const handoffPushable = (stack: InboxPullStack): boolean => handoffLayers(stack).every(branchIsMine);
+
 /**
  * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one), the owner's approved
  * text (`.product/approved/pull-handoff-pushes/`, over `pull-handoff-message/`; a stack's step 1 in `stack-picture-it`, the
@@ -205,7 +207,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk | 
   const where = REPO.test(stack.repo) ? (stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`) : null;
   const repository = where ? `- Repository: ${where}` : null;
   const heading = `${noun[0]!.toUpperCase()}${nouns.slice(1)}`;
-  const pushable = layers.every(branchIsMine);
+  const pushable = handoffPushable(stack);
   const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${pushable ? '' : " Don't change any code unless I explicitly tell you to."}`;
   const them = many ? 'them' : 'it';
   const branch = many ? 'branches' : 'branch';

@@ -1,4 +1,4 @@
-import { openLayers, pullHandoffMessage, pullHandoffThreadName, pullNounOf } from "@plannotator/core/inbox-pull-handoff";
+import { handoffPushable, openLayers, pullHandoffMessage, pullHandoffThreadName, pullNounOf } from "@plannotator/core/inbox-pull-handoff";
 import { type InboxLaunchAgent, type InboxPull, type InboxProject, type InboxPullRiskAutoMake, type InboxPullRiskAutoRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -18,6 +18,7 @@ export interface PullRiskAutoStartDeps {
 const SKILLS: Record<InboxPullRiskAutoMake, string[]> = { guide: ["review-curate"], picture_it: ["picture-it"] };
 const LEVEL_WORD = { high: "High", medium: "Medium", low: "Low" } as const;
 const STAY_PUT = "Don't switch branches, stash or touch uncommitted work here; read the diff with git from where you are.";
+const STAY_PUT_OWN = "Until I ask you for changes, don't switch branches, stash or touch uncommitted work here; read the diff with git from where you are.";
 
 export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "key" | "stack" | "made" | "level">, skillsBlock: (names: readonly string[]) => string): { handed: PullRiskAutoJob["stack"]; name: string; body: string } {
   const handed = pullRiskAutoHanded(job);
@@ -25,7 +26,7 @@ export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "key" | "stack" | "m
   const what = openLayers(handed).length > 1 ? `this stack of ${noun}s` : `this ${noun}`;
   const why = `The Inbox sent this on its own, because ${what} ranked ${LEVEL_WORD[job.level]} risk.`;
   const words = pullHandoffMessage(handed, { kind: job.made }, { fenced: true });
-  return { handed, name: pullHandoffThreadName(handed, null, job.stack), body: `${why}\n\n${STAY_PUT}\n\n${words}\n\n${skillsBlock(SKILLS[job.made])}`.trimEnd() };
+  return { handed, name: pullHandoffThreadName(handed, null, job.stack), body: `${why}\n\n${handoffPushable(handed) ? STAY_PUT_OWN : STAY_PUT}\n\n${words}\n\n${skillsBlock(SKILLS[job.made])}`.trimEnd() };
 }
 
 export function pullRiskAutoSettled(store: InboxPullLinkStore, run: Pick<InboxPullRiskAutoRun, "made" | "at" | "started_at"> & { thread_id: string }): boolean {
