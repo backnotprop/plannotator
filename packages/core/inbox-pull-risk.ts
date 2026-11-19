@@ -78,8 +78,8 @@ export interface InboxPullRiskAnswer {
   auto_would_start?: Record<InboxPullRiskAuto["level"], number>;
 }
 
-export type InboxPullRiskAutoMake = "guide" | "show_me";
-export const INBOX_PULL_RISK_AUTO_MAKES: readonly InboxPullRiskAutoMake[] = ["guide", "show_me"];
+export type InboxPullRiskAutoMake = "guide" | "picture_it";
+export const INBOX_PULL_RISK_AUTO_MAKES: readonly InboxPullRiskAutoMake[] = ["guide", "picture_it"];
 export const INBOX_PULL_RISK_AUTO_TRIES = 3;
 
 export interface InboxPullRiskAuto {

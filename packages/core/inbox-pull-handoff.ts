@@ -120,11 +120,11 @@ export function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
 }
 
 /** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
-export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string } | { kind: 'show_me'; words?: string };
+export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string } | { kind: 'picture_it'; words?: string };
 /** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
 export type PullHandoffThread = { kind: 'thread' };
 
-/** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
+/** A stack's guided review, after step 1's `/review-curate` (approval "stack-picture-it", q-55141171). */
 const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
 
 /** The layers a hand-off names: the stack's open ones, else its top one. */
@@ -161,16 +161,16 @@ export function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 
  * Step 1 of the hand-off, one line: the guided review through phase 1's `/review-curate` (its approved instructions
  * go with the message as the skills block). One PR: its diff against its base, the person's words (custom curation)
  * after `/review-curate`, and on a teammate's PR what the person might ask its author. A stack (approval
- * "stack-show-me"): the whole stack's diff, from its base to the top layer's head, walked layer by layer, or the
+ * "stack-picture-it"): the whole stack's diff, from its base to the top layer's head, walked layer by layer, or the
  * person's words in place of that walk. `pullLaunchAsk` looks for this line.
  */
 export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
   const layers = handoffLayers(stack);
   // The person's words, whole (through 0.28.61 they were cut at 1,000 characters without a word).
   const custom = ask.kind === 'guide' ? '' : (ask.words ?? '').trim();
-  if (ask.kind === 'show_me') {
+  if (ask.kind === 'picture_it') {
     const of = layers.length > 1 ? `the whole stack's diff, from ${safeBranch(stack.open_base) ?? "the stack's base branch"} to ${safeBranch(layers[layers.length - 1]!.head) ?? `the top ${pullNounOf(stack)}'s branch`}` : `its diff against ${safeBranch(layers[0]!.base) ?? 'its base branch'}`;
-    return `1. Send me a Show me page of ${of}, using /show-me${custom ? ` ${custom}` : ''} (its instructions are at the end of this message).`;
+    return `1. Send me a Picture page of ${of}, using /picture-it${custom ? ` ${custom}` : ''} (its instructions are at the end of this message).`;
   }
   if (layers.length > 1) {
     const top = layers[layers.length - 1]!;
@@ -188,7 +188,7 @@ export const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.pl
 
 /**
  * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one), the owner's approved
- * text (`.product/approved/pull-handoff-pushes/`, over `pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the
+ * text (`.product/approved/pull-handoff-pushes/`, over `pull-handoff-message/`; a stack's step 1 in `stack-picture-it`, the
  * rest of a stack's wording awaits approval): help me review and understand it; what it is; then the guided review
  * (`pullHandoffAskLine`) and the discussion. On the person's own PRs (`branchIsMine`), feedback is made and pushed where the
  * agent can, and the next round comes in the same thread, as a local review's does (`localReviewMessage`). With any open
@@ -218,7 +218,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk | 
   const feedback = pushable
     ? thread
       ? `If I ask for changes, make them and push them to the ${branch} if you can. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
-      : `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated ${ask.kind === 'show_me' ? 'page' : 'review'} here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+      : `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated ${ask.kind === 'picture_it' ? 'page' : 'review'} here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
     : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
   const whatToDo =
     ask.kind === 'thread'

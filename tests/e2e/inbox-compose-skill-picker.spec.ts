@@ -478,7 +478,7 @@ test('the reply box: undo after a skill pick steps back through the pick, the ty
   }
 });
 
-test('a plain thread: "/" lists show-me, and a pick sent carries its instructions once', async ({ browser }: { browser: Browser }) => {
+test('a plain thread: "/" lists picture-it, and a pick sent carries its instructions once', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   try {
@@ -488,15 +488,15 @@ test('a plain thread: "/" lists show-me, and a pick sent carries its instruction
     const field = pane.locator('.ib-rbox').getByRole('textbox');
     await expect(field).toBeFocused();
     await page.keyboard.type('Draw the export for me /');
-    const row = page.locator('[data-skill-item="show-me"]');
+    const row = page.locator('[data-skill-item="picture-it"]');
     await expect(row).toBeVisible();
     await row.click();
-    await expect(field).toHaveValue('Draw the export for me /show-me ');
+    await expect(field).toHaveValue('Draw the export for me /picture-it ');
     await pane.locator('.ib-rbox [data-reply-send]').click();
     const reply = (await world.agent.nextReply(world.threadId)) as { body: string };
-    expect(reply.body.startsWith('Draw the export for me /show-me')).toBe(true);
-    expect(reply.body.split('--- BEGIN SKILL INSTRUCTIONS: show-me ---')).toHaveLength(2);
-    expect(reply.body).toContain('--- END SKILL INSTRUCTIONS: show-me ---');
+    expect(reply.body.startsWith('Draw the export for me /picture-it')).toBe(true);
+    expect(reply.body.split('--- BEGIN SKILL INSTRUCTIONS: picture-it ---')).toHaveLength(2);
+    expect(reply.body).toContain('--- END SKILL INSTRUCTIONS: picture-it ---');
   } finally {
     await context.close();
   }

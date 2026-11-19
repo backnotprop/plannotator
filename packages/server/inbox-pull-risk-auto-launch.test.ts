@@ -91,7 +91,7 @@ function setup(full: boolean) {
     skillsBlock: () => "",
     own: () => {},
   });
-  const job = { key: pull.key, stack: inboxPullStacks([pull])[0]!, made: "show_me" as const, agent: FAKE, level: "high" as const };
+  const job = { key: pull.key, stack: inboxPullStacks([pull])[0]!, made: "picture_it" as const, agent: FAKE, level: "high" as const };
   return { dataDir, store, project, fake, start, job };
 }
 
@@ -123,10 +123,10 @@ test("an automatic run is done once its thread has what was asked for after it s
     sessionLive: () => true,
     launchDead: () => false,
   };
-  const run = { made: "show_me" as const, at: "2026-11-18T09:00:00.000Z", started_at: w.store.message(thread_id)!.created_at, thread_id };
+  const run = { made: "picture_it" as const, at: "2026-11-18T09:00:00.000Z", started_at: w.store.message(thread_id)!.created_at, thread_id };
   expect(pullRiskAutoSettled(links, run)).toBe(false);
   expect(pullRiskAutoSettled({ ...links, launchDead: () => true }, run)).toBe(true);
-  const page = { ...w.store.message(thread_id)!, id: "msg_page", reply_to: thread_id, author: { kind: "agent" as const, host: "fake-agent", session: "s1", name: null }, created_at: "2099-01-01T00:00:00.000Z", show_me: { attachment_id: "att_1", title: "Retries" } };
+  const page = { ...w.store.message(thread_id)!, id: "msg_page", reply_to: thread_id, author: { kind: "agent" as const, host: "fake-agent", session: "s1", name: null }, created_at: "2099-01-01T00:00:00.000Z", picture_it: { attachment_id: "att_1", title: "Retries" } };
   const withPage = { ...links, threadMessageIds: (id: string) => [...w.store.threadMessageIds(id), page.id], message: (id: string) => (id === page.id ? page : w.store.message(id)) };
   expect(pullRiskAutoSettled(withPage, run)).toBe(true);
   expect(pullRiskAutoSettled(withPage, { ...run, made: "guide" })).toBe(false);

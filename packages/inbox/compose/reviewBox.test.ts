@@ -204,17 +204,17 @@ describe('To moves to an agent with changes to review', () => {
   });
 });
 
-describe('Show me from the review box', () => {
-  test('a local change asks for a Show me page through /show-me, the words after it, never /review-curate', () => {
-    const parts = localReviewMessage({ changes: 'uncommitted', project: 'web', branch: 'main', base: null, words: ' the retry path ', ask: 'show_me' }).split('\n\n');
-    expect(parts[0]).toBe('Please send me a Show me page of the uncommitted changes in web (on main), using /show-me.');
+describe('Picture it from the review box', () => {
+  test('a local change asks for a Picture page through /picture-it, the words after it, never /review-curate', () => {
+    const parts = localReviewMessage({ changes: 'uncommitted', project: 'web', branch: 'main', base: null, words: ' the retry path ', ask: 'picture_it' }).split('\n\n');
+    expect(parts[0]).toBe('Please send me a Picture page of the uncommitted changes in web (on main), using /picture-it.');
     expect(parts[1]).toBe('the retry path');
     expect(parts.join('\n')).not.toContain('/review-curate');
   });
 
-  test("the box's ask: Show me keeps it whatever the words; otherwise words make a custom curation, none a guided review", () => {
-    expect(reviewBoxPullAsk('show_me', '')).toEqual({ kind: 'show_me', words: '' });
-    expect(reviewBoxPullAsk('show_me', 'x')).toEqual({ kind: 'show_me', words: 'x' });
+  test("the box's ask: Picture it keeps it whatever the words; otherwise words make a custom curation, none a guided review", () => {
+    expect(reviewBoxPullAsk('picture_it', '')).toEqual({ kind: 'picture_it', words: '' });
+    expect(reviewBoxPullAsk('picture_it', 'x')).toEqual({ kind: 'picture_it', words: 'x' });
     expect(reviewBoxPullAsk(undefined, 'x')).toEqual({ kind: 'custom', words: 'x' });
     expect(reviewBoxPullAsk(undefined, '  ')).toEqual({ kind: 'guide' });
   });

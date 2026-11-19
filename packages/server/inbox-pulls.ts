@@ -2171,30 +2171,30 @@ export function previewOf(body: string): string {
 }
 
 /** What a thread says about the agent behind it. */
-function threadFacts(store: InboxPullLinkStore, threadId: string, showMeSince: string | null = null) {
+function threadFacts(store: InboxPullLinkStore, threadId: string, pictureItSince: string | null = null) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
-  let showMe: InboxMessage | null = null;
+  let pictureIt: InboxMessage | null = null;
   let replied = false;
-  let showMeSeen = false;
-  let looking = showMeSince !== null;
+  let pictureItSeen = false;
+  let looking = pictureItSince !== null;
   for (let i = ids.length - 1; i >= 0 && (!last || !guide || looking); i--) {
     const message = store.message(ids[i]!);
     if (!message) continue;
-    if (looking && message.created_at < showMeSince!) looking = false;
+    if (looking && message.created_at < pictureItSince!) looking = false;
     if (looking && message.author.kind === "person") replied = true;
     if (message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
-    if (looking && message.show_me) {
-      showMe = message;
+    if (looking && message.picture_it) {
+      pictureIt = message;
       looking = false;
       const seq = store.messageSeq?.(message.id) ?? null;
-      showMeSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
+      pictureItSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
     }
   }
-  return { last, guide, showMe, showMeSeen };
+  return { last, guide, pictureIt, pictureItSeen };
 }
 
 /**
@@ -2225,7 +2225,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; show_me_at?: string; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; picture_it_at?: string; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2269,8 +2269,8 @@ export function linkInboxPulls(
     }
   }
 
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, showMeSince: string | null = null): InboxPullLink => {
-    const { last, guide, showMe, showMeSeen } = threadFacts(store, threadId, showMeSince);
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null): InboxPullLink => {
+    const { last, guide, pictureIt, pictureItSeen } = threadFacts(store, threadId, pictureItSince);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2283,7 +2283,7 @@ export function linkInboxPulls(
       guide: guide?.guide
         ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
         : null,
-      ...(showMe?.show_me ? { show_me_page: { message_id: showMe.id, title: showMe.show_me.title, at: showMe.created_at, ...(showMeSeen ? { seen: true as const } : {}) } } : {}),
+      ...(pictureIt?.picture_it ? { picture_it_page: { message_id: pictureIt.id, title: pictureIt.picture_it.title, at: pictureIt.created_at, ...(pictureItSeen ? { seen: true as const } : {}) } } : {}),
     };
   };
 
@@ -2291,7 +2291,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.show_me_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.show_me_at ? { show_me_asked_at: owner.show_me_at } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.picture_it_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.picture_it_at ? { picture_it_asked_at: owner.picture_it_at } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);

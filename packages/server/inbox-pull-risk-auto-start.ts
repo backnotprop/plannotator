@@ -15,7 +15,7 @@ export interface PullRiskAutoStartDeps {
   skillsBlock: (names: readonly string[]) => string;
 }
 
-const SKILLS: Record<InboxPullRiskAutoMake, string[]> = { guide: ["review-curate"], show_me: ["show-me"] };
+const SKILLS: Record<InboxPullRiskAutoMake, string[]> = { guide: ["review-curate"], picture_it: ["picture-it"] };
 const LEVEL_WORD = { high: "High", medium: "Medium", low: "Low" } as const;
 
 export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "stack" | "made" | "level">, skillsBlock: (names: readonly string[]) => string): { handed: PullRiskAutoJob["stack"]; name: string; body: string } {
@@ -35,7 +35,7 @@ export function pullRiskAutoSettled(store: InboxPullLinkStore, run: Pick<InboxPu
     const message = store.message(ids[i]!);
     if (!message) continue;
     if (message.created_at < since) break;
-    if (message.author.kind === "agent" && (run.made === "guide" ? !!message.guide : !!message.show_me)) return true;
+    if (message.author.kind === "agent" && (run.made === "guide" ? !!message.guide : !!message.picture_it)) return true;
   }
   return false;
 }

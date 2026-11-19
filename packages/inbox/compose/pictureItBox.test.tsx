@@ -32,7 +32,7 @@ beforeEach(() => {
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
-    if (url.pathname.endsWith('/api/skills')) return Response.json({ skills: [{ name: 'show-me', root: 'plannotator', humanOnly: true }] });
+    if (url.pathname.endsWith('/api/skills')) return Response.json({ skills: [{ name: 'picture-it', root: 'plannotator', humanOnly: true }] });
     if (init?.method === 'POST') return Response.json({ ok: true });
     if (url.pathname.endsWith('/reviews/changes')) return Response.json({ git: true, files: 2, additions: 2, deletions: 0, branch: 'main', base: 'main' });
     return Response.json({});
@@ -81,29 +81,29 @@ const type = async (words: string) => {
   });
 };
 
-test.skipIf(!hasDom)('the box asked for Show me: the hand-off asks for a page through /show-me with the words after it, tied to the PR as show_me', async () => {
+test.skipIf(!hasDom)('the box asked for Picture it: the hand-off asks for a page through /picture-it with the words after it, tied to the PR as picture_it', async () => {
   const started: StartThreadInput[] = [];
   const sent: ComposeSent[] = [];
   const chosen = pick();
-  open({ pick: chosen, ask: 'show_me' }, started, sent);
+  open({ pick: chosen, ask: 'picture_it' }, started, sent);
   await settle();
   await type('just the retries');
   await act(async () => el('[data-compose-send]').click());
   await settle();
-  expect(started[0]!.body).toContain('1. Send me a Show me page of its diff against main, using /show-me just the retries (its instructions are at the end of this message).');
+  expect(started[0]!.body).toContain('1. Send me a Picture page of its diff against main, using /picture-it just the retries (its instructions are at the end of this message).');
   expect(started[0]!.body).not.toContain('/review-curate');
-  expect(sent[0]).toMatchObject({ threadId: 'thr_box', pullKeys: [chosen.stack.layers[0]!.key], pullAsk: 'show_me' });
+  expect(sent[0]).toMatchObject({ threadId: 'thr_box', pullKeys: [chosen.stack.layers[0]!.key], pullAsk: 'picture_it' });
 });
 
-test.skipIf(!hasDom)('the box asked for Show me on local changes: the message asks for a page of them through /show-me', async () => {
+test.skipIf(!hasDom)('the box asked for Picture it on local changes: the message asks for a page of them through /picture-it', async () => {
   const started: StartThreadInput[] = [];
-  open({ ask: 'show_me' }, started, [], { id: 'prj_9', root: '/home/dana/other', name: 'other' });
+  open({ ask: 'picture_it' }, started, [], { id: 'prj_9', root: '/home/dana/other', name: 'other' });
   await settle();
   await act(async () => el('[data-review-choice="branch"]').click());
   await act(async () => el('[data-compose-send]').click());
   await settle();
-  expect(started[0]!.body.startsWith('Please send me a Show me page of the whole branch in other')).toBe(true);
-  expect(started[0]!.body).toContain('using /show-me.');
+  expect(started[0]!.body.startsWith('Please send me a Picture page of the whole branch in other')).toBe(true);
+  expect(started[0]!.body).toContain('using /picture-it.');
   expect(started[0]!.body).not.toContain('/review-curate');
-  expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'show_me' });
+  expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'picture_it' });
 });

@@ -38,7 +38,7 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
-import type { InboxShowMePage } from "@plannotator/core/show-me-page";
+import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -291,7 +291,7 @@ export interface InboxSendInput {
   inline_images?: InboxInlineImage[];
   /** Running apps the body's question choices name as prototypes, already checked and probed by the server (`packages/server/inbox-live.ts`). */
   live_sites?: Omit<InboxLiveSiteRef, "opened_at">[];
-  show_me?: InboxShowMePage | null;
+  picture_it?: InboxPictureItPage | null;
   /** A guided review the message carries (submit_guide); its blob is written once the message lands. */
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
@@ -4310,7 +4310,7 @@ export class InboxStore {
         : {}),
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
       ...(input.live_sites && input.live_sites.length > 0 ? { live_sites: input.live_sites.map((site) => ({ ...site, opened_at: at })) } : {}),
-      ...(input.show_me && input.attachments?.some((attachment) => attachment.id === input.show_me!.attachment_id) ? { show_me: input.show_me } : {}),
+      ...(input.picture_it && input.attachments?.some((attachment) => attachment.id === input.picture_it!.attachment_id) ? { picture_it: input.picture_it } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(basePath ? { base_path: basePath } : {}),
       // Only into another project's thread: a send that landed in its own project (or one combined with it) is from there.

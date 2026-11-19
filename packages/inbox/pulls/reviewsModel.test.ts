@@ -284,11 +284,11 @@ test('a walkthrough says Walkthrough, not a branch, from its start (Writing…) 
   const curatingReview = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local' } } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(curatingReview).status).toBe('Curating…');
   expect(reviewViewOf(curatingReview, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).curating).toBe('Curating the review…');
-  // A local Show me: the row and the thread say a page is being made, never a guided review.
-  const showMe = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local', ask: 'show_me' } } as unknown as Partial<InboxReviewRow>);
-  const showMeView = reviewViewOf(showMe, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
-  expect(reviewRowLine(showMe).status).toBe('Making a Show me page…');
-  expect([showMeView.curating, showMeView.asked]).toEqual(['Making a Show me page…', 'New review · Show me']);
+  // A local Picture it: the row and the thread say a page is being made, never a guided review.
+  const pictureIt = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local', ask: 'picture_it' } } as unknown as Partial<InboxReviewRow>);
+  const pictureItView = reviewViewOf(pictureIt, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
+  expect(reviewRowLine(pictureIt).status).toBe('Making a Picture page…');
+  expect([pictureItView.curating, pictureItView.asked]).toEqual(['Making a Picture page…', 'New review · Picture it']);
   // Its review in: the source names a branch, but the row still says what it is; there is no verdict to wait on.
   const ready = row({ started, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(ready)).toMatchObject({ lead: 'Walkthrough', status: 'Ready' });
@@ -316,16 +316,16 @@ test("a PR made for when it ranked: the row says what is being made while its ag
   const stacked = (link: Record<string, unknown> | null = null, fields: Record<string, unknown> = {}) =>
     row({ reviewed: !!link, reason: 'curating', review: null, thread_id: link ? 't' : null, stacks: inboxPullStacks([pull(880)]), link, ...fields } as unknown as Partial<InboxReviewRow>);
   const key = pull(880).key;
-  const runs = (fields: Record<string, unknown>) => ({ [key]: { at: '2026-11-18T10:00:00.000Z', level: 'high', made: 'show_me', state: 'started', thread_id: 't', ...fields } }) as never;
+  const runs = (fields: Record<string, unknown>) => ({ [key]: { at: '2026-11-18T10:00:00.000Z', level: 'high', made: 'picture_it', state: 'started', thread_id: 't', ...fields } }) as never;
   const working = { thread_id: 't', guide: null, agent: { host: 'codex', session: 's', name: 'Codex' } };
   const ended = { ...working, agent: { ...working.agent, ended: true } };
-  expect(reviewRowLine(stacked(working), runs({})).status).toBe('Making a Show me page…');
+  expect(reviewRowLine(stacked(working), runs({})).status).toBe('Making a Picture page…');
   expect(reviewRowLine(stacked(working), runs({ made: 'guide' })).status).toBe('Making a guided review…');
   expect(reviewRowLine(stacked(ended), runs({})).status).toBe('Curating…');
   expect(reviewRowLine(stacked(), runs({ state: 'queued', thread_id: null })).status).not.toContain('Making');
-  const page = (seen: boolean) => ({ ...ended, show_me_page: { message_id: 'm', title: 'Retries', at: '2026-11-18T10:05:00.000Z', ...(seen ? { seen: true } : {}) } });
-  expect(reviewRowLine(stacked(page(false)), runs({ level: 'high' })).status).toBe('Show me ready, made when it ranked High');
-  expect(reviewRowLine(stacked(page(false)), runs({ level: 'medium' })).status).toBe('Show me ready, made when it ranked Medium');
+  const page = (seen: boolean) => ({ ...ended, picture_it_page: { message_id: 'm', title: 'Retries', at: '2026-11-18T10:05:00.000Z', ...(seen ? { seen: true } : {}) } });
+  expect(reviewRowLine(stacked(page(false)), runs({ level: 'high' })).status).toBe('Picture page ready, made when it ranked High');
+  expect(reviewRowLine(stacked(page(false)), runs({ level: 'medium' })).status).toBe('Picture page ready, made when it ranked Medium');
   expect(reviewRowLine(stacked(page(true)), runs({})).status).toBe('Curating…');
   const waiting = stacked(page(false), { review: review({}), reason: 'review_ready', move: 'on_you' });
   expect(reviewRowLine(waiting, runs({})).status).toBe('Review ready');

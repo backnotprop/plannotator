@@ -2,12 +2,12 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
-import type { ShowMeSubject } from './useShowMeAsk';
+import type { PictureItSubject } from './usePictureItAsk';
 
 const hasDom = typeof document !== 'undefined';
-const { useShowMeAsk, forgetShowMeRequests, showMeWords, SHOW_ME_UNTOLD } = (hasDom ? await import('./useShowMeAsk') : {}) as typeof import('./useShowMeAsk');
+const { usePictureItAsk, forgetPictureItRequests, pictureItWords, PICTURE_IT_UNTOLD } = (hasDom ? await import('./usePictureItAsk') : {}) as typeof import('./usePictureItAsk');
 const { resetSkillCatalogCache } = (hasDom ? await import('@plannotator/ui/utils/skillCatalog') : {}) as typeof import('@plannotator/ui/utils/skillCatalog');
-const { SHOW_ME_SKILL } = (hasDom ? await import('@plannotator/core/show-me-skill') : {}) as typeof import('@plannotator/core/show-me-skill');
+const { PICTURE_IT_SKILL } = (hasDom ? await import('@plannotator/core/picture-it-skill') : {}) as typeof import('@plannotator/core/picture-it-skill');
 
 const REPO = 'northwind/web-app';
 const pull: InboxPull = {
@@ -36,8 +36,8 @@ const pull: InboxPull = {
   merged_at: null,
 };
 const stack = inboxPullStacks([pull])[0]!;
-const prSubject: ShowMeSubject = { kind: 'pull', stack, linkThreadId: 'thr_pr' };
-const localSubject: ShowMeSubject = { kind: 'local', changes: 'uncommitted', project: 'web-app', branch: 'main', base: null };
+const prSubject: PictureItSubject = { kind: 'pull', stack, linkThreadId: 'thr_pr' };
+const localSubject: PictureItSubject = { kind: 'local', changes: 'uncommitted', project: 'web-app', branch: 'main', base: null };
 const first = { id: 'msg_1', project_id: 'prj_web', thread_id: 'thr_pr', reply_to: null, author: { kind: 'person' }, subject: 'Review #880', subject_question: null, body: 'Tell me about it.', created_at: '2026-11-03T09:40:00.000Z', resolved_at: null, idempotency_key: 'k', to: { host: 'claude-code', session: 'ses_web' } } as unknown as InboxMessageWire;
 const agentSaid = { ...first, id: 'msg_2', reply_to: 'msg_1', author: { kind: 'agent', host: 'claude-code', session: 'ses_web', name: 'Claude Code' }, body: 'It fixes RTL.', to: undefined, wakes: true } as unknown as InboxMessageWire;
 const threadOf = (messages: InboxMessageWire[]): InboxThread => ({ thread_id: 'thr_pr', project: { id: 'prj_web', key: 'web-app-abc', name: 'web-app', root: '/w/web-app', created_at: '2026-11-01T09:00:00.000Z' }, subject: 'Review #880', thread_name: 'Review #880', resolved_at: null, messages }) as unknown as InboxThread;
@@ -54,12 +54,12 @@ beforeEach(() => {
   posts = [];
   tieFails = 0;
   asked = 0;
-  forgetShowMeRequests();
+  forgetPictureItRequests();
   resetSkillCatalogCache();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
-    if (url.pathname.endsWith('/api/skills')) return Response.json({ skills: [{ name: 'show-me', root: 'plannotator', humanOnly: true }] });
+    if (url.pathname.endsWith('/api/skills')) return Response.json({ skills: [{ name: 'picture-it', root: 'plannotator', humanOnly: true }] });
     if (init?.method === 'POST') {
       posts.push({ path: url.pathname.replace(/^.*\/api\/inbox/, ''), body: JSON.parse(String(init.body ?? '{}')) });
       if (url.pathname.endsWith('/pulls/owner') && tieFails > 0) {
@@ -90,17 +90,17 @@ async function settle(rounds = 8) {
   }
 }
 
-function Probe({ subject, thread }: { subject: ShowMeSubject; thread: InboxThread }) {
-  const ask = useShowMeAsk(subject, thread, () => (asked += 1));
+function Probe({ subject, thread }: { subject: PictureItSubject; thread: InboxThread }) {
+  const ask = usePictureItAsk(subject, thread, () => (asked += 1));
   return (
-    <div data-state={ask.onTheWay ? 'on-the-way' : ask.onShowMe ? 'ready' : 'none'} data-page={ask.page?.attachment_id ?? ''}>
-      {ask.onShowMe && <button type="button" onClick={ask.onShowMe} />}
+    <div data-state={ask.onTheWay ? 'on-the-way' : ask.onPictureIt ? 'ready' : 'none'} data-page={ask.page?.attachment_id ?? ''}>
+      {ask.onPictureIt && <button type="button" onClick={ask.onPictureIt} />}
       {ask.error && <p data-error>{ask.error}</p>}
     </div>
   );
 }
 
-function mount(subject: ShowMeSubject, messages: InboxMessageWire[]) {
+function mount(subject: PictureItSubject, messages: InboxMessageWire[]) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -109,7 +109,7 @@ function mount(subject: ShowMeSubject, messages: InboxMessageWire[]) {
   });
 }
 
-const remount = (subject: ShowMeSubject, messages: InboxMessageWire[]) => {
+const remount = (subject: PictureItSubject, messages: InboxMessageWire[]) => {
   act(() => root!.unmount());
   host!.remove();
   mount(subject, messages);
@@ -124,14 +124,14 @@ const press = async (times = 1) => {
 const replies = () => posts.filter((p) => p.path.endsWith('/reply'));
 const ties = () => posts.filter((p) => p.path === '/pulls/owner');
 
-test.skipIf(!hasDom)("a PR's thread: one reply to its agent with the Show me step and the skill's text, then the PR is told show_me", async () => {
+test.skipIf(!hasDom)("a PR's thread: one reply to its agent with the Picture it step and the skill's text, then the PR is told picture_it", async () => {
   mount(prSubject, [first, agentSaid]);
   await press(2);
   expect(replies().map((p) => p.path)).toEqual(['/messages/msg_2/reply']);
   const words = String(replies()[0]!.body.words);
-  expect(words.startsWith(`${showMeWords(prSubject)}\n\n`)).toBe(true);
-  expect(words).toContain(SHOW_ME_SKILL.body.split('\n')[0]!);
-  expect(ties().map((p) => p.body)).toEqual([{ keys: [pull.key], thread_id: 'thr_pr', ask: 'show_me' }]);
+  expect(words.startsWith(`${pictureItWords(prSubject)}\n\n`)).toBe(true);
+  expect(words).toContain(PICTURE_IT_SKILL.body.split('\n')[0]!);
+  expect(ties().map((p) => p.body)).toEqual([{ keys: [pull.key], thread_id: 'thr_pr', ask: 'picture_it' }]);
   expect(asked).toBe(1);
   expect(state()).toBe('on-the-way');
 });
@@ -140,9 +140,9 @@ test.skipIf(!hasDom)('a request that went but whose PR was not told is not sent 
   mount(prSubject, [first, agentSaid]);
   tieFails = 2;
   await press();
-  expect(document.querySelector('[data-error]')!.textContent).toBe(SHOW_ME_UNTOLD);
+  expect(document.querySelector('[data-error]')!.textContent).toBe(PICTURE_IT_UNTOLD);
   await press();
-  const request = { ...first, id: 'msg_3', reply_to: 'msg_2', body: `${showMeWords(prSubject)}\n\n…`, created_at: '2026-11-03T09:50:00.000Z' } as unknown as InboxMessageWire;
+  const request = { ...first, id: 'msg_3', reply_to: 'msg_2', body: `${pictureItWords(prSubject)}\n\n…`, created_at: '2026-11-03T09:50:00.000Z' } as unknown as InboxMessageWire;
   remount(prSubject, [first, agentSaid, request]);
   expect(state()).toBe('ready');
   await press();
@@ -152,17 +152,17 @@ test.skipIf(!hasDom)('a request that went but whose PR was not told is not sent 
   expect(state()).toBe('on-the-way');
 });
 
-test.skipIf(!hasDom)('local changes: the reply asks for a page of them through /show-me, and no PR is told', async () => {
+test.skipIf(!hasDom)('local changes: the reply asks for a page of them through /picture-it, and no PR is told', async () => {
   mount(localSubject, [first, agentSaid]);
   await press();
-  expect(String(replies()[0]!.body.words).startsWith('Please send me a Show me page of the uncommitted changes in web-app (on main), using /show-me.')).toBe(true);
+  expect(String(replies()[0]!.body.words).startsWith('Please send me a Picture page of the uncommitted changes in web-app (on main), using /picture-it.')).toBe(true);
   expect(ties()).toEqual([]);
   expect(state()).toBe('on-the-way');
 });
 
 test.skipIf(!hasDom)('a page in the thread is the latest; a request before it does not hold back asking again, one after it does', async () => {
-  const request = { ...first, id: 'msg_3', reply_to: 'msg_2', body: `${showMeWords(prSubject)}\n\n…`, created_at: '2026-11-03T09:50:00.000Z' } as unknown as InboxMessageWire;
-  const page = { ...agentSaid, id: 'msg_4', body: 'Here it is.', show_me: { attachment_id: 'att_1', title: 'RTL' }, created_at: '2026-11-03T10:00:00.000Z' } as unknown as InboxMessageWire;
+  const request = { ...first, id: 'msg_3', reply_to: 'msg_2', body: `${pictureItWords(prSubject)}\n\n…`, created_at: '2026-11-03T09:50:00.000Z' } as unknown as InboxMessageWire;
+  const page = { ...agentSaid, id: 'msg_4', body: 'Here it is.', picture_it: { attachment_id: 'att_1', title: 'RTL' }, created_at: '2026-11-03T10:00:00.000Z' } as unknown as InboxMessageWire;
   mount(prSubject, [first, agentSaid, request, page]);
   expect(document.querySelector('[data-page]')!.getAttribute('data-page')).toBe('att_1');
   expect(state()).toBe('ready');

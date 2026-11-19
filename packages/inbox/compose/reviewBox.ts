@@ -18,10 +18,10 @@ export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
   /** Branch reviews' safety net: a local branch nobody reported, reviewed whole against its base, in its project. */
   branch?: ReviewBoxBranch | null;
-  ask?: 'show_me';
+  ask?: 'picture_it';
 }
 
-export const reviewBoxPullAsk = (ask: ReviewBoxRequest['ask'], body: string): PullHandoffAsk => (ask === 'show_me' ? { kind: 'show_me', words: body } : body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' });
+export const reviewBoxPullAsk = (ask: ReviewBoxRequest['ask'], body: string): PullHandoffAsk => (ask === 'picture_it' ? { kind: 'picture_it', words: body } : body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' });
 
 export interface ReviewBoxBranch {
   name: string;
@@ -139,7 +139,7 @@ export function localReviewMessage(input: { changes: InboxReviewChanges; project
   const where = input.project ? ` in ${input.project}` : '';
   const on = input.branch ? (input.changes === 'branch' && input.base ? ` (${input.branch}, against ${input.base})` : ` (on ${input.branch})`) : '';
   const words = input.words.trim();
-  if (input.ask === 'show_me') return [`Please send me a Show me page of ${CHANGES_WORDS[input.changes]}${where}${on}, using /show-me.`, words, 'If I ask for changes, make them and send me the updated page in this thread.'].filter(Boolean).join('\n\n');
+  if (input.ask === 'picture_it') return [`Please send me a Picture page of ${CHANGES_WORDS[input.changes]}${where}${on}, using /picture-it.`, words, 'If I ask for changes, make them and send me the updated page in this thread.'].filter(Boolean).join('\n\n');
   return [`Please send me a guided review of ${CHANGES_WORDS[input.changes]}${where}${on}, using /review-curate.`, words, 'If I ask for changes, make them and send me the updated review in this thread.']
     .filter(Boolean)
     .join('\n\n');

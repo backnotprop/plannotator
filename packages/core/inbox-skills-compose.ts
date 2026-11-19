@@ -2,7 +2,7 @@ import { GRILL_ME_NOTE_TEXT, isGrillMeSkill } from './grill-me';
 import { createRoutineSkill } from './create-routine-skill';
 import { INBOX_BUILTIN_SKILL_ROOT, inboxReviewSkill } from './inbox-review';
 import { shapeSkill } from './shape-skill';
-import { showMeSkill } from './show-me-skill';
+import { pictureItSkill } from './picture-it-skill';
 import { inboxSkillNoteSection, type SkillBlockAudience } from './skill-reference-block';
 import { renderSkillReferencesBlock, type SkillCatalogEntry, type SkillExportContent } from './skill-references-render';
 
@@ -37,6 +37,6 @@ export function composeInboxSkillsBlock(
 
 export function inboxBuiltinSkillContent(ref: SkillCatalogEntry, shape: boolean, diagrams: boolean): SkillExportContent | undefined {
   if (ref.root !== INBOX_BUILTIN_SKILL_ROOT) return undefined;
-  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name) ?? createRoutineSkill(ref.name) ?? showMeSkill(ref.name);
+  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name) ?? createRoutineSkill(ref.name) ?? pictureItSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
 }

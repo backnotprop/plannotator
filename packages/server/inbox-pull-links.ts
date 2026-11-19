@@ -38,7 +38,7 @@ export interface InboxPullOwner {
   thread_id: string;
   at: string;
   ask?: InboxPullAsk;
-  show_me_at?: string;
+  picture_it_at?: string;
   theirs?: true;
   page?: true;
 }
@@ -89,8 +89,8 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
           links.set(key, {
             thread_id: owner.thread_id,
             at: owner.at,
-            ...(isInboxPullAsk(owner.ask) && owner.ask !== "show_me" ? { ask: owner.ask } : {}),
-            ...(typeof owner.show_me_at === "string" ? { show_me_at: owner.show_me_at } : owner.ask === "show_me" ? { show_me_at: owner.at } : {}),
+            ...(isInboxPullAsk(owner.ask) && owner.ask !== "picture_it" ? { ask: owner.ask } : {}),
+            ...(typeof owner.picture_it_at === "string" ? { picture_it_at: owner.picture_it_at } : owner.ask === "picture_it" ? { picture_it_at: owner.at } : {}),
             ...(owner.theirs === true ? { theirs: true as const } : {}),
             ...(owner.page === true ? { page: true as const } : {}),
           });
@@ -139,11 +139,11 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
         const was = map.get(key);
         const same = was?.thread_id === threadId;
         const page = extra.ask === "thread" || (same && was.page === true);
-        const showMe = extra.ask === "show_me";
-        const ask = showMe ? (same ? was.ask : undefined) : (extra.ask ?? undefined);
-        const showMeAt = showMe ? at : same ? was.show_me_at : undefined;
+        const pictureIt = extra.ask === "picture_it";
+        const ask = pictureIt ? (same ? was.ask : undefined) : (extra.ask ?? undefined);
+        const pictureItAt = pictureIt ? at : same ? was.picture_it_at : undefined;
         map.delete(key);
-        map.set(key, { thread_id: threadId, at, ...(ask ? { ask } : {}), ...(showMeAt ? { show_me_at: showMeAt } : {}), ...(extra.theirs ? { theirs: true as const } : {}), ...(page ? { page: true as const } : {}) });
+        map.set(key, { thread_id: threadId, at, ...(ask ? { ask } : {}), ...(pictureItAt ? { picture_it_at: pictureItAt } : {}), ...(extra.theirs ? { theirs: true as const } : {}), ...(page ? { page: true as const } : {}) });
       }
       while (map.size > INBOX_PULL_LINKS_MAX) map.delete(map.keys().next().value!);
       save(map);

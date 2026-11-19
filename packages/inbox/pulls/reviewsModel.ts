@@ -115,7 +115,7 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
     case 'branch_ready':
       return { status: ['Ready for review'], tone: null };
     case 'curating':
-      return { status: [row.started?.ask === 'show_me' ? 'Making a Show me page…' : 'Curating…'], tone: null };
+      return { status: [row.started?.ask === 'picture_it' ? 'Making a Picture page…' : 'Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
       if (verdict?.verdict !== 'changes_requested') return { status: ['You answered'], tone: null };
@@ -169,10 +169,10 @@ export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<I
     return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}${again}` : null;
   }
   if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
-  const page = run.made !== 'guide' && link.show_me_page && link.show_me_page.at >= run.at ? link.show_me_page : null;
-  if (page) return !page.seen && !row.review ? `Show me ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
+  const page = run.made !== 'guide' && link.picture_it_page && link.picture_it_page.at >= run.at ? link.picture_it_page : null;
+  if (page) return !page.seen && !row.review ? `Picture page ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
   if (link.agent?.ended || row.review) return null;
-  return run.made === 'show_me' ? 'Making a Show me page…' : 'Making a guided review…';
+  return run.made === 'picture_it' ? 'Making a Picture page…' : 'Making a guided review…';
 }
 
 export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>): ReviewRowLine {
@@ -353,8 +353,8 @@ export function reviewViewOf(
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : row.started?.ask === 'show_me' ? 'Making a Show me page…' : 'Curating the review…',
-    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : ask === 'show_me' ? 'Show me' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : row.started?.ask === 'picture_it' ? 'Making a Picture page…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : ask === 'picture_it' ? 'Picture it' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

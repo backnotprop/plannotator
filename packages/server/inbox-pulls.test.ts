@@ -974,38 +974,38 @@ describe("on", () => {
     expect(moved?.page).toBeUndefined();
   });
 
-  test("a Show me asked of a PR's thread keeps its guided review on the way beside it, and its page is served once the agent sends one", async () => {
+  test("a Picture it asked of a PR's thread keeps its guided review on the way beside it, and its page is served once the agent sends one", async () => {
     const w = await world({ codeReview: true });
     const talk = await w.send("Ready.", "talk");
     await w.pulls();
     const key = "github.com/northwind/billing-svc#412";
     const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
     expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
-    expect((await w.own([key], talk, { ask: "show_me" })).status).toBe(200);
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
     const asked = await linkOf();
     expect(asked).toMatchObject({ via: "owner", thread_id: talk, ask: "guide" });
-    expect(typeof asked?.show_me_asked_at).toBe("string");
-    expect(asked?.show_me_page).toBeUndefined();
-    const page = join(w.root, "show-me.html");
-    writeFileSync(page, '<html><head><meta name="plannotator-page" content="show-me"><title>Retries</title></head><body></body></html>');
+    expect(typeof asked?.picture_it_asked_at).toBe("string");
+    expect(asked?.picture_it_page).toBeUndefined();
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
     await w.send("Here it is.", "talk", { attachments: [page] });
-    expect((await linkOf())?.show_me_page).toMatchObject({ title: "Retries" });
-    expect((await w.own([key], talk, { ask: "show-me" })).status).toBe(422);
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries" });
+    expect((await w.own([key], talk, { ask: "picture-it" })).status).toBe(422);
   });
 
-  test("a Show me page is marked seen once the person has looked at its thread", async () => {
+  test("a Picture page is marked seen once the person has looked at its thread", async () => {
     const w = await world({ codeReview: true });
     const talk = await w.send("Ready.", "talk");
     await w.pulls();
     const key = "github.com/northwind/billing-svc#412";
     const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
-    expect((await w.own([key], talk, { ask: "show_me" })).status).toBe(200);
-    const page = join(w.root, "show-me.html");
-    writeFileSync(page, '<html><head><meta name="plannotator-page" content="show-me"><title>Retries</title></head><body></body></html>');
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
     await w.send("Here it is.", "talk", { attachments: [page] });
-    expect((await linkOf())?.show_me_page?.seen).toBeUndefined();
+    expect((await linkOf())?.picture_it_page?.seen).toBeUndefined();
     w.server.store.markSeen(talk);
-    expect((await linkOf())?.show_me_page).toMatchObject({ title: "Retries", seen: true });
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries", seen: true });
   });
 
   test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
