@@ -208,11 +208,11 @@ const notice = (el: HTMLElement) => el.querySelector('[data-inbox-notice]');
 const list = (el: HTMLElement) => el.querySelector<HTMLElement>('.ib-listcol .ib-lbody')!;
 const indicator = (el: HTMLElement) => el.querySelector<HTMLElement>('.ib-listcol [data-pull-indicator]');
 
-/** An agent's message lands while the list is held: the list on screen does not take it, "1 new · Show" says so. */
+/** An agent's message lands while the list is held: the list on screen does not take it, "New from …: “…” · Show" says so. */
 async function heldArrival(el: HTMLElement): Promise<string> {
   const late = await agentSends('A late note from the agent.');
   act(() => pokeStream!());
-  await until(() => notice(el)?.textContent?.includes('1 new') === true, 'the "1 new" notice');
+  await until(() => /^New from .+: “/.test(notice(el)?.textContent ?? ''), 'the "New from …" notice');
   return late;
 }
 

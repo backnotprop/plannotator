@@ -49,6 +49,7 @@ import {
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
 import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { isInboxTurnedOn } from "./generated/inbox/turned-on.ts";
 import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
@@ -148,6 +149,27 @@ function takeOutOfEditor(current: ExtensionContext, text: string): void {
 }
 
 /**
+ * Blocking UI prompts up in a Pi session's terminal now (`ui_prompt_start` / `ui_prompt_end`, Pi 0.84+): while any
+ * is, the Inbox hears "asking a question in its terminal" (INBOX_BLOCKED_FIELD; the kind only, never the prompt's
+ * title). Pi itself asks no permission, so every prompt is a question. Cleared when the run settles or the session goes.
+ */
+export class PiTerminalPrompts {
+	private open = 0;
+	up(): void {
+		this.open += 1;
+	}
+	down(): void {
+		this.open = Math.max(0, this.open - 1);
+	}
+	clear(): void {
+		this.open = 0;
+	}
+	blocked(): "question" | null {
+		return this.open > 0 ? "question" : null;
+	}
+}
+
+/**
  * Called once at extension load. Returns the discovery to await when the
  * Inbox connection applies to this Pi; undefined (and nothing done) otherwise.
  */
@@ -157,7 +179,8 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	// With the Inbox tool on or off: the Inbox must never start a second Pi on a session this one runs.
 	claimPiSessions(pi, dataDir);
 	const config = loadConfig();
-	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
+	// Only once the person turned the Inbox on here (turned-on.ts).
+	if (!resolveInboxTool(config, process.env, "pi") || !isInboxTurnedOn(dataDir)) return undefined;
 	// Decided with the tool, once per extension instance (each session, /reload):
 	// the line (the person's own from config.json prompts.inbox, else
 	// INBOX_REMINDER_TEXT), or null when the reminder is off.
@@ -299,6 +322,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 	/** Pi emits `agent_settled` (0.80.4+): a run counts as over only when it settled. */
 	let settleEvents = false;
 	let runOpen = false;
+	const prompts = new PiTerminalPrompts();
 	/** The wake waiting to show up as a user message in the session. */
 	let waiting: { id: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
@@ -345,6 +369,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		});
 
 	const target = {
+		blocked: () => prompts.blocked(),
 		// Never steer into this session's own "Ask this session" question (its answer streams to
 		// Plannotator; the Claude Code mod's rule): the reply waits for idle, and the poll stops offering Send now.
 		canSteer: () => !options.isAskActive(),
@@ -427,6 +452,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			wake.dispose();
 			wake = null;
 			runOpen = false;
+			prompts.clear();
 			endWaiting(new Error("the session changed"));
 		}
 		if (!wake && startCtx.hasUI) {
@@ -475,6 +501,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		wake?.dispose();
 		wake = null;
 		ctx = null;
+		prompts.clear();
 		endWaiting(new Error("the session ended"));
 	});
 
@@ -489,7 +516,11 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 	pi.on("agent_settled", () => {
 		settleEvents = true;
 		runOpen = false;
+		prompts.clear();
 	});
+	// A blocking prompt in the terminal (an extension's confirm, select, input or editor): only its being up is told.
+	pi.on("ui_prompt_start", () => prompts.up());
+	pi.on("ui_prompt_end", () => prompts.down());
 	pi.on("message_start", (event) => {
 		const message = event?.message as { role?: string; content?: unknown } | undefined;
 		if (message?.role !== "user" || !waiting) return;

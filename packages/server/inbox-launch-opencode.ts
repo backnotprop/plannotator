@@ -422,9 +422,10 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     /**
      * Start in Rex: OpenCode's session is made as for `start` (its id exists only once a server makes it), that
      * server ends, and the tab runs OpenCode's own terminal UI on it, as Open in Terminal does. The plugin there
-     * connects as that session at its start and takes the root as its first turn. `resume`: the same session again.
+     * connects as that session at its start and takes the root as its first turn. `resume`: the same session again
+     * (`fresh` changes nothing: the session exists from `makeSession` whether or not it took a turn).
      */
-    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
       let session = input.resume ? (launch.session_ref ?? "") : "";
       if (!session) {
         const made = await makeSession(launch, input);
