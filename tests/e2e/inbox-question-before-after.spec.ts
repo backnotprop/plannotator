@@ -198,7 +198,10 @@ test('words: the Where first, Now and After marked, the kept choice carries toda
   await shot(page, 'words-picked', card);
   // Send is in the pane's footer, not the card.
   await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  await expect.poll(() => sentSelection(claude, threadId)).toEqual(['Say what you are viewing']);
+  // The answer reaches the agent first; then the thread reads it as sent.
+  const body = String((await claude.nextReply(threadId, 40)).body);
+  expect(body).toContain('Say what you are viewing');
+  expect(await sentSelection(claude, threadId)).toEqual(['Say what you are viewing']);
   expect(world.errors).toEqual([]);
 });
 
