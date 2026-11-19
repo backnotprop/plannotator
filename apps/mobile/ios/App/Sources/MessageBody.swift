@@ -108,21 +108,23 @@ struct MessageWords: View {
   var body: some View {
     switch block {
     case .text(let text):
+      // A little more air between lines than the system's own: these are sentences to read, not labels.
       Text(MessageBody.attributed(text))
-        .font(.body)
+        .font(TextRole.body)
+        .lineSpacing(TextRole.bodyLeading)
         .foregroundStyle(Token.foreground)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     case .heading(let text):
       Text(MessageBody.attributed(text))
-        .font(.headline)
+        .font(TextRole.heading)
         .foregroundStyle(Token.foreground)
         .accessibilityAddTraits(.isHeader)
     case .code(let code):
       CodeBlock(code: code)
     case .elsewhere:
       Label(PhoneWords.moreOnComputer, systemImage: "desktopcomputer")
-        .font(.subheadline)
+        .font(TextRole.secondary)
         .foregroundStyle(Token.mutedForeground)
     case .question, .actions:
       EmptyView()
@@ -144,10 +146,36 @@ struct CodeBlock: View {
   private var fades: Bool { textWidth > boxWidth + 1 && !atEnd }
 
   private var words: some View {
-    Text(code)
-      .font(.system(copies ? .callout : .footnote, design: .monospaced))
+    Text(CodeLayout.keeps(code) ? Self.drawn(code) : AttributedString(code))
+      .font(TextRole.code(copies ? .subheadline : .footnote))
+      .lineSpacing(TextRole.codeLeading)
       .foregroundStyle(Token.foreground)
       .textSelection(.enabled)
+  }
+
+  /// A drawing's rules (the box-drawing characters) in the quiet grey of a hairline, its words in the foreground:
+  /// the lines part the cells, the words are what is read.
+  private static func drawn(_ code: String) -> AttributedString {
+    var out = AttributedString()
+    var run = ""
+    var rules = false
+    func flush() {
+      guard !run.isEmpty else { return }
+      var part = AttributedString(run)
+      if rules { part.foregroundColor = Token.mutedForeground.opacity(0.45) }
+      out += part
+      run = ""
+    }
+    for character in code {
+      let rule = character.unicodeScalars.allSatisfy { (0x2500...0x257F).contains($0.value) }
+      if rule != rules {
+        flush()
+        rules = rule
+      }
+      run.append(character)
+    }
+    flush()
+    return out
   }
 
   var body: some View {
@@ -156,11 +184,11 @@ struct CodeBlock: View {
         ScrollView(.horizontal) {
           words
             .fixedSize()
-            .padding(.horizontal, 14)
-            // A slim band over the drawing holds Copy: the drawing's first rule starts under the button, never
-            // through it.
-            .padding(.top, copies ? 42 : 13)
-            .padding(.bottom, 13)
+            .padding(.leading, Space.snug)
+            // Copy floats over the drawing's corner on a ground of its own. Scrolled to its end, the drawing
+            // stands clear of it: nothing of it is ever only under the button.
+            .padding(.trailing, copies ? Space.touch : Space.snug)
+            .padding(.vertical, Space.step)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
         }
         .scrollIndicators(.visible)
@@ -169,23 +197,23 @@ struct CodeBlock: View {
         .mask {
           HStack(spacing: 0) {
             Color.black
-            LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: 56)
+            LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: Size.codeFade)
           }
         }
-        .animation(.easeOut(duration: 0.15), value: fades)
+        .motion(.fade, value: fades)
       } else {
         words
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.leading, 14)
-          .padding(.vertical, 13)
+          .padding(.leading, Space.snug)
+          .padding(.vertical, Space.step)
           // The words never run under the button.
-          .padding(.trailing, copies ? 44 : 14)
+          .padding(.trailing, copies ? Space.touch : Space.snug)
       }
     }
-    .frame(minHeight: copies ? 44 : 0)
-    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
-    // Over a drawing that scrolls sideways, Copy is a chip of its own in the band above the drawing.
+    .frame(minHeight: copies ? Space.touch : 0)
+    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
+    // Over a drawing that scrolls sideways, Copy is a chip of its own on the drawing's corner.
     .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied, ground: CodeLayout.keeps(code)) } }
   }
 }
@@ -206,12 +234,12 @@ struct CopyButton: View {
       }
     } label: {
       Image(systemName: copied ? "checkmark" : "square.on.square")
-        .font(.footnote.weight(.medium))
+        .font(TextRole.meta.weight(.medium))
         .foregroundStyle(copied ? Token.success : Token.mutedForeground)
-        .frame(width: 32, height: 32)
-        .background(ground ? Token.card : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay { if ground { RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Token.border, lineWidth: 0.5) } }
-        .frame(width: 44, height: 44)
+        .frame(width: Size.copy, height: Size.copy)
+        .background(ground ? Token.card : .clear, in: RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous))
+        .overlay { if ground { RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous).strokeBorder(Token.border, lineWidth: 0.5) } }
+        .frame(width: Space.touch, height: Space.touch)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

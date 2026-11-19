@@ -20249,6 +20249,888 @@
       }
     },
     {
+      "id": "undecided-enum-inboxattachmentstate-captured-on-open",
+      "title": "enum:InboxAttachmentState.captured.on_open",
+      "surface": [
+        "enum:InboxAttachmentState.captured.on_open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorkeybody-idempotency-key",
+      "title": "field:DoorKeyBody.idempotency_key",
+      "surface": [
+        "field:DoorKeyBody.idempotency_key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doormarkunreadanswer-thread",
+      "title": "field:DoorMarkUnreadAnswer.thread",
+      "surface": [
+        "field:DoorMarkUnreadAnswer.thread"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doormarkunreadanswer-through-seq",
+      "title": "field:DoorMarkUnreadAnswer.through_seq",
+      "surface": [
+        "field:DoorMarkUnreadAnswer.through_seq"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doormarkunreadanswer-wrote",
+      "title": "field:DoorMarkUnreadAnswer.wrote",
+      "surface": [
+        "field:DoorMarkUnreadAnswer.wrote"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorpinbody-idempotency-key",
+      "title": "field:DoorPinBody.idempotency_key",
+      "surface": [
+        "field:DoorPinBody.idempotency_key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorpinbody-pinned",
+      "title": "field:DoorPinBody.pinned",
+      "surface": [
+        "field:DoorPinBody.pinned"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorpinsbody-idempotency-key",
+      "title": "field:DoorPinsBody.idempotency_key",
+      "surface": [
+        "field:DoorPinsBody.idempotency_key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorpinsbody-order",
+      "title": "field:DoorPinsBody.order",
+      "surface": [
+        "field:DoorPinsBody.order"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorpinsbody-restore",
+      "title": "field:DoorPinsBody.restore",
+      "surface": [
+        "field:DoorPinsBody.restore"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorpriorityanswer-before",
+      "title": "field:DoorPriorityAnswer.before",
+      "surface": [
+        "field:DoorPriorityAnswer.before"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorprioritybefore-at",
+      "title": "field:DoorPriorityBefore.at",
+      "surface": [
+        "field:DoorPriorityBefore.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorprioritybefore-off-at",
+      "title": "field:DoorPriorityBefore.off_at",
+      "surface": [
+        "field:DoorPriorityBefore.off_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorprioritybody-idempotency-key",
+      "title": "field:DoorPriorityBody.idempotency_key",
+      "surface": [
+        "field:DoorPriorityBody.idempotency_key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorprioritybody-priority",
+      "title": "field:DoorPriorityBody.priority",
+      "surface": [
+        "field:DoorPriorityBody.priority"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorprioritybody-restore",
+      "title": "field:DoorPriorityBody.restore",
+      "surface": [
+        "field:DoorPriorityBody.restore"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorresolvebody-idempotency-key",
+      "title": "field:DoorResolveBody.idempotency_key",
+      "surface": [
+        "field:DoorResolveBody.idempotency_key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorresolvebody-resolved",
+      "title": "field:DoorResolveBody.resolved",
+      "surface": [
+        "field:DoorResolveBody.resolved"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorsnoozeanswer-snoozed",
+      "title": "field:DoorSnoozeAnswer.snoozed",
+      "surface": [
+        "field:DoorSnoozeAnswer.snoozed"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorsnoozebody-at",
+      "title": "field:DoorSnoozeBody.at",
+      "surface": [
+        "field:DoorSnoozeBody.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorsnoozebody-idempotency-key",
+      "title": "field:DoorSnoozeBody.idempotency_key",
+      "surface": [
+        "field:DoorSnoozeBody.idempotency_key"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorsnoozebody-until",
+      "title": "field:DoorSnoozeBody.until",
+      "surface": [
+        "field:DoorSnoozeBody.until"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorthreadattachmentsanswer-attachments",
+      "title": "field:DoorThreadAttachmentsAnswer.attachments",
+      "surface": [
+        "field:DoorThreadAttachmentsAnswer.attachments"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorthreadattachmentsanswer-inline-images",
+      "title": "field:DoorThreadAttachmentsAnswer.inline_images",
+      "surface": [
+        "field:DoorThreadAttachmentsAnswer.inline_images"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorthreadattachmentsanswer-serversession",
+      "title": "field:DoorThreadAttachmentsAnswer.serverSession",
+      "surface": [
+        "field:DoorThreadAttachmentsAnswer.serverSession"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorthreaddraftanswer-draft",
+      "title": "field:DoorThreadDraftAnswer.draft",
+      "surface": [
+        "field:DoorThreadDraftAnswer.draft"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-doorthreaddraftanswer-serversession",
+      "title": "field:DoorThreadDraftAnswer.serverSession",
+      "surface": [
+        "field:DoorThreadDraftAnswer.serverSession"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-captured",
+      "title": "field:InboxAttachmentState.captured",
+      "surface": [
+        "field:InboxAttachmentState.captured"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-captured-at",
+      "title": "field:InboxAttachmentState.captured_at",
+      "surface": [
+        "field:InboxAttachmentState.captured_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-changed-since-sent",
+      "title": "field:InboxAttachmentState.changed_since_sent",
+      "surface": [
+        "field:InboxAttachmentState.changed_since_sent"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-current",
+      "title": "field:InboxAttachmentState.current",
+      "surface": [
+        "field:InboxAttachmentState.current"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-duration-ms",
+      "title": "field:InboxAttachmentState.duration_ms",
+      "surface": [
+        "field:InboxAttachmentState.duration_ms"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-height",
+      "title": "field:InboxAttachmentState.height",
+      "surface": [
+        "field:InboxAttachmentState.height"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-id",
+      "title": "field:InboxAttachmentState.id",
+      "surface": [
+        "field:InboxAttachmentState.id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-kind",
+      "title": "field:InboxAttachmentState.kind",
+      "surface": [
+        "field:InboxAttachmentState.kind"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-media-type",
+      "title": "field:InboxAttachmentState.media_type",
+      "surface": [
+        "field:InboxAttachmentState.media_type"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-message-id",
+      "title": "field:InboxAttachmentState.message_id",
+      "surface": [
+        "field:InboxAttachmentState.message_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-name",
+      "title": "field:InboxAttachmentState.name",
+      "surface": [
+        "field:InboxAttachmentState.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-named-path",
+      "title": "field:InboxAttachmentState.named_path",
+      "surface": [
+        "field:InboxAttachmentState.named_path"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-path",
+      "title": "field:InboxAttachmentState.path",
+      "surface": [
+        "field:InboxAttachmentState.path"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-ref",
+      "title": "field:InboxAttachmentState.ref",
+      "surface": [
+        "field:InboxAttachmentState.ref"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-sent-at",
+      "title": "field:InboxAttachmentState.sent_at",
+      "surface": [
+        "field:InboxAttachmentState.sent_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-sent-mtime",
+      "title": "field:InboxAttachmentState.sent_mtime",
+      "surface": [
+        "field:InboxAttachmentState.sent_mtime"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-sent-sha256",
+      "title": "field:InboxAttachmentState.sent_sha256",
+      "surface": [
+        "field:InboxAttachmentState.sent_sha256"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-size",
+      "title": "field:InboxAttachmentState.size",
+      "surface": [
+        "field:InboxAttachmentState.size"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-unavailable",
+      "title": "field:InboxAttachmentState.unavailable",
+      "surface": [
+        "field:InboxAttachmentState.unavailable"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxattachmentstate-width",
+      "title": "field:InboxAttachmentState.width",
+      "surface": [
+        "field:InboxAttachmentState.width"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-body",
+      "title": "field:InboxReplyDraft.body",
+      "surface": [
+        "field:InboxReplyDraft.body"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-created-at",
+      "title": "field:InboxReplyDraft.created_at",
+      "surface": [
+        "field:InboxReplyDraft.created_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-files",
+      "title": "field:InboxReplyDraft.files",
+      "surface": [
+        "field:InboxReplyDraft.files"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-mentions",
+      "title": "field:InboxReplyDraft.mentions",
+      "surface": [
+        "field:InboxReplyDraft.mentions"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-quote",
+      "title": "field:InboxReplyDraft.quote",
+      "surface": [
+        "field:InboxReplyDraft.quote"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-recipients",
+      "title": "field:InboxReplyDraft.recipients",
+      "surface": [
+        "field:InboxReplyDraft.recipients"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-thread-id",
+      "title": "field:InboxReplyDraft.thread_id",
+      "surface": [
+        "field:InboxReplyDraft.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-updated-at",
+      "title": "field:InboxReplyDraft.updated_at",
+      "surface": [
+        "field:InboxReplyDraft.updated_at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplydraft-v",
+      "title": "field:InboxReplyDraft.v",
+      "surface": [
+        "field:InboxReplyDraft.v"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-archived",
+      "title": "field:InboxReplyMention.archived",
+      "surface": [
+        "field:InboxReplyMention.archived"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-at",
+      "title": "field:InboxReplyMention.at",
+      "surface": [
+        "field:InboxReplyMention.at"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-label",
+      "title": "field:InboxReplyMention.label",
+      "surface": [
+        "field:InboxReplyMention.label"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-machine",
+      "title": "field:InboxReplyMention.machine",
+      "surface": [
+        "field:InboxReplyMention.machine"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-project",
+      "title": "field:InboxReplyMention.project",
+      "surface": [
+        "field:InboxReplyMention.project"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-thread-id",
+      "title": "field:InboxReplyMention.thread_id",
+      "surface": [
+        "field:InboxReplyMention.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxreplymention-title",
+      "title": "field:InboxReplyMention.title",
+      "surface": [
+        "field:InboxReplyMention.title"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "undecided-window-plannotator-themes-js",
       "title": "window:/plannotator-themes.js",
       "surface": [

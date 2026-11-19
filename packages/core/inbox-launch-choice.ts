@@ -112,6 +112,16 @@ export function launchEffortsFor(choices: Pick<InboxLaunchChoices, "efforts" | "
   return (model && choices.model_efforts?.[model]) || choices.efforts;
 }
 
+export function initialLaunchChoice(choices: InboxLaunchChoices | null | undefined): InboxLaunchChoice {
+  const last = choices?.last;
+  if (!choices || !last) return {};
+  return {
+    ...(last.model ? { model: last.model } : {}),
+    ...(last.effort && launchEffortsFor(choices, last.model).includes(last.effort) ? { effort: last.effort } : {}),
+    ...(last.primary_agent && choices.primary_agents?.includes(last.primary_agent) ? { primary_agent: last.primary_agent } : {}),
+  };
+}
+
 /** `efforts` null: the lists are not read yet, so only the token is checked (a slow CLI never refuses a start). */
 export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown; primary_agent?: unknown }, efforts: readonly string[] | null): InboxLaunchChoice {
   const choice: InboxLaunchChoice = {};

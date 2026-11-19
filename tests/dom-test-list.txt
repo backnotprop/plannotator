@@ -30,6 +30,7 @@ packages/ui/components/CodeFilePopout.commentFolds.test.tsx
 packages/ui/hooks/useVimSelection.test.tsx
 packages/ui/hooks/useVimSelection.selectionScope.test.tsx
 packages/ui/hooks/useModelCatalogs.dom.test.tsx
+packages/ui/hooks/useAgentJobs.dom.test.tsx
 packages/ui/hooks/useAIProviderActivation.dom.test.tsx
 packages/ui/components/ModelSourceHint.dom.test.tsx
 packages/ui/components/ai/AIProviderBar.dom.test.tsx
@@ -444,6 +445,7 @@ packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.escape.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
+packages/ui/components/ImageAnnotator/ZoomableCanvas.test.tsx
 packages/ui/utils/undoHistory.dom.test.ts
 packages/ui/utils/codeBlockMark.test.ts
 packages/ui/components/InlineMarkdown.seam.test.tsx
@@ -525,11 +527,6 @@ packages/editor/App.sessionTitle.test.tsx
 packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
-packages/ui/components/blocks/directiveRenderer.seam.test.tsx
-packages/canvas/react/objects.dom.test.tsx
-packages/canvas/snapshot/CanvasStage.dom.test.tsx
-packages/canvas/react/HtmlItem.dom.test.tsx
-packages/canvas/react/ChartView.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx
@@ -670,6 +667,7 @@ packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
 packages/inbox/pulls/pullThreadStart.test.tsx
 packages/inbox/pulls/pullThreadGuide.test.tsx
+packages/inbox/pulls/pictureItAskHook.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/prs/checksTurn.test.tsx
@@ -862,6 +860,7 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/inbox/compose/pictureItBox.test.tsx
 packages/inbox/projectTagMenu.test.tsx
 packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
