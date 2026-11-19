@@ -266,6 +266,22 @@ panel and the headless sessions never ask for the tool list),
 `packages/server/inbox-t3-wake.test.ts` (one owner per reply) and engine-harness
 cases in `apps/hook/tests/register.test.ts`.
 
+**A prompt waiting in the terminal (Inbox).** A matcherless `on('tool.*')`
+hook in `register.ts` tells `TerminalPrompts` (`terminal-prompts.ts`) when the
+person must answer in the terminal: a `tool.check` whose verdict is `ask` (a
+permission), or a `tool.call` of `AskUserQuestion` (a question). It names no
+`tool.run` (an older engine fails to load a module that does): a run is seen as
+`next.event`. A permission ends when its call runs or settles, at that loop's
+next `turn.step`, or at the turn's end; a question when its call settles or the
+turn ends. An `ask` is told only once it has held 1.5 s
+(`TERMINAL_PROMPT_SETTLE_MS`), so auto mode or a hook that answers at once never
+flashes. The InboxLink's `blocked` option sends `blocked: { kind }` in a
+`state` event on change and on every poll, after the registry check (nothing
+while no Inbox has run). Only the kind leaves the session. The Inbox side:
+"Status marks for every agent" in
+[inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
+`terminal-prompts.test.ts`.
+
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of
 closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;

@@ -45,6 +45,8 @@ export function setInboxAgents(next: unknown): void {
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
             // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
             ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
+            // The person's "Agent status" setting (agents/agentStatus.ts): this Inbox's own group says it.
+            ...(group.status_marks === true ? { status_marks: true as const } : {}),
           };
         })
     : null;

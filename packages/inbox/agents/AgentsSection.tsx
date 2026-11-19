@@ -13,7 +13,8 @@ import { AgentMark, type AgentMarkPicks } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
 import { showInRex, useRexShowNote } from '../data/actions/rexShow';
-import { rexMarkWords } from './rexMark';
+import { rexMarkWords, shownMarkOf } from './rexMark';
+import { useAgentStatusOn } from './agentStatus';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -157,6 +158,8 @@ const AgentRow = memo(
     picks: AgentMarkPicks;
   }) {
     const { entry, machine, on, away } = props;
+    // Its icon's mark, spoken with its name (the mark's own label is not always reached).
+    const mark = shownMarkOf(entry.agent, useAgentStatusOn());
     const [menuOpen, setMenuOpen] = useState(false);
     const [contextOpen, setContextOpen] = useState(false);
     const [renaming, setRenaming] = useState(false);
@@ -289,7 +292,7 @@ const AgentRow = memo(
             <span className="ib-sr">
               , {agentHostName(entry.agent.host)}
               {entry.agent.place ? `, in ${entry.agent.place.line.replace(' · ', ', ').replace(' / ', ', ')}` : ''}
-              {entry.agent.rex_mark ? `, ${rexMarkWords(entry.agent.rex_mark)}` : ''}
+              {mark ? `, ${rexMarkWords(mark)}` : ''}
             </span>
           </button>
         </Tip>

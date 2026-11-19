@@ -123,6 +123,21 @@ headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 
 In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
 
+### OpenCode 2: a prompt waiting in the terminal (Inbox)
+
+The plugin's Inbox link says `blocked: { kind }` on its polls and in a `state`
+event while a session waits on the person in OpenCode (`noteOpenCodePrompt`,
+`openCodeBlocked` in `apps/opencode-plugin/inbox.ts`): `permission.asked`
+holds a `permission` until `permission.replied` for that request; `form.created`
+holds a `question` until any later `form.*` event for that form; the turn's end
+(`session.execution.succeeded` / `failed` / `interrupted`) clears both. A
+permission wins over a question. Only the kind leaves the plugin, never the
+action, resources or the form's title. The form's end event name is not yet
+proved on a real OpenCode 2 form (the 45 s expiry and the turn's end bound it).
+The Inbox side: "Status marks for every agent" in
+[inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
+`apps/opencode-plugin/inbox-blocked.test.ts`.
+
 ### OpenCode 2: the installer updates a running service's plugin
 
 The OpenCode 2 service keeps the plugin it loaded. When it is running with an

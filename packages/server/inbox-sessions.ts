@@ -38,6 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
@@ -80,6 +81,11 @@ export interface InboxAgentSession {
   live: boolean;
   /** A turn runs now (live only); null when the connection does not say, or it is not live. */
   busy: boolean | null;
+  /**
+   * What it waits on in its terminal now (INBOX_BLOCKED_FIELD: a permission prompt or a question), as its connection
+   * said it in the last INBOX_BLOCKED_STALE_MS (live only); null when none, stale, or not said. Optional: absent is none.
+   */
+  blocked?: InboxBlockedKind | null;
   label: string | null;
   /** The title its host generated (INBOX_TITLE_POLL_FIELD); null when it sent none. */
   title: string | null;
@@ -198,6 +204,12 @@ interface SeenSession {
    * inbox-rex.ts asks Rex before anything is drawn. Ids only. Absent: none said.
    */
   place?: InboxPlace | null;
+  /**
+   * What its connection last said it waits on in its terminal (INBOX_BLOCKED_FIELD), and when it said it (ms). The
+   * latest poll or `state` event stands: one without it clears it. Read only while said in the last
+   * INBOX_BLOCKED_STALE_MS. Absent: none said.
+   */
+  blocked?: { kind: InboxBlockedKind; at: number } | null;
   /**
    * A session the Inbox wakes itself, with no connection that polls (Codex:
    * `codex queue`; packages/server/inbox-codex-wake.ts): seen from its MCP
@@ -438,6 +450,15 @@ export function createInboxLiveSessions(options: {
     entry.held = held;
   };
 
+  /** A poll's or `state` event's `blocked` (INBOX_BLOCKED_FIELD): the latest word stands, with when it was said. */
+  const setBlocked = (entry: SeenSession, body: Record<string, unknown>, at: number) => {
+    const kind = parseInboxBlocked(body[INBOX_BLOCKED_FIELD]);
+    entry.blocked = kind ? { kind, at } : null;
+  };
+  /** What a session waits on in its terminal now: said in the last INBOX_BLOCKED_STALE_MS, else none. */
+  const blockedOf = (entry: SeenSession): InboxBlockedKind | null =>
+    entry.blocked && now() - entry.blocked.at <= INBOX_BLOCKED_STALE_MS ? entry.blocked.kind : null;
+
   const applyState = (entry: SeenSession, body: Record<string, unknown>, at: number) => {
     if (typeof body.busy !== "boolean") return;
     if (body.busy) {
@@ -564,6 +585,8 @@ export function createInboxLiveSessions(options: {
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
     // Sent on every poll, so the latest stands: a poll without it (an older connection, or no longer in Rex) says none.
     entry.place = parseInboxPlace(body[INBOX_PLACE_POLL_FIELD]);
+    // Sent on every poll while a prompt is up in its terminal, so the latest stands: a poll without it says none.
+    setBlocked(entry, body, at);
     // Sent on every poll, so the latest stands: a poll without it withdraws the claim.
     const continues = parseInboxContinues(body[INBOX_CONTINUES_POLL_FIELD], session);
     continuations.claim(session, continues);
@@ -611,6 +634,8 @@ export function createInboxLiveSessions(options: {
     applyState(entry, body, at);
     if (typeof body[INBOX_SEND_NOW_POLL_FIELD] === "boolean") setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     if (typeof body[INBOX_HELD_POLL_FIELD] === "boolean") setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
+    // Every `state` event of a connection that knows the field carries it while a prompt is up: without it, none.
+    setBlocked(entry, body, at);
     trackWaitsOf(session, entry, at);
   };
 
@@ -910,6 +935,7 @@ export function createInboxLiveSessions(options: {
         lastSeen: heard,
         live,
         busy: live ? entry.busy : null,
+        blocked: live ? blockedOf(entry) : null,
         label: entry.label ?? null,
         title: entry.title ?? null,
       });
@@ -925,7 +951,7 @@ export function createInboxLiveSessions(options: {
   const agentsSignature = (since: number): string =>
     agentSessions(since)
       // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
-      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : "i") : "e"}:${entry.root ?? ""}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
+      .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : entry.busy === false ? "i" : "n") : "e"}${entry.blocked ? `!${entry.blocked}` : ""}:${entry.root ?? ""}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
       .join("|") + `#${continuations.signature()}`;
 
   /**

@@ -76,6 +76,8 @@ import {
   inboxToolResultText,
   inboxToolsWithoutBro,
   INBOX_HELD_POLL_FIELD,
+  inboxBlockedField,
+  type InboxBlockedKind,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
@@ -1096,6 +1098,11 @@ export interface InboxLinkOptions {
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
   /**
+   * What the session waits on in its terminal now (terminal-prompts.ts): a permission prompt or a question, the kind
+   * only. Asked every tick; a change goes to the Inbox as a `state` event, and every poll repeats it. Absent: never said.
+   */
+  blocked?: (now: number) => InboxBlockedKind | null
+  /**
    * The main-loop turn running now when a Send now reply may go into it, else
    * null: never the turn of this session's own "Ask this session" question
    * (its answer streams to Plannotator), and null while that question is
@@ -1262,6 +1269,8 @@ export class InboxLink {
   private lastSendNow: boolean | null = null
   /** What the Inbox was last told about `heldForInput` (`held` on the poll and the state events): its "Stopped" line. */
   private lastHeld = false
+  /** What the Inbox was last told the session waits on in its terminal (`blocked` on the poll and the state events). */
+  private lastBlocked: InboxBlockedKind | null = null
   /** Send now could not go into the running turn (the engine refused the row): these wait for idle, as before. */
   private noSteer = new Set<string>()
   /** The engine refused a row once (an engine without `$.session.append`): stop offering Send now. */
@@ -1572,16 +1581,19 @@ export class InboxLink {
     // Whether a Send now reply could go in right now: never while this session's own Ask question holds it.
     const sendNow = await this.sendNowNow()
     const held = this.heldForInput
-    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld) {
+    const blocked = this.options.blocked?.(now) ?? null
+    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld || blocked !== this.lastBlocked) {
       const known = this.busy !== null
       if (busy !== this.busy && !busy) this.idleSince = now
       this.busy = busy
       this.lastSendNow = sendNow
       this.lastHeld = held
-      // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in, and
-      // whether Claude Code holds this session's replies until the person types (the window's "Stopped").
+      this.lastBlocked = blocked
+      // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in,
+      // whether Claude Code holds this session's replies until the person types (the window's "Stopped"), and
+      // what it waits on in its terminal (the Agents list's mark; the kind only).
       if (known && this.leader)
-        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held })
+        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held, ...inboxBlockedField(blocked) })
     }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
@@ -1762,6 +1774,8 @@ export class InboxLink {
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
       // Claude Code refused a reply and holds them all until the person types there: the window says "Stopped".
       ...(this.heldForInput ? { [INBOX_HELD_POLL_FIELD]: true } : {}),
+      // A prompt up in its terminal (the kind only): said again on every poll while it lasts.
+      ...inboxBlockedField(this.lastBlocked),
       [INBOX_STEER_POLLS_POLL_FIELD]: true,
       // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
       [INBOX_TAGS_POLL_FIELD]: true,

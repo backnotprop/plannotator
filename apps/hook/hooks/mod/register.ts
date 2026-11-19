@@ -154,6 +154,7 @@ import { PLAN_TOOL } from './plan'
 import { pickShell, useShell, type ModShell } from './shell'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerAtRun, isEarlyRunRefusal, isServedAtRun, RUN_EVENT, RUN_MATCHER } from './early-run'
+import { ASK_QUESTION_TOOL } from './terminal-prompts'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
@@ -1335,6 +1336,36 @@ export function register(on: On) {
     return verdict
   })
 
+  // What waits on the person in this session's terminal (terminal-prompts.ts), for the Inbox's Agents list: a call
+  // whose `tool.check` answered `ask` (a permission prompt) until it runs or settles, an AskUserQuestion call (a
+  // question) until it settles. Only the kind leaves the session; never the input or the question. Through `tool.*`
+  // like the run hook above (an engine before 2.1.326 refuses a module that names `tool.run`), with no matcher: the
+  // glob already puts the mod in every `tool.*` chain, so no new "hook was skipped" line can come of it. Every result
+  // is passed on as it is.
+  on('tool.*', async ($: Engine, e: any, next: Next) => {
+    const event = next?.event
+    const callId = typeof e?.tool_use_id === 'string' && e.tool_use_id ? e.tool_use_id : null
+    const instance = allowed && callId ? mod : null
+    if (!instance || instance.isDisposed || !callId) return next(e)
+    const agentId = typeof e.agentId === 'string' ? e.agentId : undefined
+    if (event === 'tool.check') {
+      const verdict = await next(e)
+      if (verdict?.decision === 'ask') await instance.onToolAsked(callId, agentId).catch(() => undefined)
+      return verdict
+    }
+    if (event === RUN_EVENT) {
+      instance.onToolRan(callId)
+      return next(e)
+    }
+    if (event !== 'tool.call') return next(e)
+    if (e.tool === ASK_QUESTION_TOOL) await instance.onQuestionAsked(callId, agentId).catch(() => undefined)
+    try {
+      return await next(e)
+    } finally {
+      instance.onToolSettled(callId)
+    }
+  })
+
   on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
     let why = ''
@@ -1468,6 +1499,8 @@ export function register(on: On) {
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
     if (!e.agentId) await plainReminderAgain($)
     const instance = allowed ? mod : null
+    // A model request of this loop: whatever it waited on in the terminal was answered (terminal-prompts.ts).
+    if (instance && !instance.isDisposed) instance.onLoopStep(typeof e.agentId === 'string' ? e.agentId : undefined)
     // A main-loop model request is going out: a reply Send now put into the turn is in it (inbox.ts).
     if (instance && !instance.isDisposed && !e.agentId && typeof e.turnId === 'string') instance.onMainStep(e.turnId)
     if (!instance || !instance.turns.ownsTurn(e.turnId)) return yield* next(e)

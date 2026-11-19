@@ -18,6 +18,7 @@ import { THREAD_PANEL_LABEL } from '../threadPanel';
 import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
 import { STARRED_ABOVE_LABEL } from '../starredPills';
 import { SHOW_TAG_COLOURS_LABEL } from '../tagColours';
+import { AGENT_STATUS_LABEL, setAgentStatus, useAgentStatusOn } from '../agents/agentStatus';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -192,6 +193,15 @@ export function MenuCheckbox({
 }
 
 /**
+ * "Show agent status" (agents/agentStatus.ts, owner 2026-11-18): the same switch as Settings → General → Appearance's
+ * row, so the two always agree. Off by default.
+ */
+export function AgentStatusMenuItem() {
+  const on = useAgentStatusOn();
+  return <MenuCheckbox label={AGENT_STATUS_LABEL} checked={on} onChange={(next) => void setAgentStatus(next)} data-agent-status-option="" />;
+}
+
+/**
  * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
  * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
  * list at once and leaves the menu open, as a tick does.
@@ -347,6 +357,7 @@ export function TidyMenu({
                     {LIST_LOOK_OPTIONS.map((option) => (
                       <MenuCheckbox key={option.key} label={option.label} checked={look[option.key]} onChange={(on) => onLook(option.key, on)} data-list-look={option.key} />
                     ))}
+                    <AgentStatusMenuItem />
                     {tagColours && <MenuCheckbox label={SHOW_TAG_COLOURS_LABEL} checked={tagColours.on} onChange={tagColours.onChange} data-tag-colours-option="" />}
                     {onCustomize && (
                       // No icon (the owner, 2026-11-02): its words line up with the checkboxes' labels above it.

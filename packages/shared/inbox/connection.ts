@@ -2186,3 +2186,40 @@ export const INBOX_SESSION_LIVE_MS = 30_000
  * reads it as stuck once that session is gone too.
  */
 export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+
+/**
+ * "Stuck on a prompt in its terminal" (owner, 2026-11-18): the poll and
+ * `state` field by which a connection says its session waits on the person
+ * in its own terminal right now, `{ kind: 'permission' | 'question' }`. The
+ * kind only: never the prompt's words, its command or its title. Sent by the
+ * Claude Code mod (`tool.check` answered `ask`, `AskUserQuestion`), the
+ * OpenCode 2 plugin (`permission.asked`/`replied`, `form.created`) and Pi /
+ * Oh My Pi (`ui_prompt_start`/`end`) on every poll and `state` event while
+ * the prompt is up, and left out once it is answered or the turn ends. The
+ * Inbox keeps the latest word (a poll or `state` event without it clears it)
+ * and drops one not said again within INBOX_BLOCKED_STALE_MS. Only the
+ * Agents list's status mark reads it. An older Inbox ignores it; an older
+ * connection never sends it.
+ */
+export const INBOX_BLOCKED_FIELD = 'blocked'
+
+/** What a session waits on in its terminal (INBOX_BLOCKED_FIELD). */
+export type InboxBlockedKind = 'permission' | 'question'
+
+/** A `blocked` as a poll or `state` event carried it: a known kind, else null (none). */
+export function parseInboxBlocked(value: unknown): InboxBlockedKind | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const kind = (value as Record<string, unknown>).kind
+  return kind === 'permission' || kind === 'question' ? kind : null
+}
+
+/** The field for a poll or `state` body: `{ blocked: { kind } }` while blocked, else nothing (which clears it). */
+export function inboxBlockedField(kind: InboxBlockedKind | null): { blocked?: { kind: InboxBlockedKind } } {
+  return kind ? { [INBOX_BLOCKED_FIELD]: { kind } } : {}
+}
+
+/**
+ * A `blocked` not said again for this long is dropped: a connection polls
+ * again at most 25 s after its last poll, and says a change at once.
+ */
+export const INBOX_BLOCKED_STALE_MS = 45_000

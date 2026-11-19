@@ -365,6 +365,53 @@ export async function registerInboxOpenCode2(
 interface SessionState {
   running: boolean;
   lastEventAt: number;
+  /**
+   * What waits on the person in its terminal now, by request or form id (`permission.asked` until
+   * `permission.replied`, `form.created` until a later `form.*` event for the same id), cleared when the turn ends.
+   * Absent: none. The kind only goes to the Inbox (blocked.ts).
+   */
+  prompts?: Map<string, "permission" | "question">;
+}
+
+/** The session's terminal prompts, as the Inbox hears them: a permission prompt first, then a question; null when none. */
+export function openCodeBlocked(state: Pick<SessionState, "prompts"> | undefined): "permission" | "question" | null {
+  const kinds = [...(state?.prompts?.values() ?? [])];
+  return kinds.includes("permission") ? "permission" : kinds.includes("question") ? "question" : null;
+}
+
+/**
+ * One event's word on a session's terminal prompts (OpenCode 2's stream): a permission asked or replied, a form
+ * (a question) created or ended, a turn over. Returns whether it was such an event. The form's end event is not
+ * confirmed against a real OpenCode form: any later `form.*` event naming the same id ends it, and the turn's end
+ * always does.
+ */
+export function noteOpenCodePrompt(state: SessionState, type: string, data: Record<string, unknown> | undefined): boolean {
+  const id = (key: string) => (typeof data?.[key] === "string" && data[key] ? (data[key] as string) : null);
+  if (type === "permission.asked") {
+    const request = id("id");
+    if (request) (state.prompts ??= new Map()).set(request, "permission");
+    return true;
+  }
+  if (type === "permission.replied") {
+    const request = id("requestID") ?? id("id");
+    if (request) state.prompts?.delete(request);
+    return true;
+  }
+  if (type === "form.created") {
+    const form = id("id") ?? id("formID");
+    if (form) (state.prompts ??= new Map()).set(form, "question");
+    return true;
+  }
+  if (type.startsWith("form.")) {
+    const form = id("id") ?? id("formID");
+    if (form && state.prompts?.get(form) === "question") state.prompts.delete(form);
+    return true;
+  }
+  if (type === "session.execution.succeeded" || type === "session.execution.failed" || type === "session.execution.interrupted") {
+    state.prompts?.clear();
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -550,6 +597,7 @@ class OpenCode2Wakes {
     if (typeof type !== "string" || !sessionID) return;
     const state = this.state(sessionID);
     state.lastEventAt = Date.now();
+    if (noteOpenCodePrompt(state, type, data)) return;
     switch (type) {
       case "session.created":
         if (this.launch.created) this.discover(sessionID);
@@ -623,6 +671,8 @@ class OpenCode2Wakes {
 
   private target(sessionID: string): InboxWakeTarget {
     return {
+      // A permission prompt or a form up in its terminal (the kind only); cleared when answered or the turn ends.
+      blocked: () => openCodeBlocked(this.states.get(sessionID)),
       isBusy: async () => {
         const state = this.state(sessionID);
         if (!this.eventsAvailable) return !(await this.idleProbe(sessionID));
