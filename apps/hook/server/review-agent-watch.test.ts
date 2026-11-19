@@ -8,6 +8,10 @@
  * under the person, or Send says "gone" to a session that came back.
  */
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { PlannotatorMod } from "../hooks/mod/controller";
 import { fakeHost, type RunCall } from "../hooks/mod/testing/fake-host";
 import {
@@ -20,6 +24,7 @@ import {
   modLeaseAgentWatch,
   parentAgentWatch,
   parseWatcherLease,
+  probeStdoutReader,
   reviewAgentWatch,
   SLEEP_GAP_MS,
 } from "./review-agent-watch";
@@ -117,6 +122,56 @@ describe("the process that reads stdout", () => {
     expect(reviewAgentWatch({ ...base, hostResultFile: "/data/dsh/s/l/result.json" })).toBeNull();
     expect(reviewAgentWatch({ ...base, hostResultFile: "/data/claude-code-mod/s/l/result.json" })?.kind).toBe("mod");
   });
+});
+
+// The probe itself, on a real pipe: N4 (a line-counting reader such as
+// `| head -n 5` must not be fed by it where a zero-length write is enough).
+describe.skipIf(process.platform === "win32")("the stdout probe on a real pipe", () => {
+  test("open while read, closed (EPIPE) once the reader is gone; on macOS it writes no byte", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-probe-"));
+    const fifo = join(dir, "out");
+    const go = join(dir, "go");
+    expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+    const reader = Bun.spawn(["cat", fifo], { stdout: "pipe", stderr: "ignore" });
+    const script = [
+      `import { existsSync } from "node:fs";`,
+      `import { probeStdoutReader } from ${JSON.stringify(resolve(import.meta.dir, "review-agent-watch.ts"))};`,
+      `process.on("SIGPIPE", () => {});`,
+      `console.error("first " + probeStdoutReader());`,
+      `while (!existsSync(${JSON.stringify(go)})) await Bun.sleep(20);`,
+      `console.error("second " + probeStdoutReader());`,
+    ].join("\n");
+    writeFileSync(join(dir, "probe.ts"), script);
+    const child = Bun.spawn(["/bin/sh", "-c", 'exec "$@" > "$0"', fifo, process.execPath, join(dir, "probe.ts")], { stdout: "ignore", stderr: "pipe" });
+    try {
+      const errors = child.stderr.getReader();
+      let text = "";
+      while (!text.includes("first ")) {
+        const { value, done } = await errors.read();
+        if (done) break;
+        text += new TextDecoder().decode(value);
+      }
+      expect(text).toContain("first open");
+      reader.kill("SIGKILL");
+      await reader.exited;
+      writeFileSync(go, "");
+      for (;;) {
+        const { value, done } = await errors.read();
+        if (done) break;
+        text += new TextDecoder().decode(value);
+      }
+      expect(text).toContain("second closed");
+      expect(await child.exited).toBe(0);
+    } finally {
+      reader.kill("SIGKILL");
+      child.kill("SIGKILL");
+    }
+    const received = await new Response(reader.stdout).arrayBuffer();
+    // macOS: nothing at all. Elsewhere: at most the one newline (cat may die before passing it on).
+    if (process.platform === "darwin") expect(received.byteLength).toBe(0);
+    else expect(received.byteLength).toBeLessThanOrEqual(1);
+    rmSync(dir, { recursive: true, force: true });
+  }, 20_000);
 });
 
 describe("a Claude Code mod launch's lease", () => {

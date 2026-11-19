@@ -7,8 +7,18 @@
  * instead of saying the agent is gone.
  */
 import { describe, expect, test } from 'bun:test';
+// The servers' codes, from the module both servers use. @plannotator/ui ships
+// to outside consumers and cannot depend on the private shared package, so it
+// keeps its own copies; this pins them to the servers'.
 import {
+  AGENT_AWAY_CODE as SERVER_AGENT_AWAY_CODE,
+  AGENT_GONE_CODE as SERVER_AGENT_GONE_CODE,
+  NO_SESSION_CODE as SERVER_NO_SESSION_CODE,
+} from '../../shared/review-agent-gone';
+import {
+  AGENT_AWAY_CODE,
   AGENT_GONE_CODE,
+  NO_SESSION_CODE,
   assertSendOk,
   canRetrySend,
   DecisionSendError,
@@ -29,8 +39,7 @@ async function failureFor(res: Response) {
 describe('agent gone', () => {
   test("the server's refusal reads as agent-gone: no Retry, and a reason that is not an outage", async () => {
     // What both review servers answer (packages/shared/review-agent-gone.ts).
-    const failure = await failureFor(Response.json({ error: 'gone', code: 'agent_gone' }, { status: 410 }));
-    expect(AGENT_GONE_CODE).toBe('agent_gone');
+    const failure = await failureFor(Response.json({ error: 'gone', code: SERVER_AGENT_GONE_CODE }, { status: 410 }));
     expect(failure).toEqual({ kind: 'agent-gone' });
     expect(canRetrySend(failure!)).toBe(false);
     expect(describeSendFailure(failure!)).toContain('gone');
@@ -39,7 +48,7 @@ describe('agent gone', () => {
 
   // L2: Pi between sessions answers 409 agent_away: Retry stays, since a session may be back a moment later.
   test("no session right now (Pi between sessions): Retry stays, and the reason says so", async () => {
-    const failure = await failureFor(Response.json({ error: 'away', code: 'agent_away' }, { status: 409 }));
+    const failure = await failureFor(Response.json({ error: 'away', code: SERVER_AGENT_AWAY_CODE }, { status: 409 }));
     expect(failure).toEqual({ kind: 'agent-away' });
     expect(canRetrySend(failure!)).toBe(true);
     expect(describeSendFailure(failure!)).not.toContain('gone');
@@ -47,10 +56,14 @@ describe('agent gone', () => {
 
   // L1: OpenCode with no session never had an agent to lose.
   test('a review with no session: no Retry, and it never claims an agent is gone', async () => {
-    const failure = await failureFor(Response.json({ error: 'none', code: 'no_session' }, { status: 410 }));
+    const failure = await failureFor(Response.json({ error: 'none', code: SERVER_NO_SESSION_CODE }, { status: 410 }));
     expect(failure).toEqual({ kind: 'no-session' });
     expect(canRetrySend(failure!)).toBe(false);
     expect(describeSendFailure(failure!)).not.toContain('gone');
+  });
+
+  test("the page's codes are the servers' codes", () => {
+    expect([AGENT_GONE_CODE, AGENT_AWAY_CODE, NO_SESSION_CODE]).toEqual([SERVER_AGENT_GONE_CODE, SERVER_AGENT_AWAY_CODE, SERVER_NO_SESSION_CODE]);
   });
 
   test('any other 410 stays a plain rejection', async () => {

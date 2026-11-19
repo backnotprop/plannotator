@@ -60,6 +60,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
       </div>
 
       <textarea
+        data-not-a-comment
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
         placeholder="Ask about this code..."

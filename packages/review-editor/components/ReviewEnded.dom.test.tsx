@@ -5,13 +5,15 @@
  *
  * What regresses if this fails: the ended screen covers the page before the
  * last edits are saved (a lost comment), or an edit made during that save is
- * dropped; the screen claims comments were saved when there were none; Copy
- * feedback copies something other than what Send would have sent.
+ * dropped; text typed but not added is not kept before the save, or a box
+ * that held text from the start (a settings field) is taken for a comment;
+ * the screen claims comments were saved when there were none; Copy feedback
+ * copies something other than what Send would have sent.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ReviewEndedCopy, reviewEndedSubtitle, useAgentGoneEnding } from './ReviewEnded';
+import { ReviewEndedCopy, reviewEndedSubtitle, useAgentGoneEnding, useTypedTextBoxes } from './ReviewEnded';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -39,25 +41,54 @@ describe('the ending', () => {
     let ending: ReturnType<typeof useAgentGoneEnding> | null = null;
     function Probe() {
       ending = useAgentGoneEnding({
+        unfinishedTexts: () => ['Half-typed'],
+        keepUnfinished: (texts) => {
+          events.push(`keep:${texts.join('|')}`);
+          return texts.length;
+        },
         flushDraft: () => {
           events.push('flush');
-          return events.length === 1 ? new Promise<void>((resolve) => { release = resolve; }) : Promise.resolve();
+          return events.length === 2 ? new Promise<void>((resolve) => { release = resolve; }) : Promise.resolve();
         },
         savedComments: () => 2,
       });
-      if (ending.ended) events.push(`ended:${ending.ended.savedComments}`);
+      if (ending.ended) events.push(`ended:${ending.ended.savedComments}:${ending.ended.keptUnfinished}`);
       return null;
     }
     await render(<Probe />);
-    await act(async () => { void ending!.onGone(); });
-    // The send guard flips at once; the screen waits for the save.
+    await act(async () => { void ending!.onGone(); await new Promise((resolve) => setTimeout(resolve, 60)); });
+    // The send guard flips at once; unfinished text is kept first; the screen waits for the save.
     expect(ending!.gone.current).toBe(true);
-    expect(events).toEqual(['flush']);
+    expect(events).toEqual(['keep:Half-typed', 'flush']);
     await act(async () => { release(); await Promise.resolve(); });
-    expect(events).toEqual(['flush', 'flush', 'ended:2']);
+    expect(events).toEqual(['keep:Half-typed', 'flush', 'flush', 'ended:2:1']);
     // A second event changes nothing.
     await act(async () => { await ending!.onGone(); });
     expect(events.filter((e) => e === 'flush')).toHaveLength(2);
+  });
+
+  test.skipIf(!hasDom)('takes only text boxes the person typed in, and never the AI question boxes', async () => {
+    let read: (() => string[]) | null = null;
+    function Probe() {
+      read = useTypedTextBoxes();
+      return null;
+    }
+    await render(<Probe />);
+    const prefilled = document.createElement('textarea');
+    prefilled.value = 'A saved setting';
+    const typed = document.createElement('textarea');
+    const ai = document.createElement('textarea');
+    ai.setAttribute('data-not-a-comment', '');
+    const emptied = document.createElement('textarea');
+    for (const box of [prefilled, typed, ai, emptied]) {
+      document.body.appendChild(box);
+      hosts.push(box);
+    }
+    for (const [box, text] of [[typed, ' Why 2? '], [ai, 'What is this?'], [emptied, '  ']] as const) {
+      box.value = text;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    expect(read!()).toEqual(['Why 2?']);
   });
 
   test('says comments were saved only when there are some', () => {

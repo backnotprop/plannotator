@@ -8,12 +8,14 @@
  *   or names a per-call helper whose death ends a live session's review;
  * - a launch timer the engine ended is never armed again: no lease renewal and
  *   no delivery until the session's next restore;
- * - a code review open across `/clear` or an in-process `/resume` is left with
- *   nobody watching it, and its decision never reaches the new session;
+ * - a code review open across `/clear` or an in-process `/resume` is ended
+ *   under the live process, or its decision goes to the new conversation
+ *   instead of waiting for the one that asked;
  * - the review the CLI ended for a gone session is reported as a crash.
  */
 import { describe, expect, test } from 'bun:test'
-import { PlannotatorMod, STORE_LAUNCHES } from './controller'
+import { modLeaseAgentWatch } from '../../server/review-agent-watch'
+import { PlannotatorMod } from './controller'
 import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
 
 const SESSION = { sessionId: 'session-1', dataDir: '/data', interactive: true }
@@ -103,7 +105,10 @@ describe('a launch timer the engine ended', () => {
 })
 
 describe('a code review open across /clear or an in-process /resume', () => {
-  test('the new session takes it over: it holds the lease and its decision lands there', async () => {
+  // The review stays with the conversation that asked for it: the new
+  // conversation never gets its decision, and the CLI never ends it while the
+  // Claude Code process runs. Resuming the first conversation delivers it.
+  test('is not ended, is not handed to the new conversation, and lands when its own session is resumed', async () => {
     const host = fakeHost()
     serve(host)
     const first = new PlannotatorMod(host, SESSION)
@@ -111,21 +116,34 @@ describe('a code review open across /clear or an in-process /resume', () => {
     await ticks(host, 6)
     const dir = dirOf(host)
 
-    // register.ts: session.end disposes, then currentMod makes the new session's instance.
+    // register.ts: session.end disposes, then currentMod makes the new conversation's instance.
     first.dispose()
+    await Bun.sleep(0)
     const second = new PlannotatorMod(host, { ...SESSION, sessionId: 'session-2' })
     second.carryQueued(first)
-    expect(await second.takeOverReviews(first)).toBe(1)
     await second.restore()
+    expect(lease(host, dir)).toMatchObject({ owner: null, pid: 777 })
 
-    const records = host.store.get(STORE_LAUNCHES) as { sessionId: string }[]
-    expect(records.map((record) => record.sessionId)).toEqual(['session-2'])
-    expect(lease(host, dir)?.owner).toEqual(expect.any(String))
+    // The CLI's 10 s looks for 3 minutes: the lease stays still, the process runs.
+    let now = 0
+    const watch = modLeaseAgentWatch({ readLease: () => host.files.get(`${dir}/watcher.json`) ?? null, now: () => now, pidAlive: (pid) => pid === 777 })
+    for (let look = 0; look < 18; look += 1) {
+      now += 10_000
+      expect(watch.ended()).toBe(false)
+    }
+    expect(watch.presence()).toBe('here')
 
     host.files.set(`${dir}/result.json`, JSON.stringify({ v: 1, surface: 'review', decision: 'annotated', message: 'Rename a.', noop: false }))
     await ticks(host, 2)
-    expect(host.submits.join('\n')).toContain('Rename a.')
+    expect(host.submits.join('\n')).not.toContain('Rename a.')
+
+    // `/resume` back to the first conversation: its decision lands there.
     second.dispose()
+    const resumed = new PlannotatorMod(host, SESSION)
+    await resumed.restore()
+    await ticks(host, 2)
+    expect(host.submits.join('\n')).toContain('Rename a.')
+    resumed.dispose()
   })
 })
 

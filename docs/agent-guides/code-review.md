@@ -53,11 +53,32 @@ so every doubt keeps the review.
     CLI bridge): a changed parent (reparented; on Windows, a parent pid that
     no longer exists) is only a suspicion, since `plannotator review &`, nohup,
     setsid, `start /b` or an agent's background shell reparents at once. The
-    reader is gone only when a newline written to stdout fails with EPIPE
-    (SIGPIPE ignored). The probe runs only under suspicion, every 10 s
-    doubling to 60 s, and at once on Send.
+    reader is gone only when a write to stdout fails with EPIPE (SIGPIPE
+    ignored; `probeStdoutReader`). On macOS the probe is a zero-length
+    write, which adds nothing to the output. Linux answers a zero-length
+    write to a pipe with success whatever the reader does, so there (and on
+    Windows) the probe writes one newline: the reader gets a blank line per
+    probe, which a line-counting reader counts. With `plannotator review |
+    head -n 5 &`, `head` exits after five probes (about 3 minutes) and the
+    next probe ends the review. The probe runs only under suspicion, every
+    10 s doubling to 60 s, and at once on Send. EPIPE means nobody reads the
+    pipe, not that the agent process quit: a harness that closes a
+    background command's stdout while the agent lives ends the review too
+    (and its words say the agent is gone), though nothing could have reached
+    the agent through stdout any more.
   - Else nothing (a terminal, a file, a T3 or DeepSeek Harness result file,
     a review the Inbox opened from a live thread): the review runs as before.
+  - **When the watch is off** (always the safe side: the review stays open
+    as before): stdout to a file (an agent harness that writes a background
+    command's output to a file, a skill run redirected to a log); stdout to a
+    terminal; a parent that was already pid 1 at start; a mod lease with no
+    pid (Git Bash on Windows; an older mod; a `host-pid` run that failed or
+    disagreed, which the instance does not ask again).
+  - **How long ending takes:** the parent watch looks every 10 s and its probe
+    backs off to 60 s, so a review ends up to about 70 s after its reader
+    went; a mod review ends 2 minutes after the lease stopped moving, at the
+    next 10 s look once its Claude Code process is gone. Send probes at once
+    in both cases, so it never pretends during that time.
 - **The end (Bun CLI, local reviews only).** Once `ended()`, the CLI
   broadcasts `session-closed` with `by: "gone"`, waits 1 s, stops and exits 3
   (not 0: a mod launch that exits 0 with no record is read as an old CLI's
@@ -72,16 +93,33 @@ so every doubt keeps the review.
   current session (feedback goes to that session), else "away" (between two
   sessions). OpenCode's in-process review: "no-session" when the command had
   no session to prompt into, else no probe.
-- **The page.** On `by: "gone"` the review editor saves its draft at once
-  (twice, so an edit made during the first save is saved too), then shows the
-  done screen (`CompletionOverlay`, `packages/review-editor/components/ReviewEnded.tsx`):
-  "Review Ended", "The agent that asked for this review is gone, so nothing
-  could be sent." plus, with comments, " Your comments are saved as a draft:
-  open a review of the same changes to get them back." and Copy feedback. The
-  screen covers the page, so nothing can be typed into a review that can no
-  longer save it. A send refused before that shows the send-failure toast
-  (`packages/ui/utils/sendFailure.ts`): agent-gone and no-session have no
-  Retry; away keeps it.
+- **The page** (`packages/review-editor/components/ReviewEnded.tsx`). On
+  `by: "gone"` the review editor, at once:
+  1. adds text typed into a comment box but not added yet as a general
+     comment: every text box the person typed in that still holds text
+     (`useTypedTextBoxes`; a box that held text from the start, such as a
+     settings field, is never taken), except the AI question boxes, marked
+     `data-not-a-comment`. The comment loses where it was anchored, not its
+     words;
+  2. saves the draft (twice, so an edit made during the first save is saved
+     too);
+  3. shows its own ended screen (`ReviewEndedScreen`, styled as the done
+     screen but never closing the tab, with no countdown and no "return to
+     the agent"): "Review Ended", "The agent that asked for this review is
+     gone, so nothing could be sent." plus, with comments, " Your comments are
+     saved as a draft: open a review of the same changes to get them back.",
+     with kept unfinished text "Text you typed but had not added is kept too,
+     as a general comment.", and Copy feedback (with comments; the same text
+     Send would have sent, kept text included). The screen covers the page,
+     so nothing can be typed into a review that can no longer save it.
+
+  The server stops a second after it announced the end, so a save that
+  takes longer is lost (a slow disk, a throttled background tab); Copy
+  feedback still holds every comment. The draft comes back only for a review
+  of the same changes (the same draft key: a different diff type or patch
+  opens another draft). A send refused before the end shows the send-failure
+  toast (`packages/ui/utils/sendFailure.ts`): agent-gone and no-session have
+  no Retry; away keeps it.
 - Tests: `apps/hook/server/review-agent-watch.test.ts` (each watch: a
   backgrounded reader kept, EPIPE ends; the lease with a live or dead pid, a
   foreign clock, a sleep, Send not latched; the mod's real lease and pid; the
@@ -90,7 +128,8 @@ so every doubt keeps the review.
   backgrounded review still read lives past a look and delivers; its reader
   killed, Send is refused, the review exits keeping the draft, the reopened
   review restores it and a live Send settles it; a Bitbucket PR review stays
-  and posts), `apps/hook/hooks/mod/review-agent-gone.test.ts` (the mod's side,
+  and posts; the probe on a real pipe writes no byte on macOS),
+  `apps/hook/hooks/mod/review-agent-gone.test.ts` (the mod's side,
   see `claude-code-mod.md`), `packages/server/review-agent-gone.test.ts` and its
   Pi mirror, `packages/ui/utils/sendFailure.agentGone.test.ts`,
   `ReviewEnded.dom.test.tsx`, `App.agentGone.test.tsx`.

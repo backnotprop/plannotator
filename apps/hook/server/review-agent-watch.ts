@@ -15,8 +15,9 @@
  *   no longer exists) is only a suspicion: an agent may have started the
  *   review in the background (`&`, nohup, setsid, `start /b`) and still read
  *   the pipe. The reader is gone only when a write to stdout fails with
- *   EPIPE. The probe writes one newline, only while the suspicion holds, at
- *   most every `PROBE_EVERY_MS` doubling up to `PROBE_MAX_GAP_MS`.
+ *   EPIPE (`probeStdoutReader`: a zero-length write on macOS, one newline
+ *   elsewhere), only while the suspicion holds, at most every
+ *   `PROBE_EVERY_MS` doubling up to `PROBE_MAX_GAP_MS`.
  * - A Claude Code mod launch (a host result file under `claude-code-mod/`).
  *   Its lease (`watcher.json` beside the result file) is renewed every 5 s by
  *   the Claude Code process watching the launch, which records its pid there
@@ -73,14 +74,29 @@ export interface AgentWatch {
 /** Whether stdout still has a reader: "closed" only on EPIPE. */
 export type ReaderProbe = () => "open" | "closed";
 
-/** Writes one newline to stdout: EPIPE means nobody reads it any more. */
-export function probeStdoutReader(): "open" | "closed" {
+/** Only EPIPE (no process holds the read end) counts as closed; any other outcome is open. */
+function writeProbe(text: string): "open" | "closed" {
   try {
-    writeSync(1, "\n");
+    writeSync(1, text);
     return "open";
   } catch (error) {
     return (error as NodeJS.ErrnoException | null)?.code === "EPIPE" ? "closed" : "open";
   }
+}
+
+/**
+ * Whether stdout still has a reader. First a zero-length write, which adds
+ * nothing to the output: macOS answers it with EPIPE once the reader is gone
+ * (checked on Bun, review-agent-watch.test.ts), so there it is the whole probe.
+ * Linux answers a zero-length write to a pipe with success whatever the
+ * reader does, so elsewhere a single newline is written; the reader sees a
+ * blank line (see "When the agent that asked for a review is gone" in
+ * docs/agent-guides/code-review.md for the `| head` case).
+ */
+export function probeStdoutReader(platform: NodeJS.Platform = process.platform): "open" | "closed" {
+  if (writeProbe("") === "closed") return "closed";
+  if (platform === "darwin") return "open";
+  return writeProbe("\n");
 }
 
 /** The process reading stdout. */

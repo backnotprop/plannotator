@@ -690,8 +690,6 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
-    // `/clear` or an in-process resume: the open code reviews follow the process into this session.
-    await instance.takeOverReviews(previous).catch(() => 0)
     mod = instance
     // Beside the tag, for the same session: the project its shell's `plannotator inbox call` / `card` file under.
     // Not awaited: every hook (ExitPlanMode included) waits on this switch, and the turn start and each Bash call export again.

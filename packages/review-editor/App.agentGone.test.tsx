@@ -4,8 +4,12 @@
  * (packages/server/review.ts `announceAgentGone`).
  *
  * Regressions guarded: the page staying editable after its server quit (a
- * keystroke typed there is lost); the ended screen missing, or worded as the
- * agent's own close; a review with no comments claiming some were saved.
+ * keystroke typed there is lost); text typed into a comment box but not added
+ * yet lost (missing from the saved draft and from Copy feedback); the screen
+ * closing the tab by itself (auto-close at 0 s took Copy feedback with it) or
+ * telling the person to return to the agent that is gone; the ended screen
+ * worded as the agent's own close; a review with no comments claiming some
+ * were saved.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
@@ -16,7 +20,7 @@ import {
   type StorageBackend,
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
-import { REVIEW_ENDED_TITLE, reviewEndedSubtitle } from "./components/ReviewEnded";
+import { REVIEW_ENDED_KEPT_UNFINISHED_TEXT, REVIEW_ENDED_TITLE, reviewEndedSubtitle } from "./components/ReviewEnded";
 
 // Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
@@ -30,6 +34,7 @@ const appModule = hasDom ? await import("./App") : null;
 const App = appModule?.default as typeof import("./App")["default"];
 const originalFetch = globalThis.fetch;
 const originalEventSource = globalThis.EventSource;
+const originalClose = hasDom ? window.close : () => {};
 
 
 const memory = new Map<string, string>();
@@ -90,7 +95,7 @@ class StubEventSource {
 }
 
 let configPosts: unknown[] = [];
-let draftPosts = 0;
+let draftPosts: string[] = [];
 
 function makeFetch(origin: string, agentTool: Record<string, unknown> | undefined): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init).
@@ -106,7 +111,7 @@ function makeFetch(origin: string, agentTool: Record<string, unknown> | undefine
     }
     if (url.pathname === "/api/ai/capabilities") return Response.json({ available: false, providers: [] });
     if (url.pathname === "/api/draft" && init?.method === "POST") {
-      draftPosts += 1;
+      draftPosts.push(String(init.body));
       return Response.json({ ok: true });
     }
     if (url.pathname === "/api/draft") return Response.json({ error: "Not found" }, { status: 404 });
@@ -177,7 +182,8 @@ afterEach(async () => {
   globalThis.EventSource = originalEventSource;
   memory.clear();
   configPosts = [];
-  draftPosts = 0;
+  draftPosts = [];
+  window.close = originalClose;
   streams.length = 0;
   resetStorageBackend();
 });
@@ -187,22 +193,65 @@ afterAll(() => {
 });
 
 describe.if(hasDom)("a code review whose agent is gone", () => {
-  test("the page is covered by the ended screen: no comment can be typed into a review that cannot save it", async () => {
+  test("the page is covered by the ended screen, which never closes the tab or sends the person back to the agent", async () => {
     seedEarlierChainSeen();
+    // Auto-close at 0 s: the done screen would close the tab at once.
+    memory.set("plannotator-auto-close", "0");
+    let closes = 0;
+    window.close = () => { closes += 1; };
     await mount("claude-code", undefined);
-    expect(document.querySelector("[data-completion-state]")).toBeNull();
+    expect(document.querySelector("[data-review-ended]")).toBeNull();
     expect(streams.length).toBeGreaterThan(0);
 
     await closeStream({ type: "session-closed", by: "gone", unsentAnnotations: 0 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 3_200)); });
 
-    const screen = document.querySelector<HTMLElement>("[data-completion-state]");
-    expect(screen?.getAttribute("data-completion-state")).toBe("exited");
+    const screen = document.querySelector<HTMLElement>("[data-review-ended]");
     expect(screen?.textContent).toContain(REVIEW_ENDED_TITLE);
     expect(screen?.textContent).toContain(reviewEndedSubtitle(0));
+    expect(document.querySelector("[data-completion-state]")).toBeNull();
+    expect(closes).toBe(0);
+    expect(document.body.textContent).not.toContain("return to");
+    expect(document.body.textContent).not.toContain("Auto-close");
     // No comments: nothing to copy, no claim that a draft holds some.
     expect(screen?.querySelector("[data-review-ended-copy]")).toBeNull();
     expect(screen?.textContent).not.toContain("saved as a draft");
-    expect(draftPosts).toBe(0);
+    expect(draftPosts).toEqual([]);
+  }, 15_000);
+
+  // Any comment box left open with text in it (here a stand-in text box the
+  // person typed in): its words go into the draft and into Copy feedback.
+  test("text typed but not added yet is kept: saved in the draft as a general comment and in Copy feedback", async () => {
+    seedEarlierChainSeen();
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => { written.push(text); } },
+    });
+    await mount("claude-code", undefined);
+    const box = document.createElement("textarea");
+    document.body.appendChild(box);
+    box.value = "Half-typed: why is b 2?";
+    await act(async () => { box.dispatchEvent(new Event("input", { bubbles: true })); });
+    // An AI question box is not a comment.
+    const ask = document.createElement("textarea");
+    ask.setAttribute("data-not-a-comment", "");
+    document.body.appendChild(ask);
+    ask.value = "What does parse do?";
+    await act(async () => { ask.dispatchEvent(new Event("input", { bubbles: true })); });
+
+    await closeStream({ type: "session-closed", by: "gone", unsentAnnotations: 0 });
+    for (let attempt = 0; attempt < 20 && !document.querySelector("[data-review-ended]"); attempt += 1) await settle();
+
+    expect(draftPosts.some((body) => body.includes("Half-typed: why is b 2?"))).toBe(true);
+    expect(draftPosts.some((body) => body.includes("What does parse do?"))).toBe(false);
+    const screen = document.querySelector<HTMLElement>("[data-review-ended]");
+    expect(screen?.textContent).toContain(reviewEndedSubtitle(1));
+    expect(screen?.textContent).toContain(REVIEW_ENDED_KEPT_UNFINISHED_TEXT);
+    const copy = screen!.querySelector<HTMLButtonElement>("[data-review-ended-copy]")!;
+    await act(async () => { copy.click(); await Promise.resolve(); });
+    expect(written.join("\n")).toContain("Half-typed: why is b 2?");
+    delete (navigator as { clipboard?: unknown }).clipboard;
   });
 
   test("the agent's own close keeps its own screen", async () => {
@@ -211,6 +260,7 @@ describe.if(hasDom)("a code review whose agent is gone", () => {
     await closeStream({ type: "session-closed", by: "agent", unsentAnnotations: 0 });
     const screen = document.querySelector<HTMLElement>("[data-completion-state]");
     expect(screen).not.toBeNull();
+    expect(document.querySelector("[data-review-ended]")).toBeNull();
     expect(screen?.textContent).not.toContain(REVIEW_ENDED_TITLE);
   });
 });

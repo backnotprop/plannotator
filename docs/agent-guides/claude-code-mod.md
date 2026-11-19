@@ -391,10 +391,11 @@ was open for it. Your comments are saved as a draft; open a review of the same
 changes to get them back." when the session is resumed). An idle or compacting
 session never loses its review: its process still runs. The launch timer is
 re-armed when it went silent for 10 s (`ensureLaunchTicking`, from every hook
-through `currentMod` and from the 30 s self-heal look). `/clear` and an
-in-process `/resume` move the open code reviews to the new session
-(`takeOverReviews`, before `restore`): it holds their lease and receives their
-decisions. A decision written before an end is delivered on resume as before.
+through `currentMod` and from the 30 s self-heal look). A review open across
+`/clear` or an in-process `/resume` stays with the conversation that asked for
+it: its lease is released but names a process that still runs, so it is not
+ended, and its decision waits for that conversation to be resumed. A decision
+written before an end is delivered on resume as before.
 Tests: `apps/hook/hooks/mod/review-agent-gone.test.ts`. See "When the agent
 that asked for a review is gone" in `code-review.md`.
 

@@ -57,7 +57,7 @@ import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFo
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
 import { assertSendOk, sendErrorAfterAgentGone, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
-import { REVIEW_ENDED_TITLE, ReviewEndedCopy, reviewEndedSubtitle, useAgentGoneEnding } from './components/ReviewEnded';
+import { ReviewEndedScreen, useAgentGoneEnding, useTypedTextBoxes } from './components/ReviewEnded';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
@@ -769,14 +769,19 @@ const ReviewApp: React.FC = () => {
   // reviewer's unsent comments stay in the draft for a reopen.
   const [agentClosed, setAgentClosed] = useState<{ unsentAnnotations: number } | null>(null);
   // The agent that asked for this local review is gone and its server is
-  // quitting (`session-closed`, by "gone"): the page saves its last edits,
-  // then shows the ended screen with Copy feedback (ReviewEnded.tsx). A send
-  // meanwhile says the agent is gone.
+  // quitting (`session-closed`, by "gone"): the page keeps text not added
+  // yet as general comments, saves its draft, then shows the ended screen
+  // with Copy feedback (ReviewEnded.tsx). A send meanwhile says the agent is gone.
   // Set once the draft hook exists; saves the last edits before the server stops.
   const flushDraftOnGoneRef = useRef<() => Promise<void>>(async () => {});
+  // Set once handleAddGeneralComment exists.
+  const addGeneralCommentOnGoneRef = useRef<(text: string) => boolean>(() => false);
   // How many comments the draft holds (set every render, below).
   const draftCommentCountRef = useRef(0);
+  const typedTextBoxes = useTypedTextBoxes();
   const agentGoneEnding = useAgentGoneEnding({
+    unfinishedTexts: typedTextBoxes,
+    keepUnfinished: (texts) => texts.filter((text) => addGeneralCommentOnGoneRef.current(text)).length,
     flushDraft: () => flushDraftOnGoneRef.current(),
     savedComments: () => draftCommentCountRef.current,
   });
@@ -5114,6 +5119,8 @@ const ReviewApp: React.FC = () => {
     return true;
   }, [identity, addCodeAnnotationsWithHistory, busyWithDecision, submitted, localDraftTarget]);
 
+  addGeneralCommentOnGoneRef.current = handleAddGeneralComment;
+
   // A global comment chosen in the guide's list: the sidebar's Annotations tab
   // shows it selected (its edit and delete live there).
   const handleShowGlobalComment = useCallback((id: string) => {
@@ -6749,19 +6756,18 @@ const ReviewApp: React.FC = () => {
         />
 
         {/* Completion overlay - shown after approve/feedback/exit */}
+        {/* The review ended because its agent is gone: its own screen, which never closes the tab. */}
+        {reviewEnded && <ReviewEndedScreen ending={reviewEnded} copyText={() => feedbackMarkdown} />}
         <CompletionOverlay
-          submitted={submitted}
+          submitted={reviewEnded ? null : submitted}
           title={
             submitted === 'approved' ? 'Changes Approved'
-            : submitted === 'exited' && reviewEnded ? REVIEW_ENDED_TITLE
             : submitted === 'exited' && agentClosed ? AGENT_CLOSED_TITLE
             : submitted === 'exited' ? 'Session Closed'
             : 'Feedback Sent'
           }
           subtitle={
-            submitted === 'exited' && reviewEnded
-              ? reviewEndedSubtitle(reviewEnded.savedComments)
-            : submitted === 'exited' && agentClosed
+            submitted === 'exited' && agentClosed
               ? agentClosedSubtitle(agentClosed.unsentAnnotations, 'changes')
             : submitted === 'exited'
               ? 'Review session closed without feedback.'
@@ -6774,9 +6780,7 @@ const ReviewApp: React.FC = () => {
                   : `${getAgentName(origin)} will address your review feedback.`
           }
           agentLabel={getAgentName(origin)}
-          footer={submitted === 'exited' && reviewEnded
-            ? (totalAnnotationCount > 0 ? <ReviewEndedCopy copyText={() => feedbackMarkdown} /> : null)
-            : starAskFooter}
+          footer={starAskFooter}
           links={platformMode && submitted !== 'exited'
             ? platformPostedUrls.map((href) => ({
               href,

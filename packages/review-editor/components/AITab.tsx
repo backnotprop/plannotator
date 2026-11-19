@@ -341,6 +341,7 @@ const GeneralInput: React.FC<{
       <div className="flex items-end gap-1.5">
         <textarea
           ref={textareaRef}
+          data-not-a-comment
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Ask about the overall changes..."

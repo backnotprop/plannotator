@@ -707,30 +707,6 @@ export class PlannotatorMod {
   }
 
   /**
-   * The process moved here from `previous`'s session (`/clear`, an in-process
-   * `/resume`): the code reviews `previous` still had open become this
-   * session's, so this instance watches them (its `restore` takes their
-   * lease) and their decisions land here. Without this, a review open across
-   * a `/clear` had nobody watching it, and its server would end as if its
-   * agent were gone. Called before `restore`. Other kinds stay with their session.
-   */
-  async takeOverReviews(previous: PlannotatorMod | null): Promise<number> {
-    if (!previous || previous === this || previous.session.sessionId === this.session.sessionId) return 0
-    const ids = new Set([...previous.launches.values()].filter((launch) => launch.kind === 'review' && !launch.settling).map((launch) => launch.id))
-    if (ids.size === 0) return 0
-    const stored = await this.host.storeGet(STORE_LAUNCHES)
-    const all = Array.isArray(stored) ? (stored as LaunchRecord[]) : []
-    let moved = 0
-    const next = all.map((record) => {
-      if (!record || !ids.has(record.id) || record.sessionId !== previous.session.sessionId) return record
-      moved += 1
-      return { ...record, sessionId: this.session.sessionId }
-    })
-    if (moved > 0) await this.host.storeSet(STORE_LAUNCHES, next)
-    return moved
-  }
-
-  /**
    * Re-arms the launch timer when the engine ended it (it ends an interval
    * at a refused period, as it did the Inbox tick): without its ticks no
    * lease is renewed and no decision delivered. Called from every hook that
