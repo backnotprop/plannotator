@@ -617,8 +617,9 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
 // --- Custom themes ------------------------------------------------------------
 //
 // A person's own theme files (`plannotator theme add`, kept in the data dir).
-// Each server answers `/plannotator-themes.js`, a classic script in the page's
-// head that runs before this module: it adds the themes' stylesheet and leaves
+// Each server writes a script into the page's head (pageWithCustomThemes in
+// packages/shared/theme-files.ts; none when there are no custom themes) that
+// runs before this module: it adds the themes' stylesheet and leaves
 // their registry entries on `window.__PLANNOTATOR_CUSTOM_THEMES__`, read here
 // once, so the first render already knows a custom id (cookies and config.json
 // name it like any palette). Each entry is checked again: it is data from a

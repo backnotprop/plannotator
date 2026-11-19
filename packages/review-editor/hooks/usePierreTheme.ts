@@ -11,11 +11,22 @@ import { buildPierreFontCSS } from '../utils/pierreFontCss';
  * resolve the same theme this diff pane does. Re-exported here because it is
  * the import path the review editor has always used.
  */
-import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
-import * as pierreDiffs from '@pierre/diffs';
+import { resolveSyntaxTheme as resolveSyntaxThemeName } from '@plannotator/ui/utils/syntaxTheme';
+import { registerCustomTheme, resolveTheme } from '@pierre/diffs';
 import { connectCustomSyntaxThemes, type CustomSyntaxPierre } from '@plannotator/ui/utils/customSyntaxThemes';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
-export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+export { SHIKI_THEME_MAP } from '@plannotator/ui/utils/syntaxTheme';
+
+/**
+ * The theme pair for Pierre's diff views (`syntaxTheme.ts`), with a custom
+ * theme's code colours registered with Pierre first (customSyntaxThemes.ts):
+ * every diff view here (the diff pane, the PR comments' hunk previews) takes
+ * its names from this, so Pierre never gets a name it cannot resolve.
+ */
+export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
+  connectCustomSyntaxThemes({ registerCustomTheme, resolveTheme } as unknown as CustomSyntaxPierre);
+  return resolveSyntaxThemeName(colorTheme, mode);
+}
 
 export interface PierreTheme {
   type: 'dark' | 'light';
@@ -268,8 +279,6 @@ export function usePierreTheme(options?: {
     const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
     const border = styles.getPropertyValue('--border').trim();
     const primary = styles.getPropertyValue('--primary').trim();
-    // A custom theme's code colours are themes Pierre resolves by name: registered before the name reaches it.
-    connectCustomSyntaxThemes(pierreDiffs as unknown as CustomSyntaxPierre);
     const syntaxTheme = resolveSyntaxTheme(colorTheme, mode);
     if (!bg || !fg) return { type: mode, css: '', syntaxTheme };
     const fontCSS = buildPierreFontCSS(fontFamily, fontSize);

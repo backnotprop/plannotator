@@ -156,7 +156,11 @@ describe('detection and ids', () => {
     expect(themeIdFromName('Dracula')).toBe('dracula-custom');
     expect(themeIdFromName('Tokyo Night')).toBe('tokyo-night-custom');
     expect(themeIdFromName('Café Noir ☕')).toBe('cafe-noir');
-    expect(themeIdFromName('!!!')).toBe('custom-theme');
+    // No Latin letter or digit: a stable id of its own, different for different names.
+    expect(themeIdFromName('夜')).toMatch(/^theme-[0-9a-f]{8}$/);
+    expect(themeIdFromName('夜')).toBe(themeIdFromName('夜'));
+    expect(themeIdFromName('朝')).not.toBe(themeIdFromName('夜'));
+    expect(themeIdFromName('!!!')).toMatch(/^theme-[0-9a-f]{8}$/);
   });
 });
 
@@ -204,5 +208,24 @@ describe('code colours', () => {
   test('a VS Code theme with no tokenColors has no code colours (code keeps Plannotator\'s)', () => {
     const { theme } = imported(JSON.stringify({ name: 'Bare', type: 'dark', colors: { 'editor.background': '#101010' } }));
     expect(theme.dark!.syntax).toBeUndefined();
+  });
+});
+
+describe('a converted name', () => {
+  test('loses invisible and text-direction characters, so the theme is not refused for its source name', () => {
+    const r = importThemeText(JSON.stringify({ name: 'Ev\u202eil\u200b Night', type: 'dark', colors: { 'editor.background': '#101010' } }));
+    if (!r.ok) throw new Error(r.message);
+    expect((r.theme as ThemeFile).name).toBe('Evil Night');
+    expect(validateThemeFile(r.theme).ok).toBe(true);
+  });
+});
+
+describe('a byte order mark', () => {
+  test('a VS Code theme saved with a BOM (Windows editors write one) reads like one without', () => {
+    const text = fixture('monokai-classic.vscode-theme.json');
+    const withBom = importThemeText(`\uFEFF${text}`);
+    expect(withBom.ok).toBe(true);
+    expect(withBom).toEqual(importThemeText(text));
+    expect(importThemeText(`\uFEFF${fixture('tomorrow-night.base16.yaml')}`)).toMatchObject({ ok: true, format: 'base16' });
   });
 });

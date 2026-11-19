@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { saveCustomTheme } from "./generated/theme-files.ts";
 import { startAnnotateServer, startPlanReviewServer, startReviewServer } from "./server.ts";
 
-const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
+const MINIMAL_HTML = '<html><head><script  src="/plannotator-themes.js"></script></head><body>Plannotator</body></html>';
 const PATCH = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n";
 const KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_PORT", "PLANNOTATOR_REMOTE", "PLANNOTATOR_AI"] as const;
 const saved: Record<string, string | undefined> = {};
@@ -53,10 +53,17 @@ describe("the custom themes script on the Pi servers", () => {
         expect(empty.headers.get("content-type")).toStartWith("text/javascript");
         expect(empty.headers.get("cache-control")).toBe("no-store");
         expect(await empty.text()).not.toContain(".theme-");
+        // The page itself: with no custom theme, no themes tag (no request, nothing added).
+        const bare = await (await fetch(`${server.url}/`)).text();
+        expect(bare).toBe("<html><head></head><body>Plannotator</body></html>");
         saveCustomTheme(dataDir, { plannotatorTheme: 1, id: "harbor", name: "Harbor", dark: { background: "#0f1419" } });
         const body = await (await fetch(`${server.url}/plannotator-themes.js`)).text();
         expect(body).toContain(".theme-harbor {");
         expect(body).toContain("--background: #0f1419;");
+        // ...and with one, the script is written into the page: still no request.
+        const page = await (await fetch(`${server.url}/`)).text();
+        expect(page).toContain(".theme-harbor {");
+        expect(page).not.toContain('src="/plannotator-themes.js"');
         // Code colours: asked for when code first renders, never in the script.
         expect((await fetch(`${server.url}/plannotator-themes.js?syntax=harbor`)).status).toBe(404);
         saveCustomTheme(dataDir, { plannotatorTheme: 1, id: "mono", name: "Mono", dark: { background: "#272822", syntax: [{ scope: "keyword", foreground: "#f92672" }] } });

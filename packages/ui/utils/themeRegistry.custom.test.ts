@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { BUILT_IN_THEME_IDS } from '@plannotator/core/theme-file';
+import { BUILT_IN_THEME_IDS, builtInThemeModeSupport } from '@plannotator/core/theme-file';
 import {
   BUILT_IN_THEMES,
   getAllThemes,
@@ -72,5 +72,10 @@ describe('custom themes in the registry', () => {
     const files = readdirSync(join(import.meta.dir, '..', 'themes')).filter((f) => f.endsWith('.css')).map((f) => f.slice(0, -4)).sort();
     expect([...BUILT_IN_THEME_IDS].sort()).toEqual(registry);
     expect(files).toEqual(registry);
+  });
+
+  test("the server's mode support for each built-in is the registry's (theme use never writes a half a page cannot draw)", () => {
+    for (const theme of BUILT_IN_THEMES) expect([theme.id, builtInThemeModeSupport(theme.id)]).toEqual([theme.id, theme.modeSupport]);
+    expect(builtInThemeModeSupport('not-a-built-in')).toBeUndefined();
   });
 });

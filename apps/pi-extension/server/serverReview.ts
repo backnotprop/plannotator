@@ -165,6 +165,7 @@ import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleReviewDraftRequest,
 	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -2202,7 +2203,7 @@ export async function startReviewServer(options: {
 		env: process.env,
 	});
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
@@ -4271,7 +4272,7 @@ export async function startReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 	serverUrl = buildAdvertisedUrl(port);
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();

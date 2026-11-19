@@ -15,6 +15,7 @@
 import {
   BUILT_IN_THEME_IDS,
   compositeOver,
+  INVISIBLE_NAME_CHARS,
   isSyntaxColour,
   isSyntaxFontStyle,
   isSyntaxScope,
@@ -201,13 +202,25 @@ export function themeIdFromName(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 57)
     .replace(/-+$/g, '');
-  if (!slug) slug = 'custom-theme';
+  // A name with no Latin letter or digit (夜, Ночь, an emoji) still gets its own id: theme- and a hash of the name.
+  if (!slug) slug = `theme-${nameHash(name)}`;
   if (BUILT_IN_THEME_IDS.includes(slug)) slug = `${slug}-custom`;
-  return THEME_ID_PATTERN.test(slug) ? slug : 'custom-theme';
+  return THEME_ID_PATTERN.test(slug) ? slug : `theme-${nameHash(name)}`;
+}
+
+/** Eight hex digits of a name (FNV-1a over its UTF-16 code units): stable, so re-adding the same theme finds it again. */
+function nameHash(name: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
 }
 
 const cleanName = (name: unknown, fallback: string): string => {
-  const text = typeof name === 'string' ? name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').trim() : '';
+  // A converted theme's name is the source's: control characters become spaces, invisible ones are dropped.
+  const text = typeof name === 'string' ? name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(INVISIBLE_NAME_CHARS, '').trim() : '';
   return (text || fallback).slice(0, THEME_NAME_MAX).trim();
 };
 
@@ -436,6 +449,8 @@ function asFailure(r: ThemeConvertResult): ThemeImportResult {
  * as parsed (the caller validates it); base16 and VS Code are converted.
  */
 export function importThemeText(text: string): ThemeImportResult {
+  // A byte order mark (Windows editors write one; VS Code reads such files) is not part of the theme.
+  text = text.replace(/^\uFEFF/, '');
   let parsed: unknown;
   try {
     parsed = parseJsonc(text);

@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 async function start(): Promise<InboxServer> {
-  const server = await startInboxServer({ dataDir, htmlContent: "<!doctype html><title>Inbox</title>" });
+  const server = await startInboxServer({ dataDir, htmlContent: '<!doctype html><title>Inbox</title><script  src="/plannotator-themes.js"></script>' });
   servers.push(server);
   return server;
 }
@@ -59,7 +59,11 @@ test("the window's themes script carries an added theme, read fresh on every loa
   expect(empty.headers.get("content-type")).toStartWith("text/javascript");
   expect(empty.headers.get("cache-control")).toBe("no-store");
   expect(await empty.text()).not.toContain(".theme-");
+  // The window's page: no themes tag with no custom theme; the script written in once there is one (no request).
+  const page = async () => (await fetch(`http://127.0.0.1:${server.port}/`)).text();
+  expect(await page()).toBe("<!doctype html><title>Inbox</title>");
   saveCustomTheme(dataDir, { plannotatorTheme: 1, id: "harbor", name: "Harbor", dark: { background: "#0f1419" } });
+  expect(await page()).toContain(".theme-harbor {");
   const body = await (await script()).text();
   expect(body).toContain(".theme-harbor {");
   expect(body).toContain('"id":"harbor"');

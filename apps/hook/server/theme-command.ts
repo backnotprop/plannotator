@@ -17,11 +17,13 @@
  * wrong. Exit 0 done, 1 refused, 2 bad usage.
  */
 
-import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   BODY_TEXT_CONTRAST_NOTE_BELOW,
+  CUSTOM_THEME_LIMIT,
   BUILT_IN_THEME_IDS,
+  builtInThemeModeSupport,
   bodyTextContrast,
   missingThemeTokens,
   THEME_ID_PATTERN,
@@ -30,7 +32,7 @@ import {
   type ThemeFile,
 } from "@plannotator/core/theme-file";
 import { importThemeText, type ThemeSourceFormat } from "@plannotator/core/theme-import";
-import { listCustomThemes, readCustomTheme, removeCustomTheme, saveCustomTheme } from "@plannotator/shared/theme-files";
+import { customThemesDir, listCustomThemes, readCustomTheme, removeCustomTheme, saveCustomTheme } from "@plannotator/shared/theme-files";
 import type { ThemeConfig } from "@plannotator/core/config-types";
 import { THEME_COMMAND_USAGE } from "./cli";
 
@@ -129,7 +131,10 @@ export async function runThemeCommand(argv: string[], deps: ThemeCommandDeps): P
       const flag = (checked.problem.field === "id" && id !== undefined) || (checked.problem.field === "name" && name !== undefined);
       return refuse("invalid_theme", `${flag ? `--${checked.problem.field}` : `${args[0]}: ${checked.problem.field}`}: ${checked.problem.message}`);
     }
-    const theme = checked.theme;
+    let theme = checked.theme;
+    // A converted theme's id comes from its name, not from the person: it never replaces a different theme.
+    // Re-adding the same theme (same name) replaces it; another one takes the next free id (-2, -3, ...).
+    if (id === undefined && imported.format !== "plannotator") theme = { ...theme, id: freeDerivedId(deps.dataDir, theme) };
     const saved = saveCustomTheme(deps.dataDir, theme);
     if (!saved.ok) return refuse(saved.code, saved.message);
     const from = imported.format === "plannotator" ? "" : `, converted from ${FORMAT_NAMES[imported.format]}`;
@@ -181,7 +186,12 @@ export async function runThemeCommand(argv: string[], deps: ThemeCommandDeps): P
     const id = args[0]!;
     if (BUILT_IN_THEME_IDS.includes(id)) return refuse("built_in", `"${id}" is a built-in theme; only themes you added can be removed.`);
     const theme = readCustomTheme(deps.dataDir, id);
-    const movedTo = removeCustomTheme(deps.dataDir, id);
+    let movedTo: string | null;
+    try {
+      movedTo = removeCustomTheme(deps.dataDir, id);
+    } catch (err) {
+      return refuse("not_removed", `could not move themes/${id}.json to themes/removed/ (${err instanceof Error ? err.message : String(err)}); nothing changed.`);
+    }
     if (!movedTo) return refuse("not_found", `no custom theme "${id}" (plannotator theme list shows them).`);
     const inUse = deps.loadTheme() ?? {};
     const halves = (["dark", "light"] as const).filter((half) => inUse[half] === id);
@@ -207,10 +217,12 @@ export async function runThemeCommand(argv: string[], deps: ThemeCommandDeps): P
     const builtIn = BUILT_IN_THEME_IDS.includes(id);
     const custom = builtIn ? null : readCustomTheme(deps.dataDir, id);
     if (!builtIn && !custom) return refuse("not_found", `no theme "${id}" (plannotator theme list shows them).`);
-    const has = custom ? halvesOf(custom) : (["dark", "light"] as const).slice();
+    // A built-in draws the halves the registry says (27 are one mode); a custom theme, the halves its file has.
+    const support = custom ? themeFileModeSupport(custom) : builtInThemeModeSupport(id)!;
+    const has: ("dark" | "light")[] = support === "dark-only" ? ["dark"] : support === "light-only" ? ["light"] : ["dark", "light"];
     const asked = light ? ["light" as const] : dark ? ["dark" as const] : has;
     const missing = asked.find((half) => !has.includes(half));
-    if (missing) return refuse("no_such_half", `"${id}" has no ${missing} half (it is ${custom ? themeFileModeSupport(custom).replace("-", " ") : "both"}).`);
+    if (missing) return refuse("no_such_half", `"${id}" has no ${missing} half (it is ${support.replace("-", " ")}).`);
     const next: ThemeConfig = {};
     for (const half of asked) next[half] = id;
     if (!deps.saveTheme(next)) return refuse("not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix it first.");
@@ -221,4 +233,14 @@ export async function runThemeCommand(argv: string[], deps: ThemeCommandDeps): P
   }
 
   return usage(`unknown theme command "${sub}".`);
+}
+
+/** The id a converted theme takes: its own, unless a different theme (another name, or a file that does not read) holds it. */
+function freeDerivedId(dataDir: string, theme: ThemeFile): string {
+  for (let n = 1; n <= CUSTOM_THEME_LIMIT + 1; n++) {
+    const candidate = n === 1 ? theme.id : `${theme.id.slice(0, 60).replace(/-+$/, "")}-${n}`;
+    if (!existsSync(join(customThemesDir(dataDir), `${candidate}.json`))) return candidate;
+    if (readCustomTheme(dataDir, candidate)?.name === theme.name) return candidate;
+  }
+  return theme.id;
 }

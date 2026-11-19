@@ -227,7 +227,7 @@ import { createLinearKey } from "./inbox-linear-key";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleCustomThemesScript, handleFavicon } from "./shared-handlers";
-import { isRegisteredThemeId } from "@plannotator/shared/theme-files";
+import { isRegisteredThemeId, pageWithCustomThemes } from "@plannotator/shared/theme-files";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import type { WebFraming } from "./inbox-web-prototypes";
@@ -5650,7 +5650,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `/assets/`, so the page loads its entry script up front and the rest (the guided and code review, the
    * diagram runtimes, the syntax grammars) on first use. An unpacked page (the not-built line) serves whole.
    */
-  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
+  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE, { page: (html) => pageWithCustomThemes(html, dataDir) });
+  // The page as it goes out (the person's themes written in), and a number that changes with it: a compressed
+  // body made for one page is ready only for that page.
+  let windowPageNow = "";
+  let windowPageVersion = 0;
+  const currentWindowPage = (): string => {
+    const page = windowApp.page();
+    if (page !== windowPageNow) {
+      windowPageNow = page;
+      windowPageVersion++;
+    }
+    return page;
+  };
+  const readyKey = (encoding: string, path: string) => (path === "/" ? `${encoding} /#${windowPageVersion}` : `${encoding} ${path}`);
   const semDiffAssets = createSemDiffAssets(options.semDiff);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
   // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
@@ -5658,10 +5671,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // asks of localhost and of an HTTPS address); gzip (a plain-http address, Safari) on first ask.
   const compressedReady = new Set<string>();
   const warmCompressed = (path: string, encoding: "br" | "gzip"): Promise<void> => {
-    const key = `${encoding} ${path}`;
+    if (path === "/") currentWindowPage();
+    const key = readyKey(encoding, path);
     if (compressedReady.has(key)) return Promise.resolve();
     const made: Promise<boolean> =
-      path === "/" ? encodeAppHtml(windowApp.html, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
+      path === "/" ? encodeAppHtml(windowPageNow, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
     return made.then(
       (ok) => {
         if (ok) compressedReady.add(key);
@@ -5678,7 +5692,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const compressWindowAsset = (req: Request, via: RequestVia, path: string): boolean => {
     if (via !== "local" || req.headers.has("x-forwarded-for")) return true;
     const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
-    if (encoding === "identity" || compressedReady.has(`${encoding} ${path}`)) return true;
+    if (path === "/") currentWindowPage();
+    if (encoding === "identity" || compressedReady.has(readyKey(encoding, path))) return true;
     void warmCompressed(path, encoding);
     return false;
   };
@@ -7914,7 +7929,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // One origin: notification permission is per origin (inbox-canonical.ts).
         const canonical = inboxCanonicalRedirect(req, url, baseUrl, via);
         if (canonical) return canonical;
-        const page = windowApp.html;
+        const page = currentWindowPage();
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();

@@ -57,6 +57,7 @@ import {
 
 import {
 	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -920,7 +921,7 @@ export async function startAnnotateServer(options: {
 	let liveSessionToken = "";
 	let liveAppUrl = "";
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
@@ -1596,7 +1597,7 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapabilityFor = agentTerminal.capabilityFor;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 
 	if (options.liveApp) {
 		// Compose the proxy-served bridge body via the shared assembly (config

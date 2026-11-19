@@ -137,6 +137,16 @@ describe('validating a theme file', () => {
     expect(field({ plannotatorTheme: 1, id: 'harbor', name: 'Harbor' })).toBe('dark');
   });
 
+  test('a name with an invisible or text-direction character is refused (it could read as another name in a terminal)', () => {
+    for (const name of ['Harbor\u202e', 'Har\u200bbor', '\u2066Harbor\u2069', 'Harbor\ufeff']) {
+      const r = validateThemeFile(ok({ name }));
+      expect(r.ok ? null : r.problem.field).toBe('name');
+    }
+    // ZWJ (emoji sequences) and ZWNJ (Persian) are words, not tricks.
+    expect(validateThemeFile(ok({ name: 'Dev \u{1F468}\u200d\u{1F4BB}' })).ok).toBe(true);
+    expect(validateThemeFile(ok({ name: 'می\u200cخواهم' })).ok).toBe(true);
+  });
+
   test('a token written with its leading -- says how to write it', () => {
     const r = validateThemeFile(ok({ dark: { '--background': '#000' } }));
     expect(r.ok ? '' : r.problem.message).toContain('"background"');

@@ -8,12 +8,24 @@
  * config.json pointing at a theme that is gone.
  *
  * Starts no Inbox and no server. Temp folders are left in the OS temp dir.
+ * The CLI entry imports the built HTML from ../dist at module load; no case
+ * here serves a page, so placeholder files stand in where there is no build
+ * (CI), and only those are removed afterwards.
  */
-import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
+
+let stubs: string[] = [];
+beforeAll(() => {
+  stubs = stubHookDistHtml();
+});
+afterAll(() => {
+  removeStubbedHtml(stubs);
+});
 
 const entry = resolve(import.meta.dir, "index.ts");
 const fixtures = resolve(import.meta.dir, "..", "..", "..", "packages", "core", "fixtures", "themes");
@@ -112,6 +124,45 @@ describe("plannotator theme", () => {
     expect(w.themes()).toEqual(["dim.json"]);
   }, 60_000);
 
+  test("add: a converted theme never replaces a different one; re-adding the same one replaces it; a BOM file reads", () => {
+    const w = world();
+    const vscode = (name: string, bg: string) => ({ name, type: "dark", colors: { "editor.background": bg } });
+    const idOf = (out: string) => /\(([a-z0-9-]+)\)/.exec(out)![1]!;
+    const ember = w.run("add", w.file("a.json", vscode("Ember", "#101010")));
+    const loud = w.run("add", w.file("b.json", vscode("EMBER!", "#202020")));
+    expect([idOf(ember.stdout), idOf(loud.stdout)]).toEqual(["ember", "ember-2"]);
+    expect(loud.stdout).toStartWith('Added theme "EMBER!" (ember-2)');
+    const again = w.run("add", "a.json");
+    expect(again.stdout).toStartWith('Replaced theme "Ember" (ember)');
+    // Names with no Latin letter get ids of their own: neither replaces the other.
+    const night = w.run("add", w.file("c.json", vscode("夜", "#111111")));
+    const morning = w.run("add", w.file("d.json", vscode("朝", "#121212")));
+    expect(idOf(night.stdout)).not.toBe(idOf(morning.stdout));
+    expect(w.themes()).toHaveLength(4);
+    // An explicit --id still replaces whatever has it.
+    expect(w.run("add", "b.json", "--id", "ember").stdout).toStartWith('Replaced theme "EMBER!" (ember)');
+    // A file with a byte order mark reads like one without.
+    const bom = w.run("add", w.file("bom.json", `\uFEFF${JSON.stringify(vscode("Bommy", "#131313"))}`));
+    expect(bom.code).toBe(0);
+    expect(bom.stdout).toStartWith('Added theme "Bommy" (bommy)');
+  }, 60_000);
+
+  test("remove that cannot write the themes folder is one refusal line, not a stack trace", () => {
+    const w = world();
+    w.run("add", join(fixtures, "tomorrow-night.base16.yaml"));
+    const folder = join(w.dataDir, "themes");
+    chmodSync(folder, 0o555);
+    try {
+      const r = w.run("remove", "tomorrow-night");
+      expect(r.code).toBe(1);
+      expect(lines(r.stderr)).toHaveLength(1);
+      expect(r.stderr).toStartWith("not_removed: could not move themes/tomorrow-night.json to themes/removed/ (");
+    } finally {
+      chmodSync(folder, 0o755);
+    }
+    expect(w.themes()).toEqual(["tomorrow-night.json"]);
+  }, 60_000);
+
   test("use writes the halves a theme has to config.json, and refuses a half it lacks", () => {
     const w = world();
     w.run("add", join(fixtures, "instrument.plannotator-theme.json"));
@@ -125,8 +176,17 @@ describe("plannotator theme", () => {
     const light = w.run("use", "tomorrow-night", "--light");
     expect(light.code).toBe(1);
     expect(light.stderr).toStartWith('no_such_half: "tomorrow-night" has no light half');
-    expect(w.run("use", "nord", "--light").code).toBe(0);
-    expect(w.config().theme.light).toBe("nord");
+    expect(w.run("use", "github", "--light").code).toBe(0);
+    expect(w.config().theme.light).toBe("github");
+    // A one-mode built-in (27 are) sets only the half it draws and says so; the other half keeps the person's choice.
+    const dracula = w.run("use", "dracula");
+    expect(dracula.code).toBe(0);
+    expect(dracula.stdout).toContain("for the dark half");
+    expect(w.config().theme).toEqual({ light: "github", dark: "dracula" });
+    const wrongHalf = w.run("use", "one-light", "--dark");
+    expect(wrongHalf.code).toBe(1);
+    expect(wrongHalf.stderr).toBe('no_such_half: "one-light" has no dark half (it is light only).\n');
+    expect(w.config().theme).toEqual({ light: "github", dark: "dracula" });
     const unknown = w.run("use", "nosuch");
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toStartWith("not_found: ");
@@ -156,5 +216,12 @@ describe("plannotator theme", () => {
     expect(help.stdout).toContain("plannotator theme add <file>");
     expect(w.run().code).toBe(2);
     expect(w.run("paint").code).toBe(2);
+    // The help's example is what an agent writing a theme from scratch copies: its dark half adds as written, with every colour set.
+    const from = help.stdout.indexOf('  {\n    "plannotatorTheme"');
+    const to = help.stdout.indexOf('    "light": {', from);
+    const example = `${help.stdout.slice(from, to).trimEnd().replace(/,$/, "")}\n}`;
+    const added = w.run("add", w.file("example.json", example));
+    expect(added.code).toBe(0);
+    expect(added.stdout).not.toContain("Note:");
   }, 60_000);
 });

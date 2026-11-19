@@ -130,6 +130,25 @@ export const BUILT_IN_THEME_IDS: readonly string[] = [
   'slack', 'snazzy-light', 'soft-pop', 'solar-dusk', 'solarized', 'synthwave-84', 'terminal', 'tinacious',
   'tokyo-night', 'tokyo-night-moon', 'vesper', 'vitesse', 'vitesse-black', 'neutral',
 ];
+/**
+ * The built-ins that draw only one half (`modeSupport` in themeRegistry.ts; its
+ * test keeps the two equal). Every other built-in draws both. `theme use`
+ * reads it, so it never writes a half a page cannot draw.
+ */
+const BUILT_IN_DARK_ONLY: ReadonlySet<string> = new Set([
+  'andromeeda', 'aurora-x', 'ayu-dark', 'cursor-hc', 'dracula', 'houston', 'kanagawa-dragon', 'kanagawa-wave',
+  'laserwave', 'cursor-midnight', 'monokai-pro', 'night-owl', 'nord', 'one-dark-pro', 'paulmillr', 'plastic',
+  'poimandres', 'red', 'synthwave-84', 'terminal', 'tokyo-night-moon', 'vesper', 'vitesse-black',
+]);
+const BUILT_IN_LIGHT_ONLY: ReadonlySet<string> = new Set([
+  'kanagawa-lotus', 'one-light', 'snazzy-light', 'tinacious',
+]);
+
+/** A built-in's mode support, as the registry says it; undefined for an id that is not a built-in. */
+export function builtInThemeModeSupport(id: string): 'both' | 'dark-only' | 'light-only' | undefined {
+  if (!BUILT_IN_THEME_IDS.includes(id)) return undefined;
+  return BUILT_IN_DARK_ONLY.has(id) ? 'dark-only' : BUILT_IN_LIGHT_ONLY.has(id) ? 'light-only' : 'both';
+}
 
 /**
  * The built-in Plannotator theme's tokens (`packages/ui/themes/plannotator.css`),
@@ -432,6 +451,13 @@ const TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([THEME_FILE_MARKER, 'id', 'n
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+/**
+ * Characters that change how a name reads without being seen: the bidi marks,
+ * embeddings, overrides and isolates (a name could print its letters in
+ * another order in `theme list`), and the invisible spaces and joiners other
+ * than ZWJ and ZWNJ (which emoji sequences and Persian need).
+ */
+export const INVISIBLE_NAME_CHARS = /[\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /** Show a refused value in a message: short, quoted, control characters visible. */
 function shown(value: unknown): string {
@@ -466,8 +492,8 @@ export function validateThemeFile(input: unknown): ThemeFileResult {
     return refuse('id', `${shown(id)} is not a theme id: lowercase letters, digits and dashes, starting with a letter or digit, at most 64.`);
   }
   if (isBuiltInThemeId(id)) return refuse('id', `"${id}" is a built-in theme; pick another id.`);
-  if (typeof name !== 'string' || name.trim().length === 0 || name.length > THEME_NAME_MAX || CONTROL_CHARS.test(name)) {
-    return refuse('name', `${shown(name)} is not a theme name: 1 to ${THEME_NAME_MAX} characters on one line.`);
+  if (typeof name !== 'string' || name.trim().length === 0 || name.length > THEME_NAME_MAX || CONTROL_CHARS.test(name) || new RegExp(INVISIBLE_NAME_CHARS.source).test(name)) {
+    return refuse('name', `${shown(name)} is not a theme name: 1 to ${THEME_NAME_MAX} characters on one line, with no invisible or text-direction characters.`);
   }
   const theme: ThemeFile = { plannotatorTheme: 1, id, name: name.trim() };
   for (const half of ['dark', 'light'] as const) {

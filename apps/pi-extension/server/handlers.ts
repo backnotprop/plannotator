@@ -13,7 +13,7 @@ import { type createReviewDraftSession, type ReviewDraftKeys } from "../generate
 import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
 import { getPlannotatorDataDir } from "../generated/data-dir.ts";
-import { customThemesAnswer } from "../generated/theme-files.ts";
+import { customThemesAnswer, pageWithCustomThemes } from "../generated/theme-files.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
@@ -295,6 +295,11 @@ export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
  * packages/server/shared-handlers.ts handleCustomThemesScript() (the answer
  * itself is packages/shared/theme-files.ts, vendored).
  */
+/** The page with the person's themes written in (mirrors shared-handlers.ts customThemesPage). */
+export function customThemesPage(html: string): string {
+	return pageWithCustomThemes(html, getPlannotatorDataDir());
+}
+
 export function handleCustomThemesScript(res: Res, search: URLSearchParams = new URLSearchParams()): void {
 	const answer = customThemesAnswer(getPlannotatorDataDir(), search);
 	send(res, Buffer.from(answer.body), answer.status, answer.headers);

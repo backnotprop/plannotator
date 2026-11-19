@@ -24,12 +24,12 @@ import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { getRepoInfo } from "./repo";
 import {
   handleCustomThemesScript,
+  customThemesPage,
   handleFavicon,
   handleImage,
   handleServerReady,
   handleUpload,
 } from "./shared-handlers";
-import { CUSTOM_THEMES_SCRIPT_PATH } from "@plannotator/shared/theme-files";
 import { detectGitUser, getServerConfig, saveConfig } from "./config";
 import { agentToolHostForServer } from "./ai-runtime";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
@@ -86,7 +86,7 @@ export async function startGoalSetupServer(
 ): Promise<GoalSetupServerResult> {
   const { bundle, htmlContent, origin = "claude-code", onReady } = options;
   const isRemote = isRemoteSession();
-  const app = openPackedApp(htmlContent);
+  const app = openPackedApp(htmlContent, { page: (html) => customThemesPage(html) });
   const wslFlag = await isWSL();
   const repoInfo = await getRepoInfo();
   const gitUser = detectGitUser();
@@ -213,7 +213,7 @@ export async function startGoalSetupServer(
           }
 
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
-          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript(url.searchParams);
+          if (url.pathname === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams);
 
           return packedAppResponse(app, req, url.pathname, isRemote);
         },
@@ -232,7 +232,7 @@ export async function startGoalSetupServer(
   const serverUrl = buildAdvertisedUrl(port);
   // Remote sessions serve the app page compressed (#1617); start the likely
   // encoding (gzip over plain http) now so the first load does not wait.
-  if (isRemote) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+  if (isRemote) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
   onReady?.(serverUrl, isRemote, port);
 
   return {

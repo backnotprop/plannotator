@@ -16,7 +16,7 @@ import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image"
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "./draft";
 import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { customThemesAnswer } from "@plannotator/shared/theme-files";
+import { customThemesAnswer, pageWithCustomThemes } from "@plannotator/shared/theme-files";
 import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
@@ -244,6 +244,15 @@ export function handleFavicon(pathname = "/favicon.png"): Response {
  * for when code first renders in it. Pi's servers answer the same
  * (apps/pi-extension/server/handlers.ts).
  */
+/**
+ * The page with the person's themes written in, or no themes tag when they have
+ * none (`pageWithCustomThemes`): the `page` option every server's
+ * `openPackedApp` takes, so a page load asks for no themes script.
+ */
+export function customThemesPage(html: string, dataDir: string = getPlannotatorDataDir()): string {
+  return pageWithCustomThemes(html, dataDir);
+}
+
 export function handleCustomThemesScript(search: URLSearchParams = new URLSearchParams(), dataDir: string = getPlannotatorDataDir()): Response {
   const answer = customThemesAnswer(dataDir, search);
   return new Response(answer.body, { status: answer.status, headers: answer.headers });

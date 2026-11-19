@@ -138,7 +138,12 @@ export function saveCustomTheme(dataDir: string, theme: ThemeFile): SaveCustomTh
   return { ok: true, replaced, path };
 }
 
-/** Move `themes/<id>.json` to `themes/removed/`; the path it went to, or null when there was no such file. */
+/**
+ * Move `themes/<id>.json` to `themes/removed/`; the path it went to, or null
+ * when there was no such file. Never over an earlier removal (two in the same
+ * millisecond take `-2`, ...). Throws when the folder cannot be written (the
+ * CLI says so in one line).
+ */
 export function removeCustomTheme(dataDir: string, id: string, now = Date.now()): string | null {
   if (!THEME_ID_PATTERN.test(id)) return null;
   const dir = customThemesDir(dataDir);
@@ -146,7 +151,8 @@ export function removeCustomTheme(dataDir: string, id: string, now = Date.now())
   if (!existsSync(path)) return null;
   const removedDir = join(dir, "removed");
   mkdirSync(removedDir, { recursive: true });
-  const to = join(removedDir, `${id}-${now}.json`);
+  let to = join(removedDir, `${id}-${now}.json`);
+  for (let n = 2; existsSync(to); n++) to = join(removedDir, `${id}-${now}-${n}.json`);
   renameSync(path, to);
   return to;
 }
@@ -172,9 +178,10 @@ function scriptSafeJson(value: unknown): string {
 }
 
 /**
- * `/plannotator-themes.js`: a classic script every page links in its head
- * (apps/hook, apps/review and apps/inbox index.html), so it runs before the
- * app's module script and before the first paint. It hands the registry the
+ * The themes script: written into each page's head where the build's
+ * `/plannotator-themes.js` tag is (pageWithCustomThemes), so it runs before
+ * the app's module script and before the first paint; the route answers it
+ * too, for a page held from before. It hands the registry the
  * custom themes (`window.__PLANNOTATOR_CUSTOM_THEMES__`, read by
  * packages/ui/utils/themeRegistry.ts) and adds their stylesheet to the head.
  * With no custom themes it sets an empty list and adds nothing.
@@ -187,6 +194,45 @@ export function customThemesScript(dataDir: string): string {
     payload = { themes: [], css: "" };
   }
   return `(function(){var d=${scriptSafeJson(payload)};window.__PLANNOTATOR_CUSTOM_THEMES__=d.themes;if(!d.css)return;var s=document.createElement("style");s.id="plannotator-custom-themes";s.textContent=d.css;(document.head||document.documentElement).appendChild(s)})();\n`;
+}
+
+/** The page's tag for the themes script, as the build writes it (`<script vite-ignore src=...>` in each index.html). */
+const THEMES_TAG = /<script\b[^>]*\bsrc="\/plannotator-themes\.js"[^>]*><\/script>/;
+
+/** Per page: the page with no themes tag, and the last page made with themes in it (so a body is made once). */
+const pages: { html: string; bare: string; last: { script: string; page: string } | null }[] = [];
+
+/**
+ * The page as a server sends it: the themes script written into the page at
+ * the tag (`<script>…</script>`, the same script `/plannotator-themes.js`
+ * answers), or the tag left out when the data dir has no custom themes. So a
+ * page load makes no request for themes, and a person with none gets a page
+ * with nothing added. The same string comes back while the themes are
+ * unchanged, so a compressed body made for it is reused (app-html.ts caches by
+ * page). A page without the tag is returned as it is.
+ */
+export function pageWithCustomThemes(html: string, dataDir: string): string {
+  let entry = pages.find((e) => e.html === html);
+  if (!entry) {
+    if (!THEMES_TAG.test(html)) return html;
+    entry = { html, bare: html.replace(THEMES_TAG, ""), last: null };
+    pages.push(entry);
+    if (pages.length > 8) pages.shift();
+  }
+  let script = "";
+  try {
+    script = listCustomThemes(dataDir).themes.length > 0 ? customThemesScript(dataDir) : "";
+  } catch {
+    script = "";
+  }
+  // The script holds no "<" (scriptSafeJson), so nothing in it can end the element; checked again here.
+  if (!script || script.includes("<")) return entry.bare;
+  if (entry.last?.script !== script) {
+    const at = html.search(THEMES_TAG);
+    const tag = html.match(THEMES_TAG)![0];
+    entry.last = { script, page: `${html.slice(0, at)}<script>${script.trimEnd()}</script>${html.slice(at + tag.length)}` };
+  }
+  return entry.last.page;
 }
 
 /** The route every server answers with customThemesScript (and, with `?syntax=<id>`, customThemeSyntaxJson). */

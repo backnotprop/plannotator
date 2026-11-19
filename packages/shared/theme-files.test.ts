@@ -22,6 +22,7 @@ import {
   customThemesScript,
   isRegisteredThemeId,
   listCustomThemes,
+  pageWithCustomThemes,
   removeCustomTheme,
   saveCustomTheme,
 } from './theme-files';
@@ -153,5 +154,50 @@ describe('code colours', () => {
     const path = join(customThemesDir(dir), 'harbor.json');
     writeFileSync(path, readFileSync(path, 'utf8').replace('#0f1419', '#0f141a'));
     expect(listCustomThemes(dir).themes[0]!.dark!.background).toBe('#0f141a');
+  });
+});
+
+describe('the page as served (themes written in, no request)', () => {
+  const PAGE = '<!doctype html><html><head><script  src="/plannotator-themes.js"></script><script type="module" src="/assets/app.js"></script></head><body></body></html>';
+
+  test('a person with no custom theme gets the page with the tag left out, the same string every time', () => {
+    const dir = scratch();
+    const page = pageWithCustomThemes(PAGE, dir);
+    expect(page).not.toContain('plannotator-themes');
+    expect(page).not.toContain('__PLANNOTATOR_CUSTOM_THEMES__');
+    expect(page.length).toBe(PAGE.length - '<script  src="/plannotator-themes.js"></script>'.length);
+    // One string while nothing changes, so a compressed body made for it is reused.
+    expect(pageWithCustomThemes(PAGE, dir)).toBe(page);
+  });
+
+  test('with themes, the script is in the page where the tag was, and a name cannot end it', () => {
+    const dir = scratch();
+    saveCustomTheme(dir, { ...theme('harbor'), name: '</script><script>alert(1)</script>' });
+    const page = pageWithCustomThemes(PAGE, dir);
+    expect(page).not.toContain('src="/plannotator-themes.js"');
+    const inline = /<head><script>([^<]*)<\/script><script type="module"/.exec(page);
+    expect(inline).not.toBeNull();
+    expect(runScript(inline![1]!).css).toContain('.theme-harbor {');
+    expect(pageWithCustomThemes(PAGE, dir)).toBe(page);
+    // A theme added since is in the next page.
+    saveCustomTheme(dir, theme('second'));
+    expect(pageWithCustomThemes(PAGE, dir)).toContain('.theme-second {');
+  });
+
+  test('a page without the tag is sent as it is', () => {
+    expect(pageWithCustomThemes('<html><body>x</body></html>', scratch())).toBe('<html><body>x</body></html>');
+  });
+});
+
+describe('removing', () => {
+  test('two removals in the same millisecond keep both files', () => {
+    const dir = scratch();
+    saveCustomTheme(dir, theme('harbor'));
+    const first = removeCustomTheme(dir, 'harbor', 1000)!;
+    saveCustomTheme(dir, { ...theme('harbor'), name: 'Harbor two' });
+    const second = removeCustomTheme(dir, 'harbor', 1000)!;
+    expect(second).not.toBe(first);
+    expect(JSON.parse(readFileSync(first, 'utf8')).name).toBe('harbor');
+    expect(JSON.parse(readFileSync(second, 'utf8')).name).toBe('Harbor two');
   });
 });
