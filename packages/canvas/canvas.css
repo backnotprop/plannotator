@@ -1133,3 +1133,49 @@
   background: color-mix(in oklab, var(--pcv-ink) 8%, var(--pcv-card));
   box-shadow: none;
 }
+
+/* ── The sketch look: proposed, not decided ────────────────────────────── */
+
+.pcv {
+  /* No handwriting face is bundled: the device's own is used. */
+  --pcv-hand: 'Bradley Hand', 'Segoe Print', 'Comic Sans MS', 'Chalkboard SE', cursive;
+}
+.pcv-sketch-wash {
+  fill: var(--pcv-fill);
+  stroke: none;
+}
+.pcv-shape[data-fill='none'] .pcv-sketch-wash,
+.pcv-shape[data-fill='hachure'] .pcv-sketch-wash,
+.pcv-shape[data-look='sketch']:not([data-fill]) .pcv-sketch-wash,
+.pcv-shape[data-fill='cross'] .pcv-sketch-wash {
+  fill: color-mix(in oklab, var(--pcv-fill) 45%, transparent);
+}
+.pcv-shape[data-fill='none'] .pcv-sketch-wash {
+  fill: none;
+}
+.pcv-shape[data-fill='solid'] .pcv-sketch-wash {
+  fill: color-mix(in oklab, var(--pcv-stroke) 30%, var(--pcv-fill));
+}
+.pcv-sketch-hatch {
+  fill: none;
+  /* Kept faint so words over it are still read. */
+  stroke: color-mix(in oklab, var(--pcv-stroke) 45%, transparent);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+.pcv-sketch-stroke {
+  fill: none;
+  stroke: var(--pcv-stroke);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pcv-shape[data-look='sketch'] .pcv-words {
+  font-family: var(--pcv-hand);
+  font-size: 16px;
+  font-weight: 400;
+}
+/* Hatching is the costly part to paint and too fine to see when small: it goes first. */
+.pcv-root[data-lod='plain'] .pcv-sketch-hatch {
+  display: none;
+}

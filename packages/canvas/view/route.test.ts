@@ -4,7 +4,10 @@ import { createDocument } from '../model/document';
 import type { Point, Rect } from '../model/geometry';
 import type { CanvasObject } from '../model/types';
 import { type Anchor, CLEARANCE, routeEnters, routeOrthogonal } from './route';
+import { BOX_SHAPES } from '../model/types';
+import { flatten, hachure, roughStrokes, seedOf } from './rough';
 import { findHops, pointAlong, routePath } from './route-path';
+import { shapeOutline } from './shape-outline';
 import { facingSide, portPoint, routesFor } from './routes';
 
 const rect = (x: number, y: number, w = 100, h = 60): Rect => ({ x, y, w, h });
@@ -179,5 +182,43 @@ describe('drawing a route', () => {
     expect(routePath(points)).toBe('M0 0L94 0Q100 0 100 6L100 100');
     expect(pointAlong(points, 0.25)).toEqual({ x: 50, y: 0, horizontal: true });
     expect(pointAlong(points, 0.75)).toEqual({ x: 100, y: 50, horizontal: false });
+  });
+});
+
+describe('the sketch look', () => {
+  const outline = shapeOutline('process', 170, 76).outline;
+
+  test('the same seed draws the same strokes, and another seed draws others', () => {
+    expect(roughStrokes(outline, 1, 42)).toBe(roughStrokes(outline, 1, 42));
+    expect(roughStrokes(outline, 1, 42)).not.toBe(roughStrokes(outline, 1, 43));
+    expect(seedOf('pr')).toBe(seedOf('pr'));
+    expect(seedOf('pr')).not.toBe(seedOf('qr'));
+  });
+
+  test('strokes stay close to the outline they trace, however rough', () => {
+    for (const shape of BOX_SHAPES) {
+      const made = shapeOutline(shape, 170, 120, shape === 'container' ? 2 : 0);
+      for (const rough of [0, 1, 2] as const) {
+        const numbers = roughStrokes(made.outline, rough, 7).match(/-?\d+(\.\d+)?/g)!.map(Number);
+        for (let i = 0; i < numbers.length; i += 2) {
+          expect(numbers[i]).toBeGreaterThan(-10);
+          expect(numbers[i]).toBeLessThan(180);
+          expect(numbers[i + 1]).toBeGreaterThan(-22);
+          expect(numbers[i + 1]).toBeLessThan(146);
+        }
+      }
+    }
+  });
+
+  test('hatching stays inside the shape it fills', () => {
+    const diamond = flatten(shapeOutline('decision', 130, 124).outline);
+    const d = hachure(diamond, 6, -41, 5);
+    const numbers = d.match(/-?\d+(\.\d+)?/g)!.map(Number);
+    expect(numbers.length).toBeGreaterThan(40);
+    for (let i = 0; i < numbers.length; i += 2) {
+      // Inside the diamond: |x - cx| / (w/2) + |y - cy| / (h/2) <= 1, with a little room for the unsteady hand.
+      expect(Math.abs(numbers[i] - 65) / 65 + Math.abs(numbers[i + 1] - 62) / 62).toBeLessThan(1.06);
+    }
+    expect(hachure([], 6, -41, 5)).toBe('');
   });
 });

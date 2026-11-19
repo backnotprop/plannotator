@@ -37,10 +37,25 @@ import type { Camera, CameraController, Size } from '../view/camera';
 import { type Lod, OVERSCAN, lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
 import { indexFor } from '../view/document-index';
 import { endAngles, findHops, pointAlong, routePath } from '../view/route-path';
+import { roughLine, seedOf } from '../view/rough';
 import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
 import { ArrowView, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
+
+/** A connector in the sketch look: its route drawn by hand, the same way every time. */
+const SKETCH_LINES = new Map<string, string>();
+function sketchLine(arrow: ArrowObject, points: Point[]): string {
+  const seed = arrow.style?.seed ?? seedOf(arrow.id);
+  const key = `${seed}|${arrow.style?.rough ?? 1}|${points.map((p) => `${p.x},${p.y}`).join(' ')}`;
+  let d = SKETCH_LINES.get(key);
+  if (d === undefined) {
+    d = roughLine(points, arrow.style?.rough ?? 1, seed);
+    if (SKETCH_LINES.size > 2000) SKETCH_LINES.clear();
+    SKETCH_LINES.set(key, d);
+  }
+  return d;
+}
 
 /** What the layer of arrows is called, and how one arrow is said: its ends by their words, then its label. */
 export const ARROWS_LABEL = 'Connections';
@@ -265,7 +280,7 @@ export function CanvasView({
         key={arrow.id}
         arrow={arrow}
         label={arrowLabel(doc, arrow)}
-        d={routePath(points, hops?.[i])}
+        d={arrow.style?.look === 'sketch' ? sketchLine(arrow, points) : routePath(points, hops?.[i])}
         x1={points[0].x}
         y1={points[0].y}
         a1={angles.start}

@@ -9,6 +9,7 @@ import type { CanvasColor } from '../model/color';
 import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
 import { referenceCard } from '../model/reference';
 import type { ArrowObject, ArtifactKind, BoxObject, BoxShape, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
+import { flatten, hachure, roughLine, roughStrokes, seedOf } from '../view/rough';
 import { CONTAINER_HEADER, type ShapeOutline, shapeOutline, toPath } from '../view/shape-outline';
 
 export interface ObjectViewProps {
@@ -192,6 +193,33 @@ function shapePaths(shape: BoxShape, w: number, h: number, lanes: number) {
 }
 
 /**
+ * The sketch look of a shape, worked out once and kept: by what it is drawn from (id for the seed, size,
+ * shape, fill, roughness), so moving an object reuses it, and every figure of the same object shares it.
+ */
+const SKETCHES = new Map<string, { strokes: string; details: string; hatch: string }>();
+
+function sketchPaths(object: BoxObject, lanes: number) {
+  const shape = object.shape ?? 'process';
+  const rough = object.style?.rough ?? 1;
+  const seed = object.style?.seed ?? seedOf(object.id);
+  const fill = object.style?.fill ?? 'hachure';
+  const key = `${seed}|${shape}|${object.w}|${object.h}|${lanes}|${rough}|${fill}`;
+  let hit = SKETCHES.get(key);
+  if (!hit) {
+    const made = shapeOutline(shape, object.w, object.h, lanes);
+    const polygon = fill === 'hachure' || fill === 'cross' ? flatten(made.outline) : [];
+    hit = {
+      strokes: roughStrokes(made.outline, rough, seed),
+      details: made.details.map((segs, i) => roughStrokes(segs, rough, seed + i + 1)).join(''),
+      hatch: polygon.length ? hachure(polygon, 6, -41, seed) + (fill === 'cross' ? hachure(polygon, 6, 49, seed + 7) : '') : '',
+    };
+    if (SKETCHES.size > 4000) SKETCHES.clear();
+    SKETCHES.set(key, hit);
+  }
+  return hit;
+}
+
+/**
  * A box drawn as its shape: the outline is one small SVG, the words stay
  * HTML on top of it, so they wrap, can be typed into and are read out.
  */
@@ -199,14 +227,26 @@ function ShapedBox({ object, editing, onEditEnd }: { object: BoxObject; editing:
   const shape = object.shape ?? 'process';
   const lanes = shape === 'container' ? (object.lanes ?? []) : [];
   const paths = shapePaths(shape, object.w, object.h, lanes.length);
+  const sketch = object.style?.look === 'sketch' ? sketchPaths(object, lanes.length) : null;
   const [top, right, bottom, left] = paths.text;
   return (
     <>
       <svg className="pcv-shape-svg" width={object.w} height={object.h} viewBox={`0 0 ${object.w} ${object.h}`} aria-hidden="true" focusable="false">
-        <path className="pcv-shape-fill" d={paths.outline} />
-        {paths.details.map((d, i) => (
-          <path key={i} className="pcv-shape-line" d={d} />
-        ))}
+        {sketch ? (
+          <>
+            {/* The fill sits under the strokes: a faint wash of the colour, and hatching over it when asked for. */}
+            <path className="pcv-sketch-wash" d={paths.outline} />
+            {sketch.hatch ? <path className="pcv-sketch-hatch" d={sketch.hatch} /> : null}
+            <path className="pcv-sketch-stroke" d={sketch.strokes + sketch.details} />
+          </>
+        ) : (
+          <>
+            <path className="pcv-shape-fill" d={paths.outline} />
+            {paths.details.map((d, i) => (
+              <path key={i} className="pcv-shape-line" d={d} />
+            ))}
+          </>
+        )}
       </svg>
       <div className="pcv-shape-text" style={{ padding: `${top}px ${right}px ${bottom}px ${left}px` }}>
         <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} />
@@ -255,9 +295,9 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
   };
   switch (object.type) {
     case 'box':
-      if (object.shape && object.shape !== 'process') {
+      if ((object.shape && object.shape !== 'process') || object.style?.look === 'sketch') {
         return (
-          <div className="pcv-obj pcv-shape" {...common} data-shape={object.shape} data-dash={object.style?.dash ? '' : undefined} data-fill={object.style?.fill} style={style}>
+          <div className="pcv-obj pcv-shape" {...common} data-shape={object.shape ?? 'process'} data-look={object.style?.look} data-dash={object.style?.dash ? '' : undefined} data-fill={object.style?.fill} style={style}>
             <ShapedBox object={object} editing={editing} onEditEnd={onEditEnd} />
           </div>
         );

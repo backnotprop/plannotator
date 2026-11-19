@@ -190,8 +190,9 @@ const SHAPES = ['process', 'decision', 'database', 'queue', 'document', 'cloud',
 /**
  * `typed`: `count` shapes of every kind and `connectors` routed connectors
  * between neighbours (to the right, and down), for the router's rows.
+ * `sketchEvery`: one shape in that many is drawn in the sketch look.
  */
-export function createTypedStore(count: number, connectors: number): CanvasStore {
+export function createTypedStore(count: number, connectors: number, sketchEvery = 0): CanvasStore {
   const store = new CanvasStore(createDocument('typed-board', `${count} shapes`));
   const random = mulberry(11);
   const columns = Math.ceil(Math.sqrt(count * 1.8));
@@ -207,6 +208,8 @@ export function createTypedStore(count: number, connectors: number): CanvasStore
       text: `Step ${i}`,
       ...(kind === 'decision' || kind === 'pill' ? {} : { detail: 'detail line' }),
       ...(random() < 0.6 ? { color: COLORS[i % COLORS.length] } : {}),
+      // Every so many, a shape in the sketch look, hatched: the costly one to draw.
+      ...(sketchEvery && i % sketchEvery === 1 ? { style: { look: 'sketch', fill: i % 2 ? 'hachure' : 'cross' } } : {}),
     });
   }
   let made = 0;

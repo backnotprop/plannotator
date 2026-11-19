@@ -73,7 +73,7 @@ function useTheme(): [boolean, () => void] {
 }
 
 function BenchCanvas() {
-  const store = useMemo(() => (params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500) : createLargeStore(count, 0, params.has('rich'))), []);
+  const store = useMemo(() => (params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };
   }, [store]);

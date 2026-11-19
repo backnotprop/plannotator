@@ -539,6 +539,19 @@ try {
   frameRow(`Canvas, ${typed}, at 100% (${await mounted()} mounted, hops drawn): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
   frameRow(`Canvas, ${typed}, at 100%: drag a shape with the pointer`, await pointerDrag(), interval);
 
+  // ── The sketch look on a third of the shapes ────────────────────────────
+  await open(page, `${server.url}/?bench=canvas&n=2000&typed&connectors=1500&sketch=3`);
+  await page.waitForTimeout(600);
+  const rough = await page.evaluate(() => Object.values((window as unknown as { __canvas: { store: { getDocument(): { objects: Record<string, { style?: { look?: string } }> } } } }).__canvas.store.getDocument().objects).filter((object) => object.style?.look === 'sketch').length);
+  await page.getByRole('button', { name: 'Zoom to fit' }).first().click();
+  for (let i = 0; i < 7; i++) await page.getByRole('button', { name: 'Zoom in' }).click();
+  const roughAt = await page.evaluate(() => document.querySelector('.pcv-bar-zoom span')?.textContent ?? '');
+  frameRow(`Canvas, 2000 typed shapes of which ${rough} sketched, at ${roughAt} (${await mounted()} mounted): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 22 * dir, deltaY: 8 * dir });'), interval);
+  frameRow(`Canvas, 2000 typed shapes of which ${rough} sketched: zoom in and out through every level of detail`, await wheel(5000, 'send({ ctrlKey: true, deltaY: Math.sin(t / 5000 * Math.PI * 4) > 0 ? -4 : 4 });'), interval);
+  await zoomTo100();
+  await page.waitForTimeout(500);
+  frameRow(`Canvas, 2000 typed shapes of which ${rough} sketched, at 100% (hatching drawn): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+
   // ── 10,000 objects: past what the budgets were set for; measured so the number is known ──
   await open(page, `${server.url}/?bench=canvas&n=10000`);
   await page.waitForTimeout(800);
