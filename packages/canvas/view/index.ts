@@ -11,3 +11,4 @@ export * from './routes';
 export * from './route-path';
 export * from './rough';
 export * from './guides';
+export * from './chart';

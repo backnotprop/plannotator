@@ -306,7 +306,7 @@ export function CanvasView({
           object={object}
           selected={selection.has(id)}
           editing={editingId === id}
-          rich={object.type !== 'html' || lod === 'full'}
+          rich={(object.type !== 'html' && object.type !== 'chart') || lod === 'full'}
           resolveImageSrc={resolveImageSrc}
           onEditEnd={onEditEnd}
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}

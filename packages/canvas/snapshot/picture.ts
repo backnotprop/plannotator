@@ -14,6 +14,7 @@ import type { CanvasDocument, CanvasObject, SnapshotId } from '../model/types';
 import { isPlaced } from '../model/types';
 import { shapeOutline, toPath } from '../view/shape-outline';
 import { referenceAddress } from '../model/reference';
+import { chartToSvg } from '../view/chart';
 
 interface Palette {
   stage: string;
@@ -139,6 +140,12 @@ function drawObject(doc: CanvasDocument, object: CanvasObject, palette: Palette)
       return `<rect ${box} rx="6" fill="${palette.card}" stroke="${palette.line}" stroke-dasharray="4 3"/><text x="${n(x + 8)}" y="${n(y + 20)}" font-size="12" fill="${palette.muted}">${esc(fitLine(object.alt, w - 16, 12))}</text>`;
     case 'stamp':
       return `<circle cx="${n(x + h / 2)}" cy="${n(y + h / 2)}" r="${n(h / 2)}" fill="${palette.card}" stroke="${palette.line}"/>`;
+    case 'chart': {
+      // The same shapes the board draws, in plain colours. The accent is the object's colour, as on the board.
+      const accent = object.color && object.color !== 'neutral' ? paint(object.color, palette).stroke : palette.named.violet.stroke;
+      const inside = chartToSvg(object, { ink: palette.ink, muted: palette.muted, rule: palette.line, accent, mono: 'ui-monospace, SFMono-Regular, Menlo, monospace', sans: 'Inter, system-ui, sans-serif' });
+      return `<rect ${box} rx="4" fill="${palette.card}" stroke="${palette.line}"/><g transform="translate(${n(x)} ${n(y)})">${inside}</g>`;
+    }
     case 'html':
       return `<rect ${box} rx="6" fill="none" stroke="${palette.line}" stroke-dasharray="4 3"/>`;
     case 'reference': {

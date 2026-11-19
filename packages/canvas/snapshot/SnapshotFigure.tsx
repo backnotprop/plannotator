@@ -19,6 +19,7 @@ import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStor
 import type { CanvasStore } from '../events/store';
 import { LIMITS } from '../model/codec';
 import { isSafeImageSrc } from '../model/html-item';
+import { describeChart } from '../view/chart';
 import type { CanvasDocument, SnapshotCapture } from '../model/types';
 import { CanvasView } from '../react/CanvasView';
 import { CameraController, type Size, fitRect } from '../view/camera';
@@ -72,7 +73,7 @@ export function scrollRootOf(el: HTMLElement): HTMLElement | null {
 export function describeCapture(capture: SnapshotCapture, max = 12): string {
   const words: string[] = [];
   for (const object of capture.objects) {
-    const text = object.type === 'frame' ? object.title : 'text' in object ? object.text : 'alt' in object ? (object.alt ?? '') : object.type === 'reference' ? (object.title ?? '') : object.type === 'arrow' ? (object.label ?? '') : '';
+    const text = object.type === 'frame' ? object.title : object.type === 'chart' ? describeChart(object) : 'text' in object ? object.text : 'alt' in object ? (object.alt ?? '') : object.type === 'reference' ? (object.title ?? '') : object.type === 'arrow' ? (object.label ?? '') : '';
     const line = text.split('\n')[0].trim();
     if (line) words.push(line);
     if (words.length === max) break;

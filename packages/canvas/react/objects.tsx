@@ -9,6 +9,8 @@ import type { CanvasColor } from '../model/color';
 import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
 import { referenceCard } from '../model/reference';
 import { seedOf, seeded } from '../view/rough';
+import { describeChart } from '../view/chart';
+import { ChartView } from './ChartView';
 import { Face, usePerson } from './people';
 import { previewsPending } from './references';
 import type { ArrowObject, ArtifactKind, BoxObject, BoxShape, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
@@ -449,7 +451,7 @@ function BoxWords({ object, editing, onEditEnd, common, style }: { object: BoxOb
 }
 
 /** What an object is called when it has no words of its own. */
-export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card', stamp: 'Stamp' } as const;
+export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', chart: 'Chart', reference: 'Card', stamp: 'Stamp' } as const;
 export const STAMP_NAMES = { check: 'Agreed', thumb: 'Liked', ask: 'In question' } as const;
 
 /** What a screen reader says for an object: its own words, else what it is. */
@@ -461,6 +463,8 @@ export function objectLabel(object: PlacedCanvasObject): string {
         ? referenceCard(object).title
         : object.type === 'stamp'
           ? `${STAMP_NAMES[object.kind]}${object.count ? ` ${object.count}` : ''}`
+          : object.type === 'chart'
+            ? describeChart(object)
           : 'text' in object
             ? object.text
             : 'alt' in object
@@ -581,6 +585,13 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
         <div className="pcv-obj pcv-card" {...common} data-target={object.target.kind} style={style}>
           <Card object={object} resolveImageSrc={resolveImageSrc} />
           <ByBadge actor={object.by} />
+        </div>
+      );
+    case 'chart':
+      return (
+        // In a figure it is one picture with its data said in words; in an editor the object already carries that name.
+        <div className="pcv-obj pcv-chart" {...common} {...(tabIndex === undefined ? { role: 'img', 'aria-label': describeChart(object) } : {})} data-mark={object.mark} style={style}>
+          <ChartView object={object} rich={rich} />
         </div>
       );
     case 'html':
