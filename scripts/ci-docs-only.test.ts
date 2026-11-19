@@ -268,10 +268,29 @@ describe('no code reads an allowlisted file', () => {
     expect(folders.filter((f) => !allowlist.test(f))).toEqual([]);
   });
 
+  // Code that does read allowlisted files, on a workflow of its own whose path filter names them: a docs-only
+  // pull request skips none of ITS runs, so the read is safe. Each entry is held to that by the test below.
+  const OWN_FILTER: Record<string, { workflow: string; paths: string; why: string }> = {
+    'apps/mobile/ios/agent-marks.sh': { workflow: 'mobile-ios.yml', paths: '.github/assets/icons/**', why: 'copies the agent icons into the iPhone app and checks the copies' },
+    '.github/workflows/mobile-ios.yml': { workflow: 'mobile-ios.yml', paths: '.github/assets/icons/**', why: 'its own path filter' },
+    'scripts/ci-affected-map.test.ts': { workflow: 'mobile-ios.yml', paths: '.github/assets/icons/**', why: 'pins that path filter' },
+  };
+
+  test('code that reads an allowlisted file runs on a workflow whose own path filter names it', () => {
+    for (const [file, { workflow, paths }] of Object.entries(OWN_FILTER)) {
+      const text = readFileSync(join(repoRoot, '.github/workflows', workflow), 'utf8');
+      // In both triggers, and the workflow is gated by nothing but its paths (it never asks ci-docs-only.sh).
+      expect(text.split(`- '${paths}'`).length - 1, `${file}: ${workflow} names ${paths} for pull_request and push`).toBe(2);
+      expect(text, `${workflow} never asks the docs-only script`).not.toContain('ci-docs-only');
+    }
+    // The one reader is run by that workflow's script.
+    expect(readFileSync(join(repoRoot, 'apps/mobile/ios/ci.sh'), 'utf8')).toContain('agent-marks.sh" --check');
+  });
+
   test('a path under docs/, adr/ or .github/assets appears in no code', () => {
     const needles = new Set(['github/assets', 'docs/releases', 'adr/']);
     for (const f of docs) if (f.includes('/')) { needles.add(f); if (f.startsWith('docs/')) needles.add(f.split('/').pop()!); }
-    const hits = grep(['-F', ...[...needles].flatMap((x) => ['-e', x])]).filter((m) => !(m[1]! in MENTIONS));
+    const hits = grep(['-F', ...[...needles].flatMap((x) => ['-e', x])]).filter((m) => !(m[1]! in MENTIONS) && !(m[1]! in OWN_FILTER));
     expect(hits.map((m) => `${m[1]}:${m[2]}: ${m[3]!.trim().slice(0, 120)}`)).toEqual([]);
   });
 

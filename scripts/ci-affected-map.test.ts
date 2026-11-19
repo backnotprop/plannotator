@@ -369,7 +369,7 @@ describe('the native app (apps/mobile)', () => {
 
   test('mobile-ios.yml stays apart: its own paths, a group per job, a pinned macOS, and no other workflow builds the app', () => {
     const wf = workflow('mobile-ios.yml') as Workflow & { concurrency?: unknown; on: Record<string, { paths?: string[]; branches?: string[] } | null> };
-    const paths = ['apps/mobile/ios/**', 'apps/mobile/contract/generated/swift/**', '.github/workflows/mobile-ios.yml'];
+    const paths = ['apps/mobile/ios/**', 'apps/mobile/contract/generated/swift/**', '.github/assets/icons/**', '.github/workflows/mobile-ios.yml'];
     expect(wf.on.pull_request).toEqual({ branches: ['main'], paths });
     expect(wf.on.push).toEqual({ branches: ['main'], paths });
     // No workflow-wide group: a pull request's run (its job skipped or not) never cancels the nightly.

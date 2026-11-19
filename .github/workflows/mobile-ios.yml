@@ -10,8 +10,10 @@ name: Mobile iOS
 # Checks there.
 #
 # It starts for the iOS app (apps/mobile/ios), the contract's generated Swift
-# (apps/mobile/contract/generated/swift) and this file: not for Android files
-# or the contract's JSON data, which no step here reads. The parity ledger's
+# (apps/mobile/contract/generated/swift), the product's agent icons
+# (.github/assets/icons: the app carries copies, apps/mobile/ios/agent-marks.sh
+# checks them) and this file: not for Android files or the contract's JSON
+# data, which no step here reads. The parity ledger's
 # clock has its own workflow, mobile-ledger.yml, so recording a ledger row
 # never starts a macOS build.
 #
@@ -40,6 +42,7 @@ on:
     paths:
       - 'apps/mobile/ios/**'
       - 'apps/mobile/contract/generated/swift/**'
+      - '.github/assets/icons/**'
       - '.github/workflows/mobile-ios.yml'
   push:
     branches:
@@ -47,6 +50,7 @@ on:
     paths:
       - 'apps/mobile/ios/**'
       - 'apps/mobile/contract/generated/swift/**'
+      - '.github/assets/icons/**'
       - '.github/workflows/mobile-ios.yml'
   schedule:
     - cron: "41 6 * * *"

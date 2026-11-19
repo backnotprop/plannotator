@@ -23,6 +23,9 @@ if [ -f "$generated/Wire.swift" ]; then
   xcrun swiftc -typecheck -swift-version 6 "$generated/Wire.swift" "$generated/Words.swift"
 fi
 
+# The agents' marks in the app are copies of the product's icons: the copies must match (agent-marks.sh).
+bash "$here/agent-marks.sh" --check
+
 if [ ! -f "$here/InboxCore/Package.swift" ]; then
   echo "apps/mobile/ios: no Swift package yet, nothing to build ($mode)."
   exit 0
