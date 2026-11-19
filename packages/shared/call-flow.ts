@@ -70,7 +70,15 @@ const CORE_PRUNED_PACKAGES = [
 
 const WORKER_TIMEOUT_MS = 45_000;
 const GIT_TIMEOUT_MS = 20_000;
-const MAX_PROCESS_OUTPUT_BYTES = 12 * 1024 * 1024;
+const DEFAULT_OUTPUT_MIB = 12;
+const MAX_PROCESS_OUTPUT_BYTES = DEFAULT_OUTPUT_MIB * 1024 * 1024;
+const DEFAULT_CALLDIFF_DEPTH = 10;
+
+function workerInteger(value: string | undefined, fallback: number, min: number, max: number): number {
+  const text = value?.trim();
+  const number = text && /^\d+$/.test(text) ? Number(text) : NaN;
+  return number >= min && number <= max ? number : fallback;
+}
 
 export interface CallFlowAnalysisInput {
   snapshotId: string;
@@ -115,6 +123,8 @@ interface CommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  stdoutBytes: number;
+  stderrBytes: number;
   timedOut: boolean;
   outputLimitExceeded: boolean;
   aborted: boolean;
@@ -1148,6 +1158,8 @@ async function runCommand(
         exitCode: exitCode ?? 1,
         stdout,
         stderr,
+        stdoutBytes,
+        stderrBytes,
         timedOut,
         outputLimitExceeded,
         aborted,
@@ -1217,17 +1229,22 @@ async function executeWorker(
   languageIds: readonly CallFlowLanguageId[],
   signal: AbortSignal,
 ): Promise<ParsedCallDiffWorkerResult> {
+  const maxDepth = workerInteger(process.env.PLANNOTATOR_CALLDIFF_MAX_DEPTH, DEFAULT_CALLDIFF_DEPTH, 1, 16);
+  const outputMiB = workerInteger(process.env.PLANNOTATOR_CALLDIFF_MAX_OUTPUT_MIB, DEFAULT_OUTPUT_MIB, DEFAULT_OUTPUT_MIB, 128);
+  const expandedOutput = outputMiB > DEFAULT_OUTPUT_MIB;
+  const profiling = expandedOutput || maxDepth !== DEFAULT_CALLDIFF_DEPTH;
   const request = JSON.stringify({
     packageEntry: runtime.packageEntry,
     version: runtime.version,
     cwd: plan.cwd,
     from: plan.from,
     to: plan.to,
-    maxDepth: 10,
+    maxDepth,
     paths,
     grammars: grammarChecksForLanguages(runtime, languageIds),
   });
   const npmBlocker = await createNpmBlocker();
+  const started = performance.now();
   let result: CommandResult;
   try {
     result = await runCommand(runtime.nodePath, [
@@ -1239,6 +1256,7 @@ async function executeWorker(
       cwd: runtime.runtimeDir,
       input: request,
       timeoutMs: WORKER_TIMEOUT_MS,
+      maxOutputBytes: outputMiB * 1024 * 1024,
       signal,
       env: {
         ...process.env,
@@ -1256,14 +1274,33 @@ async function executeWorker(
   } finally {
     npmBlocker.cleanup();
   }
+  if (profiling) console.error("[CallDiff] worker", JSON.stringify({
+    maxDepth,
+    outputMiB,
+    elapsedMs: Math.round(performance.now() - started),
+    files: paths.length,
+    stdoutBytes: result.stdoutBytes,
+    stderrBytes: result.stderrBytes,
+    exitCode: result.exitCode,
+    timedOut: result.timedOut,
+    outputLimitExceeded: result.outputLimitExceeded,
+    aborted: result.aborted,
+  }));
   if (result.aborted) throw new Error("Call-flow analysis was superseded by a newer review snapshot.");
   if (result.timedOut) throw new Error("CallDiff exceeded the 45 second analysis limit.");
-  if (result.outputLimitExceeded) throw new Error("CallDiff result exceeded Plannotator's 12 MB output limit.");
+  if (result.outputLimitExceeded) throw new Error(`CallDiff result exceeded Plannotator's ${outputMiB} MiB output limit.`);
   let parsed: unknown;
   try {
     parsed = JSON.parse(result.stdout);
   } catch {
     throw new Error((result.stderr.trim() || "CallDiff worker returned invalid JSON.").slice(0, 2_000));
+  }
+  if (profiling) {
+    const payload = (parsed as { result?: { ascii?: unknown; trees?: unknown } } | null)?.result;
+    console.error("[CallDiff] payload", JSON.stringify({
+      rawBytes: typeof payload?.ascii === "string" ? Buffer.byteLength(payload.ascii) : undefined,
+      trees: Array.isArray(payload?.trees) ? payload.trees.length : undefined,
+    }));
   }
   if (
     typeof parsed === "object"
@@ -1274,7 +1311,7 @@ async function executeWorker(
     const message = (parsed as Record<string, unknown>).message;
     throw new CallFlowMissingGrammarError(typeof message === "string" ? message : "Call flow language support is not installed.");
   }
-  return parseCallDiffWorkerResult(parsed);
+  return parseCallDiffWorkerResult(parsed, expandedOutput ? { maxRawLength: 16 * 1024 * 1024, maxNodes: 250_000 } : undefined);
 }
 
 async function gitRaw(cwd: string, args: readonly string[]): Promise<string> {
