@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { openLayers } from "@plannotator/core/inbox-pull-handoff";
+import { handoffStack, openLayers } from "@plannotator/core/inbox-pull-handoff";
 import {
   INBOX_PULL_RISK_AUTO_TRIES,
   inboxPullRiskReaches,
@@ -50,6 +50,8 @@ export interface PullRiskAuto {
 
 const RANK: Record<InboxPullRiskLevel, number> = { high: 2, medium: 1, low: 0 };
 
+export const pullRiskAutoHanded = (job: Pick<PullRiskAutoJob, "stack" | "key">): InboxPullStack => handoffStack(job.stack, {}, null, job.key) ?? job.stack;
+
 export const pullRiskAutoMayStart = (layers: readonly InboxPull[]): boolean => layers.length > 0 && layers.every((layer) => layer.state === "open" && (layer.mine || layer.author_member === true));
 
 export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
@@ -92,13 +94,13 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
   const anyThread = async (layers: readonly InboxPull[]) => (await Promise.all(layers.map((layer) => options.hasThread(layer).catch(() => true)))).some(Boolean);
   const openOf = (key: string) => {
     const stack = options.stackOf(key);
-    return stack ? { stack, open: openLayers(stack) } : null;
+    return stack ? { stack, open: openLayers(pullRiskAutoHanded({ stack, key })) } : null;
   };
   const retryable = (run: InboxPullRiskAutoRun) => run.state === "failed" && (run.tries ?? 1) < INBOX_PULL_RISK_AUTO_TRIES && now() - Date.parse(run.failed_at ?? run.at) >= PULL_RISK_AUTO_RETRY_MS;
   const taken = (layers: readonly InboxPull[]) => layers.some((layer) => checking.has(layer.key) || (runs.has(layer.key) && !retryable(runs.get(layer.key)!)));
-  const queuedJobs = () => new Set([...runs.values()].filter((run) => run.state === "queued")).size + checkingJobs;
-  const dropQueued = (keep: (key: string) => boolean) => {
-    const gone = [...runs].filter(([key, run]) => run.state === "queued" && !keep(key));
+  const queuedJobs = () => new Set([...runs].filter(([, run]) => run.state === "queued").map(([key, run]) => run.ranked ?? key)).size + checkingJobs;
+  const dropQueued = (keep: (key: string, run: InboxPullRiskAutoRun) => boolean) => {
+    const gone = [...runs].filter(([key, run]) => run.state === "queued" && !keep(key, run));
     for (const [key] of gone) runs.delete(key);
     if (gone.length > 0) save();
   };
@@ -129,7 +131,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     const found = openOf(key);
     const open = found?.open ?? [];
     const level = levelOfLayers(open);
-    const keys = [...new Set([key, ...open.map((layer) => layer.key)])].filter((one) => one === key || runs.get(one)?.state === "queued");
+    const keys = [...new Set([key, ...open.map((layer) => layer.key), ...[...runs].filter(([, one]) => one.state === "queued" && one.ranked === key).map(([one]) => one)])].filter((one) => one === key || runs.get(one)?.state === "queued");
     if (!auto || !found || !open.some((layer) => layer.key === key) || !level || !inboxPullRiskReaches(level, auto) || !pullRiskAutoMayStart(open) || (await anyThread(open))) {
       if (!stopped) {
         for (const one of keys) runs.delete(one);
@@ -146,6 +148,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       const reason = (error instanceof Error && error.message ? error.message : "The agent could not start.").replace(/\s*Nothing was sent\.$/, "");
       kept = { at: run.at, level, made: auto.make, state: "failed", thread_id: null, reason, tries: (run.tries ?? 0) + 1, failed_at: iso() };
     }
+    for (const one of keys) runs.delete(one);
     for (const one of new Set([key, ...open.map((layer) => layer.key)])) runs.set(one, kept);
     if (!stopped) save();
   };
@@ -157,7 +160,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       return;
     }
     if (busy()) return;
-    const next = [...runs].find(([key, run]) => run.state === "queued" && options.pullOf(key));
+    const next = [...runs].find(([key, run]) => run.state === "queued" && (run.ranked ?? key) === key && options.pullOf(key));
     if (!next) return;
     running = startOne(...next)
       .catch(() => {})
@@ -177,7 +180,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     const check = (async () => {
       try {
         if ((await anyThread(layers)) || stopped) return;
-        const run: InboxPullRiskAutoRun = { at: iso(), level, made: auto.make, state: "queued", thread_id: null, ...(tries > 0 ? { tries } : {}) };
+        const run: InboxPullRiskAutoRun = { at: iso(), level, made: auto.make, state: "queued", thread_id: null, ranked: pull.key, ...(tries > 0 ? { tries } : {}) };
         for (const layer of layers) runs.set(layer.key, run);
         save();
       } finally {
@@ -204,7 +207,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       const auto = options.settings();
       const listed = options.listed();
       const known = new Set(listed.map((pull) => pull.key));
-      dropQueued((key) => !!auto && known.has(key));
+      dropQueued((key, run) => !!auto && known.has(key) && known.has(run.ranked ?? key));
       if (!auto) return;
       const waiting = listed
         .filter((pull) => pull.state === "open" && (!runs.has(pull.key) || retryable(runs.get(pull.key)!)))

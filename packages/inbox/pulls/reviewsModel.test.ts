@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { planFolds } from '@plannotator/core/inbox-folding';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
-import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewRowTitle, reviewViewOf, saveReviewFolds } from './reviewsModel';
+import { readReviewFolds, REVIEW_ROW_AUTO_STOPPED, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewRowTitle, reviewViewOf, saveReviewFolds } from './reviewsModel';
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   const repo = fields.repo ?? 'northwind/web-app';
@@ -321,7 +321,6 @@ test("a PR made for when it ranked: the row says what is being made while its ag
   const ended = { ...working, agent: { ...working.agent, ended: true } };
   expect(reviewRowLine(stacked(working), runs({})).status).toBe('Making a Picture page…');
   expect(reviewRowLine(stacked(working), runs({ made: 'guide' })).status).toBe('Making a guided review…');
-  expect(reviewRowLine(stacked(ended), runs({})).status).toBe('Curating…');
   expect(reviewRowLine(stacked(), runs({ state: 'queued', thread_id: null })).status).not.toContain('Making');
   const page = (seen: boolean) => ({ ...ended, picture_it_page: { message_id: 'm', title: 'Retries', at: '2026-11-18T10:05:00.000Z', ...(seen ? { seen: true } : {}) } });
   expect(reviewRowLine(stacked(page(false)), runs({ level: 'high' })).status).toBe('Picture page ready, made when it ranked High');
@@ -336,4 +335,12 @@ test("a PR made for when it ranked: the row says what is being made while its ag
   const closed = [{ ...inboxPullStacks([pull(880)])[0]!, layers: [pull(880, { state: 'closed' })] }];
   expect(reviewRowLine(stacked(null, { stacks: closed, reason: 'not_reviewed' }), failed).status).not.toContain("Couldn't start");
   expect(reviewRowLine(stacked()).status).toBe('Curating…');
+});
+
+test('a PR made for when it ranked whose agent ended before sending what was asked for says so, not Curating…', () => {
+  const ended = { thread_id: 't', guide: null, agent: { host: 'codex', session: 's', name: 'Codex', ended: true } };
+  const stopped = row({ reviewed: true, reason: 'curating', review: null, thread_id: 't', stacks: inboxPullStacks([pull(880)]), link: ended } as unknown as Partial<InboxReviewRow>);
+  const runs = (made: string) => ({ [pull(880).key]: { at: '2026-11-18T10:00:00.000Z', level: 'high', made, state: 'started', thread_id: 't', done: true } }) as never;
+  expect(reviewRowLine(stopped, runs('picture_it')).status).toBe(REVIEW_ROW_AUTO_STOPPED.picture_it);
+  expect(reviewRowLine(stopped, runs('guide')).status).toBe(REVIEW_ROW_AUTO_STOPPED.guide);
 });

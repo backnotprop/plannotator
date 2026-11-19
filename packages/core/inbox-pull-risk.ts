@@ -94,6 +94,7 @@ export interface InboxPullRiskAutoRun {
   made: InboxPullRiskAutoMake;
   state: "queued" | "started" | "failed";
   thread_id: string | null;
+  ranked?: string;
   reason?: string;
   started_at?: string;
   done?: true;

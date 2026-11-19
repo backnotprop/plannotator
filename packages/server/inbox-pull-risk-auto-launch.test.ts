@@ -132,3 +132,21 @@ test("an automatic run is done once its thread has what was asked for after it s
   expect(pullRiskAutoSettled(withPage, { ...run, made: "guide" })).toBe(false);
   expect(pullRiskAutoSettled(withPage, { ...run, started_at: "2100-01-01T00:00:00.000Z" })).toBe(false);
 });
+
+test("an automatic run whose thread was deleted is done, so the next one can start", async () => {
+  const w = setup(false);
+  const thread_id = w.store.startPersonThread({ project_id: w.project.id, body: "Review #880", to: { host: "codex", session: "ses_c" }, idempotency_key: "pull-risk-auto:880" }).message.thread_id;
+  const links = {
+    threadsOf: () => [],
+    threadMessageIds: (id: string) => w.store.threadMessageIds(id),
+    message: (id: string) => w.store.message(id),
+    threadSubject: () => null,
+    threadProject: () => w.project.id,
+    sessionLive: () => true,
+    launchDead: () => false,
+  };
+  const run = { made: "guide" as const, at: "2026-11-18T09:00:00.000Z", started_at: w.store.message(thread_id)!.created_at, thread_id };
+  expect(pullRiskAutoSettled(links, run)).toBe(false);
+  w.store.deleteThread(thread_id);
+  expect(pullRiskAutoSettled(links, run)).toBe(true);
+});

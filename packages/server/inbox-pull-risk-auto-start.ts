@@ -1,9 +1,9 @@
-import { handoffStack, openLayers, pullHandoffMessage, pullHandoffThreadName, pullNounOf } from "@plannotator/core/inbox-pull-handoff";
+import { openLayers, pullHandoffMessage, pullHandoffThreadName, pullNounOf } from "@plannotator/core/inbox-pull-handoff";
 import { type InboxLaunchAgent, type InboxPull, type InboxProject, type InboxPullRiskAutoMake, type InboxPullRiskAutoRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxLaunch } from "./inbox-launch";
-import type { PullRiskAutoJob } from "./inbox-pull-risk-auto";
+import { pullRiskAutoHanded, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
 import { threadAgent, type InboxPullLinkStore } from "./inbox-pulls";
 
 export interface PullRiskAutoStartDeps {
@@ -17,18 +17,19 @@ export interface PullRiskAutoStartDeps {
 
 const SKILLS: Record<InboxPullRiskAutoMake, string[]> = { guide: ["review-curate"], picture_it: ["picture-it"] };
 const LEVEL_WORD = { high: "High", medium: "Medium", low: "Low" } as const;
+const STAY_PUT = "Don't switch branches, stash or touch uncommitted work here; read the diff with git from where you are.";
 
-export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "stack" | "made" | "level">, skillsBlock: (names: readonly string[]) => string): { handed: PullRiskAutoJob["stack"]; name: string; body: string } {
-  const handed = handoffStack(job.stack, {}) ?? job.stack;
+export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "key" | "stack" | "made" | "level">, skillsBlock: (names: readonly string[]) => string): { handed: PullRiskAutoJob["stack"]; name: string; body: string } {
+  const handed = pullRiskAutoHanded(job);
   const noun = pullNounOf(handed);
   const what = openLayers(handed).length > 1 ? `this stack of ${noun}s` : `this ${noun}`;
   const why = `The Inbox sent this on its own, because ${what} ranked ${LEVEL_WORD[job.level]} risk.`;
   const words = pullHandoffMessage(handed, { kind: job.made }, { fenced: true });
-  return { handed, name: pullHandoffThreadName(handed, null, job.stack), body: `${why}\n\n${words}\n\n${skillsBlock(SKILLS[job.made])}`.trimEnd() };
+  return { handed, name: pullHandoffThreadName(handed, null, job.stack), body: `${why}\n\n${STAY_PUT}\n\n${words}\n\n${skillsBlock(SKILLS[job.made])}`.trimEnd() };
 }
 
 export function pullRiskAutoSettled(store: InboxPullLinkStore, run: Pick<InboxPullRiskAutoRun, "made" | "at" | "started_at"> & { thread_id: string }): boolean {
-  if (threadAgent(store, run.thread_id)?.ended) return true;
+  if (!store.message(run.thread_id) || threadAgent(store, run.thread_id)?.ended) return true;
   const since = run.started_at ?? run.at;
   const ids = store.threadMessageIds(run.thread_id);
   for (let i = ids.length - 1; i >= 0; i--) {

@@ -9,6 +9,7 @@ import {
   type InboxPull,
   type InboxPullLink,
   INBOX_PULL_RISK_AUTO_TRIES,
+  type InboxPullRiskAutoMake,
   type InboxPullRiskAutoRun,
   type InboxPullStack,
   type InboxReviewRow,
@@ -155,6 +156,11 @@ export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][
 
 const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
 
+export const REVIEW_ROW_AUTO_STOPPED: Record<InboxPullRiskAutoMake, string> = {
+  picture_it: 'The agent stopped before sending a Picture page.',
+  guide: 'The agent stopped before sending a guided review.',
+};
+
 export function reviewRowAutoRun(row: Pick<InboxReviewRow, 'stacks'>, runs: Readonly<Record<string, InboxPullRiskAutoRun>> | undefined): InboxPullRiskAutoRun | null {
   const layer = runs ? row.stacks[0]?.layers.find((pull) => runs[pull.key]) : undefined;
   return layer ? runs![layer.key]! : null;
@@ -171,7 +177,8 @@ export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<I
   if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
   const page = run.made !== 'guide' && link.picture_it_page && link.picture_it_page.at >= run.at ? link.picture_it_page : null;
   if (page) return !page.seen && !row.review ? `Picture page ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
-  if (link.agent?.ended || row.review) return null;
+  if (row.review) return null;
+  if (link.agent?.ended) return REVIEW_ROW_AUTO_STOPPED[run.made];
   return run.made === 'picture_it' ? 'Making a Picture page…' : 'Making a guided review…';
 }
 
