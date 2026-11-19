@@ -1411,6 +1411,29 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-notice-text { display: flex; align-items: baseline; gap: 0.3em; min-width: 0; overflow: hidden; }
 .ib-notice-n { flex-shrink: 0; }
 .ib-notice-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The held list's bar sticks to the top of the list's scroll box while threads wait behind it (HeldNoticeLine.tsx,
+   listNewState.ts; the owner, 2026-11-17: always in reach, never scrolled out of sight). At rest it is where it was,
+   above the rows; its box is the rows' own ground, so rows pass under it unseen, and the 12 px under the line is
+   the box's. Above the phone's sticky group headers, which stick under it. `--ib-held-h` is the box's height: the
+   phone's headers and the list's top pill sit below it. Nothing moves: no transition, so reduced motion is the same. */
+.ib-listcol { --ib-held-h: 50px; --ib-held-pad: var(--ib-held-h); }
+.ib-notice-stick { position: sticky; top: 0; z-index: 3; padding-bottom: 12px; background: var(--card); display: grid; gap: 8px; }
+/* Two lines (newsWords.ts: news here, then news in other projects): the box is both, 38 + 8 + 38 + 12. */
+.ib-listcol:has(.ib-notice-stick[data-lines="2"]) { --ib-held-h: 96px; }
+/* "from …" is left off whole when the line has no room for it (newsWords.ts): the words may wrap here, onto a second
+   line this one-line box clips, so "from …" goes to that line as a whole, never cut inside a name. The counts in
+   front of it are still cut with "…" if even they do not fit. */
+.ib-notice-text[data-drop] { flex-wrap: wrap; height: 1lh; }
+.ib-notice-text[data-drop] > .ib-notice-n { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-notice-from { white-space: nowrap; }
+.ib-notice-stick > .ib-notice { margin-bottom: 0; }
+/* A row that ↑ ↓, J/K or Tab scrolls to (`scrollIntoView`, block nearest) stops below the stuck bar, never under it.
+   The bar itself sits inside that padding, so it takes a negative scroll margin of the same size: without it, the bar
+   taking focus (Tab, a click that scrolls its target into view) made the browser scroll to bring it below the padding,
+   which a stuck box never reaches, and the list jumped (418 px in a 900 px window). */
+.ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: var(--ib-held-pad); }
+.ib-notice-stick > .ib-notice { scroll-margin-top: calc(-1 * var(--ib-held-pad)); }
+.pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 12px); }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
 .ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }
@@ -2297,8 +2320,12 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-vhead .ib-fn { font-weight: 600; font-size: var(--ib-fs-14, 14px); white-space: nowrap; min-width: 0; overflow: hidden; }
 .ib-vhead .ib-from { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-vhead .ib-sp { flex: 1; }
-.ib-changed { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
-.ib-changed .ib-ic { color: var(--warning); }
+.ib-changed { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 8px; padding: 8px 18px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
+.ib-changed .ib-ic { color: var(--warning); margin-top: calc((1lh - 14px) / 2); }
+/* Icon | words: the sentence wraps in its own box, and the link follows it or takes the next row under the sentence, never under the icon. */
+.ib-changed-b { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.ib-changed-t { flex: 0 1 auto; min-width: 0; max-width: 100%; text-wrap: pretty; }
+.ib-changed .ib-vlink { flex: none; white-space: nowrap; }
 .pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; }
 .ib-vbody { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }
@@ -3702,6 +3729,17 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
+  /* The bar's box on a phone: the line's 10 / 12 px margins are its padding, the line one 44 px row; the group
+     headers stick under it. */
+  .ib-listcol { --ib-held-h: 64px; --ib-held-pad: calc(var(--ib-held-h) + 44px); }
+  .ib-notice-stick { padding: 10px 12px; }
+  /* A fixed 44 px (one line, nowrap) so the box is exactly `--ib-held-h`: change one, change the other. */
+  .ib-notice-stick > .ib-notice { height: 44px; margin: 0; width: 100%; }
+  /* The group header stuck under the bar is in the padding too: the same negative margin, its own 44 px. */
+  .ib-lbody:has(.ib-notice-stick) .ib-band { top: var(--ib-held-h); scroll-margin-top: -44px; }
+  .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 56px); }
+  /* Two lines: 10 + 44 + 8 + 44 + 10. */
+  .ib-listcol:has(.ib-notice-stick[data-lines="2"]) { --ib-held-h: 116px; }
   /* The stale page notice's ×: a finger's width. */
   .pn-inbox .ib-stale .ib-stale-x { width: 44px; }
   .ib-askline { margin: 10px 12px; }

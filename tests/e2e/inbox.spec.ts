@@ -535,7 +535,7 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const before = await rowOrder(page);
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^New from Codex: “/);
   // Held: nothing moved, and the new thread is not on screen yet.
   await page.waitForTimeout(500);
   expect(await rowOrder(page)).toEqual(before);

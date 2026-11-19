@@ -86,7 +86,7 @@ const turning = (page: Page, sel: string) =>
 
 async function heldArrival(page: Page, subject: string): Promise<string> {
   const id = await agentWrites(subject);
-  await expect(notice(page)).toContainText('1 new');
+  await expect(notice(page)).toContainText(/^New from .+: “/);
   await expect(row(page, id)).toHaveCount(0);
   return id;
 }

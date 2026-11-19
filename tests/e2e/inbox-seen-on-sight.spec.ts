@@ -172,8 +172,8 @@ test('desktop, at the end of the thread: the arrival scrolls into view, the row 
     expect(await rowsOf(page)).toEqual(order);
     expect(await sectionOf(page, id)).toBe(section);
     expect((await storeRow(id)).unseen).toBe(1);
-    // The Show line counts only the other thread, and names only its project.
-    await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-other');
+    // The Show line counts only the other thread, and names only it.
+    await expect(page.locator('[data-inbox-notice]')).toContainText(/^New from .+: “Docs deploy”/);
     expect(await noticeText(page)).not.toContain('billing-end');
     await shot(page, '01-desktop-arrived-bold');
     // Its first lines are on screen (the view followed it to the end).

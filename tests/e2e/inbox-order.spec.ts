@@ -150,7 +150,7 @@ test('a newer agent message waits behind "N new"; shown, its row is first in its
   const before = await sectionOrder(page, 'waiting');
   await opencode!.send({ project_path: world.ledger, reply_to: world.opencodeMessage, body: question('Also gzip the file?') });
   // The held rule (PR 1772): the order on screen waits for an action.
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in ledger');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ (asked|replied) in “/);
   expect(await sectionOrder(page, 'waiting')).toEqual(before);
   await page.locator('[data-inbox-notice]').click();
   await expect.poll(() => sectionOrder(page, 'waiting')).toEqual([threads.opencode, threads.claude]);

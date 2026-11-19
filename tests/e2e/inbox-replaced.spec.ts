@@ -248,7 +248,7 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
     body: 'You settled this in our session: the jobs queue already retries a 409 with the same idempotency key, so neither question above applies any more.',
     supersedes: [String(second.message_id)],
   });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in billing-svc');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ (asked|replied) in “/);
   await expect(row).toHaveAttribute('data-section', 'stopped');
   await shot('5-withdrawn-held');
   await page.locator('[data-inbox-notice]').click();
