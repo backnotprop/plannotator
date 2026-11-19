@@ -61,6 +61,8 @@ interface World {
   long: string;
   /** No badge, no thread name, no count: no line 3. */
   news: string;
+  /** No thread name, one message with a question: no preview, so a phone row's count sits beside the title. */
+  lone: string;
   /** Two agents in one thread. */
   pair: string;
   /** Holds up 3, a thread name, 2 questions and a guided review: a full phone line 3. */
@@ -135,6 +137,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const fcm = await pi.send({ project_path: relay, subject: 'FCM token migration', body: DEMO_MESSAGES.news });
   // Its own thread (pi's next relay message replies in the one above): no badge, no thread name, no question.
   const news = await opencode.send({ project_path: relay, subject: 'Release notes are up', body: DEMO_MESSAGES.news });
+  // Its own thread too, unnamed, its one message a question: the row's title is that message, so it has no preview.
+  const lone = await opencode.send({ project_path: docs, subject: 'Pick the cache store', body: [':::question', 'Which store backs the page cache?', '', '- [ ] Redis', '- [ ] In memory', ':::'].join('\n') });
   const long = await opencode.send({
     project_path: northwind,
     subject: "Approve the ledger reconciliation plan before Friday's cutover and the audit",
@@ -168,7 +172,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
-  world = { url, src: join(root, 'src'), agents: [claude, opencode, pi, codex], context, page, errors, stopped: stopped.thread_id as string, holding: holding.thread_id as string, long: long.thread_id as string, news: news.thread_id as string, pair: named.thread_id as string, guided: guided.thread_id as string };
+  world = { url, src: join(root, 'src'), agents: [claude, opencode, pi, codex], context, page, errors, stopped: stopped.thread_id as string, holding: holding.thread_id as string, long: long.thread_id as string, news: news.thread_id as string, lone: lone.thread_id as string, pair: named.thread_id as string, guided: guided.thread_id as string };
 });
 
 test.afterAll(async () => {
@@ -526,6 +530,17 @@ test('an iPhone (WebKit): the marks only, no card; three lines, the agents\' til
         expect(r.top.titleCut || !r.top.titleInside, `row ${r.id}: the title is cut`).toBe(false);
         expectLineThree(r.l3, r.id);
       }
+      // A row with no preview: its count at the right end of the title's line, level with it, never alone on a line
+      // of its own under the title.
+      const lone = (await page.evaluate(`(() => {
+        const r = document.querySelector('.ib-mrow[data-thread-id="${world.lone}"]');
+        const box = (el) => el.getBoundingClientRect().toJSON();
+        return { title: box(r.querySelector(':scope > .ib-m2')), count: box(r.querySelector(':scope > .ib-m3 > .ib-qn')), preview: !!r.querySelector('.ib-pv') };
+      })()`)) as { title: DOMRect; count: DOMRect; preview: boolean };
+      expect(lone.preview, 'the lone row has no preview').toBe(false);
+      expect(lone.count.left, 'the count beside the title').toBeGreaterThanOrEqual(lone.title.right - 0.5);
+      const mid = (lone.count.top + lone.count.bottom) / 2;
+      expect(mid >= lone.title.top && mid <= lone.title.bottom, `the count on the title's line: ${JSON.stringify(lone)}`).toBe(true);
       // The long row: its preview is cut, the count is whole; its project is cut on one line, after both tiles.
       const long = rows.find((r) => r.id === world.long)!;
       expect(long.l3.previewCut).toBe(true);
