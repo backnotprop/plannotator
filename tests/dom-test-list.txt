@@ -523,6 +523,8 @@ packages/editor/App.sessionTitle.test.tsx
 packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
+packages/ui/components/blocks/directiveRenderer.seam.test.tsx
+packages/canvas/snapshot/CanvasStage.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx
@@ -854,3 +856,6 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/inbox/projectTagMenu.test.tsx
+packages/inbox/projectTagsFilter.test.tsx
+packages/inbox/tagWritesPending.test.tsx

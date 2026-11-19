@@ -37,6 +37,27 @@ export interface ThreadTagsHost {
   rowTags?: RowTags;
   /** The tags this Inbox's own listed threads carry: Search's Tag chip offers these (search reads this Inbox's threads). */
   here?: readonly InboxInitiative[];
+  /** A row's tags for the filters: its own and its project's (projectTags.ts). */
+  filterTags?: (row: InboxListRow) => readonly string[];
+  /** A project's tags (its ⋯ → Add tag, projectTags.ts); absent on an Inbox that keeps none. */
+  projects?: ProjectTagsHost;
+}
+
+/** What Add tag's list does to the thread or project it was opened on. */
+export interface TagTarget {
+  /** The tags it is in. */
+  on: readonly string[];
+  set: (tag: InboxInitiative, on: boolean) => void;
+  /** Make a tag of the typed name and put it in it. */
+  create: (name: string) => void;
+}
+
+/** The projects' tags in the window (useProjectTags.ts). */
+export interface ProjectTagsHost {
+  /** Add tag is offered on the project: this Inbox's, or a linked machine's that takes project tags. */
+  can: (projectId: string) => boolean;
+  /** The project's tags as a target for Add tag's list. */
+  target: (projectId: string) => TagTarget;
 }
 
 export const ThreadTagsContext = createContext<ThreadTagsHost | null>(null);
