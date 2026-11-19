@@ -34,7 +34,8 @@ export const LIMITS = {
   title: 300,
   coordinate: 10_000_000,
   size: 20_000,
-  objects: 20_000,
+  /** As many as have been measured (`bench/run.ts`): at 10,000 a pan with the whole board in view drops frames. */
+  objects: 10_000,
   snapshots: 2_000,
   spriteFrames: 512,
   spriteFps: 60,

@@ -162,7 +162,14 @@ const COLORS = ['blue', 'green', 'amber', 'red', 'violet'] as const;
  * then, and an arrow from most boxes to the next. Laid out about four
  * screens wide so panning has somewhere to go.
  */
-export function createLargeStore(count: number, snapshots = 0): CanvasStore {
+const LONG_NOTE = 'Check this before the rollout: the replay tool takes a time range, the dead-letter list fills during an outage, and support has no night rota yet. '.repeat(3);
+
+/**
+ * `rich`: the same board with the heavy kinds mixed in, the way a real one
+ * has them: every twelfth box is a picture, every thirtieth an HTML item,
+ * every fortieth a card with a picture, and the notes are long.
+ */
+export function createLargeStore(count: number, snapshots = 0, rich = false): CanvasStore {
   const store = new CanvasStore(createDocument('large-board', `${count} objects`));
   const random = mulberry(7);
   const objects: CanvasObject[] = [];
@@ -175,11 +182,25 @@ export function createLargeStore(count: number, snapshots = 0): CanvasStore {
     const col = i % columns;
     const row = Math.floor(i / columns);
     const tinted = random() < 0.3;
+    const x = col * 230 + Math.round(random() * 24);
+    const y = row * 120 + Math.round(random() * 20);
+    if (rich && i % 12 === 5) {
+      objects.push({ id, type: 'image', x, y, w: 176, h: 78, src: CHART_IMAGE, alt: `Chart ${i}` });
+      continue;
+    }
+    if (rich && i % 30 === 7) {
+      objects.push({ id, type: 'html', x, y, w: 176, h: 78, html: HTML_ITEM, alt: 'Timings' });
+      continue;
+    }
+    if (rich && i % 40 === 9) {
+      objects.push({ id, type: 'reference', x, y, w: 176, h: 96, target: { kind: 'web', url: `https://example.org/notes/${i}` }, title: `Note on service ${i}`, description: 'Why the sweep is late, and what a queue changes.', site: 'example.org', image: CHART_IMAGE });
+      continue;
+    }
     objects.push({
       id,
       type: 'box',
-      x: col * 230 + Math.round(random() * 24),
-      y: row * 120 + Math.round(random() * 20),
+      x,
+      y,
       w: 176,
       h: 56,
       text: `Service ${i}`,
@@ -190,7 +211,7 @@ export function createLargeStore(count: number, snapshots = 0): CanvasStore {
   const notes = Math.round(count * 0.08);
   for (let i = 0; i < notes; i++) {
     const near = objects[Math.floor(random() * boxes)] as { x: number; y: number };
-    objects.push({ id: `n${i}`, type: 'note', x: near.x + 40, y: near.y + 62, w: 150, h: 44, text: `Note ${i}: check this` });
+    objects.push({ id: `n${i}`, type: 'note', x: near.x + 40, y: near.y + 62, w: 150, h: rich ? 110 : 44, text: rich ? `Note ${i}: ${LONG_NOTE}` : `Note ${i}: check this` });
   }
   const arrows = count - boxes - notes;
   for (let i = 0; i < arrows; i++) {

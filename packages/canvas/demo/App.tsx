@@ -3,7 +3,8 @@
  *
  *   /                      plan and canvas side by side (a phone gets the plan)
  *   /?bench=plan&n=50      a plan with n snapshots of one 2,000-object canvas
- *   /?bench=canvas&n=2000  the editor alone on an n-object canvas
+ *   /?bench=canvas&n=2000  the editor alone on an n-object canvas (&rich: pictures, HTML items, cards, long notes)
+ *   /?view=split           plan and canvas side by side
  *   &theme=dark            start dark
  */
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
@@ -72,7 +73,7 @@ function useTheme(): [boolean, () => void] {
 }
 
 function BenchCanvas() {
-  const store = useMemo(() => createLargeStore(count), []);
+  const store = useMemo(() => createLargeStore(count, 0, params.has('rich')), []);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };
   }, [store]);

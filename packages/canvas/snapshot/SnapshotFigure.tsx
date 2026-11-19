@@ -28,7 +28,7 @@ import { type SnapshotStanding, snapshotStanding } from './resolve';
 import { SNAPSHOT_STRINGS } from './strings';
 
 /** How far outside the screen a figure starts drawing, in CSS pixels. */
-export const FIGURE_NEAR_MARGIN = 800;
+export const FIGURE_NEAR_MARGIN = 1400;
 /** A figure never draws its part of the canvas larger than life. */
 export const FIGURE_MAX_ZOOM = 1;
 /** The tallest a figure grows, in CSS pixels. */

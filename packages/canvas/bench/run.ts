@@ -14,6 +14,10 @@
  * whatever caused it (script, style, layout, paint). Heap and DOM node
  * counts come from the DevTools protocol after a forced collection.
  *
+ * Scrolling is driven by setting scrollTop each frame, which a frame rate alone would flatter (a real scroll
+ * runs off the main thread and shows a late figure as an empty box, not a slow frame), so the scroll rows
+ * also count frames in which a figure is on screen with nothing drawn in it.
+ *
  * It is a measuring script, not a test: it exits 1 when a budget is missed
  * so a person running it sees that, but no CI lane runs it (a shared runner
  * has no stable frame rate to hold a budget against).
@@ -121,6 +125,8 @@ let failed = false;
 
 function row(name: string, budget: string, measured: string, ok: boolean): void {
   rows.push([name, budget, measured, ok ? 'met' : 'NOT met']);
+  // Said as it is measured, so a run that stops early still shows how far it got.
+  console.error(`${ok ? 'met    ' : 'NOT met'}  ${name}: ${measured}`);
   if (!ok) failed = true;
 }
 
@@ -179,9 +185,47 @@ try {
       [ms],
     );
   const passMs = Math.round((planInfo.height / 2400) * 2 * 1000);
+
+  /**
+   * A scroll, watched for the fault a frame rate cannot show: a figure that is on screen with nothing drawn
+   * in it yet. Counted per frame, as the person would see it.
+   */
+  const scrollWatchingFigures = (ms: number, pxPerSecond: number) =>
+    page.evaluate(
+      ([duration, speed]) => {
+        const pane = document.querySelector<HTMLElement>('.demo-plan')!;
+        const views = [...document.querySelectorAll<HTMLElement>('.pcv-figure-view')];
+        const span = pane.scrollHeight - pane.clientHeight;
+        let frames = 0;
+        let emptyFrames = 0;
+        let worst = 0;
+        return (window as unknown as { __frames: (ms: number, step: (t: number) => void) => Promise<number[]> })
+          .__frames(duration, (t) => {
+            const travelled = (t / 1000) * speed;
+            const lap = Math.floor(travelled / span);
+            pane.scrollTop = lap % 2 === 0 ? travelled % span : span - (travelled % span);
+            const box = pane.getBoundingClientRect();
+            let empty = 0;
+            for (const view of views) {
+              const at = view.getBoundingClientRect();
+              if (at.bottom > box.top && at.top < box.bottom && !view.firstElementChild) empty++;
+            }
+            frames++;
+            if (empty) emptyFrames++;
+            worst = Math.max(worst, empty);
+          })
+          .then(() => ({ frames, emptyFrames, worst }));
+      },
+      [ms, pxPerSecond],
+    );
   await scrollPass(passMs);
   const base = await memory(cdp);
   frameRow('Plan with 50 materialized snapshots: scroll', await scrollPass(passMs), interval);
+  for (const speed of [2400, 12000]) {
+    const seen = await scrollWatchingFigures(4000, speed);
+    results[`emptyFigures@${speed}`] = seen;
+    row(`Plan with 50 snapshots: a figure on screen with nothing drawn yet, scrolling at ${speed.toLocaleString('en')} px/s`, 'never', `${seen.emptyFrames} of ${seen.frames} frames (at most ${seen.worst} at once)`, seen.emptyFrames === 0);
+  }
   let peakLive = 0;
   for (let i = 0; i < 9; i++) {
     await scrollPass(Math.round(passMs / 2));
@@ -291,7 +335,34 @@ try {
   const behindOpens: Opened[] = [];
   for (let i = 5; i < 10; i++) behindOpens.push(await openAndBack(i));
   openRows('Opening a snapshot that is behind', behindOpens);
-  row('Opening a snapshot that is behind: the capture dissolves into the canvas', 'drawn over the live canvas from the first frame', behindOpens.every((o) => o.ghost) ? 'every time' : 'NOT every time', behindOpens.every((o) => o.ghost) && current.every((o) => !o.ghost));
+  row('Opening a snapshot: the capture is drawn over the canvas from the first frame, to dissolve into it', 'every time, behind or not', [...current, ...behindOpens].every((o) => o.ghost) ? 'every time' : 'NOT every time', [...current, ...behindOpens].every((o) => o.ghost));
+  // 50 times in and back, turned round mid-flight each time, watching what is left behind.
+  await page.locator('.pcv-figure-hit').first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const cycle = async () => {
+    await page.locator('.pcv-figure-hit').first().click();
+    await page.waitForTimeout(220);
+    await page.getByRole('button', { name: 'Back to plan' }).click();
+    await page.waitForSelector('.pcv-stage', { state: 'detached' });
+  };
+  for (let i = 0; i < 5; i++) await cycle();
+  const beforeCycles = await memory(cdp);
+  for (let i = 0; i < 50; i++) await cycle();
+  const afterCycles = await memory(cdp);
+  results.openCloseMemory = { before: beforeCycles, after: afterCycles };
+  row('Opening and closing 50 times: heap', `grows at most ${BUDGET.heapGrowthMb} MB`, `${beforeCycles.heapMb} MB to ${afterCycles.heapMb} MB (${(afterCycles.heapMb - beforeCycles.heapMb).toFixed(2)} MB)`, afterCycles.heapMb - beforeCycles.heapMb <= BUDGET.heapGrowthMb);
+  row('Opening and closing 50 times: DOM nodes', `grow at most ${BUDGET.nodeGrowthShare * 100}%`, `${beforeCycles.nodes} to ${afterCycles.nodes}`, afterCycles.nodes <= beforeCycles.nodes * (1 + BUDGET.nodeGrowthShare));
+
+  // The canvas being edited while the plan and its 50 figures are on the page: every commit reaches every figure.
+  const editing = await page.evaluate(() => {
+    const { store } = (window as unknown as { __canvas: { store: { dispatch(c: unknown, o?: unknown): unknown; getDocument(): { order: string[] } } } }).__canvas;
+    const moving = store.getDocument().order.filter((id) => id.startsWith('b')).slice(0, 20);
+    return (window as unknown as { __frames: (ms: number, step: (t: number) => void) => Promise<number[]> }).__frames(3000, (t) => {
+      store.dispatch({ type: 'move', ids: moving, dx: Math.cos(t / 300) * 3, dy: Math.sin(t / 300) * 3 }, { gesture: 'bench-edit' });
+    });
+  });
+  frameRow('Plan with 50 snapshots: the canvas edited 60 times a second behind it', editing, interval);
+
   const behindScroll = await scrollPass(passMs);
   frameRow('Plan with 50 snapshots, all behind: scroll', behindScroll, interval);
 
@@ -310,7 +381,27 @@ try {
       },
       [ms, script],
     );
-  const mounted = () => page.evaluate(() => document.querySelectorAll('.pcv-obj, .pcv-arrow').length);
+  /**
+   * To 100% about the middle of the board. Fitted first, because a pan that dropped frames does not come back
+   * to where it started, and far out a few hundred pixels of drift is the whole board.
+   */
+  const zoomTo100 = async () => {
+    await page.getByRole('button', { name: 'Zoom to fit' }).first().click();
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: 'Zoom to 100%' }).click();
+  };
+  const countMounted = () => page.evaluate(() => document.querySelectorAll('.pcv-obj, .pcv-arrow').length);
+  /** How many objects are mounted, once that number has stopped changing (a big board takes a moment to re-cull after a zoom). */
+  const mounted = async (): Promise<number> => {
+    let last = -1;
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(250);
+      const now = await countMounted();
+      if (now === last && now > 0) return now;
+      last = now;
+    }
+    return last;
+  };
 
   // Fitted: the whole board on screen, every object mounted, far level of detail.
   const mountedFit = await mounted();
@@ -318,7 +409,7 @@ try {
   frameRow(`Canvas, ${count} objects: zoom in and out through every level of detail`, await wheel(5000, 'send({ ctrlKey: true, deltaY: Math.sin(t / 5000 * Math.PI * 4) > 0 ? -4 : 4 });'), interval);
 
   // At 100%: a screenful mounted, the render window turning over as it pans.
-  await page.getByRole('button', { name: 'Zoom to 100%' }).click();
+  await zoomTo100();
   await page.waitForTimeout(300);
   const mountedNear = await mounted();
   frameRow(`Canvas, ${count} objects, at 100% (${mountedNear} mounted): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
@@ -342,6 +433,82 @@ try {
   await page.waitForTimeout(300);
   frameRow(`Canvas, ${count} objects: drag 1 object`, await drag(1), interval);
   frameRow(`Canvas, ${count} objects: drag 300 objects together`, await drag(300), interval);
+
+  /**
+   * A drag the way a person makes one: pointer events on an object, one move a frame, through hit-testing and
+   * the gesture code, at 100% where text and shadows are drawn. Returns frame times.
+   */
+  const pointerDrag = () =>
+    page.evaluate(() => {
+      const root = document.querySelector<HTMLElement>('.pcv-root')!;
+      const view = root.getBoundingClientRect();
+      const boxes = [...root.querySelectorAll<HTMLElement>('.pcv-box')];
+      const inMiddle = (el: HTMLElement) => {
+        const box = el.getBoundingClientRect();
+        return box.left > view.left + 300 && box.right < view.right - 300 && box.top > view.top + 200 && box.bottom < view.bottom - 250;
+      };
+      const onScreen = (el: HTMLElement) => {
+        const box = el.getBoundingClientRect();
+        return box.left > view.left && box.right < view.right && box.top > view.top + 80 && box.bottom < view.bottom - 80;
+      };
+      const target = boxes.find(inMiddle) ?? boxes.find(onScreen);
+      if (!target) throw new Error(`no box on screen to drag (${boxes.length} boxes mounted)`);
+      const box = target.getBoundingClientRect();
+      const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      const fire = (type: string, x: number, y: number) => root.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y }));
+      fire('pointerdown', start.x, start.y);
+      return (window as unknown as { __frames: (ms: number, step: (t: number) => void) => Promise<number[]> })
+        .__frames(3000, (t) => fire('pointermove', start.x + Math.cos(t / 350) * 180 + 10, start.y + Math.sin(t / 350) * 120))
+        .then((times) => {
+          fire('pointerup', start.x, start.y);
+          return times;
+        });
+    });
+  await zoomTo100();
+  await page.waitForTimeout(300);
+  frameRow(`Canvas, ${count} objects, at 100%: drag an object with the pointer`, await pointerDrag(), interval);
+
+  // The measurement behind a rule in the guide: the board's element is not promoted to its own layer.
+  await page.getByRole('button', { name: 'Zoom to fit' }).first().click();
+  await page.waitForTimeout(300);
+  const fitPan = 'const a = (t / duration) * Math.PI * 4; send({ deltaX: Math.cos(a) * 18, deltaY: Math.sin(a) * 18 });';
+  const plain = stats(await wheel(3000, fitPan), Math.max(interval, SIXTY));
+  const style = await page.addStyleTag({ content: '.pcv-world { will-change: transform; }' });
+  await page.waitForTimeout(300);
+  const promoted = stats(await wheel(3000, fitPan), Math.max(interval, SIXTY));
+  await style.evaluate((el) => (el as Element).remove());
+  results.willChange = { plain, promoted };
+  row(
+    `Canvas, ${count} objects, whole board in view: why the board is not given its own layer`,
+    'without will-change it holds 60 fps; with it, it is recorded here',
+    `without: ${plain.meanFps} fps, worst ${plain.worst} ms. With will-change: transform: ${promoted.meanFps} fps, worst ${promoted.worst} ms`,
+    plain.slowShare <= BUDGET.slowFrameShare && plain.worst <= BUDGET.worstFrameMs,
+  );
+
+  // ── The heavy kinds: pictures, HTML items, cards, long notes ────────────
+  await open(page, `${server.url}/?bench=canvas&n=2000&rich`);
+  await page.waitForTimeout(600);
+  const kinds = await page.evaluate(() => {
+    const objects = Object.values((window as unknown as { __canvas: { store: { getDocument(): { objects: Record<string, { type: string }> } } } }).__canvas.store.getDocument().objects);
+    const of = (type: string) => objects.filter((object) => object.type === type).length;
+    return `${of('image')} pictures, ${of('html')} HTML items, ${of('reference')} cards, ${of('note')} long notes`;
+  });
+  results.richKinds = kinds;
+  frameRow(`Canvas, 2000 objects with ${kinds}, whole board in view: pan`, await wheel(4000, fitPan), interval);
+  await zoomTo100();
+  await page.waitForTimeout(500);
+  frameRow('Same board at 100% (pictures and HTML items drawn): pan across it', await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+  frameRow('Same board at 100%: drag an object with the pointer', await pointerDrag(), interval);
+
+  // ── 10,000 objects: past what the budgets were set for; measured so the number is known ──
+  await open(page, `${server.url}/?bench=canvas&n=10000`);
+  await page.waitForTimeout(800);
+  const big = await page.evaluate(() => Object.keys((window as unknown as { __canvas: { store: { getDocument(): { objects: object } } } }).__canvas.store.getDocument().objects).length);
+  frameRow(`Canvas, ${big} objects, whole board in view (${await mounted()} mounted): pan`, await wheel(4000, fitPan), interval);
+  await zoomTo100();
+  await page.waitForTimeout(500);
+  frameRow(`Canvas, ${big} objects, at 100% (${await mounted()} mounted): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+  frameRow(`Canvas, ${big} objects, at 100%: drag an object with the pointer`, await pointerDrag(), interval);
 } finally {
   await browser.close();
   server.stop();
