@@ -416,6 +416,7 @@ private struct ActionRow: View {
       }
       .buttonStyle(ChoiceStyle())
     }
+    .cardPart()
   }
 
   private func mark(_ next: ActionMarks.Mark?) {

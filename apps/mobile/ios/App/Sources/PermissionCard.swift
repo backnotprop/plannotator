@@ -152,6 +152,7 @@ struct PermissionCard: View {
         .disabled(empty)
       }
     }
+    .cardPart()
   }
 
   private func confirmFull(_ question: InboxQuestion) -> some View {

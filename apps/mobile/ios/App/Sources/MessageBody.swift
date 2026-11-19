@@ -47,7 +47,7 @@ enum MessageBody {
         if trimmed == ":::" {
           flush()
           // The block's own name, whole: `:::actions` is another block.
-          let kind = name.split(whereSeparator: { $0 == " " || $0 == "{" }).first.map(String.init) ?? name
+          let kind = String(name.prefix { $0.isLetter })
           if kind == "question", questions > 0 {
             if askedSoFar < questions { out.append(.question(askedSoFar)) }
             askedSoFar += 1

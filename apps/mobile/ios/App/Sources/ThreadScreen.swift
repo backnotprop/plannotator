@@ -140,6 +140,7 @@ struct ThreadScreen: View {
       .onPreferenceChange(CardFrames.self) { now in
         let before = cards
         cards.merge(now) { $1 }
+        if now[CardFrames.part] == nil { cards[CardFrames.part] = nil }
         // Only the card the person just touched follows its own growth (a pick's line, a note field, a reason):
         // a card that changes on its own (another device's answer, a refusal's line) never moves the page.
         if let key = scroll.fresh(within: 1.5), let old = before[key], let frame = now[key], frame.height > old.height + 1 { reveal(key, proxy) }
@@ -228,7 +229,10 @@ struct ThreadScreen: View {
   /// field, it is brought back over it. A card taller than the page is left where it is: the system keeps the
   /// field being typed in on screen, and the card's end would push that field off the top.
   private func reveal(_ key: String, _ proxy: ScrollViewProxy) {
-    guard let card = cards[key], scroll.height > 0, card.height + Self.margin * 2 <= scroll.height, card.maxY + Self.margin > scroll.bottom else { return }
+    guard let whole = cards[key], scroll.height > 0 else { return }
+    // The part of the card the person just opened (a reason and its buttons), when it says where it is.
+    let card = cards[CardFrames.part].flatMap { $0.intersects(whole) ? $0 : nil } ?? whole
+    guard card.height + Self.margin * 2 <= scroll.height, card.maxY + Self.margin > scroll.bottom else { return }
     // By its own distance, not by name: a named scroll rests the card on the page's edge under the keyboard.
     withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(y: scroll.top + card.maxY + Self.margin - scroll.bottom) }
   }
@@ -249,6 +253,8 @@ enum CardID {
 
 /// Where each card is in the thread's content.
 struct CardFrames: PreferenceKey {
+  /// The part of a card the person is filling in: a field with its buttons.
+  static let part = "part"
   static let defaultValue: [String: CGRect] = [:]
   static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
 }
@@ -271,6 +277,12 @@ struct CardPlace: ViewModifier {
 
 extension View {
   func card(_ key: String) -> some View { modifier(CardPlace(key: key)) }
+
+  /// A field and its buttons, opened inside a card: when the keyboard rises it is this, whole, that stays over the
+  /// reply field, even in a card taller than the page.
+  func cardPart() -> some View {
+    background { GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: [CardFrames.part: geometry.frame(in: .named("content"))]) } }
+  }
 }
 
 /// One message: plain text on the page, never a bubble; the person's own in the same column.
