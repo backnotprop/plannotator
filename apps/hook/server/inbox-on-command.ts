@@ -110,8 +110,9 @@ const INBOX_ON_WHY: Record<string, string> = {
   off: "turned off",
   "update-used": "kept on when Plannotator updated: the Inbox window had been used here",
   "update-ran": "kept on when Plannotator updated: plannotator inbox had been run here",
-  "update-agent-only": "off since Plannotator updated: only agents had started the Inbox here",
+  "update-agent-only": "off since Plannotator updated: nothing here showed the person had used the Inbox or run plannotator inbox",
   "update-slow": "kept on when Plannotator updated: the Inbox's files took too long to read",
+  "update-unreadable": "kept on when Plannotator updated: some of the Inbox's files could not be read",
 };
 
 /** `record-lost` reads the store again, so it can be either. */

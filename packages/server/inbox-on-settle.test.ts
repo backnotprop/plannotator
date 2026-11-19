@@ -148,6 +148,25 @@ describe("an install from before the rule, settled once", () => {
     expect(readFileSync(geminiNote(), "utf8")).toContain("a fact of mine");
   });
 
+  // D(c2): an Inbox from before the update still running would serve on while status says off: the decision stops it, once.
+  test("C with the old Inbox still running: decided off stops it, once; a person's use keeps it running", async () => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), "{}");
+    const stopped: string[] = [];
+    const stop = async (dir: string) => (stopped.push(dir), { state: "not_running" as const });
+    expect(await settleInboxOn(dataDir, { environment: e, env: REAL, stop })).toBe(false);
+    expect(await settleInboxOn(dataDir, { environment: e, env: REAL, stop })).toBe(false);
+    expect(stopped).toEqual([dataDir]);
+    expect(readFileSync(join(dataDir, "inbox", "inbox.log"), "utf8")).toContain('"stop":"not_running"');
+
+    const used = join(fake.root, "used");
+    mkdirSync(join(used, "inbox"), { recursive: true });
+    writeFileSync(join(used, "inbox", "inbox.json"), "{}");
+    writeFileSync(join(used, "inbox", "pins.json"), JSON.stringify({ t1: true }));
+    expect(await settleInboxOn(used, { environment: e, env: REAL, stop })).toBe(true);
+    expect(stopped).toEqual([dataDir]);
+  });
+
   // M3: each file on its own (Codex reads AGENTS.override.md first; the person edited the note in AGENTS.md).
   test("C with a Codex note in two files: the untouched one goes (the file keeps its other text), the edited one stays", async () => {
     mkdirSync(join(dataDir, "inbox"), { recursive: true });

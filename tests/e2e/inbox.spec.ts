@@ -25,6 +25,9 @@ import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { LISTED_AGENTS } from '../../apps/marketing/src/lib/inbox-agents';
+import { agentSetup, bareCommand, forbiddenCommand, llmsInboxSetup, promptSetup, setupCommands, TURN_ON, type SetupText } from '../../apps/marketing/src/lib/setup-texts';
+import { INBOX_OFF_LEAD } from '../../packages/shared/inbox/inbox-on-contract';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -1030,6 +1033,72 @@ test('Inbox on over SSH with no terminal: plannotator inbox --open turns it on, 
     expect(existsSync(join(env.PLANNOTATOR_DATA_DIR, 'inbox', 'inbox.json'))).toBe(true);
   } finally {
     await removeInboxScratch(root);
+  }
+});
+
+/**
+ * The first setup, as an agent follows it, against the compiled binary with the real rule on a fresh computer: the
+ * setup script, the llms Inbox page and the Claude Code and Codex pages (apps/marketing/src/lib/setup-texts.ts), each
+ * with and without SSH_CONNECTION, stdin never a terminal. Every command an agent runs from them, in their order:
+ * none is refused with the off line, each returns within the timeout (bare `plannotator inbox` would serve in the
+ * foreground: setup-order.test.ts keeps it and `--background` out of every page), and once the turn-on has run,
+ * `plannotator inbox mcp` lists the tools and the script's first message is sent. The order of every other page is
+ * held by apps/marketing/setup-order.test.ts.
+ */
+test('First setup: the setup script, the llms page, the Claude Code and Codex pages run in order: never refused, each returns, tools after the turn-on', async () => {
+  const promptSource = readFileSync(join(repo, 'apps/marketing/src/lib/inbox-prompt.md'), 'utf8');
+  const agent = (slug: string) => agentSetup(LISTED_AGENTS.find((a) => a.slug === slug)!);
+  const pages: SetupText[] = [promptSetup(promptSource), llmsInboxSetup(), agent('claude-code'), agent('codex')];
+  const RETURNS_WITHIN_MS = 30_000;
+  /** What an agent runs from a page: the read-only commands, the turn-on and the MCP server. */
+  const runnable = (command: string) => /^plannotator (?:--version|--help|inbox --help|inbox call --help|inbox --open|inbox mcp)(?:\s|$)/.test(bareCommand(command));
+  const mcpInit = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'setup-walk', version: '1' } } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+  ];
+  for (const page of pages) {
+    for (const ssh of [false, true]) {
+      const where = `${page.name}${ssh ? ' over SSH' : ''}`;
+      const root = inboxScratch('plannotator-inbox-setup-walk-e2e-');
+      try {
+        const env = realRuleEnv(root, ssh ? { SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22' } : {});
+        const commands = setupCommands(page.text).filter(runnable);
+        expect([where, commands.includes(TURN_ON)]).toEqual([where, true]);
+        let on = false;
+        for (const command of commands) {
+          expect([where, command, forbiddenCommand(command)]).toEqual([where, command, null]);
+          const assignments = Object.fromEntries([...command.slice(0, command.length - bareCommand(command).length).matchAll(/([A-Z_]+)=(\S+)/g)].map((m) => [m[1]!, m[2]!]));
+          const args = bareCommand(command).replace(/\s*<.*$/, '').split(/\s+/).slice(1);
+          let input: string | undefined;
+          if (args[0] === 'inbox' && args[1] === 'mcp') {
+            // `inbox mcp < first.json`: the script's first message, as the script has the agent write it (one line, no initialize).
+            const first = command.includes('<') ? page.text.slice(page.text.indexOf(command)).match(/```json\n(.*)\n```/)?.[1] : undefined;
+            input = first ? `${first.replaceAll('AGENT_NAME', 'Codex').replaceAll('AGENT_HOST', 'codex')}\n` : mcpInit.map((m) => JSON.stringify(m)).join('\n') + '\n';
+          }
+          const started = Date.now();
+          const run = spawnSync(builtBinary, args, { env: { ...env, ...assignments }, encoding: 'utf8', timeout: RETURNS_WITHIN_MS, input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+          const said = `${run.stdout}${run.stderr}`;
+          expect([where, command, run.error?.message ?? null, run.status]).toEqual([where, command, null, 0]);
+          expect(Date.now() - started).toBeLessThan(RETURNS_WITHIN_MS);
+          expect([where, command, said.includes(INBOX_OFF_LEAD)]).toEqual([where, command, false]);
+          if (bareCommand(command) === TURN_ON) {
+            on = true;
+            expect(run.stdout.trim()).toMatch(/^http:\/\/(?:localhost|127\.0\.0\.1):\d+\/?$/);
+            expect(recordIn(env.PLANNOTATOR_DATA_DIR)).toMatchObject({ on: true, by: 'command' });
+          }
+          if (args[0] === 'inbox' && args[1] === 'mcp') {
+            // setup-order.test.ts holds the turn-on before every other Inbox command; here the MCP server proves it on.
+            expect([where, command, on]).toEqual([where, command, true]);
+            const answers = run.stdout.trim().split('\n').map((l) => JSON.parse(l) as { id?: number; result?: { tools?: unknown[]; structuredContent?: { thread_id?: string } } });
+            if (input?.includes('"tools/list"')) expect(answers.find((a) => a.id === 2)?.result?.tools?.length ?? 0).toBeGreaterThan(0);
+            else expect(answers.find((a) => a.id === 1)?.result?.structuredContent?.thread_id).toBeTruthy();
+          }
+        }
+      } finally {
+        await removeInboxScratch(root);
+      }
+    }
   }
 });
 

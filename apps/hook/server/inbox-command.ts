@@ -7,9 +7,10 @@
  *                                   URL, exit 0; what agents and the shim run
  *   plannotator inbox --no-open     run here without opening a browser
  *   plannotator inbox --open        open it in the browser, starting it
- *                                   detached first when it is not running;
- *                                   print the URL, exit 0 (never blocks: what
- *                                   the /plannotator-inbox commands run)
+ *                                   detached first when it is not running,
+ *                                   and connect the agents it finds; print
+ *                                   the URL, exit 0 (never blocks: what the
+ *                                   setup texts and /plannotator-inbox run)
  *   plannotator inbox --open <thread>
  *                                   show that thread in the Inbox window open
  *                                   on this computer (the one used last), or
@@ -607,7 +608,10 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
   }
   for (const line of inboxOnStatusLines(dataDir)) out(line);
   out(`  data dir: ${dataDir}`);
-  if (status.state === "running" && status.health.version !== cliVersion) {
+  if (status.state === "running" && !inboxOnStatus(dataDir).on) {
+    // An Inbox from before the update that the decision could not stop: agents are refused, so say how it ends.
+    out("This Inbox still runs though the Inbox is off here: plannotator inbox stop stops it.");
+  } else if (status.state === "running" && status.health.version !== cliVersion) {
     // Restart runs this binary, so it is advised only when that is an update, never a downgrade.
     out(
       isNewerStableVersion(cliVersion, status.health.version)
@@ -949,6 +953,9 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       if (open && !opened && (await openBrowserDetached(url, { isRemote: isRemoteSession() })) === "remote") {
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
+      // --open is the setup's one step (it returns, where bare `plannotator inbox` may serve in the foreground): it
+      // connects the agents it finds, as the person's bare run does, and names them on stderr.
+      if (open && connect) await connectRunningInbox(entry);
       process.stdout.write(`${url}\n`);
       process.exit(0);
     } catch (error) {

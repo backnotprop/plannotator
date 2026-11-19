@@ -54,6 +54,15 @@ describe('Turn the Inbox off', () => {
     expect(screen?.querySelector('code')?.textContent).toBe('plannotator inbox');
   });
 
+  // The review pages' Settings switch turns the Inbox on too: the row never says plannotator inbox is the only way back.
+  test.skipIf(!hasDom)('the row names both ways back on', async () => {
+    await mount(async () => ({ ok: true, lines: [] }));
+    const row = document.querySelector('#ib-g-inbox-on')?.parentElement?.textContent ?? '';
+    expect(row).toContain('plannotator inbox');
+    expect(row).toContain("a review's Settings");
+    expect(row).not.toContain('nothing starts it again');
+  });
+
   test.skipIf(!hasDom)('a failed Turn off says why and leaves the switch to try again', async () => {
     await mount(async () => {
       throw new Error("Could not turn the Plannotator Inbox off: state.json in Plannotator's data folder could not be written.");

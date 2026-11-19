@@ -19,6 +19,8 @@
 import { createPlanStore } from "@plannotator/shared/plans/store";
 import { PLANS_SWITCH_NOT_SAVED, plansOn, setPlansSwitch } from "@plannotator/shared/plans/switch";
 import { inboxStatus } from "@plannotator/shared/inbox/registry";
+import { isInboxOn } from "@plannotator/shared/inbox/inbox-on";
+import { INBOX_OFF_LEAD } from "@plannotator/shared/inbox/inbox-on-contract";
 import type { PlanSummary } from "@plannotator/core/plans";
 import { PLANS_COMMAND_USAGE } from "./cli";
 
@@ -44,7 +46,12 @@ export interface PlansCommandDeps {
   listWaitMs?: number;
   /** How long the switch waits on a running Inbox before writing config.json itself. */
   switchTimeoutMs?: number;
+  /** Whether the Inbox is on here (`isInboxOn`): Plans opens in it, so bare `plans` needs it on. */
+  inboxOn?: () => boolean;
 }
+
+/** Bare `plannotator plans` while the Inbox is off: Plans lives in the Inbox, and `plans` is not a way to turn it on. */
+export const PLANS_INBOX_OFF_TEXT = `${INBOX_OFF_LEAD}, and Plans opens in it. Turn the Inbox on with plannotator inbox, then run plannotator plans.`;
 
 /** The running Inbox, else null; never starts one. */
 const runningInboxOf = (deps: PlansCommandDeps) =>
@@ -108,6 +115,10 @@ export async function runPlansCommand(argv: readonly string[], deps: PlansComman
   }
 
   if (which === undefined) {
+    if (!(deps.inboxOn ?? (() => isInboxOn(deps.dataDir)))()) {
+      err(PLANS_INBOX_OFF_TEXT);
+      return 1;
+    }
     if (!(await savePlansSwitch(true, deps))) {
       err(`config_not_saved: ${PLANS_SWITCH_NOT_SAVED}`);
       return 1;

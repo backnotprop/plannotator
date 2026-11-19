@@ -21,7 +21,7 @@ export const INBOX_ON_FILE = 'state.json'
  * `update-used` (the person used the window), `update-ran` (the person ran
  * `plannotator inbox`), `update-agent-only` (only agents ever started it),
  * `update-never-ran`, `update-slow` (the store took too long to read: kept
- * on). `record-lost`: a record existed here once (the decided mark,
+ * on), `update-unreadable` (a store file could not be read: kept on). `record-lost`: a record existed here once (the decided mark,
  * INBOX_ON_DECIDED_FILE) and is gone (state.json deleted or set aside as
  * corrupt), and the mark held no copy of it: the store was read again (on
  * when the person used the Inbox, else off). A copy in the mark comes back
@@ -36,6 +36,7 @@ export type InboxOnBy =
   | 'update-agent-only'
   | 'update-never-ran'
   | 'update-slow'
+  | 'update-unreadable'
   | 'record-lost'
 
 /**

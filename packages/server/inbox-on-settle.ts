@@ -5,7 +5,8 @@
  *
  *  - settleInboxOn: decide an install from before the rule (once) and, for one
  *    decided off with `notes: 'remove'` (only agents ever started its Inbox),
- *    remove Plannotator's own untouched notes, once: what cannot go is
+ *    stop an Inbox still running from before the update and remove
+ *    Plannotator's own untouched notes, once: what cannot go is
  *    logged and never retried by itself (Turn off tries again). The CLI runs it
  *    at the start of every `plannotator inbox` command and in `plannotator
  *    inbox migrate`, which the Claude Code mod runs once when the record is
@@ -100,7 +101,10 @@ function notesLine(cleared: InboxNotesCleared): Record<string, unknown> {
  * an agent-only decision left to do, once. Idempotent: a decided record with
  * nothing pending is only read. Answers whether the Inbox is on.
  */
-export async function settleInboxOn(dataDir: string, options: { environment?: AgentEnvironment; env?: Readonly<Record<string, string | undefined>> } = {}): Promise<boolean> {
+export async function settleInboxOn(
+  dataDir: string,
+  options: { environment?: AgentEnvironment; env?: Readonly<Record<string, string | undefined>>; stop?: (dataDir: string) => Promise<InboxStopResult> } = {},
+): Promise<boolean> {
   const before = readInboxOnRecord(dataDir);
   // isInboxOn decides an undecided install (and writes the record), the one rule for it.
   const on = isInboxOn(dataDir, options.env ?? process.env);
@@ -111,13 +115,15 @@ export async function settleInboxOn(dataDir: string, options: { environment?: Ag
   if (!record) return on;
   if (!before) logInboxOn(dataDir, { decided: record.by, on: record.on });
   if (record.on || record.notes !== "remove") return record.on;
+  // Decided off: an Inbox still running from before the update stops, as Turn off stops it, so status and agents agree.
+  const stop = await (options.stop ?? ((dir: string) => stopInbox(dir, { escalate: true })))(dataDir).catch(() => undefined);
   const cleared = removeUntouchedInboxNotes(dataDir, e);
   // Decided off: the routines' start at login would bring the Inbox back at the next login.
   const login = await removeLoginItem(dataDir, e);
   // Once: what could not go is logged, never retried by itself (Turn off tries again and names it).
   const next: InboxOnRecord = withoutNotes(record);
   writeInboxOnRecord(dataDir, next, { ifCurrent: record });
-  logInboxOn(dataDir, { settled: record.by, ...loginLine(login), ...notesLine(cleared) });
+  logInboxOn(dataDir, { settled: record.by, ...(stop ? { stop: stop.state } : {}), ...loginLine(login), ...notesLine(cleared) });
   return false;
 }
 

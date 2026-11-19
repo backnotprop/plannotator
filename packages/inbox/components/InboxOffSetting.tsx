@@ -71,7 +71,7 @@ export function InboxOffSetting({ post = apiPost }: { post?: typeof apiPost }) {
           <span className="ib-txt">
             <span className="ib-l">The Inbox is on</span>
             <span className="ib-desc">
-              Agents on this computer can leave you messages and questions here. Turn it off and they stop: nothing starts it again until you run <code>plannotator inbox</code>.
+              Agents on this computer can leave you messages and questions here. Turn it off and they stop until you turn it back on: run <code>plannotator inbox</code>, or use the Plannotator Inbox switch in a review's Settings.
             </span>
             {failed ? (
               <span className="ib-desc" role="alert" data-inbox-off-failed="">

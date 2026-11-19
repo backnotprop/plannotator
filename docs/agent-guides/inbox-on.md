@@ -25,14 +25,14 @@ The writers are `turnInboxOn(by)`, `recordInboxOff()` and `writeInboxOnRecord()`
 - `command`: a run of `plannotator inbox` (`/plannotator-inbox` runs it).
 - `settings`: the Settings switch.
 - `off`: Turn the Inbox off.
-- `update-used`, `update-ran`, `update-agent-only`, `update-slow`: the one-time decision for an install from before the rule (below).
+- `update-used`, `update-ran`, `update-agent-only`, `update-slow`, `update-unreadable`: the one-time decision for an install from before the rule (below).
 - `record-lost`: see the decided mark above.
 
 `notes: 'remove'` means Plannotator's untouched notes in agents' instruction files are still to be removed. It is dropped after one try, whatever that removed: nothing retries by itself, the log names what stayed, and each `plannotator inbox off` tries again and names it.
 
 ### What turns it on
 
-- **A run of `plannotator inbox`**: bare, `--no-open` or `--open`, whoever runs it (`inboxRunMayStart` in `apps/hook/server/inbox-on-command.ts`). `/plannotator-inbox` on every host just runs `plannotator inbox --open`. A record that cannot be written is said plainly (`INBOX_ON_NOT_SAVED`) and nothing starts.
+- **A run of `plannotator inbox`**: bare, `--no-open` or `--open`, whoever runs it (`inboxRunMayStart` in `apps/hook/server/inbox-on-command.ts`). `/plannotator-inbox` on every host just runs `plannotator inbox --open`, which also connects the agents it finds (as bare does) and returns. A record that cannot be written is said plainly (`INBOX_ON_NOT_SAVED`) and nothing starts.
 - **Opening the window and pairing a phone** need a running Inbox, and an Inbox runs only while the record is on, so they need no write of their own.
 - **The Settings switch** in plan review, code review and annotate (`POST /api/config { inboxOn: true }`, `turnInboxOn("settings")`, both runtimes). No guard, by the owner's ruling: anything that can reach the local server can already run `plannotator inbox`. The row is a plain on/off switch; it shows only to someone who had the Inbox on when the page loaded (`serverConfig.inboxOn`).
 
@@ -86,11 +86,19 @@ Every decision and every Turn off leaves one line in `inbox/inbox.log` (`ev: "in
 
 The answer starts "The Plannotator Inbox is off on this computer: agents lose it from their next session." and ends with "Turn it back on any time with plannotator inbox." There is no confirmation: turning it back on is one command. The removed agents leave `inboxAgentNotes.asked`, so turning the Inbox on again writes their notes back.
 
+### The setup texts
+
+Every setup text an agent follows has the same first Inbox step, `plannotator inbox --open` (`TURN_ON` in `apps/marketing/src/lib/inbox-agents.ts`): the setup script `/inbox/prompt.md`, the llms Inbox page's setup section, every `/llms/agents/<slug>.md`, the plannotator skill and `inbox --help`'s "Connecting yourself". It turns the Inbox on, starts it detached, opens it, connects the agents it finds, prints the URL and returns, with or without a screen. It comes before any connection, config edit, restart or "you should see": a host decides the tool at start, so a session started before the turn-on never gets it. No setup text gives an agent `--background` (refused while off) or bare `plannotator inbox` (it serves in the foreground when no Inbox runs, and never returns in an agent's shell).
+
+Held by `apps/marketing/setup-order.test.ts` (every page, from `apps/marketing/src/lib/setup-texts.ts`), `apps/hook/server/inbox-help-setup.test.ts` (the guide, its usage and the skill) and the compiled-binary walk in `tests/e2e/inbox.spec.ts` ("First setup", Browser smoke: the script, the llms page, the Claude Code and Codex pages, with and without SSH).
+
+Bare `plannotator plans` while off refuses with one line that says the Inbox is off and how to turn it on (`PLANS_INBOX_OFF_TEXT`), and saves nothing: Plans lives in the Inbox, and is not a way on.
+
 The plan review / code review / annotate row shows only while `serverConfig.inboxOn` is true (`getServerConfig`), so it never pushes the Inbox at someone who did not turn it on. It is a new optional prop on `@plannotator/ui`'s Settings (`inboxOnSetting`, `onInboxOnChange`, `useInboxOnSetting`). A host that passes neither gets no row.
 
 ### Existing installs, decided once
 
-An install from before the rule has no record. `isInboxOn` decides it once (`decideExistingInstall`), writes the record (a compare-and-set: a person's on or off written meanwhile stays), and logs `ev: "inbox_on"` to `inbox/inbox.log`. The store read stops after `INBOX_SCAN_BUDGET_MS` (5 s); a store not read by then is kept on as `update-slow`, so status does not claim the window was used. A store file or folder that is there but cannot be read (permissions, an I/O error, unparseable JSON) counts as used: in doubt, on. A decision whose write fails is kept in the process, so the store is not read again on every check.
+An install from before the rule has no record. `isInboxOn` decides it once (`decideExistingInstall`), writes the record (a compare-and-set: a person's on or off written meanwhile stays), and logs `ev: "inbox_on"` to `inbox/inbox.log`. The store read stops after `INBOX_SCAN_BUDGET_MS` (5 s); a store not read by then is kept on as `update-slow`, so status does not claim the window was used. A store file or folder that is there but cannot be read (permissions, an I/O error, unparseable JSON) keeps it on as `update-unreadable` when nothing else shows use: in doubt, on, and status says the files could not be read. A decision whose write fails is kept in the process, so the store is not read again on every check.
 
 - **A, used the window: on.** Any one of these counts:
   - config.json `inboxNotifications`;
@@ -106,9 +114,9 @@ An install from before the rule has no record. `isInboxOn` decides it once (`dec
   - `inbox/agents.json` exists. Only a person's non-detached run (its connect step), Settings → Agents and uninstall write it.
   - config.json `inboxTool` turns the tool on for a host.
 
-  Gap: a person who ran it only with `PLANNOTATOR_INBOX_CONNECT=0` and never used the window reads as C. An agent whose bare `plannotator inbox` wrote `agents.json` reads as B ("keep on" when in doubt).
+  Gap: a person who ran it only with `PLANNOTATOR_INBOX_CONNECT=0` and never used the window reads as C. Nothing on disk shows such a run (0.29's start trace is written only with the debug log on, and opening the window writes nothing by itself), so status says only that nothing showed the person's use. They turn it on again with `plannotator inbox`. An agent whose bare `plannotator inbox` wrote `agents.json` reads as B ("keep on" when in doubt).
 - **C, only agents started it: off,** with `notes: 'remove'`.
-  - The CLI (`settleInboxOn` at every `plannotator inbox` command, and `plannotator inbox migrate`) removes Plannotator's untouched notes in the same run, never an edited one, once, and removes the routines' start at login (it would start the Inbox again at the next login).
+  - The CLI (`settleInboxOn` at every `plannotator inbox` command, and `plannotator inbox migrate`) stops an Inbox still running from before the update (as Turn off does), removes Plannotator's untouched notes in the same run, never an edited one, once, and removes the routines' start at login (it would start the Inbox again at the next login). An Inbox it could not stop shows in `plannotator inbox status` with the line to stop it.
   - The mod reads the decided mark's copy itself when state.json has no record (so a `plannotator` older than the rule cannot answer on for it); with no copy, it runs `plannotator inbox migrate` once when `inbox/inbox.json` or the mark exists; after that the record decides, so no later session start runs it.
 - **D, never ran: off.** Nothing is written: the first record there is the person's own act.
 
@@ -129,12 +137,14 @@ The tests and their scratch-only knob:
   - `packages/shared/inbox/inbox-on.test.ts`;
   - `packages/server/inbox-on-settle.test.ts`;
   - `apps/hook/server/inbox-on-command.test.ts` (the run kinds, the login item's marker, status, the shim under the MCP SDK client);
-  - `apps/hook/hooks/mod/inbox-on-contract.test.ts`.
+  - `apps/hook/hooks/mod/inbox-on-contract.test.ts`;
+  - `apps/hook/server/plans-command.test.ts` (bare `plans` while off);
+  - `apps/marketing/setup-order.test.ts` and `apps/hook/server/inbox-help-setup.test.ts` (the setup texts).
 - **The engine harness:** the "Whether the person turned the Inbox on here" block in `apps/hook/tests/register.test.ts`. Its `world()` seeds an on record unless a test passes `inbox: 'off' | 'undecided'`.
 - **Started-Inbox tests (CI):** `packages/server/inbox-off-route.test.ts`.
 - **DOM tests:** `packages/ui/components/Settings.inboxOn.test.tsx` and `packages/inbox/inboxOffSetting.test.tsx`.
 
-Host off proofs: `tests/inbox-off-hosts.test.ts` (OpenCode, DSH, Cline, OpenClaw, Hermes) and `apps/pi-extension/inbox-off.test.ts`. The CLI as a process: `apps/hook/server/inbox-off-cli.test.ts` (CI). The compiled binary with the real rule: the last test of `tests/e2e/inbox.spec.ts` (Browser smoke).
+Host off proofs: `tests/inbox-off-hosts.test.ts` (OpenCode, DSH, Cline, OpenClaw, Hermes) and `apps/pi-extension/inbox-off.test.ts`. The CLI as a process: `apps/hook/server/inbox-off-cli.test.ts` (CI). The compiled binary with the real rule: the last tests of `tests/e2e/inbox.spec.ts` (Browser smoke), the first setup's walk among them.
 
 **The test knob.** A test suite starts Inboxes in fresh scratch data dirs. An undecided scratch data dir counts as on only when a variable that only tests set says so: `PLANNOTATOR_TEST_INBOX_ON=1`, or the test sandbox marker `PLANNOTATOR_TEST_SANDBOX` (the unit preload and the import-time sandbox set it; nothing outside a test run does). Nothing else counts: a real machine with HOME or the data dir under `/tmp` (a container, a CI image) follows the real rule.
 - `scratchEnv()` in `tests/e2e/inbox-scratch.ts`, every e2e spawn env (`tests/e2e-spawn-home.test.ts` checks it), `createFakeAgents().env` and `worldEnv` set `PLANNOTATOR_TEST_INBOX_ON=1`.

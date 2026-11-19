@@ -13,6 +13,7 @@
  *    them, `settleInboxOn` in packages/server/inbox-on-settle.ts);
  *  - it never ran here: off.
  * The store's files too slow to read in time: on (`update-slow`, in doubt, on).
+ * A store file there but unreadable: on (`update-unreadable`, in doubt, on).
  *
  * A lost or corrupt state.json, where a record existed: the record comes back
  * from the decided mark, which keeps a copy of the last one written (so an off
@@ -134,7 +135,7 @@ export function decideExistingInstall(dataDir: string = getPlannotatorDataDir(),
   else if (!existsSync(join(dataDir, "inbox"))) return { on: false, at, by: "update-never-ran" };
   else {
     const use = inboxUseOnDisk(dataDir);
-    const by: InboxOnBy = use === "used" ? "update-used" : use === "slow" ? "update-slow" : use === "ran" ? "update-ran" : "update-agent-only";
+    const by: InboxOnBy = use === "used" ? "update-used" : use === "slow" ? "update-slow" : use === "unreadable" ? "update-unreadable" : use === "ran" ? "update-ran" : "update-agent-only";
     record = { on: use !== null, at, by, ...(by === "update-agent-only" ? { notes: "remove" as const } : {}) };
   }
   const stored = writeInboxOnRecord(dataDir, record, { ifAbsent: true });
@@ -220,7 +221,7 @@ export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord, optio
  * Inbox: the cheap files (inboxUseFromFiles), then the store itself. null:
  * nothing the person did (only agents started it, or it never ran).
  */
-export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BUDGET_MS): InboxUseEvidence | "slow" | null {
+export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BUDGET_MS): InboxUseEvidence | "slow" | "unreadable" | null {
   const files = inboxUseFromFiles({
     config: readText(join(dataDir, "config.json")),
     state: readText(join(dataDir, INBOX_ON_FILE)),
@@ -229,13 +230,13 @@ export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BU
   if (files === "used") return "used";
   const store = storeShowsPersonUse(join(dataDir, "inbox"), Date.now() + budgetMs);
   if (store === "used") return "used";
-  // A slow store is kept on, but said as such: `ran` is still the truer reason when there is one.
-  if (store === "slow") return files ?? "slow";
+  // A slow or unreadable store is kept on, but said as such: `ran` is still the truer reason when there is one.
+  if (store === "slow" || store === "unreadable") return files ?? store;
   return files;
 }
 
-/** What the store shows: the person's use, too slow to read by the deadline (counts as used), or nothing. */
-export type StoreUse = "used" | "slow" | null;
+/** What the store shows: the person's use, too slow to read by the deadline, a file there that could not be read (both count as used), or nothing. */
+export type StoreUse = "used" | "slow" | "unreadable" | null;
 
 /** Not there at all: the one read failure that means "nothing", not "could not read". */
 function missing(error: unknown): boolean {
@@ -252,65 +253,74 @@ function missing(error: unknown): boolean {
  * a draft, a paired device, a linked machine or the relay, a snooze, a
  * search. A store not yet returned from SQLite (`inbox.db`) counts as used, so
  * no user of it is cut off. Stops at the first hit. A file or folder that is
- * there but cannot be read (permissions, an I/O error, unparseable JSON)
- * counts as used: in doubt, on. A store too large to read by `deadline` is
- * `slow` (kept on, said as such), so the decision is bounded in time.
+ * there but cannot be read (permissions, an I/O error, unparseable JSON) is
+ * `unreadable` when nothing else shows use: in doubt, on, said as such. A store
+ * too large to read by `deadline` is `slow` (kept on, said as such), so the
+ * decision is bounded in time.
  */
 export function storeShowsPersonUse(inboxDir: string, deadline: number = Date.now() + INBOX_SCAN_BUDGET_MS): StoreUse {
+  // A file that could not be read: kept as the answer only when nothing else shows use.
+  let doubt: StoreUse = null;
+  const seen = (found: StoreUse): boolean => {
+    if (found === "unreadable") doubt = "unreadable";
+    return found === "used" || found === "slow";
+  };
   if (existsSync(join(inboxDir, "inbox.db"))) return "used";
-  if (nonEmptyFile(join(inboxDir, "devices.jsonl"))) return "used";
+  const devices = nonEmptyFile(join(inboxDir, "devices.jsonl"));
+  if (seen(devices)) return devices;
   for (const name of ["pins.json", "machines.json", "relay.json", "snoozes.json", "recent-searches.json"]) {
-    if (nonEmptyJson(join(inboxDir, name))) return "used";
+    const found = nonEmptyJson(join(inboxDir, name));
+    if (seen(found)) return found;
   }
   for (const folder of ["drafts", "reply-drafts"]) {
     try {
       if (readdirSync(join(inboxDir, folder)).some((name) => name.endsWith(".json"))) return "used";
     } catch (error) {
-      if (!missing(error)) return "used";
+      if (!missing(error)) doubt = "unreadable";
     }
   }
   let projects: string[];
   try {
     projects = readdirSync(join(inboxDir, "projects"));
   } catch (error) {
-    return missing(error) ? null : "used";
+    return missing(error) ? doubt : "unreadable";
   }
   for (const project of projects) {
     if (Date.now() > deadline) return "slow";
     for (const [file, test] of [["messages.jsonl", personMessageLine], ["questions.jsonl", pickedQuestionLine]] as const) {
       const found = linesMatch(join(inboxDir, "projects", project, file), test, deadline);
-      if (found) return found;
+      if (seen(found)) return found;
     }
   }
-  return null;
+  return doubt;
 }
 
 /** How long the one-time decision may read the store (the Claude Code mod waits on it once). */
 export const INBOX_SCAN_BUDGET_MS = 5_000;
 
-function nonEmptyFile(path: string): boolean {
+function nonEmptyFile(path: string): StoreUse {
   try {
-    return statSync(path).size > 0;
+    return statSync(path).size > 0 ? "used" : null;
   } catch (error) {
-    return !missing(error);
+    return missing(error) ? null : "unreadable";
   }
 }
 
-/** A JSON file with something in it; one that is there but unreadable or unparseable counts too. */
-function nonEmptyJson(path: string): boolean {
+/** A JSON file with something in it: used; one that is there but unreadable or unparseable: unreadable. */
+function nonEmptyJson(path: string): StoreUse {
   let text: string;
   try {
     text = readFileSync(path, "utf-8");
   } catch (error) {
-    return !missing(error);
+    return missing(error) ? null : "unreadable";
   }
-  if (!text.trim()) return false;
+  if (!text.trim()) return null;
   try {
     const value = JSON.parse(text) as unknown;
-    if (Array.isArray(value)) return value.length > 0;
-    return !!value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
+    if (Array.isArray(value)) return value.length > 0 ? "used" : null;
+    return !!value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0 ? "used" : null;
   } catch {
-    return true;
+    return "unreadable";
   }
 }
 
@@ -358,14 +368,14 @@ function pickedQuestionLine(line: string): boolean {
   return typeof record?.picked_at === "string" && record.picked_at !== "";
 }
 
-/** Whether any line of a JSONL file passes `test`, read in chunks so a large store stops at the first hit; past `deadline`, true. */
-/** "used" at the first matching line or a read error, "slow" past the deadline, null when no line matches. */
+/** Whether any line of a JSONL file passes `test`, read in chunks so a large store stops at the first hit. */
+/** "used" at the first matching line, "unreadable" on a read error, "slow" past the deadline, null when no line matches. */
 function linesMatch(path: string, test: (line: string) => boolean, deadline: number): StoreUse {
   let fd: number;
   try {
     fd = openSync(path, "r");
   } catch (error) {
-    return missing(error) ? null : "used";
+    return missing(error) ? null : "unreadable";
   }
   try {
     const chunk = Buffer.alloc(1 << 20);
@@ -383,7 +393,7 @@ function linesMatch(path: string, test: (line: string) => boolean, deadline: num
     rest += decoder.end();
     return rest !== "" && test(rest) ? "used" : null;
   } catch {
-    return "used";
+    return "unreadable";
   } finally {
     closeSync(fd);
   }

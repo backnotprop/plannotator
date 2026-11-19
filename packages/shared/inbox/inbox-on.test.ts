@@ -231,18 +231,27 @@ describe("an install from before the rule", () => {
     expect(inboxUseOnDisk(dataDir, -1)).toBe("slow");
   });
 
-  // D1: a read error is not "nothing there": in doubt, on.
-  test("a store file or folder that is there but cannot be read counts as used", () => {
+  // D1: a read error is not "nothing there": in doubt, on, and said as unreadable (never as the window's use).
+  test("a store file or folder that is there but cannot be read is unreadable: kept on as update-unreadable", () => {
     write(inbox("projects", "p1", "messages.jsonl"), line(agentMessage) + "\n");
     expect(storeShowsPersonUse(inbox())).toBeNull();
     chmodSync(inbox("projects", "p1", "messages.jsonl"), 0o000);
     try {
       // root reads it anyway (a CI container): the broken JSON below still covers the rule there.
-      if (process.getuid?.() !== 0) expect(storeShowsPersonUse(inbox())).toBe("used");
+      if (process.getuid?.() !== 0) expect(storeShowsPersonUse(inbox())).toBe("unreadable");
     } finally {
       chmodSync(inbox("projects", "p1", "messages.jsonl"), 0o600);
     }
     write(inbox("pins.json"), "{ broken");
+    expect(storeShowsPersonUse(inbox())).toBe("unreadable");
+    write(inbox("inbox.json"), "{}");
+    expect(isInboxOn(dataDir, REAL)).toBe(true);
+    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "update-unreadable" });
+  });
+
+  test("the person's use found past an unreadable file is still used", () => {
+    write(inbox("pins.json"), "{ broken");
+    write(inbox("projects", "p1", "messages.jsonl"), line({ id: "m2", author: { kind: "person" }, body: "Go." }, 2) + "\n");
     expect(storeShowsPersonUse(inbox())).toBe("used");
   });
 

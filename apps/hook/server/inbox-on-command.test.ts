@@ -113,10 +113,15 @@ describe("plannotator inbox status", () => {
   });
 
   // D1: a slow store is kept on, and status says so instead of claiming the window was used.
-  test("a slow store and a re-read lost record say what happened", () => {
+  test("a slow or unreadable store, an agent-only decision and a re-read lost record say what happened", () => {
     const at = "2026-11-18T09:00:00.000Z";
     writeInboxOnRecord(dataDir, { on: true, at, by: "update-slow" });
     expect(inboxOnStatusLines(dataDir)).toEqual([`  turned:   on (kept on when Plannotator updated: the Inbox's files took too long to read, ${at})`]);
+    writeInboxOnRecord(dataDir, { on: true, at, by: "update-unreadable" });
+    expect(inboxOnStatusLines(dataDir)).toEqual([`  turned:   on (kept on when Plannotator updated: some of the Inbox's files could not be read, ${at})`]);
+    // A person who ran it with PLANNOTATOR_INBOX_CONNECT=0 and never touched the window leaves no trace: never "only agents".
+    writeInboxOnRecord(dataDir, { on: false, at, by: "update-agent-only" });
+    expect(inboxOnStatusLines(dataDir)).toEqual([`  turned:   off (off since Plannotator updated: nothing here showed the person had used the Inbox or run plannotator inbox, ${at})`]);
     writeInboxOnRecord(dataDir, { on: true, at, by: "record-lost" });
     expect(inboxOnStatusLines(dataDir)).toEqual([`  turned:   on (kept on: its record in state.json was lost and the Inbox had been used here, ${at})`]);
   });

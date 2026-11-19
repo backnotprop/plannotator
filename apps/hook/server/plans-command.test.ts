@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPlanStore } from "@plannotator/shared/plans/store";
-import { PLANS_COMMAND_USAGE, PLANS_OFF_TEXT, runPlansCommand, type PlansCommandDeps } from "./plans-command";
+import { PLANS_COMMAND_USAGE, PLANS_INBOX_OFF_TEXT, PLANS_OFF_TEXT, runPlansCommand, type PlansCommandDeps } from "./plans-command";
 
 let dataDir = "";
 let savedEnv: string | undefined;
@@ -54,6 +54,7 @@ function cli(overrides: Partial<PlansCommandDeps> = {}) {
     }) as unknown as typeof fetch,
     stdout: (text) => out.push(text),
     stderr: (text) => err.push(text),
+    inboxOn: () => true,
     ...overrides,
   };
   return { run: (...argv: string[]) => runPlansCommand(argv, deps), out, err, calls };
@@ -71,6 +72,16 @@ describe("plannotator plans", () => {
     }
     expect(PLANS_OFF_TEXT).toContain("`plannotator plans`");
     expect(readdirSync(dataDir)).toEqual([]);
+  });
+
+  // Plans lives in the Inbox: with it off, bare plans says so and how to turn it on, never "Plans is on.", and saves nothing.
+  test("bare while the Inbox is off: one line, exit 1, the switch not saved, nothing started", async () => {
+    const { run, out, err, calls } = cli({ inboxOn: () => false });
+    expect(await run()).toBe(1);
+    expect([out, err]).toEqual([[], [PLANS_INBOX_OFF_TEXT]]);
+    expect(PLANS_INBOX_OFF_TEXT).toContain("plannotator inbox");
+    expect(calls).toEqual({ ensure: 0, opened: [], running: 0 });
+    expect(inboxPlans()).toBeUndefined();
   });
 
   test("bare: on, the Inbox started or found, its Plans page opened and printed", async () => {
