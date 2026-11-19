@@ -2,7 +2,7 @@
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxMessageWire, InboxQuestion, InboxThread, InboxUpload } from '@plannotator/core/inbox-types';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
-import { inboxAskingMessage, inboxUnwakeableSender, type InboxAnnotationRecord, type InboxQuestionState } from '@plannotator/core/inbox-types';
+import { inboxAskingMessage, type InboxAnnotationRecord, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import { InboxApiError, type OutboxView } from '../api';
 import { annotationOf } from '../attachments';
 import { agentName, clockTime, dayWords } from '../format';
@@ -117,10 +117,7 @@ export function askingSessionOf(thread: InboxThread, options: { skip: ReadonlySe
     ? sendTargetsOf(thread, options.skip).at(-1)!.message
     : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false));
   if (!message) return null;
-  if (message.author.kind !== 'agent') return null;
-  // A sender nothing wakes may name no session (a script's `plannotator inbox call`): it can still have ended, so it
-  // asks too, as session '' (no session of the Inbox is that). Any other message with no session asks nothing.
-  if (!message.author.session) return inboxUnwakeableSender(message) ? { message, session: '', host: '', name: agentName(message.author) } : null;
+  if (message.author.kind !== 'agent' || !message.author.session) return null;
   return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };
 }
 

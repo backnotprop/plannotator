@@ -147,6 +147,18 @@ final class SendPlanTests: XCTestCase {
     XCTAssertEqual(targets[0].questions.map(\.key), ["allow"])
   }
 
+  func testAScriptsPostDoesNotTakeTheWordsFromTheSessionThatWrote() {
+    let script = InboxAuthor(kind: .agent)
+    // The words go past the script's post to the latest message with a session.
+    XCTAssertEqual(SendPlan.targets(in: thread([message("m1", a), message("m2", script)])).map(\.message.rawValue), ["m1"])
+    // Answering the script's own question: the reply, words too, is the script's.
+    XCTAssertEqual(SendPlan.targets(in: thread([message("m1", a), message("m2", script, picked: ["q"])])).map(\.message.rawValue), ["m2"])
+    // No session wrote: the script's post, as before.
+    XCTAssertEqual(SendPlan.targets(in: thread([message("m1", script), message("m2", script)])).map(\.message.rawValue), ["m2"])
+    // A sender with a session id but no host is not a script.
+    XCTAssertEqual(SendPlan.targets(in: thread([message("m1", a), message("m2", InboxAuthor(kind: .agent, session: "ses_x"))])).map(\.message.rawValue), ["m2"])
+  }
+
   func testOnlyAHandOffThatStillStandsIsAnsweredOnTheComputer() {
     var handed = message("m2", InboxAuthor(kind: .person))
     handed.handoff = InboxHandoff(at: "2026-11-18T10:00:00.000Z")

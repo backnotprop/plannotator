@@ -540,14 +540,6 @@ export interface LiveSessionsModel {
    * now). Absent from an older Inbox.
    */
   recipients?: Record<string, RecipientConnection | null>;
-  /**
-   * Asked for with `?answers=<message id>`: where a reply to that message goes when its sender is one nothing
-   * wakes (no host, not sent through a waking connection: a script, a raw MCP call). `live`: its own session is
-   * there now, so the reply stays its own; else `taker`, the live session that wrote in the thread and takes it
-   * (null: none, and the reply waits as one to an ended session does). Absent for any other message and from an
-   * older Inbox.
-   */
-  answers?: { message_id: string; live: boolean; taker: { host: string; session: string } | null };
 }
 
 /** One session the person may tag with `@` (packages/server/inbox-tags.ts). */
@@ -1957,10 +1949,9 @@ export const inboxApi = {
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
   /** `timeoutMs`: given up after it (InboxReadTimeout), for a read a Send waits on. */
-  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = [], timeoutMs?: number, answers?: string | null) => {
+  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = [], timeoutMs?: number) => {
     const query = [
       ...(asker ? [`asker=${encodeURIComponent(asker)}`] : []),
-      ...(answers ? [`answers=${encodeURIComponent(answers)}`] : []),
       ...(recipients.length > 0 ? [`recipients=${recipients.map(encodeURIComponent).join(',')}`] : []),
     ].join('&');
     const url = threadUrl(threadId, `/sessions`, query);

@@ -227,26 +227,39 @@ export function inboxDefaultSkip<M>(_messages: readonly M[], _statesOf: (message
 }
 
 /**
+ * An agent message sent with no session, no host and no wake: what `plannotator inbox call` sends from a shell that
+ * names no session (a script, a hook, a cron job). Nothing can be woken for it, and no session reads as its sender.
+ * A sender with any session id (a stdio shim's `ses_…` included) is not one.
+ */
+export function inboxSessionlessSend(message: { author: { kind: string; host?: string | null; session?: string | null }; wakes?: boolean }): boolean {
+  return message.author.kind === "agent" && !message.author.session && !message.author.host && message.wakes !== true;
+}
+
+/**
  * The agent message whose session a Send with nothing riding on the latest
  * message reaches (the thread's `askingSessionOf` without words or files):
  * the last agent message a pick answers or, when the Send skips (`skip`),
  * an open question it skips; with none, the latest agent message. Null when
  * no agent wrote. One rule for the thread's "the session that asked" and the
- * list row's delivery, so the two name the same session.
+ * list row's delivery, so the two name the same session. A sessionless send
+ * (`inboxSessionlessSend`) as the latest does not take the reply from the
+ * latest agent message that has a session: a script's post does not steal the thread.
  */
-export function inboxAskingMessage<M extends { author: { kind: string } }>(
+export function inboxAskingMessage<M extends { author: { kind: string; host?: string | null; session?: string | null }; wakes?: boolean }>(
   messages: readonly M[],
   statesOf: (message: M) => readonly AskingQuestionState[],
   skip: boolean,
 ): M | null {
   let latest: M | null = null;
+  let withSession: M | null = null;
   let answered: M | null = null;
   for (const message of messages) {
     if (message.author.kind !== "agent") continue;
     latest = message;
+    if (message.author.session) withSession = message;
     if (statesOf(message).some((state) => state === "picked" || (skip && state === "open"))) answered = message;
   }
-  return answered ?? latest;
+  return answered ?? (latest && inboxSessionlessSend(latest) ? (withSession ?? latest) : latest);
 }
 
 /**

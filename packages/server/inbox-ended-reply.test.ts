@@ -27,6 +27,7 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
+import { sendTargetsOf } from "../inbox/sendTargets";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxLiveSessions, INBOX_ASKER_GRACE_MS, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 
@@ -898,66 +899,54 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
   });
 });
 
-describe("a reply to a sender nothing wakes (a script's `plannotator inbox call`, a raw MCP call)", () => {
-  /** The session's own tool: a waking connection, as the Claude Code mod sends. */
-  const tool = async (client: Client, project: string, session: string, body: string) =>
-    (await client.callTool({ name: "send_message", arguments: { body, project_path: project, agent_session: session, agent_host: "claude-code", agent_name: "Claude Code" }, _meta: { [INBOX_WAKES_META_KEY]: true } }))
-      .structuredContent as { message_id: string; thread_id: string };
-  /** A shell with no session: no host, no session, nothing that wakes. */
-  const script = async (client: Client, project: string, body: string, replyTo: string) =>
-    (await client.callTool({ name: "send_message", arguments: { body, project_path: project, reply_to: replyTo } })).structuredContent as { message_id: string; thread_id: string };
-  const listRow = async (server: InboxServer, threadId: string) =>
-    ((await (await fetch(`${base(server)}/api/inbox/threads`)).json()) as { sections: { threads: InboxListRow[] }[] }).sections.flatMap((s) => s.threads).find((r) => r.thread_id === threadId)!;
-
-  test("the owner's sequence: the person's reply with nothing aimed goes to the live session that wrote in the thread, and its poll is handed it", async () => {
-    const { server, client, project } = await setup();
-    const first = await tool(client, project, "ses-ops", "The nightly sync is green.");
-    await poll(server, "ses-ops", project);
-    const asked = await script(client, project, "Disk at 91% on node 3.", first.message_id);
-    expect((await thread(server, first.thread_id)).messages.at(-1)!.author).toMatchObject({ kind: "agent", host: null, session: null });
-
-    // The window reads where it goes before the Send.
-    const model = (await (await fetch(`${base(server)}/api/inbox/threads/${first.thread_id}/sessions?answers=${asked.message_id}`)).json()) as { answers?: unknown };
-    expect(model.answers).toEqual({ message_id: asked.message_id, live: false, taker: { host: "claude-code", session: "ses-ops" } });
-
-    const response = await reply(server, asked.message_id, { idempotency_key: "k1", words: "Clear the old snapshots." });
+describe("a script's post does not steal the thread (a sessionless send: no session, no host, no wake)", () => {
+  /** The window's plain Send, words only: to the message its own rule picks (`sendTargetsOf`), with nothing aimed. */
+  async function windowReply(server: InboxServer, threadId: string, words: string, key: string) {
+    const target = sendTargetsOf(await thread(server, threadId)).at(-1)!.message;
+    const response = await reply(server, target.id, { idempotency_key: key, words });
     expect(response.status).toBe(200);
-    const sent = ((await response.json()) as { reply: { id: string; to?: unknown; reply_to: string } }).reply;
-    expect(sent).toMatchObject({ reply_to: asked.message_id, to: { host: "claude-code", session: "ses-ops" } });
+    return ((await response.json()) as { reply: { id: string; reply_to: string; to?: unknown } }).reply;
+  }
+  const waking = { _meta: { [INBOX_WAKES_META_KEY]: true } };
+
+  test("the owner's sequence: the session wrote with its tool, a script posted after it, the person replies: the idle session's poll hands it as a reply to its own message, and its delivery names it", async () => {
+    const { server, client, project } = await setup();
+    const first = (
+      await client.callTool({ name: "send_message", arguments: { body: "The nightly sync is green.", project_path: project, agent_session: "ses-ops", agent_host: "claude-code", agent_name: "Claude Code" }, ...waking })
+    ).structuredContent as { message_id: string; thread_id: string };
+    // `plannotator inbox call send_message` from a shell that names no session.
+    await client.callTool({ name: "send_message", arguments: { body: "Disk at 91% on node 3.", project_path: project, reply_to: first.message_id } });
+    await poll(server, "ses-ops", project);
+    const sent = await windowReply(server, first.thread_id, "Clear the old snapshots.", "k1");
+    expect(sent.reply_to).toBe(first.message_id);
+    expect(sent.to ?? null).toBeNull();
+    // The Claude Code mod's poll (the wake): the reply, as one to its own message.
     const commands = await poll(server, "ses-ops", project);
     expect(commands.map((c) => c.id)).toEqual([sent.id]);
-    expect(commands[0]).toMatchObject({ type: "reply", reply_to: asked.message_id, redirected_from: "agent" });
-    // A replay answers what it wrote.
-    const replay = (await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "Clear the old snapshots." })).json()) as { replayed: boolean; reply: { id: string } };
-    expect(replay).toMatchObject({ replayed: true, reply: { id: sent.id } });
-
-    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-ops", host: "claude-code", type: "delivered", id: sent.id });
-    expect((await listRow(server, first.thread_id)).delivery).toMatchObject({ state: "delivered", host: "claude-code" });
-    expect(await poll(server, "ses-ops", project)).toEqual([]);
+    const text = inboxWakeText(commands[0]!);
+    expect(text).not.toContain("another agent session");
+    expect(text).not.toContain("has ended");
+    expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-ops", host: "claude-code", type: "delivered", id: sent.id })).status).toBe(200);
+    expect((await thread(server, first.thread_id)).messages.find((m) => m.id === sent.id)?.delivery).toMatchObject({ state: "delivered", host: "claude-code", session: "ses-ops" });
   });
 
-  test("an aimed reply, and a reply to the session's own message, are as before", async () => {
-    const { server, client, project } = await setup();
-    const first = await tool(client, project, "ses-ops", "Started.");
+  test("a stdio shim's agent (a ses_ id, no host) asks and goes quiet two minutes while a Claude Code session that wrote is live: the reply stays the agent's, unread for it, and Claude Code is not woken", async () => {
+    let now = 1_000_000;
+    const { server, client, project } = await setup({ sessionsNow: () => now });
+    const first = (
+      await client.callTool({ name: "send_message", arguments: { body: "Started.", project_path: project, agent_session: "ses-ops", agent_host: "claude-code", agent_name: "Claude Code" }, ...waking })
+    ).structuredContent as { message_id: string; thread_id: string };
     await poll(server, "ses-ops", project);
-    await poll(server, "ses-other", project);
-    const asked = await script(client, project, "Check it.", first.message_id);
-    const aimed = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "One.", to: { session: "ses-other" } })).json()) as { reply: { to: unknown } }).reply;
-    expect(aimed.to).toEqual({ host: "claude-code", session: "ses-other" });
-    const own = ((await (await reply(server, first.message_id, { idempotency_key: "k2", words: "Two." })).json()) as { reply: { id: string; to?: unknown } }).reply;
-    expect(own.to).toBeUndefined();
-    expect((await poll(server, "ses-ops", project)).map((c) => c.id)).toEqual([own.id]);
-  });
-
-  test("a reply left for the script (nothing was live) is settled by the session's read_thread, and the row says who read it", async () => {
-    const { server, client, project } = await setup();
-    const first = await tool(client, project, "ses-ops", "Started.");
-    const asked = await script(client, project, "Disk at 91%.", first.message_id);
-    const sent = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "Clear it." })).json()) as { reply: { to?: unknown } }).reply;
-    expect(sent.to).toBeUndefined();
-    expect((await listRow(server, first.thread_id)).delivery).toMatchObject({ state: "saved", reason: "ended" });
+    const asked = (await client.callTool({ name: "send_message", arguments: { body: "Which queue should I drain first?", project_path: project, reply_to: first.message_id, agent_session: "ses_shim1" } })).structuredContent as { message_id: string };
+    now += 2 * 60_000;
     await poll(server, "ses-ops", project);
-    await client.callTool({ name: "read_thread", arguments: { thread_id: first.thread_id, agent_session: "ses-ops", agent_host: "claude-code" } });
-    expect((await listRow(server, first.thread_id)).delivery).toMatchObject({ state: "delivered", read_by: "claude-code" });
+    const sent = await windowReply(server, first.thread_id, "The billing queue.", "k1");
+    expect(sent.reply_to).toBe(asked.message_id);
+    expect(sent.to ?? null).toBeNull();
+    expect((await poll(server, "ses-ops", project)).map((c) => c.id)).toEqual([]);
+    // Claude Code reads the thread: still the agent's to read.
+    await client.callTool({ name: "read_thread", arguments: { thread_id: first.thread_id, agent_session: "ses-ops" } });
+    const list = await client.callTool({ name: "read_thread", arguments: { project_path: project, asked_by: "anyone", agent_session: "ses_shim1" } });
+    expect((list.structuredContent as { threads: { thread_id: string; unread: boolean }[] }).threads.find((t) => t.thread_id === first.thread_id)?.unread).toBe(true);
   });
 });

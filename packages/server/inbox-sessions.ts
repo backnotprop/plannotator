@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, inboxUnwakeableSender, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
@@ -839,42 +839,6 @@ export function createInboxLiveSessions(options: {
     return { host: target.host, session: target.session };
   };
 
-  /** A sender's own session is there now: a connection polls for it, or an Inbox tool call named it within the asker grace. */
-  const senderThere = (session: string): boolean => {
-    const entry = sessions.get(session);
-    if (entry && isLive(entry)) return true;
-    const seen = mcpSeen.get(session);
-    return !!seen && now() - seen.lastSeen <= INBOX_ASKER_GRACE_MS;
-  };
-
-  /**
-   * Where a reply to `messageId` goes when its sender is one nothing wakes (`inboxUnwakeableSender`: no host, not
-   * sent through a waking connection; a script's `plannotator inbox call` outside any agent session, the stdio shim
-   * outside one, a raw MCP call). Null for any other message: its reply goes to its own session, as always. In order:
-   *   1. The sender's own session is there now (`senderThere`): `live`, and the reply stays its own.
-   *   2. Else `taker`: of the live sessions that wrote in the thread (one that only read it never counts), with a
-   *      host, in the thread's project (its folder resolves to the project or one combined with it, or it says no
-   *      folder), the latest writer. Never a session of another project, though it wrote in the thread.
-   *   3. None: `taker` null, and the reply waits as a reply to an ended session does.
-   * The reply route addresses the reply to the taker (`to`), so it is delivered, and wakes it, as a reply to its own
-   * message would; the sessions route tells the window the same answer (`answers`), and the list rows read it.
-   */
-  const unwakeableReply = (messageId: string): { live: boolean; taker: { host: string; session: string } | null } | null => {
-    const message = store.message(messageId);
-    if (!message || message.author.kind !== "agent" || !inboxUnwakeableSender(message)) return null;
-    const own = message.author.session ?? null;
-    if (own && senderThere(own)) return { live: true, taker: null };
-    const thread = store.thread(message.thread_id);
-    if (!thread) return { live: false, taker: null };
-    const roots = new Set([thread.project.root, ...store.projectGroup(thread.project.id).flatMap((id) => store.project(id)?.root ?? [])]);
-    const taker = liveFor(message.thread_id).sessions.find((candidate) => {
-      if (!candidate.wrote_thread || !candidate.host || candidate.session === own) return false;
-      const root = sessions.get(candidate.session)?.root ?? null;
-      return root === null || roots.has(root);
-    });
-    return { live: false, taker: taker ? { host: taker.host, session: taker.session } : null };
-  };
-
   /**
    * The live sessions of a thread's project, and those of the thread itself from any folder (its writers and
    * the sessions tagged in it): its writers first (the latest writer first), then by start.
@@ -1389,16 +1353,11 @@ export function createInboxLiveSessions(options: {
           .map((session) => session.trim())
           .filter((session) => session !== ""),
       );
-      // `answers` (additive): where a reply to that message goes when its sender is one nothing wakes (`unwakeableReply`);
-      // only for a message of this thread, and absent for any other message.
-      const answersId = searchParams.get("answers");
-      const answered = answersId && store.message(answersId)?.thread_id === sessionsMatch[1] ? unwakeableReply(answersId) : null;
       return answer({
         serverSession,
         home: homedir(),
         project: live.project,
         sessions: live.sessions,
-        ...(answered ? { answers: { message_id: answersId, ...answered } } : {}),
         // `connection` (additive): how that session is connected now, for the line under the person's message ("Queued", "Sending", Send now).
         // `stuck` (additive, absent when none): its items that session claimed and will never deliver.
         ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: askerConnection, ...stuckField(sessionsMatch[1]!, asker) } } : {}),
@@ -1522,7 +1481,6 @@ export function createInboxLiveSessions(options: {
     continuesOf: continuations.lineOf,
     stuck,
     replyTarget,
-    unwakeableReply,
     seenOverMcp,
     route,
     allLive,

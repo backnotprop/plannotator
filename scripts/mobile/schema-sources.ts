@@ -27,7 +27,6 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-launch-choice.ts',
   'packages/core/inbox-muse.ts',
   'packages/core/inbox-open-in.ts',
-  'packages/core/inbox-permission.ts',
   'packages/core/inbox-pull-risk.ts',
   'packages/core/inbox-pulls.ts',
   'packages/core/inbox-qwen.ts',
