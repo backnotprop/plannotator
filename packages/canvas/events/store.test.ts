@@ -624,6 +624,33 @@ describe('the two lists of field names', () => {
   });
 });
 
+describe('what a change did not touch keeps its identity', () => {
+  test('a peer moving a chart, and an undo of a move, leave its rows the very same rows', () => {
+    // A reader that skips unchanged fields by identity (the chart's drawing is worked out again only when
+    // its table changed) depends on this: a checked change rebuilds the object, and must not rebuild its rows.
+    const chart = { id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, mark: 'line', fields: ['week', 'v'], rows: [['W1', 4], ['W2', 2]], encode: { x: 'week', y: 'v' }, rules: [{ at: 3 }], dash: ['v'] };
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [chart as unknown as CanvasObject] });
+    const before = store.getDocument().objects.c as unknown as Record<string, unknown>;
+    const moved = decodeEnvelope(JSON.stringify({ id: 'peer-1', actor: { kind: 'person', id: 'peer' }, events: [{ type: 'object-set', id: 'c', set: { x: 40, y: 10 } }] }));
+    if (!moved.ok) throw new Error(moved.error);
+    store.receive(moved.value);
+    const after = store.getDocument().objects.c as unknown as Record<string, unknown>;
+    expect(after.x).toBe(40);
+    for (const field of ['rows', 'fields', 'encode', 'rules', 'dash']) expect(after[field]).toBe(before[field]);
+    store.dispatch({ type: 'move', ids: ['c'], dx: 5, dy: 5 });
+    store.undo();
+    const undone = store.getDocument().objects.c as unknown as Record<string, unknown>;
+    for (const field of ['rows', 'fields', 'encode', 'rules', 'dash']) expect(undone[field]).toBe(before[field]);
+    // A change that does touch the rows gives new rows.
+    const edited = decodeEnvelope(JSON.stringify({ id: 'peer-2', actor: { kind: 'person', id: 'peer' }, events: [{ type: 'object-set', id: 'c', set: { rows: [['W1', 4], ['W2', 9]] } }] }));
+    if (!edited.ok) throw new Error(edited.error);
+    store.receive(edited.value);
+    expect((store.getDocument().objects.c as unknown as Record<string, unknown>).rows).not.toBe(before.rows);
+    expect((store.getDocument().objects.c as unknown as Record<string, unknown>).fields).toBe(before.fields);
+  });
+});
+
 describe('the event stream', () => {
   test('every commit is told once, with who did it and what they asked', () => {
     const store = seeded();
