@@ -28,7 +28,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import {
   CORE_GUARDS, GATES, GATE_JOB, HEAVY_FAIL_SAFE, JOB_MAP, KNOWN_TOP, RUN_ALL, SMOKE_ROOTS, buildGraph, builtPathRefs, ciChanges, decideGates, gatePaths,
   knownKind, listsCheckout, nativeAppFile, pathReasons, plan, preloadClosure, repoRoot, semgrepPlan, type Change, type Graph, type Node, type PathRead,
@@ -386,44 +386,98 @@ describe('the native app (apps/mobile)', () => {
     expect(jobs.ios!.if).toContain("vars.MOBILE_CI != 'nightly'");
     for (const file of files.filter((f) => f !== 'mobile-ios.yml')) {
       const text = readFileSync(join(WF_DIR, file), 'utf8');
-      // mobile-ledger.yml names the ledger (a push path) and builds nothing.
-      if (file !== 'mobile-ledger.yml') expect(text, file).not.toContain('apps/mobile');
+      // mobile-contract.yml checks the contract's files and builds nothing.
+      if (file !== 'mobile-contract.yml') expect(text, file).not.toContain('apps/mobile');
       expect(text, file).not.toMatch(/xcodebuild|swift (build|test)/);
     }
   });
 
-  test("the parity ledger's clock runs only in mobile-ledger.yml, never in a `bun test` or on an Inbox pull request", () => {
+  test("the contract check and the ledger's clock run only in mobile-contract.yml, never in a `bun test` or on an Inbox pull request", () => {
     // A mobile debt must never turn the Inbox's checks, main's full run or a release red: the clock is a script
     // (bun test runs only *.test.ts), one job runs it, and no test file reads the ledger's dates.
-    const runners = files.flatMap((file) =>
-      Object.entries(workflow(file).jobs).flatMap(([id, job]) => ((job.steps ?? []).some((s) => s.run?.includes('parity-debts')) ? [`${file} ${id}`] : [])),
+    const runners = (script: string) => files.flatMap((file) =>
+      Object.entries(workflow(file).jobs).flatMap(([id, job]) => ((job.steps ?? []).some((s) => s.run?.includes(script)) ? [`${file} ${id}`] : [])),
     );
-    expect(runners).toEqual(['mobile-ledger.yml ledger']);
-    const ledger = workflow('mobile-ledger.yml') as Workflow & { on: Record<string, { paths?: string[]; branches?: string[] } | null> };
-    expect(ledger.jobs.ledger!.steps!.map((s) => s.run).filter(Boolean)).toEqual(['bun scripts/mobile/parity-debts.ts']);
-    expect(ledger.jobs.ledger!['runs-on']).toBe('ubuntu-24.04');
-    expect(ledger.on.pull_request).toEqual({ branches: ['main'], paths: ['scripts/mobile/parity-debts.ts', '.github/workflows/mobile-ledger.yml'] });
-    expect(ledger.on.push?.paths).toContain('apps/mobile/contract/parity/ledger.json');
+    expect(runners('parity-debts')).toEqual(['mobile-contract.yml ledger']);
+    expect(runners('scripts/mobile/check.ts')).toEqual(['mobile-contract.yml contract']);
+    const wf = workflow('mobile-contract.yml') as Workflow & { on: Record<string, { paths?: string[]; branches?: string[] } | null> };
+    expect(wf.jobs.ledger!.steps!.map((s) => s.run).filter(Boolean)).toEqual(['bun scripts/mobile/parity-debts.ts']);
+    expect(Object.values(wf.jobs).map((j) => j['runs-on'])).toEqual(['ubuntu-24.04', 'ubuntu-24.04']);
+    expect(wf.on.pull_request).toEqual({ branches: ['main'], paths: ['apps/mobile/contract/**', 'scripts/mobile/**', '.github/workflows/mobile-contract.yml'] });
     const testFiles = tracked.filter((f) => /\.(test|spec)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$/.test(f));
     expect(testFiles.filter((f) => f.includes('debts'))).toEqual(['tests/mobile-parity-debts.test.ts']);
     expect(readFileSync(join(repoRoot, 'tests/mobile-parity-debts.test.ts'), 'utf8')).not.toContain('ledger.json');
   });
 
-  test('a pull request that records a ledger row beside Inbox changes starts no macOS job and no ledger job', () => {
-    // An Inbox pull request that adds a field or route must record it in the ledger (tests/mobile-parity.test.ts).
-    const changed = ['apps/mobile/contract/parity/ledger.json', 'apps/mobile/contract/parity/surface.json', 'packages/server/inbox.ts', 'packages/core/inbox-types.ts', 'packages/inbox/api.ts'];
-    const started = files.flatMap((file) => {
+  test('an Inbox pull request starts no mobile job, and a ledger row starts no macOS build', () => {
+    const started = (changed: string[], pick: (file: string, job: Job) => boolean) => files.flatMap((file) => {
       const wf = workflow(file);
       const pr = wf.on.pull_request;
       if (pr === undefined) return [];
       const paths = pr?.paths;
-      const reached = !paths || changed.some((f) => paths.some((g) => new Bun.Glob(g).match(f)));
-      if (!reached) return [];
-      return Object.entries(wf.jobs).flatMap(([id, job]) =>
-        String(job['runs-on'] ?? '').includes('macos') || (job.steps ?? []).some((s) => s.run?.includes('parity-debts')) ? [`${file} ${id}`] : [],
-      );
+      if (paths && !changed.some((f) => paths.some((g) => new Bun.Glob(g).match(f)))) return [];
+      return Object.entries(wf.jobs).flatMap(([id, job]) => (pick(file, job) ? [`${file} ${id}`] : []));
     });
-    expect(started).toEqual([]);
+    // A new route module is added to ROUTE_FILES in inbox-window-routes.ts (an invented module stands for it).
+    const inbox = ['packages/server/inbox.ts', 'packages/core/inbox-types.ts', 'packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/server/inbox-window-routes.ts', 'packages/server/inbox-new-route.ts', 'docs/agent-guides/server-and-storage.md'];
+    const mobile = (file: string, job: Job) => file.startsWith('mobile-') || String(job['runs-on'] ?? '').includes('macos');
+    expect(started(inbox, mobile), 'an Inbox-only pull request').toEqual([]);
+    // Nor does any other workflow run a mobile script (a `bun scripts/mobile/all.ts --check` step in test.yml, say).
+    const runsMobile = files.filter((f) => !f.startsWith('mobile-')).flatMap((file) =>
+      Object.entries(workflow(file).jobs).flatMap(([id, job]) => (job.steps ?? []).filter((st) => st.run?.includes('scripts/mobile/')).map(() => `${file} ${id}`)),
+    );
+    expect(runsMobile, 'a workflow other than mobile-*.yml running scripts/mobile/').toEqual([]);
+    const macos = (_: string, job: Job) => String(job['runs-on'] ?? '').includes('macos');
+    expect(started(['apps/mobile/contract/parity/ledger.json', 'apps/mobile/contract/parity/surface.json', ...inbox], macos), 'a ledger row').toEqual([]);
+  });
+});
+
+describe('the Inbox\'s tests and the mobile contract', () => {
+  /**
+   * The only scripts/mobile/ modules a test may import, each with why. Each imports nothing but node: builtins and
+   * the others here, so no Inbox change can break a test through it. Everything else there (the generators, door.ts,
+   * schema.ts, words.ts, ledger.ts, rules.ts, check.ts) reads the live product against tables only the mobile scripts
+   * keep: that is scripts/mobile/check.ts's, in the mobile-contract workflow.
+   */
+  const ALLOWED: Record<string, string> = {
+    'scripts/mobile/lib.ts': "paths, JSON text and emit, which a test runs on a temp folder",
+    'scripts/mobile/tokens.ts': 'the color conversions, on fixed values (its CSS read is buildTokens, which a test never calls)',
+    'scripts/mobile/parity.ts': 'the ledger rules, on fixed ledgers',
+    'scripts/mobile/parity-debts.ts': 'the clock, on fixed dates',
+    'scripts/mobile/flows.ts': 'the list of flow files: tests/mobile-flows.test.ts checks their citation form, and only a mobile pull request edits a flow',
+  };
+  /** What a test that imports one of them must not call: a generator or builder, a contract path, a read of the checkout, a check of committed files. */
+  const LIVE = /\b(generate|build)[A-Z]\w*\(|\bOUT\.|VERSION_FILE|STREAM_FIXTURE|STREAM_VECTORS|readRepoText\(|emit\((?:[^()]|\([^()]*\))*,\s*true\s*\)/;
+  const transpilers = { ts: new Bun.Transpiler({ loader: 'ts' }), tsx: new Bun.Transpiler({ loader: 'tsx' }), js: new Bun.Transpiler({ loader: 'js' }) };
+  const transpiler = (f: string) => (f.endsWith('.tsx') ? transpilers.tsx : /\.[cm]?ts$/.test(f) ? transpilers.ts : transpilers.js);
+  const trackedSet = new Set(tracked);
+  const code = (f: string) => readFileSync(join(repoRoot, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+  /** The repository files a file imports by a relative path. */
+  const importsOf = (f: string) => transpiler(f).scanImports(readFileSync(join(repoRoot, f), 'utf8')).flatMap(({ path }) => {
+    if (!path.startsWith('.')) return [path];
+    const base = relative(repoRoot, resolve(repoRoot, dirname(f), path));
+    return [['', '.ts', '.tsx', '/index.ts'].map((x) => base + x).find((c) => trackedSet.has(c)) ?? base];
+  });
+  const testFiles = tracked.filter((f) => /\.test\.[cm]?[jt]sx?$/.test(f));
+
+  test('a test imports from scripts/mobile/ only the modules that read nothing of the product, and reads no contract file', () => {
+    const reaching = testFiles.flatMap((f) => importsOf(f).filter((i) => i.startsWith('scripts/mobile/') && !(i in ALLOWED)).map((i) => `${f} imports ${i}`));
+    expect(reaching).toEqual([]);
+    for (const [module] of Object.entries(ALLOWED)) {
+      expect(importsOf(module).filter((i) => !i.startsWith('node:') && !(i in ALLOWED)), `${module} imports only node: and the allowed modules`).toEqual([]);
+    }
+    const users = testFiles.filter((f) => importsOf(f).some((i) => i in ALLOWED));
+    expect(users.filter((f) => LIVE.test(code(f))), 'a test calling a generator or reading a contract file through the allowed modules').toEqual([]);
+    // The picker's own tests name contract paths as changes to plan, never read them.
+    const picker = (f: string) => /^scripts\/ci-[\w-]+\.test\.ts$/.test(f);
+    expect(testFiles.filter((f) => !picker(f) && code(f).includes('apps/mobile/contract/')), 'a test naming a contract file').toEqual([]);
+  });
+
+  test('the guard sees what it guards: a forbidden import, a generator call and a check of committed files', () => {
+    expect(LIVE.test("expect(emit(generateDoor(), true)).toEqual([])")).toBe(true);
+    expect(LIVE.test("emit(outputs, true, dir)")).toBe(false);
+    expect(LIVE.test("readRepoText(OUT.schema)")).toBe(true);
+    expect(importsOf('tests/mobile-parity.test.ts')).toContain('scripts/mobile/parity.ts');
   });
 });
 
@@ -570,12 +624,13 @@ describe('the real graph', () => {
     expect([app.mode, app.tests.length, app.unit.lanes.length, app.dom.lanes.length]).toEqual(['docs', 0, 0, 0]);
   });
 
-  test("the app contract's check runs for a wire change, not for the window's or the shared UI's code", () => {
-    // Picked at all (a tree-scanning pick would run it on every pull request).
-    const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.some((t) => t.path === 'tests/mobile-vectors.test.ts');
-    // A file the schema reaches only by `import type` too (SCHEMA_SOURCES, scripts/mobile/schema-sources.ts).
-    for (const wire of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts']) expect(picks(wire), wire).toBe(true);
-    for (const window of ['packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) expect(picks(window), window).toBe(false);
+  test("no mobile test runs for a wire change, the window's code or the shared UI's (the contract's check is the mobile-contract workflow)", () => {
+    // Picked at all: a tree-scanning mobile test would run on every pull request. tests/mobile-flows.test.ts may run
+    // (the flows name the window's files it cites), but it reads only the flow files, which only a mobile PR edits.
+    const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.filter((t) => t.path.startsWith('tests/mobile-') && t.path !== 'tests/mobile-flows.test.ts').map((t) => t.path);
+    for (const changed of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts', 'packages/server/inbox-devices.ts', 'packages/core/inbox-delivery-line.ts', 'packages/inbox/api.ts', 'packages/inbox/sharedEvents.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) {
+      expect(picks(changed), changed).toEqual([]);
+    }
   });
 
   test('the tree-scanning set includes the guards that read the whole tree', () => {

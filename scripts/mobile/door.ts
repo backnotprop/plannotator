@@ -14,8 +14,17 @@
  * the door does not have.
  */
 import { doorRouteOf, doorRouteTable } from '../../packages/server/inbox-devices';
+import { DOOR_CONTRACT } from '../../packages/server/inbox-door-version';
 import { DOOR_WRITES } from '../../packages/server/inbox-outbox';
-import { OUT, VERSION_FILE, cli, contractVersion, jsonText, type Output } from './lib';
+import { OUT, VERSION_FILE, cli, jsonText, type Output } from './lib';
+
+/**
+ * The contract's number: the door's own (packages/server/inbox-door-version.ts DOOR_CONTRACT), which rises only for
+ * a breaking wire change. generateDoor writes it to VERSION; Wire.swift compiles it in as `wireContract`.
+ */
+export function contractVersion(): number {
+  return DOOR_CONTRACT;
+}
 
 /** The name a collection's id takes in a path (`threads/:id` -> `{thread}`), and its word in a call's name. */
 const COLLECTIONS: Record<string, { word: string; param: string }> = {

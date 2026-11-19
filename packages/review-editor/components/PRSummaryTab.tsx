@@ -39,9 +39,9 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
           {metadata.author} wants to merge <code className="bg-muted px-1 rounded break-all">{metadata.headBranch}</code> into <code className="bg-muted px-1 rounded break-all">{metadata.baseBranch}</code>
         </div>
         {metadata.defaultBranch && metadata.baseBranch !== metadata.defaultBranch && (
-          <div className="inline-flex items-center gap-1.5 rounded border border-accent/20 bg-accent/10 px-2 py-1 text-xs text-accent">
+          <div className="inline-flex items-center gap-1.5 rounded border border-accent/20 bg-accent/10 px-2 py-1 text-xs text-accent-text">
             <span className="font-medium">Stacked</span>
-            <span className="text-accent/80">
+            <span className="text-accent-text/80">
               Diffs against <code className="font-mono">{metadata.baseBranch}</code>, default branch is <code className="font-mono">{metadata.defaultBranch}</code>
             </span>
           </div>

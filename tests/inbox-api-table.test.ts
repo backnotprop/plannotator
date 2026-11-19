@@ -1,8 +1,8 @@
 /**
  * docs/agent-guides/server-and-storage.md's Inbox table lists every endpoint
  * the Inbox serves, and only those. The served list is read from the server's
- * code as text (scripts/mobile/window-routes.ts), the same list the app's
- * parity surface uses.
+ * code as text (packages/server/inbox-window-routes.ts), the same list the
+ * app's parity surface uses.
  *
  * What can regress, and the test that says so:
  *  - an endpoint added to the Inbox with no doc row, or a doc row left for an
@@ -14,18 +14,18 @@
  * Reads source files as text; imports no server module and starts nothing.
  */
 import { describe, expect, test } from 'bun:test';
-import { readRepoText } from '../scripts/mobile/lib';
 import {
   API_DOC,
   NOT_ROUTE_MODULES,
   NOT_SERVED,
   ROUTE_FILES,
   docTableRows,
+  readSource,
   routesOfDocCell,
   routesOfPattern,
   underFamily,
   windowRoutesFromCode,
-} from '../scripts/mobile/window-routes';
+} from '../packages/server/inbox-window-routes';
 
 const isFamily = (route: string) => /(\*|…)$/.test(route);
 
@@ -64,7 +64,7 @@ describe('the table and the server', () => {
 
 describe('the reader reads every route module', () => {
   test('a module inbox.ts imports that compares request paths is in ROUTE_FILES', () => {
-    const inbox = readRepoText('packages/server/inbox.ts');
+    const inbox = readSource('packages/server/inbox.ts');
     const imported = [...inbox.matchAll(/from "(\.\/[a-z0-9-]+|@plannotator\/shared\/[a-z0-9/-]+)"/g)].map((m) =>
       m[1]!.startsWith('./') ? `packages/server/${m[1]!.slice(2)}.ts` : `packages/shared/${m[1]!.slice('@plannotator/shared/'.length)}.ts`,
     );
@@ -74,13 +74,13 @@ describe('the reader reads every route module', () => {
       if (listed.has(file) || file in NOT_ROUTE_MODULES) return false;
       let text: string;
       try {
-        text = readRepoText(file);
+        text = readSource(file);
       } catch {
         return false; // a folder's index or a non-.ts module: not a route module
       }
       return routing.test(text);
     });
-    expect(unread, 'add each to ROUTE_FILES in scripts/mobile/window-routes.ts (or, serving nothing, to NOT_ROUTE_MODULES)').toEqual([]);
+    expect(unread, 'add each to ROUTE_FILES in packages/server/inbox-window-routes.ts (or, serving nothing, to NOT_ROUTE_MODULES)').toEqual([]);
     expect(Object.keys(NOT_ROUTE_MODULES).filter((f) => !imported.includes(f)), 'NOT_ROUTE_MODULES names a module inbox.ts no longer imports').toEqual([]);
   });
 });
