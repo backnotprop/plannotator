@@ -1,6 +1,7 @@
 import { newSideLines, oldSideLines } from '@plannotator/core/line-anchor';
 import { reviewAnchorNow, reviewConversations, REVIEW_ANCHOR_CODE_LINES_MAX, type InboxReviewAnchor, type ReviewConversation, type ReviewThreadNow } from '@plannotator/core/review-threads';
 import type { InboxMessage } from '@plannotator/core/inbox-types';
+import { splitInboxReplyBody } from '@plannotator/core/inbox-questions';
 
 export type LiveMessage = InboxMessage;
 
@@ -165,7 +166,11 @@ export function commentOfMessage(message: LiveMessage): { filePath: string; line
   const anchor = message.review_anchor;
   if (!anchor) return null;
   const whole = anchor.line_start === 0;
-  return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text: message.body };
+  // The person's words, never the still-open sentence the Inbox wrote after them for the agent (a comment answering an
+  // agent's message with a question open): sent again, the Inbox writes it once more.
+  const parts = splitInboxReplyBody(message.body);
+  const text = [parts.words, parts.rest].filter((part) => part !== '').join('\n\n');
+  return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text };
 }
 
 export interface ForgeThreadComments {

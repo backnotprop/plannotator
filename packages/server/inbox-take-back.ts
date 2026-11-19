@@ -1,11 +1,36 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { splitInboxReplyBody } from "@plannotator/core/inbox-questions";
+import { withoutInboxReplyQuoteLead } from "@plannotator/core/inbox-reply-quote";
 import { inboxThreadMentionsTakenBack } from "@plannotator/core/inbox-thread-mention";
-import { inboxId, type InboxDraft, type InboxMessage, type InboxReplyDraft, type InboxUpload } from "@plannotator/core/inbox-types";
+import { inboxId, splitPullThreadDetails, type InboxDraft, type InboxMessage, type InboxReplyDraft, type InboxUpload } from "@plannotator/core/inbox-types";
+import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadFromAttachment } from "@plannotator/shared/inbox/uploads";
 
 const ROUTE = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/take-back$/;
+
+/**
+ * A reply's words as the person typed them, from the body the agent would have read: the still-open sentence the store
+ * wrote out (`splitInboxReplyBody`, as the thread view draws it), the skills block the window added at Send out (the
+ * `$skill` / `/skill` words stay, and the next Send adds the block again), and the quote's lead out only when the draft
+ * gets the quote back (`quoted`), so a quote is never lost. The stored body and what agents receive never change.
+ */
+const replyWordsOf = (message: InboxMessage, quoted: boolean): string => {
+  const parts = splitInboxReplyBody(withoutInboxSkillsBlock(message.body));
+  const words = [parts.words, parts.rest].filter((part) => part !== "").join("\n\n");
+  return quoted ? withoutInboxReplyQuoteLead(words) : words;
+};
+
+/**
+ * A thread's first message's words: without the skills block, and without the PR's details a PR page's Start a thread
+ * added after them (`splitPullThreadDetails`). A New message draft cannot hold that PR tie (its `pulls` is Launch an
+ * agent's hand-off, another ask), so the words come back alone, as a New message.
+ */
+const rootWordsOf = (message: InboxMessage): string => {
+  const body = withoutInboxSkillsBlock(message.body);
+  return splitPullThreadDetails(body)?.words ?? body;
+};
 
 const joined = (taken: string, kept: InboxReplyDraft | null) => (kept?.body.trim() ? `${taken}\n\n${kept.body}` : taken);
 
@@ -36,7 +61,8 @@ export function createInboxTakeBack(options: {
     const kept = store.replyDraft(message.thread_id);
     const recipients = [store.recipientOf(message)?.session, ...(message.tags ?? []).map((t) => t.session)].filter((s): s is string => !!s);
     // The words as the person wrote them: each thread mention its title again, kept as a mention (the list goes).
-    const taken = inboxThreadMentionsTakenBack(message.body);
+    // The quote comes back as the draft's quote when no draft is kept, so only then does its lead leave the words.
+    const taken = inboxThreadMentionsTakenBack(replyWordsOf(message, !kept && !!message.quote));
     const shift = kept?.body.trim() ? taken.body.length + 2 : 0;
     return store.saveReplyDraft(message.thread_id, {
       base: kept?.updated_at ?? null,
@@ -51,7 +77,7 @@ export function createInboxTakeBack(options: {
   const composeDraft = (message: InboxMessage, uploads: readonly InboxUpload[]): InboxDraft => {
     const kept = store.replyDraft(message.thread_id);
     const project = store.project(message.project_id);
-    const taken = inboxThreadMentionsTakenBack(message.body).body;
+    const taken = inboxThreadMentionsTakenBack(rootWordsOf(message)).body;
     const where = project ? { id: project.id, root: project.root, name: project.name } : null;
     const draft = saveInboxDraft(
       store.dir,
