@@ -18,7 +18,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
+import { PaneToolstrip } from '../parts/PaneToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -64,7 +64,6 @@ import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
 import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
-import { useNarrowPhone } from '../phone';
 import { scrollerOf } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
@@ -452,7 +451,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** The thread's files outside the set being stepped through (the pill's sheet lists them). */
   const outsideSet = Math.max(0, allSteps.length - steps.length);
   const phone = props.phone === true;
-  const narrowPhone = useNarrowPhone();
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
@@ -2659,19 +2657,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && isText && !linkedTop && !props.readOnly && (
-            <div className="ib-toolstrip">
-              <AnnotationToolstrip
-                inputMethod={inputMethod}
-                onInputMethodChange={setInputMethod}
-                mode={mode}
-                onModeChange={setMode}
-                showHelpLink={false}
-                hideQuickLabel
-                compact
-                // Under 360 px the labelled strip ran under the Contents button: its tools as icons there.
-                iconOnly={phone && narrowPhone && contentsButton !== null}
-              />
-            </div>
+            <PaneToolstrip inputMethod={inputMethod} onInputMethodChange={setInputMethod} mode={mode} onModeChange={setMode} phone={phone} contents={contentsButton !== null} />
           )}
           {view && contentsButton && !linkedTop && (
             <ContentsPanel

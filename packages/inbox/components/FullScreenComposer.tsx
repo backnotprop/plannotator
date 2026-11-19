@@ -54,7 +54,6 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { CORNERS, useComposerDrag } from '../composerDrag';
 import { openItemsLabel } from '../openQuestions';
-import { markFullScreenComposer } from '../pageMarks';
 import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 import { useReplyTextOr, type ReplyText } from '../replyText';
 
@@ -305,15 +304,13 @@ export function FullScreenComposer({
   const cardRef = useRef<HTMLDivElement | null>(null);
   // The card moves out of the way by its tray, for this file only (composerDrag.ts). A phone's card is docked: no move.
   const { attach: attachDrag, handle: dragHandle, resizable, narrow, corner } = useComposerDrag(!phone, value.fileKey);
-  // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
+  // (A phone's toast measures the card to stay above it: Toast.tsx `PHONE_FLOOR`; no page mark.)
   const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
     cardRef.current = el;
     attachDrag(el);
-    const release = markFullScreenComposer(el);
     return () => {
       cardRef.current = null;
       attachDrag(null);
-      release?.();
     };
   }, [attachDrag]);
   const pillRef = useRef<HTMLButtonElement | null>(null);

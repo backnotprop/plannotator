@@ -30,18 +30,28 @@ function valid(size: ZoomSize | null | undefined): size is ZoomSize {
   return !!size && size.width > 0 && size.height > 0;
 }
 
-/** The base size: the whole picture fitted into the area (less its padding), never above its own pixels. */
+/**
+ * The base size: the whole picture fitted into the area (less its padding), never above its own pixels, in whole
+ * CSS pixels. Whole, so the laid-out image's `clientWidth` (an integer, what the export scales strokes by) is the
+ * base exactly: a fractional base put a stroke up to 0.3% of the picture off where it was drawn. Taken once when the
+ * screen opens and kept while it is open (`ZoomableCanvas`): strokes are in base pixels, so a base that followed a
+ * rotation or a resize would move every stroke already drawn.
+ */
 export function annotatorBase(natural: ZoomSize, area: ZoomSize, pad = ANNOTATOR_BASE_PAD): ZoomSize {
   if (!valid(natural) || !valid(area)) return { width: 0, height: 0 };
   const room = { width: Math.max(1, area.width - 2 * pad), height: Math.max(1, area.height - 2 * pad) };
   const scale = Math.min(1, room.width / natural.width, room.height / natural.height);
-  return { width: natural.width * scale, height: natural.height * scale };
+  return { width: Math.max(1, Math.round(natural.width * scale)), height: Math.max(1, Math.round(natural.height * scale)) };
 }
 
-/** Whole picture (1) to far enough in that a picture pixel is a few screen pixels, never under 4×. */
-export function annotatorLimits(natural: ZoomSize, base: ZoomSize): ZoomLimits {
+/**
+ * The whole picture (1, or less when the area shrank since the base was taken: a phone turned) to far enough in that
+ * a picture pixel is a few screen pixels, never under 4×.
+ */
+export function annotatorLimits(natural: ZoomSize, base: ZoomSize, area?: ZoomSize | null): ZoomLimits {
   if (!valid(natural) || !valid(base)) return { min: 1, max: ANNOTATOR_ZOOM_MIN_MAX };
-  return { min: 1, max: Math.max(ANNOTATOR_ZOOM_MIN_MAX, (ANNOTATOR_PIXEL_ZOOM * natural.width) / base.width) };
+  const min = valid(area) ? Math.min(1, area.width / base.width, area.height / base.height) : 1;
+  return { min, max: Math.max(ANNOTATOR_ZOOM_MIN_MAX, (ANNOTATOR_PIXEL_ZOOM * natural.width) / base.width) };
 }
 
 /** A panorama fitted whole is a sliver: it opens this share of the area tall, from its left. */
@@ -56,8 +66,8 @@ export const ANNOTATOR_SLIVER_SHARE = 1 / 3;
  * fills the width from its top, both pinch out to the whole.
  */
 export function annotatorInitialView(natural: ZoomSize, base: ZoomSize, area: ZoomSize, shown?: AnnotatorBox | null): ZoomViewport {
-  const limits = annotatorLimits(natural, base);
-  const whole = clampViewport({ x: 0, y: 0, scale: 1 }, base, area, limits);
+  const limits = annotatorLimits(natural, base, area);
+  const whole = clampViewport({ x: 0, y: 0, scale: limits.min }, base, area, limits);
   if (!valid(natural) || !valid(base) || !valid(area)) return whole;
   if (shown) {
     const k = base.width / natural.width;

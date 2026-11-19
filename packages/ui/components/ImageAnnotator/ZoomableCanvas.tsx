@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Point, Stroke } from './types';
 import { renderStroke } from './utils';
 import { clampViewport, panBy, zoomAt, type ZoomSize, type ZoomViewport } from '../imageZoom';
@@ -69,7 +69,12 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const [natural, setNatural] = useState<ZoomSize | null>(null);
   const [area, setArea] = useState<ZoomSize | null>(null);
-  const base = useMemo(() => (natural && area ? annotatorBase(natural, area) : null), [natural, area]);
+  // Taken once, when the picture and the area are both known, and kept while the screen is open: strokes are in base
+  // pixels, so a base that followed a rotation would move every stroke already drawn (zoom.ts `annotatorBase`).
+  const [base, setBase] = useState<ZoomSize | null>(null);
+  useLayoutEffect(() => {
+    if (!base && natural && area && area.width > 0 && area.height > 0) setBase(annotatorBase(natural, area));
+  }, [base, natural, area]);
   const viewRef = useRef<ZoomViewport>({ x: 0, y: 0, scale: 1 });
   const placed = useRef(false);
   /** Canvas pixels per base pixel: raised after a zoom so strokes stay sharp. */
@@ -100,17 +105,22 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
       setArea((prev) => (prev && Math.abs(prev.width - r.width) < 0.5 && Math.abs(prev.height - r.height) < 0.5 ? prev : { width: r.width, height: r.height }));
     };
     read();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(read);
-    observer.observe(el);
-    return () => observer.disconnect();
+    // A turn of the phone resizes the window; the observer sees the area itself (the tools wrapping, a split view).
+    window.addEventListener('resize', read);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
+    observer?.observe(el);
+    return () => {
+      window.removeEventListener('resize', read);
+      observer?.disconnect();
+    };
   }, []);
 
-  // The first view: the part the viewer showed; after a resize, the same view kept within the new limits.
+  // The first view: the part the viewer showed; after a resize, the same view kept within the new limits (the base,
+  // and so every stroke, stays as it is).
   useLayoutEffect(() => {
     if (!natural || !base || !area || base.width <= 0) return;
     viewRef.current = placed.current
-      ? clampViewport(viewRef.current, base, area, annotatorLimits(natural, base))
+      ? clampViewport(viewRef.current, base, area, annotatorLimits(natural, base, area))
       : annotatorInitialView(natural, base, area, initialRef.current);
     placed.current = true;
     paint();
@@ -147,7 +157,8 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
   }, []);
 
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const stroke = useRef<{ id: number; startedAt: number } | null>(null);
+  /** The stroke under way; `touched`: some point of it was on the picture (one that never was is no stroke). */
+  const stroke = useRef<{ id: number; startedAt: number; touched: boolean } | null>(null);
   const press = useRef<{ id: number; x: number; y: number; moved: boolean; onPicture: boolean } | null>(null);
   const pinch = useRef<Pinch | null>(null);
   const areaBox = useRef<{ left: number; top: number }>({ left: 0, top: 0 });
@@ -177,8 +188,13 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
       const ax = event.clientX - r.left;
       const ay = event.clientY - r.top;
       press.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, onPicture: annotatorOnPicture(viewRef.current, base, ax, ay) };
-      stroke.current = { id: event.pointerId, startedAt: event.timeStamp };
+      stroke.current = { id: event.pointerId, startedAt: event.timeStamp, touched: press.current.onPicture };
       callbacks.current.onStrokeStart(pointAt(event), viewRef.current.scale);
+      return;
+    }
+    if (pointers.current.size > 2) {
+      // A third finger (a palm): the pinch goes on with the first two, measured afresh so nothing jumps.
+      pinch.current = pinchNow();
       return;
     }
     if (pointers.current.size === 2) {
@@ -200,7 +216,7 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
     if (pinch.current && pointers.current.size >= 2) {
       const next = pinchNow();
       const prev = pinch.current;
-      const limits = annotatorLimits(natural, base);
+      const limits = annotatorLimits(natural, base, area);
       // About the fingers' last middle, then moved with it: the picture point between them stays between them.
       let view = zoomAt(viewRef.current, next.dist / prev.dist, prev.midX - areaBox.current.left, prev.midY - areaBox.current.top, base, area, limits);
       view = panBy(view, next.midX - prev.midX, next.midY - prev.midY, base, area, limits);
@@ -211,16 +227,21 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
     }
     const p = press.current;
     if (p && p.id === event.pointerId && !p.moved && Math.hypot(event.clientX - p.x, event.clientY - p.y) >= TAP_SLOP_PX) p.moved = true;
-    if (stroke.current && stroke.current.id === event.pointerId) callbacks.current.onStrokeMove(pointAt(event));
+    if (stroke.current && stroke.current.id === event.pointerId) {
+      if (!stroke.current.touched) stroke.current.touched = annotatorOnPicture(viewRef.current, base, event.clientX - areaBox.current.left, event.clientY - areaBox.current.top);
+      callbacks.current.onStrokeMove(pointAt(event));
+    }
   };
 
   const endPointer = (event: React.PointerEvent<HTMLDivElement>, cancelled: boolean) => {
     if (!pointers.current.has(event.pointerId)) return;
     pointers.current.delete(event.pointerId);
     if (stroke.current && stroke.current.id === event.pointerId) {
+      // Never on the picture (a tap or a slip beside it): nothing to keep, so Undo never takes an invisible stroke.
+      const kept = !cancelled && stroke.current.touched;
       stroke.current = null;
-      if (cancelled) callbacks.current.onStrokeCancel();
-      else callbacks.current.onStrokeEnd();
+      if (kept) callbacks.current.onStrokeEnd();
+      else callbacks.current.onStrokeCancel();
       const p = press.current;
       press.current = null;
       if (!cancelled && p && !p.moved && !p.onPicture) callbacks.current.onBackgroundTap?.();
@@ -229,6 +250,9 @@ export const ZoomableCanvas: React.FC<ZoomableCanvasProps> = ({
       // A finger left down after a pinch draws nothing: only a new first finger starts a stroke.
       pinch.current = null;
       sharpen();
+    } else if (pinch.current) {
+      // One of three fingers lifted: the pinch goes on with the two left, measured afresh so nothing jumps.
+      pinch.current = pinchNow();
     }
   };
 

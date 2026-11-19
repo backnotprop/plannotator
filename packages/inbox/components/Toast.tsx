@@ -296,7 +296,8 @@ function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
       let top = Infinity;
       for (const node of found) {
         const box = node.getBoundingClientRect();
-        if (box.width > 0 && box.height > 0) top = Math.min(top, box.top);
+        // Gathered into the corner (full screen's tucked tools), the card is hidden but keeps its box: nothing to clear.
+        if (box.width > 0 && box.height > 0 && getComputedStyle(node).visibility !== 'hidden') top = Math.min(top, box.top);
       }
       setFloor(top === Infinity ? null : Math.max(0, Math.round(container - top)) + 8);
       if (resize) {
@@ -316,7 +317,8 @@ function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
       });
     };
     const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(soon);
-    mutations?.observe(document.body, { childList: true, subtree: true });
+    // `data-tools`: full screen's tools gathered into the corner or brought back, the card with them.
+    mutations?.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tools'] });
     window.addEventListener('resize', measure);
     return () => {
       if (frame) cancelAnimationFrame(frame);

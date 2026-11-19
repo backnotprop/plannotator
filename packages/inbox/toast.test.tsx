@@ -419,6 +419,40 @@ for (const phone of [
   });
 }
 
+test.skipIf(!hasDom)("a phone toast ignores a card gathered into the corner (hidden, its box kept), and moves when the tools come back", async () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  const view = document.createElement('section');
+  view.className = 'ib-view ib-fullview ib-phone';
+  view.setAttribute('data-tools', 'tucked');
+  const dock = document.createElement('div');
+  dock.className = 'ib-fvdock-phone';
+  const handle = document.createElement('div');
+  handle.className = 'ib-fvhandle';
+  boxAt(handle, 330, 790, 48, 48);
+  dock.appendChild(handle);
+  const card = document.createElement('div');
+  card.className = 'ib-fcomp ib-mode-reply ib-phone';
+  card.style.visibility = 'hidden';
+  boxAt(card, 8, 644, 377, 200);
+  view.append(dock, card);
+  page.appendChild(view);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  // Only the corner control is on screen: the toast sits over it, not 200 px up over an invisible card.
+  expect(toast.style.bottom).toBe(`${852 - 790 + 8}px`);
+  // The tools come back (an attribute, no node added): the card is measured again.
+  card.style.visibility = '';
+  act(() => view.setAttribute('data-tools', 'shown'));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(toast.style.bottom).toBe(`${852 - 644 + 8}px`);
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
 test.skipIf(!hasDom)("a phone toast sits above a full-screen file's minimized card (its pill), not over it", () => {
   phoneWindow(true);
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 852 });

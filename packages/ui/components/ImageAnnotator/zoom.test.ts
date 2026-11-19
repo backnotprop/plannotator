@@ -73,10 +73,13 @@ describe('the drawing screen on a phone: where a stroke lands', () => {
 describe('the drawing screen on a phone: how a picture opens', () => {
   test('the base fits the whole picture inside the area, never above its own pixels', () => {
     const wide = annotatorBase({ width: 2400, height: 576 }, AREA);
-    expect(wide.width).toBeCloseTo(AREA.width - 2 * ANNOTATOR_BASE_PAD, 6);
-    expect(wide.height / wide.width).toBeCloseTo(576 / 2400, 6);
+    expect(wide.width).toBe(AREA.width - 2 * ANNOTATOR_BASE_PAD);
+    // Whole pixels (the laid-out image's clientWidth is the base exactly), the aspect kept within a pixel.
+    expect(Math.abs(wide.height - (wide.width * 576) / 2400)).toBeLessThanOrEqual(0.5);
     const tall = annotatorBase({ width: 900, height: 3367 }, AREA);
-    expect(tall.height).toBeCloseTo(AREA.height - 2 * ANNOTATOR_BASE_PAD, 6);
+    expect(tall.height).toBe(AREA.height - 2 * ANNOTATOR_BASE_PAD);
+    expect(Number.isInteger(tall.width)).toBe(true);
+    expect(Math.abs(tall.width - (tall.height * 900) / 3367)).toBeLessThanOrEqual(0.5);
     expect(annotatorBase({ width: 120, height: 80 }, AREA)).toEqual({ width: 120, height: 80 });
   });
 
@@ -138,5 +141,16 @@ describe('the drawing screen on a phone: how a picture opens', () => {
     expect(annotatorCanvasRatio(base, 1, 3)).toBe(3);
     expect(annotatorCanvasRatio(base, 2, 3)).toBe(6);
     expect(annotatorCanvasRatio(base, 20, 3) * base.width).toBeCloseTo(ANNOTATOR_CANVAS_MAX_SIDE, 6);
+  });
+
+  test('after the area shrinks (a phone turned), the whole picture can still be pinched back into view', () => {
+    const natural = { width: 2400, height: 576 };
+    const base = annotatorBase(natural, { width: 820, height: 300 });
+    const turned = { width: 377, height: 640 };
+    const limits = annotatorLimits(natural, base, turned);
+    expect(limits.min).toBeCloseTo(turned.width / base.width, 6);
+    expect(base.width * limits.min).toBeLessThanOrEqual(turned.width + 1e-9);
+    // Unchanged area: the whole picture is scale 1, as before.
+    expect(annotatorLimits(natural, base, { width: 820, height: 300 }).min).toBe(1);
   });
 });

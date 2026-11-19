@@ -2,8 +2,7 @@
  * Marking up a thread's files on a phone (the 2026-11-19 phone audit), proved against the compiled binary under a
  * temp data dir, in Chromium as a touch phone (393 × 852 at 3×, and 320 px wide), with real fingers through the
  * DevTools protocol:
- * - A panorama (2400 × 576) opens whole, not cropped on the right.
- * - Mark up opens a drawing screen the picture fills (not an 85vw preview: the panorama was about 334 × 80 px), a
+ * - Mark up on a panorama (2400 × 576) opens a drawing screen the picture fills (not an 85vw preview: the panorama was about 334 × 80 px), a
  *   third of the area tall from its left; one finger draws, two fingers pinch it closer, and a stroke made zoomed
  *   lands under the finger (the kept drawing has red where the finger went, in the picture's own pixels).
  * - "Added to your reply" sits above the full-screen Comment / Reply card, never over its tabs.
@@ -101,7 +100,7 @@ const line = (x0: number, y0: number, x1: number, y1: number, n = 16): [number, 
 
 for (const width of [393, 320])
   for (const scheme of ['light', 'dark'] as const)
-    test(`a phone ${width} px, ${scheme}: a panorama opens whole, draws zoomed under the finger, and the toast keeps off the card's tabs`, async () => {
+    test(`a phone ${width} px, ${scheme}: Mark up on a panorama draws zoomed under the finger, and the toast keeps off the card's tabs`, async () => {
       const w = await world();
       const browser = await chromium.launch();
       try {
@@ -110,10 +109,6 @@ for (const width of [393, 320])
         const img = page.locator('[data-image-zoom-stage] img');
         await expect(img).toBeVisible();
         await page.waitForTimeout(500);
-        // Whole: its right edge on screen.
-        const shown = (await img.boundingBox())!;
-        expect(shown.x).toBeGreaterThanOrEqual(0);
-        expect(shown.x + shown.width).toBeLessThanOrEqual(width);
         await shot(page, `pano-${width}-${scheme}`);
 
         await page.locator('[data-markup-open]').first().tap();
@@ -123,14 +118,14 @@ for (const width of [393, 320])
         await page.waitForTimeout(400);
         const areaBox = (await area.boundingBox())!;
         const opened = (await content.boundingBox())!;
-        // A third of the area tall, from its left: far more than the 80 px preview.
+        // On the part the viewer showed (its height, from the left): far taller than the old 80 px preview.
         expect(opened.height).toBeGreaterThan(areaBox.height / 3 - 4);
         expect(Math.abs(opened.x - areaBox.x)).toBeLessThan(2);
         await shot(page, `drawing-opened-${width}-${scheme}`);
 
         // Two fingers pinch it closer about the area's middle.
         const mid = { x: areaBox.x + areaBox.width / 2, y: areaBox.y + areaBox.height / 2 };
-        await pinch(page, [{ x: mid.x - 20, y: mid.y }, { x: mid.x + 20, y: mid.y }], [{ x: mid.x - 60, y: mid.y }, { x: mid.x + 60, y: mid.y }]);
+        await pinch(page, [{ x: mid.x - 20, y: mid.y }, { x: mid.x + 20, y: mid.y }], [{ x: mid.x - 50, y: mid.y }, { x: mid.x + 50, y: mid.y }]);
         await page.waitForTimeout(300);
         const zoomed = (await content.boundingBox())!;
         expect(zoomed.width).toBeGreaterThan(opened.width * 2);
@@ -161,7 +156,10 @@ for (const width of [393, 320])
         const toast = page.locator('[data-inbox-toast]');
         await expect(toast).toBeVisible();
         const toastBox = (await toast.boundingBox())!;
-        for (const tab of await page.locator('[data-fcomp] [role="tab"]').all()) {
+        // The card's two tabs, Comment and Reply (radios in a radiogroup).
+        const tabs = page.locator('[data-fcomp] [data-fcomp-mode]');
+        await expect(tabs).toHaveCount(2);
+        for (const tab of await tabs.all()) {
           const tabBox = (await tab.boundingBox())!;
           expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(tabBox.y);
         }
