@@ -757,7 +757,7 @@ export const AGENTS: Agent[] = [
     other: [
       {
         title: 'Turn the tool on by hand',
-        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must be on. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
+        steps: [{ do: `Merge this into your Plannotator config. The Inbox must be on (\`${TURN_ON}\`). It applies from the next message in each chat.`, file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
       },
     ],
     check: wakeCheck('OpenClaw'),
@@ -834,7 +834,7 @@ export const AGENTS: Agent[] = [
       },
       {
         title: 'Turn the tool on by hand',
-        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must be on. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
+        steps: [{ do: `Merge this into your Plannotator config. The Inbox must be on (\`${TURN_ON}\`). It applies to new Hermes sessions.`, file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
       },
     ],
     check: wakeCheck('Hermes Agent'),

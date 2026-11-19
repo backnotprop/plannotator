@@ -922,9 +922,6 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       if (open && !opened && (await openBrowserDetached(url, { isRemote: isRemoteSession() })) === "remote") {
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
-      // --open is the setup's one step (it returns, where bare `plannotator inbox` may serve in the foreground): it
-      // connects the agents it finds, as the person's bare run does, and names them on stderr.
-      if (open && connect) await connectRunningInbox(entry);
       process.stdout.write(`${url}\n`);
       process.exit(0);
     } catch (error) {

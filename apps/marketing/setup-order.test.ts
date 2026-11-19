@@ -1,5 +1,5 @@
 // Every setup text the site serves (the setup script /inbox/prompt.md, the llms Inbox page's setup section and every
-// /llms/agents/<slug>.md), walked as an agent walks it: the commands in order (src/lib/setup-texts.ts). A first
+// /llms/agents/<slug>.md), walked as an agent walks it: the commands in order (tests/helpers/setup-texts.ts). A first
 // setup broke when the script's first Inbox step was `--background` (refused while the Inbox is off) and the next
 // was bare `plannotator inbox` (it served in the foreground and never returned), and when the Claude Code page
 // restarted Claude Code before the Inbox was on (the restarted session never got the tool). So: the first Inbox
@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { LISTED_AGENTS, type Step } from './src/lib/inbox-agents';
-import { forbiddenCommand, inboxCommand, setupCommands, setupTexts, TURN_ON } from './src/lib/setup-texts';
+import { forbiddenCommand, inboxCommand, setupCommands, setupTexts, TURN_ON } from '../../tests/helpers/setup-texts';
 
 const promptSource = readFileSync(new URL('./src/lib/inbox-prompt.md', import.meta.url), 'utf8');
 const texts = setupTexts(promptSource);

@@ -16,8 +16,9 @@ import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
-import { forbiddenCommand, inboxCommand, setupCommands, TURN_ON } from "../../marketing/src/lib/setup-texts";
+import { forbiddenCommand, inboxCommand, setupCommands, TURN_ON } from "../../../tests/helpers/setup-texts";
 import { formatInboxHelp } from "./inbox-help";
+import { INBOX_OFF_LINE } from "@plannotator/shared/inbox/connection";
 
 const here = import.meta.dir;
 const HOME = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-help-setup-home-")));
@@ -63,6 +64,16 @@ describe("plannotator inbox --help", () => {
     expect(claims.length).toBeGreaterThan(0);
     for (const claim of claims) expect(claim).toMatch(/turned the Inbox on|Inbox is on/);
     expect(sentences.filter((s) => /has run once|if it never has/.test(s))).toEqual([]);
+  });
+});
+
+describe("the off line", () => {
+  // What regresses: the line an agent gets while the Inbox is off names a command that holds its shell (bare
+  // `plannotator inbox` serves in the foreground when no Inbox runs) or that is refused while off.
+  test("the command it names to turn the Inbox on is the setup's turn-on, and nothing it names is refused or blocking", () => {
+    const named = setupCommands(INBOX_OFF_LINE);
+    expect(named).toEqual([TURN_ON]);
+    expect(named.filter((command) => forbiddenCommand(command))).toEqual([]);
   });
 });
 

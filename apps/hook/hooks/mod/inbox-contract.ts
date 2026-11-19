@@ -2207,22 +2207,23 @@ export const INBOX_BLOCKED_STALE_MS = 45_000
  * commands run `--open`). Until it says on, no host registers the agents' tool
  * or its reminder, and nothing Plannotator starts by itself (`--background`, a
  * detached start, `restart`, the MCP server, `inbox call` and the other
- * commands that start the Inbox, the start at login) starts it. Its text is
- * `{"on":true|false,"by":...,"at":...}`; only `"on":false` reads off, so a
- * mark that cannot be read keeps the Inbox on.
+ * commands that start the Inbox, the start at login) starts it. Where an
+ * Inbox already ran (`inbox/inbox.json`, from before the mark or from an older
+ * `plannotator`), the first reader writes the mark on. Its text is
+ * `{"on":true,"by":...,"at":...}`; only `"on":false` reads off, so a mark that
+ * cannot be read keeps the Inbox on.
  */
 export const INBOX_TURNED_ON_FILE = 'turned-on'
 
-/** What an agent gets when it reaches for the Inbox before the person turned it on. */
-export const INBOX_OFF_LINE =
-  'The Plannotator Inbox is off on this computer. `plannotator inbox` turns it on. If you are an agent, ask the person in the chat instead, and turn it on only if they ask you to.'
-
 /**
  * The command every setup text gives an agent as its first Inbox step: it
- * turns the Inbox on, starts it detached, opens it, connects the agents it
- * finds, prints the URL and returns, with or without a screen. Swap it here only.
+ * turns the Inbox on, starts it detached, opens it, prints the URL and
+ * returns, with or without a screen. Swap it here only.
  */
 export const INBOX_SETUP_COMMAND = 'plannotator inbox --open'
+
+/** What an agent gets when it reaches for the Inbox before the person turned it on. */
+export const INBOX_OFF_LINE = `The Plannotator Inbox is off on this computer. \`${INBOX_SETUP_COMMAND}\` turns it on. If you are an agent, ask the person in the chat instead, and turn it on only if they ask you to.`
 
 /** Whether a mark's text says on: anything but `"on": false` does (in doubt, on). */
 export function inboxMarkSaysOn(text: string): boolean {
@@ -2233,69 +2234,3 @@ export function inboxMarkSaysOn(text: string): boolean {
   }
 }
 
-/**
- * Files in the Inbox folder that only a person leaves (the window, a paired
- * phone, the connect step of their own `plannotator inbox`). `read`: a JSON
- * file that counts when it holds something; `dir`: a folder that counts when
- * it is there (the window makes it at the first draft); else it counts when it
- * is there and not empty. Never a thread's own files.
- */
-export const INBOX_PERSON_FILES: readonly { name: string; read: boolean; dir?: true }[] = [
-  { name: 'agents.json', read: false },
-  { name: 'inbox.db', read: false },
-  { name: 'devices.jsonl', read: false },
-  { name: 'pins.json', read: true },
-  { name: 'machines.json', read: true },
-  { name: 'relay.json', read: true },
-  { name: 'snoozes.json', read: true },
-  { name: 'recent-searches.json', read: true },
-  { name: 'drafts', read: false, dir: true },
-  { name: 'reply-drafts', read: false, dir: true },
-]
-
-/**
- * The one-time decision for an install from before the mark (an Inbox ran
- * here, `inbox/inbox.json`, and no mark): did a person use it? From
- * config.json and state.json's text and the INBOX_PERSON_FILES (by name: its
- * text, `''` for one that is there and not empty but not read, `null` for one
- * that is there but could not be read, missing for none). A person's
- * settings in config.json count: `inboxNotifications` (the window's
- * notification answer), `inboxTool` on for a host (the connect step and
- * Settings), routines on (`inboxScheduledThreads`: only the window's switch,
- * and the start at login exists only then), a Tour stamp (also in
- * state.json). Anything that cannot be read or parsed counts: in doubt, on.
- */
-export function inboxPersonUsedIt(files: { config: string | null; state: string | null; inbox: Record<string, string | null | undefined> }): boolean {
-  const object = (text: string | null): Record<string, unknown> | 'broken' => {
-    if (text === null || text.trim() === '') return {}
-    try {
-      const value = JSON.parse(text.replace(/^﻿/, '')) as unknown
-      return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-    } catch {
-      return 'broken'
-    }
-  }
-  const config = object(files.config)
-  const state = object(files.state)
-  if (config === 'broken' || state === 'broken') return true
-  const on = (value: unknown) => value === true || value === 'true' || value === '1'
-  const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-  if (isObject(config.inboxNotifications) || config.inboxScheduledThreads === true) return true
-  if (on(config.inboxTool) || (isObject(config.inboxTool) && Object.values(config.inboxTool).some(on))) return true
-  for (const tour of [config.inboxTour, state.inboxTour]) {
-    if (isObject(tour) && ['seen_at', 'finished_at', 'skipped_at'].some((key) => typeof tour[key] === 'string' && tour[key] !== '')) return true
-  }
-  for (const file of INBOX_PERSON_FILES) {
-    const text = files.inbox[file.name]
-    if (text === undefined) continue
-    if (text === null || !file.read) return true
-    if (text.trim() === '') continue
-    try {
-      const value = JSON.parse(text) as unknown
-      if (Array.isArray(value) ? value.length > 0 : isObject(value) && Object.keys(value).length > 0) return true
-    } catch {
-      return true
-    }
-  }
-  return false
-}

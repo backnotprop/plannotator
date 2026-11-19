@@ -659,13 +659,13 @@ describe('register', () => {
     expect(w.files.has(TURNED_ON)).toBe(false)
   })
 
-  // An install from before the mark that only agents ever started: decided off once, and written.
-  test('an Inbox only agents ever started (inbox.json, no person files, no mark): no plannotator_inbox, decided off', async ($: any, on: any) => {
+  // An Inbox that ran before the mark, or that an older plannotator started (it writes no mark): on, written once.
+  test('an Inbox ran here with no mark (inbox.json from before, or an older plannotator): plannotator_inbox, and the mark written on', async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []), noMark: true })
     await $.session.start(SESSION)
 
-    expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
-    expect(JSON.parse(w.files.get(TURNED_ON)!)).toMatchObject({ on: false, by: 'update-agent-only' })
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(JSON.parse(w.files.get(TURNED_ON)!)).toMatchObject({ on: true, by: 'update-existing' })
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {

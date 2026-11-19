@@ -946,7 +946,11 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   })
   const debugPath = debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null
   // The Inbox only once the person turned it on here (inbox-turned-on.ts), and only where its switch allows it.
-  const testOn = (await $.env.get('PLANNOTATOR_TEST_INBOX_ON')) === '1' || ((await $.env.get('PLANNOTATOR_TEST_INBOX_ON')) !== '0' && !!(await $.env.get('PLANNOTATOR_TEST_SANDBOX')))
+  // A test run's knob, or the test sandbox for a scratch data dir (in the temp folder) only (turned-on.ts testRunCountsOn).
+  const testKnob = await $.env.get('PLANNOTATOR_TEST_INBOX_ON')
+  const tmp = (await $.env.get('TMPDIR'))?.replace(/\/+$/, '')
+  const scratch = /^(?:\/private)?\/(?:tmp|var\/folders)\//.test(dataDir) || (!!tmp && dataDir.startsWith(`${tmp}/`))
+  const testOn = testKnob === '1' || (testKnob !== '0' && !!(await $.env.get('PLANNOTATOR_TEST_SANDBOX')) && scratch)
   const inboxOn =
     features.inboxTool &&
     resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText) &&

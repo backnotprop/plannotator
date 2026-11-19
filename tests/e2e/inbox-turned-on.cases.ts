@@ -4,13 +4,13 @@
  * `<root>/data` inboxScratch marks as turned on). Registered by inbox.spec.ts, so Browser smoke runs them on every PR.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test } from './inbox-test';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { LISTED_AGENTS } from '../../apps/marketing/src/lib/inbox-agents';
-import { agentSetup, bareCommand, forbiddenCommand, llmsInboxSetup, promptSetup, setupCommands, TURN_ON, type SetupText } from '../../apps/marketing/src/lib/setup-texts';
+import { agentSetup, bareCommand, forbiddenCommand, llmsInboxSetup, promptSetup, setupCommands, TURN_ON, type SetupText } from '../helpers/setup-texts';
 import { INBOX_OFF_LINE } from '../../packages/shared/inbox/connection';
 
 const repo = resolve(__dirname, '../..');
@@ -105,32 +105,31 @@ export function turnedOnCases(binary: string): void {
     }
   });
 
-  test('Inbox from before the mark: used stays on, agent-only goes quiet, unreadable stays on', async () => {
-    const cases: [string, (dataDir: string) => void, boolean][] = [
-      ['used (the connect step ran)', (d) => writeFileSync(join(d, 'inbox', 'agents.json'), '{}'), true],
-      ['used (a pinned thread)', (d) => writeFileSync(join(d, 'inbox', 'pins.json'), '["thr_1"]'), true],
-      ['agent-only', () => undefined, false],
-      ['unreadable', (d) => {
-        writeFileSync(join(d, 'inbox', 'pins.json'), '[]');
-        chmodSync(join(d, 'inbox', 'pins.json'), 0o000);
-      }, true],
+  // Where an Inbox already ran, it stays on: a person who only reads threads and picks answers in the window
+  // (inbox.json and projects/* on disk, nothing else), and a person's Inbox an older plannotator started on a fresh
+  // computer (it writes inbox.json and no mark). Restart (what Update ends in) brings it back.
+  test('Inbox where one already ran (no mark): the reading-and-picking window user and an older plannotator stay on, and Restart works', async () => {
+    const shapes: [string, (dataDir: string) => void][] = [
+      ['window user who reads and picks only', (d) => {
+        mkdirSync(join(d, 'inbox', 'projects', 'p1'), { recursive: true });
+        writeFileSync(join(d, 'inbox', 'projects', 'p1', 'questions.jsonl'), '{"id":"q1","picked_at":"2026-11-01T00:00:00.000Z"}\n');
+      }],
+      ['an older plannotator started it', () => undefined],
     ];
-    for (const [name, arrange, on] of cases) {
-      const root = inboxScratch('plannotator-inbox-update-e2e-');
+    for (const [name, arrange] of shapes) {
+      const root = inboxScratch('plannotator-inbox-existing-e2e-');
       try {
         const env = realRuleEnv(root);
         const dataDir = env.PLANNOTATOR_DATA_DIR;
         mkdirSync(join(dataDir, 'inbox'), { recursive: true });
-        // An Inbox ran here before the mark (its registry, stopped).
+        // The registry an Inbox left (stopped).
         writeFileSync(join(dataDir, 'inbox', 'inbox.json'), JSON.stringify({ pid: 999999, port: 9, token: 'old', serverSession: 'old', version: '0.29.0', startedAt: '2026-11-01T00:00:00.000Z' }));
         arrange(dataDir);
         const run = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
-        if (on) expect([name, run.status, run.stdout.trim()]).toEqual([name, 0, expect.stringMatching(URL_LINE)]);
-        else expect([name, run.status, run.stderr.includes(INBOX_OFF_LINE)]).toEqual([name, 1, true]);
-        expect([name, markIn(dataDir)]).toEqual([name, expect.objectContaining({ on, by: on ? 'update-used' : 'update-agent-only' })]);
-        try {
-          chmodSync(join(dataDir, 'inbox', 'pins.json'), 0o600);
-        } catch {}
+        expect([name, run.status, run.stdout.trim()]).toEqual([name, 0, expect.stringMatching(URL_LINE)]);
+        expect([name, markIn(dataDir)]).toEqual([name, expect.objectContaining({ on: true, by: 'update-existing' })]);
+        const restarted = spawnSync(binary, ['inbox', 'restart'], { env, encoding: 'utf8', timeout: 60_000 });
+        expect([name, restarted.status, restarted.stdout.trim()]).toEqual([name, 0, expect.stringMatching(URL_LINE)]);
       } finally {
         await removeInboxScratch(root);
       }
@@ -139,7 +138,7 @@ export function turnedOnCases(binary: string): void {
 
   /**
    * The first setup, as an agent follows it, on a fresh computer: the setup script, the llms Inbox page and the
-   * Claude Code and Codex pages (apps/marketing/src/lib/setup-texts.ts), each with and without SSH_CONNECTION, stdin
+   * Claude Code and Codex pages (tests/helpers/setup-texts.ts), each with and without SSH_CONNECTION, stdin
    * never a terminal. Every command an agent runs from them, in their order: none gets the off line, each returns
    * (setup-order.test.ts keeps bare `plannotator inbox` and `--background` out of every page), and once the turn-on
    * has run, `plannotator inbox mcp` lists the tools and the script's first message is sent.

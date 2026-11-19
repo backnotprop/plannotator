@@ -5,17 +5,17 @@
  * connection`) read it here; the Claude Code mod reads the same files itself
  * (apps/hook/hooks/mod/inbox-turned-on.ts).
  *
- * An install from before the mark (an Inbox ran here, no mark) is decided once,
- * by the first reader, from cheap files only (`inboxPersonUsedIt`): a person's
- * use keeps it on, else only agents ever started it and it stays off. The
- * answer is written as the mark (created only if still absent, so the first
- * writer wins), so it is never decided again and nothing an agent writes
- * later turns it on.
+ * An install from before the mark (an Inbox ran here: `inbox/inbox.json`, and
+ * no mark) is on: the first reader writes the mark on (`update-existing`), so
+ * only a computer where the Inbox never ran starts off. The same holds when an
+ * older `plannotator`, which knows no mark, starts the person's Inbox. No other
+ * file is read.
  */
 
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { INBOX_PERSON_FILES, INBOX_TURNED_ON_FILE, inboxMarkSaysOn, inboxPersonUsedIt } from "./connection";
+import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { INBOX_TURNED_ON_FILE, inboxMarkSaysOn } from "./connection";
 
 /** Set on the start at login's run (packages/server/inbox-scheduled-login.ts): one of Plannotator's own starts, which never turns the Inbox on. */
 export const INBOX_LOGIN_ITEM_ENV = "PLANNOTATOR_INBOX_LOGIN_ITEM";
@@ -24,15 +24,30 @@ export function inboxTurnedOnPath(dataDir: string): string {
   return join(dataDir, "inbox", INBOX_TURNED_ON_FILE);
 }
 
+const realOr = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+};
+
+/** Whether `dir` is inside the OS temp folder or /tmp: a scratch folder, never a person's real data dir. */
+function isScratchFolder(dir: string): boolean {
+  const real = realOr(dir);
+  return [tmpdir(), "/tmp", "/private/tmp"].some((root) => real.startsWith(`${realOr(root).replace(/[\\/]+$/, "")}${sep}`));
+}
+
 /**
- * A test run's scratch data dir with no mark counts as on, so the suites that
- * start Inboxes need no mark: only a variable that only tests set says so
- * (`PLANNOTATOR_TEST_INBOX_ON=1`, or the test sandbox marker). `=0` gives the
- * real rule. Nothing about where the data dir is counts.
+ * A test run's data dir with no mark counts as on, so the suites that start
+ * Inboxes need no mark: `PLANNOTATOR_TEST_INBOX_ON=1` (set only on purpose),
+ * or the test sandbox marker for a scratch data dir (inside the OS temp
+ * folder). `=0` gives the real rule.
  */
-export function testRunCountsOn(env: Readonly<Record<string, string | undefined>>): boolean {
+export function testRunCountsOn(dataDir: string, env: Readonly<Record<string, string | undefined>>): boolean {
   if (env.PLANNOTATOR_TEST_INBOX_ON === "0") return false;
-  return env.PLANNOTATOR_TEST_INBOX_ON === "1" || !!env.PLANNOTATOR_TEST_SANDBOX;
+  if (env.PLANNOTATOR_TEST_INBOX_ON === "1") return true;
+  return !!env.PLANNOTATOR_TEST_SANDBOX && isScratchFolder(dataDir);
 }
 
 /** A file's text; undefined when it is not there, null when it is there but cannot be read. */
@@ -45,44 +60,34 @@ function read(path: string): string | null | undefined {
   }
 }
 
-function writeMark(dataDir: string, on: boolean, by: string, flag: "w" | "wx"): void {
+/**
+ * Write the mark whole, never half: a temp file first, then moved into place
+ * (`replace`) or linked there only if no mark is there yet (the first writer
+ * wins). No reader ever sees an empty mark.
+ */
+function writeMark(dataDir: string, by: string, replace: boolean): void {
   mkdirSync(join(dataDir, "inbox"), { recursive: true, mode: 0o700 });
-  writeFileSync(inboxTurnedOnPath(dataDir), `${JSON.stringify({ on, by, at: new Date().toISOString() })}\n`, { mode: 0o600, flag });
+  const path = inboxTurnedOnPath(dataDir);
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temp, `${JSON.stringify({ on: true, by, at: new Date().toISOString() })}\n`, { mode: 0o600 });
+  if (replace) return renameSync(temp, path);
+  try {
+    linkSync(temp, path);
+  } finally {
+    try {
+      unlinkSync(temp);
+    } catch {}
+  }
 }
 
 /** A person's run of `plannotator inbox`: the Inbox is on here from now on. Never throws; false when it could not be written. */
 export function markInboxTurnedOn(dataDir: string): boolean {
   try {
-    writeMark(dataDir, true, "command", "w");
+    writeMark(dataDir, "command", true);
     return true;
   } catch {
     return false;
   }
-}
-
-/** The one-time decision's evidence, from the files themselves (no thread is read). */
-function personUsedIt(dataDir: string): boolean {
-  const inbox: Record<string, string | null | undefined> = {};
-  for (const file of INBOX_PERSON_FILES) {
-    const path = join(dataDir, "inbox", file.name);
-    if (file.read) {
-      inbox[file.name] = read(path);
-      continue;
-    }
-    try {
-      const stat = statSync(path);
-      inbox[file.name] = file.dir || stat.size > 0 ? "" : undefined;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException | null)?.code;
-      inbox[file.name] = code === "ENOENT" || code === "ENOTDIR" ? undefined : null;
-    }
-  }
-  // One that cannot be read is passed as broken JSON, which counts.
-  const text = (path: string) => {
-    const t = read(path);
-    return t === undefined ? null : t === null ? "{" : t;
-  };
-  return inboxPersonUsedIt({ config: text(join(dataDir, "config.json")), state: text(join(dataDir, "state.json")), inbox });
 }
 
 /** Whether the person has turned the Inbox on here: the one gate (see the file's comment). */
@@ -90,15 +95,12 @@ export function isInboxTurnedOn(dataDir: string, env: Readonly<Record<string, st
   const mark = read(inboxTurnedOnPath(dataDir));
   if (mark === null) return true;
   if (mark !== undefined) return inboxMarkSaysOn(mark);
-  if (testRunCountsOn(env)) return true;
+  if (testRunCountsOn(dataDir, env)) return true;
   if (read(join(dataDir, "inbox", "inbox.json")) === undefined) return false;
-  const on = personUsedIt(dataDir);
+  // An Inbox ran here before the mark (or an older plannotator started it): on, written once. Another
+  // reader may have written it first; either way the mark says on.
   try {
-    writeMark(dataDir, on, on ? "update-used" : "update-agent-only", "wx");
-  } catch {
-    // Another reader decided first (its mark stands), or it cannot be written: the answer holds for this run.
-    const written = read(inboxTurnedOnPath(dataDir));
-    if (typeof written === "string") return inboxMarkSaysOn(written);
-  }
-  return on;
+    writeMark(dataDir, "update-existing", false);
+  } catch {}
+  return true;
 }

@@ -2,7 +2,7 @@
  * The setup texts an agent follows to set up the Plannotator Inbox for a person, cut to their setup sections, and
  * the `plannotator` commands each one gives, in the order it gives them. Two tests walk them:
  * apps/marketing/setup-order.test.ts (every page: the turn-on comes first, and no step an agent runs is refused or
- * holds its shell) and the compiled-binary walk in tests/e2e/inbox.spec.ts (the commands run against the binary
+ * holds its shell) and the compiled-binary walk in tests/e2e/inbox-turned-on.cases.ts (the commands run against the binary
  * with the real rule).
  *
  * The rule they hold (2026-11-19, after a first setup broke): the first Inbox step is always `plannotator inbox
@@ -11,8 +11,8 @@
  * setup text gives an agent `--background` (refused while the Inbox is off) or bare `plannotator inbox` (it serves
  * in the foreground when no Inbox runs, so it never returns in an agent's shell).
  */
-import { LISTED_AGENTS, TURN_ON, type Agent } from './inbox-agents';
-import { buildInboxPrompt, buildLlmsAgent, buildLlmsInbox } from './llms';
+import { LISTED_AGENTS, TURN_ON, type Agent } from '../../apps/marketing/src/lib/inbox-agents';
+import { buildInboxPrompt, buildLlmsAgent, buildLlmsInbox } from '../../apps/marketing/src/lib/llms';
 
 export { TURN_ON };
 
