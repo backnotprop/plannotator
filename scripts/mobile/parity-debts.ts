@@ -4,9 +4,8 @@
  *
  *   bun scripts/mobile/parity-debts.ts
  *
- * Only .github/workflows/mobile-ledger.yml runs it: nightly, by hand, on a
- * push to main that changes the ledger, and on a pull request that changes
- * this file. It is a script, not a test file, so no
+ * Only the `ledger` job of .github/workflows/mobile-contract.yml runs it. It
+ * is a script, not a test file, so no
  * `bun test` runs it: a mobile debt never turns the Inbox's checks, main's
  * full run or a release red. It imports nothing, so it runs with no install.
  */

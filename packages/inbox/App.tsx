@@ -78,7 +78,7 @@ import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './ma
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
-import { useShowLight, type ListEdge } from './showLight';
+import { useShowLight } from './showLight';
 import { useHeldRead } from './app/useHeldRead';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread, priorityChangedRows } from './held';
@@ -4929,8 +4929,6 @@ function Inbox() {
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
-  /** The list's pill was pressed (Show, and "take me there"): the list's next draw goes to the rows it brought in past that edge. Show's own line never scrolls. */
-  const goAfterShow = useRef<ListEdge | null>(null);
   /** The row Back over a covered list focused (a key, or a stacked window's mouse Back), which its settle redraws in another group. */
   const refocusRow = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -4941,8 +4939,6 @@ function Inbox() {
     if (body && from) playSettle(body, from);
     const showBefore = showFrom.current;
     showFrom.current = null;
-    const pressedPill = goAfterShow.current;
-    goAfterShow.current = null;
     // The rows Show (or a refresh) brought in, in the order they are drawn, their groups opened with the press.
     let brought: HTMLElement[] = [];
     if (showBefore && shown) {
@@ -4951,10 +4947,7 @@ function Inbox() {
       // A read that brings nothing in (Show again, a second refresh) leaves the light already on as it is.
       // Each lights when it is in view in the list (showLight.ts): Show never scrolls, and the rows out of view
       // wait for the reader, counted by the list's pill. Only that pill's press goes to them.
-      if (ids.size > 0) {
-        light(ids, from ? SHOW_LIT_AFTER_SLIDE_MS : 0, body);
-        if (pressedPill) goToNew(pressedPill);
-      }
+      if (ids.size > 0) light(ids, from ? SHOW_LIT_AFTER_SLIDE_MS : 0, body);
     }
     const shownAll = focusAfterShow.current;
     focusAfterShow.current = false;
@@ -5625,16 +5618,15 @@ function Inbox() {
           // A phone's pull down from the list's top does the same, its ↻ spinning until the read lands (pullRefresh.ts).
           onPullRefresh={() => refreshInbox(route.project, false)}
           refreshSpin={refreshSpin && refreshSpin.scope === route.project ? refreshSpin.key : null}
-          onShowNew={(fromPill) => {
+          onShowNew={() => {
             // Show's line goes away with the press: after a key, focus goes to the first row it brought in.
             focusAfterShow.current = lastInput() === 'keyboard';
             listOrder.current = [...(listBody(rootRef.current)?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
-            if (latestRef.current) {
-              showFrom.current = shown;
-              goAfterShow.current = fromPill ?? null;
-            }
+            if (latestRef.current) showFrom.current = shown;
             settleList('all', true);
           }}
+          // News outside a project or filter view: the whole Inbox, the open thread kept; another list shows whole.
+          onShowAll={() => go({ page: 'inbox', project: null, thread: route.thread })}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
           onMarkUnread={(row) => void markUnread(row.thread_id)}
