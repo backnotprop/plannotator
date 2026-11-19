@@ -1495,7 +1495,8 @@
    - with no colour or a named one, it takes the ink and line colours for a light ground or a dark one, by how
      light the picture is under it (when the picture could not be looked at, the board's theme, as before);
    - a custom colour is drawn exactly as chosen: whoever chose it chose it against that picture. */
-.pcv [data-ground='light'] {
+.pcv-obj[data-ground='light'],
+.pcv-arrow[data-ground='light'] {
   --pcv-ink: var(--pcv-ink-l);
   --pcv-muted: var(--pcv-muted-l);
   --pcv-arrow: var(--pcv-arrow-l);
@@ -1506,7 +1507,8 @@
   --pcv-red: var(--pcv-red-l);
   --pcv-violet: var(--pcv-violet-l);
 }
-.pcv [data-ground='dark'] {
+.pcv-obj[data-ground='dark'],
+.pcv-arrow[data-ground='dark'] {
   --pcv-ink: var(--pcv-ink-d);
   --pcv-muted: var(--pcv-muted-d);
   --pcv-arrow: var(--pcv-arrow-d);

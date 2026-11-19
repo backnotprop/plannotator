@@ -38,7 +38,7 @@ describe('the stylesheet and the code agree', () => {
 
   test('every ink and line colour a picture can ask for exists for a light ground and for a dark one', () => {
     for (const ground of ['light', 'dark'] as const) {
-      const rule = css.slice(css.indexOf(`.pcv [data-ground='${ground}'] {`));
+      const rule = css.slice(css.indexOf(`.pcv-arrow[data-ground='${ground}'] {`));
       const asked = [...rule.slice(0, rule.indexOf('}')).matchAll(/var\((--pcv-[a-z]+-[ld])\)/g)].map((match) => match[1]);
       expect(asked.length).toBe(9);
       for (const name of asked) {
