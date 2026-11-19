@@ -34,11 +34,12 @@
 
 .theme-everforest-soft.light {
   --background: #F3EAD3;
-  --foreground: #5C6A72;
+  /* Was #5C6A72: the same grey-green, darker, so body text stays clearly stronger than the muted text (about 7:1 on the background). */
+  --foreground: #454f55;
   --card: #EAE4CA;
-  --card-foreground: #5C6A72;
+  --card-foreground: #454f55;
   --popover: #E5DFC5;
-  --popover-foreground: #5C6A72;
+  --popover-foreground: #454f55;
   --primary: #8DA101;
   --primary-foreground: #F3EAD3;
   --secondary: #DDD8BE;

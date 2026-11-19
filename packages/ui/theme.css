@@ -669,9 +669,9 @@
   --color-surface-0: var(--surface-0);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
-  /* Comment-annotation indicator color. Defaults to each theme's --accent
-   * (see :root below); a theme whose accent is a low-contrast neutral (e.g.
-   * "simple") overrides --annotation-comment directly. */
+  /* Comment-annotation indicator color. Defaults to each theme's
+   * --accent-text (see :root below), which is --accent unless the theme sets
+   * its own; "simple" also overrides --annotation-comment directly. */
   --color-annotation-comment: var(--annotation-comment);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

@@ -34,11 +34,12 @@
 
 .theme-material.light {
   --background: #FAFAFA;
-  --foreground: #546E7A;
+  /* Was #546E7A: Blue Grey 700 from the Material palette, so body text stays clearly stronger than the muted text (about 7:1 on the background). */
+  --foreground: #455A64;
   --card: #F0F4F5;
-  --card-foreground: #546E7A;
+  --card-foreground: #455A64;
   --popover: #FAFAFA;
-  --popover-foreground: #546E7A;
+  --popover-foreground: #455A64;
   --primary: #80CBC4;
   --primary-foreground: #263238;
   --secondary: #E8EDEF;

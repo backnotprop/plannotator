@@ -6,6 +6,8 @@
  *   Neutral light's destructive buttons did (the text was the fill's own red, 1:1), or accent-coloured text on the
  *   page in an accent that is a pale fill;
  * - a light theme's muted text goes back below 4.5:1 on its background (an editor's pale comment grey);
+ * - a light theme's muted text reads as strong as its body text or stronger, so the two no longer rank (raising
+ *   muted text to 4.5:1 did this in themes whose body text sat near 4.5:1 too);
  * - any other solid text pair falls below 4.5:1 where it did not, or a pair already below gets worse.
  *
  * The pairs below 4.5:1 when this guard was written are pinned in themeContrastAllowList.json with their ratio: a
@@ -95,6 +97,14 @@ describe('built-in theme text contrast', () => {
     const light = rows.filter(lightMuted);
     expect(light.length).toBeGreaterThan(30);
     expect(light.filter((r) => r.ratio < FLOOR).map(key)).toEqual([]);
+  });
+
+  test('body text reads stronger than muted text in every light theme', () => {
+    const at = new Map(rows.map((r) => [key(r), r.ratio]));
+    const light = rows.filter(lightMuted);
+    expect(light.length).toBeGreaterThan(30);
+    const flat = light.filter((m) => at.get(key({ ...m, pair: '--foreground / --background' }))! <= m.ratio);
+    expect(flat.map((m) => `${m.theme}: body ${at.get(key({ ...m, pair: '--foreground / --background' }))!.toFixed(2)}, muted ${m.ratio.toFixed(2)}`)).toEqual([]);
   });
 
   test('every other solid text pair reads at 4.5:1, or is pinned and has not got worse', () => {

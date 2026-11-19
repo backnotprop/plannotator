@@ -393,7 +393,7 @@ Uses cookies (not localStorage) because each hook invocation runs on a random po
 
 The 55 built-in themes are hand-written files, `packages/ui/themes/<id>.css` (dark in `.theme-<id>`, light in `.theme-<id>.light`); nothing derives them. `packages/ui/utils/themeContrast.test.ts` reads every offered theme-mode as text and measures its solid text pairs (WCAG 2.x): foreground and muted foreground on the background, card and popover text on their surfaces, the foregrounds on the primary, secondary, accent and destructive fills, and `--accent-text` on the background.
 
-- No pair may be near-identical (below 1.5:1, text that is not there), and a light theme's `--muted-foreground` reads at 4.5:1 on its background. Both have no exceptions.
+- No pair may be near-identical (below 1.5:1, text that is not there). A light theme's `--muted-foreground` reads at 4.5:1 on its background, and its `--foreground` reads stronger than its muted text. None of these has exceptions.
 - Every other pair below 4.5:1 is pinned with its ratio in `packages/ui/utils/themeContrastAllowList.json`: a new one, or a pinned one getting worse, fails the test; one that is fixed must leave the list.
 - **`--accent-text`** is accent drawn as text on the page (`text-accent-text`). `theme.css`'s `:root` defaults it to `--accent`, and `--annotation-comment` defaults to it. A theme sets its own when its accent is a pale fill that text in it would vanish against (Simple, Neutral, Quantum Rose light).
 
