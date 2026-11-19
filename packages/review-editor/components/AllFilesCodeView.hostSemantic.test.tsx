@@ -182,6 +182,11 @@ async function headerOf(path: string): Promise<HTMLElement> {
   return box;
 }
 
+async function flip(header: HTMLElement) {
+  await act(async () => header.querySelector<HTMLButtonElement>('[data-semantic-note]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-semantic-file-popover] [role="switch"]')].at(-1)!.click());
+}
+
 const touchAt = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, composed: true }), { changedTouches: [{ clientX: x, clientY: 0 }] });
 
 async function pressArrow(gesture: string | Event[] = 'click', marker = 'data-expand-button') {
@@ -224,7 +229,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(reads.sort()).toEqual(['a.ts', 'b.ts']);
     expect(asked.sort()).toEqual(['a.ts', 'b.ts']);
     expect([...items.values()].every((item) => item.fileDiff.isPartial === false)).toBe(true);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.getAttribute('aria-label')).toContain('1 moved');
   });
 
   test.skipIf(!hasDom)('nothing to say, an unsupported file or texts that do not fit the patch: no note, the plain diff', async () => {
@@ -281,9 +286,9 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(calls).toBe(2);
     expect(asked).toEqual(['a.ts']);
     expect([...items.values()][0]!.fileDiff.semanticOperations).toBeUndefined();
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect(offered?.textContent).toContain('1 moved');
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    expect(header.querySelector('[data-semantic-note="off"]')?.getAttribute('aria-label')).toContain('1 moved');
+    await flip(header);
     expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
@@ -331,9 +336,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       await options.loadDiffFiles({ name: 'a.ts' });
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect([offered?.dataset.semanticNote, offered?.getAttribute('aria-label')?.includes('1 moved')]).toEqual(['off', true]);
+    await flip(header);
     expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
@@ -359,7 +365,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
     const note = (await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]');
-    expect([note?.dataset.semanticNote === 'working', note?.textContent?.includes('1 moved')]).toEqual([false, true]);
+    expect([note?.dataset.semanticNote === 'working', note?.getAttribute('aria-label')?.includes('1 moved')]).toEqual([false, true]);
   });
 
   for (const [when, engineMs, settleMs] of [['before the engine answers', 400, 40], ['while its answer waits to be drawn', 20, 80]] as const) {
@@ -381,9 +387,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
         await options.loadDiffFiles({ name: 'a.ts' });
         await new Promise((resolve) => setTimeout(resolve, 700));
       });
-      const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-      expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
-      await act(async () => offered!.click());
+      const header = await headerOf('a.ts');
+      const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note]');
+      expect([offered?.dataset.semanticNote, offered?.getAttribute('aria-label')?.includes('1 moved')]).toEqual(['off', true]);
+      await flip(header);
       expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
     });
   }
@@ -665,13 +672,14 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await engaged.land();
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
-    const name = offered?.getAttribute('aria-label');
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
+    expect([offered?.textContent, offered?.title, header.querySelector('.line-through')]).toEqual(['sem1', '1 semantic change, not shown in the diff. Open to show them.', null]);
+    await flip(header);
     expect(engaged.swapped('a.ts')).toBe(true);
+    expect(document.querySelector('[data-semantic-file-popover] [role="switch"]')?.isConnected).toBe(true);
     const shown = (await headerOf('a.ts')).querySelector('[data-semantic-note]');
-    expect([shown?.getAttribute('aria-pressed'), shown?.getAttribute('aria-label')]).toEqual(['true', name]);
+    expect([shown?.getAttribute('data-semantic-note'), shown?.getAttribute('aria-label')]).toEqual(['semantic', 'Semantic changes for a.ts: 1 moved']);
   });
 
   test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
@@ -831,12 +839,12 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     expect(page.drawnKey('a.ts')).not.toContain(':c1');
-    const shown = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect(shown?.dataset.semanticNote).toBe('semantic');
-    await act(async () => shown!.click());
-    const off = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect(off?.dataset.semanticNote).toBe('off');
-    await act(async () => off!.click());
+    const shown = await headerOf('a.ts');
+    expect(shown.querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('semantic');
+    await flip(shown);
+    const off = await headerOf('a.ts');
+    expect(off.querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
+    await flip(off);
     expect(page.drawnKey('a.ts')).toContain(':c1');
   });
 
@@ -851,7 +859,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
     await page.land();
     expect(page.drawnKey('a.ts')).toContain(':c2');
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('2 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('Semantic changes for a.ts: 2 moved');
   });
 
   test.skipIf(!hasDom)('turning Power Up off after the switch was turned on by hand offers the answer without it, and leaves the drawn file alone', async () => {

@@ -10,7 +10,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -174,6 +174,12 @@ async function open(browser: Browser, url: string, viewport = { width: 1280, hei
 }
 
 const note = (page: Page, state: string) => page.locator(`[data-semantic-note="${state}"]`);
+const kinds = (page: Page, said: string) => page.locator(`[data-semantic-note="semantic"][aria-label$=": ${said}"]`);
+
+async function flip(page: Page, chip: Locator) {
+  await chip.click();
+  await page.locator('[data-semantic-file-popover]').last().getByRole('switch', { name: 'Show in the diff' }).click();
+}
 
 async function shot(page: Page, name: string) {
   if (!shots) return;
@@ -197,8 +203,8 @@ test('moved and renamed code is labelled in plain words, and only the TypeScript
     expect(advert?.runtime).toMatch(/^\/assets\/sem-diff\/web-tree-sitter-[0-9a-f]{16}\.wasm$/);
     const { context, page, parsers } = await open(browser, session.url);
     await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
-    await expect(page.getByText('1 renamed', { exact: true })).toBeVisible();
-    await expect(page.getByText('1 moved · 1 moved & edited', { exact: true })).toBeVisible();
+    await expect(kinds(page, '1 renamed')).toBeVisible();
+    await expect(kinds(page, '1 moved, 1 moved & edited')).toBeVisible();
     await expect(page.getByText('Moved 4 lines').first()).toBeAttached();
     expect(parsers.some((path) => path.includes('tree-sitter-typescript-'))).toBe(true);
     expect(parsers.filter((path) => /tree-sitter-(python|go|rust|java|c_sharp|php|ruby|kotlin)-/.test(path))).toEqual([]);
@@ -246,6 +252,7 @@ test("a file header's sem menu lists that file's changes on hover, and a row lan
     await badge.hover();
     const menu = page.locator('[data-semantic-file-popover]');
     await expect(menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' })).toBeVisible();
+    await expect(menu.getByRole('switch', { name: 'Show in the diff' })).toHaveAttribute('aria-checked', 'true');
     await shot(page, 'file-menu');
     await menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first().click();
     await expect(menu).toHaveCount(0);
@@ -256,15 +263,16 @@ test("a file header's sem menu lists that file's changes on hover, and a row lan
   }
 });
 
-test('the diff display switch and a file header note each bring back the plain diff', async () => {
+test("the diff display switch and a file's switch in its sem chip each bring back the plain diff", async () => {
   const session = await review();
   try {
     const { context, page } = await open(browser, session.url);
     await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
-    await page.getByText('1 renamed', { exact: true }).click();
+    await flip(page, kinds(page, '1 renamed'));
     await expect(note(page, 'off')).toHaveCount(1);
     await expect(note(page, 'semantic')).toHaveCount(1);
-    await page.locator('[data-semantic-note="off"]').click();
+    await expect(page.locator('[data-file-header] .line-through')).toHaveCount(0);
+    await flip(page, note(page, 'off'));
     await expect(note(page, 'semantic')).toHaveCount(2);
     await page.locator('[data-diff-display-options]').first().click();
     await page.getByText('Show moved & renamed code').click();

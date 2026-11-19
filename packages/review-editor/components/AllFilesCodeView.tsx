@@ -35,7 +35,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
 import { POWER_UP_PERIOD_MS, POWER_UP_ROW, powerUpCss } from '../semDiff/powerUpCss';
-import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
+import type { SemanticFileState } from '../semDiff/semanticFileState';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
@@ -4131,10 +4131,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           </button>
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
-        semanticNote={(() => {
+        semantic={(() => {
           const semState = semStateRef.current.get(item.id);
           if (!semState || !semanticEnabledRef.current) return undefined;
-          return <SemanticFileNote state={semState} onToggle={() => toggleInPlace(item.id, semState.status !== 'semantic')} />;
+          return { state: semState, onToggle: () => toggleInPlace(item.id, semState.status !== 'semantic') };
         })()}
         />
         {/* A collapsed generated file must read as an intentional fold, never
