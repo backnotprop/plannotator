@@ -68,7 +68,7 @@ struct Composer: View {
         .font(TextRole.meta)
         .foregroundStyle(Token.mutedForeground)
         // In line with the page's words and icons above it (the page's margin is 20, the foot's 12).
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Space.close)
     }
     // Under the guard only the guard speaks: the refusal behind it names keys.
     if let notice = session.notices[id], !guarded {
@@ -76,11 +76,11 @@ struct Composer: View {
       Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
         .font(TextRole.meta)
         .foregroundStyle(Token.destructive)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Space.close)
     }
     if guarded, let stale = session.stale[id] {
       // As wide as the cards above it.
-      StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go).padding(.horizontal, 8)
+      StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go).padding(.horizontal, Space.close)
     }
     let jumps = !guarded && items.shown
     if session.standing == .appNeedsUpdate {
@@ -112,7 +112,7 @@ struct Composer: View {
         Image(systemName: "questionmark.circle").foregroundStyle(Token.mutedForeground)
         if let waits { Text(waits).foregroundStyle(Token.foreground).multilineTextAlignment(.leading) }
         Spacer(minLength: Space.close)
-        Image(systemName: "chevron.down").font(.caption.weight(.bold)).foregroundStyle(Token.mutedForeground)
+        Image(systemName: "chevron.down").font(TextRole.glyph).foregroundStyle(Token.mutedForeground)
       }
       .font(TextRole.link)
       .padding(.horizontal, Space.card)
@@ -123,7 +123,7 @@ struct Composer: View {
     .buttonStyle(PressStyle(gives: false))
     // A line of the foot, as a bar's is: it grows with the text to a limit, so the page keeps the screen at the
     // largest sizes. The cards and the words above grow all the way.
-    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    .barSized()
     .accessibilityLabel(PhoneWords.openItems(items) ?? PhoneWords.allAnswered)
   }
 
@@ -131,18 +131,17 @@ struct Composer: View {
   /// of the reply field's own line.
   private var jumpMark: some View {
     Button(action: jump) {
-      HStack(spacing: 3) {
+      HStack(spacing: Space.tight) {
         Image(systemName: "questionmark.circle")
-        Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+        Image(systemName: "chevron.down").font(TextRole.glyph)
       }
       .font(TextRole.link)
       .foregroundStyle(Token.mutedForeground)
       .padding(.leading, Space.card)
-      .frame(minWidth: Space.touch, minHeight: Space.touch)
-      .contentShape(Rectangle())
+      .touchTarget()
     }
     .buttonStyle(PressStyle())
-    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    .barSized()
     .accessibilityLabel(PhoneWords.openItems(items) ?? PhoneWords.allAnswered)
   }
 
@@ -159,13 +158,13 @@ struct Composer: View {
         Hairline().padding(.horizontal, Space.card)
       }
       HStack(alignment: .bottom, spacing: 0) {
-        if jumps, waits == nil { jumpMark.padding(.vertical, 2) }
+        if jumps, waits == nil { jumpMark.padding(.vertical, Space.hair) }
         TextField("", text: $words, axis: .vertical)
           .lineLimit(1...6)
           .font(TextRole.body)
           .focused(focused)
           .padding(.leading, jumps && waits == nil ? Space.close : Space.card)
-          .padding(.vertical, 13)
+          .padding(.vertical, Space.step)
           // The hint whole, never cut: the long one when it fits on the line, else the short one.
           .overlay(alignment: .topLeading) {
             if words.isEmpty {
@@ -176,11 +175,12 @@ struct Composer: View {
               .font(TextRole.body)
               .foregroundStyle(Color(uiColor: .placeholderText))
               .padding(.leading, jumps && waits == nil ? Space.close : Space.card)
-              .padding(.vertical, 13)
+              .padding(.vertical, Space.step)
               .allowsHitTesting(false)
               .accessibilityHidden(true)
             }
           }
+          .frame(minHeight: Size.replyRow)
           .accessibilityLabel(hint)
         Button {
           // Words typed on a card and not saved yet are saved first: what is on screen is what is sent.
@@ -192,23 +192,34 @@ struct Composer: View {
             if !(await session.send(thread: id, words: text)), words.isEmpty { words = text }
           }
         } label: {
-          // A disc that keeps the field's own centre: 6 points in from its edge all round. It takes the accent
-          // the moment there is something to send, and only then.
-          Image(systemName: "arrow.up")
-            .font(.system(size: 15, weight: .bold))
-            .foregroundStyle(canSend ? Token.primaryForeground : Token.mutedForeground)
-            .frame(width: 36, height: 36)
-            .background(canSend ? Token.primary : Token.foreground.opacity(0.08), in: Circle())
-            .animation(.easeOut(duration: 0.18), value: canSend)
-            .frame(width: Space.touch, height: Space.touch)
-            .contentShape(Rectangle())
+          SendDisc(ready: canSend)
         }
         .buttonStyle(PressStyle())
         .disabled(!canSend)
         .accessibilityLabel(PhoneWords.send)
-        .padding(2)
+        // Send is a control of the foot's bar: it grows with the text to the bar's limit.
+        .barSized()
       }
     }
     .glassEffect(.regular, in: .rect(cornerRadius: Radius.foot))
+  }
+}
+
+/// Send: a disc that keeps the reply field's own centre, 6 points in from its edge all round. It takes the accent
+/// the moment there is something to send, and only then. The disc and its arrow follow the person's text size
+/// (to the bar's limit, which the foot sets with `barSized()`); what answers a touch is never under 44 points.
+struct SendDisc: View {
+  let ready: Bool
+  @ScaledMetric(relativeTo: .body) private var disc: CGFloat = Size.sendDisc
+
+  var body: some View {
+    Image(systemName: "arrow.up")
+      .font(TextRole.secondary.weight(.bold))
+      .foregroundStyle(ready ? Token.primaryForeground : Token.mutedForeground)
+      .frame(width: disc, height: disc)
+      .background(ready ? Token.primary : Token.foreground.opacity(0.08), in: Circle())
+      .motion(.fade, value: ready)
+      .padding(Space.trim)
+      .touchTarget()
   }
 }

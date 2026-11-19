@@ -50,8 +50,6 @@ struct ThreadScreen: View {
   private var fade: CGFloat { Composer.fade(typeSize) }
   @FocusState private var composing: Bool
   @State private var pageWidth: CGFloat = 0
-  /// The bar's way back with the air on both its sides.
-  private static let backRoom: CGFloat = 72
 
   private var model: ThreadModel? { session.thread(id) }
   private var title: String {
@@ -74,7 +72,7 @@ struct ThreadScreen: View {
       } else if session.reach == .away {
         Standing(symbol: "wifi.slash", words: PhoneWords.awayNoCopy(session.computer.name), action: PhoneWords.tryAgain) { Task { await session.open(id) } }
       } else {
-        ProgressView().controlSize(.large).frame(maxWidth: .infinity, maxHeight: .infinity)
+        Waiting()
       }
     }
     .background(Token.background.ignoresSafeArea())
@@ -87,13 +85,16 @@ struct ThreadScreen: View {
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
     .toolbar {
       ToolbarItem(placement: .principal) {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: Space.hair) {
           Text(title).font(TextRole.name).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.tail)
-          if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail) }
+          if !subtitle.isEmpty { Text(subtitle).font(TextRole.caption).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail) }
         }
-        .frame(width: max(0, pageWidth - 2 * Self.backRoom), alignment: .leading)
+        // Until the page's width is known (the first frame), the title keeps its own.
+        .frame(width: pageWidth > 2 * Size.barSide ? pageWidth - 2 * Size.barSide : nil, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+        // The bar does not grow with the text: a long press shows the title large, as the system's own does.
+        .accessibilityShowsLargeContentViewer { Text(title) }
       }
     }
     .task { await session.open(id) }
@@ -145,21 +146,21 @@ struct ThreadScreen: View {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(shown[..<landing], id: \.id) { message in
             MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
-            Rule(key: message.id.rawValue).padding(.top, 14).padding(.bottom, message.id == shown[landing - 1].id ? 2 : 14)
+            Rule(key: message.id.rawValue).padding(.top, Space.snug).padding(.bottom, message.id == shown[landing - 1].id ? Space.hair : Space.snug)
           }
         }
         VStack(alignment: .leading, spacing: 0) {
           ForEach(Array(shown[landing...].enumerated()), id: \.element.id) { index, message in
-            if index > 0 { Rule(key: shown[landing + index - 1].id.rawValue).padding(.vertical, 14) }
+            if index > 0 { Rule(key: shown[landing + index - 1].id.rawValue).padding(.vertical, Space.snug) }
             MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
           }
           // A reply that waits for the computer is the person's own message already, said to be waiting.
           ForEach(held) { write in
-            Divider().overlay(Token.border).padding(.vertical, 18)
+            Divider().overlay(Token.border).padding(.vertical, Space.card)
             HeldReply(words: write.words ?? "", to: MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread), computer: session.computer.name)
           }
         }
-        .padding(.top, 12)
+        .padding(.top, Space.step)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tail = $0 }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.content)) } action: { cards[Self.landing] = $0 }
         .id(Self.landing)
@@ -522,7 +523,7 @@ private struct Rule: View {
   let key: String
 
   var body: some View {
-    Divider().overlay(Token.border).padding(.vertical, 4).blockEdge("rule/\(key)")
+    Divider().overlay(Token.border).padding(.vertical, Space.tight).blockEdge("rule/\(key)")
   }
 }
 
@@ -672,15 +673,15 @@ struct HeldReply: View {
   let computer: String
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack(spacing: 10) {
-        Text(PhoneWords.you).font(.subheadline.weight(.semibold)).foregroundStyle(Token.foreground)
-        if let to { Text(PhoneWords.to(to)).font(.subheadline).foregroundStyle(Token.mutedForeground).lineLimit(1) }
+    VStack(alignment: .leading, spacing: Space.step) {
+      HStack(spacing: Space.near) {
+        Text(PhoneWords.you).font(TextRole.name).foregroundStyle(Token.foreground)
+        if let to { Text(PhoneWords.to(to)).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).lineLimit(1) }
       }
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
-      Text(words).font(.body).foregroundStyle(Token.foreground.opacity(0.75)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-      Label(PhoneWords.willSendWhenBack(computer), systemImage: "clock").font(.footnote).foregroundStyle(Token.mutedForeground)
+      Text(words).font(TextRole.body).foregroundStyle(Token.foreground.opacity(0.75)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+      Label(PhoneWords.willSendWhenBack(computer), systemImage: "clock").font(TextRole.meta).foregroundStyle(Token.mutedForeground)
     }
   }
 }
@@ -711,24 +712,24 @@ struct StaleGuard: View {
     let typed = !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let others = thread.messages.flatMap { $0.questions ?? [] }.filter { $0.kind != .action && $0.state == .picked }.count
     let first = asked.first?.supersededBy
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: Space.close) {
       Label(PhoneWords.guardHeading(position: asked.first.map { Int($0.position) }, count: max(stale.count, 1)), systemImage: "exclamationmark.triangle")
-        .font(.subheadline.weight(.semibold))
+        .font(TextRole.name)
         .foregroundStyle(Token.foreground)
         .accessibilityAddTraits(.isHeader)
       ForEach(asked, id: \.key) { question in
         if let by = question.supersededBy, let message = thread.messages.first(where: { $0.id == by.messageId }) {
           Text(MessageBody.attributed("\(PhoneWords.guardReplaced(agent: Names.agent(message.author), prompt: question.prompt, at: TimeWords().when(message.createdAt), by: by.key != nil)) \(PhoneWords.guardPick(pick(question.answer)))"))
-            .font(.subheadline)
+            .font(TextRole.secondary)
             .foregroundStyle(Token.foreground)
             .fixedSize(horizontal: false, vertical: true)
         }
       }
       Text(typed ? PhoneWords.guardWordsGo : others > 0 ? PhoneWords.guardRestGoes : PhoneWords.guardNothingElse)
-        .font(.footnote)
+        .font(TextRole.meta)
         .foregroundStyle(Token.mutedForeground)
         .fixedSize(horizontal: false, vertical: true)
-      VStack(spacing: 6) {
+      VStack(spacing: Space.trim) {
         if let first {
           WideButton(words: first.key != nil ? PhoneWords.guardAnswerNew : PhoneWords.guardReadWhy) {
             session.clearStale(id)
@@ -748,10 +749,10 @@ struct StaleGuard: View {
       }
       .buttonStyle(PressStyle())
     }
-    .padding([.top, .horizontal], 14)
+    .padding([.top, .horizontal], Space.snug)
     // Keep editing's touch area already holds air under its words: the words end as far from the edge as the
     // heading starts.
-    .padding(.bottom, 4)
+    .padding(.bottom, Space.tight)
     .background(Token.card, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
     // Amber: this holds the Send up until the person chooses.
     .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Role.hold.ink.opacity(0.5)))

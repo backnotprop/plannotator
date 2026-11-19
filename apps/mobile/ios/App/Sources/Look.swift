@@ -2,25 +2,34 @@ import SwiftUI
 
 // The app's look, in one place: every screen takes its spacing, type, surfaces and controls from here, so a new
 // screen inherits the product's rhythm instead of choosing numbers of its own. The colours are the contract's
-// (`Token`, Theme.swift); this file is what the app does with them.
+// (`Token`, Theme.swift); this file is what the app does with them. The pieces the next screens need (rows,
+// raised surfaces, media, states) are in LookKit.swift.
 //
 // The rules the pieces hold to:
 //   - One thing is emphasised at a time. A card's prompt is its only heavy line; everything else steps down.
-//   - Colour is a role, never decoration: the accent is what the person can do or has done, amber is work held up,
-//     red is an agent stopped, green is a thing finished.
+//   - Colour is a role, never decoration: the accent is what the person can do or has done, amber is work held up
+//     or a caution, red is an agent stopped or a thing destroyed, green is a thing finished.
 //   - Hairlines part things; a ground (a well) is kept for what the person chose.
-//   - Every length is a step of `Space`; every corner is one of `Radius`, and a shape inside another keeps the same
-//     centre (its radius is the outer one less the gap between them).
+//   - A length between things is a step of `Space`; a thing's own measure is in `Size`; a corner is one of
+//     `Radius`, and a shape inside another keeps the same centre (its radius is the outer one less the gap).
+//   - A fraction of a mark's own side (a tick inside a ring, a nudge onto the text's line) is written where the
+//     mark is drawn: it is the mark's drawing, not a length of the layout.
 
-/// The spacing scale, in points. Nothing in the app is spaced by a number that is not one of these.
+/// The spacing scale, in points: the room between things and inside them.
 enum Space {
   /// Between two lines that are one thought (a label and its detail).
   static let hair: CGFloat = 2
   static let tight: CGFloat = 4
+  /// A line and the one it explains; a dot and its words.
+  static let trim: CGFloat = 6
   /// Between parts of one group.
   static let close: CGFloat = 8
+  /// The air over and under the words in a row, a field or a button.
+  static let near: CGFloat = 10
   /// Between groups inside a card; a mark and its words.
   static let step: CGFloat = 12
+  /// A card's words and its answers; the inside of a code box.
+  static let snug: CGFloat = 14
   /// A card's own padding; the list's page edge.
   static let card: CGFloat = 16
   /// The thread's page edge.
@@ -29,6 +38,37 @@ enum Space {
   static let section: CGFloat = 24
   /// The least a thing to touch measures, either way.
   static let touch: CGFloat = 44
+}
+
+/// The measures of the controls themselves.
+enum Size {
+  /// A button that is an answer.
+  static let button: CGFloat = 48
+  /// The one thing to do on a screen.
+  static let wideButton: CGFloat = 50
+  /// A tinted capsule inside a 44-point target (Accept recommended).
+  static let capsule: CGFloat = 34
+  /// Send's disc at the default text size: 6 points in from the reply field's edge all round.
+  static let sendDisc: CGFloat = 36
+  /// Copy's own square inside its 44-point target.
+  static let copy: CGFloat = 32
+  /// A choice's mark at the default text size, and the most it grows to (`MarkSide`).
+  static let mark: CGFloat = 22
+  static let markCap: CGFloat = 32
+  /// The reply field's one line: Send's disc with 6 points over and under it.
+  static let replyRow: CGFloat = 48
+  /// A field with room for a sentence or two (a reason).
+  static let reasonField: CGFloat = 64
+  /// The line numbers' column in a file's preview.
+  static let gutter: CGFloat = 26
+  /// Where a drawing that scrolls sideways fades out at its cut edge.
+  static let codeFade: CGFloat = 56
+  /// The title bar's way back with the air on both its sides (the system's 44-point button, 16 from the edge,
+  /// 12 before the title).
+  static let barSide: CGFloat = 72
+  /// The largest text size a line of the foot or a bar grows to. Past it the page would lose the screen to its
+  /// own chrome; the system's bars stop too, and offer the Large Content Viewer instead (`barSized()`).
+  static let barText = DynamicTypeSize.accessibility2
 }
 
 /// The corners. A card holds wells and controls 4 points in from its edge, so theirs is 4 less.
@@ -42,6 +82,10 @@ enum Radius {
   static let field: CGFloat = Token.radius
   /// The reply field at a thread's foot.
   static let foot: CGFloat = 24
+  /// A small word on a tinted ground: a capsule on one line, still rounded on two.
+  static let chip: CGFloat = 11
+  /// Copy's square, a thumbnail.
+  static let thumb: CGFloat = 8
 }
 
 /// The type roles. All are system text styles, so each follows the person's text size and keeps the system's own
@@ -64,7 +108,17 @@ enum TextRole {
   /// Times, counts, where a thing stands ("Picked 12:23 AM · in your draft").
   static let meta = Font.footnote
   static let metaStrong = Font.footnote.weight(.semibold)
+  /// The smallest words: a line under a title, a tag.
+  static let caption = Font.caption
+  static let captionStrong = Font.caption.weight(.semibold)
+  /// A small arrow beside words (a chevron).
+  static let glyph = Font.caption.weight(.bold)
   static func code(_ style: Font.TextStyle = .callout) -> Font { .system(style, design: .monospaced) }
+  /// A heading inside a message; a name in a bar.
+  static let heading = Font.headline
+  /// Extra room between the lines of sentences to read, and of code.
+  static let bodyLeading: CGFloat = 3
+  static let codeLeading: CGFloat = 2
 }
 
 /// What a colour says. Views name the role; the role names the token.
@@ -73,8 +127,12 @@ enum Role {
   case act
   /// Work held up until the person answers.
   case hold
+  /// A warning about the answer itself ("Can't be undone").
+  case caution
   /// An agent stopped.
   case stop
+  /// A thing the person destroys (delete, remove): a swipe's or a menu's red.
+  case destructive
   /// A thing finished.
   case done
   case quiet
@@ -82,11 +140,75 @@ enum Role {
   var ink: Color {
     switch self {
     case .act: return Token.primary
-    case .hold: return Token.warning
-    case .stop: return Token.destructive
+    case .hold, .caution: return Token.warning
+    case .stop, .destructive: return Token.destructive
     case .done: return Token.success
     case .quiet: return Token.mutedForeground
     }
+  }
+
+  /// The role's colour as words on a tint of itself (a chip, a count): a quarter of the way to the foreground,
+  /// so the words keep 4.5:1 on the tint over a card, the page or a well, in the dark and in the light.
+  var inkOnTint: Color { self == .quiet ? ink : ink.mix(with: Token.foreground, by: 0.25) }
+  /// The tint under those words.
+  var tint: Color { self == .quiet ? Token.muted : ink.opacity(0.14) }
+}
+
+/// How things move. Motion is kept for what it means: a pick settling, a thing taking its colour, a touch
+/// answered. With Reduce Motion on, each is a short fade and nothing changes size.
+enum Motion {
+  /// A mark filling after a finger set it down: a short spring with a little give.
+  case settle
+  /// A ground or a colour arriving.
+  case fade
+  /// A touch, down and up.
+  case press
+
+  func animation(still: Bool) -> Animation {
+    switch self {
+    case .settle: return still ? .easeOut(duration: 0.15) : .spring(response: 0.26, dampingFraction: 0.74)
+    case .fade: return .easeOut(duration: still ? 0.15 : 0.2)
+    case .press: return .easeOut(duration: 0.12)
+    }
+  }
+}
+
+private struct Moves<Value: Equatable>: ViewModifier {
+  let motion: Motion
+  let value: Value
+  @Environment(\.accessibilityReduceMotion) private var still
+
+  func body(content: Content) -> some View { content.animation(motion.animation(still: still), value: value) }
+}
+
+/// A choice's mark side at the person's text size: 22 points, growing with the text to 32, so the words keep the
+/// row's width at the largest sizes. Everything that stands in the marks' column reads this one value.
+@propertyWrapper
+struct MarkSide: DynamicProperty {
+  @ScaledMetric(relativeTo: .body) private var scaled: CGFloat = Size.mark
+  var wrappedValue: CGFloat { min(scaled, Size.markCap) }
+  /// From a mark's left edge to the words beside it: what stands under a row starts here.
+  var projectedValue: CGFloat { wrappedValue + Space.step }
+}
+
+extension View {
+  /// Animate with one of the app's motions when `value` changes; Reduce Motion is read here, once.
+  func motion<Value: Equatable>(_ motion: Motion, value: Value) -> some View { modifier(Moves(motion: motion, value: value)) }
+
+  /// A thing to touch: 44 points at least both ways, and all of it answers, its padding too. Put it after the
+  /// padding.
+  func touchTarget() -> some View { frame(minWidth: Space.touch, minHeight: Space.touch).contentShape(Rectangle()) }
+
+  /// A line of a bar or of the foot: it grows with the text to `Size.barText`, and past that a long press shows
+  /// it large (the Large Content Viewer), as the system's own bars do.
+  func barSized() -> some View { dynamicTypeSize(...Size.barText).accessibilityShowsLargeContentViewer() }
+
+  /// A field's ground: a tint and a hairline, so it reads as a field on a card in the dark too. Focused, its
+  /// hairline takes the accent.
+  func fieldGround(radius: CGFloat = Radius.field, focused: Bool = false) -> some View {
+    background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(focused ? Token.ring : Token.foreground.opacity(0.14), lineWidth: focused ? 1.5 : 1))
+      .motion(.fade, value: focused)
   }
 }
 
@@ -104,7 +226,8 @@ private struct CardSurface: ViewModifier {
     let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
     content
       .background(Token.card, in: shape)
-      .overlay(shape.strokeBorder(drafted ? Token.primary.opacity(0.55) : Token.border.opacity(0.6), lineWidth: drafted ? 1 : 0.5))
+      // The drafted edge is 4.6:1 on the card in the dark and 4.0:1 in the light.
+      .overlay(shape.strokeBorder(drafted ? Token.primary.opacity(0.75) : Token.border.opacity(0.6), lineWidth: drafted ? 1 : 0.5))
   }
 }
 
@@ -123,23 +246,25 @@ struct PressStyle: ButtonStyle {
     configuration.label
       .opacity(configuration.isPressed ? 0.6 : 1)
       .scaleEffect(configuration.isPressed && gives && !still ? 0.97 : 1)
-      .animation(.easeOut(duration: configuration.isPressed ? 0.08 : 0.18), value: configuration.isPressed)
+      .animation(Motion.press.animation(still: still), value: configuration.isPressed)
   }
 }
 
-/// A button's ground and words. Filled is the one thing to do; neutral is another answer of the same rank; bare is
-/// words alone in the accent; off is a filled button that cannot be used yet.
+/// A button's ground and words. Filled is the one thing to do; neutral is another answer of the same rank;
+/// destructive is a thing destroyed; bare is words alone in the accent; off is a filled button that cannot be
+/// used yet.
 struct ActionGround: ViewModifier {
-  enum Tone { case filled, neutral, bare, off }
+  enum Tone { case filled, neutral, destructive, bare, off }
   let tone: Tone
   /// The whole width, or as wide as its words.
   var wide = true
-  var height: CGFloat = 48
+  var height: CGFloat = Size.button
 
   private var ink: Color {
     switch tone {
     case .filled: return Token.primaryForeground
     case .neutral: return Token.foreground
+    case .destructive: return Token.destructiveForeground
     case .bare: return Token.primary
     case .off: return Token.mutedForeground
     }
@@ -149,53 +274,64 @@ struct ActionGround: ViewModifier {
     switch tone {
     case .filled: return Token.primary
     case .neutral: return Token.foreground.opacity(0.09)
+    case .destructive: return Token.destructive
     case .bare: return .clear
     case .off: return Token.foreground.opacity(0.05)
     }
   }
 
   func body(content: Content) -> some View {
+    let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
     content
-      .font(tone == .bare ? Font.body.weight(.medium) : TextRole.action)
+      .font(tone == .bare ? TextRole.label : TextRole.action)
       .foregroundStyle(ink)
       .padding(.horizontal, tone == .bare && !wide ? Space.step : Space.card)
-      .padding(.vertical, 10)
+      .padding(.vertical, Space.near)
       .frame(maxWidth: wide ? .infinity : nil, minHeight: height)
-      .background(ground, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+      .background(ground, in: shape)
+      // A neutral answer's tint alone is 1.2:1 on its card: the hairline is what stands it off (1.8:1 in the
+      // dark, 1.6:1 in the light), as it did before the buttons were shared.
+      .overlay(shape.strokeBorder(Token.foreground.opacity(tone == .neutral ? 0.22 : 0)))
       .contentShape(Rectangle())
   }
 }
 
 extension View {
-  func actionGround(_ tone: ActionGround.Tone, wide: Bool = true, height: CGFloat = 48) -> some View {
+  func actionGround(_ tone: ActionGround.Tone, wide: Bool = true, height: CGFloat = Size.button) -> some View {
     modifier(ActionGround(tone: tone, wide: wide, height: height))
   }
 }
 
-/// A small word on a tinted ground: Done, Can't do it, Stopped, Holds up 2, Recommended.
+/// A small word on a tinted ground: Done, Can't do it, Stopped, Holds up 2, Recommended. It keeps its words
+/// whole on one line when there is room and wraps to two when there is not (the largest text sizes, a longer
+/// language): it never makes its row wider than the screen.
 struct Chip: View {
   enum Tone { case ok, stop, hold, quiet, accent }
   let words: String
   let tone: Tone
 
-  private var ink: Color {
+  private var role: Role {
     switch tone {
-    case .ok: return Role.done.ink
-    case .stop: return Role.stop.ink
-    case .hold: return Role.hold.ink
-    case .quiet: return Role.quiet.ink
-    case .accent: return Role.act.ink
+    case .ok: return .done
+    case .stop: return .stop
+    case .hold: return .hold
+    case .quiet: return .quiet
+    case .accent: return .act
     }
   }
 
   var body: some View {
     Text(words)
-      .font(tone == .accent ? Font.caption.weight(.semibold) : TextRole.metaStrong)
-      .foregroundStyle(ink)
+      .font(tone == .accent ? TextRole.captionStrong : TextRole.metaStrong)
+      .foregroundStyle(role.inkOnTint)
+      .lineLimit(2)
+      .multilineTextAlignment(.leading)
+      .fixedSize(horizontal: false, vertical: true)
       .padding(.horizontal, Space.close)
       .padding(.vertical, 3)
-      .background(tone == .quiet ? Token.muted : ink.opacity(0.14), in: Capsule())
-      .fixedSize()
+      .background(role.tint, in: RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
+      // Beside longer words in a row, the chip keeps its line and the words wrap.
+      .layoutPriority(1)
   }
 }
 
@@ -221,11 +357,9 @@ struct PickMark: View {
   let selected: Bool
   /// A way out more than a choice ("Other…"): a dashed ring until it holds words.
   var open = false
-  @ScaledMetric(relativeTo: .body) private var scaled: CGFloat = 22
+  @MarkSide private var side
   @Environment(\.accessibilityReduceMotion) private var still
 
-  /// The mark's side: it grows with the text, to a limit, so the words keep the row's width at the largest sizes.
-  private var side: CGFloat { min(scaled, 32) }
   private var ring: Color { selected ? Token.primary : Token.mutedForeground.opacity(0.75) }
   private var line: StrokeStyle { StrokeStyle(lineWidth: 1.5, dash: open && !selected ? [3, 3] : []) }
 
@@ -246,8 +380,8 @@ struct PickMark: View {
       }
     }
     .frame(width: side, height: side)
-    // The pick settles: a short spring with a little give, since a finger set it down. With motion reduced it fades.
-    .animation(still ? .easeOut(duration: 0.15) : .spring(response: 0.26, dampingFraction: 0.74), value: selected)
+    // The pick settles.
+    .motion(.settle, value: selected)
     // On the first line of the words beside it, centred on their capitals.
     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + $0.height * 0.27 }
     .accessibilityHidden(true)
@@ -271,10 +405,7 @@ struct ChoiceRow: View {
 
   /// How far a row's ground reaches past its words, into the card's padding.
   static let reach: CGFloat = Space.step
-  /// From a row's mark to its words, for a mark of the size `PickMark` draws at this text size: lines that belong
-  /// to a row (a field under it) start here.
-  static func column(_ mark: CGFloat) -> CGFloat { min(mark, 32) + Space.step }
-  @Environment(\.accessibilityReduceMotion) private var still
+  @Environment(\.colorScheme) private var scheme
 
   var body: some View {
     Button(action: action) {
@@ -298,11 +429,13 @@ struct ChoiceRow: View {
         Spacer(minLength: 0)
       }
       .padding(.horizontal, Self.reach)
-      .padding(.vertical, 11)
+      .padding(.vertical, Space.near)
       .frame(minHeight: Space.touch)
-      // The well is the page's own ground showing through the card: dark in the dark, grey in the light.
-      .background(Token.background.opacity(selected ? 1 : 0), in: RoundedRectangle(cornerRadius: Radius.well, style: .continuous))
-      .animation(.easeOut(duration: still ? 0.15 : 0.2), value: selected)
+      // The well under a picked row: the page's own dark showing through the card in the dark (1.14:1 on the
+      // card), and in the light the muted grey, since the page's light ground is nearly the card's white (1.09:1;
+      // muted is 1.26:1). The filled mark carries the pick either way; the well says which row it is on.
+      .background((scheme == .dark ? Token.background : Token.muted).opacity(selected ? 1 : 0), in: RoundedRectangle(cornerRadius: Radius.well, style: .continuous))
+      .motion(.fade, value: selected)
       .contentShape(Rectangle())
     }
     // A settled card keeps its words at full contrast: only the touch is off.
@@ -333,11 +466,11 @@ struct CardNotice: View {
   let words: String
   let symbol: String
   let role: Role
-  @ScaledMetric(relativeTo: .body) private var mark: CGFloat = 22
+  @MarkSide private var side
 
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: Space.step) {
-      Image(systemName: symbol).font(.system(size: min(mark, 32) * 0.6, weight: .semibold)).foregroundStyle(role.ink).frame(width: min(mark, 32)).accessibilityHidden(true)
+      Image(systemName: symbol).font(.system(size: side * 0.6, weight: .semibold)).foregroundStyle(role.ink).frame(width: side).accessibilityHidden(true)
       Text(words).font(TextRole.meta).foregroundStyle(role == .quiet ? Token.mutedForeground : role.ink).fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 0)
     }

@@ -111,13 +111,13 @@ struct MessageWords: View {
       // A little more air between lines than the system's own: these are sentences to read, not labels.
       Text(MessageBody.attributed(text))
         .font(TextRole.body)
-        .lineSpacing(3)
+        .lineSpacing(TextRole.bodyLeading)
         .foregroundStyle(Token.foreground)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     case .heading(let text):
       Text(MessageBody.attributed(text))
-        .font(.headline)
+        .font(TextRole.heading)
         .foregroundStyle(Token.foreground)
         .accessibilityAddTraits(.isHeader)
     case .code(let code):
@@ -148,7 +148,7 @@ struct CodeBlock: View {
   private var words: some View {
     Text(code)
       .font(TextRole.code(copies ? .callout : .footnote))
-      .lineSpacing(2)
+      .lineSpacing(TextRole.codeLeading)
       .foregroundStyle(Token.foreground)
       .textSelection(.enabled)
   }
@@ -159,11 +159,11 @@ struct CodeBlock: View {
         ScrollView(.horizontal) {
           words
             .fixedSize()
-            .padding(.horizontal, 14)
+            .padding(.horizontal, Space.snug)
             // A slim band over the drawing holds Copy: the drawing's first rule starts under the button, never
             // through it.
-            .padding(.top, copies ? 42 : 13)
-            .padding(.bottom, 13)
+            .padding(.top, copies ? Space.touch - Space.hair : Space.step)
+            .padding(.bottom, Space.step)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
         }
         .scrollIndicators(.visible)
@@ -172,7 +172,7 @@ struct CodeBlock: View {
         .mask {
           HStack(spacing: 0) {
             Color.black
-            LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: 56)
+            LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: Size.codeFade)
           }
         }
         .animation(.easeOut(duration: 0.15), value: fades)
@@ -180,10 +180,10 @@ struct CodeBlock: View {
         words
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.leading, 14)
-          .padding(.vertical, 13)
+          .padding(.leading, Space.snug)
+          .padding(.vertical, Space.step)
           // The words never run under the button.
-          .padding(.trailing, copies ? 44 : 14)
+          .padding(.trailing, copies ? Space.touch : Space.snug)
       }
     }
     .frame(minHeight: copies ? 44 : 0)
@@ -209,12 +209,12 @@ struct CopyButton: View {
       }
     } label: {
       Image(systemName: copied ? "checkmark" : "square.on.square")
-        .font(.footnote.weight(.medium))
+        .font(TextRole.meta.weight(.medium))
         .foregroundStyle(copied ? Token.success : Token.mutedForeground)
-        .frame(width: 32, height: 32)
-        .background(ground ? Token.card : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay { if ground { RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Token.border, lineWidth: 0.5) } }
-        .frame(width: 44, height: 44)
+        .frame(width: Size.copy, height: Size.copy)
+        .background(ground ? Token.card : .clear, in: RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous))
+        .overlay { if ground { RoundedRectangle(cornerRadius: Radius.thumb, style: .continuous).strokeBorder(Token.border, lineWidth: 0.5) } }
+        .frame(width: Space.touch, height: Space.touch)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

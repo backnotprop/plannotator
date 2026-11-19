@@ -46,8 +46,8 @@ struct QuestionCard: View {
   @Environment(\.cardKey) private var cardKey
   @FocusState private var focus: Field?
   enum Field { case other, note, text }
-  /// The choices' mark at this text size: what stands under a row starts in the column of its words.
-  @ScaledMetric(relativeTo: .body) private var mark: CGFloat = 22
+  /// The choices' mark at this text size: what stands under a row starts in the column of its words (`$side`).
+  @MarkSide private var side
 
   private var answer: QuestionAnswer? { question.answer }
   private var live: Bool { question.state == .openValue || question.state == .picked }
@@ -59,31 +59,33 @@ struct QuestionCard: View {
   private var picked: [String] { CardAnswers.selected(question) }
 
   /// The card's parts, top to bottom, each a step quieter than the prompt: where it stands among the questions and
-  /// what it holds up; the prompt; its context; what happened to the pick, if anything, right over the answers it
-  /// speaks of; the answers; the note; where the pick stands; then, under a hairline, what else can be done.
+  /// what it holds up; what happened to the pick, if anything, where the person reads first; the prompt; its
+  /// context; the answers; the note; where the pick stands; then, under a hairline, what else can be done.
   var body: some View {
     let refusal = session.refusal(message: message, key: question.key)
     let acts = known && live
     VStack(alignment: .leading, spacing: 0) {
       header.lineEdge("head")
+      if let refusal {
+        // A pick the computer did not take, in the app's own words, where the person reads first (and VoiceOver
+        // before the prompt); it stays until they act on this question. A clash with another device's answer
+        // never comes here in red: it settles quietly.
+        let calm = refusal == .gaveWay
+        CardNotice(words: PhoneWords.pickNotice(refusal, computer: session.computer.name), symbol: calm ? "arrow.triangle.2.circlepath" : "exclamationmark.circle", role: calm ? .quiet : .stop)
+          .lineEdge("refusal")
+          .padding(.top, Space.near)
+      }
       Text(question.prompt)
         .font(TextRole.prompt)
         .foregroundStyle(Token.foreground)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityAddTraits(.isHeader)
         .lineEdge("prompt")
-        .padding(.top, Space.close)
+        .padding(.top, refusal == nil ? Space.close : Space.step)
       ForEach([question.context, question.stakes].compactMap { $0 }.filter { !$0.isEmpty }, id: \.self) { line in
-        Text(line).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("context/\(line)").padding(.top, 6)
+        Text(line).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("context/\(line)").padding(.top, Space.trim)
       }
       VStack(alignment: .leading, spacing: Space.close) {
-        if let refusal {
-          // A pick the computer did not take, in the app's own words, over the answers it speaks of; it stays
-          // until the person acts on this question. A clash with another device's answer settles quietly.
-          let calm = refusal == .gaveWay
-          CardNotice(words: PhoneWords.pickNotice(refusal, computer: session.computer.name), symbol: calm ? "arrow.triangle.2.circlepath" : "exclamationmark.circle", role: calm ? .quiet : .stop)
-            .lineEdge("refusal")
-        }
         if !known {
           Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
         } else if !live {
@@ -96,7 +98,7 @@ struct QuestionCard: View {
         if acts, draft.noteOpen { noteField }
         status
       }
-      .padding(.top, 14)
+      .padding(.top, Space.snug)
       if acts {
         Hairline().padding(.top, Space.step)
         footer
@@ -163,10 +165,11 @@ struct QuestionCard: View {
     if let place { Text(PhoneWords.eyebrow(place.index, place.count, multi: question.kind == .multi)).fontWeight(.medium) }
   }
 
-  /// What rides on the answer, said in its role's colour: amber is work held up until the person answers.
+  /// What rides on the answer, said in its role's colour: amber is a caution, and work held up until the person
+  /// answers.
   @ViewBuilder private var marks: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 10) {
-      if question.reversible?.value == false { Text(PhoneWords.cantBeUndone).foregroundStyle(Token.foreground).fontWeight(.semibold) }
+    HStack(alignment: .firstTextBaseline, spacing: Space.near) {
+      if question.reversible?.value == false { Text(PhoneWords.cantBeUndone).foregroundStyle(Role.caution.ink).fontWeight(.semibold) }
       if !question.holdsUp.isEmpty { RoleLine(words: PhoneWords.holdingUp(question.holdsUp), role: .hold) }
     }
   }
@@ -203,7 +206,7 @@ struct QuestionCard: View {
         // Under the row it belongs to, in the column of its words.
         field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
           .lineEdge("otherField")
-          .padding(.leading, ChoiceRow.column(mark))
+          .padding(.leading, $side)
           .padding(.top, Space.tight)
       }
     }
@@ -238,7 +241,7 @@ struct QuestionCard: View {
         answered(words, symbol: "checkmark")
       }
       if let note = answer?.note, !note.isEmpty {
-        Text("\(PhoneWords.note): \(note)").font(TextRole.secondary).foregroundStyle(Token.mutedForeground).padding(.leading, ChoiceRow.column(mark))
+        Text("\(PhoneWords.note): \(note)").font(TextRole.secondary).foregroundStyle(Token.mutedForeground).padding(.leading, $side)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -247,7 +250,7 @@ struct QuestionCard: View {
   /// One answered line: its tick stands where the choices' marks stood, its words where theirs did.
   private func answered(_ words: String, symbol: String, quiet: Bool = false) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: Space.step) {
-      Image(systemName: symbol).font(.system(size: min(mark, 32) * 0.68, weight: .bold)).foregroundStyle(quiet ? Token.mutedForeground : Role.done.ink).frame(width: min(mark, 32)).accessibilityHidden(true)
+      Image(systemName: symbol).font(.system(size: side * 0.68, weight: .bold)).foregroundStyle(quiet ? Token.mutedForeground : Role.done.ink).frame(width: side).accessibilityHidden(true)
       Text(words).font(TextRole.label).foregroundStyle(quiet ? Token.mutedForeground : Token.foreground).fixedSize(horizontal: false, vertical: true)
     }
     .accessibilityElement(children: .combine)
@@ -260,9 +263,9 @@ struct QuestionCard: View {
       .focused($focus, equals: which)
       .disabled(!enabled)
       .padding(.horizontal, Space.step)
-      .padding(.vertical, 10)
+      .padding(.vertical, Space.near)
       .frame(minHeight: Space.touch)
-      .fieldGround()
+      .fieldGround(focused: focus == which)
       .toolbar {
         if focus == which {
           ToolbarItemGroup(placement: .keyboard) {
@@ -277,7 +280,7 @@ struct QuestionCard: View {
   // MARK: Note, Skip
 
   private var noteField: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: Space.trim) {
       Text(PhoneWords.note).font(TextRole.metaStrong).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
       field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note).lineEdge("noteField")
     }
@@ -309,7 +312,7 @@ struct QuestionCard: View {
         CardSaver.apply(CardAnswers.toggleSkip(now), session: session, thread: thread, message: message, question: now)
       }
     } label: {
-      quietWords(skipped ? PhoneWords.undoSkip : PhoneWords.skip).padding(.leading, spread ? Space.page : 0)
+      quietWords(skipped ? PhoneWords.undoSkip : PhoneWords.skip, leading: spread ? Space.page : 0)
     }
     if spread { Spacer(minLength: Space.step) }
     if CardAnswers.offersAccept(question) {
@@ -321,16 +324,16 @@ struct QuestionCard: View {
           .font(TextRole.link)
           .foregroundStyle(Token.primary)
           .padding(.horizontal, Space.step)
-          .frame(minHeight: 34)
+          .frame(minHeight: Size.capsule)
           .background(Token.primary.opacity(0.14), in: Capsule())
-          .frame(minHeight: Space.touch)
-          .contentShape(Rectangle())
+          .touchTarget()
       }
     }
   }
 
-  private func quietWords(_ words: String) -> some View {
-    Text(words).font(TextRole.link).foregroundStyle(Token.primary).frame(minHeight: Space.touch).contentShape(Rectangle())
+  /// Words alone to touch: the air before them is theirs to touch too, and the whole is 44 points at least.
+  private func quietWords(_ words: String, leading: CGFloat = 0) -> some View {
+    Text(words).font(TextRole.link).foregroundStyle(Token.primary).padding(.leading, leading).touchTarget()
   }
 
   @ViewBuilder private var status: some View {
