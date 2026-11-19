@@ -8,22 +8,16 @@
  * shown as text by the card.
  */
 
-export interface LinkPreview {
-  /** The address the preview is for, after redirects. */
-  url: string;
-  title?: string;
-  description?: string;
-  site?: string;
-  image?: string;
-  icon?: string;
-}
+import type { LinkPreview } from '../model/reference';
+
+export type { LinkPreview };
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
 
 export function decodeEntities(value: string): string {
   return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
     const key = name.toLowerCase();
-    if (key in ENTITIES) return ENTITIES[key];
+    if (Object.hasOwn(ENTITIES, key)) return ENTITIES[key];
     if (key.startsWith('#')) {
       const code = key[1] === 'x' ? parseInt(key.slice(2), 16) : parseInt(key.slice(1), 10);
       return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';

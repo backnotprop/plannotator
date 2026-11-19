@@ -202,16 +202,32 @@ describe('the event stream', () => {
     expect(heard).toEqual(['person:local:move', 'agent:local:recolor', 'person:undo:-']);
   });
 
-  test('since() hands over everything after a point, and says when it can no longer', () => {
+  test('since() hands over everything after a cursor', () => {
     const store = new CanvasStore(createDocument('board'), { logLimit: 3 });
     store.dispatch({ type: 'add', objects: [box('a')] });
-    const mark = store.head;
+    const mark = store.cursor();
     store.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 });
     store.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 });
-    expect(store.since(mark)?.map((envelope) => envelope.command?.type)).toEqual(['move', 'move']);
-    expect(store.since(store.head)).toEqual([]);
-    store.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 });
-    store.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 });
-    expect(store.since(0)).toBeNull();
+    const heard = store.since(mark);
+    expect(heard.kind === 'events' && heard.envelopes.map((envelope) => envelope.command?.type)).toEqual(['move', 'move']);
+    const nothing = store.since(store.cursor());
+    expect(nothing.kind === 'events' && nothing.envelopes).toEqual([]);
+  });
+
+  test('a cursor it cannot answer for gets the whole document, never "nothing changed"', () => {
+    const earlier = new CanvasStore(createDocument('board'));
+    for (let i = 0; i < 120; i++) earlier.dispatch({ type: 'add', objects: [box(`e${i}`)] });
+    const stale = earlier.cursor();
+
+    // The page reloads: a new store, whose numbering starts again below the old cursor.
+    const store = new CanvasStore(createDocument('board'), { logLimit: 3 });
+    for (let i = 0; i < 5; i++) store.dispatch({ type: 'add', objects: [box(`n${i}`)] });
+    const first = store.cursor();
+    for (const cursor of [stale, { epoch: store.epoch, seq: 999 }, { epoch: store.epoch, seq: -1 }, { epoch: store.epoch, seq: 0 }, null, undefined]) {
+      const answer = store.since(cursor);
+      expect(answer.kind).toBe('resync');
+      expect(answer.kind === 'resync' && Object.keys(answer.document.objects)).toHaveLength(5);
+      expect(answer.cursor).toEqual(first);
+    }
   });
 });

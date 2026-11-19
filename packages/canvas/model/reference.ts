@@ -54,3 +54,21 @@ export function pastedUrl(text: string): string | null {
     return null;
   }
 }
+
+/** A page's preview: text and absolute http(s) addresses, never markup. */
+export interface LinkPreview {
+  /** The address the preview is for, after redirects. */
+  url: string;
+  title?: string;
+  description?: string;
+  site?: string;
+  image?: string;
+  icon?: string;
+}
+
+/**
+ * How the canvas asks for a page's preview. The editor knows nothing about
+ * how it is fetched, and calls it only for an address a person pasted:
+ * an agent's `add` of a web card never causes a fetch.
+ */
+export type LinkPreviewPort = (url: string, signal?: AbortSignal) => Promise<LinkPreview | null>;

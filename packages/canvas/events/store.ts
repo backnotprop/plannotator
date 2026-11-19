@@ -13,6 +13,7 @@
  * and a peer's change go through the same store but never onto this stack,
  * so "undo" never takes back something the person did not do.
  */
+import { withIdMaps } from '../model/document';
 import { createId } from '../model/ids';
 import type { Actor, CanvasDocument } from '../model/types';
 import { planCommand } from './plan';
@@ -36,6 +37,16 @@ interface UndoEntry {
   redo: CanvasEvent[];
   gesture?: string;
 }
+
+/** A place in one store's history. See `CanvasStore.cursor`. */
+export interface Cursor {
+  epoch: string;
+  seq: number;
+}
+
+export type Since =
+  | { kind: 'events'; envelopes: Envelope[]; cursor: Cursor }
+  | { kind: 'resync'; document: CanvasDocument; cursor: Cursor };
 
 export interface CanvasStoreOptions {
   /** The person at this screen. */
@@ -62,6 +73,8 @@ function compactChanges(events: CanvasEvent[]): CanvasEvent[] {
 
 export class CanvasStore {
   readonly actor: Actor;
+  /** Names this store's history. A new store, even of the same document, has a new one. */
+  readonly epoch: string = createId('epoch');
   private doc: CanvasDocument;
   private seq = 0;
   private readonly undoStack: UndoEntry[] = [];
@@ -74,7 +87,7 @@ export class CanvasStore {
   private readonly logLimit: number;
 
   constructor(doc: CanvasDocument, options: CanvasStoreOptions = {}) {
-    this.doc = doc;
+    this.doc = withIdMaps(doc);
     this.actor = options.actor ?? { kind: 'person', id: 'local' };
     this.undoLimit = options.undoLimit ?? 500;
     this.logLimit = options.logLimit ?? 2000;
@@ -102,21 +115,28 @@ export class CanvasStore {
     return this.redoStack.length > 0;
   }
 
-  /** The newest commit's number. Keep it to ask `since` for what came after. */
-  get head(): number {
-    return this.seq;
+  /**
+   * Where this store is now. Keep it, and hand it back to `since` later to
+   * hear what happened in between. It names the store as well as the place:
+   * commit numbers start again with every store (a reload, another tab), so
+   * a number alone would mean something else to the next one.
+   */
+  cursor(): Cursor {
+    return { epoch: this.epoch, seq: this.seq };
   }
 
   /**
-   * Every commit after `seq`, oldest first: what a hand-over tells the agent.
-   * Null when the log no longer reaches back that far; the caller then sends
-   * the whole document instead.
+   * What happened after `cursor`: what a hand-over tells the agent.
+   * - `events`: every commit since, oldest first (none when nothing changed).
+   * - `resync`: the cursor is from another store, is ahead of this one, is
+   *   older than the log reaches, or was never given. The answer is then the
+   *   whole document and a fresh cursor, never "nothing changed".
    */
-  since(seq: number): Envelope[] | null {
-    if (seq >= this.seq) return [];
-    const first = this.log[0];
-    if (!first || first.seq > seq + 1) return null;
-    return this.log.filter((envelope) => envelope.seq > seq);
+  since(cursor: Cursor | null | undefined): Since {
+    const known = !!cursor && cursor.epoch === this.epoch && Number.isInteger(cursor.seq) && cursor.seq >= 0 && cursor.seq <= this.seq;
+    const reaches = known && (cursor.seq === this.seq || (this.log.length > 0 && this.log[0].seq <= cursor.seq + 1));
+    if (!known || !reaches) return { kind: 'resync', document: this.doc, cursor: this.cursor() };
+    return { kind: 'events', envelopes: this.log.filter((envelope) => envelope.seq > cursor.seq), cursor: this.cursor() };
   }
 
   dispatch(command: Command, options: DispatchOptions = {}): DispatchResult {

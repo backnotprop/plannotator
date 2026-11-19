@@ -5,3 +5,5 @@ export * from './editor-state';
 export * from './gestures';
 export * from './objects';
 export * from './references';
+export * from './link-preview';
+export * from './plan-drop';

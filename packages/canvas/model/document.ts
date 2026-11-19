@@ -20,8 +20,28 @@ import {
   isPlaced,
 } from './types';
 
+/**
+ * A map keyed by id with no prototype, so an id such as `constructor` or
+ * `__proto__` is just an id: `map[id]` is the stored value or undefined,
+ * never something inherited from `Object.prototype`. Every `objects` and
+ * `snapshots` map in a document is one of these (made here, in the reducer,
+ * in the codec and when a store takes a document), which is what makes a
+ * plain `doc.objects[id]` safe everywhere.
+ */
+export function idMap<T>(from?: Readonly<Record<string, T>>): Record<string, T> {
+  const map = Object.create(null) as Record<string, T>;
+  if (from) for (const key of Object.keys(from)) map[key] = from[key];
+  return map;
+}
+
+/** The same document with its maps made prototype-free. A document that already is comes back as it was. */
+export function withIdMaps(doc: CanvasDocument): CanvasDocument {
+  if (Object.getPrototypeOf(doc.objects) === null && Object.getPrototypeOf(doc.snapshots) === null) return doc;
+  return { ...doc, objects: idMap(doc.objects), snapshots: idMap(doc.snapshots) };
+}
+
 export function createDocument(id: string, title = ''): CanvasDocument {
-  return { version: CANVAS_DOCUMENT_VERSION, id, title, objects: {}, order: [], snapshots: {} };
+  return { version: CANVAS_DOCUMENT_VERSION, id, title, objects: idMap(), order: [], snapshots: idMap() };
 }
 
 export const isBoundEnd = (end: ArrowEnd): end is { object: ObjectId } => 'object' in end;
@@ -32,12 +52,60 @@ export interface ArrowGeometry {
   to: Point;
 }
 
-/** An arrow end's anchor: a bound object's rect, or the free point itself. */
+/** The rect of a group's placed members, nested groups included. Arrows are not asked. */
+function placedBounds(doc: CanvasDocument, groupId: ObjectId): Rect | null {
+  const rects: Rect[] = [];
+  for (const member of groupMembers(doc, groupId)) {
+    const child = doc.objects[member];
+    if (child && isPlaced(child)) rects.push(child);
+  }
+  return unionRects(rects);
+}
+
+/**
+ * An arrow end's anchor: the free point, or the rect of what it is stuck to.
+ * An end may be stuck to a placed object or to a group; a group is measured
+ * by its placed members only. So working out an arrow never asks about
+ * another arrow, and no chain of arrows and groups can go round in a circle,
+ * whatever a document holds. An end stuck to an arrow has no anchor.
+ */
 function endRect(doc: CanvasDocument, end: ArrowEnd): Rect | Point | null {
   if (!isBoundEnd(end)) return end;
   const target = doc.objects[end.object];
   if (!target) return null;
-  return objectBounds(doc, target.id);
+  if (isPlaced(target)) return target;
+  return target.type === 'group' ? placedBounds(doc, target.id) : null;
+}
+
+/**
+ * Why an arrow may not be stuck to `targetId`, or null when it may. The one
+ * rule for every door (the planner, a loaded file, a peer's event): an end
+ * sticks to a placed object, or to a group the arrow is not inside.
+ */
+/** Finds an object by id: a document's map, or a map with changes laid over it. */
+export type ObjectLookup = (id: ObjectId) => CanvasObject | undefined;
+
+export function bindingFault(lookup: ObjectLookup, arrow: { id: ObjectId; group?: ObjectId }, targetId: ObjectId): string | null {
+  const target = lookup(targetId);
+  if (!target) return `there is no object ${targetId} to attach to`;
+  if (target.type === 'arrow') return `${targetId} is an arrow; an arrow attaches to an object or a group`;
+  if (target.type !== 'group') return null;
+  let group = arrow.group;
+  for (let depth = 0; group && depth < 64; depth++) {
+    if (group === targetId) return `it is inside the group ${targetId} it would attach to`;
+    group = lookup(group)?.group;
+  }
+  return null;
+}
+
+/** Whether following `group` upward from `id` comes back round, or never ends. */
+export function groupCycle(lookup: ObjectLookup, id: ObjectId): boolean {
+  let group = lookup(id)?.group;
+  for (let depth = 0; group; depth++) {
+    if (group === id || depth > 64) return true;
+    group = lookup(group)?.group;
+  }
+  return false;
 }
 
 const anchorCenter = (anchor: Rect | Point): Point => ('w' in anchor ? rectCenter(anchor) : anchor);
@@ -63,15 +131,19 @@ export function resolveArrow(doc: CanvasDocument, arrow: ArrowObject): ArrowGeom
 /** Ids of the objects in a group, nested groups included, in no set order. */
 export function groupMembers(doc: CanvasDocument, groupId: ObjectId): ObjectId[] {
   const out: ObjectId[] = [];
-  const walk = (id: ObjectId, depth: number) => {
-    if (depth > 32) return;
+  // Each group is walked once, so a document whose groups hold each other still ends.
+  const walked = new Set<ObjectId>([groupId]);
+  const walk = (id: ObjectId) => {
     for (const object of Object.values(doc.objects)) {
-      if (object.group !== id) continue;
+      if (object.group !== id || object.id === groupId) continue;
       out.push(object.id);
-      if (object.type === 'group') walk(object.id, depth + 1);
+      if (object.type === 'group' && !walked.has(object.id)) {
+        walked.add(object.id);
+        walk(object.id);
+      }
     }
   };
-  walk(groupId, 0);
+  walk(groupId);
   return out;
 }
 

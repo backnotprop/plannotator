@@ -7,6 +7,7 @@
  * one copy per frame, and every object the batch did not touch keeps its
  * identity (the renderer skips those with a reference check).
  */
+import { bindingFault, groupCycle, idMap, isBoundEnd } from '../model/document';
 import type { CanvasDocument, CanvasObject, Snapshot } from '../model/types';
 import type { CanvasEvent } from './types';
 
@@ -21,6 +22,27 @@ export interface Applied {
 const clampIndex = (at: number | undefined, length: number): number =>
   at === undefined || !Number.isFinite(at) ? length : Math.max(0, Math.min(length, Math.trunc(at)));
 
+/**
+ * An object that would make the document go round in a circle: an arrow
+ * stuck to an arrow or to a group it is inside, or a group inside itself.
+ * The planner never makes one; a peer's event might, and it is dropped here.
+ * (An end stuck to an object that is not there is allowed: that object may
+ * have been removed by someone else a moment ago.)
+ */
+function unsound(objects: Readonly<Record<string, CanvasObject>>, object: CanvasObject, before?: CanvasObject): boolean {
+  // The common case, a move or an edit, touches neither: nothing to look at.
+  const ends = object.type === 'arrow' ? [object.from, object.to].filter(isBoundEnd) : [];
+  if (!object.group && ends.length === 0) return false;
+  if (before && before.group === object.group && before.type === 'arrow' && object.type === 'arrow' && before.from === object.from && before.to === object.to) return false;
+  if (before && before.group === object.group && ends.length === 0) return false;
+  const lookup = (id: string) => (id === object.id ? object : objects[id]);
+  if (object.group && groupCycle(lookup, object.id)) return true;
+  for (const end of ends) {
+    if (lookup(end.object) && bindingFault(lookup, object, end.object)) return true;
+  }
+  return false;
+}
+
 export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[]): Applied {
   let objects: Record<string, CanvasObject> | null = null;
   let order: string[] | null = null;
@@ -29,15 +51,15 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[])
   const undo: CanvasEvent[] = [];
   const applied: CanvasEvent[] = [];
 
-  const objs = () => (objects ??= { ...doc.objects });
+  const objs = () => (objects ??= idMap(doc.objects));
   const ord = () => (order ??= [...doc.order]);
-  const snaps = () => (snapshots ??= { ...doc.snapshots });
+  const snaps = () => (snapshots ??= idMap(doc.snapshots));
   const current = (id: string): CanvasObject | undefined => (objects ?? doc.objects)[id];
 
   for (const event of events) {
     switch (event.type) {
       case 'object-added': {
-        if (current(event.object.id)) break;
+        if (current(event.object.id) || unsound(objects ?? doc.objects, event.object)) break;
         const list = ord();
         const at = clampIndex(event.at, list.length);
         objs()[event.object.id] = event.object;
@@ -48,7 +70,7 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[])
       }
       case 'object-changed': {
         const before = current(event.object.id);
-        if (!before || before === event.object) break;
+        if (!before || before === event.object || unsound(objects ?? doc.objects, event.object, before)) break;
         objs()[event.object.id] = event.object;
         undo.push({ type: 'object-changed', object: before });
         applied.push(event);

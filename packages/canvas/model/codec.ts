@@ -5,6 +5,7 @@
  * through. What passes here is safe to hand to the renderer.
  */
 import { parseColor } from './color';
+import { bindingFault, groupCycle, idMap, isBoundEnd } from './document';
 import { isFiniteRect } from './geometry';
 import { HTML_ITEM_MAX_LENGTH, isSafeImageSrc, isWebUrl } from './html-item';
 import { isValidId } from './ids';
@@ -266,12 +267,24 @@ export function parseDocument(input: unknown): Checked<CanvasDocument> {
   if (!isRecord(current.objects)) return fail('objects is missing');
   const entries = Object.entries(current.objects);
   if (entries.length > LIMITS.objects) return fail(`more than ${LIMITS.objects} objects`);
-  const objects: Record<string, CanvasObject> = {};
+  const objects = idMap<CanvasObject>();
   for (const [key, value] of entries) {
     const checked = checkObject(value);
     if (!checked.ok) return checked;
     if (checked.value.id !== key) return fail(`object stored under ${JSON.stringify(key)} says its id is ${checked.value.id}`);
     objects[key] = checked.value;
+  }
+  // Cross references, fail closed: a group that is a group, no group inside
+  // itself, an arrow stuck only to what an arrow may be stuck to.
+  const lookup = (id: string) => objects[id];
+  for (const object of Object.values(objects)) {
+    if (object.group && objects[object.group]?.type !== 'group') return fail(`${object.id}: group ${object.group} is not a group on this canvas`);
+    if (object.group && groupCycle(lookup, object.id)) return fail(`${object.id}: its groups hold each other`);
+    if (object.type !== 'arrow') continue;
+    for (const end of [object.from, object.to]) {
+      const fault = isBoundEnd(end) ? bindingFault(lookup, object, end.object) : null;
+      if (fault) return fail(`${object.id}: ${fault}`);
+    }
   }
   if (!Array.isArray(current.order)) return fail('order is missing');
   const order: string[] = [];
@@ -282,7 +295,7 @@ export function parseDocument(input: unknown): Checked<CanvasDocument> {
     order.push(id);
   }
   if (order.length !== entries.length) return fail('order must list each object once');
-  const snapshots: Record<string, Snapshot> = {};
+  const snapshots = idMap<Snapshot>();
   const rawSnapshots = current.snapshots ?? {};
   if (!isRecord(rawSnapshots) || Object.keys(rawSnapshots).length > LIMITS.snapshots) return fail('snapshots is not understood');
   for (const [key, value] of Object.entries(rawSnapshots)) {
@@ -309,9 +322,9 @@ function sorted(value: unknown): unknown {
  * however the document came to be (a clean diff, a stable hash).
  */
 export function serializeDocument(doc: CanvasDocument): string {
-  const objects: Record<string, unknown> = {};
+  const objects = idMap<unknown>();
   for (const id of doc.order) if (doc.objects[id]) objects[id] = sorted(doc.objects[id]);
-  const snapshots: Record<string, unknown> = {};
+  const snapshots = idMap<unknown>();
   for (const id of Object.keys(doc.snapshots).sort()) snapshots[id] = sorted(doc.snapshots[id]);
   return JSON.stringify({ version: doc.version, id: doc.id, title: doc.title, objects, order: doc.order, snapshots });
 }

@@ -7,8 +7,8 @@ import { isBoundEnd, objectBounds } from '../model/document';
 import { type Rect, rectContainsRect } from '../model/geometry';
 import { createId } from '../model/ids';
 import type { CanvasDocument, CanvasObject, FrameObject, ObjectId, SnapshotInput } from '../model/types';
-import type { DocumentIndex } from '../view/document-index';
-import { objectsInRect } from '../view/hit-test';
+import type { DocumentIndex } from './document-index';
+import { objectsInRect } from './hit-test';
 
 const TITLE_MAX = 60;
 

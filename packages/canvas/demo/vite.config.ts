@@ -6,7 +6,6 @@
 import path from 'path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { lookup } from 'node:dns/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { type Plugin, defineConfig } from 'vite';
 import { createUnfurlHandler } from '../unfurl/route';
@@ -19,14 +18,13 @@ const UNFURL_PATH = '/__canvas/unfurl';
 
 /**
  * The link preview route, mounted on the demo's own dev server and nowhere
- * else. `allowPrivate` is on here only so the demo can preview its own
- * fixture page on loopback; a product server would leave it off.
+ * else. `allowPrivate` is on, as it would be for a local single-user server:
+ * the demo previews its own fixture page on loopback. Development only: any
+ * page open in the developer's browser could ask this route to GET a
+ * loopback address while the demo runs.
  */
 function unfurlRoute(): Plugin {
-  const handle = createUnfurlHandler({
-    allowPrivate: true,
-    lookup: async (hostname) => (await lookup(hostname, { all: true })).map((entry) => entry.address),
-  });
+  const handle = createUnfurlHandler({ allowPrivate: true });
   const middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     if (!req.url?.startsWith(UNFURL_PATH)) return next();
     void handle(new Request(`http://demo.invalid${req.url}`, { method: req.method })).then(async (response) => {

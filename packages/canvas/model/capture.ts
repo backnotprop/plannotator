@@ -19,7 +19,7 @@
  * small arrays. The comparison takes the same shortcut: an object that is
  * the same reference is equal without being read.
  */
-import { isBoundEnd, objectBounds, resolveArrow } from './document';
+import { idMap, isBoundEnd, objectBounds, resolveArrow } from './document';
 import { type Rect, expandRect, rectContainsRect, rectsIntersect, unionRects } from './geometry';
 import { type CanvasDocument, type CanvasObject, type ObjectId, type SnapshotCapture, type SnapshotSource, isPlaced } from './types';
 
@@ -122,9 +122,9 @@ export function capturesEqual(a: SnapshotCapture | null, b: SnapshotCapture | nu
 
 /** A small document holding just a capture, so the ordinary renderer can draw it. */
 export function captureDocument(capture: SnapshotCapture): CanvasDocument {
-  const objects: Record<ObjectId, CanvasObject> = {};
+  const objects = idMap<CanvasObject>();
   for (const object of capture.objects) objects[object.id] = object;
-  return { version: 1, id: 'capture', title: '', objects, order: capture.objects.map((object) => object.id), snapshots: {} };
+  return { version: 1, id: 'capture', title: '', objects, order: capture.objects.map((object) => object.id), snapshots: idMap() };
 }
 
 /** True for an object type a capture may hold. */

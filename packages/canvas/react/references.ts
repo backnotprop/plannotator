@@ -9,7 +9,7 @@ import { createId } from '../model/ids';
 import { hostOf, pastedUrl } from '../model/reference';
 import type { Point } from '../model/geometry';
 import type { ReferenceObject, ReferenceTarget } from '../model/types';
-import type { LinkPreviewPort } from '../unfurl/route';
+import type { LinkPreviewPort } from '../model/reference';
 
 /** A card with no picture, and one with. */
 export const CARD_SIZE = { w: 280, h: 84 } as const;

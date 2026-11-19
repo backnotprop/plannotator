@@ -5,20 +5,50 @@
  * It behaves the way link previews do everywhere, with the usual limits,
  * none of which the person ever sees: http and https only, a few redirects,
  * a time cap, a size cap (only the start of the page is read), and no
- * address on the machine's own network unless the host says so. When a page
+ * address on the machine's own network unless the host's policy says so
+ * (`allowPrivate`). Each host name is resolved, checked, and then connected
+ * to at the address that was checked. When a page
  * gives nothing, or cannot be reached, the answer is still a preview: the
  * bare address, so the card always has something to show.
  *
  * `fetch` and the address lookup are passed in, so the same code runs under
  * Bun, under Node (the Pi server) and in a test with no network.
  */
+import { isIpAddress, isPrivateAddress } from './address';
 import { type LinkPreview, parseLinkPreview } from './parse';
+
+export { isPrivateAddress };
+
+/** The addresses a host name resolves to. */
+export type HostLookup = (hostname: string) => Promise<string[]>;
+
+/**
+ * Connect to `address` and ask it for `url`: the request goes to the address
+ * that was checked, not to whatever the name resolves to a moment later
+ * (which is how DNS rebinding gets past a check).
+ */
+export type PinnedFetch = (url: URL, address: string, init: RequestInit) => Promise<Response>;
 
 export interface UnfurlOptions {
   fetch?: typeof fetch;
-  /** The addresses a host name resolves to. Absent: only literal addresses are checked. */
-  lookup?: (hostname: string) => Promise<string[]>;
-  /** Let a preview be fetched from this machine or its private network. */
+  /**
+   * Absent: the system resolver (`node:dns`, which Bun has too). `false`
+   * turns the lookup off, on purpose: then only addresses written as numbers
+   * are checked.
+   */
+  lookup?: HostLookup | false;
+  /** Absent: Bun's own way when running under Bun with no `fetch` given; otherwise the request goes by name. */
+  pin?: PinnedFetch;
+  /**
+   * The host's policy for this machine and its private network. Default
+   * false: such an address gets no preview, and a picture or icon address
+   * that points there is dropped from the preview. Set true only by a server
+   * that one person runs for themselves on their own machine (the local
+   * Plannotator server), where pasting `http://localhost:3000` should give a
+   * card. A hosted server leaves it false. It is safe there only because a
+   * preview is fetched for an address a person pasted, never for one an
+   * agent put in a card: see `LinkPreviewPort`.
+   */
   allowPrivate?: boolean;
   timeoutMs?: number;
   maxBytes?: number;
@@ -40,31 +70,41 @@ export function parseWebUrl(value: string): URL | null {
   }
 }
 
-/** Whether an IP address (v4 or v6 text) is this machine, a private network or otherwise not the public internet. */
-export function isPrivateAddress(address: string): boolean {
-  const value = address.replace(/^\[|\]$/g, '').toLowerCase();
-  const mapped = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  const v4 = (mapped ? mapped[1] : value).match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
-  }
-  if (!value.includes(':')) return false;
-  return value === '::' || value === '::1' || /^f[cd]/.test(value) || /^fe[89ab]/.test(value) || value.startsWith('ff');
+const systemLookup: HostLookup = async (hostname) => {
+  const dns = await import('node:dns/promises');
+  return (await dns.lookup(hostname, { all: true })).map((entry) => entry.address);
+};
+
+/** Bun: connect by address, name the host for the request and for the certificate. */
+const bunPin: PinnedFetch = (url, address, init) => {
+  const direct = new URL(url.href);
+  direct.hostname = address.includes(':') ? `[${address}]` : address;
+  const headers = new Headers(init.headers);
+  headers.set('host', url.host);
+  return fetch(direct.href, { ...init, headers, tls: { serverName: url.hostname } } as RequestInit);
+};
+
+interface Resolved {
+  /** The address to connect to, when one is known. */
+  address: string | null;
+  private: boolean;
 }
 
-const isIpLiteral = (hostname: string): boolean => /^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':');
+const LOCAL_NAME_RE = /(^|\.)(localhost|local|internal|home\.arpa|lan)$/;
 
-async function isPrivateHost(url: URL, options: UnfurlOptions): Promise<boolean> {
+/** Where a host is, and whether that is private. A name that will not resolve is treated as private. */
+export async function resolveHost(url: URL, options: Pick<UnfurlOptions, 'lookup'> = {}): Promise<Resolved> {
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) return true;
-  if (isIpLiteral(hostname)) return isPrivateAddress(hostname);
-  if (!options.lookup) return false;
+  if (isIpAddress(hostname)) return { address: hostname, private: isPrivateAddress(hostname) };
+  const named = LOCAL_NAME_RE.test(hostname);
+  if (options.lookup === false) return { address: null, private: named };
   try {
-    const addresses = await options.lookup(hostname);
-    return addresses.length === 0 || addresses.some(isPrivateAddress);
+    const addresses = await (options.lookup ?? systemLookup)(hostname);
+    if (addresses.length === 0) return { address: null, private: true };
+    // Any private address among them makes the name private; connect to the first.
+    return { address: addresses[0], private: named || addresses.some(isPrivateAddress) };
   } catch {
-    return true;
+    return { address: null, private: true };
   }
 }
 
@@ -99,70 +139,107 @@ async function readStart(response: Response, maxBytes: number): Promise<string> 
   }
 }
 
-/**
- * The preview for `address`. Null only when the address itself is not one a
- * preview can be made for (not http(s), or on a private network). Any other
- * trouble (a timeout, an error page, a page with no metadata, a PDF) gives
- * the bare preview: `{ url }` with the site's name.
- */
-export async function unfurlUrl(address: string, options: UnfurlOptions = {}): Promise<LinkPreview | null> {
+/** A preview, and whether the site really answered (a bare fallback after a failure is not worth keeping). */
+interface Unfurled {
+  preview: LinkPreview | null;
+  real: boolean;
+}
+
+async function unfurl(address: string, options: UnfurlOptions): Promise<Unfurled> {
   const first = parseWebUrl(address);
-  if (!first) return null;
-  const doFetch = options.fetch ?? fetch;
+  if (!first) return { preview: null, real: true };
   const { timeoutMs, maxBytes, maxRedirects } = { ...UNFURL_DEFAULTS, ...options };
+  const pin = options.pin ?? (!options.fetch && typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined' ? bunPin : null);
+  const doFetch = options.fetch ?? fetch;
   const bare = (url: URL): LinkPreview => ({ url: url.href, site: url.hostname.replace(/^www\./, '') });
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const init: RequestInit = {
+    redirect: 'manual',
+    signal,
+    headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'accept-language': 'en' },
+  };
+  /** A picture or icon address the page named: kept only when a viewer's browser may be sent there. */
+  const reachable = async (value: string | undefined): Promise<string | undefined> => {
+    const url = value ? parseWebUrl(value) : null;
+    if (!url) return undefined;
+    return options.allowPrivate || !(await resolveHost(url, options)).private ? url.href : undefined;
+  };
 
   let url = first;
   try {
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      if (!options.allowPrivate && (await isPrivateHost(url, options))) return hop === 0 ? null : bare(first);
-      const response = await doFetch(url.href, {
-        redirect: 'manual',
-        signal,
-        headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', 'accept-language': 'en' },
-      });
+      const where = await resolveHost(url, options);
+      if (where.private && !options.allowPrivate) return { preview: hop === 0 ? null : bare(first), real: true };
+      const response = pin && where.address ? await pin(url, where.address, init) : await doFetch(url.href, init);
       if (response.status >= 300 && response.status < 400) {
         const next = parseWebUrl(new URL(response.headers.get('location') ?? '', url).href);
         response.body?.cancel().catch(() => {});
-        if (!next) return bare(url);
+        if (!next) return { preview: bare(url), real: true };
         url = next;
         continue;
       }
       const type = response.headers.get('content-type') ?? '';
-      if (!response.ok || !/html|xml/i.test(type)) {
+      if (!response.ok) {
         response.body?.cancel().catch(() => {});
-        // A picture's address previews as the picture itself.
-        return /^image\//i.test(type) && response.ok ? { ...bare(url), image: url.href, title: decodeURIComponent(url.pathname.split('/').pop() || '') || undefined } : bare(url);
+        return { preview: bare(url), real: false };
       }
-      return parseLinkPreview(await readStart(response, maxBytes), url.href);
+      if (/^image\//i.test(type)) {
+        // A picture's address previews as the picture itself.
+        response.body?.cancel().catch(() => {});
+        return { preview: { ...bare(url), image: url.href, title: decodeURIComponent(url.pathname.split('/').pop() || '') || undefined }, real: true };
+      }
+      if (!/html|xml/i.test(type)) {
+        response.body?.cancel().catch(() => {});
+        return { preview: bare(url), real: true };
+      }
+      const preview = parseLinkPreview(await readStart(response, maxBytes), url.href);
+      const [image, icon] = await Promise.all([reachable(preview.image), reachable(preview.icon)]);
+      delete preview.image;
+      delete preview.icon;
+      if (image) preview.image = image;
+      if (icon) preview.icon = icon;
+      return { preview, real: true };
     }
-    return bare(url);
+    return { preview: bare(url), real: true };
   } catch {
-    return bare(first);
+    return { preview: bare(first), real: false };
   }
 }
 
-/** A small cache in front of `unfurlUrl`: the same address asked twice is fetched once. */
-export function createUnfurler(options: UnfurlOptions & { cacheSize?: number; cacheMs?: number } = {}): (address: string, signal?: AbortSignal) => Promise<LinkPreview | null> {
+/**
+ * The preview for `address`. Null only when the address itself is not one a
+ * preview can be made for (not http(s), or private while the host's policy
+ * says no). Any other trouble (a timeout, an error page, a page with no
+ * metadata, a PDF) gives the bare preview: `{ url }` with the site's name.
+ */
+export async function unfurlUrl(address: string, options: UnfurlOptions = {}): Promise<LinkPreview | null> {
+  return (await unfurl(address, options)).preview;
+}
+
+/**
+ * A small cache in front of `unfurlUrl`: the same address asked twice is
+ * fetched once. A fallback made because the site failed or timed out is not
+ * kept, so the next paste tries again.
+ */
+export function createUnfurler(options: UnfurlOptions & { cacheSize?: number; cacheMs?: number } = {}): (address: string) => Promise<LinkPreview | null> {
   const size = options.cacheSize ?? 300;
   const ttl = options.cacheMs ?? 30 * 60 * 1000;
-  const cache = new Map<string, { at: number; value: Promise<LinkPreview | null> }>();
-  return (address, signal) => {
+  const cache = new Map<string, { at: number; value: Promise<Unfurled> }>();
+  return async (address) => {
     const key = parseWebUrl(address)?.href;
-    if (!key) return Promise.resolve(null);
+    if (!key) return null;
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < ttl) {
       cache.delete(key);
       cache.set(key, hit);
-      return hit.value;
+      return (await hit.value).preview;
     }
-    // The fetch is not tied to one caller's signal: a second caller may be waiting on it.
-    void signal;
-    const value = unfurlUrl(key, options);
+    const value = unfurl(key, options);
     cache.set(key, { at: Date.now(), value });
     if (cache.size > size) cache.delete(cache.keys().next().value as string);
-    return value;
+    const answer = await value;
+    if (!answer.real && cache.get(key)?.value === value) cache.delete(key);
+    return answer.preview;
   };
 }

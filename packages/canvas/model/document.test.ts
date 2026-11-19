@@ -27,6 +27,10 @@ const doc: CanvasDocument = {
   },
 };
 
+/** The same document without the arrow that points at nothing: what a save may hold. */
+const { lost: _lost, ...soundObjects } = doc.objects;
+const sound: CanvasDocument = { ...doc, objects: soundObjects, order: doc.order.filter((id) => id !== 'lost') };
+
 describe('reading a document', () => {
   test('an arrow between two objects runs edge to edge, not centre to centre', () => {
     expect(resolveArrow(doc, doc.objects.ab as never)).toEqual({ from: { x: 100, y: 20 }, to: { x: 300, y: 20 } });
@@ -47,33 +51,37 @@ describe('reading a document', () => {
 
 describe('saving and loading', () => {
   test('a saved document loads back equal, and saving twice gives the same text', () => {
-    const text = serializeDocument(doc);
+    const text = serializeDocument(sound);
     const loaded = parseDocument(text);
-    expect(loaded.ok && loaded.value).toEqual(doc);
+    expect(loaded.ok && loaded.value).toEqual(sound);
     expect(loaded.ok && serializeDocument(loaded.value)).toBe(text);
   });
 
   test('a document from a newer version is refused, not half-read', () => {
-    const newer = parseDocument({ ...doc, version: CANVAS_DOCUMENT_VERSION + 1 });
+    const newer = parseDocument({ ...sound, version: CANVAS_DOCUMENT_VERSION + 1 });
     expect(newer.ok).toBe(false);
   });
 
+  test('an arrow stuck to an object the file does not hold is refused', () => {
+    expect(parseDocument(JSON.parse(JSON.stringify(doc))).ok).toBe(false);
+  });
+
   test('order must hold every object exactly once', () => {
-    expect(parseDocument({ ...doc, order: ['a', 'b', 'g', 'ab'] }).ok).toBe(false);
-    expect(parseDocument({ ...doc, order: ['a', 'a', 'b', 'g', 'ab'] }).ok).toBe(false);
-    expect(parseDocument({ ...doc, order: [...doc.order, 'ghost'] }).ok).toBe(false);
+    expect(parseDocument({ ...sound, order: ['a', 'b', 'g'] }).ok).toBe(false);
+    expect(parseDocument({ ...sound, order: ['a', 'a', 'b', 'g'] }).ok).toBe(false);
+    expect(parseDocument({ ...sound, order: [...sound.order, 'ghost'] }).ok).toBe(false);
   });
 
   test('a snapshot keeps its capture through a save, and a capture is checked like any other objects', () => {
-    const loaded = parseDocument(serializeDocument(doc));
+    const loaded = parseDocument(serializeDocument(sound));
     expect(loaded.ok && loaded.value.snapshots.s.capture.objects[0]).toMatchObject({ text: 'A as it was' });
     const hostile = { ...doc.snapshots.s, capture: { rect: doc.snapshots.s.capture.rect, objects: [{ id: 'p', type: 'image', x: 0, y: 0, w: 9, h: 9, src: 'javascript:1', alt: '' }] } };
-    expect(parseDocument({ ...doc, snapshots: { s: hostile } }).ok).toBe(false);
-    expect(parseDocument({ ...doc, snapshots: { s: { id: 's', title: '', source: doc.snapshots.s.source } } }).ok).toBe(false);
+    expect(parseDocument({ ...sound, snapshots: { s: hostile } }).ok).toBe(false);
+    expect(parseDocument({ ...sound, snapshots: { s: { id: 's', title: '', source: doc.snapshots.s.source } } }).ok).toBe(false);
   });
 
   test('a field this version does not know is not carried through', () => {
-    const loaded = parseDocument({ ...doc, objects: { ...doc.objects, a: { ...doc.objects.a, onclick: 'alert(1)', style: 'x' } } });
+    const loaded = parseDocument({ ...sound, objects: { ...sound.objects, a: { ...sound.objects.a, onclick: 'alert(1)', style: 'x' } } });
     expect(loaded.ok && Object.keys(loaded.value.objects.a).sort()).toEqual(['group', 'h', 'id', 'text', 'type', 'w', 'x', 'y']);
   });
 });

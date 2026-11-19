@@ -9,15 +9,15 @@ import type { CanvasColor } from '../model/color';
 import { boundsOf } from '../model/document';
 import { createId } from '../model/ids';
 import type { ObjectId, ReferenceObject, Snapshot } from '../model/types';
-import type { LinkPreviewPort } from '../unfurl/route';
-import { snapshotFromRegion, snapshotFromSelection } from '../snapshot/create';
-import { type PlanDropTarget, beginPlanDrag } from '../snapshot/plan-drop';
+import type { LinkPreviewPort } from '../model/reference';
 import { CameraController, type Size, fitRect, worldToScreen, zoomAt } from '../view/camera';
 import { indexFor } from '../view/document-index';
+import { snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { CanvasView } from './CanvasView';
 import { CANVAS_STRINGS, HistoryBar, SelectionBar, ToolDock, ZoomBar } from './chrome';
 import { EditorState } from './editor-state';
 import { GestureController } from './gestures';
+import { type PlanDropTarget, beginPlanDrag } from './plan-drop';
 import { type PasteResolver, addReference, referenceFromPaste } from './references';
 
 export interface CanvasEditorProps {

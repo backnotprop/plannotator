@@ -7,7 +7,7 @@
 import { captureOf, capturesEqual } from '../model/capture';
 import { checkObject, checkSnapshotInput, LIMITS, type Checked } from '../model/codec';
 import { parseColor } from '../model/color';
-import { groupMembers, isBoundEnd, resolveArrow } from '../model/document';
+import { bindingFault, groupCycle, groupMembers, isBoundEnd, resolveArrow } from '../model/document';
 import { isValidId } from '../model/ids';
 import {
   type Actor,
@@ -66,9 +66,11 @@ function planAdd(doc: CanvasDocument, objects: readonly unknown[], actor: Actor)
   const known = (id: ObjectId) => incoming.get(id) ?? doc.objects[id];
   for (const object of incoming.values()) {
     if (object.group && known(object.group)?.type !== 'group') return fail(`${object.id}: group ${object.group} is not a group on this canvas`);
+    if (object.group && groupCycle(known, object.id)) return fail(`${object.id}: its groups hold each other`);
     if (object.type === 'arrow') {
       for (const end of [object.from, object.to]) {
-        if (isBoundEnd(end) && !known(end.object)) return fail(`${object.id}: there is no object ${end.object} to attach to`);
+        const fault = isBoundEnd(end) ? bindingFault(known, object, end.object) : null;
+        if (fault) return fail(`${object.id}: ${fault}`);
       }
     }
   }
@@ -141,7 +143,8 @@ function planEdit(doc: CanvasDocument, id: ObjectId, patch: ObjectPatch): Checke
   if (!checked.ok) return checked;
   if (checked.value.type === 'arrow') {
     for (const end of [checked.value.from, checked.value.to]) {
-      if (isBoundEnd(end) && (!doc.objects[end.object] || end.object === id)) return fail(`${id}: there is no object ${end.object} to attach to`);
+      const fault = isBoundEnd(end) ? bindingFault((other) => doc.objects[other], checked.value, end.object) : null;
+      if (fault) return fail(`${id}: ${fault}`);
     }
   }
   return done([{ type: 'object-changed', object: checked.value }]);

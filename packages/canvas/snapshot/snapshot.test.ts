@@ -6,10 +6,10 @@ import type { CanvasObject } from '../model/types';
 import { placeSelectionBar } from '../react/chrome';
 import { indexFor } from '../view/document-index';
 import { findSnapshotBlocks, insertSnapshotBlock, parseSnapshotBlock, serializeSnapshotBlock, serializeSnapshotBody } from './block';
-import { defaultSnapshotTitle, snapshotFromRegion, snapshotFromSelection } from './create';
+import { defaultSnapshotTitle, snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { createSnapshotDirectiveRenderer } from './directive';
 import { snapshotToDataUrl, snapshotToSvg } from './picture';
-import { nearestGap } from './plan-drop';
+import { nearestGap } from '../react/plan-drop';
 import { behindSnapshots, resolveSnapshot } from './resolve';
 import { frameAt, ghostOpacity, recedeAt, springAtRest, stepSpring } from './transition';
 
@@ -181,8 +181,7 @@ describe('updating a snapshot', () => {
 
   test('an agent updates with the same command, and a peer receives the new capture', () => {
     const store = board();
-    const mirror = new CanvasStore(createDocument('board', 'Board'));
-    for (const envelope of store.since(0) ?? []) mirror.receive(JSON.parse(JSON.stringify(envelope)));
+    const mirror = new CanvasStore(JSON.parse(JSON.stringify(store.getDocument())));
     store.onCommit((envelope) => {
       const decoded = decodeEnvelope(JSON.stringify(envelope));
       if (decoded.ok) mirror.receive(decoded.value);

@@ -6,25 +6,27 @@ The owner's rules for it: any colour on any object, set by a person or an agent;
 
 ### Layers
 
-Each layer imports only the ones above it. Keep it that way: no React in `model/`, `events/` or `view/`, and no document change outside `events/`.
+Each layer imports only the ones above it, and `layers.test.ts` fails on any import that goes the other way: `model` < `events` < `view` < `react` < `snapshot`, with `unfurl` (server-side) importing `model` only. No React in `model/`, `events/` or `view/`, and no document change outside `events/`.
 
 | Folder | What it owns |
 |---|---|
 | `model/` | The document: plain JSON, typed, versioned (`CANVAS_DOCUMENT_VERSION`, `MIGRATIONS`). `types.ts` (objects, `Snapshot`, `ReferenceTarget`), `codec.ts` (fail-closed `parseDocument` / `checkObject`; unknown fields are dropped), `document.ts` (bounds, arrow geometry, groups), `capture.ts` (taking and comparing a snapshot's capture), `color.ts`, `html-item.ts` (the sandbox contract), `reference.ts`. |
 | `events/` | The only way a document changes. `plan.ts` turns a **command** into **events** after checking it; `reduce.ts` applies events and returns their inverse; `store.ts` (`CanvasStore`) commits an **envelope** and tells its listeners. `wire.ts` checks commands and envelopes that arrive as JSON. `sync.ts` is the collaboration seam. |
-| `view/` | Pure screen maths: `camera.ts`, `spatial-index.ts` (uniform grid), `document-index.ts` (the index kept current from the event stream, one per store), `cull.ts` (render window, level of detail), `hit-test.ts`. |
-| `react/` | `CanvasView` (the renderer, read-only) and `CanvasEditor` around it (`gestures.ts`, `editor-state.ts`, `chrome.tsx`, `references.ts`). |
+| `view/` | Pure screen maths: `snapshot-source.ts` (a selection or a region as a snapshot to ask for), `camera.ts`, `spatial-index.ts` (uniform grid), `document-index.ts` (the index kept current from the event stream, one per store), `cull.ts` (render window, level of detail), `hit-test.ts`. |
+| `react/` | `CanvasView` (the renderer, read-only) and `CanvasEditor` around it (`gestures.ts`, `editor-state.ts`, `chrome.tsx`, `references.ts`, `plan-drop.ts`, `link-preview.ts`). |
 | `snapshot/` | Snapshots: `resolve.ts` (current, behind, detached), `create.ts`, `block.ts` (the Markdown block), `SnapshotFigure`, `frozen.ts`, `CanvasStage` + `transition.ts` (the portal), `picture.ts` (the still fallback), `plan-drop.ts`, `registry.tsx`, `directive.tsx`. |
-| `unfurl/` | Link previews: `parse.ts`, `fetch.ts`, `route.ts`. |
+| `unfurl/` | Link previews, server-side: `address.ts`, `parse.ts`, `fetch.ts`, `route.ts`. |
 
 ### Events
 
 `command → planCommand → events → applyEvents → document`, and every commit is an `Envelope` (`id`, `actor`, `origin`, the command, the events). A person's drag and an agent's "add image" are the same commands through the same `dispatch`; the actor is the only difference.
 
 - **Undo and redo** are a property of that: each commit keeps the inverse events, and an undo is an ordinary envelope. Only the local person's commands go on the stack (an agent's or a peer's change is never theirs to undo). Commands sharing a `gesture` id fold into one step. An undo whose objects someone else removed does nothing.
-- **Agents** send JSON through `decodeCommand` and receive envelopes from `onCommit` (or `since(seq)` for a hand-over).
+- **Agents** send JSON through `decodeCommand` and receive envelopes from `onCommit`. For a hand-over they keep `store.cursor()` and later ask `store.since(cursor)`. A cursor names the store (`epoch`) as well as the place, because commit numbers start again with every store; a cursor from another store, ahead of this one, or older than the log answers `{ kind: 'resync', document }`, never "nothing changed".
 - **Sync** (not built): a backend implements `SyncPort`; `connectSync` wires it. Events replace whole objects, are idempotent and ignore missing objects; envelope ids are unique across peers and a repeat is ignored. Concurrent edits of one object are last-writer-wins by the backend's order. Presence would travel beside the port.
 - **Comments** (not built) will anchor with `CanvasAnchor`.
+
+**Untrusted ids and references.** Every `objects` and `snapshots` map has no prototype (`idMap`, `model/document.ts`; made by `createDocument`, the reducer, the codec and `CanvasStore`'s constructor), so `doc.objects[id]` is the stored value or undefined even for `constructor`. An arrow's end sticks to a placed object or to a group the arrow is not inside (`bindingFault`); a group is never inside itself (`groupCycle`). The planner and `parseDocument` refuse anything else, the reducer drops a peer's event that would break it, and `resolveArrow` measures a group by its placed members only, so it cannot recurse whatever a document holds. `hostile.test.ts` covers each door.
 
 Add a new object type in `model/types.ts`, `checkObject`, `PATCH_FIELDS` (`events/plan.ts`), `ObjectView` and `snapshot/picture.ts`; the compiler's exhaustive switches name the rest.
 
@@ -68,7 +70,14 @@ The plan renderer draws the block through the `directiveRenderer` seam of `@plan
 
 `ReferenceObject` is a card for a web page, one of the person's artifacts, or a place in a plan. What it shows is stored on the object as text and picture addresses. Paste is the way in (`CanvasEditor`: a bare address becomes a web card; `resolvePaste` lets a host claim its own artifact and plan references); an agent adds the same object with `add`.
 
-A web card appears at once with its address and fills in from `linkPreview` (a `LinkPreviewPort`). `unfurl/fetch.ts` is the real fetcher: Open Graph, Twitter card, title, description, icon; http and https only, five redirects, 6 s, the first 512 KB, a small cache, no private addresses, and the bare link whenever a site gives nothing. None of that is shown to the person. `createUnfurlHandler` is a `(Request) => Response`; **only the demo's dev server mounts it** (`demo/vite.config.ts`). Making it a product endpoint means mounting it in both the Bun and the Pi server and adding it to the API tables.
+A web card appears at once with its address and fills in from `linkPreview` (a `LinkPreviewPort`, `model/reference.ts`; the browser side is `routeLinkPreview` in `react/link-preview.ts`). The port is called only for an address a person pasted (`addReference` from the paste handler); an agent's `add` of a web card never causes a fetch, which is how the two are told apart.
+
+`unfurl/fetch.ts` is the real fetcher: Open Graph, Twitter card, title, description, icon; http and https only, five redirects, 6 s, the first 512 KB, a small cache (a failure is not cached), and the bare link whenever a site gives nothing. None of that is shown to the person. Addresses:
+
+- Every host name is resolved (the system resolver by default; `lookup: false` is the explicit opt-out), judged on the address's bytes (`unfurl/address.ts`: IPv4 and IPv6, mapped, NAT64, 6to4, loopback, private, link-local, unique-local, carrier NAT, multicast), and then connected to at the address that was checked (`pin`), on every redirect hop. Under Bun the pin is built in (connect by address, `Host` and TLS server name set); under Node (the Pi server) the host must pass a `pin`, for example an undici agent with `connect.lookup`. Not exercised here: the built-in Bun pin against a real TLS site.
+- `allowPrivate` is the host's policy, default false. A local server that one person runs for themselves sets it true, so their own `http://localhost:3000` gets a card; a hosted server leaves it false. With it false, a preview picture or icon that points at a private address is dropped before it reaches a viewer's browser.
+
+`createUnfurlHandler` is a `(Request) => Response`; **only the demo's dev server mounts it** (`demo/vite.config.ts`, with `allowPrivate: true`: while the demo runs, any page in the developer's browser could ask it to GET a loopback address). Making it a product endpoint means mounting it in both the Bun and the Pi server behind the usual guards, a concurrency cap, and a line in the API tables.
 
 ### Custom HTML items
 
