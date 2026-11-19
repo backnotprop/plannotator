@@ -209,8 +209,10 @@ public enum StandInData {
 
   public static let long = ThreadID("msg_STANDIN0000000000000009")
 
-  /// A long working session, `count` messages: an agent and the person taking turns, paragraphs, lists and code,
-  /// and one open question at its end. For measuring how a long thread opens and scrolls.
+  /// A long working session, `count` messages: an agent and the person taking turns, paragraphs, lists and code.
+  /// One question is still open far up, and the last message asks for an action item and a choice. For measuring
+  /// how a long thread opens and scrolls, and for what a lazily built thread must keep (a jump to a card far away, a
+  /// reason being typed when the agent writes again).
   public static func longThread(now: Date, count: Int = 300) -> InboxThread {
     let claude = agent("claude-code", "ses_long")
     let bodies = [
@@ -223,17 +225,50 @@ public enum StandInData {
     for index in 0..<max(count - 1, 0) {
       let agentTurn = index % 2 == 0
       let id = MessageID(String(format: "msg_LONG%018d", index))
-      messages.append(InboxMessageWire(
+      var message = InboxMessageWire(
         seq: Int64(1000 + index), id: id, projectId: ProjectID("prj_api-server"), threadId: long, author: agentTurn ? claude : InboxAuthor(kind: .person),
         body: agentTurn ? bodies[(index / 2) % bodies.count] : "Thanks. Keep going, and tell me when the next part is done.",
-        createdAt: iso(now.addingTimeInterval(Double(index - count) * 120))))
+        createdAt: iso(now.addingTimeInterval(Double(index - count) * 120)))
+      // Far up, a question nobody answered yet, under more than a screen of words.
+      if index == 2 {
+        let notes = (1...6).map { "Place \($0): the flag is read when the socket closes, before the wait is chosen, and the value it holds decides whether the phone tries again at once or waits for the next full minute." }
+        message.body = "Before I go on: the old retry flag is still read in a few places.\n\n" + notes.joined(separator: "\n\n") + "\n\n:::question\nKeep the old retry flag?\n\n- [ ] Keep it\n- [ ] Drop it\n:::"
+        message.questions = [question("q_flag", .single, "Keep the old retry flag?", choices: [choice("Keep it"), choice("Drop it")], message: id)]
+      }
+      messages.append(message)
     }
     let ask = MessageID(String(format: "msg_LONG%018d", count))
+    var todo = question("a-long0001", .action, "Rotate the relay key on the staging box", position: 0, message: ask)
+    todo.orphaned = false
     messages.append(InboxMessageWire(
-      questions: [question("q_long", .single, "Ship it today?", choices: [choice("Yes", recommended: true), choice("Tomorrow")], stopped: nil, message: ask)],
+      questions: [question("q_long", .single, "Ship it today?", choices: [choice("Yes", recommended: true), choice("Tomorrow")], stopped: nil, message: ask), todo],
       seq: Int64(1000 + count), id: ask, projectId: ProjectID("prj_api-server"), threadId: long, author: claude,
-      body: "All of it is done and the tests pass.\n\n:::question\nShip it today?\n\n- [ ] Yes\n- [ ] Tomorrow\n:::", createdAt: iso(now.addingTimeInterval(-60))))
+      body: "All of it is done and the tests pass.\n\n:::action\nRotate the relay key on the staging box\n:::\n\n:::question\nShip it today?\n\n- [ ] Yes\n- [ ] Tomorrow\n:::", createdAt: iso(now.addingTimeInterval(-60))))
     return InboxThread(threadId: long, project: project("api-server"), threadName: "A long session", messages: messages)
+  }
+
+  public static let longPermission = ThreadID("msg_STANDIN0000000000000010")
+
+  /// A started agent's permission session after a long day: `count` prompts already answered, one line each, and
+  /// one waiting at the end. For what a lazily built thread must keep (a Deny reason being typed when a second
+  /// prompt arrives).
+  public static func longPermissionThread(now: Date, count: Int = 200) -> InboxThread {
+    let author = agent("claude-code", "perm:ses_day")
+    let labels = [PermissionPrompt.allowOnce, PermissionPrompt.deny]
+    func prompt(_ index: Int, answered: Bool) -> InboxMessageWire {
+      let id = MessageID(String(format: "msg_PERM%018d", index))
+      var asked = question("q_day_\(index)", .single, "Claude Code wants to run a command", choices: labels.map { choice($0) }, stopped: answered ? nil : longPermission.rawValue, message: id)
+      if answered {
+        asked.state = .sent
+        asked.answer = QuestionAnswer(v: 1, key: asked.key, kind: .single, prompt: asked.prompt, selected: [PermissionPrompt.allowOnce])
+      }
+      return InboxMessageWire(
+        questions: [asked], seq: Int64(5000 + index), id: id, projectId: ProjectID("prj_api-server"), threadId: longPermission, author: author,
+        body: "```\nbun test --filter step-\(index)\n```\n\nPurpose: Run one step's tests.\n\nin `~/work/api-server`\n\n:::question\nClaude Code wants to run a command\n\n" + labels.map { "- [ ] \($0)" }.joined(separator: "\n") + "\n:::",
+        createdAt: iso(now.addingTimeInterval(Double(index - count) * 90)))
+    }
+    let messages = (0..<count).map { prompt($0, answered: true) } + [prompt(count, answered: false)]
+    return InboxThread(threadId: longPermission, project: project("api-server"), threadName: "A long day: permission", messages: messages)
   }
 
   // MARK: The stand-in's own, simple reading of a thread as a row

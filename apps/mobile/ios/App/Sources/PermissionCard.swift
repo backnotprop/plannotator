@@ -10,6 +10,9 @@ struct PermissionCard: View {
   let session: InboxSession
   let thread: InboxThread
   let message: InboxMessageWire
+  /// Where the Deny reason is kept while it is typed: the thread is built as it scrolls, and a card scrolled far
+  /// away and back opens with the words still there.
+  var drafts: ThreadDrafts?
 
   enum Mode { case answers, reason, confirmFull }
   @State private var mode = Mode.answers
@@ -17,6 +20,8 @@ struct PermissionCard: View {
   @State private var busy = false
   @State private var shown = Date()
   @State private var opened = false
+  /// The card was built anew with a reason kept: opening its field again is no touch of the person's.
+  @State private var restoring = false
   @FocusState private var typing: Bool
   @Environment(ScrollBox.self) private var scroll: ScrollBox?
   @Environment(\.cardKey) private var cardKey
@@ -26,6 +31,7 @@ struct PermissionCard: View {
   private static let arm: TimeInterval = 0.6
 
   private var question: InboxQuestion? { message.questions?.first }
+  private var reasonKey: String { "deny/\(message.id.rawValue)" }
   /// The agent that asks; Claude Code for a prompt with no name (the window's card, `agentNameOf`).
   private var agent: String {
     let name = Names.agent(message.author)
@@ -48,9 +54,20 @@ struct PermissionCard: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
       .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.border.opacity(0.7)))
-      .onAppear { shown = Date() }
+      .onAppear {
+        shown = Date()
+        if let kept = drafts?.reasons[reasonKey] {
+          restoring = true
+          reason = kept
+          mode = .reason
+        }
+      }
       // Opening a field or the confirmation by any means says which card the person is on.
-      .onChange(of: mode) { _, _ in if let cardKey { scroll?.act(cardKey) } }
+      .onChange(of: mode) { _, now in
+        drafts?.reasons[reasonKey] = now == .reason ? reason : nil
+        if restoring { restoring = false } else if let cardKey { scroll?.act(cardKey) }
+      }
+      .onChange(of: reason) { _, now in if mode == .reason { drafts?.reasons[reasonKey] = now } }
       .onChange(of: typing) { _, now in if now, let cardKey { scroll?.act(cardKey) } }
     }
   }

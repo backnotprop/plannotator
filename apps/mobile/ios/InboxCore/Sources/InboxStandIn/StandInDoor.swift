@@ -96,7 +96,8 @@ public actor StandInDoor {
   /// An agent writes a new message, as it would while the person is away.
   public func agentWrites(thread id: ThreadID, body: String, questions: [InboxQuestion] = []) {
     guard let index = threads.firstIndex(where: { $0.threadId == id }), let first = threads[index].messages.first(where: { $0.author.kind == .agent }) else { return }
-    seq += 1
+    // After every message already there, a thread added with its own numbers (the long ones) included.
+    seq = max(seq, threads[index].messages.compactMap(\.seq).max() ?? 0) + 1
     counter += 1
     let message = MessageID("msg_STANDINNEW\(counter)")
     var asked = questions

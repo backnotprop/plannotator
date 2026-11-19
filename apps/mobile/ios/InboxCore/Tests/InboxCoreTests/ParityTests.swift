@@ -198,6 +198,51 @@ final class ParityTests: XCTestCase {
     XCTAssertTrue(session.held.isEmpty)
   }
 
+  func testATapMadeAsTheAppOpensAndEndedWithTheAppNeverGoesOverANewerAnswer() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-core-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { LocalCopy(folder: folder).erase() }
+    let door = StandInDoor()
+    let thread = try XCTUnwrap(StandInData.threads(now: Date()).first { $0.threadId == StandInData.retry })
+    let asked = try XCTUnwrap(thread.messages.last)
+    let question = try XCTUnwrap(asked.questions?.first)
+    // The person taps a choice as the app opens, then locks the phone; iOS ends the app before the computer answered.
+    var session = await pairedSession(door: door, copy: LocalCopy(folder: folder))
+    XCTAssertEqual(session.reach, .connecting)
+    session.hold(pick: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""), thread: StandInData.retry, message: asked.id, question: question)
+    XCTAssertNil(session.held.first?.waited)
+    session.stop()
+    // Meanwhile the laptop is answered differently. The next launch reaches the computer.
+    session = await pairedSession(door: door, copy: LocalCopy(folder: folder))
+    await door.setOptions { $0.racesPicks = 1 }
+    await session.start()
+
+    let stored = await door.thread(StandInData.retry)?.messages.last?.questions?.first
+    XCTAssertEqual(stored?.answer?.selected, ["Everyone at once"], "the newer answer stands: the tap from before the app ended has waited")
+    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .gaveWay)
+    XCTAssertTrue(session.held.isEmpty)
+  }
+
+  func testATapHeldWhileThePhoneNeedsAnUpdateNeverGoesOverANewerAnswer() async throws {
+    let door = StandInDoor()
+    await door.setOptions { $0.minAppContract = 2 }
+    let session = await pairedSession(door: door)
+    let thread = try XCTUnwrap(StandInData.threads(now: Date()).first { $0.threadId == StandInData.retry })
+    let asked = try XCTUnwrap(thread.messages.last)
+    let question = try XCTUnwrap(asked.questions?.first)
+    // A tap made as the app opens, and the computer answers that this app is too old: the pick stays on the phone.
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
+    XCTAssertEqual(session.standing, .appNeedsUpdate)
+    XCTAssertEqual(session.held.first?.waited, true, "it could not go: it has waited")
+    // Hours later the phone is updated (here: the Inbox lowers its floor); the laptop was answered meanwhile.
+    await door.setOptions { $0.minAppContract = 1; $0.racesPicks = 1 }
+    await session.refresh()
+
+    let stored = await door.thread(StandInData.retry)?.messages.last?.questions?.first
+    XCTAssertEqual(stored?.answer?.selected, ["Everyone at once"], "the newer answer stands")
+    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .gaveWay)
+    XCTAssertTrue(session.held.isEmpty)
+  }
+
   func testAWaitedPickThatMatchesTheNewerAnswerSaysNothingAndItsSendGoes() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)

@@ -284,7 +284,24 @@ struct LaunchOptions {
         case "long":
           // A 300-message thread, to measure how a long thread opens and scrolls.
           await door.add(StandInData.longThread(now: Date()))
+          await door.add(StandInData.longPermissionThread(now: Date()))
           await session.refresh()
+        case "writes":
+          // Twenty seconds on, the long session's agent writes again and the long permission session asks a second
+          // command (a test types meanwhile).
+          Task {
+            try? await Task.sleep(for: .seconds(20))
+            await door.agentWrites(thread: StandInData.long, body: "While that waits: the other steps all passed.")
+            if var asked = await door.thread(StandInData.longPermission)?.messages.last?.questions?.first {
+              asked.key = "q_day_lint"
+              let labels = asked.choices.map(\.label)
+              await door.agentWrites(
+                thread: StandInData.longPermission,
+                body: "```\nbun run lint\n```\n\nPurpose: Check the style.\n\nin `~/work/api-server`\n\n:::question\n\(asked.prompt)\n\n" + labels.map { "- [ ] \($0)" }.joined(separator: "\n") + "\n:::",
+                questions: [asked])
+            }
+            await session.refresh()
+          }
         case "allowed":
           await session.open(StandInData.permission)
           if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first {

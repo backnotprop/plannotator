@@ -157,7 +157,9 @@ struct CodeBlock: View {
           words
             .fixedSize()
             .padding(.horizontal, 14)
-            .padding(.top, 13)
+            // A slim band over the drawing holds Copy: the drawing's first rule starts under the button, never
+            // through it.
+            .padding(.top, copies ? 42 : 13)
             .padding(.bottom, 13)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
         }
@@ -183,8 +185,7 @@ struct CodeBlock: View {
     }
     .frame(minHeight: copies ? 44 : 0)
     .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
-    // Over a drawing that scrolls sideways, Copy stands on its own ground in the corner: the drawing's first row
-    // passes under it, never through it.
+    // Over a drawing that scrolls sideways, Copy is a chip of its own in the band above the drawing.
     .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied, ground: CodeLayout.keeps(code)) } }
   }
 }
@@ -208,7 +209,8 @@ struct CopyButton: View {
         .font(.footnote.weight(.medium))
         .foregroundStyle(copied ? Token.success : Token.mutedForeground)
         .frame(width: 32, height: 32)
-        .background(ground ? Token.codeBackground : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(ground ? Token.card : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { if ground { RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Token.border, lineWidth: 0.5) } }
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
     }

@@ -23,6 +23,9 @@ final class ThreadDrafts {
   func register(_ id: String, _ save: @escaping () -> Void) { savers[id] = save }
   func remove(_ id: String) { savers[id] = nil }
   func saveAll() { for save in savers.values { save() } }
+  /// The reasons typed under a Can't do it or a Deny with a reason, by card, while their field is open. The thread
+  /// is built as it scrolls: a card scrolled far away and back is built anew, and opens with its words still there.
+  var reasons: [String: String] = [:]
 }
 
 /// A question, answered in place (FLOWS 5, mock 4). A touch saves the pick to the computer at once; nothing is

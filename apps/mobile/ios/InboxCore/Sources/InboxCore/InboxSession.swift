@@ -101,7 +101,13 @@ public final class InboxSession {
       list = kept
       listLoaded = true
     }
-    held = copy.outbox()
+    // A write still on the phone from before the app was last closed has waited, however it was made: one tapped
+    // as the app opened, with the app ended before the computer answered, never goes over an answer made since.
+    held = copy.outbox().map { write in
+      var write = write
+      write.waited = true
+      return write
+    }
     // Words a refused Send handed back, and why: kept until the composer takes them.
     let kept = copy.givenBack()
     for (thread, back) in kept {
@@ -680,7 +686,11 @@ public final class InboxSession {
     while !removed, client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread }) {
       if !(await deliver(next)) { break }
     }
-    if held.contains(where: { $0.thread == thread }) { retryLater() }
+    // Left on the phone (the computer away, refused, or in need of an update): what is left has waited.
+    if held.contains(where: { $0.thread == thread }) {
+      markWaited()
+      retryLater()
+    }
   }
 
   /// Send what waited: every thread's queue, in the order made.

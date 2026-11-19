@@ -82,6 +82,90 @@ final class FirstSliceTests: XCTestCase {
     XCTAssertFalse(allow.exists)
   }
 
+  // MARK: A long thread, built as it scrolls
+
+  private func openLong(_ thread: String) -> XCUIApplication {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-stage", "long", "-open", thread]
+    app.launch()
+    return app
+  }
+
+  private func field(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+    app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND (elementType == %d OR elementType == %d)", label, XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.textView.rawValue)).firstMatch
+  }
+
+  /// The foot's button goes to a question far up a 300-message thread, a card not built until the page gets there,
+  /// and the page rests with the card whole between the title bar and the foot.
+  @MainActor
+  func testTheFootButtonRestsOnAQuestionFarUpALongThread() {
+    let app = openLong("msg_STANDIN0000000000000009")
+    XCTAssertTrue(app.staticTexts["Ship it today?"].waitForExistence(timeout: 30))
+    let foot = app.buttons["2 questions, 1 action item"]
+    XCTAssertTrue(foot.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["Keep the old retry flag?"].exists, "far up, not built yet")
+    foot.tap()
+    let prompt = app.staticTexts["Keep the old retry flag?"]
+    XCTAssertTrue(prompt.waitForExistence(timeout: 15))
+    sleep(2)
+    let drop = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Drop it")).firstMatch
+    XCTAssertTrue(drop.exists)
+    let skip = app.buttons.matching(NSPredicate(format: "label == %@", "Skip")).allElementsBoundByIndex.first { $0.frame.minY > drop.frame.maxY && $0.frame.minY < drop.frame.maxY + 200 }
+    let bar = app.navigationBars.firstMatch.frame.maxY
+    XCTAssertGreaterThanOrEqual(prompt.frame.minY, bar, "the card's top is under the title bar, not behind it")
+    XCTAssertNotNil(skip, "the card's last row is built")
+    XCTAssertLessThanOrEqual(skip?.frame.maxY ?? .infinity, foot.frame.minY, "the card ends above the foot")
+  }
+
+  /// A Can't do it reason being typed on the newest message survives the agent writing again meanwhile: the
+  /// message is no longer the newest, and its card is built anew where older messages are.
+  @MainActor
+  func testACantDoItReasonSurvivesTheAgentWritingAgain() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-stage", "long,writes", "-open", "msg_STANDIN0000000000000009"]
+    app.launch()
+    XCTAssertTrue(app.buttons["Can't do it…"].waitForExistence(timeout: 15))
+    sleep(1)
+    app.buttons["Can't do it…"].tap()
+    let reason = field(app, "Why can't you? Claude Code gets this word for word.")
+    XCTAssertTrue(reason.waitForExistence(timeout: 5))
+    reason.typeText("No access to staging.")
+    let written = app.staticTexts["While that waits: the other steps all passed."]
+    XCTAssertFalse(written.exists, "typed before the agent writes again")
+    XCTAssertTrue(written.waitForExistence(timeout: 30))
+    sleep(1)
+    XCTAssertTrue(reason.waitForExistence(timeout: 5))
+    XCTAssertEqual(reason.value as? String, "No access to staging.")
+  }
+
+  /// A Deny reason being typed on the newest prompt survives a second prompt arriving meanwhile: the first
+  /// prompt's message is no longer the newest, and its card is built anew where older messages are.
+  @MainActor
+  func testADenyReasonSurvivesASecondPromptArriving() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-stage", "long,writes", "-open", "msg_STANDIN0000000000000010"]
+    app.launch()
+    XCTAssertTrue(app.buttons["Deny with a reason"].waitForExistence(timeout: 15))
+    sleep(1)
+    app.buttons["Deny with a reason"].tap()
+    let reason = field(app, "Why you deny this, for Claude")
+    XCTAssertTrue(reason.waitForExistence(timeout: 5))
+    sleep(1)
+    // The field opens and the keyboard rises with the page still on the card: the rows far above are not guessed
+    // again into a different place.
+    let command = app.staticTexts["bun test --filter step-200"]
+    XCTAssertTrue(command.exists)
+    XCTAssertGreaterThanOrEqual(command.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+    XCTAssertLessThanOrEqual(reason.frame.maxY, app.keyboards.firstMatch.frame.minY)
+    reason.typeText("Run the dry run first.")
+    let written = app.staticTexts["bun run lint"]
+    XCTAssertFalse(written.exists, "typed before the second prompt arrives")
+    XCTAssertTrue(written.waitForExistence(timeout: 30))
+    sleep(1)
+    XCTAssertTrue(reason.waitForExistence(timeout: 5))
+    XCTAssertEqual(reason.value as? String, "Run the dry run first.")
+  }
+
   /// A pairing link from outside the app is shown and waits: nothing is paired until the person says Pair.
   @MainActor
   func testAPairingLinkFromOutsideAsksBeforeAnythingIsPaired() {

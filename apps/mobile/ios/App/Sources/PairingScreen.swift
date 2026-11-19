@@ -131,17 +131,20 @@ struct OfferedPairingSheet: View {
 
   private var working: Bool { model.pairing == .working }
   @Environment(\.dynamicTypeSize) private var typeSize
-  /// The words and actions, measured: the sheet is as tall as they are.
-  @State private var fitted: CGFloat = 300
+  /// The words and actions, measured: the sheet is as tall as they are. Measured before the sheet is presented
+  /// (`initial`), so it opens at its height and never resizes on its first frame.
+  @State private var fitted: CGFloat
+
+  init(link: PairLink, initial: CGFloat) {
+    self.link = link
+    _fitted = State(initialValue: initial)
+  }
 
   /// Presented as the system presents a confirmation: a sheet over the dimmed list, as tall as what it says, the
   /// two actions at its foot. Large words take the whole height; words that still do not fit scroll.
   var body: some View {
     ScrollView {
-      content
-        .padding(.horizontal, 24)
-        .padding(.top, 32)
-        .padding(.bottom, 16)
+      OfferedPairingContent(link: link)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fitted = $0 }
     }
     .scrollBounceBehavior(.basedOnSize)
@@ -151,6 +154,21 @@ struct OfferedPairingSheet: View {
     .presentationBackground(Token.card)
     // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
     .interactiveDismissDisabled(working)
+  }
+}
+
+/// What the pairing sheet says, with its margins: measured once off screen before the sheet opens, then shown in it.
+struct OfferedPairingContent: View {
+  let link: PairLink
+  @Environment(AppModel.self) private var model
+
+  private var working: Bool { model.pairing == .working }
+
+  var body: some View {
+    content
+      .padding(.horizontal, 24)
+      .padding(.top, 32)
+      .padding(.bottom, 16)
   }
 
   private var content: some View {

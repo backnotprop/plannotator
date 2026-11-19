@@ -17,6 +17,8 @@ final class ScrollBox {
   /// brought back over the reply field when it grows or the keyboard rises.
   @ObservationIgnored var acted: String?
   @ObservationIgnored var actedAt = Date.distantPast
+  /// A card the page was sent to before it was built (far up a long thread): shown once its frame arrives.
+  @ObservationIgnored var wanted: String?
 
   func act(_ key: String) {
     acted = key
@@ -44,6 +46,8 @@ struct ThreadScreen: View {
   @State private var room: CGFloat = 0
   /// The keyboard is up. Typing in a card, the foot's button steps aside so the card has the room.
   @State private var keyboard = false
+  @Environment(\.dynamicTypeSize) private var typeSize
+  private var fade: CGFloat { Composer.fade(typeSize) }
   @FocusState private var composing: Bool
 
   private var model: ThreadModel? { session.thread(id) }
@@ -115,11 +119,16 @@ struct ThreadScreen: View {
     let held = session.heldReplies(id)
     return ScrollViewReader { proxy in
     ScrollView {
-      // Built as it scrolls: a long thread lays out, and says where its lines are, only near the screen.
-      LazyVStack(alignment: .leading, spacing: 0) {
-        ForEach(shown[..<landing], id: \.id) { message in
-          MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
-          Divider().overlay(Token.border).padding(.top, 18).padding(.bottom, message.id == shown[landing - 1].id ? 6 : 18)
+      VStack(alignment: .leading, spacing: 0) {
+        // What came before the newest agent message is built as it scrolls: a long thread lays out, and says where
+        // its lines are, only near the screen. Only that part: the newest message and what follows it, and the room
+        // under them, are built whole, so a field opened there or the keyboard rising (which change their heights)
+        // never makes the lazy part guess its rows' heights again and move what is on screen.
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(shown[..<landing], id: \.id) { message in
+            MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
+            Divider().overlay(Token.border).padding(.top, 18).padding(.bottom, message.id == shown[landing - 1].id ? 6 : 18)
+          }
         }
         VStack(alignment: .leading, spacing: 0) {
           ForEach(Array(shown[landing...].enumerated()), id: \.element.id) { index, message in
@@ -153,6 +162,23 @@ struct ThreadScreen: View {
         // Only the card the person just touched follows its own growth (a pick's line, a note field, a reason):
         // a card that changes on its own (another device's answer, a refusal's line) never moves the page.
         if let key = scroll.fresh(within: 1.5), let old = before[key], let frame = now[key], frame.height > old.height + 1 { reveal(key, proxy) }
+        // The card a jump went for is built now: rest on it once the rows around it have their own heights and
+        // the page has stopped correcting where it is (its card and its top still for a moment).
+        if let key = scroll.wanted, before[key] == nil, now[key] != nil {
+          Task {
+            var last: (CGFloat, CGFloat)?
+            for _ in 0..<20 {
+              try? await Task.sleep(for: .milliseconds(50))
+              guard scroll.wanted == key, let frame = cards[key] else { return }
+              let seen = (frame.minY, scroll.top)
+              if let last, abs(last.0 - seen.0) < 0.5, abs(last.1 - seen.1) < 0.5 { break }
+              last = seen
+            }
+            guard scroll.wanted == key else { return }
+            scroll.wanted = nil
+            withAnimation { show(key, proxy) }
+          }
+        }
       }
       Color.clear.frame(height: 1).id(Self.end)
     }
@@ -162,7 +188,12 @@ struct ThreadScreen: View {
     .toolbarBackgroundVisibility(.visible, for: .navigationBar)
     .scrollPosition($position)
     // The person moved the page themselves: it has landed, and the second landing never pulls it back.
-    .onScrollPhaseChange { _, phase in if phase == .interacting { scroll.landed = true } }
+    .onScrollPhaseChange { _, phase in
+      guard phase == .interacting else { return }
+      scroll.landed = true
+      // And a card a jump still went for is no longer wanted: the person is reading somewhere else.
+      scroll.wanted = nil
+    }
     // What is on screen, in the content's coordinates. The container's size is already what is left between the
     // title bar and the reply field (and the keyboard, when it is up).
     .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentOffset.y + $0.contentInsets.top, $0.contentOffset.y + $0.contentInsets.top + $0.containerSize.height] } action: { _, now in
@@ -293,7 +324,7 @@ struct ThreadScreen: View {
     let edge = scroll.height
     func clean(_ y: CGFloat) -> Bool {
       let fadeTop: CGFloat = y + edge
-      let fadeEnd: CGFloat = fadeTop + Composer.fade
+      let fadeEnd: CGFloat = fadeTop + fade
       return !lines.contains { line in line.minY < fadeEnd && line.maxY > fadeTop + 0.5 }
     }
     // And a card's top or foot is whole over the fade or past it out of sight: never half in it. A top that shows
@@ -301,7 +332,7 @@ struct ThreadScreen: View {
     // out of sight.
     func rims(_ y: CGFloat) -> Bool {
       let fadeTop: CGFloat = y + edge
-      let fadeEnd: CGFloat = fadeTop + Composer.fade
+      let fadeEnd: CGFloat = fadeTop + fade
       return !edges.contains { card in
         let top = card.minY < fadeEnd - 1.5 && card.minY + Self.corner > fadeTop - Self.air
         let foot = card.maxY > fadeTop + 2.5 && card.maxY - Self.corner < fadeEnd
@@ -325,11 +356,11 @@ struct ThreadScreen: View {
     // Or where the bottom edge falls between two lines: one ends over the fade, the next starts past it.
     for line in lines {
       places.append(line.maxY + 1 - edge)
-      places.append(line.minY - Composer.fade - 1 - edge)
+      places.append(line.minY - fade - 1 - edge)
     }
     // Or where a card's top or foot ends up out of sight, or whole with its air.
     for card in edges {
-      places.append(card.minY - Composer.fade - edge)
+      places.append(card.minY - fade - edge)
       places.append(card.minY + Self.corner + Self.air - edge)
       places.append(card.maxY + Self.air - edge)
       places.append(card.maxY - 2 - edge)
@@ -338,7 +369,7 @@ struct ThreadScreen: View {
     // nothing cleaner is in reach: no line of it may. When no place keeps both edges clean (large type, a tall
     // card), the top still opens on the start of a sentence and no card's rim shows half in the fade: a line may
     // run into it sooner than a rim may.
-    let reach = low - Self.clear - Composer.fade
+    let reach = low - Self.clear - fade
     places = places.filter { y in y >= reach - 0.5 && y <= high + 0.5 && top(y, whole: false) }
     let inside = places.filter { $0 >= low - 0.5 }
     let read = places.filter { top($0) }
@@ -354,15 +385,17 @@ struct ThreadScreen: View {
   /// Bring a card on screen.
   private func show(_ key: String, _ proxy: ScrollViewProxy) {
     guard let card = cards[key], scroll.height > 0 else {
-      // A card far up a long thread is not laid out yet: go to its message, then rest on the card once it is.
+      // A card far up a long thread is not built yet: go to its message, and rest on the card when its frame
+      // arrives (onPreferenceChange), however long the way there takes. The hop is not animated: the page could
+      // not show the way there anyway, and an animation still running would carry the page past the card.
       let message = key.split(separator: "/").dropFirst().first.map { "m/\($0)" }
-      proxy.scrollTo(message ?? key, anchor: .top)
-      Task {
-        try? await Task.sleep(for: .milliseconds(80))
-        if cards[key] != nil { withAnimation { show(key, proxy) } }
-      }
+      scroll.wanted = key
+      var hop = Transaction()
+      hop.disablesAnimations = true
+      withTransaction(hop) { proxy.scrollTo(message ?? key, anchor: .top) }
       return
     }
+    scroll.wanted = nil
     if let tail = cards[Self.landing] { settle(at: rest(for: card), end: tail.maxY + Self.clear) } else { position.scrollTo(y: rest(for: card)) }
   }
 
@@ -527,7 +560,7 @@ struct MessageView: View {
   var body: some View {
     if SendPlan.isPermissionPrompt(message) {
       // Its own framed card and nothing else, as in the window: the card names who asks and when.
-      PermissionCard(session: session, thread: thread, message: message).card(CardID.permission(message.id))
+      PermissionCard(session: session, thread: thread, message: message, drafts: drafts).card(CardID.permission(message.id))
     } else {
       plain
     }
@@ -626,8 +659,13 @@ struct Composer: View {
   let go: (String) -> Void
   let jump: () -> Void
 
-  /// The fade over the reply field, at the top of the foot: what scrolls under it fades into it.
-  static let fade: CGFloat = 14
+  /// The fade over the reply field, at the top of the foot: what scrolls under it fades into it. It grows with the
+  /// text (14 points at the default size, up to 24), so a line cut at the foot fades out rather than being sliced.
+  static func fade(_ size: DynamicTypeSize) -> CGFloat {
+    let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(size))
+    return min(24, UIFontMetrics(forTextStyle: .body).scaledValue(for: 14, compatibleWith: traits).rounded())
+  }
+  private var fade: CGFloat { Self.fade(typeSize) }
 
   private var hasPicks: Bool { thread.messages.contains { ($0.questions ?? []).contains { $0.state == .picked } } }
   private var canSend: Bool {
@@ -650,11 +688,11 @@ struct Composer: View {
     .padding(.vertical, inCard ? 0 : 8)
     // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge. The fade
     // is part of the foot, so the page's room ends where it begins and nothing rests under it.
-    .padding(.top, Self.fade)
+    .padding(.top, fade)
     .background {
       VStack(spacing: 0) {
         LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
-          .frame(height: Self.fade)
+          .frame(height: fade)
         // Solid down to the screen's edge, under the keyboard too: nothing of the page shows below the field.
         Token.background
       }

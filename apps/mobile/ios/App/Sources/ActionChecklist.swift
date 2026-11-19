@@ -19,7 +19,12 @@ struct ActionChecklist: View {
   @State private var openKey: String?
   @State private var chosen = false
 
-  private var open: String? { chosen ? openKey : actions.first { ActionMarks.state($0) == .open }?.key }
+  /// The open row: the one the person chose, else one with a reason still being typed (a card the thread built
+  /// anew after a long scroll), else the first still to do.
+  private var open: String? {
+    if chosen { return openKey }
+    return actions.first { drafts.reasons[ActionRow.reasonKey(message, $0)] != nil }?.key ?? actions.first { ActionMarks.state($0) == .open }?.key
+  }
 
   var body: some View {
     let progress = ActionMarks.progress(actions)
@@ -103,7 +108,7 @@ struct Chip: View {
   }
 }
 
-private struct ActionRow: View {
+struct ActionRow: View {
   let session: InboxSession
   let thread: ThreadID
   let message: MessageID
@@ -142,6 +147,8 @@ private struct ActionRow: View {
     return result.person.map { ($0.outcome == .cant, $0.note, $0.at) }
   }
   private var held: Bool { session.isHeldMark(message: message, key: action.key) }
+  static func reasonKey(_ message: MessageID, _ action: InboxQuestion) -> String { "cant/\(message.rawValue)/\(action.key)" }
+  private var reasonKey: String { Self.reasonKey(message, action) }
   private var sendHeld: Bool { session.isHeldSend(message: message, key: action.key) }
 
   private var chip: Chip? {
@@ -205,7 +212,16 @@ private struct ActionRow: View {
       }
       if open { panel }
     }
-    .onAppear { note = mine?.note ?? "" }
+    .onAppear {
+      note = mine?.note ?? ""
+      // Built anew after a long scroll: the reason being typed is still there, its field open.
+      if let kept = drafts.reasons[reasonKey] {
+        reason = kept
+        composing = true
+      }
+    }
+    .onChange(of: reason) { _, now in if composing { drafts.reasons[reasonKey] = now } }
+    .onChange(of: composing) { _, now in drafts.reasons[reasonKey] = now ? reason : nil }
     // Send saves a note still inside its typing pause first, so what is on screen is what goes. Registered again
     // whenever the item changes, so the saver reads the item as it is now.
     .onChange(of: action, initial: true) { _, _ in drafts.register("action/\(message.rawValue)/\(action.key)") { saveNote() } }
