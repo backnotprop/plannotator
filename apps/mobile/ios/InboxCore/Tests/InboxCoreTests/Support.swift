@@ -62,10 +62,10 @@ let testApp = AppIdentity(version: "0.1.0")
 
 /// A paired phone and its stand-in computer.
 @MainActor
-func pairedSession(door: StandInDoor, copy: LocalCopy = LocalCopy(folder: nil)) async -> InboxSession {
+func pairedSession(door: StandInDoor, copy: LocalCopy = LocalCopy(folder: nil), bytes: AttachmentCache? = nil) async -> InboxSession {
   let issued = await door.issueToken()
   let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
-  return InboxSession(computer: computer, app: testApp, copy: copy) { _ in [StandInTransport(door: door)] }
+  return InboxSession(computer: computer, app: testApp, copy: copy, bytes: bytes) { _ in [StandInTransport(door: door)] }
 }
 
 func body(_ call: DoorCall) -> JSONValue { (try? JSONDecoder().decode(JSONValue.self, from: call.body ?? Data())) ?? .null }
