@@ -8,6 +8,8 @@
  *   agent message", by `plainMessageRings`: the one place the owner's cadence lives.
  *
  * Either way nothing rings with the sound off or an Inbox tab in front, and a tab coming to the front ends the bursts.
+ * A notice about news is silent when the bell rang in that news's burst (now, or earlier in it): one sound per burst,
+ * the bell's, as before the choice; a burst the bell never rang in (the tab not armed yet) keeps the system's.
  */
 
 import { inboxSoundWhen, type InboxSoundWhen } from '@plannotator/core/inbox-types';
@@ -26,9 +28,13 @@ export interface RingGate {
   lastAt: number | null;
   /** When the last question arrived (this tab's, or a question ring another tab reported); null: no question burst. */
   askAt: number | null;
+  /** The bell rang in the burst `lastAt` ends (for anything): plain news in it is the bell's, its notice silent. */
+  lastRang: boolean;
+  /** The bell rang for a question in the question burst `askAt` ends: a question in it is the bell's, its notice silent. */
+  askRang: boolean;
 }
 
-export const QUIET_GATE: RingGate = { lastAt: null, askAt: null };
+export const QUIET_GATE: RingGate = { lastAt: null, askAt: null, lastRang: false, askRang: false };
 
 /**
  * Whether news of this kind is the sound's business under the person's choice: a question always; a plain agent
@@ -58,7 +64,10 @@ export interface RingNews {
   plain: boolean;
 }
 
-/** Which of the news the bell rang for: the notices about that news are silent (there is one sound), the rest keep the system's. */
+/**
+ * Which of the news is the bell's: it rang for it now, or already rang in that kind's burst. The notices about that
+ * news are silent (there is one sound per burst), the rest keep the system's.
+ */
 export interface RangFor {
   asks: boolean;
   plain: boolean;
@@ -74,25 +83,38 @@ export const RANG_FOR_NOTHING: RangFor = { asks: false, plain: false };
  * - Plain news under "when an agent asks you" is not the sound's: it neither rings nor moves a burst.
  * - Otherwise a question rings by `questionRings`, plain news by `plainMessageRings`; either ringing is one sound,
  *   and it is for every piece of this news that is the sound's.
+ * - `armed` false (the browser would not play it yet): nothing rings, and the burst is not marked as rung.
+ * - `rangFor`: what of this news is the bell's, rung now or earlier in its burst.
  */
 export function decideRing(
   gate: RingGate,
-  input: { now: number; enabled: boolean; inFront: boolean; otherTabInFront: boolean; when?: InboxSoundWhen } & RingNews,
+  input: { now: number; enabled: boolean; inFront: boolean; otherTabInFront: boolean; when?: InboxSoundWhen; armed?: boolean } & RingNews,
 ): { ring: boolean; rangFor: RangFor; gate: RingGate } {
   if (!input.enabled) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
   if (input.inFront || input.otherTabInFront) return { ring: false, rangFor: RANG_FOR_NOTHING, gate: QUIET_GATE };
   const plain = input.plain && ringsFor(input.when, false);
   if (!input.asks && !plain) return { ring: false, rangFor: RANG_FOR_NOTHING, gate };
-  const ring = (input.asks && questionRings(gate, input.now)) || (plain && plainMessageRings(gate, input.now));
+  const newBurst = plainMessageRings(gate, input.now);
+  const newAskBurst = questionRings(gate, input.now);
+  const ring = input.armed !== false && ((input.asks && newAskBurst) || (plain && newBurst));
+  const lastRang = ring || (!newBurst && gate.lastRang);
+  const askRang = input.asks ? ring || (!newAskBurst && gate.askRang) : gate.askRang;
   return {
     ring,
-    rangFor: ring ? { asks: input.asks, plain } : RANG_FOR_NOTHING,
-    gate: { lastAt: input.now, askAt: input.asks ? input.now : gate.askAt },
+    rangFor: { asks: input.asks && askRang, plain: plain && lastRang },
+    gate: { lastAt: input.now, askAt: input.asks ? input.now : gate.askAt, lastRang, askRang },
   };
 }
 
-/** Another tab rang at `at` (for a question when `asked`): this tab is in that burst too. */
+/** Another tab rang at `at` (for a question when `asked`): this tab is in that burst too, a burst the bell rang in. */
 export function heardRing(gate: RingGate, at: number, asked: boolean): RingGate {
   const later = (mine: number | null) => (mine === null ? at : Math.max(mine, at));
-  return { lastAt: later(gate.lastAt), askAt: asked ? later(gate.askAt) : gate.askAt };
+  const lastAt = later(gate.lastAt);
+  const askAt = asked ? later(gate.askAt) : gate.askAt;
+  return {
+    lastAt,
+    askAt,
+    lastRang: gate.lastRang || lastAt - at < RING_BURST_MS,
+    askRang: asked ? gate.askRang || (askAt ?? at) - at < RING_BURST_MS : gate.askRang,
+  };
 }

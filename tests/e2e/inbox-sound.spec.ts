@@ -280,17 +280,38 @@ test('a question while the tab is hidden rings once, and its notification is sil
   await expect.poll(() => page.evaluate(() => window.__notified.at(-1))).toMatchObject({ silent: true });
 });
 
-test('a burst of three questions rings once', async () => {
+test('a burst of three questions rings once, and every notice of it is silent (one sound)', async () => {
   await awayAgain(page);
   const before = await rings(page);
+  const notices = await page.evaluate(() => window.__notified.length);
   const codex = await agent(fresh, 'Codex', 'codex');
   const opencode = await agent(fresh, 'OpenCode', 'opencode');
   const a = await codex.send({ project_path: fresh.project, body: question('Drop the refunds table?') });
+  await settled(page, a.thread_id);
   const b = await opencode.send({ project_path: fresh.project, body: question('Rotate the webhook secret?') });
+  await settled(page, b.thread_id);
   const c = await codex.send({ project_path: fresh.project, body: question('And cap the retries?') });
-  for (const sent of [a, b, c]) await settled(page, sent.thread_id);
+  await settled(page, c.thread_id);
   await quietFor(page);
   expect(await rings(page)).toBe(before + 1);
+  const raised = await page.evaluate((from) => window.__notified.slice(from), notices);
+  expect(raised.length).toBeGreaterThan(1);
+  expect(raised.map((n) => n.silent)).toEqual(raised.map(() => true));
+});
+
+test('by default three new threads seconds apart ring once, and every notice of that burst is silent', async () => {
+  await awayAgain(page);
+  const before = await rings(page);
+  const notices = await page.evaluate(() => window.__notified.length);
+  for (const [i, body] of ['Starting the index rebuild.', 'Picked up the flaky test.', 'Looking at the slow query.'].entries()) {
+    const sent = await fresh.agents[i % fresh.agents.length]!.send({ project_path: fresh.project, body });
+    await settled(page, sent.thread_id);
+  }
+  await quietFor(page);
+  expect(await rings(page)).toBe(before + 1);
+  const raised = await page.evaluate((from) => window.__notified.slice(from), notices);
+  expect(raised.length).toBeGreaterThan(1);
+  expect(raised.map((n) => n.silent)).toEqual(raised.map(() => true));
 });
 
 test('with the tab visible and focused nothing rings', async () => {

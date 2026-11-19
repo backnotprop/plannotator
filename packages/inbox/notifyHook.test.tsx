@@ -94,6 +94,8 @@ let clock = 0;
 let ringGate: RingGate = QUIET_GATE;
 /** How many times the probe's bell rang. */
 let bellRings = 0;
+/** The tab had its first click (the browser lets the bell play). */
+let armed = true;
 let otherTabInFront = false;
 /** Settings → General's notifications switch. */
 let enabled = true;
@@ -110,7 +112,7 @@ function Probe({ index }: { index: number }) {
     onAgentNews: (news) => {
       heard.push(news.asks);
       const inFront = front.visible && front.focused;
-      const decided = decideRing(ringGate, { now: clock, enabled: bell, inFront, otherTabInFront, when: bellEvery ? 'messages' : 'asks', ...news });
+      const decided = decideRing(ringGate, { now: clock, enabled: bell, armed, inFront, otherTabInFront, when: bellEvery ? 'messages' : 'asks', ...news });
       ringGate = decided.gate;
       if (decided.ring) bellRings++;
       return decided.rangFor;
@@ -220,6 +222,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     clock = 0;
     ringGate = QUIET_GATE;
     bellRings = 0;
+    armed = true;
     otherTabInFront = false;
     enabled = true;
     onOpenThread = () => {};
@@ -369,18 +372,47 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised.map((r) => r.silent)).toEqual([false, false, true, false, true]);
   });
 
-  test('the bell stayed quiet (a reply rang 10 s before): the new thread\'s notice keeps the system\'s sound; a minute later it is the bell\'s', async () => {
+  test('three agents ask seconds apart (three list reads): one ring, and every notice of that burst is silent (one sound, as before)', async () => {
+    bell = true;
+    away();
+    const rows: { id: string; section: InboxSectionId }[] = [];
+    for (const [i, at] of [0, 4_000, 8_000].entries()) {
+      clock = at;
+      rows.push({ id: `q${i}`, section: 'waiting' });
+      await batch([message(`q${i}`, `q${i}`, { author: { ...claude, session: `ses_q${i}` } }), question(`q${i}`, `q-${i}`)], list(rows));
+    }
+    expect(bellRings).toBe(1);
+    expect(raised.length).toBeGreaterThanOrEqual(2);
+    expect(raised.every((r) => r.silent)).toBe(true);
+  });
+
+  test('"for every agent message": three new threads seconds apart, one ring, every notice silent', async () => {
     bell = true;
     bellEvery = true;
     away();
-    await batch([message('r1', 'old')], list([{ id: 'old', section: 'new' }]));
+    const rows: { id: string; section: InboxSectionId }[] = [];
+    for (const [i, at] of [0, 4_000, 8_000].entries()) {
+      clock = at;
+      rows.push({ id: `n${i}`, section: 'new' });
+      await batch([message(`n${i}`, `n${i}`, { author: { ...claude, session: `ses_n${i}` } })], list(rows));
+    }
     expect(bellRings).toBe(1);
-    clock = 10_000;
-    await batch([message('t5', 't5')], list([{ id: 'old', section: 'new' }, { id: 't5', section: 'new' }]));
-    clock = 70_000;
-    await batch([message('t6', 't6')], list([{ id: 'old', section: 'new' }, { id: 't5', section: 'new' }, { id: 't6', section: 'new' }]));
-    expect(bellRings).toBe(2);
-    expect(raised.map((r) => r.silent)).toEqual([false, true]);
+    expect(raised.length).toBeGreaterThanOrEqual(2);
+    expect(raised.every((r) => r.silent)).toBe(true);
+  });
+
+  test('a burst the bell never rang in (no click in the tab yet) keeps the system\'s sound on every notice', async () => {
+    bell = true;
+    bellEvery = true;
+    armed = false;
+    away();
+    await batch([message('u1', 'u1'), question('u1', 'q-u1')], list([{ id: 'u1', section: 'waiting' }]));
+    clock = 4_000;
+    armed = true;
+    await batch([message('u2', 'u2')], list([{ id: 'u1', section: 'waiting' }, { id: 'u2', section: 'new' }]));
+    expect(bellRings).toBe(0);
+    expect(raised.length).toBeGreaterThanOrEqual(1);
+    expect(raised.some((r) => r.silent)).toBe(false);
   });
 
   for (const notificationsOn of [true, false]) {

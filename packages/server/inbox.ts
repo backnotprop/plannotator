@@ -1324,7 +1324,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sound's settings were saved (config.json `inboxSound`): the windows' streams say `event: sound`, so a window in the background rings by the new choice at once. */
-  const soundListeners = new Set<(sound: unknown) => void>();
+  const soundListeners = new Set<(sound: unknown, rev: number) => void>();
+  /**
+   * The sound's save count, for ordering only (a window never takes an older save's frame over a newer one): it starts at
+   * this start's clock and only grows, so it stays ahead of an earlier start's. In memory.
+   */
+  let soundRev = Date.now();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
@@ -2753,7 +2758,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
     const state = soundState();
-    for (const listener of soundListeners) listener(state);
+    soundRev = Math.max(soundRev + 1, Date.now());
+    for (const listener of soundListeners) listener(state, soundRev);
     return state;
   };
 
@@ -4174,7 +4180,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The sound's switch, volume or choice was saved (any window's, a phone's too): every window rings by it at once. Windows only.
-        const onSound = (sound: unknown) => send(`event: sound\ndata: ${JSON.stringify({ sound })}\n\n`);
+        const onSound = (sound: unknown, rev: number) => send(`event: sound\ndata: ${JSON.stringify({ sound, rev })}\n\n`);
         if (windowId) soundListeners.add(onSound);
         // "Show archived" was saved here or taken from a linked machine: every window, and a linked machine that asks
         // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
@@ -6905,7 +6911,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

@@ -49,7 +49,7 @@ export interface InboxEventHandlers {
   onThreadPulls?: (threadIds: string[]) => void;
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
   /** The sound's switch, volume or choice was saved in any window: its settings as the Inbox now has them. */
-  onSound?: (sound: unknown) => void;
+  onSound?: (sound: unknown, rev?: number) => void;
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
   /** The list's "Show archived" was saved here, in another window or on a linked machine: `{ on, rev }`. */
   onShowArchived?: (value: unknown) => void;
@@ -154,7 +154,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'sound':
       try {
-        handlers.onSound?.((JSON.parse(frame.data) as { sound?: unknown }).sound);
+        const data = JSON.parse(frame.data) as { sound?: unknown; rev?: unknown };
+        handlers.onSound?.(data.sound, typeof data.rev === 'number' ? data.rev : undefined);
       } catch {
       }
       return;

@@ -21,7 +21,8 @@ const hasDom = typeof document !== 'undefined';
 const { SettingsPage } = (hasDom ? await import('./components/Settings') : {}) as typeof import('./components/Settings');
 const { NotificationAsk } = (hasDom ? await import('./components/NotificationAsk') : {}) as typeof import('./components/NotificationAsk');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { useInboxSound } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
+const { useInboxSound, endRingHold } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
+const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -251,6 +252,8 @@ function installStubs() {
 }
 
 function restoreStubs() {
+  // The ring lock this file's tabs took (module state): the next test starts with none held.
+  endRingHold();
   (window as unknown as { AudioContext: unknown }).AudioContext = saved.ctx;
   document.hasFocus = saved.hasFocus!;
   if (saved.visibility) Object.defineProperty(document, 'visibilityState', saved.visibility);
@@ -373,10 +376,10 @@ describe.if(hasDom)('useInboxSound', () => {
     let rang = api.arrived(REPLY);
     expect(rings()).toBe(1);
     expect(rang).toEqual({ asks: false, plain: true });
-    // Five agents posting at once: one burst, one ring, and their notices keep the system's sound.
+    // Five agents posting at once: one burst, one ring, and all of it the bell's (their notices silent: one sound).
     for (let i = 0; i < 5; i++) act(() => void (rang = api.arrived(REPLY)));
     expect(rings()).toBe(1);
-    expect(rang).toEqual({ asks: false, plain: false });
+    expect(rang).toEqual({ asks: false, plain: true });
     // The tab in front: nothing rings, and the burst ends.
     front = { visible: true, focused: true };
     act(() => {
@@ -397,12 +400,13 @@ describe.if(hasDom)('useInboxSound', () => {
       clock.t += 20_000;
       let rang = api.arrived(QUESTION);
       expect(rings()).toBe(2);
-      // The bell rang for the question, so its notice is silent; a question in that question burst rings nothing and its notice keeps the system's sound.
+      // The bell rang for the question, so its notice is silent; a question in that question burst rings nothing and is
+      // the bell's too (its notice silent: one sound per burst).
       expect(rang).toEqual({ asks: true, plain: false });
       clock.t += 5_000;
       act(() => void (rang = api.arrived(QUESTION)));
       expect(rings()).toBe(2);
-      expect(rang).toEqual({ asks: false, plain: false });
+      expect(rang).toEqual({ asks: true, plain: false });
     });
   });
 
@@ -459,6 +463,48 @@ describe.if(hasDom)('useInboxSound', () => {
     act(() => root!.render(<Probe />));
     act(() => api.arrived(QUESTION));
     expect(rings()).toBe(0);
+  });
+
+  test("a double-clicked switch never flicks back: an older save's frame, or one landing while this window's save is on its way, is not shown over the newer", async () => {
+    mount(<Probe />);
+    const realSave = inboxApi.saveSound;
+    const answers: ((value: { sound: InboxSoundSettings; sound_rev: number }) => void)[] = [];
+    inboxApi.saveSound = () => new Promise((resolve) => answers.push(resolve));
+    try {
+      const off = { enabled: false, volume: 60, when: 'messages' as const, dialog_shown_for: null };
+      const on = { ...off, enabled: true };
+      let first!: Promise<boolean>;
+      let second!: Promise<boolean>;
+      act(() => {
+        first = api.setEnabled(false);
+      });
+      act(() => {
+        second = api.setEnabled(true);
+      });
+      expect(kept?.enabled).toBe(true);
+      // The first save's frame lands while both are on their way: held, not shown.
+      act(() => api.hear(off, 101));
+      expect(kept?.enabled).toBe(true);
+      await act(async () => {
+        answers[0]!({ sound: off, sound_rev: 101 });
+        await first;
+      });
+      // The first answer is not the last save's: not shown either.
+      expect(kept?.enabled).toBe(true);
+      await act(async () => {
+        answers[1]!({ sound: on, sound_rev: 102 });
+        await second;
+      });
+      expect(kept?.enabled).toBe(true);
+      // The first save's frame again, late: older than what this window knows.
+      act(() => api.hear(off, 101));
+      expect(kept?.enabled).toBe(true);
+      // Another window's later save is shown.
+      act(() => api.hear({ ...off, when: 'asks' }, 103));
+      expect(kept).toMatchObject({ enabled: false, when: 'asks' });
+    } finally {
+      inboxApi.saveSound = realSave;
+    }
   });
 
   test('the sound turned off before the choice existed stays off: nothing rings for any news, and no notice is made silent', () => {

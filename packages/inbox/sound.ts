@@ -24,7 +24,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_SOUND_DEFAULT_VOLUME, INBOX_SOUND_DEFAULT_WHEN, inboxSoundWhen, isInboxSoundVolume, type InboxSoundSettings, type InboxSoundWhen } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
-import { decideRing, heardRing, QUIET_GATE, RANG_FOR_NOTHING, RING_LOCK_MS, type RangFor, type RingGate, type RingNews } from './soundRing';
+import { decideRing, heardRing, QUIET_GATE, RING_LOCK_MS, type RangFor, type RingGate, type RingNews } from './soundRing';
 
 export { decideRing, heardRing, plainMessageRings, questionRings, QUIET_GATE, RING_BURST_MS, RING_LOCK_MS, ringsFor, type RangFor, type RingGate, type RingNews } from './soundRing';
 
@@ -143,7 +143,7 @@ let holdingUntil = 0;
  * The burst ended (an Inbox tab came to the front): let go of the ring lock
  * at once, so the next burst can ring even within RING_LOCK_MS.
  */
-function endRingHold(): void {
+export function endRingHold(): void {
   releaseHold?.();
   releaseHold = null;
   holdingUntil = 0;
@@ -217,8 +217,12 @@ export interface InboxSound {
    * it (`plain`). Answers which of it the bell rang for: a notice about that news is silent, so there is one sound.
    */
   arrived: (news: RingNews) => RangFor;
-  /** The Inbox's `event: sound` frame (any window saved the switch, volume or choice): this window rings by it at once. */
-  hear: (frame: unknown) => void;
+  /**
+   * The Inbox's `event: sound` frame (any window saved the switch, volume or choice; `rev`, that save's count): this
+   * window rings by it at once. An older save's frame, or one that lands while this window's own save is on its way,
+   * never turns the row back.
+   */
+  hear: (frame: unknown, rev?: number) => void;
   /** Another Inbox tab said it is in front (within the last 15 s): it handles what arrives (notify.ts). */
   otherTabInFront: () => boolean;
   /** Save the switch; false when the Inbox did not keep it (the switch goes back). */
@@ -397,11 +401,11 @@ export function useInboxSound(options: {
   const arrived = useCallback((news: RingNews): RangFor => {
     const now = Date.now();
     const { enabled, when } = settingsRef.current;
-    const decided = decideRing(gate.current, { now, enabled, when, inFront: pageInFront(), otherTabInFront: otherTabInFront(), ...news });
+    // Before the first click Chrome keeps the context suspended: the ring would be lost, so none is tried, and the
+    // burst stays one the bell never rang in (its notices keep the system's sound).
+    const decided = decideRing(gate.current, { now, enabled, when, armed: armedRef.current, inFront: pageInFront(), otherTabInFront: otherTabInFront(), ...news });
     gate.current = decided.gate;
-    // Before the first click Chrome keeps the context suspended: the ring would be lost, so none is tried (and the
-    // notices keep the system's sound).
-    if (!decided.ring || !armedRef.current) return RANG_FOR_NOTHING;
+    if (!decided.ring) return decided.rangFor;
     // This tab rings, or another that decided the same within the lock's hold does: either way the bell rang for it.
     void withRingLock(() => {
       audio.current?.play(settingsRef.current.volume, { create: true });
@@ -414,9 +418,25 @@ export function useInboxSound(options: {
     return decided.rangFor;
   }, [otherTabInFront]);
 
-  const hear = useCallback((frame: unknown) => {
+  // Saves in order: the last save's count this window knows (a frame's or a save's answer's), the saves on their way,
+  // and the newest frame that came meanwhile (applied after them if it is newer than their answers).
+  const lastRev = useRef(0);
+  const saving = useRef(0);
+  const saveSeq = useRef(0);
+  const heldFrame = useRef<{ sound: InboxSoundSettings; rev: number } | null>(null);
+
+  const hear = useCallback((frame: unknown, rev?: number) => {
     const next = soundFromFrame(frame);
-    if (next) onSettingsRef.current(next);
+    if (!next) return;
+    if (typeof rev === 'number') {
+      if (rev <= lastRev.current) return;
+      if (saving.current > 0) {
+        if (!heldFrame.current || rev > heldFrame.current.rev) heldFrame.current = { sound: next, rev };
+        return;
+      }
+      lastRev.current = rev;
+    }
+    onSettingsRef.current(next);
   }, []);
 
   const preview = useCallback((volume?: number) => {
@@ -431,13 +451,28 @@ export function useInboxSound(options: {
 
   const save = useCallback(async (change: { enabled?: boolean; volume?: number; when?: InboxSoundWhen }) => {
     const before = settingsRef.current;
+    const seq = ++saveSeq.current;
+    saving.current++;
     onSettingsRef.current({ ...before, ...change });
     try {
-      onSettingsRef.current((await inboxApi.saveSound(change)).sound);
+      const answer = await inboxApi.saveSound(change);
+      if (typeof answer.sound_rev === 'number') lastRev.current = Math.max(lastRev.current, answer.sound_rev);
+      // A later save (a double click) is on its way: its answer is the one to show, so this one never flicks back.
+      if (seq === saveSeq.current) onSettingsRef.current(answer.sound);
       return true;
     } catch {
-      onSettingsRef.current(before);
+      if (seq === saveSeq.current) onSettingsRef.current(before);
       return false;
+    } finally {
+      saving.current--;
+      const held = heldFrame.current;
+      if (saving.current === 0 && held) {
+        heldFrame.current = null;
+        if (held.rev > lastRev.current) {
+          lastRev.current = held.rev;
+          onSettingsRef.current(held.sound);
+        }
+      }
     }
   }, []);
 

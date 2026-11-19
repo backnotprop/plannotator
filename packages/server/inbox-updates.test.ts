@@ -676,15 +676,16 @@ describe("the sound (config.json inboxSound)", () => {
           const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
           if (chunk && chunk.value) seen.text += decoder.decode(chunk.value);
         }
-        return seen.text.split("event: sound\ndata: ").slice(1).map((frame) => JSON.parse(frame.split("\n")[0]!).sound);
+        return seen.text.split("event: sound\ndata: ").slice(1).map((frame) => JSON.parse(frame.split("\n")[0]!) as { sound: unknown; rev: number });
       };
       return { until, stop: () => controller.abort() };
     };
     const a = await listen("window-sound-a");
     const b = await listen("window-sound-b");
-    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { when: "asks" } });
-    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
-    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { volume: 30 } });
+    const revs: number[] = [];
+    for (const sound of [{ when: "asks" }, { enabled: false }, { volume: 30 }]) {
+      revs.push((await (await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound })).json()).sound_rev);
+    }
     // A refused save tells no one.
     await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { when: "always" } });
     const expected = [
@@ -692,8 +693,12 @@ describe("the sound (config.json inboxSound)", () => {
       { enabled: false, volume: 60, when: "asks", dialog_shown_for: null, dialog_due: true },
       { enabled: false, volume: 30, when: "asks", dialog_shown_for: null, dialog_due: true },
     ];
-    expect(await a.until(3)).toEqual(expected);
-    expect(await b.until(4)).toEqual(expected);
+    const heardA = await a.until(3);
+    expect(heardA.map((frame) => frame.sound)).toEqual(expected);
+    expect((await b.until(4)).map((frame) => frame.sound)).toEqual(expected);
+    // Each frame carries its save's count, the one the save answered, and a later save's is larger (the page's order guard).
+    expect(heardA.map((frame) => frame.rev)).toEqual(revs);
+    expect(revs[0]! < revs[1]! && revs[1]! < revs[2]!).toBe(true);
     a.stop();
     b.stop();
   });
