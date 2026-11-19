@@ -52,6 +52,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullChangesTreePart, ReaderPart } from '../lazyParts';
+import { LineFeedbackToolsContext } from '@plannotator/review-editor/components/LineFeedbackTools';
+import { FieldVoice } from './FieldVoice';
 import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
@@ -1275,6 +1277,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <ContextNotesProvider api={noteRows.api}>
+              <LineFeedbackToolsContext.Provider value={message.guide && !isReview ? FieldVoice : null}>
               <GuideReader
                 snapshot={readerSnapshot!}
                 reviewed={reviewed}
@@ -1298,6 +1301,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                 {...(collapseAll ? { collapseAll } : {})}
                 {...(noteRows.anchors.length > 0 ? { contextNotes: noteRows.anchors, renderContextNote: noteRows.renderContextNote } : {})}
               />
+              </LineFeedbackToolsContext.Provider>
               </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>

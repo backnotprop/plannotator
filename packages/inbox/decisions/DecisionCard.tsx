@@ -15,6 +15,7 @@
  * thread card's own tiles (ui's `QuestionPictureTiles`): the picture picks and
  * the zoom button opens the viewer, never both.
  */
+import { FieldVoice } from '../components/FieldVoice';
 import { inboxUrl, machineOf } from '../inboxUrl';
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
@@ -211,6 +212,8 @@ export function DecisionCard(props: DecisionCardProps) {
   // Words kept from an earlier visit to this card (Later, Previous, a notification moved the queue) come back.
   const kept = props.keptWords?.get(decision.id);
   const [field, setField] = useState<'none' | 'other' | 'note' | 'cant'>(() => kept?.field ?? (saved?.other ? 'other' : saved?.note ? 'note' : 'none'));
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [other, setOther] = useState(kept?.other ?? saved?.other ?? '');
   const [note, setNote] = useState(kept?.note ?? saved?.note ?? '');
   const [text, setText] = useState(kept?.text ?? saved?.text ?? '');
@@ -748,8 +751,10 @@ export function DecisionCard(props: DecisionCardProps) {
                 <label className="ib-dm-flabel" htmlFor={`${promptId}-other`}>
                   Your own answer
                 </label>
-                <textarea id={`${promptId}-other`} className="ib-dm-ta" rows={2} value={other} onChange={(event) => setOther(event.target.value)} autoFocus />
-                <button type="button" className="ib-btn ib-pri ib-sm" data-decision-other-answer="" disabled={!other.trim()} onClick={() => request(otherAnswer(q, other, note))}>
+                <div className="ib-other-input"><textarea ref={otherRef} id={`${promptId}-other`} className="ib-dm-ta" rows={2} value={other} onChange={(event) => setOther(event.target.value)} autoFocus />
+                  <FieldVoice textareaRef={otherRef} onBusyChange={setVoiceBusy} />
+                </div>
+                <button type="button" className="ib-btn ib-pri ib-sm" data-decision-other-answer="" disabled={voiceBusy || !other.trim()} onClick={() => request(otherAnswer(q, other, note))}>
                   Answer
                 </button>
               </div>

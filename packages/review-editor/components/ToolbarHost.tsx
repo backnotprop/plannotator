@@ -1,4 +1,5 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo } from 'react';
+import { LineFeedbackToolsContext } from './LineFeedbackTools';
+import React, { useContext, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo } from 'react';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
@@ -165,6 +166,9 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     return formatLineRange(toolbarState.range.start, toolbarState.range.end);
   }, [toolbar.editingAnnotationId, toolbar.toolbarState]);
 
+  const feedbackTools = useContext(LineFeedbackToolsContext);
+  const target = toolbar.toolbarState?.range;
+  const fieldKey = feedbackTools && target ? JSON.stringify([filePath, target.side, target.start, target.end, toolbar.editingAnnotationId]) : undefined;
   const canSubmitAnnotation = toolbar.commentText.trim().length > 0 || toolbar.suggestedCode.trim().length > 0;
 
   const takeSelection = useCallback(
@@ -199,7 +203,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
   return (
     <>
       {toolbar.toolbarState && !toolbar.showCodeModal && (askOnly || !toolbar.showCommentModal) && (
-        <AnnotationToolbar
+        <AnnotationToolbar voiceTarget={fieldKey ?? undefined}
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
           commentText={toolbar.commentText}
@@ -233,7 +237,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
       )}
 
       {toolbar.toolbarState && toolbar.showCommentModal && !askOnly && (
-        <ExpandedCommentDialog
+        <ExpandedCommentDialog voiceTarget={fieldKey ?? undefined}
           title={expandedCommentTitle}
           commentText={toolbar.commentText}
           setCommentText={toolbar.setCommentText}

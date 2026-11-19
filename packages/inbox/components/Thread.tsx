@@ -93,6 +93,8 @@ import { usePickSave } from '../data/actions/picks';
 import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
 import { drawMessageHead } from '../parts/MessageHead';
+import { QuestionOtherToolsContext } from '@plannotator/ui/components/QuestionOtherTools';
+import { FieldVoice, QuestionVoiceBusy } from './FieldVoice';
 import { drawMessageBody } from '../parts/MessageBodyView';
 import type { MessageActs } from '../parts/messageActs';
 import { useSendReply } from '../data/actions/send';
@@ -523,6 +525,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
   /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
   const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
+  const busyOtherFields = useRef(new Set<string>());
+  const [otherBusy, setOtherBusy] = useState(false);
+  const reportOtherBusy = useCallback((id: string, busy: boolean) => {
+    if (busy) busyOtherFields.current.add(id); else busyOtherFields.current.delete(id);
+    setOtherBusy(busyOtherFields.current.size > 0);
+  }, []);
   const voice = useThreadVoice(thread.thread_id, (outcome, takenIn) => onLateVoice(outcome, takenIn), parked);
   const lateMiss = useLateVoiceMiss(thread.thread_id);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
@@ -3003,7 +3011,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> } = {}): Promise<void> => {
     const byChord = sentByChord.current;
     sentByChord.current = false;
-    if (sending || voice.busy || checkingEnded.current) return;
+    if (sending || voice.busy || busyOtherFields.current.size > 0 || checkingEnded.current) return;
     if (sendingAnywhere.current) {
       setError('Your reply in another thread is still sending. Send again in a moment.');
       return;
@@ -3944,7 +3952,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             onLateVoice,
             onSend: () => void send({ stayFull: true }),
             sending,
-            canSend: hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
+            canSend: !otherBusy && (hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0),
             picks: picksCount,
             annotations: records.length,
             comments: {
@@ -5256,6 +5264,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 {message.author.kind === 'person' && message.quote && (
                   <SentQuoteLine message={thread.messages.find((m) => m.id === message.quote!.of)} words={message.quote.words} phone={phone} onJump={() => jumpToQuote(message.quote!)} />
                 )}
+                <QuestionVoiceBusy.Provider value={reportOtherBusy}><QuestionOtherToolsContext.Provider value={parked ? null : FieldVoice}>
                 <MessageView
                   data={{
                     message,
@@ -5287,6 +5296,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   }}
                   draw={drawMessageBody}
                 />
+                </QuestionOtherToolsContext.Provider></QuestionVoiceBusy.Provider>
                 </>
                 )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
@@ -5674,7 +5684,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   routeChoiceOpen ? null : (
                   // No tooltip: a button that says Send needs none, and ⌘↵ is named only to assistive technology
                   // (approval "inbox-send-no-shortcut-hint").
-                  <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
+                  <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy || otherBusy} aria-keyshortcuts={sendAria}>
                     {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
                     {sending && <span className="ib-spin" aria-hidden="true" />}
                     {/* A phone: the round arrow; the word stays as the button's name. */}
@@ -5761,7 +5771,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <div className="ib-acts ib-footrow" data-foot-row="" data-fit={rowLevel ? footRowTokens(rowLevel) : undefined} ref={footRowRef}>
             <div className="ib-footbtns" data-foot-buttons="">
               {(waiting || draftKept) && (
-                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending} aria-describedby={footStatusIds}>
+                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || otherBusy} aria-describedby={footStatusIds}>
                   <Icon name="send" size={15} />
                   Send
                 </button>
