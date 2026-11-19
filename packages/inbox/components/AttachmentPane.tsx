@@ -105,6 +105,7 @@ import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions
 import { whenStill } from '../whenStill';
 import { unsavedComposer, unsavedComposers } from './unsavedComposers';
 import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
+import { versionLineWords } from './versionLineWords';
 export { unsavedComposer, unsavedComposers };
 
 /**
@@ -2199,61 +2200,43 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const inline = attachment.ref !== undefined;
   /** Its copy was taken the first time the thread was read (a message sent before capture), not when it was sent. */
   const onOpen = attachment.captured === 'on_open';
-  /** Who sent the message the file is in: the agent, or the person themself. */
-  const sender = props.fromPerson ? 'you' : props.agent;
   const firstOpened = whenTime(attachment.captured_at ?? attachment.sent_at);
-  let line: React.ReactNode = null;
-  if (currentUnavailable) {
-    line = (
-      <>
-        {attachment.unavailable!.message} {onOpen ? `This is the copy taken when you first opened it, ${firstOpened}.` : `This is the version ${sender} sent at ${sentAt}.`}
-      </>
-    );
-  } else if (effectiveVersion === 'sent') {
-    line = (
-      <>
-        {onOpen ? `The copy taken when you first opened it, ${firstOpened}.` : `The version ${sender} sent at ${sentAt}.`}
-        <button type="button" className="ib-vlink" onClick={() => chooseVersion('current')}>
-          Open the file as it is now
+  const shown = view?.attachment ?? attachment;
+  /** The version line's words (versionLineWords.ts): the line beside the thread and full screen's chip say the same. */
+  const words = versionLineWords({
+    unavailable: currentUnavailable ? attachment.unavailable!.message : null,
+    version: effectiveVersion,
+    changed: shown.changed_since_sent,
+    onOpen,
+    fromPerson: props.fromPerson === true,
+    agent: props.agent,
+    sentAt,
+    firstOpened,
+    editedAt: shown.current ? whenTime(shown.current.mtime) : null,
+  });
+  const line: React.ReactNode = words && (
+    <span className="ib-changed-b">
+      <span className="ib-changed-t">{words.sentence}</span>
+      {words.link && (
+        <button type="button" className="ib-vlink" onClick={() => chooseVersion(words.link!.to)}>
+          {words.link.label}
         </button>
-      </>
-    );
-  } else if ((view?.attachment ?? attachment).changed_since_sent) {
-    const current = (view?.attachment ?? attachment).current;
-    line = (
-      <>
-        {onOpen ? 'Changed since you first opened it.' : `Changed since ${sender} sent it at ${sentAt}.`}
-        {current ? ` Edited ${whenTime(current.mtime)}.` : ''}
-        <button type="button" className="ib-vlink" onClick={() => chooseVersion('sent')}>
-          {onOpen ? 'Open the version you first saw' : props.fromPerson ? 'Open the version you sent' : 'Open the version it sent'}
-        </button>
-      </>
-    );
-  }
+      )}
+    </span>
+  );
   /**
    * The changed line, compact, for full view (which drops the line): the same
    * facts and actions as a persistent chip at the file's top left, so a file
    * that opens in full view still says it changed, or which version is shown.
    */
   let versionChip: { text: string; action: { label: string; to: 'current' | 'sent' } | null; full: string } | null = null;
-  if (currentUnavailable) {
-    versionChip = {
-      text: attachment.unavailable!.code === 'attachment_missing' ? 'The file is gone; showing the sent copy' : 'The file is not that kind any more; showing the sent copy',
-      action: null,
-      full: `${attachment.unavailable!.message} ${onOpen ? `This is the copy taken when you first opened it, ${firstOpened}.` : `This is the version ${sender} sent at ${sentAt}.`}`,
-    };
-  } else if (effectiveVersion === 'sent') {
-    versionChip = {
-      text: onOpen ? 'Showing the copy from when you first opened it' : 'Showing the sent version',
-      action: { label: 'Open the file as it is now', to: 'current' },
-      full: onOpen ? `The copy taken when you first opened it, ${firstOpened}.` : `The version ${sender} sent at ${sentAt}.`,
-    };
-  } else if ((view?.attachment ?? attachment).changed_since_sent) {
-    versionChip = {
-      text: onOpen ? 'Changed since you first opened it' : 'Changed since sent',
-      action: { label: onOpen ? 'Open the version you first saw' : props.fromPerson ? 'Open the version you sent' : 'Open the version it sent', to: 'sent' },
-      full: onOpen ? 'Changed since you first opened it.' : `Changed since ${sender} sent it at ${sentAt}.`,
-    };
+  if (words) {
+    const text = currentUnavailable
+      ? attachment.unavailable!.code === 'attachment_missing' ? 'The file is gone; showing the sent copy' : 'The file is not that kind any more; showing the sent copy'
+      : effectiveVersion === 'sent'
+        ? onOpen ? 'Showing the copy from when you first opened it' : 'Showing the sent version'
+        : onOpen ? 'Changed since you first opened it' : 'Changed since sent';
+    versionChip = { text, action: words.link, full: words.sentence };
   }
 
   const annotationCounts = useMemo(() => {

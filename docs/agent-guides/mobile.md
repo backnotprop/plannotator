@@ -1,6 +1,6 @@
 # The native app's contract kit
 
-The native iPhone app of the Plannotator Inbox lives in `apps/mobile/`. It is built from one source with the window: `apps/mobile/contract/`. That folder holds data only (JSON, Markdown, generated Swift). Generators in `scripts/mobile/` make it from the product's own TypeScript. Two Bun tests fail when the product changes and the contract does not.
+The native iPhone app of the Plannotator Inbox lives in `apps/mobile/`. It is built from one source with the window: `apps/mobile/contract/`. That folder holds data only (JSON, Markdown, generated Swift). Generators in `scripts/mobile/` make it from the product's own TypeScript. Two Bun tests fail when the product changes and the contract does not: `tests/mobile-vectors.test.ts` (a generated file is stale) and `tests/mobile-parity.test.ts` (the window gained something the phone has no decision for).
 
 The Inbox is Bun-only. Nothing here has a Pi twin.
 
@@ -30,6 +30,10 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 | `tokens/tokens.json`, `generated/swift/Tokens.xcassets/` | `scripts/mobile/tokens.ts` | The default theme, `packages/ui/themes/plannotator.css`, dark and light: every color as its CSS, Display P3 and sRGB hex, the radius in points and the font names. The catalog has one color set per color, light with a dark appearance. The other themes come later. |
 | `words/words.json`, `generated/swift/Words.swift` | `scripts/mobile/words.ts` | The words the product exports as constants or pure functions: section names, agent names, Looks good, Action item, delivery lines and the failed-turn words. A word with a part (a name, a number) is made by calling the product's function with a marker, so `{name}` sits where the window prints the name. |
 
+| `parity/surface.json` | `scripts/mobile/surface.ts` | Everything the window and its server offer, as `<kind>:<name>` entries: door routes, the Inbox endpoints (paths, read from the server's code by `scripts/mobile/window-routes.ts`; `tests/inbox-api-table.test.ts` holds `server-and-storage.md`'s Inbox table to the same list), stream frames, record kinds, wire enum values, the keys the Settings write takes, capabilities, wire fields, message blocks, `:::` blocks, Settings sections and flow checks. The door, the endpoints and the wire types are read live from the product. |
+| `parity/ledger.json` | hand | One row per feature, with the phone's decision for it. See "The parity ledger". |
+| `flows/*.md` | hand | One file per flow: what the person sees and does, then numbered checks such as `[list-04]`. Each check is taken from the window's code and ends with where it comes from, `(path:line)`. Where the phone differs on purpose, the check says `phone differs:` and why. `flows/README.md` holds the rules every flow keeps. |
+
 `scripts/mobile/door-shapes.ts` declares the few door shapes that the product has no TypeScript type for: the pair exchange, the error body, the stream frames, and the bodies of `seen`, `picks` and `reply`. If the product gets a type for one of these, use the product's type in `ROOTS` and remove the shape from `door-shapes.ts`.
 
 ## Commands
@@ -43,6 +47,98 @@ bun scripts/mobile/all.ts --check   # compare with the committed files without w
 
 A word the window shows that is not in `words.json` is written inside a component or a server message. Make it a constant in the product first (that is a product change, in its own pull request), then add its row in `buildWords()`.
 
+## Fixtures and vectors
+
+A fixture (`fixtures/<suite>.json`) is invented input. A vector (`vectors/<suite>.json`) is what the product's own code makes of it, and the app's conformance tests must reach the same result. Never write a vector by hand: run its generator.
+
+| Suite | Fixture | What the vector holds | Made by |
+|---|---|---|---|
+| `list` | `fixtures/list.json`: list rows' facts | Each row's section and bold, every section's thread order, the badge count and label | `inboxSectionOf`, `inboxRowUnread`, `inboxListSections` (`packages/shared/inbox/list.ts`), `inboxTabCount`, `tabBadgeLabel` (`packages/inbox/tabCount.ts`) |
+| `words` | none | Each word template filled with sample parts; the counting words | The word functions in `packages/core` |
+| `time` | `fixtures/time.json`: moments, a "now" and three time zones | Per zone: `shortTime`, `whenTime`, `dayWords`, `dateTime`, `clockTime`, `fullTime`; and `normalise`: the rule and examples for iOS's U+202F before AM and PM | `packages/core/inbox-format.ts`, run in its own process with `TZ` set (`scripts/mobile/vectors-time.ts`), because the formatters read the zone when they load |
+| `crypto` | `packages/core/fixtures/inbox-relay-vectors.json` (the existing relay vectors) | The push collapse id per thread. The keys stay in the relay file; the app derives the collapse key itself | `deriveRelayKeys` and the Inbox's HMAC step |
+| `questions` | `fixtures/questions.json`: questions and what the person does on each | The answer each act makes, and the pick body that saves it (`answer: null` takes a pick back) | `choiceAnswer`, `otherAnswer`, `textAnswer`, `skipAnswer`, `inboxPickBody` (`packages/core/inbox-answers.ts`) |
+| `skew` | `fixtures/skew.json`: health answers, two app clients, app headers | What the app makes of each health answer (`ok`, `inbox_needs_update`, `app_needs_update`) and which routes it then offers, directly and through the relay; how the door parses each `X-Plannotator-App` header | `readInboxDoorHealth`, `inboxDoorOffers`, `parseInboxAppHeader` (`packages/core/inbox-door-version.ts`) |
+| `stream` | `fixtures/stream.json`: bytes as the Inbox writes them, and cut points | The frames the window's reader takes | `parseEventStreamText` (`packages/inbox/sharedEvents.ts`), with its own generator, `scripts/mobile/vectors-stream.ts`, and its own test, `tests/mobile-stream-vectors.test.ts` |
+
+Two of the suites that slice S1 needs have no generator yet:
+
+- `push`: brief F6a's own push vectors (`packages/core/fixtures/inbox-relay-push-v2-vectors.json`) will be referenced from here, not made twice, once F6a is on main. The collapse id then comes from its `inboxPushCollapseId`.
+- `decode`: real list and thread answers. Brief F4 defines the device view these come from.
+
+To add a fixture:
+
+1. Write the invented input in `fixtures/`. Do not put real data there: no names, keys or tokens.
+2. Add a function to `scripts/mobile/vectors.ts` that runs the product's function over the input.
+3. Name both paths as literals.
+4. Run `bun scripts/mobile/all.ts`.
+
+## The parity ledger
+
+Every entry of `parity/surface.json` needs a row in `parity/ledger.json` that names it in `surface`. The surface is read from the product, never from the docs:
+
+- door routes, from the door itself;
+- window endpoints, from the server's code (`scripts/mobile/window-routes.ts`). These are paths without methods, and `<prefix>/*` is a family that a module splits itself;
+- stream frames and record kinds;
+- the values of every wire enum (`enum:`) and every field of a wire type;
+- message blocks and `:::` directives;
+- the Settings sections, the keys the Settings write takes (`setting:`, which includes the capability switches), and the capabilities;
+- the flows' numbered checks.
+
+A row has:
+
+- `id` and `title`;
+- `surface`: the entries it decides;
+- `flows`: the flow checks that prove it;
+- `mobile`: `v1`, `rethink` (in v1, done the phone's way), `later`, `never`, or `undecided`;
+- `why`. `later` and `never` must fill it, starting with a reason code. The codes are SCOPE's (`L-door`, `L-off`, `L-size`, `L-ipad`, `L-ai`, `L-proxy`, `N-desk`, `N-web`, `N-self`), plus `L-nodoor` for a window endpoint that is not on the phone's door;
+- `since` (`undecided` only): the day the row was added;
+- `decoded: true`: the app reads these entries through `Wire.swift`. That is a fact about reading. The mark says what the phone shows;
+- `ios.state`: `not-started`, `building`, `done` or `owed`.
+
+Rules the test enforces:
+
+- **One decision per entry.** `v1` and `rethink` agree. An entry that one row marks `v1` and another `later` or `never` fails. An `undecided` row beside a decided one does not count.
+- **A new entry forces a choice.** You can decide it, or run `bun scripts/mobile/parity.ts --defer`, which gives each new entry an `undecided` row dated today. The owner then decides it.
+- **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the test fails until `bun scripts/mobile/parity.ts --owed` marks the row `owed` with today's date.
+- **The clock** is a script, `bun scripts/mobile/parity-debts.ts`. An `undecided` row or an `owed` debt older than 14 days fails it. Only `.github/workflows/mobile-ledger.yml` runs it (ubuntu, seconds): nightly, by hand, on a push to main that changes the ledger, and on a pull request only when the clock itself changes. An Inbox pull request that records a new entry in the ledger starts neither it nor a macOS build. It is not a test file, so no `bun test` runs it: the Test workflow, main's full run and a release's checks never fail for a mobile debt. Red there holds back only the app's own release. `tests/mobile-parity-debts.test.ts` checks the rule on fixed dates, never the real ledger, and `scripts/ci-affected-map.test.ts` holds all of this.
+
+The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names, then corrected by review. Rows whose `source` starts with `seed:` cover the entries no scope row names:
+
+- `type-<Type>`: the fields and enum values of one wire type, `decoded`, marked by the feature that reads the type. Update, machine updates, restart, notify reach, cloud wake, agent faces, tag colours and tidy are `later`. The outbox's view is `never`, because the phone keeps its own outbox;
+- `window-door` (the door itself, `v1`), `window-web` (the web window's own files, `never`), `window-mcp` (`never`), `window-ask` (`later`), `window-decisions` (`later`), `window-outbox` (`never`);
+- `window-door-gap`: v1 features whose route the door does not have yet. This is F5a's work list: drafts, a guide marked viewed, the comment draft's delete, agent icons;
+- `window-only-<segment>` (`later`, `L-nodoor`);
+- `health` (`v1`), `agent-session-fields` (`v1`), `setting-switches` (`later`, `L-door`);
+- the Settings write's other keys, each marked by the SCOPE row for its setting: `setting-keys-look` (`rethink`: theme, text size, notifications, sound, the Mark read warning, rows, voice, the tour), `setting-keys-v1` (the rows' Undo, Show archived, saved emoji), `setting-keys-later` (update checks, the agent tools switch, Tailscale, prompts, the sidebar, diff options and style, chapter diagrams, Experimental, Bro mode, floating drafts), `setting-keys-web` (`never`: the tab icon, the browser's cookie host);
+- `capabilities` (`later`, `L-off`: the Plans library is hidden in the product today);
+- the flows, blocks, frames and door routes left over.
+
+When you fold such an entry into its feature's row, take it out of the seed row.
+
+`tests/mobile-parity.test.ts` reads the live surface, not the committed file. It fails with:
+
+> The window gained `<entry>`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink, or run `bun scripts/mobile/parity.ts --defer` to leave it undecided for the owner
+
+Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no longer has fails too. The test takes about half a second.
+
+`tests/inbox-api-table.test.ts` ties `docs/agent-guides/server-and-storage.md`'s Inbox API table to the same server-derived route list. An endpoint with no row there fails, whatever the phone decides.
+
+### What parity does not catch
+
+1. Purely visual or interaction changes: layout, gestures, durations, menus, animation.
+2. Any word written inside a component or a server message, which is most of the UI. Only the words in `words.json` are entries.
+3. A new option inside an existing Settings section that is not a key of the Settings write, and window addresses (`#board`, `#settings/...`). Their only table imports the window's React modules.
+4. A new route inside a family (`<prefix>/*`), and a method added to a path that already has one.
+5. A changed meaning of an existing field when its type stays the same. A type change only changes the fingerprint of a `done` row.
+6. Door answers whose types are not in the schema's roots: cards, pulls, search, sessions, launch, attachments' views and more.
+7. A frame sent from a module surface.ts does not read.
+8. Server-side changes to a body the kit still declares by hand in `door-shapes.ts`.
+9. Rule changes in code that no vector runs: folding, store apply, outbox, push, send, anchors.
+10. A window change to a built feature whose entries keep the same fingerprint.
+11. A capability that is not on the capability seam.
+12. The meaning of a mark: the test checks that each entry has one decision, not that the decision is right. The owner reviews the ledger.
+
 ## When a test fails on your pull request
 
 `tests/mobile-vectors.test.ts` runs every generator with its check. It runs in an ordinary unit lane, in about 0.7 s on a laptop.
@@ -50,13 +146,19 @@ A word the window shows that is not in `words.json` is written inside a componen
 `scripts/ci-affected.ts` selects it when a file the generators import or name changes. That means:
 - the door (`packages/server/inbox-devices.ts` and what it imports);
 - the outbox's write kinds;
-- every file the schema reads (`SCHEMA_SOURCES`: `packages/core/inbox-types.ts`, `packages/core/inbox-wire-models.ts`, `packages/core/question-block.ts` and the core files they reach);
+- every file the schema reads (`SCHEMA_SOURCES` in the generated `scripts/mobile/schema-sources.ts`: `packages/core/inbox-types.ts`, `packages/core/inbox-wire-models.ts`, `packages/core/question-block.ts` and the core files they reach). When a wire type starts importing a new file, the list is stale and `bun scripts/mobile/all.ts` rewrites it;
 - the window's error table in `packages/server/inbox.ts`;
 - the default theme, `packages/ui/themes/plannotator.css` (another theme file does not select it);
 - a module a word comes from (`scripts/mobile/words.ts` imports them);
+- what the parity surface reads: the server's route files, `packages/ui/types.ts` (blocks), `packages/inbox/settingsRoute.ts` (Settings sections) and the capability files;
+- what the vectors run: `packages/shared/inbox/list.ts`, `packages/inbox/tabCount.ts`, `packages/core/inbox-format.ts`, `packages/core/crypto.ts`, `packages/core/inbox-answers.ts`, `packages/core/inbox-door-version.ts`, the word modules;
 - the contract files themselves.
 
-A change to the window's components or `packages/inbox/api.ts`, or to the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
+A change to the window's components or `packages/inbox/api.ts`, or to the rest of the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
+
+`tests/mobile-stream-vectors.test.ts` imports the window's stream reader (`packages/inbox/sharedEvents.ts`), so a change to the window's client or anything it imports selects it. It is its own file for that reason, and it takes milliseconds. `scripts/mobile/all.ts` runs its generator in a child process, and no test imports `all.ts`, so the main contract test never reaches the stream reader. Of the window's own code, the main test reaches only the badge rule (`packages/inbox/tabCount.ts`), whose module also holds a React hook.
+
+`tests/mobile-flows.test.ts` checks that each flow check cites files that exist. The cited paths are only known at run time, so the picker runs it on every pull request, as a tree-scanning test. It takes about 70 ms. It checks the file, never the line, so a change that only moves lines never fails it. A pull request that moves or deletes a cited file must update the citation.
 
 If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 
@@ -76,6 +178,11 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - `health.door` is not in the schema until brief F1 lands and its type joins `ROOTS`. After F1, match `health.door.routes` against `DoorRoute.name`.
 - Decode list rows one by one, so one bad row does not blank the list.
 - Seqs, cursors and revisions are `Int64`. Other numbers are `Double`.
+- The flows are checked against the window and cite it. In the list: left swipe is Archive only, the undo banner stays 7 s, the badge counts threads with unseen agent messages, and a picked card reads "Picked <time> · in your draft".
+- About 33 v1 features use door routes that a phone token cannot reach today (`grant: machine`: the Board, pulls, launch, open-in and more), and `window-door-gap` lists v1 features with no door route at all. S1 should use only `grant: phone` routes.
+- Time words: the vectors print U+0020 before AM and PM, and iOS's en_US format prints U+202F. Normalise both sides as `vectors/time.json` `normalise.rule` says, and test in each of the fixture's zones: UTC, Asia/Kolkata (+05:30) and America/Los_Angeles (−08:00 in November, −07:00 in summer). Format in the zone the test gives, never in UTC.
+- The suites `push` and `decode` do not exist yet (see Fixtures and vectors).
+- Skew: a `contract` or `min_app_contract` that is not a whole number from 0 to 2^53 − 1 makes the whole `door` unreadable, so the app treats it as an Inbox from before the handshake. `vectors/skew.json` holds the cases, including a number above 2^53 that `Int64` could hold.
 - Only the words in `words.json` (about 30) are generated. Any other window word needs a product constant first, in its own pull request.
 - `tokens.json` names the fonts Inter and Geist Mono. Bundling them in the app needs their OFL notices.
 - `DoorPicksBody` is the window's own pick body (`inboxPickBody` in `packages/core/inbox-answers.ts`) plus `idempotency_key`, so it has `unsent_only` and `confirm_full`. A pick's `answer: null` takes it back, and `Wire.swift` writes the null. The other bodies in `door-shapes.ts` (pair, seen, reply, the error and the frames) are still written by hand until the product has types for them.

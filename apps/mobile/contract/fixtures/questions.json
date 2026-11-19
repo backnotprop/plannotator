@@ -1,0 +1,232 @@
+{
+  "about": "Invented questions and what the person does on each. scripts/mobile/vectors.ts runs the product's answer builders (packages/core/inbox-answers.ts) over them and writes vectors/questions.json.",
+  "questions": [
+    {
+      "key": "q1",
+      "position": 0,
+      "kind": "single",
+      "prompt": "Run the migration now?",
+      "context": null,
+      "choices": [
+        {
+          "label": "Yes",
+          "description": null,
+          "recommended": true,
+          "settled": false
+        },
+        {
+          "label": "Not yet",
+          "description": null,
+          "recommended": false,
+          "settled": false
+        }
+      ],
+      "recommendation": "Yes",
+      "suggested_text": null,
+      "stopped": "msg_A00000000000000000000001",
+      "holds_up": [],
+      "asked_by_agent_id": null,
+      "orphaned": false,
+      "state": "open",
+      "answer": null,
+      "revision": 0,
+      "sent_revision": 0,
+      "picked_by": null,
+      "picked_at": null,
+      "sent_reply_id": null,
+      "message_id": "msg_A00000000000000000000001",
+      "superseded_by": null
+    },
+    {
+      "key": "q2",
+      "position": 1,
+      "kind": "multi",
+      "prompt": "Which platforms?",
+      "context": "Pick any.",
+      "choices": [
+        {
+          "label": "iOS",
+          "description": null,
+          "recommended": false,
+          "settled": false
+        },
+        {
+          "label": "Android",
+          "description": null,
+          "recommended": false,
+          "settled": false
+        },
+        {
+          "label": "Web",
+          "description": null,
+          "recommended": false,
+          "settled": false
+        }
+      ],
+      "recommendation": null,
+      "suggested_text": null,
+      "stopped": null,
+      "holds_up": [
+        "the release"
+      ],
+      "asked_by_agent_id": null,
+      "orphaned": false,
+      "state": "open",
+      "answer": null,
+      "revision": 0,
+      "sent_revision": 0,
+      "picked_by": null,
+      "picked_at": null,
+      "sent_reply_id": null,
+      "message_id": "msg_A00000000000000000000001",
+      "superseded_by": null
+    },
+    {
+      "key": "q3",
+      "position": 2,
+      "kind": "text",
+      "prompt": "What should the flag be called?",
+      "context": null,
+      "choices": [],
+      "recommendation": null,
+      "suggested_text": "new_list",
+      "stopped": null,
+      "holds_up": [],
+      "asked_by_agent_id": null,
+      "orphaned": false,
+      "state": "open",
+      "answer": null,
+      "revision": 0,
+      "sent_revision": 0,
+      "picked_by": null,
+      "picked_at": null,
+      "sent_reply_id": null,
+      "message_id": "msg_A00000000000000000000001",
+      "superseded_by": null
+    },
+    {
+      "key": "q4",
+      "position": 3,
+      "kind": "single",
+      "prompt": "Keep the old endpoint?",
+      "context": null,
+      "choices": [
+        {
+          "label": "Keep it",
+          "description": null,
+          "recommended": false,
+          "settled": false
+        },
+        {
+          "label": "Drop it",
+          "description": null,
+          "recommended": false,
+          "settled": false
+        }
+      ],
+      "recommendation": null,
+      "suggested_text": null,
+      "stopped": null,
+      "holds_up": [],
+      "asked_by_agent_id": null,
+      "orphaned": false,
+      "state": "picked",
+      "answer": {
+        "v": 1,
+        "key": "q4",
+        "kind": "single",
+        "prompt": "Keep the old endpoint?",
+        "selected": [
+          "Keep it"
+        ],
+        "note": "for a week"
+      },
+      "revision": 2,
+      "sent_revision": 0,
+      "picked_by": null,
+      "picked_at": "2026-11-18T09:00:00.000Z",
+      "sent_reply_id": null,
+      "message_id": "msg_A00000000000000000000001",
+      "superseded_by": null
+    }
+  ],
+  "acts": [
+    {
+      "question": "q1",
+      "act": "choice",
+      "selected": [
+        "Yes"
+      ],
+      "note": ""
+    },
+    {
+      "question": "q1",
+      "act": "choice",
+      "selected": [
+        "Not yet"
+      ],
+      "note": "  after lunch  "
+    },
+    {
+      "question": "q1",
+      "act": "other",
+      "other": "  Only on staging ",
+      "note": ""
+    },
+    {
+      "question": "q1",
+      "act": "skip",
+      "note": ""
+    },
+    {
+      "question": "q2",
+      "act": "choice",
+      "selected": [
+        "iOS",
+        "Web"
+      ],
+      "note": ""
+    },
+    {
+      "question": "q2",
+      "act": "choice",
+      "selected": [],
+      "note": ""
+    },
+    {
+      "question": "q3",
+      "act": "text",
+      "text": " new_inbox_list ",
+      "note": ""
+    },
+    {
+      "question": "q4",
+      "act": "other",
+      "other": "Keep it two weeks",
+      "note": ""
+    },
+    {
+      "question": "q4",
+      "act": "choice",
+      "selected": [
+        "Drop it"
+      ],
+      "note": "",
+      "unsentOnly": true
+    },
+    {
+      "question": "q1",
+      "act": "choice",
+      "selected": [
+        "Yes"
+      ],
+      "note": "",
+      "unsentOnly": true,
+      "confirmFull": true
+    },
+    {
+      "question": "q4",
+      "act": "clear"
+    }
+  ]
+}

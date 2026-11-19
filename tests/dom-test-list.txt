@@ -261,6 +261,7 @@ packages/inbox/tabCountWindow.test.tsx
 packages/inbox/phoneList.test.tsx
 packages/inbox/listHeaderPath.test.tsx
 packages/inbox/heldNoticeLine.test.tsx
+packages/inbox/heldBar.test.tsx
 packages/inbox/listLabels.test.tsx
 packages/inbox/projectLabelRows.test.tsx
 packages/inbox/projectLabelHeld.test.tsx
@@ -282,6 +283,7 @@ packages/inbox/listGroups.test.tsx
 packages/inbox/showOpensGroups.test.tsx
 packages/inbox/listNewPill.test.tsx
 packages/inbox/showLight.test.tsx
+packages/inbox/holdView.test.tsx
 packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
@@ -749,6 +751,7 @@ packages/inbox/composeLaunchTip.test.tsx
 packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
 packages/inbox/listFilterButton.test.tsx
+packages/inbox/listFilterSearchMenu.test.tsx
 packages/inbox/prototypeWindow.test.tsx
 packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx

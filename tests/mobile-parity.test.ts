@@ -1,0 +1,106 @@
+/**
+ * The phone decides everything the window offers (docs/agent-guides/mobile.md).
+ * scripts/mobile/surface.ts reads the window's surface from the product itself
+ * (the door's routes, the server's endpoints, frames, record kinds, enum
+ * values, wire fields, blocks, Settings, capabilities, flow checks), and every
+ * entry needs a row in apps/mobile/contract/parity/ledger.json that decides it
+ * for the phone (v1, rethink, later, never) or leaves it undecided, dated.
+ *
+ * What can regress, and the test that says so:
+ *  - the window gains an entry with no row, or loses one a row still names
+ *    ("the ledger decides");
+ *  - a row with a mark that is not one of the five, later or never with no
+ *    why, undecided with no date, one entry with two decisions, a built
+ *    feature the window changed without it being marked owed ("the rules");
+ *  - --defer and --owed writing something other than what they promise
+ *    ("the tools").
+ * The 14-day clock is tests/mobile-parity-debts.test.ts, apart, so a pull
+ * request that only changes the Inbox never fails for an old debt.
+ *
+ * Reads committed JSON and a few source files as text; imports no React and
+ * builds nothing.
+ */
+import { describe, expect, test } from 'bun:test';
+import { deferNew, entryFingerprints, gained, markOwed, parityProblems, readLedger, rowFingerprint, type Ledger } from '../scripts/mobile/parity';
+import { buildSurface, surfaceEntries } from '../scripts/mobile/surface';
+
+describe('the ledger decides', () => {
+  test('every entry of the window has one decision, and every row names entries that exist', () => {
+    const surface = buildSurface();
+    const problems = parityProblems(readLedger(), surfaceEntries(surface), surface.check ?? [], entryFingerprints());
+    if (problems.length) throw new Error(`${problems.length} parity problem(s):\n${problems.join('\n')}`);
+  }, 10_000);
+});
+
+const row = (over: Partial<Ledger['rows'][number]>): Ledger['rows'][number] => ({
+  id: 'r', title: 't', surface: [], flows: [], mobile: 'v1', why: '', ios: { state: 'not-started' }, ...over,
+});
+
+describe('the rules', () => {
+  test('a new entry fails with the words that say what to do, and the one command that defers it', () => {
+    expect(parityProblems({ rows: [row({ surface: ['door:GET a'] })] }, ['door:GET a', 'door:GET b'], [])).toEqual([gained('door:GET b')]);
+    expect(gained('door:GET b')).toContain('bun scripts/mobile/parity.ts --defer');
+  });
+
+  test('a row naming an entry that is gone fails', () => {
+    expect(parityProblems({ rows: [row({ surface: ['door:GET a', 'door:GET gone'] })] }, ['door:GET a'], [])).toEqual([
+      'The window lost `door:GET gone`. Remove it from ledger row r.',
+    ]);
+  });
+
+  test('later and never need a why; undecided needs its day; the mark is one of five', () => {
+    const p = parityProblems({
+      rows: [
+        row({ id: 'a', mobile: 'later' }), row({ id: 'b', mobile: 'maybe' as 'v1' }), row({ id: 'c', mobile: 'never', why: 'N-web' }),
+        row({ id: 'd', mobile: 'undecided' }), row({ id: 'e', mobile: 'undecided', since: '2026-11-18' }),
+      ],
+    }, [], []);
+    expect(p).toEqual([
+      'a: later needs a why.', 'b: mobile is "maybe"; it is v1, rethink, later, never or undecided.',
+      'd: undecided needs `since`, the day it was added (YYYY-MM-DD).',
+    ]);
+  });
+
+  test('one entry with two decisions fails; v1 and rethink agree; an undecided row beside a decision does not count', () => {
+    const rows = [
+      row({ id: 'a', surface: ['field:T.x', 'field:T.y', 'field:T.z'] }),
+      row({ id: 'b', mobile: 'never', why: 'N-web', surface: ['field:T.x'] }),
+      row({ id: 'c', mobile: 'rethink', surface: ['field:T.y'] }),
+      row({ id: 'd', mobile: 'undecided', since: '2026-11-18', surface: ['field:T.z'] }),
+    ];
+    expect(parityProblems({ rows }, ['field:T.x', 'field:T.y', 'field:T.z'], [])).toEqual(['`field:T.x` has two decisions: v1 (a) and never (b). Keep it in one.']);
+  });
+
+  test('a built feature the window changed fails until it is marked owed; one never recorded fails too', () => {
+    const prints = new Map([['field:T.x', 'aaaa']]);
+    const built = row({ id: 'built', surface: ['field:T.x'], ios: { state: 'done', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, prints) } });
+    expect(parityProblems({ rows: [built] }, ['field:T.x'], [], prints)).toEqual([]);
+    const changed = new Map([['field:T.x', 'bbbb']]);
+    expect(parityProblems({ rows: [built] }, ['field:T.x'], [], changed)).toEqual(['built: the window changed what ios built. Run `bun scripts/mobile/parity.ts --owed` to record the debt.']);
+    expect(parityProblems({ rows: [row({ id: 'n', ios: { state: 'done' } })] }, [], [], prints)).toEqual([
+      'n: ios is done with no fingerprint. Run `bun scripts/mobile/parity.ts --owed` once to record it.',
+    ]);
+  });
+
+  test('two rows with one id, and a flow check that does not exist, fail', () => {
+    const p = parityProblems({ rows: [row({ id: 'x', flows: ['list-01'] }), row({ id: 'x', flows: ['list-99'] })] }, [], ['list-01']);
+    expect(p).toEqual(['Two ledger rows have the id x.', 'x: no flow check list-99.']);
+  });
+});
+
+describe('the tools', () => {
+  test('--defer gives each new entry an undecided row of its own, dated, and the ledger then holds', () => {
+    const next = deferNew({ rows: [row({ surface: ['door:GET a'] })] }, ['door:GET a', 'field:T.new'], '2026-11-18');
+    expect(next.rows.at(-1)).toEqual(row({ id: 'undecided-field-t-new', title: 'field:T.new', surface: ['field:T.new'], mobile: 'undecided', since: '2026-11-18' }));
+    expect(parityProblems(next, ['door:GET a', 'field:T.new'], [])).toEqual([]);
+  });
+
+  test('--owed marks a changed built feature owed today and records a fingerprint never recorded', () => {
+    const before = new Map([['field:T.x', 'aaaa']]);
+    const after = new Map([['field:T.x', 'bbbb']]);
+    const built = row({ id: 'built', surface: ['field:T.x'], ios: { state: 'done', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, before) } });
+    const owed = markOwed({ rows: [built, row({ id: 'n', surface: ['field:T.x'], ios: { state: 'done' } })] }, after, '2026-11-18');
+    expect(owed.rows[0]!.ios).toEqual({ state: 'owed', owed_since: '2026-11-18', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, after) });
+    expect(owed.rows[1]!.ios).toEqual({ state: 'done', fingerprint: rowFingerprint({ surface: ['field:T.x'] }, after) });
+  });
+});
