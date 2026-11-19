@@ -453,17 +453,26 @@ describe("what six fresh agents tripped on (round 5)", () => {
     expect(picked).toContain('"Fraud check"');
     expect(joined).toContain('"sync"');
     expect(joined).toContain('"Orders API"');
-    // One step out, no farther: the queue hangs off Orders API, not off the selection.
-    expect(sketch.reading).not.toContain("payments queue");
-    expect(sketch.reading).not.toContain("Unrelated");
+    // One step out, no farther, for what is shown in full: the queue hangs off Orders API, not off the selection.
+    expect(joined!.split("Also on the canvas:")[0]).not.toContain("payments queue");
+    // Everything else is named, with its id and words and no more: the agent knows a queue exists and does not draw another.
+    const also = sketch.reading.split("\n").find((l) => l.startsWith("Also on the canvas: "))!;
+    expect(also).toMatch(/ellipse \S+ "payments queue"/);
+    expect(also).toMatch(/box \S+ "Unrelated"/);
+    expect(also).not.toMatch(/ at -?\d+,-?\d+/);
+    expect(also).not.toContain("Fraud check");
     t.canvas.replyShown(THREAD, sketch, "a");
     // The agent re-points the arrow it was shown as connected, with no read first.
     const arrow = thingsOf(scene).find((x) => x.kind === "arrow" && x.words === "sync")!;
     const first = await t.canvas.apply(THREAD, agent("a"), sketch.rev, [{ remove: arrow.id }, { set: "Orders API", color: "blue" }]);
     expect(first.text).not.toContain("not as you were last shown");
     expect(first.ok).toBe(true);
-    // What it was not shown is still protected.
-    expect((await t.canvas.apply(THREAD, agent("a"), first.rev, [{ set: "Unrelated", color: "red" }])).ok).toBe(false);
+    // Named in the outline is enough to connect to it...
+    const joinedUp = await t.canvas.apply(THREAD, agent("a"), first.rev, [{ connect: "payments queue", to: "Fraud check" }]);
+    expect(joinedUp.ok).toBe(true);
+    // ...but not to change it: what it was not shown in full is still protected.
+    expect((await t.canvas.apply(THREAD, agent("a"), joinedUp.rev, [{ set: "payments queue", color: "red" }])).ok).toBe(false);
+    expect((await t.canvas.apply(THREAD, agent("a"), joinedUp.rev, [{ set: "Unrelated", color: "red" }])).ok).toBe(false);
   });
 
   test("10: a name the person has since rewritten is refused with the thing as it is now, and that shows it: the next call lands", async () => {

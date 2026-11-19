@@ -726,6 +726,12 @@ function tieTo(work: Work, el: CanvasElement, spot: Spot): void {
   work.notes.push(`an arrow ties it to ${target.id}`);
 }
 
+/** ", in frame X" for a thing a frame holds: the add answer says where the new thing went. */
+function inFrame(work: Work, el: CanvasElement): string {
+  const frame = el.frameId ? thingsNow(work).find((t) => t.kind === 'frame' && t.elementIds.includes(el.frameId!)) : undefined;
+  return frame ? `, in frame ${frame.id}` : '';
+}
+
 function add(work: Work, given: CanvasOp, fallback?: Box): { line: string; box: Box } {
   const op = withPlaces(given);
   const kind = op.add;
@@ -767,7 +773,7 @@ function add(work: Work, given: CanvasOp, fallback?: Box): { line: string; box: 
     settle(work, copies, spot);
     const shapes = copies.filter((e) => e.type !== 'text' && e.type !== 'arrow' && e.type !== 'line').length;
     const arrows = copies.filter((e) => e.type === 'arrow').length;
-    return { line: `added a mermaid diagram at ${Math.round(spot.box.x)},${Math.round(spot.box.y)} ${Math.round(from.w)}x${Math.round(from.h)}: ${shapes} shapes, ${arrows} arrows (a group; each part can be edited)`, box: spot.box };
+    return { line: `added a mermaid diagram at ${Math.round(spot.box.x)},${Math.round(spot.box.y)} ${Math.round(from.w)}x${Math.round(from.h)}: ${shapes} shapes, ${arrows} arrows (a group; each part can be edited)${copies[0] ? inFrame(work, copies[0]) : ''}`, box: spot.box };
   }
   if (kind === 'frame') {
     const title = text(op.text ?? op.title, 'text', false, FRAME_TITLE_MAX).replace(/\s+/g, ' ').trim();
@@ -786,7 +792,7 @@ function add(work: Work, given: CanvasOp, fallback?: Box): { line: string; box: 
     const el = textElement(work, words, spot.box, { textAlign: 'left', verticalAlign: 'top', ...(column ? { autoResize: false } : {}), ...(color ? { strokeColor: color.stroke } : {}) });
     settle(work, [el], spot);
     tieTo(work, el, spot);
-    return { line: `added ${describe(work, el)}`, box: spot.box };
+    return { line: `added ${describe(work, el)}${inFrame(work, el)}`, box: spot.box };
   }
   // Long words get a wider thing, so a long note is a block and not a strip.
   const wide = Math.min(64, Math.max(kind === 'note' ? 22 : 20, Math.ceil(Math.sqrt(columns(words)) * 2.4)));
@@ -811,7 +817,7 @@ function add(work: Work, given: CanvasOp, fallback?: Box): { line: string; box: 
   settle(work, made, spot);
   tieTo(work, el, spot);
   // The kind word the agent used: a note is a yellow box, and it asked for a note.
-  const line = describe(work, el);
+  const line = `${describe(work, el)}${inFrame(work, el)}`;
   return { line: `added ${kind === 'note' ? line.replace(/^box /, 'note ') : line}`, box: spot.box };
 }
 

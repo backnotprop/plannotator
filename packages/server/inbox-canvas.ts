@@ -55,7 +55,7 @@ import { decodePng, encodePng } from "./inbox-icon-trim";
 import { fail, guarded, okComplete } from "./inbox-mcp-result";
 
 const CANVAS_VERBS = [
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram; an open Inbox window draws it, so it is refused while none is open). Place (add and move): near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "size": [width, height] and "color": black, gray, red, pink, violet, blue, teal, green, yellow, orange.',
+  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame ("title" works too), mermaid (text is a flowchart or sequence diagram; an open Inbox window draws it, so it is refused while none is open). Place (add and move): near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "size": [width, height] and "color": black, gray, red, pink, violet, blue, teal, green, yellow, orange.',
   '{"connect": "<thing>", "to": "<thing>", "label": "..."} (or {"from": "<thing>", "to": "<thing>"}; the arrow points at "to")   {"set": "<thing>", "text": "...", "color": "..."}',
   '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
   '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
@@ -66,14 +66,14 @@ const CANVAS_BASE_RULE =
 export const INBOX_CANVAS_DESCRIPTION = [
   "A thread's canvas: a shared Excalidraw drawing the person sketches on, which you read and change. With only thread_id it answers the canvas as text, one line per thing, and its rev.",
   '"picture": true also writes a PNG of it and gives the path; "picture": "<thing>" (or a list) is that part only. "in": "<frame>" reads one frame.',
-  `"do": [...] changes it, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words. Each change has one verb:`,
+  `"do": [...] changes it, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words (one just added too). Each change has one verb:`,
   ...CANVAS_VERBS,
   "The person sees your change on the canvas at once and can undo it; nothing is sent to them.",
 ].join("\n");
 
 /** The `do` field: the whole grammar, so an agent that sees only the fields (the `plannotator_inbox` tool) can write a change. */
 export const INBOX_CANVAS_DO_DESCRIPTION = [
-  `Changes to the canvas, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words. One verb per change:`,
+  `Changes to the canvas, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words (one just added too). One verb per change:`,
   ...CANVAS_VERBS,
 ].join("\n");
 
@@ -537,6 +537,16 @@ export function createInboxCanvas(options: {
         lines.push("Connected, not selected:");
         for (const thing of extra) lines.push(`  ${lineOf(thing, scene, things)}`);
         shown.push(...extra);
+      }
+      // Everything else, by kind, id and words only: "behind the queue" may name a thing two steps away, and an agent
+      // that cannot see it draws a second one. Enough to connect to or stand beside; a change to one of these still
+      // needs it shown in full (a read, or the refusal that shows it).
+      const listed = new Set([...only, ...extra.map((x) => x.id)]);
+      const rest = things.filter((x) => !listed.has(x.id) && ((x.kind !== "arrow" && x.kind !== "line") || x.words));
+      if (rest.length > 0) {
+        const brief = (x: Thing) => `${x.kind} ${x.id}${x.words ? ` ${JSON.stringify(Array.from(x.words).length > 40 ? `${Array.from(x.words).slice(0, 39).join("")}…` : x.words)}` : ""}`;
+        const more = rest.length > 40 ? `; and ${rest.length - 40} more: canvas ${JSON.stringify({ thread_id: threadId })}` : "";
+        lines.push(`Also on the canvas: ${rest.slice(0, 40).map(brief).join("; ")}${more}`);
       }
     }
     // What the reply lists, as it looks now: shown to the session the reply goes to, once the reply is stored (`replyShown`).

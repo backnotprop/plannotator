@@ -462,6 +462,9 @@ describe("what six fresh agents tripped on (round 5)", () => {
     expect(made.done[0]).toContain("holds 2");
     expect(made.done[1]).toMatch(/^added note \S+ "Three times"/);
     expect(made.done[2]).toMatch(/^added box /);
+    // The answer says which frame a new thing went into, and a frame's title may be given as "title".
+    expect(made.done[1]).toMatch(/, in frame \S+/);
+    expect(applyOps(emptyScene(), [{ add: "frame", title: "By title" }], agent).done[0]).toContain('"By title"');
   });
 
   const circle = (cx: number, cy: number, r: number, n = 24): number[][] => Array.from({ length: n + 1 }, (_, i) => [cx + Math.cos((i / n) * Math.PI * 2) * r, cy + Math.sin((i / n) * Math.PI * 2) * r]);
