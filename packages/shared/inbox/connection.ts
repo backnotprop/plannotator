@@ -2186,3 +2186,29 @@ export const INBOX_SESSION_LIVE_MS = 30_000
  * reads it as stuck once that session is gone too.
  */
 export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+
+/**
+ * The person's rules as the Inbox note in an agent's instructions file
+ * carries them (packages/server/inbox-agent-notes.ts), right after the note's
+ * own lines: one blank line, INBOX_RULES_LEAD, then the rules as written
+ * (trimmed, LF line endings). The same lead and words the reminder adds.
+ */
+export function inboxNoteRulesSection(rules: string): string {
+  return `\n\n${INBOX_RULES_LEAD}\n${rules.trim().replace(/\r\n?/g, '\n')}`
+}
+
+/**
+ * Whether an instructions file holds the Inbox note carrying exactly these
+ * rules: one start line, one end line after it, and the block ends with
+ * inboxNoteRulesSection(rules) (line endings aside; the lines above may be the
+ * person's own edit). A host's reminder then leaves the rules out: the agent
+ * has them from the file, once. Read once per session start, with the rules.
+ */
+export function inboxNoteHoldsRules(fileText: string, rules: string | null | undefined): boolean {
+  if (typeof rules !== 'string' || rules.trim() === '') return false
+  const text = fileText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  const starts = [...text.matchAll(/^<!-- plannotator-inbox:start\b[^\n]*-->[ \t]*$/gm)]
+  const ends = [...text.matchAll(/^<!-- plannotator-inbox:end -->[ \t]*$/gm)]
+  if (starts.length !== 1 || ends.length !== 1 || ends[0]!.index! < starts[0]!.index!) return false
+  return text.slice(starts[0]!.index!, ends[0]!.index!).endsWith(`${inboxNoteRulesSection(rules)}\n`)
+}

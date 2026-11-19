@@ -402,7 +402,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, inboxNoteBlockFor, inboxNoteBlockWith, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -2444,6 +2444,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   } catch {
     // Never holds up a start.
   }
+  // The block a note writes, with the person's rules for all agents (the dialog, Settings → Agents, Cursor's
+  // copy), and each agent's own where it differs (its own rules).
+  const noteTexts = (): { note_text: string; note_texts: Partial<Record<InboxNoteAgentId, string>> } => {
+    const config = loadConfig();
+    const shared = inboxNoteBlockWith(sharedNoteRules(config));
+    const own: Partial<Record<InboxNoteAgentId, string>> = {};
+    for (const id of INBOX_NOTE_AGENT_IDS) {
+      // What that agent's file gets: one several agents read carries the rules they share (inboxNoteBlockFor).
+      const block = id === "cursor" ? shared : inboxNoteBlockFor(id, dataDir, agentEnvironment, config);
+      if (block !== shared) own[id] = block;
+    }
+    return { note_text: shared, note_texts: own };
+  };
   let connecting: Promise<InboxConnectReport> | null = null;
   // The Inbox's stop ends a run still going: its agent CLIs are killed, never left running.
   const connectStop = new AbortController();
@@ -2531,7 +2544,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       tool_env: toolEnv ?? null,
       notes_offered: loadConfig().inboxAgentNotes?.offered === true,
       notes_asked: await notesAsked(options),
-      note_text: INBOX_NOTE_BLOCK,
+      ...noteTexts(),
       notes_auto: unsaidAutoNotes(),
       // The open sessions that poll now, per host, and which need a restart or an update (inbox-restart.ts).
       sessions: live.hostSessions((host) => {
@@ -3887,7 +3900,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const on = Object.fromEntries(
       INBOX_TOOL_HOSTS.map((host) => [host, !(host === "claude-code" && modOff) && resolveInboxReminder(config, env, host)]),
     ) as Record<InboxToolHost, boolean>;
-    return inboxPromptsModel(config, on, promptWakes());
+    // Who the rules do not reach: never at the cost of Settings (null when it could not tell: no lines).
+    const notes = noteRulesStates(dataDir, agentEnvironment, config);
+    return inboxPromptsModel(config, on, promptWakes(), notes ? { notes, mcp: mcpConnectedNoteAgents() } : undefined);
+  };
+  /**
+   * The note agents connected to the Inbox through MCP, from inbox/agents.json (an entry Plannotator added or
+   * found, not removed since): they read the shared rules in the MCP server's instructions too.
+   */
+  const mcpConnectedNoteAgents = (): Partial<Record<InboxNoteAgentId, boolean>> => {
+    const records = readInboxAgents(dataDir).agents;
+    const out: Partial<Record<InboxNoteAgentId, boolean>> = {};
+    for (const id of INBOX_NOTE_AGENT_IDS) {
+      const record = records[id];
+      if (record?.reach === "mcp" && (record.state === "added" || record.state === "found") && !record.removed_outside_at) out[id] = true;
+    }
+    return out;
   };
   // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
   const promptWakes = () => ({ "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" });
@@ -6893,7 +6921,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
-        if (promptsChange) saveInboxPromptsChange(promptsChange);
+        if (promptsChange) {
+          saveInboxPromptsChange(promptsChange);
+          // The person's rules ride in each agent's note: every note Plannotator wrote, untouched, is
+          // rewritten with them now (an edited, read-only or busy one is left; Settings → Prompts says so).
+          if (promptsChange.inbox && ("rules" in promptsChange.inbox || Object.values(promptsChange.inbox.runtimes ?? {}).some((entry) => entry && "rules" in entry))) {
+            try {
+              refreshInboxNotes(dataDir, agentEnvironment);
+            } catch {
+              // Never fails a save: the next start tries again.
+            }
+          }
+        }
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
         return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }

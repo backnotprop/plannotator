@@ -36,7 +36,7 @@ import {
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from "@plannotator/shared/guide";
 import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
-import { inboxRulesModel } from "./inbox-rules";
+import { inboxRulesModel, type InboxRulesDelivery } from "./inbox-rules";
 
 type Group = InboxPromptItem["group"];
 
@@ -90,6 +90,7 @@ export function inboxPromptsModel(
   config: PlannotatorConfig,
   on: Record<InboxPromptHost, boolean>,
   wakes: Record<InboxPromptHost, boolean> = { "claude-code": true, pi: true, opencode: true },
+  delivery?: Pick<InboxRulesDelivery, "notes" | "mcp">,
 ): InboxPromptsSettings {
   const inbox = record(record(config.prompts)?.inbox);
   const prompts = record(config.prompts);
@@ -129,7 +130,7 @@ export function inboxPromptsModel(
     },
     others,
     guide: { text: readGuideInstructions() || null, max: GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS },
-    rules: inboxRulesModel(config, wakes),
+    rules: inboxRulesModel(config, wakes, delivery ? { notes: delivery.notes, on, mcp: delivery.mcp } : undefined),
   };
 }
 

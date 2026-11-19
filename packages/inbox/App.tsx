@@ -6231,7 +6231,7 @@ function Inbox() {
         />
       )}
       {typeof agentNote === 'object' && agents && (
-        <AgentNoteDialog rows={agentNote.rows} noteText={agents.note_text} onModel={setAgents} onClosed={() => setAgentNote('shown')} />
+        <AgentNoteDialog rows={agentNote.rows} noteText={agents.note_text} noteTexts={agents.note_texts} onModel={setAgents} onClosed={() => setAgentNote('shown')} />
       )}
       {tourIntroShown && (
         <div className="ib-tour-layer">

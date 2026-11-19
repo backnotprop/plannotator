@@ -53,11 +53,13 @@ import {
   INBOX_AGENT_LABELS,
   INBOX_NOTE_AGENT_IDS,
   INBOX_NOTE_AUTO_AGENT_IDS,
+  INBOX_PROMPT_HOSTS,
   type InboxAgentNoteStatus,
   type InboxNoteAgentId,
   type InboxNoteAutoAdd,
 } from "@plannotator/core/inbox-types";
-import { loadConfig, saveConfig } from "@plannotator/shared/config";
+import { loadConfig, loadConfigOrNull, saveConfig } from "@plannotator/shared/config";
+import { inboxNoteHoldsRules, inboxNoteRulesSection, inboxReminderRulesText } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
@@ -252,6 +254,63 @@ export const CURSOR_NOTE_REASON = "Cursor keeps its rules in the app: copy the n
 
 export const INBOX_NOTE_BLOCK = `${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n${INBOX_NOTE_END}`;
 
+/**
+ * The person's own rules in the note (the owner, 2026-11-17: "Put your own
+ * rules into the note we already write in each agent's instructions file"):
+ * after the note's lines, the reminder's own lead (INBOX_RULES_LEAD) and the
+ * rules as written (inboxNoteRulesSection), inside the same markers, the same
+ * version. With no rules the block is INBOX_NOTE_BLOCK byte for byte. Which
+ * rules: the shared ones (config.json `prompts.inbox.rules`), and for Claude
+ * Code, Pi and OpenCode their own (`prompts.inbox.runtimes.<host>.rules`),
+ * which win, as for the reminder (inboxReminderRulesText). Codex, Gemini CLI,
+ * Qwen Code and Cursor get the shared ones. No cap beyond what Settings saves:
+ * a file has no ceiling like a hook's. Rules with a line a marker or a Gemini
+ * or Qwen memory tool would read as theirs are left out of the note (the
+ * block would read as damaged, or a memory would land inside it); the
+ * reminder still carries them where there is one.
+ */
+export function inboxNoteRules(agent: InboxNoteAgentId, config: unknown): string | null {
+  const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? agent : null;
+  return noteSafe(host ? inboxReminderRulesText(config, host) : sharedNoteRules(config));
+}
+
+/** The rules for all agents (`prompts.inbox.rules`), trimmed, or null: the ones a file several agents read carries, and Cursor's copy. */
+export function sharedNoteRules(config: unknown): string | null {
+  return noteSafe(sharedRulesText(config));
+}
+
+function noteSafe(rules: string | null): string | null {
+  if (rules === null) return null;
+  // Anywhere, not per line: the marker finders' `^` also starts a line after a CR, U+2028 or U+2029,
+  // and the memory tools find their header as plain text (indexOf).
+  if (rules.includes(NOTE_MARKER_PREFIX)) return null;
+  if (MEMORY_SECTION_HEADERS.some((header) => rules.includes(header))) return null;
+  return rules.replace(/\r\n?/g, "\n");
+}
+
+/** What every marker of the note starts with. */
+const NOTE_MARKER_PREFIX = "<!-- plannotator-inbox:";
+
+/** The note's body with these rules after it (none: INBOX_NOTE_BODY). Cursor's copy and `--notes cursor` print it. */
+export function inboxNoteBodyWith(rules: string | null): string {
+  return rules === null ? INBOX_NOTE_BODY : `${INBOX_NOTE_BODY}${inboxNoteRulesSection(rules)}`;
+}
+
+/** The block a note writes with these rules (none: INBOX_NOTE_BLOCK). */
+export function inboxNoteBlockWith(rules: string | null): string {
+  return rules === null ? INBOX_NOTE_BLOCK : `${INBOX_NOTE_START}\n${inboxNoteBodyWith(rules)}\n${INBOX_NOTE_END}`;
+}
+
+/**
+ * The block for one file, read by these agents: their rules when they agree,
+ * else the rules for all agents (Pi's AGENTS.md a link to Codex's, with rules
+ * of Pi's own: Pi's reminder carries those, since the note does not hold them).
+ */
+function blockFor(agents: readonly InboxNoteAgentId[], config: unknown): string {
+  const each = agents.map((agent) => inboxNoteRules(agent, config));
+  return inboxNoteBlockWith(each.every((rules) => rules === each[0]) ? (each[0] ?? null) : sharedNoteRules(config));
+}
+
 /** Every block an earlier Plannotator wrote, untouched (LF): read as Plannotator's own when no record names it. */
 export const INBOX_NOTE_EARLIER_BLOCKS: readonly string[] = [
   `${noteStart(1)}\n${INBOX_NOTE_BODY_V1}\n${INBOX_NOTE_END}`,
@@ -285,6 +344,13 @@ export interface InboxAgentNoteRecord {
   version: number;
   /** SHA-256 of the block as written (LF line endings). */
   block_sha256: string;
+  /**
+   * The block this record named before refreshInboxNotes moved it on (the
+   * record is written before the note): still Plannotator's own, so a crash
+   * between the two writes leaves a note the next start repairs. Absent from
+   * records an older Inbox wrote.
+   */
+  prior_sha256?: string;
   at: string;
 }
 
@@ -332,9 +398,15 @@ const isPlannotatorBlock = (hash: string) => hash === sha256(INBOX_NOTE_BLOCK) |
  * put-back) leaves it. Only Plannotator puts a record ahead of its note, and
  * only over a block it wrote, so this never takes the person's own text; it
  * lets the next start refresh the note, and add, status and uninstall read it
- * as Plannotator's.
+ * as Plannotator's. A record this Inbox moved on names the block it named
+ * before (`prior_sha256`) for the same reason: with the person's rules in the
+ * note, the block before can be one no version list holds (other rules).
  */
-const ownedBy = (recorded: string, hash: string) => recorded === hash || (recorded === sha256(INBOX_NOTE_BLOCK) && EARLIER_BLOCK_HASHES.has(hash));
+const ownedBy = (record: Pick<InboxAgentNoteRecord, "block_sha256" | "prior_sha256">, hash: string) =>
+  record.block_sha256 === hash || record.prior_sha256 === hash || (record.block_sha256 === sha256(INBOX_NOTE_BLOCK) && EARLIER_BLOCK_HASHES.has(hash));
+
+/** A block this version writes (its start line), whatever rules it carries: one a newer Plannotator wrote is never rewritten here. */
+const thisVersion = (block: string) => block.replace(/\r\n/g, "\n").startsWith(`${INBOX_NOTE_START}\n`);
 
 /** Where a path leads, as far as it exists (a symlinked folder on its way included). */
 function resolved(path: string): string {
@@ -466,8 +538,8 @@ function findBlock(text: string): BlockFind {
 }
 
 /** The block in the file's dominant line ending. */
-function blockIn(nl: string): string {
-  return INBOX_NOTE_BLOCK.replace(/\n/g, nl);
+function blockIn(block: string, nl: string): string {
+  return block.replace(/\n/g, nl);
 }
 
 /**
@@ -483,10 +555,10 @@ function blockIn(nl: string): string {
  * break before the block (the start marker must begin a line) and none after
  * it, so the block is the file's last bytes there too.
  */
-function appendBlock(text: string, nl: string): string {
-  if (!text.trim()) return text && !/\r?\n$/.test(text) ? `${text}${nl}${blockIn(nl)}` : `${text}${blockIn(nl)}${nl}`;
-  if (/\r?\n$/.test(text)) return `${text}${nl}${blockIn(nl)}${nl}`;
-  return `${text}${nl}${nl}${blockIn(nl)}`;
+function appendBlock(text: string, block: string, nl: string): string {
+  if (!text.trim()) return text && !/\r?\n$/.test(text) ? `${text}${nl}${blockIn(block, nl)}` : `${text}${blockIn(block, nl)}${nl}`;
+  if (/\r?\n$/.test(text)) return `${text}${nl}${blockIn(block, nl)}${nl}`;
+  return `${text}${nl}${nl}${blockIn(block, nl)}`;
 }
 
 /**
@@ -534,8 +606,8 @@ function placeAboveMemory(text: string, block: string, nl: string): string {
 }
 
 /** `text` with the block added: above a memory section when the file has one, else at the end (appendBlock). */
-function insertBlock(text: string, nl: string): string {
-  return memorySectionLine(text) === -1 ? appendBlock(text, nl) : placeAboveMemory(text, blockIn(nl), nl);
+function insertBlock(text: string, block: string, nl: string): string {
+  return memorySectionLine(text) === -1 ? appendBlock(text, block, nl) : placeAboveMemory(text, blockIn(block, nl), nl);
 }
 
 /** The block at [start, end) moved above the memory section, as `block` (the note in the line ending given). */
@@ -585,7 +657,8 @@ function sharers(agent: InboxNoteAgentId, path: string, dataDir: string): InboxN
   return INBOX_NOTE_AGENT_IDS.filter((id) => id !== agent && records[id]?.path === path);
 }
 
-export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment): InboxAgentNoteStatus {
+/** `config`: config.json's object, for the person's rules a block without a record may hold (default: loadConfig()). */
+export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, config?: unknown): InboxAgentNoteStatus {
   const target = noteTarget(agent, e);
   if (agent === "cursor") {
     return { agent, path: null, target: null, state: "manual", create: false, created: false, reason: target.reason, shared_with: [] };
@@ -608,7 +681,7 @@ export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnv
     const shownThere = displayPath(record.path, e);
     return {
       ...base,
-      state: ownedBy(record.block_sha256, sha256(block.block)) ? "added" : "edited",
+      state: ownedBy(record, sha256(block.block)) ? "added" : "edited",
       reason: `The note is in ${shownThere}, which ${INBOX_AGENT_LABELS[agent]} no longer reads first; turning it off removes it there.`,
     };
   };
@@ -621,7 +694,8 @@ export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnv
   if (found.kind === "damaged") return { ...base, state: "damaged", reason: "the Plannotator section's markers are broken; fix or delete it by hand" };
   const hash = sha256(found.block);
   const owner = record ?? shared.map((id) => readInboxAgentNotes(dataDir).notes[id]).find(Boolean);
-  const untouched = owner ? ownedBy(owner.block_sha256, hash) : isPlannotatorBlock(hash);
+  // With the record lost, also the block this Inbox would write now (the person's rules in it).
+  const untouched = owner ? ownedBy(owner, hash) : isPlannotatorBlock(hash) || hash === sha256(blockFor([agent], config ?? loadConfig()));
   // A block another agent's record owns in this shared file is on for this agent only once it has its own record.
   if (!record && shared.length > 0) return { ...base, state: "absent" };
   return { ...base, state: untouched ? "added" : "edited" };
@@ -642,6 +716,8 @@ export interface AddNoteOptions {
   auto?: boolean;
   /** Tests: runs between the read and the write, to change the file under the add. */
   beforeWrite?: (target: string) => void;
+  /** config.json's object, for the person's rules the note carries (default: loadConfig()). */
+  config?: unknown;
 }
 
 /** The note pasted by hand without markers (as Cursor's copy, or an older prompt showed it): its heading on a line of its own. */
@@ -684,6 +760,11 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   if (found.kind === "damaged") return { ok: false, agent, reason: `the Plannotator section in ${shown} is damaged; fix or delete it by hand`, path: shown };
   const real = resolved(target.path);
   const owner = notes[agent] ?? INBOX_NOTE_AGENT_IDS.map((id) => notes[id]).find((r) => r?.path === real);
+  // The block with the person's rules, the same for every agent whose record names this file.
+  const config = options.config === undefined ? loadConfigOrNull() : options.config;
+  // config.json there but unreadable: its rules are unknown, and `{}` would write a note without them.
+  if (config === null) return { ok: false, agent, reason: "config.json can't be read, so the note's rules are unknown; fix it and try again", path: shown };
+  const block = blockFor([agent, ...sharersOf(agent, real, notes)], config);
   let next: string;
   let action: "added" | "created" | "updated" | "unchanged" | "shared";
   /** The block's hash before this add (null: there was none), for the other records naming the same file. */
@@ -693,12 +774,13 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
     before = hash;
     // A note Plannotator wrote after a Gemini or Qwen memory section moves above it (the memory tool would write into it).
     const moves = afterMemorySection(original, found.start);
-    if (hash === sha256(INBOX_NOTE_BLOCK)) {
+    if (hash === sha256(block)) {
       next = moves ? moveAboveMemory(original, found.start, found.end, found.block, nl) : original;
       action = moves ? "updated" : notes[agent] || !owner ? "unchanged" : "shared";
-    } else if (owner ? ownedBy(owner.block_sha256, hash) : EARLIER_BLOCK_HASHES.has(hash)) {
-      // An older note Plannotator wrote (its record, or with the record lost, a block exactly as an earlier version wrote it).
-      next = moves ? moveAboveMemory(original, found.start, found.end, blockIn(nl), nl) : original.slice(0, found.start) + blockIn(nl) + original.slice(found.end);
+    } else if (owner ? ownedBy(owner, hash) : isPlannotatorBlock(hash)) {
+      // An older note Plannotator wrote, or one with other rules (its record, or with the record lost, a
+      // block exactly as an earlier version, or this one with no rules, wrote it).
+      next = moves ? moveAboveMemory(original, found.start, found.end, blockIn(block, nl), nl) : original.slice(0, found.start) + blockIn(block, nl) + original.slice(found.end);
       action = "updated";
     } else {
       // The person's edit: theirs to keep.
@@ -708,7 +790,7 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
     if (options.auto && UNMARKED_NOTE.test(original)) {
       return { ok: false, agent, reason: `${shown} already has the note, pasted without markers`, path: shown, skipped: true };
     }
-    next = insertBlock(original, nl);
+    next = insertBlock(original, block, nl);
     action = read.kind === "missing" ? "created" : "added";
   }
   if (read.kind !== "file" || next !== original) {
@@ -731,7 +813,7 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   }
   const file = readInboxAgentNotes(dataDir);
   const at = resolved(read.target);
-  const current = sha256(INBOX_NOTE_BLOCK);
+  const current = sha256(block);
   file.notes[agent] = {
     // The resolved path, so switching off and uninstall find the very file this wrote (a linked folder on the way).
     path: at,
@@ -747,7 +829,7 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
     const other = file.notes[id];
     if (id === agent || !other || other.path !== at || other.block_sha256 === current) continue;
     if (other.block_sha256 === before || EARLIER_BLOCK_HASHES.has(other.block_sha256)) {
-      file.notes[id] = { ...other, version: INBOX_NOTE_VERSION, block_sha256: current };
+      file.notes[id] = { ...other, version: INBOX_NOTE_VERSION, block_sha256: current, prior_sha256: other.block_sha256 };
     }
   }
   writeInboxAgentNotes(dataDir, file);
@@ -780,6 +862,8 @@ export interface NoteRefresh {
 export interface RefreshInboxNotesOptions {
   /** Test seam: runs after a file was read and its new text made, right before the write. */
   beforeWrite?: (path: string) => void;
+  /** config.json's object, for the person's rules each note carries (default: loadConfig()). */
+  config?: unknown;
 }
 
 /**
@@ -790,8 +874,12 @@ export interface RefreshInboxNotesOptions {
  *  - the block is found only as exactly one start line before exactly one end
  *    line (findBlock); any other markers are damaged and nothing is written;
  *  - it is replaced only when it is byte for byte (line endings aside) a block
- *    an earlier Plannotator wrote AND the one its record names (the hash):
- *    a block the person edited is never rewritten, nor a file without a record;
+ *    an earlier Plannotator wrote, or this version with other rules of the
+ *    person's (inboxNoteRules), AND the one its record names (the hash): a
+ *    block the person edited is never rewritten, nor a file without a record,
+ *    nor a block a newer Plannotator wrote;
+ *  - so the person's rules reach every note as they change: this runs again
+ *    when Settings saves them (the window's settings route);
  *    the one exception is the retired reply sentence (RETIRED_REPLY_PHRASE),
  *    swapped in place inside an edited block, the record left as it is;
  *  - a note the person removed (no block) is never put back;
@@ -815,7 +903,10 @@ export interface RefreshInboxNotesOptions {
 export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options: RefreshInboxNotesOptions = {}): NoteRefresh[] {
   if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env)) return [];
   const file = readInboxAgentNotes(dataDir);
-  const current = sha256(INBOX_NOTE_BLOCK);
+  const config = options.config === undefined ? loadConfigOrNull() : options.config;
+  // config.json there but unreadable: the rules each note should hold are unknown. Nothing is written
+  // (a read that failed is not "no rules"); the next start, or a save in Settings, refreshes them.
+  if (config === null) return [];
   const byPath = new Map<string, InboxNoteAgentId[]>();
   for (const agent of INBOX_NOTE_AGENT_IDS) {
     // Cursor's note is copied by hand into the app: never Plannotator's to rewrite, whatever a record says.
@@ -824,13 +915,14 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
     if (record) byPath.set(record.path, [...(byPath.get(record.path) ?? []), agent]);
   }
   const results: NoteRefresh[] = [];
-  // A record naming an earlier block follows the file to this version.
-  const follow = (agents: InboxNoteAgentId[]): boolean => {
+  // Every record naming this file follows it to the block it holds now (`current`): one naming any other
+  // block would read Plannotator's own note as the person's edit. The block it named stays its own (prior_sha256).
+  const follow = (agents: InboxNoteAgentId[], current: string): boolean => {
     let changed = false;
     for (const agent of agents) {
       const record = file.notes[agent]!;
-      if (record.block_sha256 !== current && EARLIER_BLOCK_HASHES.has(record.block_sha256)) {
-        file.notes[agent] = { ...record, version: INBOX_NOTE_VERSION, block_sha256: current };
+      if (record.block_sha256 !== current) {
+        file.notes[agent] = { ...record, version: INBOX_NOTE_VERSION, block_sha256: current, prior_sha256: record.block_sha256 };
         changed = true;
       }
     }
@@ -838,12 +930,14 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   };
   let staleRecords = false;
   for (const [path, agents] of byPath) {
-    const recorded = new Set(agents.map((agent) => file.notes[agent]!.block_sha256));
+    const recorded = agents.map((agent) => file.notes[agent]!);
+    const block = blockFor(agents, config);
+    const current = sha256(block);
     // Right before the file's write: the records first (throws, writing nothing, when they cannot be
     // written), with a way back if the file's write then fails.
     const commitRecords = (): (() => void) => {
       const saved = { ...file.notes };
-      if (!follow(agents)) return () => {};
+      if (!follow(agents, current)) return () => {};
       try {
         writeInboxAgentNotes(dataDir, file);
       } catch (error) {
@@ -861,12 +955,12 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
     };
     let result: NoteRefresh["result"];
     try {
-      result = refreshNoteFile(path, recorded, options, commitRecords);
+      result = refreshNoteFile(path, recorded, block, options, commitRecords);
     } catch {
       result = "refused";
     }
     // Already this version (written by an add whose record write failed, or another agent's link): the record follows.
-    if (result === "current" && follow(agents)) staleRecords = true;
+    if (result === "current" && follow(agents, current)) staleRecords = true;
     agents.forEach((agent, index) => results.push({ agent, path, result: result === "refreshed" && index > 0 ? "shared" : result }));
   }
   if (staleRecords) {
@@ -884,7 +978,13 @@ const RETIRED_REPLY_PHRASE = "otherwise call `wait_for_reply`";
 const CURRENT_REPLY_PHRASE = "otherwise read the thread later with `read_thread`";
 
 /** One file of refreshInboxNotes: its outcome, the file written for `refreshed`, and for `edited` only when the retired reply sentence was swapped. */
-function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: RefreshInboxNotesOptions, commitRecords: () => () => void): NoteRefresh["result"] {
+function refreshNoteFile(
+  path: string,
+  recorded: readonly InboxAgentNoteRecord[],
+  block: string,
+  options: RefreshInboxNotesOptions,
+  commitRecords: () => () => void,
+): NoteRefresh["result"] {
   const read = readAgentFile(path);
   if (read.kind === "missing") return "missing";
   if (read.kind === "refused") return "refused";
@@ -894,9 +994,10 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
   const hash = sha256(found.block);
   // A note after a Gemini or Qwen memory section moves above it, only while it is the very block its record names.
   const moves = afterMemorySection(read.text, found.start);
-  const current = hash === sha256(INBOX_NOTE_BLOCK);
-  if (current && (!moves || !recorded.has(hash))) return "current";
-  const untouched = (current || EARLIER_BLOCK_HASHES.has(hash)) && [...recorded].some((r) => ownedBy(r, hash));
+  const current = hash === sha256(block);
+  if (current && (!moves || !recorded.some((r) => r.block_sha256 === hash))) return "current";
+  // A block this version wrote with other rules counts as Plannotator's only through its record.
+  const untouched = (current || EARLIER_BLOCK_HASHES.has(hash) || thisVersion(found.block)) && recorded.some((r) => ownedBy(r, hash));
   // The one exception for a block the person edited: the exact retired sentence inside the block is
   // swapped, every other byte and the record kept (so it still reads as edited, and a second run finds nothing).
   const patchedBlock = untouched ? null : found.block.split(RETIRED_REPLY_PHRASE).join(CURRENT_REPLY_PHRASE);
@@ -910,8 +1011,8 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
   const next = patching
     ? read.text.slice(0, found.start) + patchedBlock! + read.text.slice(found.end)
     : moves
-      ? moveAboveMemory(read.text, found.start, found.end, blockIn(nl), nl)
-      : read.text.slice(0, found.start) + blockIn(nl) + read.text.slice(found.end);
+      ? moveAboveMemory(read.text, found.start, found.end, blockIn(block, nl), nl)
+      : read.text.slice(0, found.start) + blockIn(block, nl) + read.text.slice(found.end);
   options.beforeWrite?.(read.target);
   // Compare and write: the bytes on disk must still be the ones this read (and the mode the same).
   const before = Buffer.from(withBom(read.text, read.bom), "utf8");
@@ -1054,7 +1155,7 @@ export interface NoteRemovalPlan {
 }
 
 /** What uninstall removes: every recorded note, then any file that still holds our markers; damaged sections are named, never touched. */
-export function planInboxNoteRemoval(dataDir: string, e: AgentEnvironment, labels: Record<InboxNoteAgentId, string>): NoteRemovalPlan {
+export function planInboxNoteRemoval(dataDir: string, e: AgentEnvironment, labels: Record<InboxNoteAgentId, string>, config: unknown = loadConfig()): NoteRemovalPlan {
   if (!agentHomeAllowed(e)) return { items: [], skipped: [] };
   const records = readInboxAgentNotes(dataDir).notes;
   const items: NoteRemovalItem[] = [];
@@ -1076,7 +1177,8 @@ export function planInboxNoteRemoval(dataDir: string, e: AgentEnvironment, label
       }
       const owners = INBOX_NOTE_AGENT_IDS.filter((id) => records[id]?.path === real);
       const record = owners.map((id) => records[id]).find(Boolean);
-      const edited = record ? !ownedBy(record.block_sha256, sha256(found.block)) : !isPlannotatorBlock(sha256(found.block));
+      const hash = sha256(found.block);
+      const edited = record ? !ownedBy(record, hash) : !isPlannotatorBlock(hash) && hash !== sha256(blockFor([agent], config));
       const created = record?.created === true || real === resolved(claudeRulesFile(e));
       const how = created ? "created by Plannotator: file removed if empty" : "marked section only";
       items.push({
@@ -1137,6 +1239,118 @@ export function noteHolderIds(options: Pick<ConnectOptions, "dataDir" | "environ
     const state = noteStatus(id, options.dataDir, options.environment).state;
     return state === "added" || state === "edited";
   });
+}
+
+/**
+ * Whether each agent found here holds its rules in its note now (Settings →
+ * Prompts says who does not get them): `held`, the file it reads holds the
+ * block with exactly its rules (inboxNoteHoldsRules, what the reminder side
+ * checks too); else why not: `none`, no note there (never added, turned off,
+ * no file to put it in); `edited`, a note the person edited, which
+ * Plannotator leaves as it is; `stale`, Plannotator's note but not with these
+ * rules (read-only, other hard links, changed while written,
+ * PLANNOTATOR_INBOX_NOTES=0, damaged). `fix`: Settings → Agents can put it
+ * right (the note can be added there: not with PLANNOTATOR_INBOX_NOTES=0, not
+ * where there is no file to put it in, not over a note pasted by hand, never
+ * for rules the note cannot carry, noteSafe). Left out, so Settings says
+ * nothing it cannot stand behind: agents with no rules; Cursor (its copy by
+ * hand cannot be seen); an agent the person said no to (asked, and no note:
+ * "Don't add a note", or turned off), but never a file the automatic add left
+ * alone on purpose, which `asked` records too (skippedOnPurpose). Null when
+ * anything throws: Settings then shows no line rather than failing.
+ */
+export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: unknown): Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> | null {
+  try {
+    const out: Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> = {};
+    if (!agentHomeAllowed(e)) return out;
+    const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
+    const asked = record(record(config)?.inboxAgentNotes)?.asked;
+    const declined = (id: InboxNoteAgentId) => Array.isArray(asked) && asked.includes(id);
+    const notesOff = inboxNotesDisabled(e.env);
+    for (const id of INBOX_NOTE_AGENT_IDS) {
+      if (id === "cursor" || agentRulesText(id, config) === null || !agentSpec(id).detect(e)) continue;
+      if (inboxNoteHoldsAgentRules(id, e, config)) {
+        out[id] = "held";
+        continue;
+      }
+      // Rules the note cannot carry (noteSafe): no switch puts them there.
+      const carried = inboxNoteRules(id, config) !== null;
+      const state = noteStatus(id, dataDir, e, config).state;
+      if (state === "absent" || state === "unavailable") {
+        // Silent only for the person's own no. `asked` also holds the files the automatic add left
+        // alone on purpose; those are told apart by the file itself, so a skipped one is never hidden.
+        const skipped = skippedOnPurpose(id, e);
+        if (declined(id) && skipped === null) continue;
+        out[id] = { why: "none", fix: carried && state === "absent" && !notesOff && skipped !== "pasted" };
+      } else {
+        out[id] = { why: state === "edited" ? "edited" : "stale", fix: carried && !notesOff };
+      }
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why the automatic add would leave this agent's file alone (`addInboxNote` with `auto`), or null:
+ * `read-only` (no owner write bit), `hard-linked` (other hard links), `pasted` (the note pasted by
+ * hand without markers). Settings uses it to tell such a skip, which config.json records as asked
+ * too, from the person's own no.
+ */
+function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment): "read-only" | "hard-linked" | "pasted" | null {
+  const path = noteTarget(agent, e).path;
+  const read = path ? readAgentFile(path) : null;
+  if (read?.kind !== "file" || findBlock(read.text).kind !== "none") return null;
+  if (UNMARKED_NOTE.test(read.text)) return "pasted";
+  if ((read.mode & 0o200) === 0) return "read-only";
+  try {
+    return statSync(read.target).nlink > 1 ? "hard-linked" : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the file `agent` reads its note from holds the note with exactly
+ * its rules (inboxNoteHoldsRules: what the hosts' reminders check too). False
+ * with no rules, for Cursor, and with no file. Exported for the Inbox's MCP
+ * instructions, which can leave the rules out for a client whose agent has
+ * them here (not used there yet).
+ */
+export function inboxNoteHoldsAgentRules(agent: InboxNoteAgentId, e: AgentEnvironment, config: unknown): boolean {
+  const rules = agentRulesText(agent, config);
+  const path = rules === null ? null : noteTarget(agent, e).path;
+  const read = path ? readAgentFile(path) : null;
+  return read?.kind === "file" && inboxNoteHoldsRules(read.text, rules);
+}
+
+/** The rules an agent should have, as set (before noteSafe): its own for Claude Code, Pi and OpenCode, else the shared ones. */
+function agentRulesText(agent: InboxNoteAgentId, config: unknown): string | null {
+  const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? agent : null;
+  return host ? inboxReminderRulesText(config, host) : sharedRulesText(config);
+}
+
+export type InboxNoteRulesState = "held" | { why: "none" | "edited" | "stale"; fix: boolean };
+
+/**
+ * The block the note in `agent`'s file should hold now: the rules of every agent whose record names
+ * the same file (blockFor), so a preview shows what the file gets (Pi's AGENTS.md a link to Codex's).
+ */
+export function inboxNoteBlockFor(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, config: unknown): string {
+  const path = noteTarget(agent, e).path;
+  return blockFor(path ? [agent, ...sharersOf(agent, resolved(path), readInboxAgentNotes(dataDir).notes)] : [agent], config);
+}
+
+/** The other agents (Cursor never) whose record names this resolved file. */
+function sharersOf(agent: InboxNoteAgentId, real: string, notes: InboxAgentNotesFile["notes"]): InboxNoteAgentId[] {
+  return INBOX_NOTE_AGENT_IDS.filter((id) => id !== agent && id !== "cursor" && notes[id]?.path === real);
+}
+
+function sharedRulesText(config: unknown): string | null {
+  const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
+  const rules = record(record(record(config)?.prompts)?.inbox)?.rules;
+  return typeof rules === "string" && rules.trim() !== "" ? rules.trim() : null;
 }
 
 /**
