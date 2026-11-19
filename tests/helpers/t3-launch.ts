@@ -4,7 +4,7 @@
  * no agent run. The agents' own hosts are stand-ins (`background`) that record what they were asked to start, so a
  * fallback to the background is seen without a real Claude Code or Codex.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchAgent, InboxLaunchRecord, InboxMessage } from "../../packages/core/inbox-types";
@@ -66,8 +66,12 @@ export const CAPABILITIES = {
   features: {},
 };
 
-/** An agent's own host, standing in: records each start and starts it in the background (`bg-1`, …). */
-function backgroundHost(agent: InboxLaunchAgent, name: string, started: { agent: string; launch: InboxLaunchRecord }[]): LaunchHost {
+/**
+ * An agent's own host, standing in: records each start and starts it in the background (`bg-1`, …). `trusted`: the
+ * folders it trusts (absent: every one); its Trust folder offer warns on a folder that brings hooks, as Claude Code's
+ * does, and trusts the folder once accepted.
+ */
+function backgroundHost(agent: InboxLaunchAgent, name: string, started: { agent: string; launch: InboxLaunchRecord }[], trusted?: Set<string>): LaunchHost {
   const nothing = { exitCode: 0, text: "" };
   return {
     agent,
@@ -75,10 +79,20 @@ function backgroundHost(agent: InboxLaunchAgent, name: string, started: { agent:
     shellNames: [],
     available: async () => ({ ok: true, version: "1.0.0" }),
     // What New message offers it: a model and an effort the person may pick ("retired": one T3 no longer has).
-    choices: async () => ({ models: agent === "codex" ? ["gpt-5.5", "gpt-5.5-mini"] : ["opus", "sonnet", "haiku", "retired"], efforts: ["low", "medium", "high"], effort_word: "Effort" }),
+    choices: async () => ({ models: agent === "codex" ? ["gpt-5.5", "gpt-5.5-mini"] : ["opus", "sonnet", "haiku", "retired"], efforts: ["low", "medium", "high", "max"], effort_word: "Effort" }),
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
-    trusts: () => true,
+    trusts: (folder) => !trusted || trusted.has(folder),
+    ...(trusted
+      ? {
+          trustOffer: (target: { folder: string }) => ({
+            folder: target.folder,
+            read: () => (existsSync(join(target.folder, ".claude", "settings.json")) ? { warning: "This folder has 1 hook that will run once you trust it.", facts: ["Runs 1 hook"], warns: true } : { warning: null, facts: [], warns: false }),
+            accept: async () => void trusted.add(target.folder),
+          }),
+        }
+      : {}),
     start: async (launch) => {
+      if (trusted && !trusted.has(launch.folder)) return { ok: false, code: "untrusted", text: `${launch.folder} isn't a trusted folder yet.` };
       started.push({ agent, launch });
       const session = `bg-${started.length}`;
       return { ok: true, session, ref: session };
@@ -117,6 +131,10 @@ export interface T3LaunchOptions {
   t3Projects?: (at: { shop: string; parent: string }) => string[];
   /** Linked git checkouts T3 sees (see fake-t3.ts `checkouts`), by the same names. */
   checkouts?: (at: { shop: string; parent: string }) => Record<string, string>;
+  /** Claude Code trusts only the project's folder until its Trust folder offer is accepted (default: every folder). */
+  trust?: true;
+  /** More of the person's login env (a clone's git sees it: a URL rewrite to a repository on disk). */
+  login?: Record<string, string>;
 }
 
 export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: T3LaunchOptions = {}) {
@@ -154,6 +172,7 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
   const clock = { now: Date.now() };
   const heard = new Map<string, number>();
   const background: { agent: string; launch: InboxLaunchRecord }[] = [];
+  const trusted = options.trust ? new Set([shop]) : undefined;
   const rexOpens: unknown[] = [];
   const rexOpened: InboxRexOpened = { opened: true, session: "session:x", window: "window:y", block: "block:z", line: "Rex · shop / Claude Code" };
   /** Every line the engine logs, as the Inbox's debug log (inbox-debug-log.ts) keeps it, in the data folder. */
@@ -167,7 +186,7 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
       serverSession: "srv",
       homeDir: home,
       platform: process.platform,
-      loginEnv: async () => ({ HOME: home, PATH: path, PLANNOTATOR_TEST_SANDBOX: "1" }),
+      loginEnv: async () => ({ HOME: home, PATH: path, PLANNOTATOR_TEST_SANDBOX: "1", ...options.login }),
       ownEnv: () => ({ HOME: home, PATH: path }),
       installDirs: [],
       displayFolder: (p) => p.replace(home, "~"),
@@ -181,7 +200,7 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
       selfCommand: ["plannotator"],
       now: () => clock.now,
       firstTurn: (message) => codexQueueMessage(commandOf(message)),
-      hosts: (_ctx: LaunchHostContext) => [backgroundHost("claude-code", "Claude Code", background), backgroundHost("codex", "Codex", background)],
+      hosts: (_ctx: LaunchHostContext) => [backgroundHost("claude-code", "Claude Code", background, trusted), backgroundHost("codex", "Codex", background)],
       ...(options.startTimeoutMs ? { t3StartTimeoutMs: options.startTimeoutMs } : {}),
       ...(options.rex
         ? {
@@ -221,6 +240,20 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
       (error: Error & { code?: string }) => ({ ok: false as const, message: error.message, code: error.code }),
     );
   };
+  /** A Send that clones `url` into `folder` (`~/…`) and starts Claude Code there. */
+  const sendClone = async (url: string, folder: string) => {
+    const target = launch.target({ launch: { agent: "claude-code", folder, clone: { url } } })!;
+    const prepared = await launch.prepare(target, { name: "Cent drift", body: "Find the cent drift.", resolveProject: async (p) => store.ensureProject({ name: p.split("/").pop()!, root: p }) });
+    const message = store.startPersonThread({ project_id: prepared.project.id, body: "Find the cent drift.", to: prepared.to, idempotency_key: `clone-${url}`, thread_name: "Cent drift", launch: prepared.launch }).message;
+    launch.begin(message);
+    return message;
+  };
+  /** The run line's Trust folder, pressed in this computer's window on the warning it read. */
+  const trust = async (id: string, warning: string | null) => {
+    const at = `/api/inbox/launch/${id}/trust`;
+    const request = new Request(`http://127.0.0.1:4000${at}`, { method: "POST", headers: { host: "127.0.0.1:4000", origin: "http://127.0.0.1:4000", "content-type": "application/json" }, body: JSON.stringify({ serverSession: "srv", warning }) });
+    return (await launch.route(request, at, "local"))!.json() as Promise<Record<string, unknown>>;
+  };
   /** Settings → Agents' own read, as this computer's window asks it. */
   const settings = async () => {
     const response = await launch.route(new Request("http://127.0.0.1:4000/api/inbox/launch/settings", { headers: { host: "127.0.0.1:4000" } }), "/api/inbox/launch/settings", "local");
@@ -238,5 +271,5 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
     return made;
   };
   const starts = () => t3!.calls().filter((args) => args[0] === "thread" && args[1] === "start");
-  return { root, home, dataDir, shop, store, project, t3, mcp, launch, restart, prepare, send, route, settings, wake, starts, clock, heard, environment, background, rexOpens, debug, logged };
+  return { root, home, dataDir, shop, store, project, t3, mcp, launch, restart, prepare, send, sendClone, trust, trusted, route, settings, wake, starts, clock, heard, environment, background, rexOpens, debug, logged };
 }

@@ -67,6 +67,9 @@ export const T3_TOKEN_TTL = "1m";
 /** The client name the person's T3 shows for that token's session while it lives (Settings → Connections in T3). */
 export const T3_TOKEN_LABEL = "Plannotator Inbox";
 
+/** T3's words for a start whose `--option`s its model doesn't take (OrchestratorMcpService: "Model … rejected options: …"). */
+export const T3_OPTIONS_REFUSED = /rejected options/i;
+
 export const T3_LAUNCH_MISSING = "T3 Code's t3 command is not on this computer";
 
 /** The thread T3 started, from `--json`'s line (`{ threadId, projectId, runId }`); null when none is there. */
@@ -432,27 +435,37 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { startTimeo
         writeAttempt(launch.id, { title, before: (titled ?? []).map((t) => t.threadId), at: startedAt, outcome: !titled ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
         return { result, thread };
       };
+      // What T3 didn't take of the person's pick: their model, or only their effort.
       let declined: string | undefined;
+      let declinedEffort: string | undefined;
+      const refusedOf = () => ({ ...(declined ? { declined } : {}), ...(declinedEffort ? { declined_effort: declinedEffort } : {}) });
       for (let tries = 0; ; tries++) {
         const { result, thread } = await attempt(pick);
         if (thread) {
           const inner: InboxLaunchInner = { provider: pick.provider, model: pick.model, agent: t3AgentName(pick.provider, driver) };
           ctx.startLog(launch.id, `T3 thread ${thread}, on ${inner.agent} · ${inner.model}`);
-          return { ok: true as const, session: thread, ref: thread, inner, ...(declined ? { declined } : {}) };
+          // Started on T3's own model after the project's newest one was refused: nothing of the person's was refused.
+          return { ok: true as const, session: thread, ref: thread, inner, ...(picked ? refusedOf() : {}) };
         }
         // It may have made the thread: the line says so, and its Try again takes it. Never a second start beside it.
         if (result.timedOut || result.exitCode === 0) return { ok: false as const, code: "failed" as const, text: t3StartUncertain(result, startTimeoutMs) };
         if (T3_NOT_RUNNING.test(t3LastLine(said(result)))) return away("absent", "T3 Code isn't open on this computer.");
-        // T3 refused it, made nothing: once more on T3's own model for the agent (the newest thread's, else its list).
+        // T3 refused it and made nothing. Only the effort (T3: "… rejected options: …"): once more on the same model
+        // without it. Else once more on T3's own model for the agent (the newest thread's, else its list; the token
+        // only when the project's own threads give no other model). The first refusal is the one the line names.
         const refusedModel: string = pick.model;
-        // The token only when the project's own threads give no other model.
-        let next: T3ModelPick | null = null;
-        if (tries === 0) next = newest && newest.model !== refusedModel ? newest : await ask();
-        if (next?.model === refusedModel) next = null;
-        if (picked && refusedModel === picked.model) declined = picked.model;
-        if (!next) return { ...away("refused", "T3 Code didn't start the thread."), declined: refusedModel };
-        ctx.startLog(launch.id, `T3 Code didn't take ${pick.provider} · ${refusedModel}: once more on ${next.provider} · ${next.model}`);
-        pick = { ...next, options: [] };
+        let next: T3StartPick | null = null;
+        if (tries === 0 && pick.options.length > 0 && T3_OPTIONS_REFUSED.test(said(result))) {
+          declinedEffort = launch.effort;
+          next = { ...pick, options: [] };
+        } else if (tries === 0) {
+          declined = refusedModel;
+          const own = newest && newest.model !== refusedModel ? newest : await ask();
+          next = own && own.model !== refusedModel ? { ...own, options: [] } : null;
+        }
+        if (!next) return { ...away("refused", "T3 Code didn't start the thread."), ...refusedOf() };
+        ctx.startLog(launch.id, `T3 Code didn't take ${declinedEffort && !declined ? `the effort ${declinedEffort}` : `${pick.provider} · ${refusedModel}`}: once more on ${next.provider} · ${next.model}${declinedEffort && !declined ? ", T3's own effort" : ""}`);
+        pick = next;
       }
     },
 

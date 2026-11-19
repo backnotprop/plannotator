@@ -997,6 +997,7 @@
       "InboxLaunchRex.unavailable",
       "InboxLaunchRex.why",
       "InboxLaunchT3.declined",
+      "InboxLaunchT3.declined_effort",
       "InboxLaunchT3.refused",
       "InboxLaunchT3.unavailable",
       "InboxLaunchT3.why",

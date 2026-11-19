@@ -2567,6 +2567,9 @@
         },
         "declined": {
           "type": "string"
+        },
+        "declined_effort": {
+          "type": "string"
         }
       },
       "additionalProperties": true,
@@ -5209,6 +5212,9 @@
               "x-open": true
             },
             "declined": {
+              "type": "string"
+            },
+            "declined_effort": {
               "type": "string"
             }
           },

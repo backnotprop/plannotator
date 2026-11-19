@@ -81,10 +81,11 @@ export const INBOX_T3_NOT_HERE = "T3 Code isn't open on this computer, so it sta
 export const INBOX_T3_REFUSED = "T3 Code didn't start a thread for it, so it started in the background.";
 /**
  * The run line's note for a start T3 Code refused, saying what it refused when it said: the model (the person's, or
- * the one it was tried on), no model at all for that agent, or the folder; else `INBOX_T3_REFUSED`.
+ * the one it was tried on), the person's effort, no model at all for that agent, or the folder; else `INBOX_T3_REFUSED`.
  */
-export function inboxT3RefusedWords(t3: { why?: "no_model" | "project"; declined?: string } | undefined): string {
+export function inboxT3RefusedWords(t3: { why?: "no_model" | "project"; declined?: string; declined_effort?: string } | undefined): string {
   if (t3?.declined) return `T3 Code didn't take the model ${t3.declined}, so it started in the background.`;
+  if (t3?.declined_effort) return `T3 Code didn't take the effort ${t3.declined_effort}, so it started in the background.`;
   if (t3?.why === "no_model") return "T3 Code has no model for it here, so it started in the background.";
   if (t3?.why === "project") return "T3 Code didn't add this folder as a project, so it started in the background.";
   return INBOX_T3_REFUSED;

@@ -32,6 +32,7 @@ export function StartedBy({ launched, root, project }: { launched: InboxLaunchRe
             In T3 Code{launched.inner?.model ? ` · ${launched.inner.model}` : ''}
             {/* T3 didn't take the person's model: it runs on T3's own, and says so. */}
             {launched.t3?.declined && launched.inner?.model !== launched.t3.declined ? ` (T3 Code didn't take ${launched.t3.declined})` : ''}
+            {launched.t3?.declined_effort && !launched.t3.declined ? ` (T3 Code didn't take the effort ${launched.t3.declined_effort})` : ''}
           </span>
         </>
       ) : (

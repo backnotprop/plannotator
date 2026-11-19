@@ -806,7 +806,7 @@ export function createInboxLaunch(options: {
       restartable: !isAppOwned(launch),
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
-      ...(launch.t3 ? { t3: { ...(inboxLaunchInT3(launch) && launch.session_ref ? { started: true as const } : {}), ...(launch.t3.unavailable ? { unavailable: true as const } : {}), ...(launch.t3.refused ? { refused: true as const } : {}), ...(launch.t3.why ? { why: launch.t3.why } : {}), ...(launch.t3.declined ? { declined: launch.t3.declined } : {}) } } : {}),
+      ...(launch.t3 ? { t3: { ...(inboxLaunchInT3(launch) && launch.session_ref ? { started: true as const } : {}), ...(launch.t3.unavailable ? { unavailable: true as const } : {}), ...(launch.t3.refused ? { refused: true as const } : {}), ...(launch.t3.why ? { why: launch.t3.why } : {}), ...(launch.t3.declined ? { declined: launch.t3.declined } : {}), ...(launch.t3.declined_effort ? { declined_effort: launch.t3.declined_effort } : {}) } } : {}),
       ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const, ...(launch.rex.why === "server" || launch.rex.why === "shared" ? { why: launch.rex.why } : {}) } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && ownPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
@@ -1014,13 +1014,17 @@ export function createInboxLaunch(options: {
       const viaRex = asked && !("away" in asked) ? asked : null;
       // Start in T3 Code (`host` is T3 Code's): the T3 wake's own text for the message is the thread's first turn.
       const firstTurn = !viaRex && host.startsWithTurn ? (options.firstTurn?.(store.message(root.id) ?? root) ?? root.body) : undefined;
-      let result = viaRex ?? (await host.start(launch, { name, login, ...(firstTurn !== undefined ? { firstTurn } : {}) }));
+      // In T3 Code the agent is still the person's own: a folder it doesn't trust yet (a clone that brings hooks) waits
+      // for its Trust folder, as its own start, or Rex's, would (decision 4a). Trust folder starts it again.
+      const unTrusted = host === t3 && !viaRex && !trustHostOf(launch, host).trusts(launch.folder);
+      let result = viaRex ?? (unTrusted ? { ok: false as const, code: "untrusted" as const, text: `${launch.folder} isn't a trusted folder yet.` } : await host.start(launch, { name, login, ...(firstTurn !== undefined ? { firstTurn } : {}) }));
       // T3 Code not open here, or it said no (it made nothing): the agent's own host starts it in the background, and
       // the line says why, as for Rex.
       let used = host;
       const t3Away = host === t3 && !result.ok && "away" in result && result.away ? result.away : null;
-      const refused = result as { why?: LaunchStartWhy; declined?: string };
-      const t3Said: Pick<NonNullable<InboxLaunchRecord["t3"]>, "why" | "declined"> | null = t3Away ? { ...(refused.why ? { why: refused.why } : {}), ...(refused.declined ? { declined: refused.declined } : {}) } : null;
+      // What T3 refused rides along (the line says it): why, and the person's model or effort it didn't take.
+      const said = result as { why?: LaunchStartWhy; declined?: string; declined_effort?: string };
+      const declinedOf = { ...(said.declined ? { declined: said.declined } : {}), ...(said.declined_effort ? { declined_effort: said.declined_effort } : {}) };
       const own = t3Away && Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null;
       if (t3Away) {
         startLog(launch.id, `T3 Code ${t3Away === "absent" ? "isn't open" : "said no"} (${result.ok ? "" : result.text}): starting in the background`);
@@ -1029,13 +1033,12 @@ export function createInboxLaunch(options: {
           result = await own.start(launch, { name, login });
         }
       }
-      // What T3 refused rides along (the line says it), and a start whose model T3 didn't take keeps that model's name.
       const t3Record: InboxLaunchRecord["t3"] = t3Away
         ? t3Away === "absent"
           ? { unavailable: true }
-          : { refused: true, ...(t3Said?.why ? { why: t3Said.why } : {}), ...(t3Said?.declined ? { declined: t3Said.declined } : {}) }
-        : result.ok && "declined" in result && result.declined
-          ? { declined: result.declined }
+          : { refused: true, ...(said.why ? { why: said.why } : {}), ...declinedOf }
+        : host === t3 && result.ok && Object.keys(declinedOf).length > 0
+          ? declinedOf
           : undefined;
       // Rex not here, or it said no: it started in the background, and the line says why.
       const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const, ...(away === "server" || away === "shared" ? { why: away } : {}) } : viaRex?.ok && viaRex.line ? rexRecord(viaRex.line, viaRex.pane) : undefined;
@@ -1945,7 +1948,7 @@ ${result.text}`);
           // Nothing refused now (a second click, a stale window): the line as it stands, never a second start.
           if (!refusedForTrust(root)) return runNow();
           if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
-          const offer = trustOfferOf(host, launch);
+          const offer = trustOfferOf(trustHostOf(launch, host), launch);
           // The person agreed to the line they read: a folder that changed since gets a new read, and a new click.
           const { warning } = offer.read();
           if ((body.warning ?? null) !== warning) throw new InboxError("trust_warning_changed", `This folder changed, so nothing was saved. ${warning ?? "It no longer has anything to warn about."} Click Trust folder again if that's fine.`);
@@ -2482,10 +2485,10 @@ ${result.text}`);
         ? runLine
         : {
             ...runLine,
-            ...(host.trustCoversHome?.(root.launch) ? { trust_covers_home: true as const } : {}),
+            ...(trustHostOf(root.launch, host).trustCoversHome?.(root.launch) ? { trust_covers_home: true as const } : {}),
             ...(samePlace(root.launch.folder, options.homeDir) ? { home_folder: true as const } : {}),
           };
-      const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
+      const offer = owner && line?.untrusted ? trustHostOf(root.launch, host).trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },
 

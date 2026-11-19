@@ -11,7 +11,7 @@
  * standing in (tests/helpers/t3-launch.ts). No Inbox server, no T3 and no agent run.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { t3ListedModelOf, t3NewestModelOf } from "@plannotator/core/inbox-launch-choice";
@@ -136,6 +136,16 @@ describe("starting an agent in T3 Code", () => {
     await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
     expect(t.starts()).toEqual([["thread", "start", ".", "-", "--title=Checkout copy", "--provider=claudeAgent", "--model=haiku", "--option=effort=high", "--json"]]);
     expect(t.store.message(root.id)!.launch!.inner).toEqual({ provider: "claudeAgent", model: "haiku", agent: "Claude Code" });
+    expect(t.t3!.issued()).toEqual([]);
+  });
+
+  test("an effort T3 refuses: once more on the person's model with T3's own effort, and the thread says the effort, not the model", async () => {
+    const t = setup({ used: USED });
+    const root = await t.send("Tighten the checkout copy.", "claude-code", "Checkout copy", { model: "haiku", effort: "max" });
+    await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.starts().map((args) => args.filter((a) => a.startsWith("--model") || a.startsWith("--option")))).toEqual([["--model=haiku", "--option=effort=max"], ["--model=haiku"]]);
+    expect(t.store.message(root.id)!.launch).toMatchObject({ t3: { declined_effort: "max" }, inner: { model: "haiku" } });
+    expect(t.store.message(root.id)!.launch!.t3!.declined).toBeUndefined();
     expect(t.t3!.issued()).toEqual([]);
   });
 
@@ -360,6 +370,47 @@ describe("an agent that runs in T3 Code", () => {
     t.t3!.setRunStatus("completed");
     t.clock.now += 61_000;
     expect(await until("the line", () => t.launch.runOfMessage(root.id))).toMatchObject({ state: "failed", t3: { started: true } });
+  });
+});
+
+describe("a clone that brings hooks, with T3 Code chosen", () => {
+  test("decision 4a, as Rex's start: it waits for Claude Code's own Trust folder; Trust folder starts the T3 thread in the clone", async () => {
+    // A repository on disk, reached as https://github.com/acme/hooked through git's own URL rewrite: nothing leaves.
+    const fixtures = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-t3-clone-")));
+    cleanup.push(() => rmSync(fixtures, { recursive: true, force: true }));
+    const gitEnv = { HOME: fixtures, PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
+    const git = (cwd: string, ...args: string[]) => {
+      const ran = Bun.spawnSync(["git", ...args], { cwd, env: gitEnv, stdout: "pipe", stderr: "pipe" });
+      if (ran.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${ran.stderr.toString()}`);
+    };
+    const work = join(fixtures, "work");
+    mkdirSync(join(work, ".claude"), { recursive: true });
+    git(work, "init", "-q", "-b", "main");
+    writeFileSync(join(work, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "echo hi" }] }] } }));
+    git(work, "add", "-A");
+    git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "first");
+    mkdirSync(join(fixtures, "acme"));
+    git(fixtures, "clone", "-q", "--bare", work, join(fixtures, "acme", "hooked.git"));
+
+    const t = setup({ capabilities: CAPABILITIES, trust: true, login: { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.file://${fixtures}/.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/" } });
+    const root = await t.sendClone("https://github.com/acme/hooked", "~/code/hooked");
+    const folder = join(t.home, "code", "hooked");
+    await until("the clone, then the wait for trust", () => t.store.message(root.id)!.launch!.error?.code === "untrusted");
+    expect(t.store.message(root.id)!.launch!.clone).toMatchObject({ state: "done", brings: ["hooks"] });
+    // Nothing started anywhere: not in T3, not in the background.
+    expect(t.starts()).toEqual([]);
+    expect(t.background).toEqual([]);
+    const line = await t.launch.runOf(root.id, true);
+    expect(line).toMatchObject({ state: "failed", untrusted: true, trust: { warning: "This folder has 1 hook that will run once you trust it." } });
+
+    // Trust folder: Claude Code's own trust is saved, and the start goes on in T3, in the clone.
+    await t.trust(root.launch!.id, "This folder has 1 hook that will run once you trust it.");
+    expect(t.trusted!.has(folder)).toBe(true);
+    await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.t3!.starts()).toHaveLength(1);
+    expect(t.t3!.starts()[0]).toMatchObject({ cwd: folder, project: folder });
+    expect(t.store.message(root.id)!.to!.host).toBe("t3");
+    expect(t.background).toEqual([]);
   });
 });
 

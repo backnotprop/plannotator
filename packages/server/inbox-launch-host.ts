@@ -151,7 +151,7 @@ export type LaunchStartAway = "absent" | "refused";
 
 /**
  * T3 Code only, what it refused (the run line says it): `no_model`, it has no model for that agent; `project`, it didn't
- * add the folder. `declined` beside it: the model T3 didn't take.
+ * add the folder. `declined` beside it: the model T3 didn't take; `declined_effort`, the effort.
  */
 export type LaunchStartWhy = "no_model" | "project";
 
@@ -322,7 +322,7 @@ export interface LaunchHost {
   start(
     launch: InboxLaunchRecord,
     input: { name: string; login: LaunchEnv; firstTurn?: string },
-  ): Promise<{ ok: true; session: string; ref: string; inner?: InboxLaunchInner; declined?: string } | ({ ok: false; away?: LaunchStartAway; why?: LaunchStartWhy; declined?: string } & LaunchStartFailure)>;
+  ): Promise<{ ok: true; session: string; ref: string; inner?: InboxLaunchInner; declined?: string; declined_effort?: string } | ({ ok: false; away?: LaunchStartAway; why?: LaunchStartWhy; declined?: string; declined_effort?: string } & LaunchStartFailure)>;
   /**
    * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
    * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself

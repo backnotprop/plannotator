@@ -3865,16 +3865,18 @@ public struct InboxLaunchT3: Codable, Hashable, Sendable {
   public var refused: Bool?
   public var why: InboxLaunchT3Why?
   public var declined: String?
+  public var declinedEffort: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["unavailable", "refused", "why", "declined"]
+  static let knownKeys: Set<String> = ["unavailable", "refused", "why", "declined", "declined_effort"]
 
-  public init(unavailable: Bool? = nil, refused: Bool? = nil, why: InboxLaunchT3Why? = nil, declined: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(unavailable: Bool? = nil, refused: Bool? = nil, why: InboxLaunchT3Why? = nil, declined: String? = nil, declinedEffort: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.unavailable = unavailable
     self.refused = refused
     self.why = why
     self.declined = declined
+    self.declinedEffort = declinedEffort
     self.unknownFields = unknownFields
   }
 
@@ -3884,6 +3886,7 @@ public struct InboxLaunchT3: Codable, Hashable, Sendable {
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
     self.why = try c.decodeIfPresent(InboxLaunchT3Why.self, forKey: WireKey("why"))
     self.declined = try c.decodeIfPresent(String.self, forKey: WireKey("declined"))
+    self.declinedEffort = try c.decodeIfPresent(String.self, forKey: WireKey("declined_effort"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -3893,6 +3896,7 @@ public struct InboxLaunchT3: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
     try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.declined, forKey: WireKey("declined"))
+    try c.encodeIfPresent(self.declinedEffort, forKey: WireKey("declined_effort"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -7264,17 +7268,19 @@ public struct InboxRunT3: Codable, Hashable, Sendable {
   public var refused: Bool?
   public var why: InboxRunT3Why?
   public var declined: String?
+  public var declinedEffort: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["started", "unavailable", "refused", "why", "declined"]
+  static let knownKeys: Set<String> = ["started", "unavailable", "refused", "why", "declined", "declined_effort"]
 
-  public init(started: Bool? = nil, unavailable: Bool? = nil, refused: Bool? = nil, why: InboxRunT3Why? = nil, declined: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(started: Bool? = nil, unavailable: Bool? = nil, refused: Bool? = nil, why: InboxRunT3Why? = nil, declined: String? = nil, declinedEffort: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.started = started
     self.unavailable = unavailable
     self.refused = refused
     self.why = why
     self.declined = declined
+    self.declinedEffort = declinedEffort
     self.unknownFields = unknownFields
   }
 
@@ -7285,6 +7291,7 @@ public struct InboxRunT3: Codable, Hashable, Sendable {
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
     self.why = try c.decodeIfPresent(InboxRunT3Why.self, forKey: WireKey("why"))
     self.declined = try c.decodeIfPresent(String.self, forKey: WireKey("declined"))
+    self.declinedEffort = try c.decodeIfPresent(String.self, forKey: WireKey("declined_effort"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -7295,6 +7302,7 @@ public struct InboxRunT3: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
     try c.encodeIfPresent(self.why, forKey: WireKey("why"))
     try c.encodeIfPresent(self.declined, forKey: WireKey("declined"))
+    try c.encodeIfPresent(self.declinedEffort, forKey: WireKey("declined_effort"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

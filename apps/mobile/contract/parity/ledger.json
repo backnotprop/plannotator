@@ -20457,6 +20457,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxlauncht3-declined-effort",
+      "title": "field:InboxLaunchT3.declined_effort",
+      "surface": [
+        "field:InboxLaunchT3.declined_effort"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

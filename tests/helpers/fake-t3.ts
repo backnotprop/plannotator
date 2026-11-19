@@ -108,7 +108,7 @@ export function t3ScopeOf(access: T3Access): string {
  * - `thread list --json` in a project's folder lists that project's threads,
  *   newest first, with their title, provider, model and `createdAt`: those
  *   `thread start` made there and `used` (threads T3 had already, by project
- *   folder). A start on the model "retired" is refused in T3's words.
+ *   folder). A start on the model "retired", or with `--option=effort=max`, is refused in T3's words.
  * - `auth session issue --scope=… --subject=… --ttl=… --label=… --json`, as
  *   T3's cli/auth.ts answers it (pretty JSON with the bearer `token`, which is
  *   `authToken`: the token a `startFakeT3` on `port` takes), and `auth session
@@ -303,6 +303,8 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
   if (model === "retired") say("Model 'retired' is not available for provider instance '" + provider + "'.", 1);
   const options = flags("--option");
   if (options.length > 0 && provider === null) say("--option needs --provider and --model.", 1);
+  // An effort the model doesn't have ("max"): T3's words (OrchestratorMcpService, invalidOptionSelections).
+  if (options.includes("effort=max")) say("Model " + model + " on provider " + provider + " rejected options: Option effort must be one of: low, medium, high.", 1);
   const { randomUUID } = require("node:crypto");
   const id = "thread:project:" + randomUUID() + ":" + randomUUID();
   fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, project, base, title: flag("--title") ?? null, provider, model, options, text, createdAt: new Date().toISOString() }) + "\\n");

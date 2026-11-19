@@ -243,6 +243,8 @@ test.skipIf(!hasDom)("an agent started in T3 Code: Rex's words with T3 Code's na
   // What T3 refused, when it said.
   await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, declined: 'sonnet' } } as InboxRun);
   expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't take the model sonnet, so it started in the background.");
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, declined_effort: 'max' } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't take the effort max, so it started in the background.");
   await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, why: 'no_model' } } as InboxRun);
   expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe('T3 Code has no model for it here, so it started in the background.');
   // Another agent's not-connected line keeps Try again.
