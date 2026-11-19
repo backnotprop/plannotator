@@ -2501,6 +2501,7 @@ export class InboxStore {
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),
+      ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
     };

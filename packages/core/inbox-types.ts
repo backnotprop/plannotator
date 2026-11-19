@@ -1960,6 +1960,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * agent activity by it. Absent from an older Inbox.
    */
   last_agent_at?: string | null;
+  /**
+   * Who wrote the latest agent message, when more than one agent is in the thread (`participants`): the window's
+   * held line names the agent that wrote ("Codex replied in …"). Absent with one agent (that is the row's own agent)
+   * and from an older Inbox.
+   */
+  last_agent?: { host: string | null; name?: string | null };
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
   /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */
@@ -3823,6 +3829,13 @@ export function inboxEngineTooOldForSendNow(version: string | null | undefined):
  * Settings → Prompts (approval "inbox-prompts-page", #2194): what Plannotator
  * tells agents, as `GET /api/inbox/settings` carries it in `prompts`.
  */
+/**
+ * What an MCP client keeps of the Inbox's server instructions, from its `initialize` `clientInfo`:
+ * Claude Code before 2.1.296 (or a client that does not say who it is) 2,048 characters, Claude Code
+ * 2.1.296 and later 4,096, any other client no known cut (packages/server/inbox-mcp-instructions.ts).
+ */
+export type InboxMcpTier = "claude_code_old" | "claude_code" | "other";
+
 export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode"] as const;
 export type InboxPromptHost = (typeof INBOX_PROMPT_HOSTS)[number];
 
@@ -3883,6 +3896,15 @@ export interface InboxPromptsSettings {
     runtimes: Record<InboxPromptHost, string | null>;
     room: { shared: number; runtimes: Record<InboxPromptHost, number> };
     dropped: InboxPromptHost[];
+    /**
+     * Agents that reach the Inbox over MCP (T3 Code, Codex, any MCP client): they get the shared
+     * ("All agents") rules and reminder in the MCP server's instructions, sized to what each kind of
+     * client keeps (`InboxMcpTier`). `room`: the count the editor shows, current Claude Code's (the
+     * tightest current client); `rooms`: the most characters the shared rules may hold per tier;
+     * `dropped` / `reminder_dropped`: the tiers the shared rules / the shared reminder are set and left
+     * out for, tightest first. Absent from an older Inbox.
+     */
+    mcp?: { room: number; rooms: Record<InboxMcpTier, number>; dropped: InboxMcpTier[]; reminder_dropped: InboxMcpTier[] };
   };
 }
 

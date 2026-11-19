@@ -2669,6 +2669,35 @@
             }
           ]
         },
+        "last_agent": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "host"
+          ],
+          "additionalProperties": true
+        },
         "guide": {
           "type": "boolean"
         },

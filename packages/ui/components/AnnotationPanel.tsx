@@ -30,9 +30,10 @@ const RegionCardContext = createContext<{ numbers: ReadonlyMap<string, number>; 
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
 // theme, matching the in-document .deletion highlight). Comment uses the
-// `annotation-comment` token, which defaults to each theme's --accent (so it
-// stays consistent with the .comment highlight) but is overridden to a legible
-// blue in neutral themes whose accent is a low-contrast gray (e.g. "simple").
+// `annotation-comment` token, which defaults to each theme's --accent-text: the
+// accent (the colour of the .comment highlight) unless the theme sets a legible
+// accent text, as Neutral (both modes) and Quantum Rose light do. "simple"
+// overrides it directly to a legible blue.
 // Global has no in-document highlight, so it uses a fixed legible purple.
 const TYPE_COLOR: Record<AnnotationType, string> = {
   [AnnotationType.DELETION]: 'text-destructive',
