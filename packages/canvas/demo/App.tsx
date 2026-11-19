@@ -38,6 +38,7 @@ import { indexFor } from '../view/document-index';
 import { MARKS_PLAN, createMarksStore } from './marks';
 import { PlanPane } from './PlanPane';
 import { DATA_SETS, type DataSet, EMPTY_PLAN, FAR_PLAN, ONE_PLAN, STACKED_PLAN, bigPlan, createBigStore, createEmptyStore, createFarStore, createOneStore, createStackedStore, createWorstStore, worstPlan } from './worst';
+import { CHARTS_PLAN, createChartBenchStore, createChartsStore } from './charts';
 import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, addBenchMarks, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
 
 const params = new URLSearchParams(location.search);
@@ -47,7 +48,11 @@ const count = Number(params.get('n')) || (bench === 'plan' ? 50 : 2000);
 /** Dev only: which dataset the demo draws (`?data=worst`, see `worst.ts`). */
 const data = (DATA_SETS.some((set) => set.id === params.get('data')) ? params.get('data') : 'demo') as DataSet;
 
+/** `?board=charts`: twelve charts as chart objects (`charts.ts`). */
+const chartsBoard = params.get('board') === 'charts';
+
 function storeFor(set: DataSet): CanvasStore {
+  if (chartsBoard) return createChartsStore();
   if (set === 'marks') return createMarksStore();
   if (set === 'worst') return createWorstStore();
   if (set === 'empty') return createEmptyStore();
@@ -59,6 +64,7 @@ function storeFor(set: DataSet): CanvasStore {
   return createSampleStore();
 }
 function planFor(set: DataSet): string {
+  if (chartsBoard) return CHARTS_PLAN;
   if (set === 'marks') return MARKS_PLAN;
   if (set === 'worst') return worstPlan();
   if (set === 'empty') return EMPTY_PLAN;
@@ -133,7 +139,7 @@ function useTheme(): [boolean, () => void] {
 }
 
 function BenchCanvas() {
-  const store = useMemo(() => (params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
+  const store = useMemo(() => (params.has('charts') ? createChartBenchStore(Number(params.get('charts')) || 200) : params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
   useMemo(() => addBenchMarks(store, { ink: Number(params.get('ink')) || 0, curves: Number(params.get('curves')) || 0, html: Number(params.get('html')) || 0 }), [store]);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };

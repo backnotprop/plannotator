@@ -529,6 +529,7 @@ packages/ui/components/blocks/directiveRenderer.seam.test.tsx
 packages/canvas/react/objects.dom.test.tsx
 packages/canvas/snapshot/CanvasStage.dom.test.tsx
 packages/canvas/react/HtmlItem.dom.test.tsx
+packages/canvas/react/ChartView.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx

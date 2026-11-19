@@ -19,6 +19,7 @@ function wordsOf(object: CanvasObject | undefined): string {
   if (object.type === 'box' || object.type === 'note' || object.type === 'text') return object.text.split('\n')[0];
   if (object.type === 'image' || object.type === 'sprite') return object.alt;
   if (object.type === 'reference') return object.title ?? '';
+  if (object.type === 'chart') return object.title ?? '';
   return '';
 }
 

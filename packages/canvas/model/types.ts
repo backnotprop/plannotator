@@ -177,6 +177,62 @@ export interface HtmlObject extends PlacedObject {
   alt?: string;
 }
 
+/** How a chart draws its rows. */
+export const CHART_MARKS = ['bar', 'line', 'area', 'dot', 'cell', 'span'] as const;
+export type ChartMark = (typeof CHART_MARKS)[number];
+
+/** One value in a chart's table: a number, or a short piece of text. */
+export type ChartCell = string | number;
+
+/**
+ * Which field of the table goes where. Every value is the name of one of the chart's `fields`.
+ * - `x`, `y`: along the bottom and up the side. `y` may be up to four fields, each drawn as its own series.
+ * - `series`: rows with the same value here are one series (one line, one colour).
+ * - `x2`: where a `span` ends. `value`: how strong a `cell` is. `size`: how large a `dot` is.
+ * - `facet`: one small chart for each value here, all on the same scales.
+ */
+export interface ChartEncode {
+  x: string;
+  y: string | string[];
+  series?: string;
+  x2?: string;
+  value?: string;
+  size?: string;
+  facet?: string;
+}
+
+/** A line across the chart at one value, with a word: "today", a limit, a target. `on: 'x'` stands it upright. */
+export interface ChartRule {
+  at: ChartCell;
+  label?: string;
+  on?: 'x';
+}
+
+/**
+ * A chart as data, not as a picture or markup: a small table and which field goes where. Whoever adds it
+ * sends the numbers; the canvas draws them (`view/chart.ts`) in its own look, in both themes, in a snapshot
+ * and in the still picture. Its colour is the object's colour, like anything else. Limits: `CHART_LIMITS` (`model/chart.ts`).
+ */
+export interface ChartObject extends PlacedObject {
+  type: 'chart';
+  mark: ChartMark;
+  /** The table's column names, in order. */
+  fields: string[];
+  /** The table's rows: each as long as `fields`. */
+  rows: ChartCell[][];
+  encode: ChartEncode;
+  /** Bars and areas: series on top of each other, not side by side. */
+  stack?: true;
+  /** Bars: running sideways, names down the left. */
+  flip?: true;
+  /** Lines: the series drawn dashed (a plan, a projection), by name. */
+  dash?: string[];
+  rules?: ChartRule[];
+  title?: string;
+  /** Written after values: "ms", "%". */
+  unit?: string;
+}
+
 /** What kind of thing an artifact is: decides its card's glyph and how it opens. */
 export const ARTIFACT_KINDS = ['image', 'html', 'markdown', 'text', 'video', 'file'] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
@@ -273,6 +329,7 @@ export type CanvasObject =
   | ImageObject
   | SpriteObject
   | HtmlObject
+  | ChartObject
   | ReferenceObject
   | StampObject
   | InkObject
@@ -290,6 +347,7 @@ export const PLACED_TYPES: ReadonlySet<CanvasObjectType> = new Set([
   'image',
   'sprite',
   'html',
+  'chart',
   'reference',
   'stamp',
   'ink',
@@ -371,6 +429,7 @@ export const DEFAULT_SIZES: Readonly<Record<string, { w: number; h: number }>> =
   image: { w: 320, h: 200 },
   sprite: { w: 48, h: 48 },
   html: { w: 320, h: 120 },
+  chart: { w: 380, h: 240 },
   reference: { w: 252, h: 240 },
   stamp: { w: 34, h: 34 },
   ink: { w: 160, h: 120 },

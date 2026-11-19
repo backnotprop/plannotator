@@ -310,6 +310,9 @@ export function CanvasView({
   }
   framesKeptRef.current = htmlFramesNext(framesKeptRef.current, lod, onScreen);
   const framesKept = framesKeptRef.current;
+  // A chart's words are drawn only where they could be read: not on a crowded board far out, and not below
+  // the zoom at which its smallest words are about four pixels tall, however few objects the view holds.
+  const chartWords = lod === 'full' && zoomLod === 'full';
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
@@ -360,7 +363,7 @@ export function CanvasView({
           object={object}
           selected={selection.has(id)}
           editing={editingId === id}
-          rich={object.type !== 'html' || lod === 'full' || framesKept}
+          rich={object.type === 'chart' ? chartWords : object.type !== 'html' || lod === 'full' || framesKept}
           resolveImageSrc={resolveImageSrc}
           onEditEnd={onEditEnd}
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}
