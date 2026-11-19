@@ -66,6 +66,17 @@ export function steppedAsideToast(threads: readonly string[], rowOf: BesideNotic
   return { icon: 'check', lead, detail, speech: `${lead}: ${detail}.`, onUndo: undo };
 }
 
+/**
+ * The toast for panes that stepped aside because the room shrank (the window narrowed, the sidebar opened): the same
+ * words, with nothing to undo. They come back in place once the room is there again (layoutRoom.ts).
+ */
+export function roomShrankToast(threads: readonly string[], rowOf: BesideNotice['rowOf']): Omit<InboxToastModel, 'id'> {
+  const names = threads.map((thread) => rowOf(thread)?.subject || 'A thread');
+  const lead = 'No room for more panes';
+  const detail = names.length === 1 ? `“${names[0]}” stepped aside` : `${names.length} panes stepped aside`;
+  return { icon: 'check', lead, detail, speech: `${lead}: ${detail}.` };
+}
+
 /** What a layout places, its sizes left out: its rows and columns, each pane's thread, the active pane. */
 export function placementKey(layout: L.FreeLayout): string {
   const shape = (node: LayoutNode | null): unknown => (!node ? null : node.type === 'split' ? [node.direction, node.children.map(shape)] : node.id);

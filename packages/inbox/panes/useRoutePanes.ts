@@ -91,6 +91,14 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
     wasInbox.current = onInbox;
     const named = L.activeThread(layout);
     owed = ahead.current || !onInbox || named === thread ? undefined : named;
+  } else {
+    // Off (the switch turned off in any window, or a phone): what this window last followed is forgotten, so the switch
+    // coming back on starts from the kept layout (savedLayout.ts), as a reload does, never from an address that moved
+    // meanwhile (an Escape with the switch off would otherwise close a pane and open another thread by itself).
+    held.current = null;
+    followed.current = null;
+    wasInbox.current = false;
+    ahead.current = null;
   }
   useEffect(() => {
     if (owed !== undefined) writeRef.current(owed, true);

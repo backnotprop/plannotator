@@ -267,6 +267,8 @@ test('with the switch off there is no Open to the side; the Settings switch turn
   await expect(besideItem(page)).toHaveCount(0);
   await page.keyboard.press('Escape');
   // Settings → General → Appearance: the switch, off by default. On, and back to the thread in the same page.
+  // This writes `inboxSplitView: true` into the "off" Inbox's config.json: a test added after this one on `off` finds
+  // the switch on (give it its own Inbox, or turn the switch off first).
   await page.goto(`${off.url}#settings`);
   const toggle = page.locator('[data-settings-split-view] button[role="switch"]');
   await expect(toggle).toHaveAttribute('aria-checked', 'false');

@@ -42,6 +42,7 @@ import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
 import { ScheduledSettingsRow } from '../scheduled/SettingsRow';
+import { usePhone } from '../phone';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -282,8 +283,9 @@ function GeneralSection({
   const textSize = useInboxTextSize();
   // Null from an Inbox that predates the setting: no row.
   const favicon = useInboxFavicon();
-  // Null from a settings model without it: no row.
+  // Null from a settings model without it: no row. Never on a phone, which always shows one thread.
   const splitView = splitViewSetting(settings);
+  const phone = usePhone();
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
   const browser = browserName();
@@ -386,7 +388,7 @@ function GeneralSection({
               </button>
             </span>
           </div>
-          {splitView && <SplitViewRow saved={splitView.on} />}
+          {splitView && !phone && <SplitViewRow saved={splitView.on} />}
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>

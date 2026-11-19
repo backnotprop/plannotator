@@ -7,6 +7,7 @@ import { focusLost } from '../backFocus';
 import { focusFirst } from '../focusLanding';
 import { actedSince, inputMark, lastInput } from '../lastInput';
 import type { PaneId } from './layoutModel';
+import { announce } from './paneDrag';
 
 /** The window's host, and the row of any thread (a pane that is not the active one draws its own thread's row). */
 export interface ThreadPanesHost extends ThreadSlotHost {
@@ -77,13 +78,16 @@ export function liveHost(ref: RefObject<ThreadSlotHost>): ThreadSlotHost {
 const ACTIVE_SUBJECT = '.ib-layout > [data-layout-pane]:not([data-pane-quiet]) section.ib-pane h2.ib-subject';
 
 /**
- * A pane closed by a key (its ✕, the ⋯ menu's Close pane): focus, which it took with it, goes to the subject of the
- * pane the person is in now, as a keyboard close of the one thread puts it on its row (App.tsx), never left on the
- * page. Checked over the next frames (the closed pane's node may outlive the close by one); a key or a press meanwhile
- * means the person moved on. After a mouse or a tap nothing moves (lastInput.ts).
+ * A pane closed by a key (its ✕, the ⋯ menu's Close pane): a screen reader hears "Pane closed." (as the menu's Move
+ * says "Pane moved …"), and focus, which the pane took with it, goes to the subject of the pane the person is in now,
+ * as a keyboard close of the one thread puts it on its row (App.tsx), never left on the page. Checked over the next
+ * frames (the closed pane's node may outlive the close by one); a key or a press meanwhile means the person moved on.
+ * After a mouse or a tap nothing moves and nothing is said (lastInput.ts).
  */
 export function landAfterPaneClose(frames = 2): void {
-  if (lastInput() !== 'keyboard' || typeof requestAnimationFrame === 'undefined') return;
+  if (lastInput() !== 'keyboard') return;
+  announce('Pane closed.');
+  if (typeof requestAnimationFrame === 'undefined') return;
   const mark = inputMark();
   const land = (left: number) => {
     if (actedSince(mark) || !focusLost(document.activeElement)) return;

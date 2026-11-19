@@ -5,18 +5,21 @@
  * window, this one included, then takes it from `event: capabilities`: capabilities.test.ts).
  *
  * What regresses: the row missing, or on when the Inbox says off; a click not saving, or saving the wrong value; a
- * failed save leaving the switch showing what was not saved; a row for a settings model without `split_view`.
+ * failed save leaving the switch showing what was not saved; a row for a settings model without `split_view`; a row on
+ * a phone (which always shows one thread); the window's settings (what the panes read) waiting for a stream frame that
+ * may never come instead of taking the save's answer.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SettingsModel } from './api';
 
 const hasDom = typeof document !== 'undefined';
 const { SettingsPage } = (hasDom ? await import('./components/Settings') : {}) as typeof import('./components/Settings');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { useSettingsSaves } = (hasDom ? await import('./data/actions/settings') : {}) as typeof import('./data/actions/settings');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -25,7 +28,13 @@ const savedFetch = globalThis.fetch;
 const posted: Record<string, unknown>[] = [];
 let answer: (body: Record<string, unknown>) => Response = (body) => Response.json({ split_view: body.split_view });
 
+const savedMatchMedia = hasDom ? window.matchMedia : undefined;
+/** The window's settings as App holds them (the harness's `useSettingsSaves`): what the panes read. */
+let windowSettings: SettingsModel | null = null;
+
 afterEach(() => {
+  if (hasDom) window.matchMedia = savedMatchMedia!;
+  windowSettings = null;
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -62,15 +71,15 @@ function render(splitView: { on: boolean } | undefined) {
     return Response.json({});
   }) as typeof fetch;
   const noop = () => {};
-  host = document.createElement('div');
-  host.className = 'pn-inbox';
-  document.body.appendChild(host);
-  act(() => {
-    root = createRoot(host!);
-    root.render(
+  // The window as App holds it: its settings, and `useSettingsSaves` running over them.
+  function Window() {
+    const [settings, setSettings] = useState<SettingsModel | null>({ ...baseModel, ...(splitView ? { split_view: splitView } : {}) } as SettingsModel);
+    windowSettings = settings;
+    useSettingsSaves({ setSettings, setError: noop, refresh: async () => {}, adoptStore: noop, readStore: noop, refreshList: async () => {} });
+    return (
       <SidebarProvider>
         <SettingsPage
-          settings={{ ...baseModel, ...(splitView ? { split_view: splitView } : {}) } as SettingsModel}
+          settings={settings}
           context={null}
           error={null}
           onToggleTool={noop}
@@ -81,8 +90,15 @@ function render(splitView: { on: boolean } | undefined) {
           onDeleteThread={async () => {}}
           onDeleteProject={async () => {}}
         />
-      </SidebarProvider>,
+      </SidebarProvider>
     );
+  }
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<Window />);
   });
 }
 
@@ -119,6 +135,21 @@ describe('Inbox Settings: thread panes', () => {
     expect(splitBodies()).toEqual([{ on: true }]);
     expect(toggle()?.getAttribute('aria-checked')).toBe('false');
     expect(row()?.textContent).toContain('Not saved');
+  });
+
+  test.skipIf(!hasDom)("the save's answer goes into the window's settings, with no stream frame to bring it", async () => {
+    render({ on: false });
+    await act(async () => toggle()!.click());
+    await act(async () => {});
+    expect((windowSettings as { split_view?: unknown } | null)?.split_view).toEqual({ on: true });
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  test.skipIf(!hasDom)('on a phone, which always shows one thread: no row', () => {
+    window.matchMedia = ((query: string) => ({ matches: query.includes('max-width: 767px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as typeof window.matchMedia;
+    render({ on: false });
+    expect(document.querySelector('[data-settings-theme]')).not.toBeNull();
+    expect(row()).toBeNull();
   });
 
   test.skipIf(!hasDom)('a settings model without split_view: no row', () => {

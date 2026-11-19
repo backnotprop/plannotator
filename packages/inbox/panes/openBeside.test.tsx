@@ -22,6 +22,7 @@ import type { Route } from '../app/route';
 import { LIST_MIN_WIDTH } from '../stack';
 import { BesideContext, besideOf } from './beside';
 import * as L from './layoutModel';
+import { stackedRows } from './layoutRoom';
 import type { PaneSet } from './model';
 import { useSidebarHold } from './sidebarHold';
 import { useRoutePanes, type WindowPanes } from './useRoutePanes';
@@ -66,12 +67,15 @@ const TIGHT = LIST_MIN_WIDTH + 2 * L.PANE_MIN_WIDTH + SIDEBAR - 40;
  * wide that the person keeps open (`sidebarOpen`) or folded. The window is as wide as `window.innerWidth`.
  */
 function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = true, strict = false) {
-  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {}, toasts: [] as Omit<InboxToastModel, 'id'>[], dismissed: 0 };
+  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, setSwitch: (_on: boolean) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {}, toasts: [] as Omit<InboxToastModel, 'id'>[], dismissed: 0 };
   function Window() {
     const [thread, setThread] = useState<string | null>(start);
     out.thread = thread;
     out.go = setThread;
-    const panes = useRoutePanes(thread, true, switchOn, (next) => setThread(next));
+    // The switch as Settings or another window's change sets it, without a reload.
+    const [on, setOn] = useState(switchOn);
+    out.setSwitch = setOn;
+    const panes = useRoutePanes(thread, true, on, (next) => setThread(next));
     out.panes = panes;
     const route = { page: 'inbox', thread } as Route;
     const routeRef = useRef(route);
@@ -206,8 +210,24 @@ describe.skipIf(!hasDom)('Open to the side', () => {
     expect(w.thread).toBe(null);
   });
 
-  test('with two panes open it is still offered: where no third column fits, the third opens below the active pane, and a fourth below that', async () => {
-    // 1440 px: the list and two 400 px columns fit (the sidebar folds), three do not; the window is 900 px tall.
+  test('the switch off and on again without a reload, an Escape in between: the kept panes come back as after a reload, none closed', async () => {
+    setWidth(1440);
+    const w = draw(true);
+    act(() => w.panes!.openBeside('thr_b'));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
+    // Another window turns it off; here the person closes the thread (Escape) and the list is all there is.
+    act(() => w.setSwitch(false));
+    act(() => w.go(null));
+    expect(w.panes!.allowed).toBe(false);
+    act(() => w.setSwitch(true));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
+    expect(w.thread).toBe('thr_b');
+  });
+
+  test('with two panes open it is still offered: where no third column fits, the third opens below the active pane; a fourth never stacks a third, and with no pane to halve the least recent steps aside, said with Undo', async () => {
+    // 1440 px: the list and two 400 px columns fit (the sidebar folds), three do not; the window is 900 px tall, room
+    // for three rows of 260 px, but no column stacks more than two (layoutRoom.ts MAX_STACKED). This window draws no
+    // panes to halve (no rects), so the fourth goes right of the active pane and the least recent steps aside.
     setWidth(1440);
     expect(1440 - LIST_MIN_WIDTH).toBeLessThan(3 * L.PANE_MIN_WIDTH);
     const w = draw(true);
@@ -216,14 +236,19 @@ describe.skipIf(!hasDom)('Open to the side', () => {
       expect(besideItem()?.textContent).toBe('Open to the side');
       await act(async () => besideItem()!.click());
       expect(w.thread).toBe(id);
+      if (id === 'thr_c') {
+        // a | (b / c): two columns, the right one two rows, the person in c; nothing stepped aside, nothing said.
+        expect(w.toasts).toEqual([]);
+        const tree = w.panes!.layout.root;
+        const right = tree?.type === 'split' ? tree.children[1] : null;
+        expect(right?.type === 'split' && [right.direction, right.children.length]).toEqual(['vertical', 2]);
+      }
     }
     const { root: tree, threads } = w.panes!.layout;
-    // a | (b / c / d): two columns, the right one three rows, the person in d; nothing stepped aside, nothing said.
     expect(L.panesOf(tree).map((pane) => threads[pane.id])).toEqual(['thr_a', 'thr_b', 'thr_c', 'thr_d']);
-    expect(tree?.type === 'split' && tree.direction).toBe('horizontal');
-    const right = tree?.type === 'split' ? tree.children[1] : null;
-    expect(right?.type === 'split' && [right.direction, right.children.length]).toEqual(['vertical', 3]);
-    expect(w.toasts).toEqual([]);
+    expect(stackedRows(tree, 1)).toBe(2);
+    expect(w.toasts.map((toast) => [toast.lead, toast.detail])).toEqual([['No room for another pane', '“Thread thr_a” stepped aside']]);
+    expect(typeof w.toasts[0]!.onUndo).toBe('function');
   });
 
   test('in a window with room for two panes only without the docked sidebar, choosing it folds the sidebar on screen; closing the second pane brings it back', async () => {

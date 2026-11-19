@@ -396,7 +396,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(calls).toEqual(['focus:p1', 'close:p1', 'close:main']);
   });
 
-  test("a key on a pane's ✕ beside another: focus, gone with it, lands on the subject of the pane the person is in; after a click it is left alone", async () => {
+  test("a key on a pane's ✕ beside another: it is said, and focus, gone with it, lands on the subject of the pane the person is in; after a click neither", async () => {
     putThread(queries, B, heldOf(B, false));
     // Everything drawn has a box here (focusFirst and focusLost read getClientRects).
     stub(HTMLElement.prototype, 'getClientRects', { value(this: HTMLElement) { return this.isConnected ? [rect(0, 10)] : []; } });
@@ -415,13 +415,18 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
       expect(el!.querySelector(`section.ib-pane[data-thread-id="${B}"]`)).toBeNull();
       return document.activeElement as HTMLElement | null;
     };
+    const said = () => document.querySelector('[data-drag-live]')?.textContent ?? '';
     const byKey = await closeB(true);
     expect(byKey?.matches('h2.ib-subject')).toBe(true);
+    // A screen reader hears it, as the ⋯ menu's Move is heard.
+    expect(said()).toBe('Pane closed.');
     expect(byKey?.closest('section.ib-pane')?.getAttribute('data-thread-id')).toBe(A);
     act(() => root!.unmount());
     root = null;
+    // The live region went with the window; a click that said something would make a new one.
     const byClick = await closeB(false);
     expect(byClick?.matches('h2.ib-subject') ?? false).toBe(false);
+    expect(said()).toBe('');
   });
 
   test('the list hidden (full screen): its way back leads the top-left pane only; a stacked window draws the active pane alone', async () => {
@@ -784,6 +789,68 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(paneOf(A)).not.toBeNull();
     expect(paneOf(B)).toBe(bSection);
     expect(hostOf(A).hasAttribute('data-pane-quiet')).toBe(true);
+  });
+
+  test('a pane that steps aside because the window narrowed is said by its subject once the resize settles; drawn narrow from the start, widened, or narrowed and widened at once, nothing is', async () => {
+    putThread(queries, A, heldOf(A, false));
+    putThread(queries, B, heldOf(B, false));
+    const toasts: { lead: string; detail?: string; onUndo?: unknown }[] = [];
+    const host = { ...hostFor(B, noop), showToast: (toast: { lead: string; detail?: string; onUndo?: unknown }) => void toasts.push(toast) };
+    const panesHostWithRows = (h: ThreadSlotHost) => ({ ...h, rowOf: (id: string) => ({ subject: `Subject ${id}` }) as unknown as InboxListRow });
+    const drawWithRows = (layout = pair('p1')) =>
+      act(() =>
+        root!.render(
+          <QueryClientProvider client={queries}>
+            <div className="pn-inbox">
+              <main className="ib-main">
+                <ThreadPanes windowPanes={windowOf(layout)} held={heldOf(B, false)} host={panesHostWithRows(host)} />
+              </main>
+            </div>
+          </QueryClientProvider>,
+        ),
+      );
+    // Drawn in a narrow window: A is aside from the start, which the person never saw go: nothing said.
+    mainWidth = 780;
+    drawPanes(windowOf(pair('p1')), host, heldOf(B, false));
+    drawWithRows();
+    await wait(0);
+    expect(paneOf(A)).toBeNull();
+    expect(toasts).toEqual([]);
+    // Widened: A comes back, nothing said. Narrowed again: A steps aside, and the toast names it, with nothing to undo.
+    mainWidth = 1600;
+    act(() => void window.dispatchEvent(new Event('resize')));
+    await wait(0);
+    expect(paneOf(A)).not.toBeNull();
+    expect(toasts).toEqual([]);
+    expect(el!.querySelector('.ib-layout > .pierre-layout-sr')?.textContent).toBe('2 panes');
+    // Narrowed and widened again at once (a window edge dragged back): A stepped aside for a moment; nothing said.
+    mainWidth = 780;
+    act(() => void window.dispatchEvent(new Event('resize')));
+    await wait(100);
+    expect(paneOf(A)).toBeNull();
+    mainWidth = 1600;
+    act(() => void window.dispatchEvent(new Event('resize')));
+    await wait(1000);
+    expect(paneOf(A)).not.toBeNull();
+    expect(toasts).toEqual([]);
+    // Narrowed, and it stays narrow: once the resize settles the toast names A, with nothing to undo. The engine
+    // reports the panes' new sizes as the window resizes: the same placement, so still the resize.
+    mainWidth = 780;
+    act(() => void window.dispatchEvent(new Event('resize')));
+    const split = pair('p1');
+    drawWithRows(L.resize(split, { [(split.root as { id: string }).id]: [3, 1] }));
+    await wait(0);
+    expect(paneOf(A)).toBeNull();
+    expect(toasts).toEqual([]);
+    await wait(500);
+    expect(toasts.map((toast) => [toast.lead, toast.detail, toast.onUndo])).toEqual([['No room for more panes', `“Subject ${A}” stepped aside`, undefined]]);
+    // The engine's own count of what shows, said right (FreeLayout.tsx): one pane, not "1 panes".
+    expect(el!.querySelector('.ib-layout > .pierre-layout-sr')?.textContent).toBe('1 pane');
+    // The same narrow room measured again (another resize event) says nothing more.
+    act(() => void window.dispatchEvent(new Event('resize')));
+    await wait(1000);
+    expect(toasts).toHaveLength(1);
+    mainWidth = 1600;
   });
 
   test('closing the pane shown alone in a narrow window (an Undo, a ✕) draws the one that stepped aside, without a throw', async () => {

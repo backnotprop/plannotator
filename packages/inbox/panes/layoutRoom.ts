@@ -72,21 +72,34 @@ export interface SidePlace {
   stepsAside: PaneId[];
 }
 
+/** "Open to the side" stacks at most this many panes in a column: past it, panes are mostly header and reply bar. */
+export const MAX_STACKED = 2;
+
+/** How many panes the tree stacks in its tallest column. */
+export function stackedRows(root: LayoutNode | null, gap: number): number {
+  const size = root ? minimumSize(root, new Set(), gap) : null;
+  return size ? Math.round((size.height + gap) / (PANE_MIN_HEIGHT + gap)) : 0;
+}
+
 /**
  * Where "Open to the side" opens `thread`, the same way every time for the same layout and room: right of the active
  * pane if a column fits there; else below it if a row does; else the largest pane on screen (`rects`) split along its
- * longer side, else its shorter one, where both halves keep 400 x 260 px. "Fits" is that no pane steps aside for it. When nothing fits, right of
- * the active pane anyway: the least recent panes step aside as they do for a narrow window, and `stepsAside` names them.
+ * longer side, else its shorter one, where both halves keep 400 x 260 px. "Fits" is that no pane steps aside for it and
+ * no column stacks more than `MAX_STACKED` panes (a layout the person stacked higher by dragging is theirs: a place
+ * that stacks no higher fits). When nothing fits, right of the active pane anyway: the least recent panes step aside as
+ * they do for a narrow window, and `stepsAside` names them.
  */
 export function placeToSide(layout: FreeLayout, thread: string, room: Room, gap: number, rects: readonly PaneRect[]): SidePlace {
   const active = layout.active!;
+  const rows = Math.max(MAX_STACKED, stackedRows(layout.root, gap));
   const at = (target: PaneId, edge: Edge): SidePlace => {
     const next = openAt(layout, thread, target, edge);
     return { target, edge, next, stepsAside: steppedAside(layout, next, room, gap) };
   };
+  const fitsHere = (place: SidePlace) => place.stepsAside.length === 0 && stackedRows(place.next.root, gap) <= rows;
   for (const edge of ['right', 'bottom'] as const) {
     const place = at(active, edge);
-    if (place.stepsAside.length === 0) return place;
+    if (fitsHere(place)) return place;
   }
   const order = panesOf(layout.root).map((pane) => pane.id);
   const area = (rect: PaneRect) => (rect.right - rect.left) * (rect.bottom - rect.top);
@@ -100,7 +113,7 @@ export function placeToSide(layout: FreeLayout, thread: string, room: Room, gap:
     for (const edge of sides) {
       const halves = edge === 'right' ? (width - gap) / 2 >= PANE_MIN_WIDTH : (height - gap) / 2 >= PANE_MIN_HEIGHT;
       const place = halves ? at(largest.id, edge) : null;
-      if (place && place.stepsAside.length === 0) return place;
+      if (place && fitsHere(place)) return place;
     }
   }
   return at(active, 'right');

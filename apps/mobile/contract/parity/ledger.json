@@ -19856,15 +19856,16 @@
       }
     },
     {
-      "id": "undecided-setting-split-view",
-      "title": "setting:split_view",
+      "id": "setting-split-view",
+      "title": "Settings → Appearance → Threads side by side (thread panes)",
       "surface": [
         "setting:split_view"
       ],
       "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-19",
+      "mobile": "never",
+      "why": "N-desk: a phone always shows one thread, so the switch has nothing to do there (the coordinator's decision, 2026-11-19; the window hides the row on a phone).",
+      "reason": "N-desk",
+      "source": "PR #3719",
       "ios": {
         "state": "not-started"
       }
