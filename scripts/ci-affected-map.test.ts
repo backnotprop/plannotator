@@ -338,7 +338,7 @@ describe('the native app (apps/mobile)', () => {
   test('the app\'s files add nothing to an ordinary change, and its code files keep the ordinary rules', () => {
     expect(lanesOf(run([ch('packages/a/src.ts'), ch('apps/mobile/ios/App.swift')]))).toEqual(lanesOf(run([ch('packages/a/src.ts')])));
     // The app's own ignore file (Swift's and Xcode's build output) is one of the native kinds; one anywhere else is not.
-    for (const f of ['apps/mobile/ios/.gitignore', 'apps/mobile/ios/InboxCore/.gitignore']) expect(nativeAppFile(f), f).toBe(true);
+    for (const f of ['apps/mobile/ios/App/.gitignore', 'apps/mobile/ios/InboxCore/.gitignore']) expect(nativeAppFile(f), f).toBe(true);
     for (const f of ['.gitignore', 'apps/mobile/.gitignore', 'apps/mobile/contract/.gitignore', 'apps/mobile/ios/x.gitignore.ts']) expect(nativeAppFile(f), f).toBe(false);
     for (const f of ['apps/mobile/ios/tool.ts', 'apps/mobile/ios/x.test.ts', 'apps/mobile/ios/package.json', 'apps/mobile/ios/ci.sh', 'apps/mobile/ios/tsconfig.json', 'apps/mobile/ios/bunfig.toml', 'apps/mobile/ios/tool.py', 'apps/mobile/ios/x.yml', 'apps/mobile/ios/InboxCore/Package.resolved', 'apps/mobile/android/build.sh', 'apps/mobile/android/x.json']) {
       expect(nativeAppFile(f), f).toBe(false);
