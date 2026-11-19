@@ -431,7 +431,7 @@ describe("a Rex with no app on its computer, and Show in Rex from another comput
     const { session, ids } = await w.inRex();
     const far = w.tailnet();
     await until(async () => (await w.agentsOf(far.headers, far.at)).find((a) => a.session === session)?.place?.show === true);
-    expect(await (await w.show(session, far.headers, far.at)).json()).toEqual({ shown: true });
+    expect(await (await w.show(session, far.headers, far.at)).json()).toEqual({ shown: true, by: ["far-a1"] });
     expect(performed(w.fake)).toEqual([w.fake.farAppId("a1")]);
     expect(w.fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
   }, 20_000);
