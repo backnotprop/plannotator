@@ -11982,6 +11982,27 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-lflt-g { position: relative; display: inline-grid; place-items: center; }
 .ib-lflt-g > svg.ib-ic { stroke-width: 1.8; }
 .ib-pm.ib-lflt-menu { max-height: min(calc(100vh - 96px), 640px); overflow-y: auto; }
+/* The search at the top of a long filter menu (ListFilter.tsx, listFilterSearch.ts): the To picker's field (.ib-cp-filter)
+   at a menu's size. It stays at the top while the menu scrolls, so the menu keeps its one scroll. */
+.ib-lflt-top { position: sticky; top: -4px; z-index: 1; margin: -4px -4px 4px; padding: 4px 4px 0; background: var(--popover); }
+.ib-lflt-find { display: flex; align-items: center; gap: 8px; padding: 0 2px 0 8px; border-bottom: 1px solid var(--ib-line); color: var(--muted-foreground); }
+.ib-lflt-find:focus-within { border-bottom-color: color-mix(in oklch, var(--primary) 60%, transparent); }
+.ib-lflt-find > svg.ib-ic { width: 15px; height: 15px; flex: none; }
+.pn-inbox .ib-lflt-find input { flex: 1; min-width: 0; height: 34px; padding: 0; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-lflt-find input::placeholder { color: var(--muted-foreground); }
+.ib-lflt-clear { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--ib-rl-xs-s, 5px); background: none; color: var(--muted-foreground); cursor: pointer; }
+.ib-lflt-clear:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.ib-lflt-clear > svg.ib-ic { width: 14px; height: 14px; }
+.ib-lflt-none { padding: 8px 8px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
+.ib-lflt-hit { font-weight: 650; }
+/* A highlighted row scrolled into view stops below the sticky field, never under it (the field's 35 px and its 4 px
+   gaps). */
+.ib-pm.ib-lflt-menu[data-list-filter-searchable] { scroll-padding-top: 44px; }
+/* One width while typing: the menu is as wide as its widest row could make it, so rows going away never narrow it
+   and move its left edge under the pointer. */
+.ib-pm.ib-pc-menu.ib-lflt-menu[data-list-filter-searchable] { width: 300px; }
+/* Any touch screen, a tablet wider than a phone too: 16px, so iOS does not zoom into the field. */
+@media (pointer: coarse) { .pn-inbox .ib-lflt-find input { font-size: var(--ib-fs-16-in, 16px); } }
 .ib-lflt-menu .ib-pmi[data-checked] { box-shadow: none; }
 .ib-lflt-host { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; }
 .ib-lflt-host > * { transform: scale(0.85); }
@@ -11998,6 +12019,24 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .pn-inbox .ib-lflt { width: 44px; height: 44px; border-radius: 8px; color: var(--foreground); }
   .pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: none; }
   .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu { max-height: 72vh; }
+  /* The phone's sheet: the field under the "Filter" title, a thumb's height, 16px so iOS does not zoom. */
+  .ib-pm-pos[data-phone] .ib-lflt-top { top: -6px; margin: 0 -6px 4px; padding: 0 6px; }
+  .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { scroll-padding-top: 56px; }
+  .ib-pm-pos[data-phone] .ib-lflt-find { gap: 12px; padding: 0 2px 0 12px; }
+  .ib-pm-pos[data-phone] .ib-lflt-find > svg.ib-ic { width: 18px; height: 18px; }
+  .pn-inbox .ib-pm-pos[data-phone] .ib-lflt-find input { height: 48px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-pm-pos[data-phone] .ib-lflt-clear { width: 44px; height: 44px; }
+  /* The sheet keeps its height while typing, so the field under the thumb never moves as rows go. */
+  .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { width: auto; height: min(72vh, calc(var(--ib-vvh, 100dvh) - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top))); max-height: min(72vh, calc(var(--ib-vvh, 100dvh) - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top))); }
+  /* With the keyboard up, upright or on its side (phone.ts trackKeyboard: `data-ib-keyboard`, `--ib-vvh`), the sheet
+     sits flush on the keyboard instead of under it, a little tighter, and its title goes (the field's own words say
+     what it is), so the field and rows fit: on its side a phone leaves about 140 px, and one whole row still shows. */
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] .ib-pm-title { display: none; }
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] { bottom: calc(100% - var(--ib-vvh, 100%)) !important; }
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { padding-block: 4px; height: calc(var(--ib-vvh, 100dvh) - var(--ib-sheet-inset) - env(safe-area-inset-top)); max-height: calc(var(--ib-vvh, 100dvh) - var(--ib-sheet-inset) - env(safe-area-inset-top)); scroll-padding-top: 52px; }
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone] .ib-lflt-top { top: -4px; }
+  :root[data-ib-keyboard] .pn-inbox .ib-pm-pos[data-phone] .ib-lflt-find input { height: 44px; }
+  .ib-pm-pos[data-phone] .ib-lflt-none { padding: 12px; font-size: var(--ib-fs-15, 15px); }
   .ib-tidy-pos[data-phone] .ib-tidy.ib-lflt-range { width: auto; padding: 16px; }
   .pn-inbox .ib-lflt-range-days input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-lflt-range-act .ib-btn { height: 44px; padding: 0 18px; }
