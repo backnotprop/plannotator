@@ -68,6 +68,7 @@ import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
 import { formatInboxAppHeader } from "@plannotator/core/inbox-door-version";
 import { APP_HEADER, APP_UPGRADE, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
+import { commandTimeRefusal, NOT_AFTER_HEADER } from "./inbox-not-after";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
   PAIRING_CHECKS_DEADLINE_MS,
@@ -235,6 +236,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // tags this Inbox's threads by a tag's name and changes the tag of that name here. Phones do not take tags.
   { method: "POST", route: /^threads\/([^/]+)\/tags$/, window: (m) => `/api/inbox/threads/${m[1]}/tags`, machineOnly: true },
   { method: "POST", route: /^initiatives\/([^/]+)$/, window: (m) => `/api/inbox/initiatives/${m[1]}`, machineOnly: true },
+  // A project's tags (project-tags.ts, mark `project-tags`): a linked machine's window tags this Inbox's projects by a
+  // tag's name, as it tags its threads. Phones do not take them.
+  { method: "POST", route: /^projects\/([^/]+)\/tags$/, window: (m) => `/api/inbox/projects/${m[1]}/tags`, machineOnly: true },
   // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
   // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).
   { method: "POST", route: /^tag-colours$/, window: () => "/api/inbox/tag-colours" },
@@ -345,6 +349,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
+  // Show in Rex for one of this Inbox's agents, from a linked machine's window (inbox-rex-far.ts): the Rex apps
+  // attached to this computer's Rex from elsewhere go to its pane.
+  { method: "POST", route: /^rex\/show$/, window: () => "/api/inbox/rex/show", machineOnly: true },
   // A file an agent's message names, read only (approval "inbox-file-refs-open-viewer"): its view and an image's or a
   // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
   // Not a phone's: a phone reads them through the tailnet as the owner.
@@ -1094,6 +1101,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // A replayed file is not kept: the answer names the upload or drawing the first one made.
       return finish(json(seen.body, seen.status, { "Idempotent-Replayed": "true" }));
     }
+    // A "now" write the app queued (section 4, "not_after"), by the door or the relay: a key already answered replays
+    // its answer above, whatever the time; a first arrival past its time is refused, never applied, and not kept.
+    const late = commandTimeRefusal(req.headers.get(NOT_AFTER_HEADER) ?? undefined, now().getTime());
+    if (late) return finish(json(late.body, late.status));
     const run = (async () => {
       const result = await apply();
       if (result.record && result.status !== undefined && result.status < 500) {
@@ -1232,7 +1243,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
    * `413 result_too_large` otherwise, without reading it (inbox-relay.ts).
    * A phone plays a video over the Wi-Fi or the tailnet; relay ranges are v1.1.
    */
-  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown; app?: unknown }): Promise<Response> => {
+  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown; app?: unknown; not_after?: unknown }): Promise<Response> => {
     try {
       const device = devices.get(deviceId);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
@@ -1259,6 +1270,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // so a value that is not in the form (or not a header's characters) is served as if absent, never a 500.
       const app = parseAppHeader(typeof input.app === "string" ? input.app : null);
       if (app) headers[APP_HEADER] = formatInboxAppHeader(app);
+      // `not_after` beside `v`, as the header a direct write sends: one check, in `claim`, for both paths. A value
+      // that is not a string is carried as one, so it is refused as no time (400), never dropped.
+      if (input.not_after !== undefined && input.not_after !== null) headers[NOT_AFTER_HEADER] = typeof input.not_after === "string" ? input.not_after.replace(/[^\x20-\x7e]/g, "?") : "invalid";
       const req = new Request(url, {
         method: input.method,
         headers,

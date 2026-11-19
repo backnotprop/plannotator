@@ -35,10 +35,11 @@ import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inbox
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
-import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
+import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_SETUP_COMMAND, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-reports";
-import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
+import { INBOX_HELP_TOPICS_LINES } from "./inbox-help-before-after";
+import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
@@ -51,6 +52,27 @@ export interface InboxToolGuide {
   args: readonly string[];
   lines: readonly string[];
 }
+
+/** The "Before and after" section's example (approval "before-after"): one place, a Before as quoted lines, two versions and a choice that keeps today's words. */
+export const INBOX_BEFORE_AFTER_EXAMPLE = [
+  ":::question",
+  "New words for the line above a file that changed after it was sent?",
+  "",
+  "Where: The line above a file you open from a thread, shown when the file changed on disk after the agent sent it.",
+  "Shows: ![A file opened from a thread, the line circled](/tmp/file-line.png)",
+  "Before: Changed since Claude Code sent it. [Open the version it sent](#)",
+  "Source: packages/inbox/components/FileLine.tsx:88",
+  "",
+  "- [ ] Say when",
+  "    After: Changed since Claude Code sent it at 5:40 PM. [Open the version it sent](#)",
+  "- [ ] Say edited",
+  "    After: Edited since Claude Code sent it. [Open the version it sent](#)",
+  "- [ ] Leave it",
+  "",
+  "Recommended: Say when",
+  "Why: the time says how stale the sent version is.",
+  ":::",
+].join("\n");
 
 /** The `http://127.0.0.1:<port>/mcp` address with the port left open: it changes. */
 export const INBOX_HELP_MCP_URL = "http://127.0.0.1:<port>/mcp";
@@ -116,6 +138,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread, `reply_to`, `supersedes` or `done` is refused.",
       `- ${INBOX_SHOWING_RULE}`,
       `- Pictures: ${INBOX_PICTURES_RULE}`,
+      `- Before and after: ${INBOX_CHANGE_RULE}`,
       `- ${INBOX_DELEGATED_OPTIONS_RULE}`,
       "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show; copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
       "- Fenced blocks in `body` that draw: a block fenced as `mermaid` or `dot` draws as a diagram, and one fenced as `html` draws as a live page in the message (a chart, an SVG drawing, a small mock). The page runs in a sandbox: its scripts run and it may load libraries, data, images and fonts over https, but it cannot reach the Inbox, the person's files or a path beside you (give images as https or data: URLs). Leave its background transparent so it sits in the message, and use the theme's variables: `var(--foreground)`, `var(--muted-foreground)`, `var(--border)`, `var(--chart-1)` to `var(--chart-5)`, `var(--font-sans)`. Let content set its height: do not use vh units or `height:100%` on html or body (the frame takes the page's height, so the page would grow without end). It shows up to 480 px tall, then Show more; the person can open it full screen or read its code. A block fenced as `svg` shows as an image.",
@@ -340,6 +363,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
+  // The person's one turn-on step (INBOX_SETUP_COMMAND), naming this binary.
+  const setupCommand = INBOX_SETUP_COMMAND.replace(/^plannotator\b/, self);
   const ctx: ConnectContext = { command: mcpCommand, mcpUrl: INBOX_HELP_MCP_URL, platform: options.platform ?? inboxHelpPlatform() };
   const inboxPath = join(options.dataDir, "inbox");
   const configPath = join(options.dataDir, "config.json");
@@ -404,11 +429,11 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     `The \`${INBOX_TOOL_NAME}\` tool fills ${INBOX_FILLED_ARGUMENTS.map(code).join(", ")} for you. It files your messages under the folder your session started in. Pass \`project_path\` to it yourself only when the message is about another repository or folder (absolute, or relative to your working folder; it must be an existing folder): it then lands in that project, and relative \`attachments\` resolve against it. The stdio server fills \`project_path\` (its working folder, or \`PLANNOTATOR_CWD\`) and \`agent_session\`: the session's own id when a Claude Code or Pi session started it (a command your session runs); in Codex, your thread (Codex names it on every tool call, and in \`CODEX_THREAD_ID\` for the commands its shell runs), so the person's reply comes back into that thread; else one id per process, so pass \`agent_session\` yourself to keep your threads across restarts. Over HTTP, pass \`project_path\` (the absolute path of the repository or folder you work in) and \`agent_session\` yourself.`,
     "",
-    "Every call starts a stopped Inbox in the background, without a browser tab, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window.",
+    "Once the person has turned the Inbox on here, every call starts a stopped Inbox in the background, without a browser tab, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window and turns the Inbox on. Until they have, a call answers that the Inbox is off: ask them in the chat instead.",
     "",
     "## When the person asks where their Inbox is",
     "",
-    `When the person asks where the Inbox is, or wants it back after closing its tab, run ${code(`${self} inbox --open`)}. It opens the window in their browser (starting the Inbox in the background when it is not running), prints the address on stdout and returns at once, so it never blocks your session. Tell them the address. They can also use their agent's \`/plannotator-inbox\` command (\`$plannotator-inbox\` in Codex), which runs the same thing. In a remote session (SSH) with no browser set, it opens no browser on the remote host: it prints the address and says how to reach it (\`ssh -L\` or \`--tailscale\`). To read the address without opening a tab, run ${code(`${self} inbox --background`)}: it prints the same URL. The address can change when the Inbox restarts, so read it again instead of reusing an old one.`,
+    `When the person asks where the Inbox is, or wants it back after closing its tab, run ${code(`${self} inbox --open`)}. It opens the window in their browser (starting the Inbox in the background when it is not running), prints the address on stdout and returns at once, so it never blocks your session. The first time, it also turns the Inbox on here and, after the address, connects the agents it finds that are not connected yet, within half a minute: run it only when the person asks. Tell them the address. They can also use their agent's \`/plannotator-inbox\` command (\`$plannotator-inbox\` in Codex), which runs the same thing. In a remote session (SSH) with no browser set, it opens no browser on the remote host: it prints the address and says how to reach it (\`ssh -L\` or \`--tailscale\`). To read the address without opening a tab, run ${code(`${self} inbox --background`)}: it prints the same URL. The address can change when the Inbox restarts, so read it again instead of reusing an old one.`,
     "",
     "## Connecting yourself",
     "",
@@ -416,10 +441,10 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     `- **Claude Code** with the Plannotator plugin: nothing else to do. Check \`claude plugin list\` for \`plannotator@plannotator\`; if it is missing, run \`claude plugin marketplace add backnotprop/plannotator\` and \`claude plugin install plannotator@plannotator\`. The \`${INBOX_TOOL_NAME}\` tool appears after Claude Code restarts (\`claude --continue\` returns to this conversation). It needs Claude Code 2.1.287 or later. In \`claude -p\` and other scripted runs you have the tool, but a reply does not wake the run: read the thread later with read_thread.`,
     `- **Pi** with the Plannotator extension (\`pi install npm:@plannotator/pi-extension\` if it is missing), or **OpenCode** with the Plannotator plugin (\`@plannotator/opencode@latest\` in opencode.json: \`"plugin": [...]\` on OpenCode 1, \`"plugins": [{ "package": ... }]\` on OpenCode 2): the inbox tool is off by default there. Turn it on for your host by merging ${code(`{ "inboxTool": { "pi": true } }`)} (or \`"opencode"\`) into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. Then start a new Pi session (or \`/reload\`), or restart OpenCode. Pi and OpenCode send the tool with every request: ${inboxToolCostText("pi")} each (the size measured on both; the token count depends on the model).`,
-    `- **DeepSeek Harness** with Plannotator's plugin (\`dsh plugin --profile <profile> add @plannotator/dsh\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "dsh": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer (\`inbox/inbox.json\` in the data folder); if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies when DeepSeek Harness next starts, never in a running one, so tell the person to restart it. DeepSeek Harness sends the tool with every request too. Over MCP the Inbox cannot tell DeepSeek Harness sessions apart, so use the plugin, not the stdio server.`,
-    `- **Cline** with Plannotator's plugin (\`cline plugin install npm:@plannotator/cline\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "cline": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer; if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies to Cline sessions started after that, never to a running one. Cline sends the tool with every request too. The plugin works in the Cline CLI, Kanban, the desktop app and the VS Code extension's new version; the extension's Legacy version loads no plugins, so there register the stdio server.`,
-    `- **Hermes Agent** with Plannotator's plugin (\`${HERMES_PLUGIN_INSTALL}\` if \`hermes plugins list\` does not show \`plannotator\`): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "hermes": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. For the person's replies to come back into the session that asked, Hermes must let the plugin start a turn: \`${HERMES_WAKE_GRANT_LINE}\`. The tool appears in new Hermes sessions, never in a running one, and only once the Inbox has run on this computer; if it never has, the person starts it once with ${code(`${self} inbox --background`)}. Hermes sends the tool with every request too. It works only in the person's own sessions: the terminal, the TUI, the Desktop app and their own direct messages to the bot; in any other chat the tool refuses.`,
-    `- **OpenClaw** with Plannotator's plugin (\`openclaw plugins install npm:@plannotator/openclaw\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "openclaw": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer; if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies from the next message in each OpenClaw chat. Only the person's own chats get it: OpenClaw on this computer and their own direct messages, never a group, a channel or someone else's chat. OpenClaw sends the tool with every request too, so tell the person before you turn it on.`,
+    `- **DeepSeek Harness** with Plannotator's plugin (\`dsh plugin --profile <profile> add @plannotator/dsh\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "dsh": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the person has turned the Inbox on for this computer; if they have not, they run ${code(setupCommand)} once. It applies when DeepSeek Harness next starts, never in a running one, so tell the person to restart it. DeepSeek Harness sends the tool with every request too. Over MCP the Inbox cannot tell DeepSeek Harness sessions apart, so use the plugin, not the stdio server.`,
+    `- **Cline** with Plannotator's plugin (\`cline plugin install npm:@plannotator/cline\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "cline": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the person has turned the Inbox on for this computer; if they have not, they run ${code(setupCommand)} once. It applies to Cline sessions started after that, never to a running one. Cline sends the tool with every request too. The plugin works in the Cline CLI, Kanban, the desktop app and the VS Code extension's new version; the extension's Legacy version loads no plugins, so there register the stdio server.`,
+    `- **Hermes Agent** with Plannotator's plugin (\`${HERMES_PLUGIN_INSTALL}\` if \`hermes plugins list\` does not show \`plannotator\`): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "hermes": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. For the person's replies to come back into the session that asked, Hermes must let the plugin start a turn: \`${HERMES_WAKE_GRANT_LINE}\`. The tool appears in new Hermes sessions, never in a running one, and only once the person has turned the Inbox on for this computer; if they have not, they run ${code(setupCommand)} once. Hermes sends the tool with every request too. It works only in the person's own sessions: the terminal, the TUI, the Desktop app and their own direct messages to the bot; in any other chat the tool refuses.`,
+    `- **OpenClaw** with Plannotator's plugin (\`openclaw plugins install npm:@plannotator/openclaw\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "openclaw": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the person has turned the Inbox on for this computer; if they have not, they run ${code(setupCommand)} once. It applies from the next message in each OpenClaw chat. Only the person's own chats get it: OpenClaw on this computer and their own direct messages, never a group, a channel or someone else's chat. OpenClaw sends the tool with every request too, so tell the person before you turn it on.`,
     "- **T3 Code** (Claude in a T3 thread: `T3CODE_THREAD_ID` is set in your shell): run `plannotator t3 --help` and follow its setup. The person approves T3's sign-in page.",
     "- **Anything else**: register the stdio server; \"Connecting other agents\" below has the line for your host.",
     "",
@@ -506,6 +531,16 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_CONTRACT_EXAMPLE,
     "```",
     "",
+    "### Before and after",
+    "",
+    "When a question proposes a change (wording, a screen, code, a setting, a behaviour), show it. Most questions need none of this; a new feature or a prototype has no before: send pictures instead.",
+    "",
+    "```markdown",
+    INBOX_BEFORE_AFTER_EXAMPLE,
+    "```",
+    "",
+    "Every form (several places, a version per choice, pictures and clips, new or removed), each with what the person sees: `plannotator inbox --help before-after`.",
+    "",
     "### Trade-offs and prototypes",
     "",
     "Lines indented under a `- [ ]` choice (a plain `- Label` bullet would take them into its label), each optional, each read once. Write them only when they help the person pick:",
@@ -550,7 +585,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     ...HARNESSES.map((harness) => harnessHelpLine(harness, ctx)),
     "",
-    `The \`${INBOX_TOOL_NAME}\` tool is ${defaults}. \`PLANNOTATOR_INBOX_TOOL=1\` or \`0\` turns it on or off everywhere, and config.json \`inboxTool\` takes \`true\`, \`false\` or one per host (\`{ "pi": true }\`); the environment variable wins. A host decides once, at start (Claude Code, OpenCode and DeepSeek Harness when the process starts, Pi per session or \`/reload\`), and registers the tool only if the Inbox has run once on this machine by then (\`inbox/inbox.json\` exists); Claude Code registers it anyway, and its first call starts the Inbox. So the tool appears in sessions started after that, never in one already running. Once the Inbox has run here, a session with the tool also gets one line at its start saying when to use the Inbox; config.json \`inboxReminder\` (\`false\`, or one per host) turns that line off.`,
+    `Once the person has turned the Inbox on here, the \`${INBOX_TOOL_NAME}\` tool is ${defaults}. \`PLANNOTATOR_INBOX_TOOL=1\` or \`0\` turns it on or off everywhere, and config.json \`inboxTool\` takes \`true\`, \`false\` or one per host (\`{ "pi": true }\`); the environment variable wins. A host decides once, at start (Claude Code, OpenCode and DeepSeek Harness when the process starts, Pi per session or \`/reload\`), and registers the tool only if the person has turned the Inbox on for this machine by then (their own \`plannotator inbox\`), Claude Code included. So the tool appears in sessions started after that, never in one already running. Once the Inbox is on here, a session with the tool also gets one line at its start saying when to use the Inbox; config.json \`inboxReminder\` (\`false\`, or one per host) turns that line off.`,
     "",
     "## A note in each agent's instructions",
     "",
@@ -612,6 +647,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- `plannotator uninstall` keeps the data. `plannotator uninstall --purge` stops a running Inbox, then deletes it (if it cannot stop it, it says so and keeps the data).",
     "- Both remove the `plannotator-inbox` MCP entries `plannotator inbox` added to the agents on this computer (`plannotator uninstall --dry-run` lists them); an entry changed by hand to run something else is left.",
     "- Never run uninstall, delete threads or projects, or edit these files for the person.",
+    "",
+    ...INBOX_HELP_TOPICS_LINES,
     "",
   ].join("\n");
 }

@@ -19,6 +19,7 @@ import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { Annotation } from '@plannotator/ui/types';
 
 const hasDom = typeof document !== 'undefined';
+const { PHONE_QUERY, TOUCH_QUERY } = await import('./phone');
 const { ImageAttachmentView } = (hasDom ? await import('./components/ImageAttachmentView') : {}) as typeof import('./components/ImageAttachmentView');
 type ImageSwipeEdges = import('./components/ImageAttachmentView').ImageSwipeEdges;
 
@@ -372,6 +373,35 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     } finally {
       window.matchMedia = realMatch;
       window.getComputedStyle = realStyle;
+    }
+  });
+
+  test('on a touch phone Mark up opens the zoomable drawing screen; a desktop keeps the plain preview', async () => {
+    const realMatch = window.matchMedia;
+    const fake = (phone: boolean) =>
+      ((query: string) => ({
+        matches: phone && (query === PHONE_QUERY || query === TOUCH_QUERY),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as unknown as typeof window.matchMedia;
+    try {
+      for (const phone of [true, false]) {
+        window.matchMedia = fake(phone);
+        document.body.classList.add('pn-inbox');
+        await mount();
+        await load(6000, 1000);
+        await act(async () => host!.querySelector<HTMLButtonElement>('[data-markup-open]')!.click());
+        expect(document.querySelector('[data-pn-image-annotator-stage]')!.hasAttribute('data-pn-image-annotator-zoomable')).toBe(phone);
+        expect(document.querySelector('[data-pn-image-annotator-area]') !== null).toBe(phone);
+        await act(async () => root!.unmount());
+        root = null;
+        host!.remove();
+        document.body.replaceChildren();
+      }
+    } finally {
+      window.matchMedia = realMatch;
+      document.body.classList.remove('pn-inbox');
     }
   });
 

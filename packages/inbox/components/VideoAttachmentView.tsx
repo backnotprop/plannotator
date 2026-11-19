@@ -19,6 +19,7 @@ import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
 import { AudioScrub, useAudioPeaks } from './AudioPlayer';
 import { PlaybackSpeed, readPlaybackRate, writePlaybackRate } from './PlaybackSpeed';
+import { useTouchPhone } from '../phone';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -155,6 +156,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (kept && !keptNow) setKept(null);
   }, [kept, keptNow]);
   const [annotating, setAnnotating] = useState(false);
+  const touchPhone = useTouchPhone();
   useEffect(() => {
     if (annotating) acceptable.current = true;
   }, [annotating]);
@@ -707,6 +709,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           isOpen={annotating && frame !== null}
           escapeCancels={DRAWING_SCREEN.escapeCancels}
           hint={DRAWING_SCREEN.hint}
+          // A touch phone draws on the frame full screen, zoomable, as on an image (ImageAttachmentView).
+          zoomable={touchPhone || undefined}
           onClose={() => {
             setAnnotating(false);
             requestAnimationFrame(() => textRef.current?.focus());

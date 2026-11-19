@@ -38,6 +38,7 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
+import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -258,6 +259,8 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
+  /** Server only (launch's notes, `writeLaunchNote`): one of the Inbox's own launch notes (`InboxMessage.launch_note`). */
+  launch_note?: boolean;
   /** Server only (packages/server/inbox-scheduled.ts): an agent's routine change (`InboxMessage.scheduled_change`). */
   scheduled_change?: InboxScheduledChange;
   body: string;
@@ -288,6 +291,7 @@ export interface InboxSendInput {
   inline_images?: InboxInlineImage[];
   /** Running apps the body's question choices name as prototypes, already checked and probed by the server (`packages/server/inbox-live.ts`). */
   live_sites?: Omit<InboxLiveSiteRef, "opened_at">[];
+  picture_it?: InboxPictureItPage | null;
   /** A guided review the message carries (submit_guide); its blob is written once the message lands. */
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
@@ -2499,6 +2503,7 @@ export class InboxStore {
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),
+      ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
     };
@@ -4330,6 +4335,7 @@ export class InboxStore {
         : {}),
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
       ...(input.live_sites && input.live_sites.length > 0 ? { live_sites: input.live_sites.map((site) => ({ ...site, opened_at: at })) } : {}),
+      ...(input.picture_it && input.attachments?.some((attachment) => attachment.id === input.picture_it!.attachment_id) ? { picture_it: input.picture_it } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(basePath ? { base_path: basePath } : {}),
       // Only into another project's thread: a send that landed in its own project (or one combined with it) is from there.
@@ -4338,6 +4344,7 @@ export class InboxStore {
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
+      ...(input.launch_note === true ? { launch_note: true as const } : {}),
       ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),

@@ -1347,6 +1347,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const snapshot = machinePulls.start(refresh);
       return () => snapshot().map((entry) => ({ ...entry, name: links.get(entry.machine)?.name }));
     },
+    pullLinkedThere: (key: string) => machinePulls.linkedThere(key),
     /** Each linked machine's reported branches (mark `branches`), for Reviews (inbox-machine-branches.ts). */
     branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,

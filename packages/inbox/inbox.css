@@ -1411,6 +1411,29 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-notice-text { display: flex; align-items: baseline; gap: 0.3em; min-width: 0; overflow: hidden; }
 .ib-notice-n { flex-shrink: 0; }
 .ib-notice-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The held list's bar sticks to the top of the list's scroll box while threads wait behind it (HeldNoticeLine.tsx,
+   listNewState.ts; the owner, 2026-11-17: always in reach, never scrolled out of sight). At rest it is where it was,
+   above the rows; its box is the rows' own ground, so rows pass under it unseen, and the 12 px under the line is
+   the box's. Above the phone's sticky group headers, which stick under it. `--ib-held-h` is the box's height: the
+   phone's headers and the list's top pill sit below it. Nothing moves: no transition, so reduced motion is the same. */
+.ib-listcol { --ib-held-h: 50px; --ib-held-pad: var(--ib-held-h); }
+.ib-notice-stick { position: sticky; top: 0; z-index: 3; padding-bottom: 12px; background: var(--card); display: grid; gap: 8px; }
+/* Two lines (newsWords.ts: news here, then news in other projects): the box is both, 38 + 8 + 38 + 12. */
+.ib-listcol:has(.ib-notice-stick[data-lines="2"]) { --ib-held-h: 96px; }
+/* "from …" is left off whole when the line has no room for it (newsWords.ts): the words may wrap here, onto a second
+   line this one-line box clips, so "from …" goes to that line as a whole, never cut inside a name. The counts in
+   front of it are still cut with "…" if even they do not fit. */
+.ib-notice-text[data-drop] { flex-wrap: wrap; height: 1lh; }
+.ib-notice-text[data-drop] > .ib-notice-n { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-notice-from { white-space: nowrap; }
+.ib-notice-stick > .ib-notice { margin-bottom: 0; }
+/* A row that ↑ ↓, J/K or Tab scrolls to (`scrollIntoView`, block nearest) stops below the stuck bar, never under it.
+   The bar itself sits inside that padding, so it takes a negative scroll margin of the same size: without it, the bar
+   taking focus (Tab, a click that scrolls its target into view) made the browser scroll to bring it below the padding,
+   which a stuck box never reaches, and the list jumped (418 px in a 900 px window). */
+.ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: var(--ib-held-pad); }
+.ib-notice-stick > .ib-notice { scroll-margin-top: calc(-1 * var(--ib-held-pad)); }
+.pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 12px); }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
 .ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }
@@ -2026,6 +2049,15 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-sframe .ib-card .ib-connect { margin: 0; }
 .ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
 .ib-vslider:disabled { opacity: 0.45; }
+/* Settings → Play a sound: what rings it, under the label (the owner's two choices). The label's column is the
+   container: where it is too narrow for the two in a line (about 360 px: a phone, or a desktop window with the
+   sidebar out), one under another, each the column's full width (as Rows' agents). */
+.ib-prow[data-settings-sound] .ib-txt { container: ib-sound-row / inline-size; }
+.ib-prow .ib-sound-when { align-self: flex-start; max-width: 100%; margin: 6px 0 3px; }
+@container ib-sound-row (max-width: 379px) {
+  .ib-prow .ib-sound-when { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; align-self: stretch; }
+  .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; }
+}
 .pn-inbox .ib-sw:disabled { opacity: 0.45; }
 /* Settings → Archived: the archived rows drawn as the section's card rows. */
 .ib-card .ib-arcrow { padding: 10px 16px; border-bottom: 1px solid var(--ib-hair); }
@@ -2295,8 +2327,12 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-vhead .ib-fn { font-weight: 600; font-size: var(--ib-fs-14, 14px); white-space: nowrap; min-width: 0; overflow: hidden; }
 .ib-vhead .ib-from { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-vhead .ib-sp { flex: 1; }
-.ib-changed { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
-.ib-changed .ib-ic { color: var(--warning); }
+.ib-changed { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 8px; padding: 8px 18px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--warning) 10%, var(--card)); border-bottom: 1px solid color-mix(in oklab, var(--warning) 25%, transparent); }
+.ib-changed .ib-ic { color: var(--warning); margin-top: calc((1lh - 14px) / 2); }
+/* Icon | words: the sentence wraps in its own box, and the link follows it or takes the next row under the sentence, never under the icon. */
+.ib-changed-b { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.ib-changed-t { flex: 0 1 auto; min-width: 0; max-width: 100%; text-wrap: pretty; }
+.ib-changed .ib-vlink { flex: none; white-space: nowrap; }
 .pn-inbox .ib-vlink { color: var(--primary); font-weight: 550; }
 .ib-vbody { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-docarea { position: relative; overflow: hidden; background: var(--background); min-height: 0; }
@@ -3413,7 +3449,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-ptool-l { display: none; }
 }
 
-/* The question sound (.product/approved/inbox-sound/): the one-time dialog, the Settings row, the hints (its "Sound off." uses the window's one toast, below). */
+/* The Inbox's sound (.product/approved/inbox-sound/): the one-time dialog, the Settings row, the hints (its "Sound off." uses the window's one toast, below). */
 .ib-dlg-head { display: flex; align-items: center; gap: 12px; }
 .ib-dlg-head h2 { flex: 1; min-width: 0; }
 .pn-inbox .ib-dlg-head .ib-btn svg.ib-ic, .pn-inbox .ib-btn.ib-icon svg.ib-ic { width: 14px; height: 14px; }
@@ -3700,6 +3736,17 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
+  /* The bar's box on a phone: the line's 10 / 12 px margins are its padding, the line one 44 px row; the group
+     headers stick under it. */
+  .ib-listcol { --ib-held-h: 64px; --ib-held-pad: calc(var(--ib-held-h) + 44px); }
+  .ib-notice-stick { padding: 10px 12px; }
+  /* A fixed 44 px (one line, nowrap) so the box is exactly `--ib-held-h`: change one, change the other. */
+  .ib-notice-stick > .ib-notice { height: 44px; margin: 0; width: 100%; }
+  /* The group header stuck under the bar is in the padding too: the same negative margin, its own 44 px. */
+  .ib-lbody:has(.ib-notice-stick) .ib-band { top: var(--ib-held-h); scroll-margin-top: -44px; }
+  .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 56px); }
+  /* Two lines: 10 + 44 + 8 + 44 + 10. */
+  .ib-listcol:has(.ib-notice-stick[data-lines="2"]) { --ib-held-h: 116px; }
   /* The stale page notice's ×: a finger's width. */
   .pn-inbox .ib-stale .ib-stale-x { width: 44px; }
   .ib-askline { margin: 10px 12px; }
@@ -3776,6 +3823,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-control] { width: 20px; height: 20px; margin-top: 0; }
   :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
+  /* A choice's own version under its row lines up with its words past the 20 px control (9 + 20 + 10). */
+  :is(.ib-body, .ib-docscroll) .question-block { --qc-choice-indent: 39px; --ib-qtile-text: 42px; }
   :is(.ib-body, .ib-docscroll) [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-key] input[type="text"] { min-height: 40px; }
   /* The Other field (a textarea that grows with its lines): one line is 40 px with its words in the middle, as the
@@ -3882,6 +3931,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-sheet-h .ib-sp { flex: 1; }
   .ib-changed { flex-wrap: wrap; padding: 8px 14px; }
   .ib-docscroll { padding: 56px 10px 24px; }
+  /* Full screen, the file's bar floats 14 px over the bottom (54 px tall, above the home indicator): the end of a
+     document scrolls clear of it, so its last lines and a drawing's foot can be read and pressed. */
+  .ib-view.ib-fullview.ib-phone .ib-docscroll { padding-bottom: calc(92px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); }
   .ib-toolstrip { top: 10px; left: 10px; }
   /* the viewer's Global comment and Copy float right on a desktop; on a phone they sit on their own line, so the file keeps the width */
   .ib-phone [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
@@ -5544,6 +5596,10 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .question-block [data-question-tiles] > [data-question-tile] { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; }
 .pn-inbox .question-block [data-question-tiles] > [data-question-tile] > label { grid-row: 1 / span 2; display: grid; grid-template-rows: subgrid; row-gap: 0; }
 .pn-inbox .question-block [data-question-tile-caption] { grid-row: 2; align-self: start; padding: 10px 12px 12px; gap: 10px; }
+/* A choice's own version (change lines) under a tile's words: a third row, so the versions line up across tiles too. */
+.pn-inbox .question-block [data-question-tiles]:has(> [data-question-tile] > [data-question-choice-change]) > [data-question-tile] { grid-row: span 3; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile] > [data-question-choice-change] { grid-row: 3; align-self: start; padding-block: 0 12px; padding-inline: var(--ib-qtile-text, 37px) 12px; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile]:has(> [data-question-choice-change]) [data-question-tile-caption] { padding-bottom: 6px; }
 .pn-inbox .question-block [data-question-tile] [data-question-part="choice"] { max-width: 68ch; }
 /* The picture's box is its own shape from the recorded size (16:10 when none was recorded), never past its natural width
    (a small icon is not blown up; an SVG has no recorded size and fills the box), at most 440 px tall, on a quiet ground.
@@ -5611,6 +5667,12 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] { --ib-qpic-w: 100%; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] > label { flex-direction: column; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] [data-question-tile-picture] { flex-basis: auto; border-inline-end: 0; border-bottom-width: 1px; }
+  /* A choice's own version stays in the words' column, under its words (never under the picture, where it would read as its caption). */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) { display: grid; grid-template-columns: var(--ib-qpic-w) minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > label { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-picture] { grid-column: 1; grid-row: 1 / -1; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-caption] { grid-column: 2; grid-row: 1; padding-bottom: 6px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > [data-question-choice-change] { grid-column: 2; grid-row: 2; padding-inline-start: 41px; }
 }
 @container ib-pics (min-width: 560px) and (max-width: 899.98px) {
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) { grid-template-columns: minmax(0, 1fr); gap: 10px; --ib-qpic-w: min(62%, 760px); --ib-qpic-max: 460px; }
@@ -5625,8 +5687,18 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] > label { flex-direction: column; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] [data-question-tile-picture] { flex-basis: auto; border-inline-end: 0; border-bottom-width: 1px; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-no-picture] > label::before { content: none; }
+  /* A choice's own version stays in the words' column, under its words (never under the picture, where it would read as its caption). */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) { display: grid; grid-template-columns: var(--ib-qpic-w) minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > label { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-picture] { grid-column: 1; grid-row: 1 / -1; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-caption] { grid-column: 2; grid-row: 1; padding-bottom: 6px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > [data-question-choice-change] { grid-column: 2; grid-row: 2; padding-inline-start: 41px; }
 }
 .pn-inbox .question-block label[data-question-option]:has(input:checked) { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
+/* A choice with its own version (change lines) under its row: the row and the version tint as one choice. */
+.pn-inbox .question-block [data-question-option-with-change] > label[data-question-option], .pn-inbox .question-block [data-question-option-with-change] > label[data-question-option]:hover, .pn-inbox .question-block [data-question-option-with-change] > label[data-question-option]:has(input:checked) { background: transparent; }
+@media (hover: hover) { .pn-inbox .question-block [data-question-option-with-change]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); } }
+.pn-inbox .question-block [data-question-option-with-change]:has(input:checked), .pn-inbox .question-block [data-question-option-with-change]:has(input:checked):hover { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
 .pn-inbox .question-block [data-question-part="choice"] > span:first-child { font-weight: var(--ib-qc-choice-w-s, 550); }
 /* The Recommended tag only (ui's Tag carries data-question-tag): an image or inline code in a choice keeps its
    own radius. */
@@ -8679,9 +8751,6 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
-}
 /* A comment on an HTML page on a phone (HtmlPageComment.tsx): what it is on with Parent and Child, then the field and
    Comment, under the tabs. The card is the one tool left, solid so the page's words do not read through it, and every
    target is 44 px. */
@@ -12563,3 +12632,10 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
 .ib-topen[data-ghost-says] { visibility: hidden; }
 .pn-inbox span.ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: none; }
+
+/* Under 360 px the drawing screen's tools take three rows whatever the gaps (the colours and the history need 201 px
+   of a 193 px strip at 320): tools and size, the colours, then Undo, Redo and Clear together, never one left alone
+   (the 2026-11-19 phone audit). The divider before Undo becomes the break. */
+@media (max-width: 359px) {
+  .pn-inbox [data-pn-image-toolbar-scroll] > div > div:has(+ button[aria-label="Undo"]) { flex-basis: 100%; width: 0; height: 0; }
+}

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { inboxRunInRex, type InboxRun } from '@plannotator/core/inbox-types';
-import { INBOX_RUN_REX_NOT_CONNECTED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
+import { INBOX_REX_SERVER_AWAY, INBOX_REX_SHARED, INBOX_RUN_REX_NOT_CONNECTED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
@@ -439,7 +439,7 @@ export function RunLine({
           {text}
           {run.rex?.unavailable && (run.state === 'starting' || run.state === 'working') && (
             <span className="ib-run-sub" data-run-rex-away="">
-              Rex isn't open on this computer, so it started in the background.
+              {run.rex.why === 'server' ? INBOX_REX_SERVER_AWAY : run.rex.why === 'shared' ? INBOX_REX_SHARED : "Rex isn't open on this computer, so it started in the background."}
             </span>
           )}
           {note && (

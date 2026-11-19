@@ -269,8 +269,8 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const client = new Client({ name: "inbox-pulls-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   clients.push(client);
-  const send = async (body: string, thread: string) => {
-    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code" } })) as { structuredContent: { thread_id: string } };
+  const send = async (body: string, thread: string, extra: Record<string, unknown> = {}) => {
+    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code", ...extra } })) as { structuredContent: { thread_id: string } };
     return result.structuredContent.thread_id;
   };
   const pulls = async (query = "") => fetch(`${base}/api/inbox/pulls${query}`);
@@ -974,6 +974,40 @@ describe("on", () => {
     expect(moved?.page).toBeUndefined();
   });
 
+  test("a Picture it asked of a PR's thread keeps its guided review on the way beside it, and its page is served once the agent sends one", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const asked = await linkOf();
+    expect(asked).toMatchObject({ via: "owner", thread_id: talk, ask: "guide" });
+    expect(typeof asked?.picture_it_asked_at).toBe("string");
+    expect(asked?.picture_it_page).toBeUndefined();
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries" });
+    expect((await w.own([key], talk, { ask: "picture-it" })).status).toBe(422);
+  });
+
+  test("a Picture page is marked seen once the person has looked at its thread", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "picture_it" })).status).toBe(200);
+    const page = join(w.root, "picture-it.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="picture-it"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.picture_it_page?.seen).toBeUndefined();
+    w.server.store.markSeen(talk);
+    expect((await linkOf())?.picture_it_page).toMatchObject({ title: "Retries", seen: true });
+  });
+
   test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
     const w = await world({ codeReview: true });
     const talk = await w.send("Ready.", "talk");
@@ -1203,7 +1237,7 @@ describe("parsing", () => {
       JSON.stringify({
         data: {
           viewer: { login: "dana" },
-          requested: { nodes: [ghPull(880, { author: { login: "tomas" } })] },
+          requested: { nodes: [ghPull(880, { author: { login: "tomas" } }), ghPull(881, { author: { login: "ines" }, authorAssociation: "COLLABORATOR" }), ghPull(882, { author: { login: "zed" }, authorAssociation: "CONTRIBUTOR" })] },
           authored: {
             nodes: [
               ghPull(872, { reviewDecision: "APPROVED", latestReviews: { nodes: [{ state: "APPROVED", author: { login: "priya" } }] } }),
@@ -1218,6 +1252,7 @@ describe("parsing", () => {
     const by = Object.fromEntries(answer.pulls.map((p) => [p.number, p]));
     expect(answer.login).toBe("dana");
     expect(by[880]).toMatchObject({ requested: true, mine: false, author: "tomas" });
+    expect([by[880]!.author_member, by[881]!.author_member, by[882]!.author_member]).toEqual([undefined, true, undefined]);
     expect(by[872]).toMatchObject({ mine: true, review: "approved", approved_by: "priya", checks: "success" });
     expect(by[414]).toMatchObject({ state: "draft", checks: "pending" });
     expect(by[411]).toMatchObject({ state: "merged", merged_at: "2026-11-02T10:00:00Z" });

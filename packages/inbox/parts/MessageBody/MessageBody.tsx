@@ -187,6 +187,8 @@ export function MessageBody({
         // Option lines (`Pros:`, `Cons:`, `Prototype:`) are read, not shown in the meaning line: the card draws the
         // Trade-offs table and the Try prototype tab (approval "inbox-question-tradeoffs").
         questionOptionLines
+        // Change lines (`Where:`, `Before:`, `After:`): the card draws the place and each version (approval "before-after").
+        questionChangeLines
         renderQuestionAfterChoices={onTryPrototype ? afterChoices : undefined}
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}

@@ -25,13 +25,15 @@ import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from
 import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
+import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
+import { readInboxPictureItPage } from "@plannotator/shared/inbox/picture-it-page";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -83,27 +85,21 @@ export function inboxServedTools(switches: { board: boolean; steps: boolean; sch
 }
 
 
-/**
- * Under Claude Code's 2,048-character cap on server instructions. Room for
- * INBOX_THREAD_RULE (in INBOX_AGENT_RULES) came from the attachments line's
- * examples, which the field's own description gives. Room for the pictures
- * clause of INBOX_USE_RULE and the attachments line's "pictures go in the
- * body" (2026-11-02) came from the first line's "without blocking your
- * session" and the result line's "with your work".
- */
-export const INBOX_MCP_INSTRUCTIONS = [
-  "Plannotator Inbox: a local window where the person reads what you send and answers later; nothing blocks.",
-  "",
-  INBOX_AGENT_RULES,
-  "",
-  "- send_message posts markdown. With no reply_to or thread, a message starts a new thread; to add to a thread, reply_to its latest message (an id from the Inbox, never from memory) or use the same `thread` name. Question syntax: send_message's description.",
-  "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
-  "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on and read the thread later.",
-  "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages by words. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
-  "- A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
-  "",
-  "A reply is the person's own: their words, then \"Answers to your questions\"; no tool answers or approves for them.",
-].join("\n");
+export {
+  INBOX_MCP_INSTRUCTIONS,
+  INBOX_MCP_INSTRUCTIONS_MAX_CHARS,
+  INBOX_MCP_RULES_ROOMS,
+  INBOX_MCP_TIERS,
+  inboxMcpInitializeClient,
+  inboxMcpInstructions,
+  inboxMcpSent,
+  inboxMcpTierOf,
+  resolveInboxMcpReminder,
+  type InboxMcpClient,
+  type InboxMcpReminder,
+  type InboxMcpSent,
+  type InboxMcpTier,
+} from "./inbox-mcp-instructions";
 
 /**
  * Claude Code passes an MCP description to the model up to its first 2,048
@@ -217,6 +213,7 @@ export const SEND_BODY_DESCRIPTION = [
   "",
   INBOX_SHOWING_RULE,
   INBOX_PICTURES_RULE,
+  INBOX_CHANGE_RULE,
   "",
   "Optional lines after the question, for a decision that needs them. Most questions need none of these:",
   "- `Stakes: <one sentence>`: what the choice affects, in product terms. Give one whenever you write `Stopped:` or `Holds up:`.",
@@ -369,6 +366,21 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * Absent: off.
    */
   codeReviewOn?: () => boolean;
+  /**
+   * The person's shared Inbox rules and reminder (config.json
+   * `prompts.inbox.rules` / `prompts.inbox.reminder`, read on every
+   * connection, so a change applies at the next session). Null when neither
+   * is configured: the built-in instructions stand unchanged. Absent: the
+   * built-in instructions, as before.
+   */
+  inboxReminder?: () => InboxMcpReminder | null;
+  /**
+   * The connecting client's `initialize` `clientInfo` (name, version), for an
+   * initialize request: the room the person's text gets follows what that
+   * client keeps of the instructions (inboxMcpTierOf). Absent: the tightest
+   * room, Claude Code's before 2.1.296.
+   */
+  mcpClient?: InboxMcpClient;
   /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
   walkthroughThread?: (threadId: string) => boolean;
   /**
@@ -877,6 +889,7 @@ export async function sendAgentMessage(
   }
   // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
   const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
+  const pictureIt = attachments && attachments.length > 0 ? await readInboxPictureItPage(store.dir, attachments) : null;
   const fromProject = await senderProject(context, input.project_path, project);
   const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
   // A question's prototypes (`Prototype:` lines): each file one of these attachments, each running app checked and
@@ -920,6 +933,7 @@ export async function sendAgentMessage(
       ...(attachmentQuestions.length > 0 ? { attachment_questions: attachmentQuestions } : {}),
       inline_images: captured?.images,
       ...(prototypes.liveSites.length > 0 ? { live_sites: prototypes.liveSites } : {}),
+      ...(pictureIt ? { picture_it: pictureIt } : {}),
       guide: guide ?? null,
       base_path: basePath,
       from_project: fromProject,
@@ -1190,7 +1204,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const clock = () => context.now?.() ?? Date.now();
   const server = new McpServer(
     { name: "plannotator-inbox", version: "1.0.0" },
-    { instructions: INBOX_MCP_INSTRUCTIONS, capabilities: { tools: {} } },
+    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient)), capabilities: { tools: {} } },
   );
   // Every tool's result carries a Tidy waiting on an agent no connection wakes (MCP only), once, at its end.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (input: never, ctx: unknown) => Promise<ToolResult>) => unknown;

@@ -30,6 +30,7 @@ packages/ui/components/CodeFilePopout.commentFolds.test.tsx
 packages/ui/hooks/useVimSelection.test.tsx
 packages/ui/hooks/useVimSelection.selectionScope.test.tsx
 packages/ui/hooks/useModelCatalogs.dom.test.tsx
+packages/ui/hooks/useAgentJobs.dom.test.tsx
 packages/ui/hooks/useAIProviderActivation.dom.test.tsx
 packages/ui/components/ModelSourceHint.dom.test.tsx
 packages/ui/components/ai/AIProviderBar.dom.test.tsx
@@ -261,6 +262,7 @@ packages/inbox/tabCountWindow.test.tsx
 packages/inbox/phoneList.test.tsx
 packages/inbox/listHeaderPath.test.tsx
 packages/inbox/heldNoticeLine.test.tsx
+packages/inbox/heldBar.test.tsx
 packages/inbox/listLabels.test.tsx
 packages/inbox/projectLabelRows.test.tsx
 packages/inbox/projectLabelHeld.test.tsx
@@ -282,6 +284,7 @@ packages/inbox/listGroups.test.tsx
 packages/inbox/showOpensGroups.test.tsx
 packages/inbox/listNewPill.test.tsx
 packages/inbox/showLight.test.tsx
+packages/inbox/holdView.test.tsx
 packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
@@ -326,6 +329,7 @@ packages/ui/components/blocks/QuestionContext.lines.test.tsx
 packages/ui/components/blocks/QuestionBlock.host.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx
+packages/ui/components/blocks/QuestionBlock.change.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
 packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
@@ -408,6 +412,7 @@ packages/review-editor/components/guide/GuideExportButton.test.tsx
 packages/review-editor/hooks/useReviewSearch.test.tsx
 packages/review-editor/hooks/useTokenHover.test.tsx
 packages/review-editor/components/TokenHoverCard.test.tsx
+packages/review-editor/components/tokenHoverAffordance.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
@@ -440,6 +445,7 @@ packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.escape.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
 packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
+packages/ui/components/ImageAnnotator/ZoomableCanvas.test.tsx
 packages/ui/utils/undoHistory.dom.test.ts
 packages/ui/utils/codeBlockMark.test.ts
 packages/ui/components/InlineMarkdown.seam.test.tsx
@@ -613,6 +619,7 @@ apps/vscode-extension/src/guides/webview/diagram-loader.test.ts
 packages/review-editor/components/AnnotationToolbar.askOnly.test.tsx
 packages/ui/components/Settings.notion.test.tsx
 packages/inbox/cookieHostSettings.test.tsx
+packages/inbox/splitViewSettings.test.tsx
 packages/ui/components/Settings.cookieHost.test.tsx
 packages/review-editor/components/FileTree.allFiles.test.tsx
 packages/review-editor/components/ReviewPanelHeader.test.tsx
@@ -660,6 +667,7 @@ packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
 packages/inbox/pulls/pullThreadStart.test.tsx
 packages/inbox/pulls/pullThreadGuide.test.tsx
+packages/inbox/pulls/pictureItAskHook.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/prs/checksTurn.test.tsx
@@ -775,6 +783,7 @@ packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
+packages/inbox/agents/agentStatusMark.test.tsx
 packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
@@ -851,4 +860,8 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/inbox/compose/pictureItBox.test.tsx
+packages/inbox/projectTagMenu.test.tsx
+packages/inbox/projectTagsFilter.test.tsx
+packages/inbox/tagWritesPending.test.tsx
 packages/inbox/runCardLive.test.tsx
