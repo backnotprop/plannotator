@@ -279,15 +279,34 @@ public final class InboxSession {
     }
     // A Send that waits already carries these answers: they are no longer the person's to change, and a later
     // Send never carries them again (the Inbox refuses a reply that names a question already sent).
+    // A Done or Can't do it the computer does not have yet: drawn as marked, in the draft.
+    for write in waiting where write.kind == .action {
+      guard let mark = try? JSONDecoder().decode(ActionMarks.Body.self, from: write.body), let message = model.thread.messages.firstIndex(where: { $0.id.rawValue == write.message }) else { continue }
+      let key = write.path.split(separator: "/").last.map(String.init) ?? ""
+      let result = mark.outcome.map { InboxActionResult(outcome: InboxActionResultOutcome(rawValue: $0), note: mark.note, at: Self.stamp(write.madeAt), by: .person, staged: true) }
+      func draw(_ item: inout InboxQuestion) {
+        item.actionResult = result
+        item.state = result == nil ? .openValue : .picked
+      }
+      if let index = model.thread.messages[message].questions?.firstIndex(where: { $0.key == key }) { draw(&model.thread.messages[message].questions![index]) }
+      if let index = model.thread.messages[message].actions?.firstIndex(where: { $0.key == key }) { draw(&model.thread.messages[message].actions![index]) }
+    }
     for write in waiting where write.kind == .reply {
       guard let body = try? JSONDecoder().decode(DoorReplyBody.self, from: write.body) else { continue }
-      for pick in body.questions ?? [] {
-        let target = pick.messageId?.rawValue ?? write.message
-        guard let message = model.thread.messages.firstIndex(where: { $0.id.rawValue == target }), let index = model.thread.messages[message].questions?.firstIndex(where: { $0.key == pick.key }) else { continue }
-        model.thread.messages[message].questions?[index].state = .sent
+      for pick in (body.questions ?? []).map({ ($0.messageId, $0.key) }) + (body.actions ?? []).map({ ($0.messageId, $0.key) }) {
+        let target = pick.0?.rawValue ?? write.message
+        guard let message = model.thread.messages.firstIndex(where: { $0.id.rawValue == target }) else { continue }
+        if let index = model.thread.messages[message].questions?.firstIndex(where: { $0.key == pick.1 }) { model.thread.messages[message].questions?[index].state = .sent }
+        if let index = model.thread.messages[message].actions?.firstIndex(where: { $0.key == pick.1 }) { model.thread.messages[message].actions?[index].state = .sent }
       }
     }
     return model
+  }
+
+  private static func stamp(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: date)
   }
 
   // MARK: Writing
@@ -305,12 +324,23 @@ public final class InboxSession {
     }
   }
 
-  /// Whether a Send that waits for the computer carries this question's answer.
+  /// Whether a Send that waits for the computer carries this question's answer (or this action item's mark).
   public func isHeldSend(message: MessageID, key: String) -> Bool {
     held.contains { write in
       guard write.kind == .reply, let body = try? JSONDecoder().decode(DoorReplyBody.self, from: write.body) else { return false }
       return (body.questions ?? []).contains { $0.key == key && ($0.messageId?.rawValue ?? write.message) == message.rawValue }
+        || (body.actions ?? []).contains { $0.key == key && ($0.messageId?.rawValue ?? write.message) == message.rawValue }
     }
+  }
+
+  /// Whether this action item's Done or Can't do it is still on the phone only.
+  public func isHeldMark(message: MessageID, key: String) -> Bool {
+    held.contains { $0.kind == .action && $0.message == message.rawValue && $0.path.hasSuffix("/\(key)") }
+  }
+
+  /// A reply's words that wait for the computer, oldest first: drawn in the thread as the person's own message.
+  public func heldReplies(_ id: ThreadID) -> [HeldWrite] {
+    held.filter { $0.kind == .reply && $0.thread == id.rawValue && !($0.words ?? "").isEmpty }
   }
 
   private func keepGivenBack() {
@@ -335,7 +365,18 @@ public final class InboxSession {
     switch write.kind {
     case .pick:
       let questions = (try? JSONDecoder().decode(DoorPicksBody.self, from: write.body))?.questions ?? []
-      for question in questions { refusals[ref(write.message, question.key)] = notice }
+      // A refusal the thread itself says once read again (answered elsewhere, replaced, closed) adds no words.
+      var quiet = false
+      if case .refused(_, let code) = notice { quiet = PickConflict.saysItself(code) }
+      for question in questions {
+        if !quiet { refusals[ref(write.message, question.key)] = notice }
+        // A Send made after this pick, for this answer alone, has nothing left to carry.
+        dropFromLaterSends(after: write, message: write.message, key: question.key)
+      }
+    case .action:
+      let key = write.path.split(separator: "/").last.map(String.init) ?? ""
+      refusals[ref(write.message, key)] = notice
+      dropFromLaterSends(after: write, message: write.message, key: key)
     case .reply:
       notices[thread] = notice
       if let words = write.words, !words.isEmpty {
@@ -345,6 +386,58 @@ public final class InboxSession {
     case .seen:
       break
     }
+  }
+
+  /// Take one question (or action item) out of the Sends made after `write`; a Send left with no answer, no
+  /// action item and no words is not made at all.
+  private func dropFromLaterSends(after write: HeldWrite, message: String?, key: String) {
+    guard let start = held.firstIndex(where: { $0.id == write.id }) else { return }
+    var emptied: [String] = []
+    for index in held.indices where index > start && held[index].thread == write.thread && held[index].kind == .reply {
+      guard var body = try? JSONDecoder().decode(DoorReplyBody.self, from: held[index].body) else { continue }
+      let own = held[index].message
+      let before = (body.questions?.count ?? 0) + (body.actions?.count ?? 0)
+      body.questions?.removeAll { $0.key == key && ($0.messageId?.rawValue ?? own) == message }
+      body.actions?.removeAll { $0.key == key && ($0.messageId?.rawValue ?? own) == message }
+      guard (body.questions?.count ?? 0) + (body.actions?.count ?? 0) != before else { continue }
+      if body.questions?.isEmpty == true { body.questions = nil }
+      if body.actions?.isEmpty == true { body.actions = nil }
+      if body.questions == nil, body.actions == nil, (body.words ?? "").isEmpty { emptied.append(held[index].id) } else { held[index].body = encode(body) }
+    }
+    held.removeAll { emptied.contains($0.id) }
+    copy.saveOutbox(held)
+  }
+
+  /// Another place's answer landed first (PickConflict). True when the pick was dealt with quietly: saved again
+  /// at the revision the Inbox holds now (it stays in the outbox with a new key), or dropped for the Inbox's answer.
+  private func settleConflict(_ write: HeldWrite, _ failure: DoorFailure) async -> Bool {
+    guard write.kind == .pick, let now = PickConflict.revision(failure), var body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body), let index = held.firstIndex(where: { $0.id == write.id }) else { return false }
+    let message = MessageID(write.message ?? "")
+    let stale = body.questions.map { ($0.key, $0.revision) }
+    // The person's own later writes on this question name the revision this pick read: they go at the Inbox's.
+    for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: now) }
+    // A newer answer of it waits behind this one: that one decides.
+    let newer = held.indices.contains { later in
+      later > index && held[later].kind == .pick && held[later].message == write.message
+        && ((try? JSONDecoder().decode(DoorPicksBody.self, from: held[later].body))?.questions.contains { q in stale.contains { $0.0 == q.key } } ?? false)
+    }
+    if !newer, case .retry(let revision)? = PickConflict.step(failure, tries: write.tries ?? 0) {
+      // The refused key is spent: the same answer goes again as a new write, in the same place in the queue.
+      var again = write
+      let key = UUID().uuidString
+      for q in body.questions.indices { body.questions[q].revision = revision }
+      body.idempotencyKey = key
+      again.id = key
+      again.body = encode(body)
+      again.tries = (write.tries ?? 0) + 1
+      held[index] = again
+      copy.saveOutbox(held)
+      return true
+    }
+    // The Inbox's answer is drawn; a Send behind it carries that answer, at the Inbox's revision.
+    settle(write.id)
+    await readThread(ThreadID(write.thread))
+    return true
   }
 
   /// Send one held write. True when it has a definite answer (applied or refused) and left the outbox.
@@ -366,6 +459,7 @@ public final class InboxSession {
       if removed { return false }
       note(failure)
       guard failure.isDefinite else { return false }
+      if await settleConflict(write, failure) { return true }
       // Words first, then the outbox: a refusal never leaves the phone with neither.
       switch failure {
       case .refused(_, let error): giveBack(write, .refused(error.error, code: error.code))
@@ -401,6 +495,14 @@ public final class InboxSession {
       model.thread.messages[index].questions = model.thread.messages[index].questions?.map { byKey[$0.key] ?? $0 }
       threads[thread] = model
       copy.saveThread(model)
+    case .action:
+      // The answer holds the message's questions and action items together: keep each where it was.
+      guard let marked = try? JSONDecoder().decode(ActionMarks.Answer.self, from: answer.body), var model = threads[thread], let index = model.thread.messages.firstIndex(where: { $0.id.rawValue == write.message }) else { return }
+      let byKey = Dictionary(marked.questions.map { ($0.key, $0) }, uniquingKeysWith: { $1 })
+      model.thread.messages[index].questions = model.thread.messages[index].questions?.map { byKey[$0.key] ?? $0 }
+      model.thread.messages[index].actions = model.thread.messages[index].actions?.map { byKey[$0.key] ?? $0 }
+      threads[thread] = model
+      copy.saveThread(model)
     case .reply:
       if let result = try? JSONDecoder().decode(ReplyResult.self, from: answer.body), let read = result.threadRead { take(read) }
     case .seen:
@@ -424,7 +526,7 @@ public final class InboxSession {
         }
         body.questions = questions
         held[index].body = encode(body)
-      case .seen:
+      case .seen, .action:
         break
       }
     }
@@ -484,13 +586,13 @@ public final class InboxSession {
   /// Put one answer in the outbox now (nil takes it back), before anything else can run: a Send made right after
   /// already sees it. Returns false when this Inbox does not offer picks.
   @discardableResult
-  public func hold(pick answer: QuestionAnswer?, thread: ThreadID, message: MessageID, question: InboxQuestion) -> Bool {
+  public func hold(pick answer: QuestionAnswer?, thread: ThreadID, message: MessageID, question: InboxQuestion, confirmFull: Bool = false) -> Bool {
     guard canAnswer() else { return false }
     // The person acted on this question again: its last refusal has been read.
     refusals[ref(message.rawValue, question.key)] = nil
     let key = UUID().uuidString
     // `unsent_only`: refused when a reply already sent the question, so a pick can never race the phone's own Send.
-    let body = QuestionAnswers.pickBody(key: question.key, revision: question.revision, answer: answer, unsentOnly: true, idempotencyKey: key)
+    let body = QuestionAnswers.pickBody(key: question.key, revision: question.revision, answer: answer, unsentOnly: true, confirmFull: confirmFull, idempotencyKey: key)
     enqueue(kind: .pick, thread: thread, message: message, request: Door.postMessagePicks(message: message), body: encode(body), key: key)
     return true
   }
@@ -500,6 +602,41 @@ public final class InboxSession {
     guard hold(pick: answer, thread: thread, message: message, question: question) else { return }
     await pump(thread.rawValue)
   }
+
+  /// One answer, picked and sent at once, to its own message and with nothing else: a permission prompt's answer,
+  /// as the window's card sends it (packages/inbox/components/PermissionCard.tsx, `answer`). `confirmFull`: the
+  /// person confirmed Full permissions here.
+  public func answerNow(thread: ThreadID, message: MessageID, question: InboxQuestion, answer: QuestionAnswer, confirmFull: Bool = false) async {
+    guard offers(DoorRoutes.postMessageReply) || skew == nil, hold(pick: answer, thread: thread, message: message, question: question, confirmFull: confirmFull) else { return }
+    let key = UUID().uuidString
+    // It names the revision the pick read; the pick's answer moves it to the one the pick made (`follow`).
+    let body = DoorReplyBody(idempotencyKey: key, words: "", questions: [DoorQuestionPick(key: question.key, revision: question.revision)], withThread: true)
+    enqueue(kind: .reply, thread: thread, message: message, request: Door.postMessageReply(message: message), body: encode(body), key: key)
+    await pump(thread.rawValue)
+    if client != nil { await readList() }
+  }
+
+  /// An action item's Done (with an optional note) or Can't do it (with the reason), or taking it back (nil).
+  /// It waits in the reply draft and goes with the next Send, as in the window (`staged`; contract flow thread-09).
+  /// Returns false when this Inbox does not offer it.
+  @discardableResult
+  public func mark(action: InboxQuestion, thread: ThreadID, message: MessageID, _ mark: ActionMarks.Mark?) async -> Bool {
+    guard hold(mark: mark, action: action, thread: thread, message: message) else { return false }
+    await pump(thread.rawValue)
+    return true
+  }
+
+  /// Put a mark in the outbox now, before anything else can run: a Send made right after already follows it.
+  @discardableResult
+  public func hold(mark: ActionMarks.Mark?, action: InboxQuestion, thread: ThreadID, message: MessageID) -> Bool {
+    guard canMarkActions() else { return false }
+    refusals[ref(message.rawValue, action.key)] = nil
+    let key = UUID().uuidString
+    enqueue(kind: .action, thread: thread, message: message, request: Door.postMessageAction(message: message, action: action.key), body: encode(ActionMarks.body(mark, idempotencyKey: key)), key: key)
+    return true
+  }
+
+  public func canMarkActions() -> Bool { standing == .ok && (skew == nil || offers(DoorRoutes.postMessageAction)) }
 
   /// Send what is in the outbox for a thread: what a screen calls after `hold(pick:)`.
   public func deliverHeld(thread: ThreadID) async { await pump(thread.rawValue) }
@@ -535,11 +672,11 @@ public final class InboxSession {
 
   /// Whether Send has anything to carry for this thread.
   public func canSend(thread id: ThreadID, words: String) -> Bool {
-    guard let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil, !SendPlan.needsComputer(model.thread) else { return false }
+    guard standing == .ok, let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil, !SendPlan.needsComputer(model.thread) else { return false }
     return SendPlan.hasSomethingToSend(thread: model.thread, words: words) && !SendPlan.targets(in: model.thread).isEmpty
   }
 
-  public func canAnswer() -> Bool { skew == nil || offers(DoorRoutes.postMessagePicks) }
+  public func canAnswer() -> Bool { standing == .ok && (skew == nil || offers(DoorRoutes.postMessagePicks)) }
 
   /// A reply of this thread that waits for the computer.
   public func hasHeldReply(_ id: ThreadID) -> Bool { held.contains { $0.kind == .reply && $0.thread == id.rawValue } }

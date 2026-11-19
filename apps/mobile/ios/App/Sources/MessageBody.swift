@@ -2,17 +2,25 @@ import SwiftUI
 
 /// A message's words for this first slice: paragraphs, headings, lists and code, drawn by the system's own
 /// Markdown reading. Slice S2 replaces this with the block tree the computer sends (`message.blocks`, brief F4);
-/// until then a `:::` block is never shown as source: a question draws as its card, and anything else as one
-/// line that says it is on the computer.
+/// until then a `:::` block is never shown as source: a question and an action item draw as their cards, where
+/// the agent wrote them (so an action item written before a question comes before it, as in the window), and
+/// anything else as one line that says it is on the computer.
 enum MessageBody {
   enum Block: Hashable {
     case text(String)
     case heading(String)
     case code(String)
     case elsewhere
+    /// The message's question at this place, counted from 0 in the order the agent wrote them.
+    case question(Int)
+    /// A run of adjacent action items: one checklist, as in the window.
+    case actions(first: Int, count: Int)
   }
 
-  static func blocks(_ body: String, hasCards: Bool) -> [Block] {
+  /// `questions` and `actions`: how many of each the message has as cards.
+  static func blocks(_ body: String, questions: Int, actions: Int) -> [Block] {
+    var askedSoFar = 0
+    var todosSoFar = 0
     var open: [String] = []
     var out: [Block] = []
     var paragraph: [String] = []
@@ -36,8 +44,18 @@ enum MessageBody {
       }
       if let name = directive {
         if trimmed == ":::" {
-          let drawnAsCard = hasCards && (name.hasPrefix("question") || name.hasPrefix("action"))
-          if !drawnAsCard, out.last != .elsewhere { out.append(.elsewhere) }
+          flush()
+          if name.hasPrefix("question"), questions > 0 {
+            if askedSoFar < questions { out.append(.question(askedSoFar)) }
+            askedSoFar += 1
+          } else if name.hasPrefix("action"), actions > 0 {
+            if todosSoFar < actions {
+              if case .actions(let first, let count)? = out.last { out[out.count - 1] = .actions(first: first, count: count + 1) } else { out.append(.actions(first: todosSoFar, count: 1)) }
+            }
+            todosSoFar += 1
+          } else if out.last != .elsewhere {
+            out.append(.elsewhere)
+          }
           directive = nil
           open = []
         } else {
@@ -69,6 +87,9 @@ enum MessageBody {
       if !rest.isEmpty { paragraph.append(rest) }
     }
     flush()
+    // A card the body has no block for is never lost: it comes after the words.
+    if askedSoFar < questions { out.append(contentsOf: (askedSoFar..<questions).map { .question($0) }) }
+    if todosSoFar < actions { out.append(.actions(first: todosSoFar, count: actions - todosSoFar)) }
     return out
   }
 
@@ -77,66 +98,82 @@ enum MessageBody {
   }
 }
 
-struct MessageBodyView: View {
-  let text: String
-  let hasCards: Bool
+/// One block of words (the cards are drawn by the thread, which has their data).
+struct MessageWords: View {
+  let block: MessageBody.Block
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      ForEach(Array(MessageBody.blocks(text, hasCards: hasCards).enumerated()), id: \.offset) { _, block in
-        switch block {
-        case .text(let text):
-          Text(MessageBody.attributed(text))
-            .font(.body)
-            .foregroundStyle(Token.foreground)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .heading(let text):
-          Text(MessageBody.attributed(text))
-            .font(.headline)
-            .foregroundStyle(Token.foreground)
-            .accessibilityAddTraits(.isHeader)
-        case .code(let code):
-          CodeBlock(code: code)
-        case .elsewhere:
-          Label(PhoneWords.moreOnComputer, systemImage: "desktopcomputer")
-            .font(.subheadline)
-            .foregroundStyle(Token.mutedForeground)
-        }
-      }
+    switch block {
+    case .text(let text):
+      Text(MessageBody.attributed(text))
+        .font(.body)
+        .foregroundStyle(Token.foreground)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    case .heading(let text):
+      Text(MessageBody.attributed(text))
+        .font(.headline)
+        .foregroundStyle(Token.foreground)
+        .accessibilityAddTraits(.isHeader)
+    case .code(let code):
+      CodeBlock(code: code)
+    case .elsewhere:
+      Label(PhoneWords.moreOnComputer, systemImage: "desktopcomputer")
+        .font(.subheadline)
+        .foregroundStyle(Token.mutedForeground)
+    case .question, .actions:
+      EmptyView()
     }
   }
 }
 
-/// Code, scrolling sideways when a line is longer than the page, as the window's code block does
-/// (packages/ui/components/blocks/CodeBlock.tsx:75, `overflow-x-auto`). Where a line is cut, the edge fades out,
-/// so it reads as "there is more this way"; at the end of the scroll the fade goes.
+/// Code as the window draws it on a phone (packages/ui/components/blocks/CodeBlock.tsx): a long line wraps, so
+/// nothing is cut and nothing scrolls sideways, and Copy sits in the top corner.
 struct CodeBlock: View {
   let code: String
-  @State private var textWidth: CGFloat = 0
-  @State private var boxWidth: CGFloat = 0
-  @State private var atEnd = false
-  private var fades: Bool { textWidth > boxWidth + 1 && !atEnd }
+  /// A permission prompt's request: the same box, with no Copy (the window's has none).
+  var copies = true
+  @State private var copied = false
 
   var body: some View {
-    ScrollView(.horizontal) {
-      Text(code)
-        .font(.system(.callout, design: .monospaced))
-        .foregroundStyle(Token.foreground)
-        .textSelection(.enabled)
-        .padding(14)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
-    }
-    .scrollIndicators(.visible)
-    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
-    .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.x + $0.containerSize.width >= $0.contentSize.width - 2 } action: { _, now in atEnd = now }
-    .mask {
-      HStack(spacing: 0) {
-        Color.black
-        LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: 56)
+    Text(code)
+      .font(.system(copies ? .callout : .footnote, design: .monospaced))
+      .foregroundStyle(Token.foreground)
+      .textSelection(.enabled)
+      .fixedSize(horizontal: false, vertical: true)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.leading, 14)
+      .padding(.vertical, 13)
+      // The words never run under the button.
+      .padding(.trailing, copies ? 44 : 14)
+      .frame(minHeight: copies ? 44 : 0)
+      .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+      .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied) } }
+  }
+}
+
+/// Copy, 44 points to touch, answering with a tick for two seconds.
+struct CopyButton: View {
+  let text: String
+  @Binding var copied: Bool
+
+  var body: some View {
+    Button {
+      UIPasteboard.general.string = text
+      copied = true
+      Task {
+        try? await Task.sleep(for: .seconds(2))
+        copied = false
       }
+    } label: {
+      Image(systemName: copied ? "checkmark" : "square.on.square")
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(copied ? Token.success : Token.mutedForeground)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
     }
-    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
-    .animation(.easeOut(duration: 0.15), value: fades)
+    .buttonStyle(.plain)
+    .sensoryFeedback(.success, trigger: copied) { _, now in now }
+    .accessibilityLabel(copied ? PhoneWords.copied : PhoneWords.copy)
   }
 }

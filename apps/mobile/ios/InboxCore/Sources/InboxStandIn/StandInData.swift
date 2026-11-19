@@ -183,9 +183,10 @@ public enum StandInData {
       :::
       """,
       questions: [question("q_tone", .single, "Which tone for the first screen?", choices: [choice("Plain", "says what the app does"), choice("Warm", "greets the person first")], message: onboardingAsk)])
-    var todo = question("a_key", .action, "Add the production analytics key to the team vault", position: 1, message: onboardingAsk)
+    var todo = question("a_key", .action, "Add the production analytics key to the team vault", position: 0, message: onboardingAsk)
     todo.orphaned = false
-    onboardingMessage.actions = [todo]
+    // The door lists an action item among the message's questions (kind "action").
+    onboardingMessage.questions = (onboardingMessage.questions ?? []) + [todo]
     let onboardingThread = InboxThread(threadId: onboarding, project: project("storefront"), threadName: "Onboarding copy", messages: [onboardingMessage])
 
     return [billingThread, checkoutThread, retryThread, docsThread, uploadThread, bumpsThread, onboardingThread]
@@ -196,11 +197,13 @@ public enum StandInData {
   /// A started agent's permission prompt, as the Inbox writes one (its own `perm:` session).
   public static func permissionThread(now: Date) -> InboxThread {
     let ask = MessageID(permission.rawValue)
-    let choices = ["Allow once", "Deny", "Allow and switch to Auto mode", SendPlan.permissionFull].map { choice($0) }
+    // The body and the choices exactly as the Inbox writes them (`inboxPermissionQuestion`, packages/core/inbox-permission.ts).
+    let labels = [PermissionPrompt.allowOnce, "Allow `bun run db:migrate` for this session", PermissionPrompt.deny, PermissionPrompt.auto, PermissionPrompt.full]
+    let body = "```\nbun run db:migrate --env staging\n```\n\nPurpose: Apply the billing migration to staging.\n\nin `~/work/api-server`\n\n:::question\nClaude Code wants to run a command\n\n" + labels.map { "- [ ] \($0)" }.joined(separator: "\n") + "\n:::"
     let message = InboxMessageWire(
-      questions: [question("q_perm", .single, "Claude Code wants to run a command", context: "bun run db:migrate --env staging", choices: choices, stopped: permission.rawValue, message: ask)],
-      seq: 900, id: ask, projectId: ProjectID("prj_api-server"), threadId: permission, author: agent("claude-code", "perm:ses_api"), body: "Claude Code is waiting for your answer before it runs a command.",
-      createdAt: iso(now.addingTimeInterval(-60)))
+      questions: [question("q_perm", .single, "Claude Code wants to run a command", choices: labels.map { choice($0) }, stopped: permission.rawValue, message: ask)],
+      seq: 900, id: ask, projectId: ProjectID("prj_api-server"), threadId: permission, author: agent("claude-code", "perm:ses_api"), body: body,
+      createdAt: iso(now.addingTimeInterval(-200)))
     return InboxThread(threadId: permission, project: project("api-server"), threadName: "Migrate billing tables: permission", messages: [message])
   }
 
@@ -230,12 +233,12 @@ public enum StandInData {
     let messages = thread.messages
     let last = messages.last
     let lastAgent = messages.last { $0.author.kind == .agent }
-    let asked: [InboxQuestion] = messages.flatMap { $0.questions ?? [] }
+    let asked: [InboxQuestion] = messages.flatMap { $0.questions ?? [] }.filter { $0.kind != .action }
     let live: [InboxQuestion] = asked.filter { $0.state == .openValue || $0.state == .picked }
     let open: [InboxQuestion] = live.filter { $0.state == .openValue }
     let picked: [InboxQuestion] = live.filter { $0.state == .picked }
     let holdsUp: [String] = live.flatMap { $0.holdsUp }
-    let todos: Int = messages.flatMap { $0.actions ?? [] }.filter { $0.state == .openValue }.count
+    let todos: Int = messages.flatMap { ActionMarks.items(of: $0) }.filter { $0.state == .openValue }.count
     let lastIsPerson = last?.author.kind == .person
     let section: InboxSectionId
     if live.contains(where: { $0.stopped != nil }) { section = .stopped }

@@ -225,33 +225,6 @@ final class DoorTests: XCTestCase {
     LocalCopy(folder: folder).erase()
   }
 
-  func testARefusedPickShowsTheInboxsOwnWordsAndWhatTheComputerHasNow() async throws {
-    let door = StandInDoor()
-    let session = await pairedSession(door: door)
-    await session.start()
-    await session.open(StandInData.retry)
-    let asked = try XCTUnwrap(session.thread(StandInData.retry)?.thread.messages.last)
-    let question = try XCTUnwrap(asked.questions?.first)
-    // Another device picked first: the phone's copy of the question is one revision behind.
-    let other = DoorClient(transport: StandInTransport(door: door), token: session.computer.token, app: testApp)
-    _ = try await other.picks(asked.id, body: QuestionAnswers.pickBody(key: question.key, revision: 0, answer: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""), idempotencyKey: "other-device"))
-
-    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
-    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .refused("Question q_rollout changed since you read it (revision 1).", code: "question_revision_conflict"))
-    XCTAssertTrue(session.held.isEmpty, "a refusal is a definite answer: the key is spent")
-    XCTAssertEqual(session.thread(StandInData.retry)?.thread.messages.last?.questions?.first?.answer?.selected, ["Everyone at once"], "the other device's pick shows")
-
-    // The refusal stays through other writes (opening the thread tells the computer the person looked)...
-    await session.open(StandInData.retry)
-    await session.refresh()
-    XCTAssertNotNil(session.refusal(message: asked.id, key: question.key))
-    // ...until the person acts on that question again.
-    let now = try XCTUnwrap(session.thread(StandInData.retry)?.thread.messages.last?.questions?.first)
-    await session.pick(thread: StandInData.retry, message: asked.id, question: now, answer: QuestionAnswers.choice(now, selected: ["Staged, 10% first"], note: ""))
-    XCTAssertNil(session.refusal(message: asked.id, key: question.key))
-    XCTAssertEqual(session.thread(StandInData.retry)?.thread.messages.last?.questions?.first?.answer?.selected, ["Staged, 10% first"])
-  }
-
   func testAPhoneTheComputerRemovedIsToldSo() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
@@ -369,7 +342,8 @@ final class DoorTests: XCTestCase {
     _ = try await other.picks(asked.id, body: QuestionAnswers.pickBody(key: now.key, revision: now.revision, answer: QuestionAnswers.choice(now, selected: ["Everyone at once"], note: ""), idempotencyKey: "other-device"))
 
     await session.send(thread: StandInData.retry, words: "Go ahead")
-    XCTAssertEqual(session.notices[StandInData.retry], .refused("Question q_rollout changed since you read it (revision 2).", code: "question_revision_conflict"))
+    // Why it was not sent is kept by its code; the screen says it in the app's own words, never the Inbox's.
+    guard case .refused(_, code: "question_revision_conflict")? = session.notices[StandInData.retry] else { return XCTFail("the Send was refused because the answer changed elsewhere") }
     XCTAssertTrue(session.held.isEmpty)
     XCTAssertEqual(session.takeReturnedWords(StandInData.retry), "Go ahead")
     XCTAssertNil(session.takeReturnedWords(StandInData.retry), "handed back once")
@@ -575,26 +549,6 @@ final class DoorTests: XCTestCase {
     let stored = await door.thread(StandInData.docs)
     XCTAssertEqual(stored?.messages.last?.body, "Thanks, merge it.")
     session.stop()
-  }
-
-  func testAPermissionAnswerIsPickedAndSentAtOnceAsOneReplyToThePrompt() async throws {
-    let door = StandInDoor()
-    await door.add(StandInData.permissionThread(now: Date()))
-    let session = await pairedSession(door: door)
-    await session.start()
-    await session.open(StandInData.permission)
-    let asked = try XCTUnwrap(session.thread(StandInData.permission)?.thread.messages.last)
-    let question = try XCTUnwrap(asked.questions?.first)
-    guard case .save(let answer) = CardAnswers.tap(question, label: "Allow once") else { return XCTFail("a tap picks") }
-    session.hold(pick: answer, thread: StandInData.permission, message: asked.id, question: question)
-    let sent = await session.send(thread: StandInData.permission, words: "")
-    XCTAssertTrue(sent)
-    XCTAssertNil(session.notices[StandInData.permission])
-    let replies = await door.posts("/reply")
-    XCTAssertEqual(replies.map(\.path), ["messages/\(asked.id.rawValue)/reply"])
-    let stored = await door.thread(StandInData.permission)?.messages.first?.questions?.first
-    XCTAssertEqual(stored?.state, .sent)
-    XCTAssertEqual(stored?.answer?.selected, ["Allow once"])
   }
 
   func testWithNoWordsTheAgentThatAskedNothingGetsNoEmptyReply() async throws {

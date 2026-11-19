@@ -53,6 +53,11 @@ struct AgentMark: View {
   }
 }
 
+/// Runs of words with their own weight or colour, as one line of text.
+func run(_ parts: Text...) -> Text {
+  parts.dropFirst().reduce(parts.first ?? Text(verbatim: "")) { Text("\($0)\($1)") }
+}
+
 enum Names {
   /// An author's name as the window gives it (`inboxAgentName`): its own name, else its agent's, else "An agent".
   static func agent(_ author: InboxAuthor) -> String {

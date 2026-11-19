@@ -20,6 +20,8 @@ public actor StandInDoor {
     /// Route names left out of `health.door.routes`, as an older Inbox would.
     public var withoutRoutes: Set<String> = []
     public var version = "0.29.3"
+    /// How many arriving picks find that another place answered the question a moment before (its revision one up).
+    public var racesPicks = 0
     /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
     public var proxyRefusesReplies: Int?
     /// True: the Authorization header never reaches the door, as when something in between strips it.
@@ -203,6 +205,7 @@ public actor StandInDoor {
     switch (parts.first, parts.count, parts.last) {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
+    case ("messages", 4, _) where parts[2] == "actions": answer = markAction(MessageID(parts[1]), parts[3], fields)
     case ("messages", 3, "reply"):
       if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
       answer = reply(MessageID(parts[1]), fields)
@@ -216,7 +219,7 @@ public actor StandInDoor {
 
   // The refusals below are the Inbox's own, in its order and with its codes and statuses, so a write the real
   // door would refuse is refused here too: packages/server/inbox.ts (`seen`), and packages/shared/inbox/store.ts
-  // `targetMessage`, `sendMessageOf`, `planAnswers`, `savePicks` and `sendReply`.
+  // `targetMessage`, `sendMessageOf`, `planAnswers`, `savePicks`, `markAction` and `sendReply`.
 
   private func seen(_ id: ThreadID, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
     guard threads.contains(where: { $0.threadId == id }) else { return refuse(404, "thread_not_found", "No thread \(id.rawValue).") }
@@ -248,7 +251,7 @@ public actor StandInDoor {
   }
 
   /// `planAnswers`: every entry is checked before anything is written.
-  private func plan(thread t: Int, message m: Int, entries: [(index: Int, entry: JSONValue)], mode: Mode) throws -> [(question: Int, planned: Planned)] {
+  private func plan(thread t: Int, message m: Int, entries: [(index: Int, entry: JSONValue)], mode: Mode, confirmFull: Bool = false) throws -> [(question: Int, planned: Planned)] {
     let message = threads[t].messages[m]
     let questions = message.questions ?? []
     let permission = message.author.kind == .agent && (message.author.session ?? "").hasPrefix("perm:")
@@ -289,6 +292,14 @@ public actor StandInDoor {
         out.append((q, .keep))
       case (let value?, _):
         guard let answer = try? value.decodedAnswer(), answer.key == key else { throw Refused(answer: refuse(422, "validation_error", "\(field).answer: not an answer to \(key).", field: "\(field).answer")) }
+        // The first time in a session, Full permissions is picked only with the person's confirmation.
+        if permission, answer.selected.contains(PermissionPrompt.full) {
+          var confirmed = false
+          if case .pick = mode { confirmed = confirmFull }
+          if !confirmed, !PermissionPrompt.fullUsed(in: threads[t], before: message) {
+            throw Refused(answer: refuse(422, "validation_error", "Full permissions: confirm it first (confirm_full).", field: "confirm_full"))
+          }
+        }
         out.append((q, .set(answer)))
       }
     }
@@ -299,7 +310,16 @@ public actor StandInDoor {
     do {
       let at = try target(message)
       guard case .array(let entries)? = fields["questions"], !entries.isEmpty else { return refuse(422, "validation_error", "questions: at least one question is required.", field: "questions") }
-      let planned = try plan(thread: at.thread, message: at.message, entries: entries.enumerated().map { ($0.offset, $0.element) }, mode: .pick(unsentOnly: fields["unsent_only"] == .bool(true)))
+      if options.racesPicks > 0, case .object(let first)? = entries.first, case .string(let key)? = first["key"], let q = threads[at.thread].messages[at.message].questions?.firstIndex(where: { $0.key == key }) {
+        options.racesPicks -= 1
+        var raced = threads[at.thread].messages[at.message].questions![q]
+        raced.answer = QuestionAnswers.choice(raced, selected: raced.choices.last.map { [$0.label] } ?? [], note: "")
+        raced.state = .picked
+        raced.revision += 1
+        raced.pickedAt = StandInData.iso(Date())
+        threads[at.thread].messages[at.message].questions![q] = raced
+      }
+      let planned = try plan(thread: at.thread, message: at.message, entries: entries.enumerated().map { ($0.offset, $0.element) }, mode: .pick(unsentOnly: fields["unsent_only"] == .bool(true)), confirmFull: fields["confirm_full"] == .bool(true))
       var questions = threads[at.thread].messages[at.message].questions ?? []
       for (q, change) in planned {
         if case .set(let answer) = change { questions[q].answer = answer } else { questions[q].answer = nil }
@@ -309,6 +329,57 @@ public actor StandInDoor {
       }
       threads[at.thread].messages[at.message].questions = questions
       return encode(200, DoorPicksAnswer(messageId: message, questions: questions))
+    } catch let refused as Refused {
+      return refused.answer
+    } catch {
+      return refuse(500, "internal_error", "The stand-in failed.")
+    }
+  }
+
+  /// `markAction`: Done (with an optional note), Can't do it (with a reason), or null to take it back.
+  private func markAction(_ message: MessageID, _ key: String, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
+    do {
+      let at = try target(message)
+      var questions = threads[at.thread].messages[at.message].questions ?? []
+      guard let q = questions.firstIndex(where: { $0.key == key }) else { return refuse(404, "question_not_found", "No action item \(key) on message \(message.rawValue).", key: key) }
+      guard questions[q].kind == .action else { return refuse(422, "validation_error", "\(key) is a question, not an action item; answer it on its card.", field: "key", key: key) }
+      if let staged = fields["staged"], staged != .null, staged != .bool(true), staged != .bool(false) { return refuse(422, "validation_error", "staged: a boolean.", field: "staged") }
+      var outcome: InboxActionResultOutcome?
+      switch fields["outcome"] {
+      case .null?: outcome = nil
+      case .string("done")?: outcome = .done
+      case .string("cant")?: outcome = .cant
+      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", or null to undo.", field: "outcome")
+      }
+      var note = ""
+      if let raw = fields["note"], raw != .null {
+        guard case .string(let text) = raw else { return refuse(422, "validation_error", "note: text.", field: "note") }
+        note = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+      if outcome == .cant, note.isEmpty { return refuse(422, "validation_error", "note: say why you can't do it; the agent gets it word for word.", field: "note") }
+      let state = questions[q].state
+      if state == .sent { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }
+      guard state == .openValue || state == .picked else { return refuse(409, "action_closed", "Action item \(key) is \(state.rawValue): it can no longer be marked.", key: key) }
+      guard let outcome else {
+        if state == .picked {
+          questions[q].actionResult = nil
+          questions[q].state = .openValue
+          questions[q].revision += 1
+          questions[q].pickedAt = nil
+          threads[at.thread].messages[at.message].questions = questions
+        }
+        return encode(200, JSONValue.object(["questions": (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(questions))) ?? .array([])]))
+      }
+      let staged = fields["staged"] == .bool(true)
+      let now = StandInData.iso(Date())
+      // A staged mark that changes keeps the time it was first marked.
+      let kept = staged && questions[q].actionResult?.staged == true && state == .picked ? questions[q].actionResult?.at : nil
+      questions[q].actionResult = InboxActionResult(outcome: outcome, note: note.isEmpty ? nil : note, at: kept ?? now, by: .person, staged: staged ? true : nil)
+      questions[q].state = .picked
+      questions[q].revision += 1
+      questions[q].pickedAt = kept ?? now
+      threads[at.thread].messages[at.message].questions = questions
+      return encode(200, JSONValue.object(["questions": (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(questions))) ?? .array([])]))
     } catch let refused as Refused {
       return refused.answer
     } catch {
@@ -347,7 +418,19 @@ public actor StandInDoor {
       for group in byMessage {
         planned += try plan(thread: at.thread, message: group.message, entries: group.entries, mode: .send).map { (group.message, $0.question, $0.planned) }
       }
-      if planned.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      // The action items whose mark waits in the draft and goes with this reply.
+      var marks: [(message: Int, question: Int)] = []
+      if case .array(let items)? = fields["actions"] {
+        for (index, item) in items.enumerated() {
+          guard case .object(let object) = item, case .string(let key)? = object["key"] else { return refuse(422, "validation_error", "actions[\(index)].key: required.", field: "actions[\(index)].key") }
+          var m = at.message
+          if case .string(let id)? = object["message_id"], let other = threads[at.thread].messages.firstIndex(where: { $0.id.rawValue == id }) { m = other }
+          guard let q = threads[at.thread].messages[m].questions?.firstIndex(where: { $0.key == key && $0.kind == .action }) else { return refuse(404, "question_not_found", "No action item \(key).", key: key) }
+          guard threads[at.thread].messages[m].questions?[q].state == .picked else { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }
+          marks.append((m, q))
+        }
+      }
+      if planned.isEmpty, marks.isEmpty, words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         if case .object(let first)? = entries.first, case .string(let key)? = first["key"] { return refuse(409, "question_already_sent", "The answer to \(key) was already sent.", key: key) }
         return refuse(422, "validation_error", "words: write a reply or send at least one answer.", field: "words")
       }
@@ -366,6 +449,14 @@ public actor StandInDoor {
         question.sentReplyId = replyID.rawValue
         threads[at.thread].messages[m].questions?[q] = question
         if let answer = question.answer { answered.append(StandInData.words(of: answer)) }
+      }
+      for (m, q) in marks {
+        guard var item = threads[at.thread].messages[m].questions?[q] else { continue }
+        item.state = .sent
+        item.sentRevision = item.revision
+        item.sentReplyId = replyID.rawValue
+        threads[at.thread].messages[m].questions?[q] = item
+        answered.append(item.actionResult?.outcome == .cant ? "Can't do it: \(item.prompt)" : "Done: \(item.prompt)")
       }
       let now = StandInData.iso(Date())
       let written = InboxMessageWire(

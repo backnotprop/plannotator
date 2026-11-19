@@ -283,9 +283,17 @@ struct LaunchOptions {
           await session.refresh()
         case "allowed":
           await session.open(StandInData.permission)
-          if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first, case .save(let answer) = CardAnswers.tap(question, label: "Allow once") {
-            session.hold(pick: answer, thread: StandInData.permission, message: asked.id, question: question)
-            await session.send(thread: StandInData.permission, words: "")
+          if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first {
+            await session.answerNow(thread: StandInData.permission, message: asked.id, question: question, answer: QuestionAnswer(v: 1, key: question.key, kind: .single, prompt: question.prompt, selected: [PermissionPrompt.allowOnce]))
+          }
+        case "outdated":
+          // The computer was updated past this app after the phone last read it: the copy stays readable.
+          await door.setOptions { $0.minAppContract = 99; $0.contract = 99 }
+          await session.refresh()
+        case "done":
+          await session.open(StandInData.onboarding)
+          if let asked = session.thread(StandInData.onboarding)?.thread.messages.first, let todo = ActionMarks.items(of: asked).first {
+            await session.mark(action: todo, thread: StandInData.onboarding, message: asked.id, ActionMarks.Mark(.done))
           }
         case "refused":
           if let (asked, question) = retry() {

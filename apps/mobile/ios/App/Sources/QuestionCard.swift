@@ -34,8 +34,8 @@ struct QuestionCard: View {
   let question: InboxQuestion
   /// When the reply that sent this answer was written.
   var sentAt: String?
-  /// A started agent's permission prompt: Full permissions is answered on the computer.
-  var permission = false
+  /// Its place among the message's questions ("Question 1 of 2"), when there is more than one.
+  var place: (index: Int, count: Int)?
   let drafts: ThreadDrafts
 
   @State private var draft = CardDraft()
@@ -55,9 +55,9 @@ struct QuestionCard: View {
     VStack(alignment: .leading, spacing: 12) {
       header
       if let refusal = session.refusal(message: message, key: question.key) {
-        // The Inbox's own words for why the pick was not taken, where the person reads first; it stays until
-        // they act on this question.
-        Label(PhoneWords.notice(refusal, computer: session.computer.name), systemImage: "exclamationmark.circle")
+        // A pick the computer did not take, in the app's own words, where the person reads first; it stays until
+        // they act on this question. A clash with another device's answer never comes here: it settles quietly.
+        Label(PhoneWords.notice(refusal, computer: session.computer.name, what: PhoneWords.pickNotSaved), systemImage: "exclamationmark.circle")
           .font(.footnote)
           .foregroundStyle(Token.destructive)
       }
@@ -73,15 +73,12 @@ struct QuestionCard: View {
         Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
       } else if !live {
         settledAnswer
-      } else if permission {
-        permissionAnswers
       } else if question.kind == .text {
         textAnswer
       } else {
         choices
       }
-      // A permission prompt has its answers and nothing else, as the window's card has (no Other, note or Skip).
-      if known, live, !permission { footer }
+      if known, live { footer }
       status
     }
     .padding(16)
@@ -133,7 +130,8 @@ struct QuestionCard: View {
   }
 
   @ViewBuilder private var kindText: some View {
-    if !permission, let kind = PhoneWords.kind(question.kind) { Text(kind) }
+    let words = [place.map { PhoneWords.questionOf($0.index, $0.count) }, PhoneWords.kind(question.kind)].compactMap { $0 }
+    if !words.isEmpty { Text(words.joined(separator: " · ")) }
   }
 
   @ViewBuilder private var marks: some View {
@@ -175,25 +173,6 @@ struct QuestionCard: View {
         field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
           .padding(.leading, 40)
           .padding(.bottom, 4)
-      }
-    }
-  }
-
-  /// A started agent's permission prompt (packages/inbox/components/PermissionCard.tsx): each answer is the
-  /// question's own choice, picked and sent at once, as the window does: the agent is waiting on it. Full
-  /// permissions needs the window's own confirmation, so it is shown and answered on the computer.
-  private var permissionAnswers: some View {
-    VStack(spacing: 0) {
-      ForEach(Array(question.choices.enumerated()), id: \.element.label) { index, choice in
-        if index > 0 { Divider().overlay(Token.border) }
-        if choice.label == SendPlan.permissionFull {
-          ChoiceRow(label: choice.label, detail: PhoneWords.answerOnComputer, recommended: false, multi: false, selected: false, enabled: false, onComputer: true) {}
-        } else {
-          ChoiceRow(label: choice.label, detail: choice.description, recommended: false, multi: false, selected: picked.contains(choice.label), enabled: enabled && !session.sending.contains(thread)) {
-            guard case .save(let answer) = CardAnswers.tap(question, label: choice.label), session.hold(pick: answer, thread: thread, message: message, question: question) else { return }
-            Task { await session.send(thread: thread, words: "") }
-          }
-        }
       }
     }
   }
@@ -297,7 +276,7 @@ struct QuestionCard: View {
       switch question.state {
       case .picked:
         let time = question.pickedAt.map { TimeWords().when($0) } ?? ""
-        let words = held ? PhoneWords.pickedOnPhone : pickedElsewhere ? PhoneWords.pickedElsewhere(at: time) : PhoneWords.picked(at: time)
+        let words = held ? PhoneWords.pickedOnPhone : PhoneWords.picked(at: time)
         return skipped ? "\(PhoneWords.skipped) · \(words)" : words
       case .sent:
         // An answer in a Send that waits for the computer is not sent yet: say what it waits for.
@@ -310,14 +289,6 @@ struct QuestionCard: View {
     if let line {
       Text(line).font(.footnote).foregroundStyle(Token.mutedForeground)
     }
-  }
-}
-
-extension QuestionCard {
-  /// The phone's own pick was refused because the question changed: the pick shown is someone else's.
-  fileprivate var pickedElsewhere: Bool {
-    if case .refused(_, let code)? = session.refusal(message: message, key: question.key) { return code == "question_revision_conflict" }
-    return false
   }
 }
 
@@ -362,12 +333,9 @@ struct ChoiceRow: View {
   let enabled: Bool
   /// What VoiceOver reads as the row's value (the words typed under "Other…").
   var value: String?
-  /// A choice the phone shows and does not take.
-  var onComputer = false
   let action: () -> Void
 
   private var symbol: String {
-    if onComputer { return "desktopcomputer" }
     if multi { return selected ? "checkmark.square.fill" : "square" }
     return selected ? "checkmark.circle.fill" : "circle"
   }
@@ -376,7 +344,7 @@ struct ChoiceRow: View {
     Button(action: action) {
       HStack(alignment: .firstTextBaseline, spacing: 12) {
         Image(systemName: symbol)
-          .font(onComputer ? .body : .title2)
+          .font(.title2)
           .foregroundStyle(selected ? Token.primary : Token.mutedForeground)
           .frame(minWidth: 28)
           .accessibilityHidden(true)
@@ -411,7 +379,7 @@ struct ChoiceRow: View {
   }
 
   private var labelText: some View {
-    Text(label).font(.body.weight(.semibold)).foregroundStyle(onComputer ? Token.mutedForeground : Token.foreground).multilineTextAlignment(.leading)
+    Text(label).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).multilineTextAlignment(.leading)
   }
 
   @ViewBuilder private var badge: some View {

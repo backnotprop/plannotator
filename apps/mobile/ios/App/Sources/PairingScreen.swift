@@ -168,10 +168,9 @@ struct OfferedPairingSheet: View {
           .accessibilityElement(children: .combine)
         }
         HStack(spacing: 12) {
-          Button(PhoneWords.cancel) { model.declineOffered() }
-          Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }
+          Button(PhoneWords.cancel) { model.declineOffered() }.buttonStyle(SheetChoice(leads: false))
+          Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }.buttonStyle(SheetChoice(leads: true))
         }
-        .buttonStyle(EqualChoice())
       }
     }
     .padding(.horizontal, 24)
@@ -188,14 +187,16 @@ struct OfferedPairingSheet: View {
   }
 }
 
-/// Two actions of equal weight: neither is the default.
-struct EqualChoice: ButtonStyle {
+/// The sheet's two actions, the same size: Pair is the filled one, Cancel the quiet one beside it.
+struct SheetChoice: ButtonStyle {
+  let leads: Bool
+
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .font(.body.weight(.semibold))
-      .foregroundStyle(Token.foreground)
+      .foregroundStyle(leads ? Token.primaryForeground : Token.foreground)
       .frame(maxWidth: .infinity, minHeight: 50)
-      .background(Token.muted.opacity(configuration.isPressed ? 0.6 : 1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .background((leads ? Token.primary : Token.muted).opacity(configuration.isPressed ? 0.6 : 1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
   }
 }
 
