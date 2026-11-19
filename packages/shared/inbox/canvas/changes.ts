@@ -33,6 +33,8 @@ export interface CanvasLogEntry {
   at: string;
   by: CanvasAuthor;
   changes: CanvasChange[];
+  /** The person took back the change of this revision (the window's Undo on an agent's change). */
+  undid?: number;
 }
 
 const same = (a: CanvasElement | undefined, b: CanvasElement | undefined) =>
@@ -114,13 +116,43 @@ export const authorWords = (by: CanvasAuthor) => (by.kind === 'person' ? 'the pe
 
 /**
  * What others changed after a revision, newest state per thing, as the lines
- * an answer opens with. Empty when nothing did.
+ * an answer opens with: edits and removals first, new things last, so a pile
+ * of additions never pushes an edit out of view. Empty when nothing did.
+ *
+ * `through`: the last revision whose changes are all in the lines. When the
+ * list had to be cut, it is the revision before the first one left out, and
+ * the agent's point moves only that far: what it was not told, it is told on
+ * its next call.
  */
-export function sinceLines(log: CanvasLogEntry[], rev: number, me: CanvasAuthor | null, max = 30): { lines: string[]; elements: Set<string>; byElement: Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }> } {
+export function sinceLines(
+  log: CanvasLogEntry[],
+  rev: number,
+  me: CanvasAuthor | null,
+  max = 30,
+): { lines: string[]; elements: Set<string>; byElement: Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>; through: number; cut: boolean; undone: number[] } {
   const last = new Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number; ops: Set<string> }>();
   const byElement = new Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>();
+  const undone: number[] = [];
+  let through = rev;
+  let cut = false;
   for (const entry of log) {
-    if (entry.rev <= rev || (me && sameAuthor(entry.by, me))) continue;
+    if (entry.rev <= rev) continue;
+    if (me && sameAuthor(entry.by, me)) {
+      if (!cut) through = entry.rev;
+      continue;
+    }
+    // A whole revision is told or none of it; the first one always is, however long.
+    const fresh = entry.changes.filter((change) => !last.has(`${entry.by.kind}:${entry.by.key ?? entry.by.name ?? ''}:${change.elements.slice().sort()[0] ?? change.thing}`)).length;
+    if (cut || (last.size > 0 && last.size + fresh > max)) {
+      cut = true;
+      continue;
+    }
+    through = entry.rev;
+    // The person took back a change of this agent's: said in its own line (the server words it).
+    if (entry.undid !== undefined && me) {
+      const made = log.find((e) => e.rev === entry.undid);
+      if (made && sameAuthor(made.by, me)) undone.push(entry.undid);
+    }
     for (const change of entry.changes) {
       const key = `${entry.by.kind}:${entry.by.key ?? entry.by.name ?? ''}:${change.elements.slice().sort()[0] ?? change.thing}`;
       const prior = last.get(key);
@@ -130,15 +162,14 @@ export function sinceLines(log: CanvasLogEntry[], rev: number, me: CanvasAuthor 
       for (const id of change.elements) byElement.set(id, { by: entry.by, change, rev: entry.rev });
     }
   }
-  const lines: string[] = [];
   const elements = new Set<string>(byElement.keys());
-  const all = [...last.values()];
-  for (const item of all.slice(0, max)) {
-    const ops = item.ops.has('added') && item.change.op !== 'removed' ? 'added' : item.change.op === 'removed' ? 'removed' : [...item.ops].join(', ');
-    lines.push(`  ${authorWords(item.by)} ${ops}: ${item.change.line}`);
-  }
-  if (all.length > max) lines.push(`  and ${all.length - max} more changes`);
-  return { lines, elements, byElement };
+  const said = [...last.values()].map((item) => {
+    const added = item.ops.has('added') && item.change.op !== 'removed';
+    const ops = added ? 'added' : item.change.op === 'removed' ? 'removed' : [...item.ops].join(', ');
+    return { added, line: `  ${authorWords(item.by)} ${ops}: ${item.change.line}` };
+  });
+  const lines = [...said.filter((x) => !x.added), ...said.filter((x) => x.added)].map((x) => x.line);
+  return { lines, elements, byElement, through, cut, undone };
 }
 
 const TOMBSTONE_DAYS = 7;

@@ -45,3 +45,14 @@
   .ibc-send { height: 44px; padding: 0 14px; }
   .ibc-note { top: 60px; }
 }
+
+/* Sent, waiting for the agent's change: three quiet dots, still for people who ask for less motion. */
+.ibc-waiting { padding: 8px 16px 8px 14px; }
+.ibc-dots { display: inline-flex; gap: 4px; flex: none; }
+.ibc-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); opacity: 0.35; animation: ibc-dot 1.2s ease-in-out infinite; }
+.ibc-dots i:nth-child(2) { animation-delay: 0.15s; }
+.ibc-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes ibc-dot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .ibc-dots i { animation: none; opacity: 0.7; } }
+/* The layer is the whole window: no pane corner to follow. */
+.ibc-root { border-radius: 0; }

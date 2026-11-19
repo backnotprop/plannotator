@@ -1,15 +1,25 @@
 /**
  * A thread's canvas in the Inbox window: the Sketch button (the thread's
- * header and the reply box) and the layer the editor is drawn in, in the
- * thread's pane under its header, where the messages and the reply were. The
- * editor itself is the lazy `#canvas-board` chunk; a person who never presses
- * Sketch loads none of it.
+ * header and the reply box), the quiet mark a thread with a canvas carries
+ * (its header button and its list row), and the layer the editor is drawn in.
+ *
+ * The canvas takes the whole window, as Excalidraw does on its own site: its
+ * tools across the top, its style panel at the left edge beside the drawing
+ * rather than over a narrow pane's middle. The thread is one press away
+ * (the layer's Thread button). The layer is a `<dialog open>`: every Inbox key
+ * handler leaves a dialog's keys to it (shortcuts/guards.ts `modalOpen`), so a
+ * letter pressed while drawing is Excalidraw's tool, never the thread's Reply.
+ *
+ * The editor itself is the lazy `#canvas-board` chunk; a person who never
+ * presses Sketch loads none of it. This file's few styles are inline for that
+ * reason too: the window's stylesheet does not grow.
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { CanvasBoardPart, PanePart } from '../lazyParts';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import type { CanvasReply } from './canvasApi';
+import { canvasMarkOf, subscribeCanvasMarks, type CanvasMark, type CanvasReply } from './canvasApi';
 
 const CanvasBoard = CanvasBoardPart.Part;
 
@@ -24,8 +34,16 @@ function markOpen(): void {
   }
 }
 
-/** Opens and closes the thread's canvas. `where`: the thread's header (an icon) or the reply box's row. */
-export function SketchButton({ open, onToggle, where, size = 16 }: { open: boolean; onToggle: () => void; where: 'header' | 'reply'; size?: number }) {
+/** A thread's canvas mark: nothing while it has no canvas (or an empty one). */
+export function useCanvasMark(threadId: string | null): CanvasMark | undefined {
+  return useSyncExternalStore(subscribeCanvasMarks, () => (threadId ? canvasMarkOf(threadId) : undefined));
+}
+
+const DOT: CSSProperties = { position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: 3, pointerEvents: 'none' };
+
+/** Opens and closes the thread's canvas. `where`: the thread's header (an icon, with the canvas's mark) or the reply box's row. */
+export function SketchButton({ threadId, open, onToggle, where, size = 16 }: { threadId: string; open: boolean; onToggle: () => void; where: 'header' | 'reply'; size?: number }) {
+  const mark = useCanvasMark(where === 'header' ? threadId : null);
   const press = () => {
     if (!open) {
       markOpen();
@@ -43,24 +61,118 @@ export function SketchButton({ open, onToggle, where, size = 16 }: { open: boole
       </Tip>
     );
   }
+  const tip = mark?.changed ? 'Canvas: an agent changed it since you looked' : mark ? "Open this thread's canvas" : "Sketch on this thread's canvas";
   return (
-    <Tip content={open ? 'Back to the messages' : "Sketch on this thread's canvas"}>
-      <button type="button" className={`ib-iconbtn${open ? ' ib-on' : ''}`} aria-label="Sketch" aria-pressed={open} data-thread-sketch="" onClick={press}>
+    <Tip content={tip}>
+      <button
+        type="button"
+        className={`ib-iconbtn${open ? ' ib-on' : ''}`}
+        style={{ position: 'relative' }}
+        aria-label={mark?.changed ? 'Canvas, changed by an agent since you looked' : mark ? 'Canvas' : 'Sketch'}
+        aria-pressed={open}
+        data-thread-sketch=""
+        data-canvas-mark={mark ? (mark.changed ? 'changed' : 'has') : undefined}
+        onClick={press}
+      >
         <Icon name="pen" size={size} />
+        {mark && <span aria-hidden="true" style={{ ...DOT, background: mark.changed ? 'var(--primary)' : 'color-mix(in oklab, var(--muted-foreground) 55%, transparent)' }} />}
       </button>
     </Tip>
   );
 }
 
-/** The canvas, in its thread's pane. */
-export function CanvasLayer({ threadId, dark, agent, onSend }: { threadId: string; dark: boolean; agent: string | null; onSend: (reply: CanvasReply) => void }) {
-  // A chunk that could not arrive says so in the pane; the next open asks for it again.
-  const failed = useCallback(() => CanvasBoardPart.retry(), []);
+/** A list row's canvas mark, beside its other marks: a small pen, in the accent colour when an agent changed the canvas since the person looked. */
+export function RowCanvasMark({ threadId }: { threadId: string }) {
+  const mark = useCanvasMark(threadId);
+  if (!mark) return null;
   return (
-    <section className="ib-shape-layer ib-shape-inthread" data-canvas-layer={threadId} aria-label="Canvas">
-      <PanePart loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
-        <CanvasBoard threadId={threadId} dark={dark} agent={agent} onSend={onSend} />
+    <span
+      role="img"
+      aria-label={mark.changed ? 'Canvas, changed by an agent since you looked' : 'Has a canvas'}
+      title={mark.changed ? 'Canvas: an agent changed it since you looked' : 'Has a canvas'}
+      data-row-canvas={mark.changed ? 'changed' : 'has'}
+      style={{ display: 'inline-flex', flex: 'none', alignItems: 'center', marginLeft: 6, color: mark.changed ? 'var(--primary)' : 'var(--muted-foreground)', opacity: mark.changed ? 1 : 0.7 }}
+    >
+      <Icon name="pen" size={13} />
+    </span>
+  );
+}
+
+const WINDOW: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 45,
+  width: '100vw',
+  height: '100dvh',
+  maxWidth: 'none',
+  maxHeight: 'none',
+  margin: 0,
+  padding: 0,
+  border: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  background: 'var(--background)',
+  color: 'var(--foreground)',
+  overflow: 'hidden',
+};
+const HEAD: CSSProperties = { flex: 'none', display: 'flex', alignItems: 'center', gap: 6, height: 48, padding: '0 10px 0 6px', boxShadow: '0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent)' };
+const BACK: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 34, padding: '0 10px 0 6px', border: 0, borderRadius: 9, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 14, fontWeight: 550, cursor: 'pointer', flex: 'none' };
+const TITLE: CSSProperties = { flex: 1, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted-foreground)' };
+
+/** The canvas, over the whole window. */
+export function CanvasLayer({
+  threadId,
+  subject,
+  dark,
+  agent,
+  draft,
+  onWords,
+  onSend,
+  onClose,
+}: {
+  threadId: string;
+  subject: string;
+  dark: boolean;
+  agent: string | null;
+  /** The reply box's words when the canvas opened: the bar starts from them. */
+  draft: string;
+  /** The bar's words as they change, so they go back to the reply box when the canvas closes. */
+  onWords: (words: string) => void;
+  onSend: (reply: CanvasReply) => void;
+  onClose: () => void;
+}) {
+  // A chunk that could not arrive says so in the layer; the next open asks for it again.
+  const failed = useCallback(() => CanvasBoardPart.retry(), []);
+  const back = useRef<HTMLButtonElement | null>(null);
+  const opener = useRef<Element | null>(null);
+  useEffect(() => {
+    opener.current = document.activeElement;
+    back.current?.focus({ preventScroll: true });
+    return () => {
+      // Focus goes back to the button that opened the canvas.
+      const el = opener.current;
+      if (el instanceof HTMLElement && el.isConnected) el.focus({ preventScroll: true });
+      else document.querySelector<HTMLElement>('[data-thread-sketch]')?.focus({ preventScroll: true });
+    };
+  }, []);
+  return createPortal(
+    <dialog open role="dialog" aria-label={`Canvas of ${subject}`} style={WINDOW} data-canvas-layer={threadId}>
+      <header style={HEAD}>
+        <button type="button" ref={back} style={BACK} onClick={onClose} data-canvas-back="" aria-label="Back to the thread">
+          <Icon name="chevL" size={16} />
+          Thread
+        </button>
+        <h2 style={TITLE}>{subject}</h2>
+        <Tip content="Back to the thread">
+          <button type="button" className="ib-iconbtn" aria-label="Close the canvas" onClick={onClose} data-canvas-close="">
+            <Icon name="x" size={16} />
+          </button>
+        </Tip>
+      </header>
+      <PanePart loading={<div style={{ flex: 1 }} aria-busy="true" />} onFailed={failed}>
+        <CanvasBoard threadId={threadId} dark={dark} agent={agent} draft={draft} onWords={onWords} onSend={onSend} />
       </PanePart>
-    </section>
+    </dialog>,
+    document.body,
   );
 }

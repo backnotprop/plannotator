@@ -11,7 +11,7 @@
  * enter the event log (the window's stream, search, the phone relay). Written
  * whole (temp, then rename), owner-only, like a reply draft.
  */
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { diffScenes, type CanvasAuthor, type CanvasLogEntry } from './changes';
 import { asScene, emptyScene, type Box, type CanvasScene } from './scene';
@@ -35,6 +35,11 @@ export interface CanvasMeta {
   /** Each agent session's last look: the revision its last answer gave it. */
   seen: Record<string, number>;
   picture: CanvasPictureMeta | null;
+  /** The last revision an agent made, and the revision the person last had on screen: an agent's change after that is news to them. */
+  agent_rev: number;
+  person_seen: number;
+  /** How many live elements the scene holds (0: nothing to show a mark for). */
+  count: number;
 }
 
 export function canvasDirOf(inboxDirPath: string, threadId: string): string {
@@ -65,7 +70,8 @@ export function readCanvasMeta(inboxDirPath: string, threadId: string): CanvasMe
   }
   const p = raw?.picture;
   const picture = p && Number.isInteger(p.rev) && p.box && [p.box.x, p.box.y, p.box.w, p.box.h, p.scale].every((n) => Number.isFinite(n)) ? p : null;
-  return { v: 1, rev: Number.isInteger(raw?.rev) ? (raw!.rev as number) : 0, updated_at: typeof raw?.updated_at === 'string' ? raw.updated_at : null, seen, picture };
+  const int = (value: unknown) => (Number.isInteger(value) ? (value as number) : 0);
+  return { v: 1, rev: int(raw?.rev), updated_at: typeof raw?.updated_at === 'string' ? raw.updated_at : null, seen, picture, agent_rev: int(raw?.agent_rev), person_seen: int(raw?.person_seen), count: int(raw?.count) };
 }
 
 export function writeCanvasMeta(inboxDirPath: string, threadId: string, meta: CanvasMeta): void {
@@ -112,7 +118,7 @@ export function readCanvasLog(inboxDirPath: string, threadId: string): CanvasLog
  * Returns the revision it now is and the log entry written (null when nothing
  * a reader would see changed).
  */
-export function commitCanvas(inboxDirPath: string, threadId: string, next: CanvasScene, by: CanvasAuthor, at: Date): { rev: number; entry: CanvasLogEntry | null } {
+export function commitCanvas(inboxDirPath: string, threadId: string, next: CanvasScene, by: CanvasAuthor, at: Date, extra: { undid?: number } = {}): { rev: number; entry: CanvasLogEntry | null } {
   const dir = canvasDirOf(inboxDirPath, threadId);
   const prev = readCanvasScene(inboxDirPath, threadId);
   const meta = readCanvasMeta(inboxDirPath, threadId);
@@ -127,12 +133,14 @@ export function commitCanvas(inboxDirPath: string, threadId: string, next: Canva
     if (existsSync(join(dir, 'scene.excalidraw')) || next.elements.length > 0) writeWhole(join(dir, 'scene.excalidraw'), text);
     return { rev: meta.rev, entry: null };
   }
-  const entry: CanvasLogEntry = { rev: meta.rev + 1, at: at.toISOString(), by, changes: changes.slice(0, 300) };
+  const entry: CanvasLogEntry = { rev: meta.rev + 1, at: at.toISOString(), by, changes: changes.slice(0, 300), ...(extra.undid !== undefined ? { undid: extra.undid } : {}) };
   writeWhole(join(dir, 'scene.excalidraw'), text);
   const log = readCanvasLog(inboxDirPath, threadId);
   if (log.length >= LOG_KEEP * 2) writeWhole(join(dir, 'log.jsonl'), `${[...log.slice(-LOG_KEEP), entry].map((e) => JSON.stringify(e)).join('\n')}\n`);
   else appendFileSync(join(dir, 'log.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
-  writeCanvasMeta(inboxDirPath, threadId, { ...meta, rev: entry.rev, updated_at: entry.at });
+  const count = next.elements.filter((e) => !e.isDeleted).length;
+  // The person's own save is on their screen as they make it.
+  writeCanvasMeta(inboxDirPath, threadId, { ...meta, rev: entry.rev, updated_at: entry.at, count, ...(by.kind === 'agent' ? { agent_rev: entry.rev } : { person_seen: entry.rev }) });
   return { rev: entry.rev, entry };
 }
 
@@ -170,4 +178,46 @@ export function noteCanvasSeen(inboxDirPath: string, threadId: string, key: stri
   // A canvas many sessions touched keeps the latest lookers.
   for (const old of keys.slice(0, Math.max(0, keys.length - 64))) delete seen[old];
   writeCanvasMeta(inboxDirPath, threadId, { ...meta, seen });
+}
+
+/** What an agent's revision replaced, kept so the person can take that change back: each changed element as it was, and what it added. */
+export interface CanvasUndo {
+  rev: number;
+  before: CanvasScene['elements'];
+  added: string[];
+}
+
+export function writeCanvasUndo(inboxDirPath: string, threadId: string, undo: CanvasUndo): void {
+  const dir = join(canvasDirOf(inboxDirPath, threadId), 'undo');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeWhole(join(dir, `${undo.rev}.json`), `${JSON.stringify(undo)}\n`);
+}
+
+export function readCanvasUndo(inboxDirPath: string, threadId: string, rev: number): CanvasUndo | null {
+  const raw = readJson(join(canvasDirOf(inboxDirPath, threadId), 'undo', `${rev}.json`)) as CanvasUndo | null;
+  return raw && Array.isArray(raw.before) && Array.isArray(raw.added) ? raw : null;
+}
+
+/** Every thread that has a canvas folder. */
+export function canvasThreads(inboxDirPath: string): string[] {
+  try {
+    return readdirSync(join(inboxDirPath, INBOX_CANVAS_DIR)).filter((name) => THREAD_ID.test(name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A deleted thread's canvas goes with it: its folder is moved out of the way (`canvas/.gone/<thread>-<time>`), where
+ * nothing reads it, rather than removed outright, so a thread deleted by mistake still has its drawing on disk.
+ */
+export function retireCanvas(inboxDirPath: string, threadId: string, at: number): boolean {
+  try {
+    const gone = join(inboxDirPath, INBOX_CANVAS_DIR, '.gone');
+    mkdirSync(gone, { recursive: true, mode: 0o700 });
+    renameSync(canvasDirOf(inboxDirPath, threadId), join(gone, `${threadId}-${at}`));
+    return true;
+  } catch {
+    return false;
+  }
 }

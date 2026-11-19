@@ -75,6 +75,30 @@ describe("an agent's changes", () => {
     expect(result.errors[0]).toContain("Orders worker");
   });
 
+  test("loose words find one thing and the answer says how they were read; overwrite and remove take only an id or whole words", () => {
+    const scene = applyOps(emptyScene(), [{ add: "note", text: "Tests still failing on the J3 rig" }, { add: "box", text: "Release 4.2" }], agent).scene;
+    const near = applyOps(scene, [{ add: "text", text: "lands a week late", near: "the failing tests note" }], agent);
+    expect(near.ok).toBe(true);
+    expect(near.done[0]).toContain('"the failing tests note" read as');
+    // Which side `near` chose is said, with how to choose one.
+    expect(near.done[0]).toMatch(/near put it (right of|below|left of|above)/);
+    const loose = applyOps(scene, [{ set: "failing tests", text: "All green" }], agent);
+    expect(loose.ok).toBe(false);
+    expect(loose.errors[0]).toContain("Tests still failing on the J3 rig");
+    expect(applyOps(scene, [{ set: "Tests still failing on the J3 rig", text: "All green" }], agent).ok).toBe(true);
+  });
+
+  test("a new thing never sits on a connector's line", () => {
+    const scene = applyOps(emptyScene(), [{ add: "box", text: "A" }, { add: "box", text: "B", at: [900, 0] }, { connect: "A", to: "B" }], agent).scene;
+    const arrow = scene.elements.find((e) => e.type === "arrow")!;
+    // Asked for the middle of the arrow's run: it goes on along that side until it is clear of the line.
+    const placed = applyOps(scene, [{ add: "box", text: "C", rightOf: "A" }], agent);
+    const c = thingsOf(placed.scene).find((t) => t.words === "C")!;
+    const y = arrow.y;
+    const overLine = c.box.y - 8 <= y && c.box.y + c.box.h + 8 >= y && c.box.x < arrow.x + arrow.width && c.box.x + c.box.w > arrow.x;
+    expect(overLine).toBe(false);
+  });
+
   test("a new thing lands in a free place and an arrow is attached at both ends", () => {
     const scene = board();
     const result = applyOps(scene, [{ add: "note", text: "Why a queue here?", near: "Orders API" }], agent);
@@ -131,5 +155,20 @@ describe("who changed what", () => {
     expect(since.lines[0]).toContain("queue");
     // Its own change is not news to the agent that made it.
     expect(sinceLines(readCanvasLog(dir, thread), 0, { kind: "agent", name: "Agent", key: "a" }).lines).toHaveLength(1);
+    // A long list is cut at a whole revision, and the agent's point moves only as far as it was told.
+    let scene = stamped;
+    for (let i = 0; i < 3; i++) {
+      scene = applyOps(scene, Array.from({ length: 20 }, (_, n) => ({ add: "box", text: `P${i}-${n}` })), { by: "Other", now: 9 }).scene;
+      commitCanvas(dir, thread, scene, { kind: "agent", name: "Other", key: "o" }, new Date(10 + i));
+    }
+    const cut = sinceLines(readCanvasLog(dir, thread), 2, { kind: "agent", name: "Agent", key: "a" });
+    expect(cut.cut).toBe(true);
+    expect(cut.through).toBe(3);
+    expect(cut.lines).toHaveLength(20);
+    expect(sinceLines(readCanvasLog(dir, thread), cut.through, { kind: "agent", name: "Agent", key: "a" }).lines.length).toBeGreaterThan(0);
+    // The person taking back the agent's change is said as that, to that agent only.
+    commitCanvas(dir, thread, { ...scene, elements: scene.elements.map((e) => (e.type === "ellipse" ? { ...e, x: e.x - 200, version: (e.version ?? 1) + 5 } : e)) }, { kind: "person" }, new Date(20), { undid: 1 });
+    expect(sinceLines(readCanvasLog(dir, thread), 5, { kind: "agent", name: "Agent", key: "a" }).undone).toEqual([1]);
+    expect(sinceLines(readCanvasLog(dir, thread), 5, { kind: "agent", name: "Other", key: "o" }).undone).toEqual([]);
   });
 });

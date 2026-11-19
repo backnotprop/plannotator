@@ -13,6 +13,7 @@ import { useHeldThread } from '../data/queries/thread';
 import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
+import { inboxApi } from '../api';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
@@ -96,26 +97,60 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   // thread yet (its scene lives in that machine's Inbox).
   const canvasFor = thread && !machineOf(thread.thread_id) ? thread.thread_id : null;
   const [canvasOpen, setCanvasOpen] = useState<string | null>(null);
-  const canvasOn = !!canvasFor && canvasOpen === canvasFor && !shapeNode;
+  const canvasOn = !!canvasFor && canvasOpen === canvasFor;
   const { shown: themeShown } = useInboxTheme();
-  const toggleCanvas = () => {
+  // The reply box's words go to the canvas's bar and come back: what the box held when the canvas opened (its saved
+  // draft), and the bar's words as the person leaves them.
+  const [canvasDraft, setCanvasDraft] = useState('');
+  const canvasWords = useRef('');
+  const openCanvas = () => {
     if (!canvasFor) return;
-    if (canvasOn) return setCanvasOpen(null);
-    // In the board's and the Artifacts view's place.
-    if (route.shape || route.artifacts) close({ ...route, shape: null, artifacts: false, links: false });
+    setCanvasDraft('');
+    canvasWords.current = '';
     setCanvasOpen(canvasFor);
+    const id = canvasFor;
+    void inboxApi
+      .replyDraft(id)
+      .then((answer) => {
+        const body = answer.draft?.body ?? '';
+        if (!body) return;
+        canvasWords.current = body;
+        setCanvasDraft(body);
+      })
+      .catch(() => {});
   };
+  const closeCanvas = () => {
+    const id = canvasOpen;
+    setCanvasOpen(null);
+    // Words typed (or changed) in the bar and not sent go to the reply box.
+    if (id && canvasWords.current !== canvasDraft) host.setShapeReply({ words: canvasWords.current, file: null, replace: true, quiet: true, threadId: id });
+  };
+  const toggleCanvas = () => (canvasOn ? closeCanvas() : openCanvas());
   const canvasAgent = thread ? ([...thread.messages].reverse().find((m) => m.author.kind === 'agent')?.author ?? null) : null;
-  const boardNode = canvasOn && canvasFor ? (
-    <CanvasLayer
-      threadId={canvasFor}
-      dark={themeShown === 'dark'}
-      agent={canvasAgent ? inboxAgentName(canvasAgent) : null}
-      onSend={(reply) => host.setShapeReply({ words: reply.words, file: null, files: reply.files, sketch: reply.sketch, send: true, threadId: canvasFor })}
-    />
-  ) : shapeNode;
+  const boardNode = shapeNode;
+  const canvasNode =
+    canvasOn && canvasFor && thread ? (
+      <CanvasLayer
+        threadId={canvasFor}
+        subject={thread.thread_name?.trim() || thread.subject || 'Thread'}
+        dark={themeShown === 'dark'}
+        agent={canvasAgent ? inboxAgentName(canvasAgent) : null}
+        draft={canvasDraft}
+        onWords={(words) => {
+          canvasWords.current = words;
+        }}
+        onSend={(reply) => {
+          // Sent: the bar is empty again, and so is what goes back to the reply box.
+          canvasWords.current = '';
+          setCanvasDraft('');
+          host.setShapeReply({ words: reply.words, file: null, files: reply.files, sketch: reply.sketch, send: true, replace: true, threadId: canvasFor });
+        }}
+        onClose={closeCanvas}
+      />
+    ) : null;
   return (
     <PaneScopeContext.Provider value={scope}>
+      {canvasNode}
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
@@ -229,11 +264,11 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
-          sketchButton={canvasFor ? <SketchButton where="reply" open={canvasOn} onToggle={toggleCanvas} size={phone ? 20 : 16} /> : null}
+          sketchButton={canvasFor ? <SketchButton threadId={canvasFor} where="reply" open={canvasOn} onToggle={toggleCanvas} size={phone ? 20 : 16} /> : null}
           // The canvas's Send could not go by itself: the reply box, with what it holds, takes the canvas's place.
           onReplyPartOutcome={(outcome) => outcome === 'held' && setCanvasOpen(null)}
           shapeButton={(() => {
-            const sketch = canvasFor ? <SketchButton where="header" open={canvasOn} onToggle={toggleCanvas} size={17} /> : null;
+            const sketch = canvasFor ? <SketchButton threadId={canvasFor} where="header" open={canvasOn} onToggle={toggleCanvas} size={17} /> : null;
             const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
             if (!board) return sketch;
             const open = !!route.shape;
@@ -242,7 +277,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             return (
               <>
                 {sketch}
-                <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : (setCanvasOpen(null), show()))} />
+                <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />
               </>
             );
           })()}
@@ -265,7 +300,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             void host.refreshList(false);
             return true;
           }}
-          onClose={phone && canvasOn ? () => setCanvasOpen(null) : phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
+          onClose={phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
           file={route.file ?? null}
           namedFile={route.ref ?? null}
           onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}

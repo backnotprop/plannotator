@@ -52,6 +52,7 @@ export function onCanvasFrame(data: string): void {
     const frame = JSON.parse(data) as CanvasFrame;
     if (typeof frame.thread_id !== 'string' || !Number.isInteger(frame.rev)) return;
     for (const listener of frameListeners) listener({ ...frame, elements: Array.isArray(frame.elements) ? frame.elements : [] });
+    marksSoon();
   } catch {
     // A frame of another shape (a newer Inbox) is skipped.
   }
@@ -78,7 +79,14 @@ export function onCanvasJob(data: string): void {
 const path = (threadId: string) => `/api/inbox/threads/${encodeURIComponent(threadId)}/canvas`;
 
 export const canvasApi = {
-  read: (threadId: string, since?: number, signal?: AbortSignal) => apiGet<CanvasRead>(`${path(threadId)}${since === undefined ? '' : `?since=${since}`}`, signal),
+  /** `look`: the canvas is on the person's screen, so an agent's change up to here is no longer news (the thread's mark goes quiet). */
+  read: (threadId: string, since?: number, signal?: AbortSignal, look = false) => {
+    const query = [since === undefined ? '' : `since=${since}`, look ? 'look=1' : ''].filter(Boolean).join('&');
+    return apiGet<CanvasRead>(`${path(threadId)}${query ? `?${query}` : ''}`, signal);
+  },
+  /** Take back one change an agent made (its revision): the answer is the canvas after. */
+  undo: (threadId: string, rev: number) => apiPost<{ rev: number; scene: CanvasScene }>(`${path(threadId)}/undo`, { rev, window: CANVAS_WINDOW }),
+  marks: () => apiGet<{ canvases: CanvasMark[] }>('/api/inbox/canvases'),
   /** `have`: the revision this window last took. The answer carries the merged scene when the Inbox held changes this window did not. */
   save: (threadId: string, scene: CanvasScene, have: number, options: { gone?: string[]; keepalive?: boolean } = {}) =>
     apiPost<{ rev: number; scene?: CanvasScene }>(path(threadId), { scene, have, window: CANVAS_WINDOW, ...(options.gone?.length ? { gone: options.gone } : {}) }, { keepalive: options.keepalive }),
@@ -103,7 +111,55 @@ export interface CanvasReplySketch {
 }
 
 export interface CanvasReply {
+  /** The bar's words: they are the reply's words (the bar starts from what the reply box held). */
   words: string;
   files: File[];
   sketch: CanvasReplySketch;
+}
+
+/** A thread that has a canvas with something on it. `changed`: an agent changed it since the person last had it on screen. */
+export interface CanvasMark {
+  thread_id: string;
+  rev: number;
+  changed: boolean;
+}
+
+let marks = new Map<string, CanvasMark>();
+let marksAsked = false;
+let marksTimer: ReturnType<typeof setTimeout> | null = null;
+const markListeners = new Set<() => void>();
+
+function loadMarks(): void {
+  marksAsked = true;
+  void canvasApi
+    .marks()
+    .then((answer) => {
+      marks = new Map(answer.canvases.map((mark) => [mark.thread_id, mark]));
+      for (const listener of markListeners) listener();
+    })
+    .catch(() => {});
+}
+
+/** After a canvas frame: the marks are read again, once for a burst of frames. Only a window that shows marks asks. */
+function marksSoon(): void {
+  if (!marksAsked) return;
+  if (marksTimer) clearTimeout(marksTimer);
+  marksTimer = setTimeout(loadMarks, 400);
+}
+
+export const subscribeCanvasMarks = (listener: () => void) => {
+  markListeners.add(listener);
+  if (!marksAsked) loadMarks();
+  return () => {
+    markListeners.delete(listener);
+  };
+};
+export const canvasMarkOf = (threadId: string): CanvasMark | undefined => marks.get(threadId);
+
+/** The person has the canvas on screen: its mark goes quiet at once, here; the Inbox was told by the read. */
+export function canvasLooked(threadId: string): void {
+  const mark = marks.get(threadId);
+  if (!mark?.changed) return;
+  marks = new Map(marks).set(threadId, { ...mark, changed: false });
+  for (const listener of markListeners) listener();
 }

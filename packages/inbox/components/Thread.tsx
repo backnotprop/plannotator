@@ -4404,7 +4404,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const words = replyPart.words;
     // Which of the words' places is this press's: the same box added twice reads the same.
     const nth = words ? replyWordsCount(kept, words) : 0;
-    if (words) changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
+    if (replyPart.replace) changeReply(words);
+    else if (words) changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
     // Its name beside every file the reply holds: a closed box's draft files come back through state, after this.
     const taken = [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)];
     const file = replyPart.file ? withFreeName(replyPart.file, taken) : null;
@@ -4466,7 +4467,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       replyDraft.save(text, files);
       replyDraft.flush();
     };
-    if (!replyPart.send) onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
+    if (!replyPart.send && !replyPart.quiet) onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
     // openBox and changeReply read this render's draft and Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyPart, sending]);

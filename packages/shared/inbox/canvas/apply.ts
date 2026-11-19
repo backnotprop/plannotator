@@ -45,24 +45,73 @@ const CHAR = 12.5;
 
 export class RefError extends Error {}
 
-/** The one thing a name means: its id, the start of its id, or its words. Never a guess between two. */
-export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene): Thing {
+const FILLER = new Set(['the', 'a', 'an', 'of', 'for', 'to', 'in', 'on', 'at', 'about', 'with', 'and', 'that', 'this', 'one', 'thing', 'called', 'named', 'labelled', 'labeled', 'saying', 'says']);
+const KIND_WORDS: Record<string, string[]> = {
+  box: ['box', 'rectangle', 'card'],
+  note: ['note', 'sticky'],
+  frame: ['frame', 'section'],
+  arrow: ['arrow', 'connector', 'connection'],
+  line: ['line'],
+  text: ['text', 'label', 'words'],
+  sketch: ['sketch', 'drawing', 'doodle', 'scribble'],
+  picture: ['picture', 'image', 'photo', 'screenshot'],
+  diamond: ['diamond', 'decision'],
+  ellipse: ['ellipse', 'circle', 'oval'],
+};
+
+export interface ResolveOptions {
+  /** A change that overwrites or removes: only an id or a thing's whole words name it, never a loose match. */
+  exact?: boolean;
+  /** How a loose name was read, for the answer ("'failing tests' read as ab12"). */
+  notes?: string[];
+}
+
+/**
+ * The one thing a name means: its id, the start of its id, or its words. Never a guess between two. Words may be
+ * loose (part of the thing's words, in any order, with a kind word such as "note" or "frame") only when exactly one
+ * thing fits, and the answer says how the name was read.
+ */
+export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, options: ResolveOptions = {}): Thing {
   if (typeof ref !== 'string' || !ref.trim()) throw new RefError('name a thing by its id or its words');
   const name = ref.trim();
   const exact = things.find((t) => t.id === name) ?? things.find((t) => t.elementIds.includes(name));
   if (exact) return exact;
   const lower = name.toLowerCase();
   const list = (found: Thing[]) => found.slice(0, 6).map((t) => `  ${lineOf(t, scene, things)}`).join('\n');
-  const starts = things.filter((t) => t.id.startsWith(name) || t.elementIds.some((id) => id.startsWith(name)));
+  // One word with no space may be the start of an id.
+  const starts = /\s/.test(name) ? [] : things.filter((t) => t.id.startsWith(name) || t.elementIds.some((id) => id.startsWith(name)));
   if (starts.length === 1) return starts[0]!;
   const same = things.filter((t) => t.words.toLowerCase() === lower);
   if (same.length === 1) return same[0]!;
   if (same.length > 1) throw new RefError(`${JSON.stringify(name)} is the words of ${same.length} things; name one by its id:\n${list(same)}`);
-  const holds = things.filter((t) => t.words && t.words.toLowerCase().includes(lower));
-  if (holds.length === 1) return holds[0]!;
-  if (holds.length > 1) throw new RefError(`${JSON.stringify(name)} matches ${holds.length} things; name one by its id:\n${list(holds)}`);
   if (starts.length > 1) throw new RefError(`${JSON.stringify(name)} starts ${starts.length} ids; write more of it:\n${list(starts)}`);
-  const words = lower.split(/\s+/).filter((w) => w.length > 2);
+  // Loose: part of its words, or its words in any order, with a kind word standing for the kind.
+  const holds = things.filter((t) => t.words && t.words.toLowerCase().includes(lower));
+  let loose = holds;
+  if (loose.length === 0) {
+    const words = lower.split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w));
+    const kinds = new Set<string>();
+    const rest = words.filter((w) => {
+      const kind = Object.keys(KIND_WORDS).find((k) => KIND_WORDS[k]!.includes(w) || KIND_WORDS[k]!.includes(w.replace(/s$/, '')));
+      if (kind) kinds.add(kind);
+      return !kind;
+    });
+    const isNote = (t: Thing) => t.kind === 'box' && t.fill === 'yellow';
+    const ofKind = (t: Thing) => kinds.size === 0 || kinds.has(t.kind) || (kinds.has('note') && isNote(t));
+    if (rest.length > 0 || kinds.size > 0) {
+      loose = things.filter((t) => ofKind(t) && rest.every((w) => t.words.toLowerCase().includes(w)) && (rest.length > 0 || t.kind !== 'arrow'));
+    }
+  }
+  if (loose.length === 1 && !options.exact) {
+    const thing = loose[0]!;
+    options.notes?.push(`${JSON.stringify(name)} read as ${thing.id}${thing.words ? ` ${JSON.stringify(thing.words.slice(0, 60))}` : ''}`);
+    return thing;
+  }
+  if (loose.length >= 1 && options.exact) {
+    throw new RefError(`${JSON.stringify(name)} is neither an id nor a thing's whole words, and a change that overwrites or removes takes only those. ${loose.length === 1 ? 'It looks like this one; name it by its id' : 'Name one by its id'}:\n${list(loose)}`);
+  }
+  if (loose.length > 1) throw new RefError(`${JSON.stringify(name)} fits ${loose.length} things; name one by its id:\n${list(loose)}`);
+  const words = lower.split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !FILLER.has(w));
   const close = things.filter((t) => words.some((w) => t.words.toLowerCase().includes(w)));
   throw new RefError(`nothing on the canvas is called ${JSON.stringify(name)}${close.length ? `; closest:\n${list(close)}` : ' (read the canvas to see what is there)'}`);
 }
@@ -74,6 +123,8 @@ interface Work {
   added: Set<string>;
   original: Set<string>;
   rand: () => number;
+  /** What the board decided for the change being made (how a name was read, which side, a frame that grew): said after its line. */
+  notes: string[];
 }
 
 function newId(work: Work): string {
@@ -205,8 +256,41 @@ function obstacles(work: Work, ignore: Set<string>): Box[] {
     .map(boxOf);
 }
 
-function isFree(box: Box, taken: Box[]): boolean {
-  return !taken.some((o) => boxesOverlap(o, box, 12));
+type Segment = [number, number, number, number];
+
+/** Every stretch of every arrow and line, so a new thing never sits on a connector. */
+function connectorLines(work: Work, ignore: Set<string>): Segment[] {
+  const out: Segment[] = [];
+  for (const el of work.scene.elements) {
+    if (el.isDeleted || (el.type !== 'arrow' && el.type !== 'line') || ignore.has(el.id)) continue;
+    // An arrow attached to what is being moved follows it: not in the way.
+    if ((el.startBinding && ignore.has(el.startBinding.elementId)) || (el.endBinding && ignore.has(el.endBinding.elementId))) continue;
+    const points = el.points ?? [];
+    for (let i = 1; i < points.length; i++) out.push([el.x + points[i - 1]![0]!, el.y + points[i - 1]![1]!, el.x + points[i]![0]!, el.y + points[i]![1]!]);
+  }
+  return out;
+}
+
+function crosses([x1, y1, x2, y2]: Segment, box: Box, margin = 8): boolean {
+  const left = box.x - margin, right = box.x + box.w + margin, top = box.y - margin, bottom = box.y + box.h + margin;
+  // Liang-Barsky: does any part of the segment lie inside the box?
+  let t0 = 0, t1 = 1;
+  const dx = x2 - x1, dy = y2 - y1;
+  for (const [p, q] of [[-dx, x1 - left], [dx, right - x1], [-dy, y1 - top], [dy, bottom - y1]] as [number, number][]) {
+    if (p === 0) {
+      if (q < 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) t0 = Math.max(t0, r);
+      else t1 = Math.min(t1, r);
+      if (t0 > t1) return false;
+    }
+  }
+  return true;
+}
+
+function isFree(box: Box, taken: Box[], lines: Segment[] = []): boolean {
+  return !taken.some((o) => boxesOverlap(o, box, 12)) && !lines.some((line) => crosses(line, box));
 }
 
 function frameAt(work: Work, box: Box): CanvasElement | undefined {
@@ -223,6 +307,9 @@ function growFrame(work: Work, frame: CanvasElement, box: Box): void {
   const top = Math.min(frame.y, box.y - pad);
   if (left !== frame.x || top !== frame.y || right !== frame.x + frame.width || bottom !== frame.y + frame.height) {
     touch(work, frame, { x: left, y: top, width: right - left, height: bottom - top });
+    const name = thingsOf(work.scene).find((t) => t.elementIds.includes(frame.id));
+    const note = `frame ${name?.id ?? frame.id} grew to ${Math.round(right - left)}x${Math.round(bottom - top)} to hold it; nothing else moved`;
+    if (!work.notes.includes(note)) work.notes.push(note);
   }
 }
 
@@ -235,6 +322,7 @@ interface Spot {
 function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, ignore: Set<string>, fallback?: Box): Spot {
   const things = thingsOf(work.scene);
   const taken = obstacles(work, ignore);
+  const lines = connectorLines(work, ignore);
   if (op.at !== undefined) {
     const at = op.at as unknown;
     if (!Array.isArray(at) || at.length !== 2 || !at.every((n) => typeof n === 'number' && Number.isFinite(n))) throw new RefError('"at" is [x, y]');
@@ -251,7 +339,7 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
     const box = taken.length === 0 ? { x: 0, y: 0, w: size.w, h: size.h } : { x: all.x, y: all.y + all.h + GAP, w: size.w, h: size.h };
     return { box };
   }
-  const anchor = resolveThing(op[place], things, work.scene);
+  const anchor = resolveThing(op[place], things, work.scene, { notes: work.notes });
   const a = anchor.box;
   if (place === 'in') {
     if (anchor.kind !== 'frame') throw new RefError(`"in" takes a frame; ${anchor.id} is a ${anchor.kind} (use near, rightOf, leftOf, above or below)`);
@@ -261,7 +349,10 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
     for (let y = top; y < a.y + Math.max(a.h, size.h + 80) + 4000; y += 20) {
       for (let x = a.x + pad; x + size.w <= a.x + Math.max(a.w, size.w + pad * 2) - pad + 1; x += 20) {
         const box = { x, y, w: size.w, h: size.h };
-        if (isFree(box, taken)) return { box, frame };
+        if (isFree(box, taken, lines)) {
+          work.notes.push(`inside ${anchor.id}`);
+          return { box, frame };
+        }
       }
     }
     return { box: { x: a.x + pad, y: top, w: size.w, h: size.h }, frame };
@@ -284,9 +375,12 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
   for (let step = 0; step < 40; step++) {
     for (const side of tries) {
       const box = at(side, step);
-      if (isFree(box, taken)) {
+      if (isFree(box, taken, lines)) {
         // Next to something in a frame stays in that frame (the frame grows to hold it).
         const home = anchor.frame ? things.find((t) => t.id === anchor.frame) : undefined;
+        const sides: Record<string, string> = { rightOf: 'right of', leftOf: 'left of', above: 'above', below: 'below' };
+        if (place === 'near') work.notes.push(`near put it ${sides[side]} ${anchor.id}; rightOf, leftOf, above or below picks a side`);
+        else if (step > 0) work.notes.push(`${sides[side]} ${anchor.id}, further out to stay clear of what is there`);
         return { box, frame: home ? elementsOf(work, home)[0] : frameAt(work, box) };
       }
     }
@@ -470,8 +564,8 @@ function sizeOf(op: CanvasOp, natural: { w: number; h: number }): { w: number; h
 
 function connect(work: Work, op: CanvasOp): string {
   const things = thingsOf(work.scene);
-  const from = resolveThing(op.connect, things, work.scene);
-  const to = resolveThing(op.to, things, work.scene);
+  const from = resolveThing(op.connect, things, work.scene, { notes: work.notes });
+  const to = resolveThing(op.to, things, work.scene, { notes: work.notes });
   if (from.id === to.id) throw new RefError(`"connect" and "to" are the same thing (${from.id})`);
   for (const end of [from, to]) {
     if (end.kind === 'arrow' || end.kind === 'line') throw new RefError(`${end.id} is ${end.kind === 'arrow' ? 'an arrow' : 'a line'}; connect two things, not a connector`);
@@ -497,7 +591,7 @@ function connect(work: Work, op: CanvasOp): string {
   }
   if (a?.frameId && a.frameId === b?.frameId) arrow.frameId = a.frameId;
   if (words) label(work, arrow, words, centerOf(boxOf(arrow)));
-  return `connected ${from.id} -> ${to.id}${words ? ` ${JSON.stringify(words)}` : ''} (arrow ${describeId(work, arrow)})`;
+  return `connected ${from.id} -> ${to.id}${words ? ` ${JSON.stringify(words)}` : ''} (arrow ${describeId(work, arrow)}, pointing at ${to.id})`;
 }
 
 function describeId(work: Work, el: CanvasElement): string {
@@ -506,7 +600,7 @@ function describeId(work: Work, el: CanvasElement): string {
 
 function set(work: Work, op: CanvasOp): string {
   const things = thingsOf(work.scene);
-  const thing = resolveThing(op.set, things, work.scene);
+  const thing = resolveThing(op.set, things, work.scene, { exact: true });
   const els = elementsOf(work, thing);
   const said: string[] = [];
   if (op.text === undefined && op.color === undefined) throw new RefError('"set" changes "text" or "color"; give one');
@@ -547,7 +641,7 @@ function set(work: Work, op: CanvasOp): string {
 
 function move(work: Work, op: CanvasOp): string {
   const things = thingsOf(work.scene);
-  const thing = resolveThing(op.move, things, work.scene);
+  const thing = resolveThing(op.move, things, work.scene, { notes: work.notes });
   if (thing.kind === 'arrow' && (thing.from?.attached || thing.to?.attached)) throw new RefError(`${thing.id} is an arrow attached to things; move those and it follows`);
   const els = withContents(work, thing);
   const ids = new Set(els.map((e) => e.id));
@@ -569,7 +663,7 @@ function frame(work: Work, op: CanvasOp): string {
   const names = op.frame as unknown;
   if (!Array.isArray(names) || names.length === 0) throw new RefError('"frame" is a list of things to put in a new frame');
   const things = thingsOf(work.scene);
-  const members = names.map((n) => resolveThing(n, things, work.scene));
+  const members = names.map((n) => resolveThing(n, things, work.scene, { notes: work.notes }));
   for (const m of members) if (m.kind === 'frame') throw new RefError(`${m.id} is a frame; a frame cannot go in a frame`);
   const title = text(op.title ?? op.text, 'title', false);
   const els = members.flatMap((m) => elementsOf(work, m));
@@ -584,7 +678,7 @@ function replace(work: Work, op: CanvasOp): string[] {
   const things = thingsOf(work.scene);
   const names = Array.isArray(op.replace) ? op.replace : [op.replace];
   if (names.length === 0) throw new RefError('"replace" names a thing or a list of things');
-  const targets = names.map((n) => resolveThing(n, things, work.scene));
+  const targets = names.map((n) => resolveThing(n, things, work.scene, { exact: true }));
   const items = op.with as unknown;
   if (!Array.isArray(items) || items.length === 0) throw new RefError('"replace" needs "with": a list of add and connect changes');
   for (const item of items) {
@@ -657,7 +751,7 @@ function one(work: Work, op: CanvasOp): string[] {
       return replace(work, op);
     default: {
       const things = thingsOf(work.scene);
-      const thing = resolveThing(op.remove, things, work.scene);
+      const thing = resolveThing(op.remove, things, work.scene, { exact: true });
       const line = lineOf(thing, work.scene, things);
       remove(work, elementsOf(work, thing));
       return [`removed ${line}`];
@@ -683,7 +777,7 @@ export function mermaidTexts(ops: unknown): string[] {
 
 export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): ApplyResult {
   const copy: CanvasScene = { ...scene, elements: scene.elements.map((e) => ({ ...e })) };
-  const work: Work = { scene: copy, ctx, touched: new Set(), added: new Set(), original: new Set(scene.elements.map((e) => e.id)), rand: ctx.random ?? Math.random };
+  const work: Work = { scene: copy, ctx, touched: new Set(), added: new Set(), original: new Set(scene.elements.map((e) => e.id)), rand: ctx.random ?? Math.random, notes: [] };
   const done: string[] = [];
   const errors: string[] = [];
   if (!Array.isArray(ops) || ops.length === 0) {
@@ -692,7 +786,11 @@ export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): A
   if (ops.length > 200) return { ok: false, scene, done, errors: ['at most 200 changes in one call'], touched: work.touched, added: work.added };
   ops.forEach((op, i) => {
     try {
-      done.push(...one(work, op as CanvasOp));
+      work.notes = [];
+      const lines = one(work, op as CanvasOp);
+      // What the board decided on the agent's behalf is said, never silent.
+      if (work.notes.length > 0) lines[lines.length - 1] += ` [${[...new Set(work.notes)].join('; ')}]`;
+      done.push(...lines);
     } catch (error) {
       if (!(error instanceof RefError)) throw error;
       errors.push(`change ${i + 1}: ${error.message}`);

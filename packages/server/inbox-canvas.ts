@@ -28,8 +28,13 @@ import { mergeSave, sinceLines, type CanvasAuthor } from "@plannotator/shared/in
 import { countWords, readThings, thingsOf } from "@plannotator/shared/inbox/canvas/reading";
 import { asScene, unionBox, type Box, type CanvasElement } from "@plannotator/shared/inbox/canvas/scene";
 import {
+  canvasThreads,
   commitCanvas,
   noteCanvasSeen,
+  readCanvasUndo,
+  retireCanvas,
+  writeCanvasMeta,
+  writeCanvasUndo,
   readCanvasLog,
   readCanvasMeta,
   readCanvasPicture,
@@ -46,7 +51,7 @@ export const INBOX_CANVAS_DESCRIPTION = [
   "A thread's canvas: a shared Excalidraw drawing the person sketches on, which you read and change. With only thread_id it answers the canvas as text, one line per thing, and its rev.",
   '"picture": true also writes a PNG of it and gives the path; "picture": "<thing>" (or a list) is that part only. "in": "<frame>" reads one frame.',
   '"do": [...] changes it, all or nothing; send "base": the rev of your last answer. Name a thing by the id at the start of its line, or by its words. Each change has one verb:',
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is the diagram source). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "color".',
+  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "color".',
   '{"connect": "<thing>", "to": "<thing>", "label": "..."}   {"set": "<thing>", "text": "...", "color": "..."}',
   '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
   '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
@@ -56,7 +61,7 @@ export const INBOX_CANVAS_DESCRIPTION = [
 /** The `do` field: the whole grammar, so an agent that sees only the fields (the `plannotator_inbox` tool) can write a change. */
 export const INBOX_CANVAS_DO_DESCRIPTION = [
   'Changes to the canvas, all or nothing; send "base" (the rev of your last answer) with them. Name a thing by the id at the start of its line, or by its words. One verb per change:',
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  add: box, ellipse, diamond, note, text, frame, mermaid (text is the diagram source). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "color".',
+  '{"add": "box", "text": "...", "rightOf": "<thing>"}  add: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "color".',
   '{"connect": "<thing>", "to": "<thing>", "label": "..."}   {"set": "<thing>", "text": "...", "color": "..."}',
   '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
   '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
@@ -110,6 +115,10 @@ export function createInboxCanvas(options: {
   const emit = (event: string, data: unknown) => {
     for (const send of windows) send(event, data);
   };
+  // A deleted thread's canvas goes with it (moved aside, store.ts `retireCanvas`).
+  store.onDeletion(() => {
+    for (const id of canvasThreads(dir)) if (!store.message(id)) retireCanvas(dir, id, now());
+  });
 
   const threadOf = (id: string): string => {
     const root = store.message(id.trim())?.thread_id;
@@ -140,17 +149,25 @@ export function createInboxCanvas(options: {
 
   const viewerKey = (viewer: CanvasAuthor) => viewer.key || "agent";
 
-  /** The lines an answer opens with: what others changed since this agent's last look. Marks the look. */
-  const opening = (threadId: string, viewer: CanvasAuthor, rev: number, since?: number): string[] => {
-    const meta = readCanvasMeta(dir, threadId);
-    const last = since ?? meta.seen[viewerKey(viewer)];
-    noteCanvasSeen(dir, threadId, viewerKey(viewer), rev);
-    if (last === undefined) return rev === 0 ? [] : ["Your first look at this canvas."];
-    if (last >= rev) return [`Nothing changed since you last looked (rev ${rev}).`];
-    const log = readCanvasLog(dir, threadId);
-    const { lines } = sinceLines(log, last, viewer);
-    if (lines.length === 0) return [`Nothing others did changed it since you last looked (rev ${last}); your own changes made it rev ${rev}.`];
-    return [`Changed since you last looked (rev ${last}):`, ...lines];
+  const undoneLines = (revs: number[]) => revs.map((n) => `The person undid your change (rev ${n}): what it changed is as it was before, and what it added is gone.`);
+
+  /** The lines an answer opens with: what others changed since this agent's last look. Marks the look, only as far as it told. */
+  const opening = (threadId: string, viewer: CanvasAuthor, rev: number): string[] => {
+    const key = viewerKey(viewer);
+    const last = readCanvasMeta(dir, threadId).seen[key];
+    if (last === undefined || last >= rev) {
+      noteCanvasSeen(dir, threadId, key, rev);
+      return last === undefined ? (rev === 0 ? [] : ["Your first look at this canvas."]) : [`Nothing changed since you last looked (rev ${rev}).`];
+    }
+    const told = sinceLines(readCanvasLog(dir, threadId), last, viewer);
+    noteCanvasSeen(dir, threadId, key, told.cut ? told.through : rev);
+    if (told.lines.length === 0 && told.undone.length === 0) return [`Nothing others did changed it since you last looked (rev ${last}); your own changes made it rev ${rev}.`];
+    return [
+      ...undoneLines(told.undone),
+      `Changed since you last looked (rev ${last}):`,
+      ...told.lines,
+      ...(told.cut ? [`  More changed after rev ${told.through}. Your next call about this canvas tells the rest; until then, change only things listed here or new ones.`] : []),
+    ];
   };
 
   const read: InboxCanvas["read"] = (threadId, viewer, readOptions = {}) => {
@@ -259,7 +276,7 @@ export function createInboxCanvas(options: {
         mermaid = new Map();
         for (const text of wanted) {
           const made = drawn[text];
-          if (made && !Array.isArray(made)) return { ok: false, rev, text: `Nothing changed. The mermaid text does not parse: ${made.error.slice(0, 400)}` };
+          if (made && !Array.isArray(made)) return { ok: false, rev, text: `Nothing changed. The mermaid diagram was not drawn: ${made.error.slice(0, 400)}` };
           if (Array.isArray(made)) mermaid.set(text, asScene({ elements: made }).elements);
         }
       }
@@ -276,7 +293,8 @@ export function createInboxCanvas(options: {
     // "work on this" names one) says nothing about what changed between the agent's last look and that rev.
     const told = readCanvasMeta(dir, threadId).seen[viewerKey(viewer)];
     const from = told === undefined ? (base as number) : Math.min(base as number, told);
-    const since = sinceLines(log, from, viewer);
+    const since = sinceLines(log, from, viewer, Number.MAX_SAFE_INTEGER);
+    const heard = sinceLines(log, from, viewer);
     const clashes = new Map<string, string>();
     for (const id of result.touched) {
       const hit = since.byElement.get(id);
@@ -300,10 +318,17 @@ export function createInboxCanvas(options: {
         ].join("\n"),
       };
     }
+    const base0 = freshRev === rev ? scene : fresh;
     const committed = commitCanvas(dir, threadId, result.scene, viewer, new Date(now()));
-    noteCanvasSeen(dir, threadId, viewerKey(viewer), committed.rev);
+    // What this change replaced, so the person can take it back with one press (the window's Undo).
+    if (committed.entry) writeCanvasUndo(dir, threadId, { rev: committed.rev, before: base0.elements.filter((e) => result.touched.has(e.id)), added: [...result.added] });
+    noteCanvasSeen(dir, threadId, viewerKey(viewer), heard.cut ? heard.through : committed.rev);
     emit("canvas", { thread_id: threadId, rev: committed.rev, by: viewer.name || "An agent", elements: [...result.added, ...result.touched] });
-    const others = since.lines.length > 0 ? [`Changed by others since you last looked (rev ${from}), not touched by you:`, ...since.lines] : [];
+    const others = [
+      ...undoneLines(heard.undone),
+      ...(heard.lines.length > 0 ? [`Changed by others since you last looked (rev ${from}), not touched by you:`, ...heard.lines] : []),
+      ...(heard.cut ? [`  More changed after rev ${heard.through}. Your next call about this canvas tells the rest.`] : []),
+    ];
     return {
       ok: true,
       rev: committed.rev,
@@ -382,11 +407,38 @@ export function createInboxCanvas(options: {
         }
         return json({ ok: true });
       }
-      const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas(\/picture)?$/.exec(path);
+      if (path === "/api/inbox/canvases") {
+        // Which threads have a canvas with something on it, and where an agent changed it since the person last had it on screen.
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        const canvases = canvasThreads(dir)
+          .map((id) => ({ id, meta: readCanvasMeta(dir, id) }))
+          .filter(({ meta }) => meta.count > 0)
+          .map(({ id, meta }) => ({ thread_id: id, rev: meta.rev, changed: meta.agent_rev > meta.person_seen }));
+        return json({ serverSession: options.serverSession, canvases });
+      }
+      const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas(\/picture|\/undo)?$/.exec(path);
       if (!match) return null;
       const message = store.message(match[1]!);
       if (!message) return json({ error: `No thread ${match[1]}.`, code: "thread_not_found" }, 404);
       const threadId = message.thread_id;
+      if (match[2] === "/undo") {
+        // The person takes back one change an agent made: each thing it changed goes back to what it was, what it
+        // added goes, and whatever the person did since to other things stays.
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await options.readBody(req);
+        const mismatch = options.sessionMismatch(body);
+        if (mismatch) return mismatch;
+        const undo = Number.isInteger(body.rev) ? readCanvasUndo(dir, threadId, body.rev as number) : null;
+        if (!undo) return json({ error: "That change can no longer be undone.", code: "validation_error" }, 422);
+        const stored = readCanvasScene(dir, threadId);
+        const was = new Map(undo.before.map((e) => [e.id, e]));
+        const added = new Set(undo.added);
+        const stamp = (e: CanvasElement, current: CanvasElement) => ({ ...e, version: (current.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: now() });
+        const elements = stored.elements.map((e) => (was.has(e.id) ? stamp(was.get(e.id)!, e) : added.has(e.id) && !e.isDeleted ? stamp({ ...e, isDeleted: true }, e) : e));
+        const committed = commitCanvas(dir, threadId, { ...stored, elements }, { kind: "person" }, new Date(now()), { undid: undo.rev });
+        emit("canvas", { thread_id: threadId, rev: committed.rev, by: null, window: typeof body.window === "string" ? body.window : null, elements: [] });
+        return json({ serverSession: options.serverSession, rev: committed.rev, scene: readCanvasScene(dir, threadId) });
+      }
       if (match[2]) {
         // The window's drawing of the whole canvas, kept for an agent's `picture` when no window is open.
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -399,6 +451,8 @@ export function createInboxCanvas(options: {
       }
       if (req.method === "GET") {
         const meta = readCanvasMeta(dir, threadId);
+        // The canvas is on the person's screen (`look=1`): an agent's change up to here is no longer news.
+        if (url.searchParams.get("look") === "1" && meta.person_seen !== meta.rev && meta.rev > 0) writeCanvasMeta(dir, threadId, { ...meta, person_seen: meta.rev });
         const since = Number(url.searchParams.get("since"));
         const scene = readCanvasScene(dir, threadId);
         // What changed after a revision, for the window's "what changed" line.

@@ -14,7 +14,7 @@
  * reading of the same things (the reply route's `sketch`).
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { CaptureUpdateAction, Excalidraw, MainMenu, WelcomeScreen, convertToExcalidrawElements, exportToCanvas, getSceneVersion, restoreElements, serializeAsJSON, sceneCoordsToViewportCoords } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, Excalidraw, MainMenu, WelcomeScreen, convertToExcalidrawElements, exportToCanvas, getSceneVersion, restoreElements, serializeAsJSON, sceneCoordsToViewportCoords, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
 import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import excalidrawCss from '@excalidraw/excalidraw/index.css?inline';
@@ -22,13 +22,17 @@ import { authorWords, type CanvasLogEntry } from '@plannotator/shared/inbox/canv
 import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
 import { boxOf, boxesOverlap, unionBox, type Box, type CanvasElement, type CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
 import boardCss from './canvas.css?inline';
-import { CANVAS_WINDOW, canvasApi, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
+import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
 
 export interface CanvasBoardProps {
   threadId: string;
   dark: boolean;
   /** Who a reply from here reaches, as the thread names it ("Claude Code"); null when nobody is known. */
   agent: string | null;
+  /** The reply box's words when the canvas opened (they may arrive a moment after it): the bar starts from them. */
+  draft?: string;
+  /** The bar's words as they change: they go back to the reply box when the canvas closes. */
+  onWords?: (words: string) => void;
   /** The reply the bar sends: its words, its pictures and scene file, and what the agent reads of the canvas. */
   onSend: (reply: CanvasReply) => void;
 }
@@ -134,7 +138,7 @@ export async function runCanvasJob(job: CanvasJob): Promise<void> {
       try {
         const parsed = await parseMermaidToExcalidraw(text);
         if (parsed.files && Object.keys(parsed.files).length > 0) {
-          drawn[text] = { error: 'this kind of mermaid diagram becomes one picture, not shapes; a flowchart (flowchart TD / LR) becomes real boxes and arrows' };
+          drawn[text] = { error: 'Excalidraw\'s converter turns flowcharts and sequence diagrams into real shapes; this kind (class, state, ER, gantt, pie and the rest) it can only draw as one flat picture, which is refused here. Use a flowchart, or add boxes and connect them' };
           continue;
         }
         drawn[text] = convertToExcalidrawElements(parsed.elements, { regenerateIds: true });
@@ -179,7 +183,7 @@ function changeWords(entries: CanvasLogEntry[]): { who: string; text: string } |
   return { who, text: parts.join(', ') || 'changed the canvas' };
 }
 
-export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoardProps) {
+export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords, onSend }: CanvasBoardProps) {
   useLayoutEffect(withStyles, []);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
   const stage = useRef<HTMLDivElement | null>(null);
@@ -190,7 +194,23 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
   const [empty, setEmpty] = useState(true);
   const [words, setWords] = useState('');
   const [state, setState] = useState<{ text: string; bad?: boolean } | null>(null);
-  const [note, setNote] = useState<{ who: string; text: string; ids: string[] } | null>(null);
+  const [note, setNote] = useState<{ who: string; text: string; ids: string[]; rev: number } | null>(null);
+  /** Sent, and no change from the agent yet: the canvas says it waits for one. */
+  const [waiting, setWaiting] = useState(false);
+  // The reply box's words arrive: the bar takes them while it is still empty.
+  useEffect(() => {
+    if (draft) setWords((now) => now || draft);
+  }, [draft]);
+  useEffect(() => {
+    onWords?.(words);
+    // The callback is the host's latest each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [words]);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setTimeout(() => setWaiting(false), 10 * 60_000);
+    return () => clearTimeout(timer);
+  }, [waiting]);
   const [flashes, setFlashes] = useState<{ key: string; box: Box }[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -324,8 +344,9 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
     live.current = true;
     const stop = new AbortController();
     canvasApi
-      .read(threadId, undefined, stop.signal)
+      .read(threadId, undefined, stop.signal, true)
       .then((read) => {
+        canvasLooked(threadId);
         rev.current = read.rev;
         for (const el of read.scene.elements) synced.current.set(el.id, sig(el));
         for (const id of Object.keys(read.scene.files)) sentFiles.current.add(id);
@@ -421,8 +442,9 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
       if (frame.thread_id !== threadId || frame.window === CANVAS_WINDOW || frame.rev <= rev.current) return;
       const since = rev.current;
       void canvasApi
-        .read(threadId, since)
+        .read(threadId, since, undefined, true)
         .then((read) => {
+          canvasLooked(threadId);
           if (!live.current || read.rev <= rev.current) return;
           take(read.scene);
           rev.current = read.rev;
@@ -430,7 +452,8 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
           const said = changeWords(read.changes);
           if (!said) return;
           const ids = read.changes.filter((e) => e.by.kind === 'agent').flatMap((e) => e.changes.filter((c) => c.op !== 'removed').flatMap((c) => c.elements));
-          setNote({ ...said, ids });
+          setWaiting(false);
+          setNote({ ...said, ids, rev: Math.max(...read.changes.filter((e) => e.by.kind === 'agent').map((e) => e.rev)) });
           // Mid-stroke the view stays where the person has it; the note's Show brings them there.
           reveal(ids, !pointerDown.current);
           storePicture();
@@ -456,6 +479,54 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
     },
     [saveSoon],
   );
+
+  /** Take back the agent's change: what it changed is as it was, what it added is gone; what the person did since stays. */
+  const undo = async (change: number) => {
+    try {
+      await flush();
+      const answer = await canvasApi.undo(threadId, change);
+      take(answer.scene);
+      rev.current = answer.rev;
+      setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
+      setNote(null);
+      setState({ text: `Undone. ${agent ?? 'The agent'} is told on its next look.` });
+      storePicture();
+    } catch {
+      setState({ text: 'That change can no longer be undone.', bad: true });
+    }
+  };
+
+  /**
+   * A drag that starts on a frame's empty inside draws a selection box, as it does on bare canvas. Excalidraw takes
+   * such a press for the frame itself and drags it. For the length of the press the frame under the pointer is
+   * locked (a locked thing is not picked up), then put back as it was; nothing is saved, its version does not move.
+   */
+  const held = useRef<string[]>([]);
+  const overFrame = (clientX: number, clientY: number) => {
+    const editor = api.current;
+    if (!editor) return;
+    const appState = editor.getAppState();
+    if (appState.activeTool.type !== 'selection') return;
+    const at = viewportCoordsToSceneCoords({ clientX, clientY }, appState);
+    const edge = 10 / appState.zoom.value;
+    const all = editor.getSceneElements();
+    const inside = (el: ExcalidrawElement, margin: number) => {
+      const box = boxOf(el as unknown as CanvasElement);
+      return at.x > box.x + margin && at.x < box.x + box.w - margin && at.y > box.y + margin && at.y < box.y + box.h - margin;
+    };
+    const frames = all.filter((el) => el.type === 'frame' && !el.locked && inside(el, edge));
+    if (frames.length === 0 || all.some((el) => el.type !== 'frame' && inside(el, -edge))) return;
+    const ids = new Set(frames.map((f) => f.id));
+    held.current = [...ids];
+    editor.updateScene({ elements: editor.getSceneElementsIncludingDeleted().map((el) => (ids.has(el.id) ? { ...el, locked: true } : el)), captureUpdate: CaptureUpdateAction.NEVER });
+  };
+  const releaseFrames = () => {
+    const editor = api.current;
+    if (!editor || held.current.length === 0) return;
+    const ids = new Set(held.current);
+    held.current = [];
+    editor.updateScene({ elements: editor.getSceneElementsIncludingDeleted().map((el) => (ids.has(el.id) ? { ...el, locked: false } : el)), captureUpdate: CaptureUpdateAction.NEVER });
+  };
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
@@ -509,7 +580,9 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
       setWords('');
       // What was picked has gone with the reply: the selection (and Excalidraw's panel for it) steps aside for the answer.
       if (picked.size > 0) editor.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
-      setState({ text: agent ? `Sent to ${agent}. Its changes land here.` : 'Sent with your reply.' });
+      setState(null);
+      setNote(null);
+      setWaiting(true);
     } catch {
       setState({ text: 'That did not send. Try again.', bad: true });
     } finally {
@@ -536,14 +609,18 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
       <div
         className="ibc-stage"
         ref={stage}
-        onPointerDownCapture={() => {
+        onPointerDownCapture={(event) => {
           pointerDown.current = true;
+          if (event.button === 0 && event.target instanceof HTMLCanvasElement) overFrame(event.clientX, event.clientY);
         }}
         onPointerUpCapture={() => {
           pointerDown.current = false;
+          // After Excalidraw has finished the press.
+          setTimeout(releaseFrames, 0);
         }}
         onPointerCancelCapture={() => {
           pointerDown.current = false;
+          setTimeout(releaseFrames, 0);
         }}
       >
         {!initial ? (
@@ -588,6 +665,18 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
         {flashes.map((flash) => (
           <span key={flash.key} className="ibc-flash" aria-hidden="true" style={{ left: flash.box.x, top: flash.box.y, width: flash.box.w, height: flash.box.h }} />
         ))}
+        {waiting && !note && (
+          <div className="ibc-note ibc-waiting" role="status" data-canvas-waiting="">
+            <span className="ibc-dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            <span className="ibc-note-text">
+              Sent to <b>{agent ?? 'the agent'}</b>. Its change lands here.
+            </span>
+          </div>
+        )}
         {note && (
           <div className="ibc-note" role="status" data-canvas-note="">
             <span className="ibc-note-text">
@@ -596,6 +685,11 @@ export default function CanvasBoard({ threadId, dark, agent, onSend }: CanvasBoa
             {note.ids.length > 0 && (
               <button type="button" onClick={() => reveal(note.ids, true)}>
                 Show
+              </button>
+            )}
+            {note.rev > 0 && (
+              <button type="button" data-canvas-undo="" onClick={() => void undo(note.rev)}>
+                Undo
               </button>
             )}
             <button type="button" className="ibc-note-x" aria-label="Dismiss" onClick={() => setNote(null)}>

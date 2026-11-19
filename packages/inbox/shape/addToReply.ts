@@ -15,6 +15,10 @@ export interface ShapeReplyPart {
   files?: File[];
   sketch?: CanvasReplySketch;
   send?: boolean;
+  /** The words are the reply's words, not an addition to them (the canvas's bar started from the reply box's words). */
+  replace?: boolean;
+  /** No "Added to your reply" line: the words only came back from the canvas's bar. */
+  quiet?: boolean;
 }
 
 const clip = (text: string, max: number) => {

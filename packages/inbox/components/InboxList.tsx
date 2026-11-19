@@ -1,3 +1,4 @@
+import { RowCanvasMark } from '../canvas/CanvasParts';
 import { memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
@@ -755,6 +756,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
         {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} status={statusMark} />}
         {/* The thread's PRs (approval "inbox-pr-binding"): the state of the one in play, the count over its corner. */}
         <RowPullsMark threadId={row.thread_id} summary={noPulls ? undefined : row.pulls} />
+      <RowCanvasMark threadId={row.thread_id} />
       </span>
       <span className="ib-bcol">{words}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
@@ -913,6 +915,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
     <>
       {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
       <RowPullsMark threadId={row.thread_id} summary={noPulls ? undefined : row.pulls} />
+      <RowCanvasMark threadId={row.thread_id} />
       <SnoozedUntil row={row} />
       <LineCount row={row} tip status={statusMark} card={cardOf(row)} open={kbd} />
     </>
@@ -1043,6 +1046,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
     <>
       {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
       <RowPullsMark threadId={row.thread_id} summary={noPulls ? undefined : row.pulls} />
+      <RowCanvasMark threadId={row.thread_id} />
       <SnoozedUntil row={row} />
       <LineCount row={row} status={statusMark} />
     </>
