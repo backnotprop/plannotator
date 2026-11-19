@@ -10365,6 +10365,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* The model list opens over the dialog's edge: a dialog that scrolls would clip it. */
 .ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
 .ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ib-riskd-auto { align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
 .ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* A sheet at the bottom of the screen, as the feedback dialog (its rule is above): the list opens upward, inside it, and the sheet can still scroll. */

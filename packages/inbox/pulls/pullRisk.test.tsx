@@ -313,7 +313,7 @@ test.skipIf(!hasDom)('a tap on a mark, on a touch screen, shows the sentence ins
 });
 
 /** Pick from one of the dialog's two lists, as a person does: the button, then the entry. */
-const pick = async (list: 'agent' | 'model', label: string) => {
+const pick = async (list: 'agent' | 'model' | 'auto', label: string) => {
   const holder = document.querySelector(`[data-pull-risk-${list}]`)!;
   await act(async () => holder.querySelector('button')!.click());
   const entry = [...holder.querySelectorAll('button')].slice(1).find((b) => b.textContent === label)!;
@@ -477,6 +477,29 @@ test.skipIf(!hasDom)('Save waits for a new agent\'s pick, so a save during the r
 
   await mount(<RiskRulesDialog answer={JUDGED} onSaved={() => {}} onClose={() => {}} />);
   expect(save().disabled).toBe(false);
+});
+
+test.skipIf(!hasDom)('the automatic line saves what to make only when changed, keeping a saved level and agent the dialog does not show; nothing clears it', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  const saves: { auto?: unknown }[] = [];
+  spy('savePullRisk', async (input) => {
+    saves.push(input);
+    return JUDGED;
+  });
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'medium', make: 'guide', agent: 'codex' } }} onSaved={() => {}} onClose={() => {}} />);
+  expect(document.querySelector('[data-pull-risk-auto] button')!.textContent).toContain('a guided review');
+  const submit = async () => {
+    await act(async () => {
+      document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+  };
+  await submit();
+  await pick('auto', 'a Picture page');
+  await submit();
+  await pick('auto', 'nothing');
+  await submit();
+  expect(saves.map((save) => ('auto' in save ? save.auto : 'kept'))).toEqual(['kept', { level: 'medium', make: 'picture_it', agent: 'codex' }, null]);
 });
 
 test.skipIf(!hasDom)('no agent installed: one line, and the rules can still be saved', async () => {
