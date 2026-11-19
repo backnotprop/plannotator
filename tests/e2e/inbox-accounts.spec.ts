@@ -117,7 +117,7 @@ test.beforeAll(async () => {
   const env = {
     PATH: bin,
     HOME: root,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     // Each state is read by Refresh, seconds apart: the 30 s between two runs would stand in the way.
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_TEST_CSWAP_DIR: bin,

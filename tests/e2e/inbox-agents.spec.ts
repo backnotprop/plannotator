@@ -80,7 +80,7 @@ function envFor(fake: FakeAgents, root: string, extra: Record<string, string> = 
     ...fake.env,
     // The fakes' scratch home, where they set the agents up (spread above; named so the HOME scan sees it).
     HOME: fake.env.HOME,
-    PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
     PLANNOTATOR_INBOX_CONNECT: '1',

@@ -5,8 +5,10 @@
  * registers no `plannotator_inbox`, gives no reminder and starts nothing.
  *
  * A record decides. Without one:
- *  - no Inbox ever ran here (no `inbox/inbox.json`): off, nothing run or
- *    written;
+ *  - no Inbox ever ran here (no `inbox/inbox.json`) and no record was ever
+ *    written here (no decided mark): off, nothing run or written;
+ *  - a lost state.json (the decided mark is there): the same one-time run
+ *    brings the record back from the mark;
  *  - an install from before the rule: the mod asks the CLI once
  *    (`plannotator inbox migrate`, which reads the Inbox's store within a
  *    bounded time, writes the record and prints on or off). After that the
@@ -19,7 +21,7 @@
  */
 
 import type { Host } from './host'
-import { INBOX_ON_FILE, inboxOnRecord, inboxUseFromFiles } from './inbox-on-contract'
+import { INBOX_ON_DECIDED_FILE, INBOX_ON_FILE, inboxOnRecord, inboxUseFromFiles } from './inbox-on-contract'
 
 /** How long the one-time `plannotator inbox migrate` may take (its store read stops at 5 s, INBOX_SCAN_BUDGET_MS). */
 export const INBOX_MIGRATE_TIMEOUT_MS = 10_000
@@ -38,9 +40,10 @@ export async function inboxOnAtStart(host: Host, dataDir: string, configText: st
   const readState = () => host.readFile(inboxStatePathOf(dataDir)).catch(() => null)
   const record = inboxOnRecord(await readState())
   if (record) return record.on
-  // No record and no Inbox ever ran here: off, with nothing run and nothing written.
-  if (!(await host.exists(`${dataDir}/inbox/inbox.json`).catch(() => false))) return false
-  // An install from before the rule: the CLI decides it once and writes the record.
+  // No record, no Inbox ever ran here and no record was ever written: off, with nothing run and nothing written.
+  const ran = await host.exists(`${dataDir}/inbox/inbox.json`).catch(() => false)
+  if (!ran && !(await host.exists(`${dataDir}/${INBOX_ON_DECIDED_FILE}`).catch(() => false))) return false
+  // An install from before the rule, or a lost record: the CLI decides it once (or restores it) and writes the record.
   const run = await host
     .run(['plannotator', 'inbox', 'migrate'], { env: { PLANNOTATOR_DATA_DIR: dataDir }, timeoutMs: INBOX_MIGRATE_TIMEOUT_MS })
     .catch(() => null)

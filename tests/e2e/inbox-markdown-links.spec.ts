@@ -73,7 +73,7 @@ test('a relative .md link in an attached Markdown file opens the linked document
   const home = join(root, 'home');
   mkdirSync(home);
   const env = {
-    PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_INBOX_TAILSCALE: '0', PLANNOTATOR_INBOX_PHONES: '0',
     PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_NOTES: '0',

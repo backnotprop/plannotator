@@ -6,7 +6,7 @@
  *  - settleInboxOn: decide an install from before the rule (once) and, for one
  *    decided off with `notes: 'remove'` (only agents ever started its Inbox),
  *    remove Plannotator's own untouched notes, once: what cannot go is
- *    recorded as `notes: 'left'` and never retried by itself. The CLI runs it
+ *    logged and never retried by itself (Turn off tries again). The CLI runs it
  *    at the start of every `plannotator inbox` command and in `plannotator
  *    inbox migrate`, which the Claude Code mod runs once when the record is
  *    missing.
@@ -97,7 +97,7 @@ function notesLine(cleared: InboxNotesCleared): Record<string, unknown> {
  * an agent-only decision left to do, once. Idempotent: a decided record with
  * nothing pending is only read. Answers whether the Inbox is on.
  */
-export function settleInboxOn(dataDir: string, options: { environment?: AgentEnvironment; env?: Readonly<Record<string, string | undefined>> } = {}): boolean {
+export async function settleInboxOn(dataDir: string, options: { environment?: AgentEnvironment; env?: Readonly<Record<string, string | undefined>> } = {}): Promise<boolean> {
   const before = readInboxOnRecord(dataDir);
   // isInboxOn decides an undecided install (and writes the record), the one rule for it.
   const on = isInboxOn(dataDir, options.env ?? process.env);
@@ -105,11 +105,14 @@ export function settleInboxOn(dataDir: string, options: { environment?: AgentEnv
   if (!record) return on;
   if (!before) logInboxOn(dataDir, { decided: record.by, on: record.on });
   if (record.on || record.notes !== "remove") return record.on;
-  const cleared = removeUntouchedInboxNotes(dataDir, options.environment);
-  // Once: what could not go is recorded and named by `plannotator inbox status`, never retried by itself.
-  const next: InboxOnRecord = { ...withoutNotes(record), ...(cleared.failed.length > 0 ? { notes: "left" as const } : {}) };
+  const e = options.environment ?? createAgentEnvironment();
+  const cleared = removeUntouchedInboxNotes(dataDir, e);
+  // Decided off: the routines' start at login would bring the Inbox back at the next login.
+  const login = await removeLoginItem(dataDir, e);
+  // Once: what could not go is logged, never retried by itself (Turn off tries again and names it).
+  const next: InboxOnRecord = withoutNotes(record);
   writeInboxOnRecord(dataDir, next, { ifCurrent: record });
-  logInboxOn(dataDir, { settled: record.by, ...notesLine(cleared) });
+  logInboxOn(dataDir, { settled: record.by, ...loginLine(login), ...notesLine(cleared) });
   return false;
 }
 
@@ -123,8 +126,8 @@ export interface InboxTurnedOff {
   recorded: boolean;
   /** What stopping the Inbox did (absent when the caller stops it itself). */
   stop?: InboxStopResult;
-  /** The routines' start at login that was removed (its path), if there was one. */
-  loginItem?: string;
+  /** The routines' start at login: removed (its path), or could not be removed (its path and why). */
+  loginItem?: LoginItemRemoval;
   notes: InboxNotesCleared;
 }
 
@@ -132,8 +135,19 @@ function underTest(): boolean {
   return !!process.env.PLANNOTATOR_TEST_SANDBOX || process.env.NODE_ENV === "test";
 }
 
-/** Remove the routines' start at login (inbox-scheduled-login.ts), if there is one; its path, or null. */
-async function removeLoginItem(dataDir: string, e: AgentEnvironment): Promise<string | null> {
+export interface LoginItemRemoval {
+  path: string;
+  /** Why it could not be removed; absent when it was. */
+  error?: string;
+}
+
+/**
+ * Remove the routines' start at login (inbox-scheduled-login.ts), if there is one. There is one per account,
+ * whatever data dir it names, so this removes it either way. Null when there was none; a failure is returned,
+ * never swallowed.
+ */
+async function removeLoginItem(dataDir: string, e: AgentEnvironment): Promise<LoginItemRemoval | null> {
+  let path: string | null = null;
   try {
     const login = inboxLoginItem({
       platform: e.platform,
@@ -142,12 +156,18 @@ async function removeLoginItem(dataDir: string, e: AgentEnvironment): Promise<st
       dataDir,
       run: underTest() ? async () => ({ code: 0 }) : async (argv) => ({ code: (await e.run(argv, { timeoutMs: 10_000 })).exitCode }),
     });
-    if (!login.path || !existsSync(login.path)) return null;
+    path = login.path ?? null;
+    if (!path || !existsSync(path)) return null;
     await login.remove();
-    return existsSync(login.path) ? null : login.path;
-  } catch {
-    return null;
+    return existsSync(path) ? { path, error: "it is still there after removing it" } : { path };
+  } catch (error) {
+    return path ? { path, error: error instanceof Error ? error.message : String(error) } : null;
   }
+}
+
+function loginLine(login: LoginItemRemoval | null): Record<string, unknown> {
+  if (!login) return {};
+  return login.error ? { login_item_failed: login.path, login_item_error: login.error } : { login_item_removed: login.path };
 }
 
 /**
@@ -166,17 +186,18 @@ export async function turnInboxOff(dataDir: string, options: { stop?: boolean; e
   const notes = removeUntouchedInboxNotes(dataDir, e);
   const pending = readInboxOnRecord(dataDir);
   if (recorded && pending && !pending.on && pending.notes === "remove") {
-    writeInboxOnRecord(dataDir, { ...withoutNotes(pending), ...(notes.failed.length > 0 ? { notes: "left" as const } : {}) }, { ifCurrent: pending });
+    writeInboxOnRecord(dataDir, withoutNotes(pending), { ifCurrent: pending });
   }
-  logInboxOn(dataDir, { decided: "off", ...(loginItem ? { login_item_removed: loginItem } : {}), ...notesLine(notes) });
+  logInboxOn(dataDir, { decided: "off", ...loginLine(loginItem), ...notesLine(notes) });
   return { recorded, ...(stop ? { stop } : {}), ...(loginItem ? { loginItem } : {}), notes };
 }
 
 /** The lines `plannotator inbox off` prints (and the Settings switches show the first and last of). */
 export function inboxOffReport(off: InboxTurnedOff): string[] {
-  const lines = [off.recorded ? "The Plannotator Inbox is off on this computer: agents lose it from their next session, and nothing starts it." : INBOX_OFF_NOT_SAVED];
+  const lines = [off.recorded ? "The Plannotator Inbox is off on this computer: agents lose it from their next session." : INBOX_OFF_NOT_SAVED];
   if (off.stop?.state === "still_running") lines.push(`The running Inbox (pid ${off.stop.pid}) did not stop; stop it with plannotator inbox stop.`);
-  if (off.loginItem) lines.push("Removed the Inbox's start at login; it comes back with routines when you turn the Inbox on.");
+  if (off.loginItem && !off.loginItem.error) lines.push("Removed the Inbox's start at login; it comes back with routines when you turn the Inbox on.");
+  if (off.loginItem?.error) lines.push(`Could not remove the Inbox's start at login (${off.loginItem.path}): ${off.loginItem.error}. Remove that file yourself, or it may start the Inbox again at login.`);
   for (const note of off.notes.removed) lines.push(`Removed Plannotator's note for ${INBOX_AGENT_LABELS[note.agent]} from ${note.path}.`);
   for (const note of off.notes.kept) lines.push(`Left the note for ${INBOX_AGENT_LABELS[note.agent]} in ${note.path}: you edited it.`);
   for (const note of off.notes.failed) lines.push(`Could not remove the note for ${INBOX_AGENT_LABELS[note.agent]}: ${note.reason}`);

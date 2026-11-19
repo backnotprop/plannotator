@@ -1,38 +1,28 @@
 /**
- * The CLI's side of "the person turned the Inbox on here" (inbox-on-command.ts)
- * and the MCP server while it is off (inbox-mcp-shim.ts). Who counts as the
- * person, the refusal, `plannotator inbox on`/`off`, and an MCP client that
- * gets a clean answer with no tools and no start. No test here starts an
- * Inbox: every data dir is a scratch folder, and the off ones hold an off
- * record, which wins over any test knob.
+ * The CLI's side of "the Inbox is on here" (inbox-on-command.ts) and the MCP
+ * server while it is off (inbox-mcp-shim.ts). Regressions guarded: a run of
+ * `plannotator inbox` that does not turn it on (in an agent's shell too: there
+ * is no detection of who runs it); Plannotator's own starts (`--background`,
+ * a detached start, the start at login) turning it on or starting anything
+ * while off; a record that cannot be written starting the Inbox anyway; the
+ * off line naming what turns it on; status not saying on or off and why. No
+ * test here starts an Inbox: every data dir is a scratch folder, and the off
+ * ones hold an off record, which wins over any test knob.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
-import { INBOX_OFF_AGENT_LINE, INBOX_OFF_PERSON_LINE, readInboxOnRecord, recordInboxOff } from "@plannotator/shared/inbox/inbox-on";
+import { INBOX_OFF_AGENT_LINE, readInboxOnRecord, recordInboxOff, writeInboxOnRecord } from "@plannotator/shared/inbox/inbox-on";
 import { INBOX_ON_NOT_SAVED } from "@plannotator/shared/inbox/inbox-on-config";
-import {
-  assertInboxOn,
-  INBOX_AGENT_SHELL_MARKERS,
-  INBOX_ON_LINES,
-  inboxAgentShell,
-  InboxOffError,
-  inboxOffLine,
-  inboxOnCommand,
-  inboxOnStatusLines,
-  inboxRunMayStart,
-  isPersonsInboxRun,
-} from "./inbox-on-command";
+import { assertInboxOn, InboxOffError, inboxOnStatusLines, inboxRunMayStart, isOurLoginItem } from "./inbox-on-command";
 import { runInboxMcpShim } from "./inbox-mcp-shim";
 
 /** The real rule: no test knob, no sandbox marker. */
-const PERSON: Record<string, string | undefined> = {};
-/** A run in a terminal (stdin and stdout), as the person types it. */
-const RUN = { detached: false, background: false, tty: true };
-/** The same run with no terminal: an agent's shell tool, a pipe, launchd or systemd. */
-const NO_TTY = { detached: false, background: false, tty: false };
+const ENV: Record<string, string | undefined> = {};
+/** A run of plannotator inbox (bare, --no-open or --open). */
+const RUN = { detached: false, background: false, loginItem: false };
 
 let dataDir: string;
 let saved: string | undefined;
@@ -46,132 +36,63 @@ afterEach(() => {
   else process.env.PLANNOTATOR_DATA_DIR = saved;
 });
 
-describe("who runs plannotator inbox", () => {
-  test("each agent's shell marker makes it an agent's run, never the person's, even in a terminal", () => {
-    for (const marker of INBOX_AGENT_SHELL_MARKERS) {
-      const env = { [marker]: "1" };
-      expect(inboxAgentShell(env)).toBe(marker);
-      expect(isPersonsInboxRun(env, RUN)).toBe(false);
-      expect(inboxOffLine(env, true)).toBe(INBOX_OFF_AGENT_LINE);
-    }
-  });
-
-  test("the person's own terminal: no marker and a terminal; a detached or --background start never is", () => {
-    expect(isPersonsInboxRun(PERSON, RUN)).toBe(true);
-    expect(isPersonsInboxRun(PERSON, { ...RUN, detached: true })).toBe(false);
-    expect(isPersonsInboxRun(PERSON, { ...RUN, background: true })).toBe(false);
-    expect(inboxOffLine(PERSON, true)).toBe(INBOX_OFF_PERSON_LINE);
-  });
-
-  // H2: Amp, Droid, Kiro, Cline, Hermes, OpenClaw... set none of the markers; their shell tools have no terminal.
-  test("no marker and no terminal (an agent the list does not know) is an agent's run and gets the agents' line", () => {
-    expect(isPersonsInboxRun(PERSON, NO_TTY)).toBe(false);
-    expect(inboxOffLine(PERSON, false)).toBe(INBOX_OFF_AGENT_LINE);
-  });
-
-  test("the agents' line never names what turns the Inbox on", () => {
-    expect(INBOX_OFF_AGENT_LINE).not.toContain("plannotator inbox");
-    expect(INBOX_OFF_AGENT_LINE).not.toContain("--from-slash-command");
-  });
-
-  // H1: the routines' start at login, a new item (its variable) or one written before (launchd's label).
-  test("the start at login is never the person, even with a terminal", () => {
-    expect(isPersonsInboxRun({ PLANNOTATOR_INBOX_LOGIN_ITEM: "1" }, RUN)).toBe(false);
-    expect(isPersonsInboxRun({ XPC_SERVICE_NAME: "ai.plannotator.inbox" }, RUN)).toBe(false);
-    expect(isPersonsInboxRun({ XPC_SERVICE_NAME: "application.com.apple.Terminal.1" }, RUN)).toBe(true);
-  });
-
-  test("/plannotator-inbox's flag is the person's act even inside the agent with no terminal; never with --background", () => {
-    expect(isPersonsInboxRun({ CLAUDECODE: "1" }, { ...NO_TTY, slashCommand: true })).toBe(true);
-    expect(isPersonsInboxRun({ CLAUDECODE: "1" }, { ...NO_TTY, slashCommand: true, background: true })).toBe(false);
-    // The environment variable an earlier build of this branch read is not a way in.
-    expect(isPersonsInboxRun({ CLAUDECODE: "1", PLANNOTATOR_INBOX_SLASH_COMMAND: "1" }, NO_TTY)).toBe(false);
-  });
-});
-
-describe("before a run starts anything", () => {
-  test("the person's own run turns the Inbox on (command), /plannotator-inbox's (slash-command)", () => {
-    expect(inboxRunMayStart(dataDir, PERSON, RUN)).toEqual({ ok: true });
+describe("what turns the Inbox on", () => {
+  test("a run of plannotator inbox turns it on, whoever runs it (an agent's shell included)", () => {
+    recordInboxOff(dataDir);
+    expect(inboxRunMayStart(dataDir, { CLAUDECODE: "1" }, RUN)).toEqual({ ok: true });
     expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "command" });
-    recordInboxOff(dataDir);
-    expect(inboxRunMayStart(dataDir, { CODEX_THREAD_ID: "t" }, { ...NO_TTY, slashCommand: true })).toEqual({ ok: true });
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "slash-command" });
   });
 
-  test("an agent's bare plannotator inbox while off is refused with the agents' line and sets nothing", () => {
+  test("while off, --background, a detached start and the start at login are refused with the one line and set nothing", () => {
     recordInboxOff(dataDir);
-    expect(inboxRunMayStart(dataDir, { CLAUDECODE: "1" }, RUN)).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false });
-  });
-
-  test("H2: an unknown agent's --no-open with no terminal is refused and turns nothing on", () => {
-    recordInboxOff(dataDir);
-    expect(inboxRunMayStart(dataDir, PERSON, NO_TTY)).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
+    for (const run of [{ ...RUN, background: true }, { ...RUN, detached: true }, { ...RUN, loginItem: true }]) {
+      expect(inboxRunMayStart(dataDir, ENV, run)).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
+    }
     expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "off" });
   });
 
-  test("H1: after off, the start at login is refused and the record stays off", () => {
-    recordInboxOff(dataDir);
-    expect(inboxRunMayStart(dataDir, { PLANNOTATOR_INBOX_LOGIN_ITEM: "1" }, NO_TTY)).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "off" });
-  });
-
-  test("--background while off is refused even from the person's terminal (it is how agents and hosts start it)", () => {
-    recordInboxOff(dataDir);
-    expect(inboxRunMayStart(dataDir, PERSON, { ...RUN, background: true })).toEqual({ ok: false, line: INBOX_OFF_PERSON_LINE });
-    expect(readInboxOnRecord(dataDir)?.on).toBe(false);
-  });
-
-  test("a fresh computer: an agent's start is refused and nothing is written", () => {
-    expect(inboxRunMayStart(dataDir, { CLAUDECODE: "1" }, { ...NO_TTY, background: true })).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
+  test("a fresh computer: Plannotator's own start is refused and nothing is written", () => {
+    expect(inboxRunMayStart(dataDir, ENV, { ...RUN, background: true })).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
     expect(readInboxOnRecord(dataDir)).toBeNull();
   });
 
-  // M1: the person's run whose record cannot be written says so and starts nothing.
-  test("the person's run when state.json cannot be written: the plain line, nothing starts", () => {
+  test("the start at login names itself: its own variable, or launchd's label for one written before", () => {
+    expect(isOurLoginItem({ PLANNOTATOR_INBOX_LOGIN_ITEM: "1" })).toBe(true);
+    expect(isOurLoginItem({ XPC_SERVICE_NAME: "ai.plannotator.inbox" })).toBe(true);
+    expect(isOurLoginItem({ XPC_SERVICE_NAME: "application.com.apple.Terminal.1" })).toBe(false);
+    expect(isOurLoginItem({})).toBe(false);
+  });
+
+  test("when state.json cannot be written: the plain line, nothing starts", () => {
     mkdirSync(join(dataDir, "state.json"));
-    expect(inboxRunMayStart(dataDir, PERSON, RUN)).toEqual({ ok: false, line: INBOX_ON_NOT_SAVED });
+    expect(inboxRunMayStart(dataDir, ENV, RUN)).toEqual({ ok: false, line: INBOX_ON_NOT_SAVED });
   });
 
   test("assertInboxOn, in front of every start (ensureInboxRunning), throws the one line while off", () => {
     recordInboxOff(dataDir);
-    expect(() => assertInboxOn(dataDir, { CLAUDECODE: "1" }, false)).toThrow(new InboxOffError({ CLAUDECODE: "1" }, false));
-    expect(() => assertInboxOn(dataDir, { CLAUDECODE: "1" }, false)).toThrow(INBOX_OFF_AGENT_LINE);
-  });
-});
-
-describe("plannotator inbox on", () => {
-  test("the person's switch: turns it on and says so", () => {
-    const lines: string[] = [];
-    expect(inboxOnCommand(dataDir, PERSON, (line) => lines.push(line), true)).toBe(0);
-    expect(lines).toEqual(INBOX_ON_LINES);
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "inbox-on" });
+    expect(() => assertInboxOn(dataDir, ENV)).toThrow(new InboxOffError());
+    expect(() => assertInboxOn(dataDir, ENV)).toThrow(INBOX_OFF_AGENT_LINE);
   });
 
-  // M1: config.json is the person's settings file; a broken one never blocks the record (state.json).
-  test("a hand-broken config.json does not block it", () => {
-    writeFileSync(join(dataDir, "config.json"), "{ not json");
-    expect(inboxOnCommand(dataDir, PERSON, () => undefined, true)).toBe(0);
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true });
-  });
-
-  test("in an agent's shell, or with no terminal, it is refused and sets nothing", () => {
-    recordInboxOff(dataDir);
-    for (const [env, tty] of [[{ OPENCODE: "1" }, true], [PERSON, false]] as const) {
-      const lines: string[] = [];
-      expect(inboxOnCommand(dataDir, env, (line) => lines.push(line), tty)).toBe(1);
-      expect(lines).toEqual([INBOX_OFF_AGENT_LINE]);
-      expect(readInboxOnRecord(dataDir)?.on).toBe(false);
-    }
+  test("the off line never names what turns the Inbox on", () => {
+    expect(INBOX_OFF_AGENT_LINE).not.toContain("plannotator inbox");
   });
 });
 
 describe("plannotator inbox status", () => {
-  test("says on or off, why and since when, and notes that were left", () => {
+  test("says on or off, why and since when", () => {
     expect(inboxOnStatusLines(dataDir)).toEqual(["  turned:   off (never turned on here)"]);
-    recordInboxOff(dataDir, new Date("2026-11-18T09:00:00.000Z"), "left");
-    expect(inboxOnStatusLines(dataDir)[0]).toBe("  turned:   off (turned off, 2026-11-18T09:00:00.000Z)");
-    expect(inboxOnStatusLines(dataDir)[1]).toContain("could not be removed");
+    recordInboxOff(dataDir, new Date("2026-11-18T09:00:00.000Z"));
+    expect(inboxOnStatusLines(dataDir)).toEqual(["  turned:   off (turned off, 2026-11-18T09:00:00.000Z)"]);
+  });
+
+  // D1: a slow store is kept on, and status says so instead of claiming the window was used.
+  test("a slow store and a re-read lost record say what happened", () => {
+    const at = "2026-11-18T09:00:00.000Z";
+    writeInboxOnRecord(dataDir, { on: true, at, by: "update-slow" });
+    expect(inboxOnStatusLines(dataDir)).toEqual([`  turned:   on (kept on when Plannotator updated: the Inbox's files took too long to read, ${at})`]);
+    writeInboxOnRecord(dataDir, { on: true, at, by: "record-lost" });
+    expect(inboxOnStatusLines(dataDir)).toEqual([`  turned:   on (kept on: its record in state.json was lost and the Inbox had been used here, ${at})`]);
   });
 });
 

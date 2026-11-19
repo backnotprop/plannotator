@@ -152,6 +152,8 @@ const PURGE_OWNED_TOP_LEVEL = [
   "migrations",
   "config.json",
   "state.json",
+  // The Inbox's decided mark (packages/shared/inbox/inbox-on.ts): left behind, it would bring the old on or off back after a reinstall.
+  "inbox-on-decided",
   "install-prefs",
   "review-skills.json",
   "vscode-ipc.json",

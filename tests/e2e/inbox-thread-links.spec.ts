@@ -236,7 +236,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: `${forge.dir}:${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

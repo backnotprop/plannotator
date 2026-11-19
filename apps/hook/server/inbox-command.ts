@@ -18,8 +18,6 @@
  *                                   run (with any of the above; a running
  *                                   Inbox is asked to publish), for the
  *                                   Tailscale login that owns this machine
- *   plannotator inbox on            turn the Inbox on here (the person only;
- *                                   inbox-on-command.ts)
  *   plannotator inbox off           turn it off: stop it, agents lose it from
  *                                   their next session, Plannotator's own
  *                                   untouched notes go
@@ -97,9 +95,9 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
-import { assertInboxOn, inboxOffCommand, inboxOffLine, inboxOnCommand, inboxOnStatus, inboxOnStatusLines, inboxRunMayStart } from "./inbox-on-command";
+import { assertInboxOn, inboxOffCommand, inboxOnStatus, inboxOnStatusLines, inboxRunMayStart, isOurLoginItem } from "./inbox-on-command";
 import { settleInboxOn } from "@plannotator/server/inbox-on-settle";
-import { INBOX_SLASH_COMMAND_FLAG, isInboxOn } from "@plannotator/shared/inbox/inbox-on";
+import { INBOX_OFF_AGENT_LINE, isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
@@ -710,7 +708,7 @@ async function stopCommand(dataDir: string): Promise<number> {
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
   if (!isInboxOn(dataDir)) {
-    process.stderr.write(`${inboxOffLine(process.env)}\n`);
+    process.stderr.write(`${INBOX_OFF_AGENT_LINE}\n`);
     return 1;
   }
   const unreachable = await outOfReach(await inboxStatus(dataDir));
@@ -781,13 +779,9 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   // An install from before the opt-in rule is decided once, and an off record's leftover notes go
   // (inbox-on-settle.ts). Cheap once decided: one read of state.json.
   try {
-    settleInboxOn(dataDir);
+    await settleInboxOn(dataDir);
   } catch {
     // Never holds up a command; isInboxOn decides again where it matters.
-  }
-  if (args[0] === "on") {
-    if (args.length > 1) usageError(`Unknown inbox on option: ${args[1]}`);
-    process.exit(inboxOnCommand(dataDir, process.env, (line) => void process.stdout.write(`${line}\n`)));
   }
   if (args[0] === "off") {
     if (args.length > 1) usageError(`Unknown inbox off option: ${args[1]}`);
@@ -885,7 +879,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   if (args[0] === "--notes") {
     if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
     if (!isInboxOn(dataDir)) {
-      process.stderr.write(`${inboxOffLine(process.env)}\n`);
+      process.stderr.write(`${INBOX_OFF_AGENT_LINE}\n`);
       process.exit(1);
     }
     process.exit(await writeNotes(dataDir, args[1]!));
@@ -897,12 +891,9 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   /** `--open <thread>`: the thread to show (a thread or message id, or a `#thread=` link). */
   let thread: string | null = null;
   let tailscale = false;
-  /** Plannotator's own `/plannotator-inbox` (INBOX_SLASH_COMMAND_FLAG, hidden): the person typed it. */
-  let slashCommand = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === INBOX_SLASH_COMMAND_FLAG) slashCommand = true;
-    else if (arg === "--background") background = true;
+    if (arg === "--background") background = true;
     else if (arg === "--no-open") noOpen = true;
     else if (arg === "--open") {
       open = true;
@@ -922,8 +913,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
 
-  // The person's own run turns the Inbox on; any other run while it is off starts and opens nothing.
-  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background, slashCommand });
+  // Running plannotator inbox turns the Inbox on; Plannotator's own starts while it is off start and open nothing.
+  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background, loginItem: isOurLoginItem(process.env) });
   if (!mayStart.ok) {
     process.stderr.write(`${mayStart.line}\n`);
     process.exit(1);

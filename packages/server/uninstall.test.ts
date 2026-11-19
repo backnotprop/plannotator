@@ -1370,6 +1370,8 @@ describe("purge uninstall", () => {
     writeText(join(fixture.dataDir, "feedback", "repo", "index.jsonl"));
     writeJson(join(fixture.dataDir, "config.json"), { theme: "dark" });
     writeJson(join(fixture.dataDir, "state.json"), { inboxTour: { version: 2 } });
+    // The Inbox's decided mark keeps a copy of the on/off record: a purge that left it would restore it after a reinstall.
+    writeJson(join(fixture.dataDir, "inbox-on-decided"), { on: true, at: "2026-11-18T00:00:00.000Z", by: "command" });
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
     const customVendorPath = join(
       fixture.dataDir,
@@ -1392,6 +1394,7 @@ describe("purge uninstall", () => {
     expect(existsSync(join(fixture.dataDir, "feedback"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "config.json"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "state.json"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "inbox-on-decided"))).toBe(false);
     expect(result.preserved).not.toContain(
       `${join(fixture.dataDir, "feedback")} (unrecognized custom entry)`,
     );

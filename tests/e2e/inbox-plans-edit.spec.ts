@@ -41,7 +41,7 @@ test('Edit, then Done: a new newest version of the person’s words, the agent n
   const v1 = store.addVersion(plan.id, document.id, { bytes: new TextEncoder().encode('# Rate limiting\n\nA token bucket per API key.\n'), committed_at: '2026-11-10T09:00:00.000Z', source: 'plan-review', author_via: 'plan-review' });
   store.addEvent(plan.id, { ...NO_ACTOR, author_via: 'person', kind: 'decision', at: '2026-11-10T10:00:00.000Z', subject: { document_id: document.id, version_number: 1 }, decision: { document_id: document.id, version: v1.version, version_number: 1, decision: 'approved', at: '2026-11-10T10:00:00.000Z', feedback: null, feedback_record: null, snapshot: null }, legacy: null });
 
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();

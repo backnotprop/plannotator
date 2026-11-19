@@ -112,7 +112,7 @@ test.beforeAll(async () => {
   // The dialog case needs Decision mode, which is off by default.
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
   const env = {
-    PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir,
+    PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
     PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_INBOX_TAILSCALE: '0', PLANNOTATOR_INBOX_PHONES: '0',

@@ -95,7 +95,7 @@ function machine(name: string, cswap: string | null, from = binary): Machine {
   const env = {
     PATH: bin,
     HOME: root,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_TEST_CSWAP_DIR: bin,
     PLANNOTATOR_BROWSER: NO_BROWSER,

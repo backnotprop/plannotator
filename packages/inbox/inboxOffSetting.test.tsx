@@ -40,7 +40,7 @@ describe('Turn the Inbox off', () => {
       return {
         ok: true,
         lines: [
-          'The Plannotator Inbox is off on this computer: agents lose it from their next session, and nothing starts it.',
+          'The Plannotator Inbox is off on this computer: agents lose it from their next session.',
           "Removed Plannotator's note for Claude Code from ~/.claude/rules/plannotator-inbox.md.",
           'Turn it back on any time with plannotator inbox.',
         ],

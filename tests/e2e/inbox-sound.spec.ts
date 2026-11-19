@@ -134,7 +134,7 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
     HOME: home,
     TMPDIR: tmpdir(),
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',
     PLANNOTATOR_UPDATE_CHECK: '0',

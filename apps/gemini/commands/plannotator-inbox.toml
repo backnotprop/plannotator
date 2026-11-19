@@ -2,7 +2,7 @@ description = "Open the Plannotator Inbox in the browser (starting it if needed)
 prompt = """
 ## Inbox address
 
-!{plannotator inbox --open --from-slash-command}
+!{plannotator inbox --open}
 
 ## Using the Inbox
 

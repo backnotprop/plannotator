@@ -251,7 +251,7 @@ test.beforeAll(async ({ browser }) => {
     // This Inbox's own: it never reads a person's real home.
     HOME: join(root, 'home'),
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_BROWSER: NO_BROWSER,

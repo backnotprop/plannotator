@@ -408,7 +408,7 @@ describe("/plannotator-inbox", () => {
   test("opens the Inbox with plannotator inbox --open and shows its address", async () => {
     await withCommandHarness(async ({ run, argsPath }) => {
       const opened = await run("plannotator-inbox", "http://localhost:61234/\n");
-      expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual(["inbox", "--open", "--from-slash-command"]);
+      expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual(["inbox", "--open"]);
       expect(opened.appended).toEqual([]);
       expect(opened.notifications).toHaveLength(1);
       expect(opened.notifications[0]).toContain("http://localhost:61234/");

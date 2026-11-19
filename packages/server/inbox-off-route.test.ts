@@ -49,7 +49,7 @@ test("one POST turns it off: record off, the untouched note gone, then the Inbox
   const answer = await post(base);
   expect(answer.status).toBe(200);
   const body = (await answer.json()) as { lines: string[] };
-  expect(body.lines[0]).toBe("The Plannotator Inbox is off on this computer: agents lose it from their next session, and nothing starts it.");
+  expect(body.lines[0]).toBe("The Plannotator Inbox is off on this computer: agents lose it from their next session.");
   expect(body.lines.at(-1)).toBe("Turn it back on any time with plannotator inbox.");
   expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "off" });
   expect(existsSync(note)).toBe(false);

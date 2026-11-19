@@ -7,7 +7,6 @@
  * bun tests drive this class with a host made of memory.
  */
 
-import { INBOX_SLASH_COMMAND_FLAG } from './inbox-on-contract'
 import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
@@ -978,18 +977,10 @@ export class PlannotatorMod {
    * `context` (no turn starts). `toolName` is `plannotator_inbox` as this
    * session registered it, when it did.
    */
-  /**
-   * `/plannotator-inbox`. `byPerson`: the person typed it (register.ts checks the command's origin), so the run
-   * turns the Inbox on (INBOX_SLASH_COMMAND_FLAG); otherwise it opens an Inbox that is on, and is refused while off.
-   */
-  async openInbox(toolName?: string | null, byPerson = false): Promise<{ text: string; context?: string[] }> {
-    const run = (argv: string[]) =>
-      this.host
-        .run(argv, { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
-        .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
-    let result = await run(byPerson ? [...inboxOpenArgv(), INBOX_SLASH_COMMAND_FLAG] : inboxOpenArgv())
-    // A plannotator older than the rule does not know the flag (and keeps no rule): the plain open, as before.
-    if (byPerson && result.exitCode !== 0 && isPreRuleSlashAnswer(`${result.stderr}\n${result.stdout}`)) result = await run(inboxOpenArgv())
+  async openInbox(toolName?: string | null): Promise<{ text: string; context?: string[] }> {
+    const result = await this.host
+      .run(inboxOpenArgv(), { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
+      .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
     const text = inboxOpenAnswer(result)
     return inboxOpened(result) ? { text, context: [inboxCommandBriefing(toolName ?? undefined)] } : { text }
   }
@@ -1972,9 +1963,4 @@ export class PlannotatorMod {
     }
     this.host.status(`${open.length} open · ${open.map((launch) => launch.subject).join(' · ')}`)
   }
-}
-
-/** A `plannotator` older than the rule, answering the `/plannotator-inbox` flag. */
-export function isPreRuleSlashAnswer(text: string): boolean {
-  return new RegExp(`unknown inbox option:?\\s*${INBOX_SLASH_COMMAND_FLAG}`, 'i').test(text)
 }

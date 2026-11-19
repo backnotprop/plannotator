@@ -74,18 +74,19 @@ export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChoos
 /**
  * What every Plannotator process a spec starts under `root` needs: a scratch
  * HOME (with none, `os.homedir()` falls back to the account's home), a scratch
- * data dir, no browser and no ping. Spread it into the spawn env, then add the
+ * data dir, no browser, no ping, and the Inbox test knob. Spread it into the spawn env, then add the
  * spec's own variables. HOME is `root/home` unless the spec names its own
  * (`{ home: root }` when the world's folders sit under HOME, as `~/src/…` does);
  * either way it must be a scratch folder. tests/e2e-spawn-home.test.ts fails on
  * an e2e env that sets a data dir with neither a scratch HOME nor this.
  */
-export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_RELAY_URL: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
+export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_RELAY_URL: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string; PLANNOTATOR_TEST_INBOX_ON: string } {
   const HOME = refuseRealHome(options.home ?? join(root, 'home'), 'tests/e2e/inbox-scratch.ts scratchEnv');
   mkdirSync(HOME, { recursive: true });
   const PLANNOTATOR_DATA_DIR = join(root, 'data');
   refuseRealDataDir(PLANNOTATOR_DATA_DIR, 'tests/e2e/inbox-scratch.ts scratchEnv');
-  return { HOME, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1' };
+  // The test knob (packages/shared/inbox/inbox-on.ts): this undecided scratch data dir counts as one the Inbox was turned on in.
+  return { HOME, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_TEST_INBOX_ON: '1' };
 }
 
 const inside = (path: string, root: string) => path === root || path.startsWith(`${root}${sep}`);

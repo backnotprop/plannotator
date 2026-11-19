@@ -5,7 +5,8 @@
  *
  * Regressions guarded: the row showing to someone who never turned the Inbox
  * on (it must not push the Inbox at everyone); the row missing on a surface;
- * a failed Turn off shown as off; the line on how to turn it back on missing.
+ * a failed Turn off shown as off; the off row not saying how it comes back, or
+ * reading as unavailable (its words greyed).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useState } from 'react';
@@ -88,7 +89,11 @@ describe('Settings Plannotator Inbox row', () => {
       await act(async () => toggle()?.click());
       expect(saved).toEqual([false]);
       expect(document.querySelector(ROW)?.getAttribute('data-inbox-on-setting')).toBe('off');
-      expect(document.querySelector('[data-inbox-on-setting-line]')?.textContent).toBe('Turn it back on any time with plannotator inbox.');
+      // Off says how it comes back, with the command as code; the words stay full strength (only the switch dims).
+      const row = document.querySelector(ROW);
+      expect(row?.textContent).toContain('nothing starts it until you run plannotator inbox.');
+      expect(row?.querySelector('code')?.textContent).toBe('plannotator inbox');
+      expect(row?.querySelector('.opacity-50')).toBe(toggle());
     });
   }
 

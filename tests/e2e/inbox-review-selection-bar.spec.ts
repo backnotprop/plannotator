@@ -116,7 +116,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     // A scratch home: the skills route reads folders under it (`~/.agents/skills`).
     HOME: join(root, 'home'),
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_INBOX_TAILSCALE: '0',
     PLANNOTATOR_INBOX_PHONES: '0',

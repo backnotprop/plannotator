@@ -66,7 +66,7 @@ test.beforeAll(async () => {
       PATH: process.env.PATH ?? '',
       HOME: home,
       TMPDIR: tmpdir(),
-      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
       // A release version: never the live daily ping (packages/shared/daily-ping.ts).
       NO_ANON_PING: '1',
       PLANNOTATOR_BROWSER: NO_BROWSER,

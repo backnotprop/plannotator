@@ -2,14 +2,12 @@
  * The CLI with the Inbox off (packages/shared/inbox/inbox-on.ts), run as a process the way agents, login items and
  * `/plannotator-inbox` run it, under the real rule (PLANNOTATOR_TEST_INBOX_ON=0) in a scratch home and data dir.
  * Regressions guarded:
- *  - an agent's start on a fresh computer starting the Inbox or writing a record (and its line naming the command
- *    that turns the Inbox on);
- *  - an agent with no marker and no terminal counting as the person (H2);
+ *  - Plannotator's own starts (`--background`, `restart`) on a fresh computer starting the Inbox or writing a record;
  *  - the routines' start at login turning the Inbox back on after off (H1);
  *  - `plannotator inbox mcp` while off listing tools or starting anything, and saying why only in its instructions;
  *  - `plannotator inbox call` while off answering `inbox_not_running` (it invites a start);
  *  - `plannotator inbox status` not saying it is off and why;
- *  - `/plannotator-inbox` (its hidden flag) refused inside an agent: the person's own command turns it on (H3).
+ *  - `plannotator inbox --open` (what `/plannotator-inbox` runs) not turning it on when run from an agent's shell.
  *
  * Starts one Inbox (the last test), killed after only when still provably that Inbox: CI runs this file.
  */
@@ -87,9 +85,9 @@ const writeOff = (box: Box) => {
 const registry = (box: Box) => join(box.dataDir, "inbox", "inbox.json");
 
 describe("the Inbox off, from a process", () => {
-  test("a fresh computer, an agent's shell: every start is refused with the one line; nothing starts or is written", async () => {
+  test("a fresh computer: Plannotator's own starts are refused with the one line; nothing starts or is written", async () => {
     const box = sandbox();
-    for (const args of [["inbox", "--background"], ["inbox"], ["inbox", "--no-open"], ["inbox", "--open"], ["inbox", "restart"], ["inbox", "on"]]) {
+    for (const args of [["inbox", "--background"], ["inbox", "restart"]]) {
       const run = await cli(box, args, { CLAUDECODE: "1" });
       expect([args.join(" "), run.code]).toEqual([args.join(" "), 1]);
       expect(run.out).toContain(INBOX_OFF_AGENT_LINE);
@@ -98,14 +96,15 @@ describe("the Inbox off, from a process", () => {
     expect(recordOf(box)).toBeNull();
   });
 
-  test("H2: no agent marker and no terminal (Amp, Droid, Cline, Hermes...) is not the person: refused, nothing turned on", async () => {
+  test("plannotator inbox on and the earlier hidden flag are unknown options now: nothing turned on", async () => {
     const box = sandbox();
     writeOff(box);
-    const run = await cli(box, ["inbox", "--no-open"]);
-    expect(run.code).toBe(1);
-    expect(run.out).toContain(INBOX_OFF_AGENT_LINE);
+    for (const args of [["inbox", "on"], ["inbox", "--open", "--from-slash-command"]]) {
+      const run = await cli(box, args);
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain(`Unknown inbox option: ${args.at(-1)}`);
+    }
     expect(recordOf(box)).toMatchObject({ on: false, by: "off" });
-    expect(existsSync(registry(box))).toBe(false);
   });
 
   test("H1: after off, the routines' start at login (as launchd runs it) starts nothing and the record stays off", async () => {
@@ -114,6 +113,22 @@ describe("the Inbox off, from a process", () => {
     for (const extra of [{ PLANNOTATOR_INBOX_LOGIN_ITEM: "1" }, { XPC_SERVICE_NAME: "ai.plannotator.inbox" }]) {
       const run = await cli(box, ["inbox", "--no-open"], extra);
       expect(run.code).toBe(1);
+    }
+    expect(recordOf(box)).toMatchObject({ on: false, by: "off" });
+    expect(existsSync(registry(box))).toBe(false);
+  });
+
+  // R1: a detached start (an agent call's background start, Restart, an update's restart) is Plannotator's own, whatever its args.
+  test("after off, a detached start of plannotator inbox (bare or --no-open) starts nothing and the record stays off", async () => {
+    const box = sandbox();
+    writeOff(box);
+    for (const [args, extra] of [
+      [["inbox"], { PLANNOTATOR_INBOX_DETACHED: "1" }],
+      [["inbox", "--no-open"], { PLANNOTATOR_INBOX_DETACHED: "1" }],
+    ] as const) {
+      const run = await cli(box, [...args], extra);
+      expect([args.join(" "), run.code]).toEqual([args.join(" "), 1]);
+      expect(run.out).toContain(INBOX_OFF_AGENT_LINE);
     }
     expect(recordOf(box)).toMatchObject({ on: false, by: "off" });
     expect(existsSync(registry(box))).toBe(false);
@@ -155,14 +170,14 @@ describe("the Inbox off, from a process", () => {
     expect(run.stdout).toContain("  turned:   off (turned off, 2026-11-18T09:00:00.000Z)");
   });
 
-  test("H3: /plannotator-inbox (its hidden flag) inside an agent with no terminal turns the Inbox on and opens it", async () => {
+  test("plannotator inbox --open (what /plannotator-inbox runs) from an agent's shell with no terminal turns it on and opens it", async () => {
     const box = sandbox();
     writeOff(box);
-    const run = await cli(box, ["inbox", "--open", "--from-slash-command"], { GEMINI_CLI: "1" });
+    const run = await cli(box, ["inbox", "--open"], { GEMINI_CLI: "1" });
     const live = inboxEntryOf(box.dataDir);
     if (live) started.push({ entry: live, root: box.root });
     expect(run.code).toBe(0);
     expect(run.stdout).toMatch(/^http:\/\/(?:localhost|127\.0\.0\.1):\d+\//);
-    expect(recordOf(box)).toMatchObject({ on: true, by: "slash-command" });
+    expect(recordOf(box)).toMatchObject({ on: true, by: "command" });
   });
 });

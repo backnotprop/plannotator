@@ -76,7 +76,7 @@ function machine(name: string): Machine {
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: root,
     SHELL: fake.shell,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_TEST_LAUNCH_PATH: `${join(root, 'fakes')}:/usr/bin:/bin`,
     PLANNOTATOR_BROWSER: NO_BROWSER,

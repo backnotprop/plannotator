@@ -145,7 +145,7 @@ export async function startWorld(browser: Browser, guide: object = GUIDE): Promi
     PATH: `${forge}:${process.env.PATH ?? ''}`,
     HOME: home,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_BROWSER: NO_BROWSER,

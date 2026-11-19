@@ -59,7 +59,7 @@ function startWorld(name: string): World {
     PLANNOTATOR_TEST_SANDBOX: root,
     HOME: home,
     NO_ANON_PING: '1',
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',

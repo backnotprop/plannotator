@@ -97,7 +97,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PATH: process.env.PATH ?? '',
     HOME: root,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
     OPENCODE_CONFIG_DIR: join(root, 'opencode'),

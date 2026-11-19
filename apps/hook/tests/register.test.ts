@@ -314,7 +314,7 @@ describe('register', () => {
     }
     // /plannotator-inbox opens the Inbox (plannotator inbox --open) and answers with its address.
     const inboxAnswer = await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
-    expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open --from-slash-command')).toBe(true)
+    expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open')).toBe(true)
     expect(inboxAnswer.text).toContain('http://localhost:5555/')
     // Opened: the model gets the Inbox briefing as the answer's hidden context (no turn).
     expect(inboxAnswer.context?.[0]).toContain('plannotator inbox --help')
@@ -724,6 +724,26 @@ describe('register', () => {
     })
   }
 
+  // E1: a lost state.json with no inbox/inbox.json left: the decided mark sends the mod to the CLI, which restores the record.
+  test('a lost record (the decided mark, no inbox.json): the CLI restores it once and the mod follows it', async ($: any, on: any) => {
+    const files = new Map<string, string>([['/home/me/.plannotator', ''], ['/home/me/.plannotator/inbox-on-decided', '{"on":true,"at":"2026-11-18T00:00:00.000Z","by":"command"}\n']])
+    const migrations: string[][] = []
+    const w = world(on, {
+      inbox: 'undecided',
+      files,
+      fetch: inbox(TOOLS, []),
+      run: (argv, files) => {
+        if (argv.join(' ') !== 'plannotator inbox migrate') return undefined
+        migrations.push(argv)
+        files.set(STATE, stateWith(true, 'command'))
+        return { exitCode: 0, stdout: 'on\n', stderr: '' }
+      },
+    })
+    await $.session.start(SESSION)
+    expect(migrations).toHaveLength(1)
+    expect(w.tools.map((t) => t.name)).toContain('plannotator_inbox')
+  })
+
   // M2: a plannotator older than the rule starts the Inbox for anyone and keeps no rule; the plugin updating first must not drop the tool.
   test('a plannotator older than the rule (Unknown inbox option: migrate): today\'s behaviour, the tool where an Inbox ran, nothing written', async ($: any, on: any) => {
     const w = world(on, {
@@ -738,9 +758,9 @@ describe('register', () => {
   })
 
   // M7: once decided, a later session start reads the record and runs nothing (no 10 s wait in every claude -p).
-  test('decided once: the next session start reads the record and runs no migrate, also when notes were left', async ($: any, on: any) => {
+  test('decided once: the next session start reads the record and runs no migrate', async ($: any, on: any) => {
     const w = world(on, { inbox: 'undecided', files: withRegistry(), fetch: inbox(TOOLS, []) })
-    w.files.set(STATE, JSON.stringify({ inboxOn: { on: false, at: '2026-11-18T00:00:00.000Z', by: 'update-agent-only', notes: 'left' } }))
+    w.files.set(STATE, JSON.stringify({ inboxOn: { on: false, at: '2026-11-18T00:00:00.000Z', by: 'update-agent-only' } }))
     await $.session.start(SESSION)
     expect(w.runs.filter((argv) => argv.join(' ') === 'plannotator inbox migrate')).toEqual([])
     expect(w.tools.map((t) => t.name)).toEqual(['plannotator'])
@@ -769,25 +789,16 @@ describe('register', () => {
     expect(answer.deny ?? answer.result).toBe(OFF_LINE)
   })
 
-  test('/plannotator-inbox typed by the person: its plannotator inbox --open carries the hidden flag', async ($: any, on: any) => {
+  // No detection of who ran it: /plannotator-inbox runs plannotator inbox --open, typed or invoked, with or without an origin.
+  test('/plannotator-inbox runs plannotator inbox --open whatever its origin', async ($: any, on: any) => {
     const w = world(on, {
       inbox: 'undecided',
       run: (argv) => (argv.slice(0, 3).join(' ') === 'plannotator inbox --open' ? { exitCode: 0, stdout: 'http://localhost:5555/\n', stderr: '' } : undefined),
     })
     await $.session.start(SESSION)
     await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
-    expect(w.runs.filter((argv) => argv[1] === 'inbox' && argv[2] === '--open').map((argv) => argv.join(' '))).toEqual(['plannotator inbox --open --from-slash-command'])
-  })
-
-  // M8: a command with no person origin (the model invoking it, another plugin) never turns the Inbox on.
-  test('/plannotator-inbox with no person origin: the plain open, which an off Inbox refuses', async ($: any, on: any) => {
-    const w = world(on, {
-      inbox: 'undecided',
-      run: (argv) => (argv.slice(0, 3).join(' ') === 'plannotator inbox --open' ? { exitCode: 1, stdout: '', stderr: `${OFF_LINE}\n` } : undefined),
-    })
-    await $.session.start(SESSION)
     await $.command.run({ command: 'plannotator-inbox', args: '' })
-    expect(w.runs.filter((argv) => argv[1] === 'inbox' && argv[2] === '--open').map((argv) => argv.join(' '))).toEqual(['plannotator inbox --open'])
+    expect(w.runs.filter((argv) => argv[1] === 'inbox' && argv[2] === '--open').map((argv) => argv.join(' '))).toEqual(['plannotator inbox --open', 'plannotator inbox --open'])
   })
 
   test('the first plannotator_inbox call with no Inbox yet starts one with plannotator inbox --background', async ($: any, on: any) => {

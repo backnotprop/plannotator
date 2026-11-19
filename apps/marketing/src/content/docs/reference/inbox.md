@@ -20,7 +20,7 @@ plannotator inbox
 
 This starts the Inbox and opens it in your browser. If it is already running, the command opens the running one.
 
-Installing Plannotator does not turn the Inbox on. Running `plannotator inbox` yourself (or typing `/plannotator-inbox` in your agent) is what turns it on for this computer. Until then agents get no inbox tool and nothing starts the Inbox. To turn it off again, use **Turn the Inbox off** in the Inbox's Settings → General, the Plannotator Inbox switch in plan review's Settings, or `plannotator inbox off`. Turning it off stops the Inbox and removes the notes Plannotator added to your agents' instructions, except notes you edited.
+Installing Plannotator does not turn the Inbox on. Running `plannotator inbox` (or typing `/plannotator-inbox` in your agent, which runs it) is what turns it on for this computer. Until then agents get no inbox tool and nothing starts the Inbox. To turn it off again, use **Turn the Inbox off** in the Inbox's Settings → General, the Plannotator Inbox switch in plan review's Settings, or `plannotator inbox off`. Turning it off stops the Inbox and removes the notes Plannotator added to your agents' instructions, except notes you edited.
 
 Other forms:
 

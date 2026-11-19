@@ -5,9 +5,8 @@
  * own Turn off (the Bun servers turn it off in process, inbox-on-settle.ts; Pi
  * asks the CLI, agent-link.ts turnInboxOffWithCli). On is refused: an agent's
  * `curl` to this local server looks like the page's request, and nothing an
- * HTTP request carries proves a person clicked, so the Inbox turns on only in
- * the person's own terminal (inbox-on-command.ts) or by their
- * `/plannotator-inbox`.
+ * HTTP request carries proves a person clicked, so the Inbox turns on only
+ * by running `plannotator inbox` (inbox-on-command.ts).
  */
 
 /** How to turn it back on, said after every Turn off. */
@@ -17,7 +16,7 @@ export const INBOX_OFF_NOT_SAVED = "Could not turn the Plannotator Inbox off: st
 export const INBOX_ON_NOT_SAVED = "Could not turn the Plannotator Inbox on: state.json in Plannotator's data folder could not be written.";
 
 /** The answer to a request that tries to turn the Inbox on from a page. */
-export const INBOX_ON_NOT_HERE = "The Inbox turns on only from your own terminal: run plannotator inbox there.";
+export const INBOX_ON_NOT_HERE = "The Inbox turns on only with plannotator inbox.";
 
 /** The answer to `{ inboxOn }`: status and JSON body. `off` turns it off and says whether the record now says off. */
 export async function inboxOnConfigWrite(on: boolean, off: () => Promise<boolean>): Promise<{ status: number; body: Record<string, unknown> }> {

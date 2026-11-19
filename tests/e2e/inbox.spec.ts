@@ -102,7 +102,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
   // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
   // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
-  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
+  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir };
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -960,10 +960,10 @@ test('the Update button follows health ("ready"), and pressing it brings the new
   await expect(page.locator('.ib-upd')).toHaveCount(0);
 });
 
-// The Inbox is off until the person turns it on (packages/shared/inbox/inbox-on.ts). Every other proof here runs
+// The Inbox is off until plannotator inbox is run (packages/shared/inbox/inbox-on.ts). Every other proof here runs
 // with it on (an undecided scratch data dir counts as on for a test); this one runs the compiled binary with the
 // real rule (PLANNOTATOR_TEST_INBOX_ON=0) on a fresh computer, as an agent's shell would.
-test('Inbox off (a fresh computer, an agent\'s shell): no start, no tools, the one line', async () => {
+test('Inbox off (a fresh computer, an agent\'s shell): no background start, no tools, the one line', async () => {
   const root = inboxScratch('plannotator-inbox-off-e2e-');
   try {
     const dataDir = join(root, 'data');
@@ -971,7 +971,7 @@ test('Inbox off (a fresh computer, an agent\'s shell): no start, no tools, the o
     mkdirSync(home, { recursive: true });
     const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_INBOX_ON: '0', CLAUDECODE: '1' };
     const line = 'The Plannotator Inbox is off on this computer: ask the person in the chat instead. Only the person can turn the Inbox on; do not try to turn it on yourself.';
-    for (const args of [['inbox', '--background'], ['inbox'], ['inbox', '--no-open'], ['inbox', 'on']]) {
+    for (const args of [['inbox', '--background']]) {
       const run = spawnSync(builtBinary, args, { env, encoding: 'utf8', timeout: 30_000 });
       expect([args.join(' '), run.status]).toEqual([args.join(' '), 1]);
       expect(`${run.stdout}${run.stderr}`).toContain(line);

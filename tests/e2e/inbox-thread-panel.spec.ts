@@ -54,7 +54,7 @@ function startWorld(prefix: string, name?: string): World {
   const env: Record<string, string> = {
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: root,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',

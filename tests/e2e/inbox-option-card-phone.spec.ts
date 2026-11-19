@@ -61,7 +61,7 @@ async function world() {
     PATH: process.env.PATH ?? '',
     HOME: root,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',

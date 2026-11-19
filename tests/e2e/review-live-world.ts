@@ -64,7 +64,7 @@ export function liveEnv(root: string, dataDir: string): Record<string, string> {
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_AI: 'disabled',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',

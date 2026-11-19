@@ -108,7 +108,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
-    PLANNOTATOR_DATA_DIR: data,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: data,
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_TEST_LAUNCH_PATH: `${bin}:/usr/bin:/bin`,
     PLANNOTATOR_BROWSER: NO_BROWSER,

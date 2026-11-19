@@ -441,13 +441,3 @@ export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: bool
 export function promptOriginKind(kind: string, sdkHost: boolean): string {
   return sdkHost && kind === 'sdk' ? 'composer' : kind
 }
-
-/**
- * Whether a `command.run` was the person's: typed at the prompt (`composer`, in a panel or T3 thread the SDK host's
- * `sdk`), or sent from their phone (`bridge`). Anything else (the model invoking the command, another plugin, no
- * origin at all on an engine that does not stamp one) is not, so `/plannotator-inbox` never turns the Inbox on for it.
- */
-export function commandByPerson(origin: unknown, sdkHost: boolean): boolean {
-  const kind = origin && typeof origin === 'object' ? (origin as { kind?: unknown }).kind : undefined
-  return typeof kind === 'string' && ['composer', 'bridge'].includes(promptOriginKind(kind, sdkHost))
-}

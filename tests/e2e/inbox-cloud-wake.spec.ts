@@ -52,7 +52,7 @@ test.beforeAll(async () => {
   await new Promise<void>((done) => relay!.listen(0, '127.0.0.1', done));
   const relayAddress = relay.address();
   const relayUrl = `http://127.0.0.1:${typeof relayAddress === 'object' && relayAddress ? relayAddress.port : 0}`;
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: relayUrl };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: relayUrl };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();

@@ -83,7 +83,7 @@ test.beforeAll(async () => {
     PATH: `${dirname(bun)}:${dirname(process.execPath)}:/usr/bin:/bin`,
     PLANNOTATOR_TEST_SANDBOX: root,
     HOME: root,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     NO_ANON_PING: '1',

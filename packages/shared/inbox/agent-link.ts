@@ -32,7 +32,7 @@
  * resolves inside `generated/inbox/`.
  */
 
-import { INBOX_OFF_AGENT_LINE, INBOX_SLASH_COMMAND_FLAG, isInboxOffAnswer } from "./inbox-on-contract";
+import { INBOX_OFF_AGENT_LINE, isInboxOffAnswer } from "./inbox-on-contract";
 import { isInboxOn, recordInboxOff } from "./inbox-on";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -450,11 +450,8 @@ export async function openInboxInBrowser(
 ): Promise<{ url: string; note?: string } | { error: string }> {
   const env = { ...(options.env ?? process.env), ...(options.dataDir ? { PLANNOTATOR_DATA_DIR: options.dataDir } : {}) };
   for (const command of plannotatorCommands(options.command)) {
-    // The person typed /plannotator-inbox (Pi's and OpenCode's commands are the person's only): the run turns the
-    // Inbox on (INBOX_SLASH_COMMAND_FLAG). A plannotator older than the flag keeps no such rule: the plain open.
-    let run = await runOnce(command, ["inbox", "--open", INBOX_SLASH_COMMAND_FLAG], env);
+    const run = await runOnce(command, ["inbox", "--open"], env);
     if (run.missing) continue;
-    if (run.exitCode !== 0 && new RegExp(`unknown inbox option:?\\s*${INBOX_SLASH_COMMAND_FLAG}`, "i").test(run.output)) run = await runOnce(command, ["inbox", "--open"], env);
     const url = /https?:\/\/\S+/.exec(run.stdout ?? "")?.[0];
     if (run.exitCode === 0 && url) {
       const note = run.stderr?.trim();

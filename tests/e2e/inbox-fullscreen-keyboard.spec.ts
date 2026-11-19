@@ -96,7 +96,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     // The Feedback sheet is opened (never sent): its Send, if ever pressed, goes nowhere real, never the live Worker.
     PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',

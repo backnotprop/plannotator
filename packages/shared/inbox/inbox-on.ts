@@ -12,9 +12,15 @@
  *    own untouched notes in agents' instruction files go; the CLI removes
  *    them, `settleInboxOn` in packages/server/inbox-on-settle.ts);
  *  - it never ran here: off.
+ * The store's files too slow to read in time: on (`update-slow`, in doubt, on).
+ *
+ * A lost or corrupt state.json, where a record existed: the record comes back
+ * from the decided mark, which keeps a copy of the last one written (so an off
+ * stays off and an on stays on); with no copy there, the store is read again
+ * and a person who used the Inbox keeps it on (`record-lost`).
  */
 
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -35,15 +41,15 @@ export * from "./inbox-on-contract";
 
 /**
  * For test suites only, never a switch: a scratch data dir (inside the OS temp
- * folder or /tmp) with no record counts as on under the test sandbox
- * (`PLANNOTATOR_TEST_SANDBOX`, which every test sandbox and child of one
- * carries), with `PLANNOTATOR_TEST_INBOX_ON=1`, or when HOME is a scratch
- * folder too (the browser specs give the binary their own env, always with a
- * scratch HOME). So the suites that start an Inbox in a fresh scratch data dir
- * keep doing so, while a test that turns the Inbox off (a record) or sets
- * `PLANNOTATOR_TEST_INBOX_ON=0` sees the real rule. A person's real data dir
- * and home are never scratch folders, so none of this can turn their Inbox
- * on, write their agents' notes or connect their agents.
+ * folder or /tmp) with no record counts as on only when an environment
+ * variable that only tests set says so: `PLANNOTATOR_TEST_INBOX_ON=1` (the
+ * browser specs and tests that give a child its own env), or the test sandbox
+ * marker `PLANNOTATOR_TEST_SANDBOX` (set by the test preload and the
+ * import-time sandbox, never outside a test run). So the suites that start an
+ * Inbox in a fresh scratch data dir keep doing so, while a test that turns the
+ * Inbox off (a record) or sets `PLANNOTATOR_TEST_INBOX_ON=0` sees the real
+ * rule. Nothing else counts: a real machine whose HOME or data dir is under
+ * /tmp (a container, a CI image, a sandbox) follows the real rule.
  */
 export const INBOX_TEST_ON_ENV = "PLANNOTATOR_TEST_INBOX_ON";
 
@@ -76,8 +82,7 @@ export function isScratchFolder(dir: string): boolean {
 function testRunCountsOn(dataDir: string, env: Readonly<Record<string, string | undefined>>): boolean {
   const knob = env[INBOX_TEST_ON_ENV]?.trim();
   if (knob === "0") return false;
-  const home = env.HOME?.trim();
-  if (knob !== "1" && !env.PLANNOTATOR_TEST_SANDBOX && !(home && isScratchFolder(home))) return false;
+  if (knob !== "1" && !env.PLANNOTATOR_TEST_SANDBOX?.trim()) return false;
   return isScratchFolder(dataDir);
 }
 
@@ -111,8 +116,10 @@ const decidedHere = new Map<string, InboxOnRecord>();
  *
  * A computer where no Inbox ever ran (no `inbox/` folder) is off and nothing
  * is written: only the person's act writes the first record there. Where a
- * record existed once (INBOX_ON_DECIDED_FILE) and is gone, it is off
- * (`record-lost`), never decided again from the evidence.
+ * record existed once (INBOX_ON_DECIDED_FILE) and is gone, the copy in the
+ * mark comes back as it was; a mark with no readable copy reads the store
+ * again: the person's use keeps it on, else off (`record-lost` either way,
+ * and no notes are removed).
  */
 export function decideExistingInstall(dataDir: string = getPlannotatorDataDir(), now: Date = new Date()): InboxOnRecord {
   const known = readInboxOnRecord(dataDir);
@@ -122,11 +129,12 @@ export function decideExistingInstall(dataDir: string = getPlannotatorDataDir(),
   if (earlier) return earlier;
   const at = now.toISOString();
   let record: InboxOnRecord;
-  if (existsSync(join(dataDir, INBOX_ON_DECIDED_FILE))) record = { on: false, at, by: "record-lost" };
+  const mark = join(dataDir, INBOX_ON_DECIDED_FILE);
+  if (existsSync(mark)) record = recordInMark(mark) ?? { on: inboxUseOnDisk(dataDir) !== null, at, by: "record-lost" };
   else if (!existsSync(join(dataDir, "inbox"))) return { on: false, at, by: "update-never-ran" };
   else {
     const use = inboxUseOnDisk(dataDir);
-    const by: InboxOnBy = use === "used" ? "update-used" : use === "ran" ? "update-ran" : "update-agent-only";
+    const by: InboxOnBy = use === "used" ? "update-used" : use === "slow" ? "update-slow" : use === "ran" ? "update-ran" : "update-agent-only";
     record = { on: use !== null, at, by, ...(by === "update-agent-only" ? { notes: "remove" as const } : {}) };
   }
   const stored = writeInboxOnRecord(dataDir, record, { ifAbsent: true });
@@ -135,7 +143,18 @@ export function decideExistingInstall(dataDir: string = getPlannotatorDataDir(),
   return result;
 }
 
-/** The person turned the Inbox on (their own `plannotator inbox`, `/plannotator-inbox`, `plannotator inbox on`). */
+/** The copy of the last record the decided mark keeps, or null (a mark from before it kept one, or unreadable). */
+function recordInMark(mark: string): InboxOnRecord | null {
+  const text = readText(mark);
+  if (!text) return null;
+  try {
+    return inboxOnRecord(JSON.stringify({ [INBOX_ON_KEY]: JSON.parse(text) }));
+  } catch {
+    return null;
+  }
+}
+
+/** A run of `plannotator inbox` turned the Inbox on (`/plannotator-inbox` runs it). */
 export function turnInboxOn(by: InboxOnBy, dataDir: string = getPlannotatorDataDir(), now: Date = new Date()): boolean {
   const known = readInboxOnRecord(dataDir);
   if (known?.on === true && !known.notes) return true;
@@ -143,7 +162,7 @@ export function turnInboxOn(by: InboxOnBy, dataDir: string = getPlannotatorDataD
 }
 
 /** Turn the Inbox off: the record says off (the caller stops the Inbox and removes the notes). */
-export function recordInboxOff(dataDir: string = getPlannotatorDataDir(), now: Date = new Date(), notes?: "remove" | "left"): boolean {
+export function recordInboxOff(dataDir: string = getPlannotatorDataDir(), now: Date = new Date(), notes?: "remove"): boolean {
   return writeInboxOnRecord(dataDir, { on: false, at: now.toISOString(), by: "off", ...(notes ? { notes } : {}) }).ok;
 }
 
@@ -154,8 +173,9 @@ export function recordInboxOff(dataDir: string = getPlannotatorDataDir(), now: D
  * with `ifCurrent`, only while the record is still that one (a follow-up
  * write never undoes an on or off made meanwhile). `ok`: the write landed or
  * was not needed; `record`: what state.json holds now. Also
- * leaves the decided mark (INBOX_ON_DECIDED_FILE). Only this file's functions
- * and inbox-on-settle.ts call it.
+ * writes the decided mark (INBOX_ON_DECIDED_FILE) with a copy of that record,
+ * for a lost state.json. Only this file's functions and inbox-on-settle.ts
+ * call it.
  */
 export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord, options: { ifAbsent?: boolean; ifCurrent?: InboxOnRecord } = {}): { ok: boolean; record: InboxOnRecord | null } {
   // state.json is the data dir this process resolves; every caller passes that same folder.
@@ -169,10 +189,13 @@ export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord, optio
   });
   const now = read(written.value);
   if (written.ok && now) {
+    const mark = join(dataDir, INBOX_ON_DECIDED_FILE);
+    const temp = `${mark}.${process.pid}.tmp`;
     try {
-      if (!existsSync(join(dataDir, INBOX_ON_DECIDED_FILE))) writeFileSync(join(dataDir, INBOX_ON_DECIDED_FILE), `${now.at}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify(now)}\n`, { mode: 0o600 });
+      renameSync(temp, mark);
     } catch {
-      // The mark only keeps a lost record from being decided again.
+      // The mark only brings a lost record back; an old copy, or none, reads the store again.
     }
   }
   return { ok: written.ok, record: now };
@@ -183,15 +206,27 @@ export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord, optio
  * Inbox: the cheap files (inboxUseFromFiles), then the store itself. null:
  * nothing the person did (only agents started it, or it never ran).
  */
-export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BUDGET_MS): InboxUseEvidence | null {
+export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BUDGET_MS): InboxUseEvidence | "slow" | null {
   const files = inboxUseFromFiles({
     config: readText(join(dataDir, "config.json")),
     state: readText(join(dataDir, INBOX_ON_FILE)),
     agentsFile: existsSync(join(dataDir, "inbox", "agents.json")),
   });
   if (files === "used") return "used";
-  if (storeShowsPersonUse(join(dataDir, "inbox"), Date.now() + budgetMs)) return "used";
+  const store = storeShowsPersonUse(join(dataDir, "inbox"), Date.now() + budgetMs);
+  if (store === "used") return "used";
+  // A slow store is kept on, but said as such: `ran` is still the truer reason when there is one.
+  if (store === "slow") return files ?? "slow";
   return files;
+}
+
+/** What the store shows: the person's use, too slow to read by the deadline (counts as used), or nothing. */
+export type StoreUse = "used" | "slow" | null;
+
+/** Not there at all: the one read failure that means "nothing", not "could not read". */
+function missing(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 /**
@@ -202,35 +237,38 @@ export function inboxUseOnDisk(dataDir: string, budgetMs: number = INBOX_SCAN_BU
  * reports, not a routine's line), an answered question (`picked_at`), a pin,
  * a draft, a paired device, a linked machine or the relay, a snooze, a
  * search. A store not yet returned from SQLite (`inbox.db`) counts as used, so
- * no user of it is cut off. Stops at the first hit. A store too large to read
- * by `deadline` counts as used (kept on when in doubt), so the decision is
- * bounded in time.
+ * no user of it is cut off. Stops at the first hit. A file or folder that is
+ * there but cannot be read (permissions, an I/O error, unparseable JSON)
+ * counts as used: in doubt, on. A store too large to read by `deadline` is
+ * `slow` (kept on, said as such), so the decision is bounded in time.
  */
-export function storeShowsPersonUse(inboxDir: string, deadline: number = Date.now() + INBOX_SCAN_BUDGET_MS): boolean {
-  if (existsSync(join(inboxDir, "inbox.db"))) return true;
-  if (nonEmptyFile(join(inboxDir, "devices.jsonl"))) return true;
+export function storeShowsPersonUse(inboxDir: string, deadline: number = Date.now() + INBOX_SCAN_BUDGET_MS): StoreUse {
+  if (existsSync(join(inboxDir, "inbox.db"))) return "used";
+  if (nonEmptyFile(join(inboxDir, "devices.jsonl"))) return "used";
   for (const name of ["pins.json", "machines.json", "relay.json", "snoozes.json", "recent-searches.json"]) {
-    if (nonEmptyJson(join(inboxDir, name))) return true;
+    if (nonEmptyJson(join(inboxDir, name))) return "used";
   }
   for (const folder of ["drafts", "reply-drafts"]) {
     try {
-      if (readdirSync(join(inboxDir, folder)).some((name) => name.endsWith(".json"))) return true;
-    } catch {
-      // No such folder.
+      if (readdirSync(join(inboxDir, folder)).some((name) => name.endsWith(".json"))) return "used";
+    } catch (error) {
+      if (!missing(error)) return "used";
     }
   }
   let projects: string[];
   try {
     projects = readdirSync(join(inboxDir, "projects"));
-  } catch {
-    return false;
+  } catch (error) {
+    return missing(error) ? null : "used";
   }
   for (const project of projects) {
-    if (Date.now() > deadline) return true;
-    if (linesMatch(join(inboxDir, "projects", project, "messages.jsonl"), personMessageLine, deadline)) return true;
-    if (linesMatch(join(inboxDir, "projects", project, "questions.jsonl"), pickedQuestionLine, deadline)) return true;
+    if (Date.now() > deadline) return "slow";
+    for (const [file, test] of [["messages.jsonl", personMessageLine], ["questions.jsonl", pickedQuestionLine]] as const) {
+      const found = linesMatch(join(inboxDir, "projects", project, file), test, deadline);
+      if (found) return found;
+    }
   }
-  return false;
+  return null;
 }
 
 /** How long the one-time decision may read the store (the Claude Code mod waits on it once). */
@@ -239,20 +277,26 @@ export const INBOX_SCAN_BUDGET_MS = 5_000;
 function nonEmptyFile(path: string): boolean {
   try {
     return statSync(path).size > 0;
-  } catch {
-    return false;
+  } catch (error) {
+    return !missing(error);
   }
 }
 
+/** A JSON file with something in it; one that is there but unreadable or unparseable counts too. */
 function nonEmptyJson(path: string): boolean {
-  const text = readText(path);
-  if (!text) return false;
+  let text: string;
+  try {
+    text = readFileSync(path, "utf-8");
+  } catch (error) {
+    return !missing(error);
+  }
+  if (!text.trim()) return false;
   try {
     const value = JSON.parse(text) as unknown;
     if (Array.isArray(value)) return value.length > 0;
     return !!value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -301,12 +345,13 @@ function pickedQuestionLine(line: string): boolean {
 }
 
 /** Whether any line of a JSONL file passes `test`, read in chunks so a large store stops at the first hit; past `deadline`, true. */
-function linesMatch(path: string, test: (line: string) => boolean, deadline: number): boolean {
+/** "used" at the first matching line or a read error, "slow" past the deadline, null when no line matches. */
+function linesMatch(path: string, test: (line: string) => boolean, deadline: number): StoreUse {
   let fd: number;
   try {
     fd = openSync(path, "r");
-  } catch {
-    return false;
+  } catch (error) {
+    return missing(error) ? null : "used";
   }
   try {
     const chunk = Buffer.alloc(1 << 20);
@@ -315,16 +360,16 @@ function linesMatch(path: string, test: (line: string) => boolean, deadline: num
     for (;;) {
       const read = readSync(fd, chunk, 0, chunk.length, null);
       if (read <= 0) break;
-      if (Date.now() > deadline) return true;
+      if (Date.now() > deadline) return "slow";
       const text = rest + decoder.write(chunk.subarray(0, read));
       const lines = text.split("\n");
       rest = lines.pop() ?? "";
-      if (lines.some((line) => line && test(line))) return true;
+      if (lines.some((line) => line && test(line))) return "used";
     }
     rest += decoder.end();
-    return rest !== "" && test(rest);
+    return rest !== "" && test(rest) ? "used" : null;
   } catch {
-    return false;
+    return "used";
   } finally {
     closeSync(fd);
   }

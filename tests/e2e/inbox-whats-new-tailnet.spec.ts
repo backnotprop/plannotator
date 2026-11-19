@@ -123,7 +123,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PATH: `${bin}:${dirname(bun)}:${dirname(process.execPath)}`,
     PLANNOTATOR_TEST_SANDBOX: root,
     HOME: root,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',

@@ -1463,6 +1463,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .ib-btn.ib-ghost { border-color: transparent; background: transparent; color: var(--muted-foreground); }
 .pn-inbox .ib-btn.ib-sm { height: 28px; padding: 0 10px; font-size: var(--ib-fs-12-5, 12.5px); }
 .pn-inbox .ib-btn:disabled { opacity: 0.5; }
+/* Settings → General's Turn the Inbox off: an outline the card does not swallow (the plain button's border and fill are the card's own colours in dark); muted-foreground on the card is 4.5:1 or more in the shipped themes. */
+.pn-inbox .ib-btn[data-settings-turn-off] { border-color: var(--muted-foreground); color: var(--foreground); }
 .pn-inbox .ib-iconbtn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--muted-foreground); }
 .pn-inbox .ib-iconbtn:hover { background: var(--muted); }
 

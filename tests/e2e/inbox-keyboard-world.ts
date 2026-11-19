@@ -115,7 +115,7 @@ export async function createKeyboardWorld(prefix = 'plannotator-inbox-keyboard-'
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',

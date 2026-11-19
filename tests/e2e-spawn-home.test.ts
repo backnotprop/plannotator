@@ -55,15 +55,24 @@ function hasScratchHome(literal: string): boolean {
   return named;
 }
 
+/**
+ * Whether an env literal names the Inbox test knob (PLANNOTATOR_TEST_INBOX_ON, packages/shared/inbox/inbox-on.ts) or
+ * spreads scratchEnv(): the only thing that makes the binary count its undecided scratch data dir as on. Nothing
+ * else in an env does (no HOME rule: a real machine can have HOME under /tmp).
+ */
+function hasInboxKnob(literal: string): boolean {
+  return /\.\.\.\s*scratchEnv\(/.test(literal) || /(?:^|[\s{,])["']?PLANNOTATOR_TEST_INBOX_ON["']?\s*:/.test(literal);
+}
+
 /** `file:line` of each env literal in `source` that sets a data dir without a scratch HOME, and how many it checked. */
-function unguardedEnvs(name: string, source: string): { missing: string[]; scanned: number } {
+function unguardedEnvs(name: string, source: string, guarded: (literal: string) => boolean = hasScratchHome): { missing: string[]; scanned: number } {
   const text = withoutComments(source);
   const missing: string[] = [];
   let scanned = 0;
   for (const match of text.matchAll(/(^|[\s{,])["']?PLANNOTATOR_DATA_DIR["']?\s*:/g)) {
     scanned++;
     const at = match.index! + match[1]!.length;
-    if (!hasScratchHome(enclosingLiteral(text, at))) missing.push(`${name}:${text.slice(0, at).split("\n").length}`);
+    if (!guarded(enclosingLiteral(text, at))) missing.push(`${name}:${text.slice(0, at).split("\n").length}`);
   }
   return { missing, scanned };
 }
@@ -94,6 +103,20 @@ describe("an e2e spawn env", () => {
     }
     // A matcher that stopped matching would pass forever: the specs hold about 200 of these envs.
     expect(scanned).toBeGreaterThan(100);
+    expect(missing).toEqual([]);
+  });
+
+  // The binary counts an undecided scratch data dir as on only with the knob; without it a spec's Inbox is off.
+  test("in tests/e2e that sets PLANNOTATOR_DATA_DIR also names PLANNOTATOR_TEST_INBOX_ON, or spreads scratchEnv()", () => {
+    const flagged = (literal: string) => unguardedEnvs("x.ts", `const env = ${literal};`, hasInboxKnob).missing.length === 1;
+    expect(flagged("{ HOME: h, PLANNOTATOR_DATA_DIR: d }")).toBe(true);
+    expect(flagged("{ HOME: h, PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: d }")).toBe(false);
+    expect(flagged("{ ...scratchEnv(root), PLANNOTATOR_DATA_DIR: d }")).toBe(false);
+    const dir = join(import.meta.dir, "e2e");
+    const missing: string[] = [];
+    for (const name of readdirSync(dir).filter((n) => n.endsWith(".ts")).sort()) {
+      missing.push(...unguardedEnvs(`tests/e2e/${name}`, readFileSync(join(dir, name), "utf8"), hasInboxKnob).missing);
+    }
     expect(missing).toEqual([]);
   });
 });

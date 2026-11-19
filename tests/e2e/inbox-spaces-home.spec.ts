@@ -55,7 +55,7 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
   store.addVersion(mockup.plan.id, mockup.document.id, { bytes: new TextEncoder().encode(spinning), committed_at: at(13), source: 'plan-review', author_via: 'plan-review' });
   const done = ['Nightly export in batches', 'Checkout on one page', 'Sessions in Redis', 'Offline drafts'].map((name, i) => seed(name, i % 2 ? 'ledger' : 'field-notes', 10 + i, true));
 
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();

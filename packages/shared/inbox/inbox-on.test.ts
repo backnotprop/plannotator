@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isInboxActionReport, isInboxNote } from "@plannotator/core/inbox-types";
@@ -14,9 +14,9 @@ import {
   decideExistingInstall,
   INBOX_OFF_AGENT_LINE,
   INBOX_OFF_LEAD,
-  INBOX_OFF_PERSON_LINE,
   inboxOnRecord,
   inboxUseFromFiles,
+  inboxUseOnDisk,
   isInboxOffAnswer,
   isInboxOn,
   isScratchFolder,
@@ -101,19 +101,39 @@ describe("the record", () => {
     expect(decideExistingInstall(dataDir, NOW)).toMatchObject({ on: false, by: "off" });
   });
 
-  // L4: state.json deleted or set aside as corrupt: the evidence never decides again (it would undo the person's off).
-  test("a lost record is off (record-lost), never decided again from the evidence", () => {
+  // L4/E1: state.json deleted or set aside as corrupt: the copy in the mark comes back, so the person's off stays off.
+  test("a lost record that was off comes back off from the mark, though the store shows use", () => {
     write(inbox("inbox.json"), "{}");
     write(inbox("agents.json"), "{}");
     expect(recordInboxOff(dataDir, NOW)).toBe(true);
     rmSync(join(dataDir, "state.json"));
     expect(isInboxOn(dataDir, REAL)).toBe(false);
-    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "record-lost" });
+    expect(readInboxOnRecord(dataDir)).toEqual({ on: false, at: NOW.toISOString(), by: "off" });
   });
 
-  test("the refusal lines start with one lead a host can recognise", () => {
+  // E1: ...and an active user is never turned off by it.
+  test("a lost or corrupt record that was on comes back on from the mark", () => {
+    expect(turnInboxOn("command", dataDir, NOW)).toBe(true);
+    rmSync(join(dataDir, "state.json"));
+    expect(isInboxOn(dataDir, REAL)).toBe(true);
+    expect(readInboxOnRecord(dataDir)).toEqual({ on: true, at: NOW.toISOString(), by: "command" });
+    write(join(dataDir, "state.json"), "{ not json");
+    expect(isInboxOn(dataDir, REAL)).toBe(true);
+  });
+
+  test("a lost record with no copy in the mark reads the store again: the person's use keeps it on, else off", () => {
+    write(join(dataDir, "inbox-on-decided"), `${NOW.toISOString()}\n`);
+    write(inbox("inbox.json"), "{}");
+    write(inbox("projects", "p1", "messages.jsonl"), line({ id: "m9", author: { kind: "person" }, body: "Go." }, 9) + "\n");
+    expect(decideExistingInstall(dataDir, NOW)).toEqual({ on: true, at: NOW.toISOString(), by: "record-lost" });
+    rmSync(join(dataDir, "state.json"));
+    write(join(dataDir, "inbox-on-decided"), "garbage\n");
+    rmSync(inbox("projects"), { recursive: true });
+    expect(decideExistingInstall(dataDir, NOW)).toEqual({ on: false, at: NOW.toISOString(), by: "record-lost" });
+  });
+
+  test("the refusal line starts with one lead a host can recognise", () => {
     expect(isInboxOffAnswer(`${INBOX_OFF_AGENT_LINE}\n`)).toBe(true);
-    expect(isInboxOffAnswer(INBOX_OFF_PERSON_LINE)).toBe(true);
     expect(isInboxOffAnswer("The Plannotator Inbox did not start: port in use")).toBe(false);
     expect(INBOX_OFF_AGENT_LINE.startsWith(INBOX_OFF_LEAD)).toBe(true);
   });
@@ -125,6 +145,13 @@ describe("the test knob", () => {
     expect(isInboxOn(dataDir, { PLANNOTATOR_TEST_INBOX_ON: "1" })).toBe(true);
     expect(readInboxOnRecord(dataDir)).toBeNull();
     expect(isInboxOn(dataDir, { PLANNOTATOR_TEST_SANDBOX: dataDir, PLANNOTATOR_TEST_INBOX_ON: "0" })).toBe(false);
+  });
+
+  // C1: a container, CI image or sandbox with HOME and the data dir under /tmp is a real machine, not a test.
+  test("HOME and the data dir in a temp folder, with no test variable: the real rule (off, nothing written)", () => {
+    expect(isInboxOn(dataDir, { HOME: dataDir })).toBe(false);
+    expect(isInboxOn(dataDir, { HOME: "/tmp" })).toBe(false);
+    expect(readInboxOnRecord(dataDir)).toBeNull();
   });
 
   test("a folder outside the temp folders is never scratch", () => {
@@ -182,11 +209,28 @@ describe("an install from before the rule", () => {
     expect(isInboxOn(dataDir, REAL)).toBe(false);
   });
 
-  // M7: the decision is bounded in time; a store it cannot read in time is kept on (in doubt, on).
-  test("a store not read by the deadline counts as used", () => {
+  // M7/D1: the decision is bounded in time; a store it cannot read in time is kept on, and said as slow, not used.
+  test("a store not read by the deadline is slow: kept on as update-slow", () => {
     write(inbox("projects", "p1", "messages.jsonl"), line(agentMessage) + "\n");
-    expect(storeShowsPersonUse(inbox(), Date.now() + 60_000)).toBe(false);
-    expect(storeShowsPersonUse(inbox(), Date.now() - 1)).toBe(true);
+    expect(storeShowsPersonUse(inbox(), Date.now() + 60_000)).toBeNull();
+    expect(storeShowsPersonUse(inbox(), Date.now() - 1)).toBe("slow");
+    write(inbox("inbox.json"), "{}");
+    expect(inboxUseOnDisk(dataDir, -1)).toBe("slow");
+  });
+
+  // D1: a read error is not "nothing there": in doubt, on.
+  test("a store file or folder that is there but cannot be read counts as used", () => {
+    write(inbox("projects", "p1", "messages.jsonl"), line(agentMessage) + "\n");
+    expect(storeShowsPersonUse(inbox())).toBeNull();
+    chmodSync(inbox("projects", "p1", "messages.jsonl"), 0o000);
+    try {
+      // root reads it anyway (a CI container): the broken JSON below still covers the rule there.
+      if (process.getuid?.() !== 0) expect(storeShowsPersonUse(inbox())).toBe("used");
+    } finally {
+      chmodSync(inbox("projects", "p1", "messages.jsonl"), 0o600);
+    }
+    write(inbox("pins.json"), "{ broken");
+    expect(storeShowsPersonUse(inbox())).toBe("used");
   });
 
   test("a person's message far into a large store, across a multi-byte boundary, is found", () => {
@@ -194,7 +238,7 @@ describe("an install from before the rule", () => {
     const lines = Array.from({ length: 3000 }, () => filler);
     lines.push(line({ id: "m9", author: { kind: "person" }, body: "Go." }, 9));
     write(inbox("projects", "p1", "messages.jsonl"), lines.join("\n"));
-    expect(storeShowsPersonUse(inbox())).toBe(true);
+    expect(storeShowsPersonUse(inbox())).toBe("used");
   });
 
   test("the cheap files alone (what the Claude Code mod reads): used, ran or nothing", () => {

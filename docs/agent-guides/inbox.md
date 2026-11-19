@@ -2,7 +2,7 @@
 
 The Inbox details are split by topic. Read the foundation guide for command, server, storage, and list behavior, then follow the links for the window, messages, files, notifications, or phone behavior relevant to your change.
 
-- [`inbox-on.md`](inbox-on.md) — how the Inbox turns on: off until the person turns it on (state.json `inboxOn`, `isInboxOn`), what counts as the person, the refusal, Turn the Inbox off, and the one-time decision for existing installs.
+- [`inbox-on.md`](inbox-on.md) — how the Inbox turns on: off until `plannotator inbox` is run (state.json `inboxOn`, `isInboxOn`), what never turns it on, the refusal, Turn the Inbox off, and the one-time decision for existing installs.
 - [`inbox-foundation.md`](inbox-foundation.md) — command (with `plannotator inbox call`, the scripting command, and who a script is per host), local and tailnet reach, registry, store, threads, and list.
 - [`inbox-window.md`](inbox-window.md) — main window, questions, and send behavior.
 - [`inbox-messages.md`](inbox-messages.md) — drafts, replies, thread actions, and project menu.

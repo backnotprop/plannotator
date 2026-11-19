@@ -54,7 +54,7 @@ function machine(name: string): Machine {
   const env = {
     HOME: root,
     PATH: `${bin}:/usr/bin:/bin`,
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_MACHINE_NAME: name,

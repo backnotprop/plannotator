@@ -28,7 +28,7 @@ test.beforeAll(async () => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
-    PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_RELAY_URL: relayUrl,

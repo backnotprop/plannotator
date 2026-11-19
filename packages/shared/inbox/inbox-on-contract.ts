@@ -5,11 +5,10 @@
  * inbox on at all. You have to run inbox first. You have to purposely want to
  * use inbox." So the Inbox (its process, the agents' `plannotator_inbox` tool,
  * the reminder, the note in agents' instruction files, the MCP server's tools)
- * exists for a person only after THEY turned it on here: their own
- * `plannotator inbox` in their own terminal, their `/plannotator-inbox`, or
- * `plannotator inbox on` in their own terminal. Nothing an
- * agent, a hook, the MCP server, an installer, an update or a restart does
- * turns it on, and `inbox/inbox.json` existing says nothing about it.
+ * exists only after `plannotator inbox` was run here (or `/plannotator-inbox`,
+ * which runs it). Nothing a hook, the MCP server, a tool call, an installer, an
+ * update, a restart or the start at login does turns it on, and
+ * `inbox/inbox.json` existing says nothing about it.
  *
  * The fact is one record in `state.json` (the data dir's per-computer state,
  * beside config.json, which may live in a dotfiles repo and roam): the key
@@ -33,48 +32,44 @@ export const INBOX_ON_KEY = 'inboxOn'
 export const INBOX_ON_FILE = 'state.json'
 
 /**
- * What last set the record. The person's acts: `command` (their own
- * `plannotator inbox`), `slash-command` (`/plannotator-inbox`), `inbox-on`
- * (`plannotator inbox on`), `settings` (an earlier build's Settings switch). `off`: Turn the
- * Inbox off. The one-time decision for an install from before the rule:
+ * What last set the record. `command`: a run of `plannotator inbox` (or
+ * `/plannotator-inbox`, which runs it). `off`: Turn the Inbox off. The one-time decision for an install from before the rule:
  * `update-used` (the person used the window), `update-ran` (the person ran
  * `plannotator inbox`), `update-agent-only` (only agents ever started it),
- * `update-never-ran`. `record-lost`: a record existed here once (the decided
- * mark, INBOX_ON_DECIDED_FILE) and is gone (state.json deleted or set aside as
- * corrupt): off, never decided again, so a lost record never undoes the
- * person's off.
+ * `update-never-ran`, `update-slow` (the store took too long to read: kept
+ * on). `record-lost`: a record existed here once (the decided mark,
+ * INBOX_ON_DECIDED_FILE) and is gone (state.json deleted or set aside as
+ * corrupt), and the mark held no copy of it: the store was read again (on
+ * when the person used the Inbox, else off). A copy in the mark comes back
+ * as it was, so a lost record never undoes the person's on or off.
  */
 export type InboxOnBy =
   | 'command'
-  | 'slash-command'
-  | 'inbox-on'
-  | 'settings'
   | 'off'
   | 'update-used'
   | 'update-ran'
   | 'update-agent-only'
   | 'update-never-ran'
+  | 'update-slow'
   | 'record-lost'
 
 /**
- * Beside state.json in the data dir: written with the first record and never
- * removed, so an install is decided once even when state.json is lost.
+ * Beside state.json in the data dir: rewritten with a copy of each record
+ * written and never removed, so an install is decided once and a lost
+ * state.json comes back from it.
  */
 export const INBOX_ON_DECIDED_FILE = 'inbox-on-decided'
 
 /**
  * The record. `notes: 'remove'`: Plannotator's own untouched notes in agents'
  * instruction files are still to be removed (an install decided off before a
- * process that can edit them ran); cleared once they are. `notes: 'left'`:
- * some could not be removed (a damaged or read-only file); nothing retries by
- * itself, `plannotator inbox status` says so, and `plannotator inbox off`
- * tries again.
+ * process that can edit them ran); cleared after one try, whatever it removed.
  */
 export interface InboxOnRecord {
   on: boolean
   at: string
   by: string
-  notes?: 'remove' | 'left'
+  notes?: 'remove'
 }
 
 /** The record in `state.json`'s text, or null when there is none (not decided yet) or it cannot be read. */
@@ -95,7 +90,7 @@ export function inboxOnRecord(stateText: string | null | undefined): InboxOnReco
     on: record.on,
     at: typeof record.at === 'string' ? record.at : '',
     by: typeof record.by === 'string' ? record.by : '',
-    ...(record.notes === 'remove' || record.notes === 'left' ? { notes: record.notes } : {}),
+    ...(record.notes === 'remove' ? { notes: record.notes } : {}),
   }
 }
 
@@ -108,32 +103,16 @@ export function inboxOnFromState(stateText: string | null | undefined): boolean 
 export const INBOX_OFF_LEAD = 'The Plannotator Inbox is off on this computer'
 
 /**
- * The one line an agent gets when it tries to use or start the Inbox while it
+ * The one line given when something tries to use or start the Inbox while it
  * is off: a tool call, the MCP server, a CLI command that would start it. It
- * never names what turns the Inbox on: only the person does that.
+ * never names what turns the Inbox on.
  */
 export const INBOX_OFF_AGENT_LINE = `${INBOX_OFF_LEAD}: ask the person in the chat instead. Only the person can turn the Inbox on; do not try to turn it on yourself.`
-
-/**
- * The same refusal for a person at their own terminal: only a run with no
- * agent's marker and a terminal on stdin and stdout gets it (inbox-on-command.ts).
- */
-export const INBOX_OFF_PERSON_LINE = `${INBOX_OFF_LEAD}. Run \`plannotator inbox\` to turn it on.`
 
 /** Whether a CLI's output is the Inbox-off refusal. */
 export function isInboxOffAnswer(text: string | null | undefined): boolean {
   return typeof text === 'string' && text.includes(INBOX_OFF_LEAD)
 }
-
-/**
- * Passed by Plannotator's own `/plannotator-inbox` commands (the Claude Code
- * mod for a command the person typed, Pi, OpenCode, Gemini, Droid, Amp and the
- * model-disabled `plannotator-inbox` skills) to the `plannotator inbox --open`
- * they run: the person typed the command, so it turns the Inbox on. A flag,
- * not an environment variable, so it works in PowerShell and cmd too. Hidden:
- * never in `--help` and never in words an agent is told to run.
- */
-export const INBOX_SLASH_COMMAND_FLAG = '--from-slash-command'
 
 /** What a pre-rule install shows of the person's own use of the Inbox. */
 export type InboxUseEvidence = 'used' | 'ran'

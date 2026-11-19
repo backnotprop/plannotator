@@ -252,7 +252,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env: Record<string, string> = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: join(root, 'home'),
-    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_TEST_INBOX_ON: '1', PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_INBOX_TAILSCALE: '0',
     PLANNOTATOR_INBOX_PHONES: '0',
