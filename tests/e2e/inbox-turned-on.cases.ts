@@ -4,7 +4,7 @@
  * `<root>/data` inboxScratch marks as turned on). Registered by inbox.spec.ts, so Browser smoke runs them on every PR.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test } from './inbox-test';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -136,8 +136,9 @@ export function turnedOnCases(binary: string): void {
     }
   });
 
-  // --open connects the agents it finds, but only after its URL is out, and returns within its callers' 30 s wait.
-  test('Inbox --open prints its URL before it connects the agents it finds, and returns within 30 s', async () => {
+  // The --open that turns the Inbox on (the setup's step) connects the agents it finds, but only after its URL is
+  // out, and returns within its callers' 30 s wait.
+  test('Inbox --open that turns it on prints its URL before it connects the agents it finds, and returns within 30 s', async () => {
     const root = inboxScratch('plannotator-inbox-open-connect-e2e-');
     try {
       const { PLANNOTATOR_INBOX_CONNECT: _off, ...env } = realRuleEnv(root, SSH);
@@ -159,8 +160,46 @@ export function turnedOnCases(binary: string): void {
       const urlAt = lines.findIndex((line) => URL_LINE.test(line.trim()));
       const connectedAt = lines.findIndex((line) => /^Connected .*Cursor/.test(line));
       expect([urlAt >= 0, connectedAt > urlAt]).toEqual([true, true]);
+      expect(existsSync(join(env.PLANNOTATOR_DATA_DIR, 'agents-home', '.cursor', 'mcp.json'))).toBe(true);
     } finally {
       await removeInboxScratch(root);
+    }
+  });
+
+  // Where the Inbox is on already (every existing install), --open is what it was before the mark: start a stopped
+  // Inbox, open the window, print the URL, return. It connects nothing, so /plannotator-inbox changes nothing.
+  // Its mark is written once: --open and bare `plannotator inbox` never rewrite a mark that says on (bytes and mtime kept).
+  test('Inbox --open where it is on already connects nothing and returns at once, as before the mark, and no run rewrites the mark', async () => {
+    const shapes: [string, (dataDir: string) => void][] = [
+      ['the mark says on', (d) => writeFileSync(join(d, 'inbox', 'turned-on'), '{"on":true,"by":"command","at":"2026-11-19T00:00:00.000Z"}\n')],
+      ['an Inbox ran here before the mark', (d) => writeFileSync(join(d, 'inbox', 'inbox.json'), JSON.stringify({ pid: 999999, port: 9, token: 'old', serverSession: 'old', version: '0.29.0', startedAt: '2026-11-01T00:00:00.000Z' }))],
+    ];
+    for (const [name, arrange] of shapes) {
+      const root = inboxScratch('plannotator-inbox-open-on-e2e-');
+      try {
+        const { PLANNOTATOR_INBOX_CONNECT: _off, ...env } = realRuleEnv(root, SSH);
+        const dataDir = env.PLANNOTATOR_DATA_DIR;
+        mkdirSync(join(dataDir, 'inbox'), { recursive: true });
+        arrange(dataDir);
+        // An agent a connect would find, and connect: Cursor, in the sandbox's agent home.
+        mkdirSync(join(dataDir, 'agents-home', '.cursor'), { recursive: true });
+        const markPath = join(dataDir, 'inbox', 'turned-on');
+        const markNow = () => (existsSync(markPath) ? { text: readFileSync(markPath, 'utf8'), mtime: statSync(markPath).mtimeMs } : null);
+        const before = markNow();
+        const run = spawnSync(binary, ['inbox', '--open'], { env, encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+        expect([name, run.error?.message ?? null, run.status, run.stdout.trim()]).toEqual([name, null, 0, expect.stringMatching(URL_LINE)]);
+        expect([name, /Connected /.test(run.stderr), existsSync(join(dataDir, 'agents-home', '.cursor', 'mcp.json'))]).toEqual([name, false, false]);
+        expect([name, markIn(dataDir)?.on]).toEqual([name, true]);
+        // The mark that was there is untouched; one written by this first read (from before the mark) is written once.
+        const written = markNow();
+        if (before) expect([name, written]).toEqual([name, before]);
+        // Bare `plannotator inbox` with the Inbox running opens a tab, connects and exits: the mark stays as it is.
+        const bare = spawnSync(binary, ['inbox'], { env, encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
+        expect([name, bare.error?.message ?? null, bare.status]).toEqual([name, null, 0]);
+        expect([name, markNow()]).toEqual([name, written]);
+      } finally {
+        await removeInboxScratch(root);
+      }
     }
   });
 

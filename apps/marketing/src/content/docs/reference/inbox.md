@@ -25,7 +25,7 @@ This starts the Inbox and opens it in your browser. If it is already running, th
 | `plannotator inbox` | Start the Inbox and open it in the browser, or open the one already running |
 | `plannotator inbox --background` | Start it detached without opening a browser, print its URL and exit. Agents run this form; it starts nothing until you have turned the Inbox on (`plannotator inbox`, `--no-open` or `--open`) |
 | `plannotator inbox --no-open` | Run it in this terminal without opening a browser |
-| `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns within half a minute. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
+| `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. The first time, it also turns the Inbox on and connects the agents it finds, within half a minute. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
 | `plannotator inbox --open <thread>` | Show that thread in the Inbox window you already have open, as if you clicked its row (Back returns). Takes a thread id, a message id or a `#thread=` link. With no window open, it opens one at the thread. For a status-bar widget or a script |
 | `plannotator inbox --tailscale` | Also publish it [over your tailnet](#over-your-tailnet) until it stops. Works with the forms above. If the Inbox is already running, it is asked to publish |
 | `plannotator inbox mcp` | The stdio MCP server for agents. It starts a stopped Inbox without opening a browser tab |

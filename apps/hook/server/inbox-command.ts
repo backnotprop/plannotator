@@ -889,14 +889,17 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   // A person's run (bare, --no-open, --open) turns the Inbox on here; Plannotator's own
   // starts (--background, a detached start, the start at login) never do, and start
-  // nothing until the person has (turned-on.ts).
+  // nothing until the person has (turned-on.ts). Where it is on already (every existing
+  // install) a run does what it did before the mark.
   const loginItem = process.env[INBOX_LOGIN_ITEM_ENV] === "1";
   delete process.env[INBOX_LOGIN_ITEM_ENV];
-  if (!detached && !loginItem && !background) markInboxTurnedOn(dataDir);
-  else if (!isInboxTurnedOn(dataDir)) {
+  const personRun = !detached && !loginItem && !background;
+  const turnsOnNow = !isInboxTurnedOn(dataDir);
+  if (turnsOnNow && !personRun) {
     process.stderr.write(`${INBOX_OFF_LINE}\n`);
     process.exit(1);
   }
+  if (turnsOnNow) markInboxTurnedOn(dataDir);
 
   await reportDebugNeedsStart(dataDir);
 
@@ -927,10 +930,11 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
       process.stdout.write(`${url}\n`);
-      // --open is the setup's one step: after the URL is out, it connects the agents it finds, as the person's bare
-      // run does, within the wait of the callers that run it (the mod's /plannotator-inbox and Droid give the whole
-      // command 30 s). The Inbox finishes a connect cut short; only this report of it is lost.
-      if (open && connect) await connectRunningInbox(entry, Math.max(1_000, OPEN_DONE_WITHIN_MS - (Date.now() - startedAt)));
+      // --open is the setup's one step: the run that turns the Inbox on connects the agents it finds after the URL
+      // is out, as the person's bare run does, within the wait of the callers that run it (the mod's
+      // /plannotator-inbox and Droid give the whole command 30 s). The Inbox finishes a connect cut short; only this
+      // report of it is lost. Where the Inbox was on already, --open connects nothing and returns at once.
+      if (open && connect && turnsOnNow) await connectRunningInbox(entry, Math.max(1_000, OPEN_DONE_WITHIN_MS - (Date.now() - startedAt)));
       process.exit(0);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

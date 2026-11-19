@@ -193,7 +193,7 @@ The Plannotator Inbox is one local window per machine where you leave the person
 - To put a thread's decisions on its pull request, run `plannotator inbox export-decisions --thread <id> --pr <ref>`: updated in place when run again.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
 - Never run `plannotator inbox` just to send: once the person has turned the Inbox on here (their own `plannotator inbox`), calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. Until they have, a call answers that the Inbox is off: ask them in the chat instead. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
-- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns within half a minute. Tell them the address.
+- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. The first time, it also turns the Inbox on and connects the agents it finds, within half a minute. Tell them the address.
 
 ## plannotator t3
 
