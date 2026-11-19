@@ -15,6 +15,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CUSTOM_THEME_LIMIT, type ThemeFile } from '@plannotator/core/theme-file';
 import {
+  customThemeSyntaxJson,
+  customThemesAnswer,
   customThemesDir,
   customThemesPayload,
   customThemesScript,
@@ -58,14 +60,14 @@ describe('the themes folder', () => {
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, 'evil.json'), JSON.stringify({ ...theme('evil'), dark: { background: '#000;} body{display:none' } }));
     writeFileSync(join(folder, 'other.json'), JSON.stringify(theme('someone-else')));
-    writeFileSync(join(folder, 'big.json'), JSON.stringify({ ...theme('big'), name: 'x'.repeat(20_000) }));
+    writeFileSync(join(folder, 'big.json'), JSON.stringify({ ...theme('big'), name: 'x'.repeat(300_000) }));
     writeFileSync(join(folder, 'broken.json'), '{ not json');
     saveCustomTheme(dir, theme('fine'));
     const { themes, skipped } = listCustomThemes(dir);
     expect(themes.map((t) => t.id)).toEqual(['fine']);
     const reason = Object.fromEntries(skipped.map((s) => [s.file, s.reason]));
     expect(Object.keys(reason).sort()).toEqual(['big.json', 'broken.json', 'evil.json', 'other.json']);
-    expect(reason['big.json']).toBe('larger than 16 KB.');
+    expect(reason['big.json']).toBe('larger than 256 KB.');
     expect(reason['broken.json']).toStartWith('not readable as JSON');
     expect(reason['evil.json']).toStartWith('dark.background: ');
     expect(reason['other.json']).toBe('its id is "someone-else"; the file must be named someone-else.json.');
@@ -107,5 +109,49 @@ describe('the page script', () => {
     expect((themes as { id: string; name: string }[])[0]).toMatchObject({ id: 'harbor', name: '</script><script>alert(1)</script>' });
     expect(css).toContain('.theme-harbor {');
     expect(css).toContain('--background: #0f1419;');
+  });
+});
+
+describe('code colours', () => {
+  const rules = (n: number) => Array.from({ length: n }, (_, i) => ({ scope: [`meta.rule${i}`, `entity.name.thing${i}`], foreground: '#a6e22e', fontStyle: 'italic' }));
+  const withSyntax = (id: string, n: number): ThemeFile => ({ ...theme(id), dark: { background: '#272822', foreground: '#f8f8f2', syntax: rules(n) } });
+
+  test('stay out of the page script; ?syntax=<id> answers them, and 404 for a theme without, an unknown id or a bad one', () => {
+    const dir = scratch();
+    saveCustomTheme(dir, withSyntax('mono', 3));
+    saveCustomTheme(dir, theme('plain'));
+    const script = customThemesScript(dir);
+    expect(script).not.toContain('meta.rule0');
+    expect((runScript(script).themes as { id: string; syntax?: string[] }[]).find((t) => t.id === 'mono')?.syntax).toEqual(['dark']);
+    const answer = customThemesAnswer(dir, new URLSearchParams('syntax=mono'));
+    expect(answer.status).toBe(200);
+    expect(answer.headers['Content-Type']).toStartWith('application/json');
+    expect(JSON.parse(answer.body)).toEqual({ dark: { foreground: '#f8f8f2', background: '#272822', rules: rules(3) } });
+    for (const query of ['syntax=plain', 'syntax=nope', 'syntax=../config', 'syntax=']) {
+      expect(customThemesAnswer(dir, new URLSearchParams(query)).status).toBe(404);
+    }
+    expect(customThemesAnswer(dir, new URLSearchParams()).body).toBe(script);
+  });
+
+  test('three themes at the rule cap: the first-paint script stays the size it is without them, and each file fits', () => {
+    const dir = scratch();
+    for (const id of ['one', 'two', 'three']) {
+      const saved = saveCustomTheme(dir, withSyntax(id, 600));
+      if (!saved.ok) throw new Error(saved.message);
+    }
+    const bare = scratch();
+    for (const id of ['one', 'two', 'three']) saveCustomTheme(bare, { ...theme(id), dark: { background: '#272822', foreground: '#f8f8f2' } });
+    // The only difference the code colours make to the script is each entry's "syntax":["dark"].
+    expect(customThemesScript(dir).length - customThemesScript(bare).length).toBeLessThan(3 * 20);
+    expect(customThemeSyntaxJson(dir, 'one')!.length).toBeGreaterThan(50_000);
+  });
+
+  test('a file changed by hand is read again (the reading kept between page loads is per size and time)', () => {
+    const dir = scratch();
+    saveCustomTheme(dir, theme('harbor'));
+    expect(listCustomThemes(dir).themes[0]!.dark!.background).toBe('#0f1419');
+    const path = join(customThemesDir(dir), 'harbor.json');
+    writeFileSync(path, readFileSync(path, 'utf8').replace('#0f1419', '#0f141a'));
+    expect(listCustomThemes(dir).themes[0]!.dark!.background).toBe('#0f141a');
   });
 });

@@ -15,6 +15,9 @@
 import {
   BUILT_IN_THEME_IDS,
   compositeOver,
+  isSyntaxColour,
+  isSyntaxFontStyle,
+  isSyntaxScope,
   contrastRatio,
   oklabToRgba,
   parseThemeColour,
@@ -23,7 +26,10 @@ import {
   THEME_FILE_MARKER,
   THEME_ID_PATTERN,
   THEME_NAME_MAX,
+  THEME_SCOPES_PER_RULE_MAX,
+  THEME_SYNTAX_RULES_MAX,
   type Rgba,
+  type ThemeSyntaxRule,
   type ThemeFile,
   type ThemeFileHalf,
   type ThemeTokens,
@@ -33,11 +39,11 @@ export type ThemeSourceFormat = 'plannotator' | 'base16' | 'vscode';
 
 /** A converter's answer: the theme, or the field of the source that stopped it. */
 export type ThemeConvertResult =
-  | { ok: true; theme: ThemeFile; field?: undefined; message?: undefined }
-  | { ok: false; theme?: undefined; field: string; message: string };
+  | { ok: true; theme: ThemeFile; field?: undefined; message?: undefined; syntaxLeftOut?: number }
+  | { ok: false; theme?: undefined; field: string; message: string; syntaxLeftOut?: undefined };
 
 export type ThemeImportResult =
-  | { ok: true; format: ThemeSourceFormat; theme: unknown }
+  | { ok: true; format: ThemeSourceFormat; theme: unknown; syntaxLeftOut?: number }
   | { ok: false; field: string; message: string };
 
 // --- Parsing ----------------------------------------------------------------
@@ -266,8 +272,30 @@ export function base16ToThemeFile(source: Record<string, unknown>): ThemeConvert
     c('base00'),
     c('base05'),
   );
-  return { ok: true, theme: { plannotatorTheme: 1, id: themeIdFromName(name), name, [half]: tokens } };
+  const hex = (k: (typeof BASE16_KEYS)[number]) => rgbaToHex(c(k));
+  const syntax: ThemeSyntaxRule[] = BASE16_SYNTAX.map(([scope, key, fontStyle]) => ({ scope: [...scope], foreground: hex(key), ...(fontStyle ? { fontStyle } : {}) }));
+  return { ok: true, theme: { plannotatorTheme: 1, id: themeIdFromName(name), name, [half]: { ...tokens, syntax } } };
 }
+
+/**
+ * Code colours for a base16 scheme: the TextMate scopes of the base16 styling
+ * guidelines (base16-textmate, base16-vscode). Comments base03, punctuation and
+ * operators base05, variables and tags base08, numbers and constants base09,
+ * types and classes base0A, strings base0B, escapes and regexes base0C,
+ * functions base0D, keywords and storage base0E, embedded and deprecated base0F.
+ */
+export const BASE16_SYNTAX: readonly (readonly [readonly string[], (typeof BASE16_KEYS)[number], string?])[] = [
+  [['comment', 'punctuation.definition.comment'], 'base03', 'italic'],
+  [['punctuation', 'keyword.operator', 'meta.brace', 'meta.delimiter'], 'base05'],
+  [['variable', 'variable.other', 'entity.name.tag', 'meta.tag', 'markup.deleted', 'invalid'], 'base08'],
+  [['variable.parameter', 'constant.numeric', 'constant.language', 'constant.character', 'constant.other', 'support.constant', 'entity.other.attribute-name', 'markup.link'], 'base09'],
+  [['entity.name.type', 'entity.name.class', 'support.type', 'support.class', 'entity.other.inherited-class', 'storage.type.class', 'markup.bold'], 'base0a'],
+  [['string', 'constant.other.symbol', 'markup.inserted', 'markup.inline.raw', 'markup.raw'], 'base0b'],
+  [['string.regexp', 'constant.character.escape', 'support.function.builtin', 'markup.quote', 'keyword.other.unit'], 'base0c'],
+  [['entity.name.function', 'support.function', 'meta.function-call', 'entity.name.section', 'markup.heading'], 'base0d'],
+  [['keyword', 'storage', 'storage.type', 'storage.modifier', 'keyword.control', 'markup.italic', 'markup.changed'], 'base0e'],
+  [['meta.embedded', 'punctuation.section.embedded', 'invalid.deprecated'], 'base0f'],
+];
 
 // --- VS Code ----------------------------------------------------------------
 
@@ -348,7 +376,52 @@ export function vscodeToThemeFile(source: Record<string, unknown>): ThemeConvert
   // A button's own text only when the button is the primary: otherwise the derived pick.
   if (from.primary !== 'button.background') delete named['primary-foreground'];
   const name = cleanName(source.name, 'Imported VS Code theme');
-  return { ok: true, theme: { plannotatorTheme: 1, id: themeIdFromName(name), name, [half]: fillHalf(named, ground, text) } };
+  const { rules, leftOut } = vscodeSyntaxRules(source.tokenColors);
+  const tokens = fillHalf(named, ground, text);
+  return {
+    ok: true,
+    theme: { plannotatorTheme: 1, id: themeIdFromName(name), name, [half]: rules.length > 0 ? { ...tokens, syntax: rules } : tokens },
+    syntaxLeftOut: leftOut,
+  };
+}
+
+/**
+ * A VS Code theme's `tokenColors` as code colour rules, as written: each
+ * entry's scopes and its foreground, background and fontStyle. Kept only what
+ * the validator takes: an entry with no scope (the theme's default text, which
+ * the half's foreground already is), a scope the validator refuses, a colour
+ * that is not #hex or a font style it does not know is left out, and so is
+ * every rule past THEME_SYNTAX_RULES_MAX. `semanticTokenColors` is not read:
+ * the highlighter has no language server, so there are no semantic tokens.
+ */
+export function vscodeSyntaxRules(tokenColors: unknown): { rules: ThemeSyntaxRule[]; leftOut: number } {
+  if (!Array.isArray(tokenColors)) return { rules: [], leftOut: 0 };
+  const rules: ThemeSyntaxRule[] = [];
+  let leftOut = 0;
+  for (const entry of tokenColors) {
+    const e = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : null;
+    const settings = e?.settings && typeof e.settings === 'object' && !Array.isArray(e.settings) ? (e.settings as Record<string, unknown>) : null;
+    if (!e || !settings) {
+      leftOut++;
+      continue;
+    }
+    if (e.scope === undefined) continue; // the default text: the half's foreground
+    const raw = typeof e.scope === 'string' ? e.scope.split(',').map((x) => x.trim()).filter(Boolean) : Array.isArray(e.scope) ? e.scope : [];
+    const scopes = raw.filter(isSyntaxScope).slice(0, THEME_SCOPES_PER_RULE_MAX);
+    const rule: ThemeSyntaxRule = { scope: scopes.length === 1 ? scopes[0]! : scopes };
+    if (isSyntaxColour(settings.foreground)) rule.foreground = settings.foreground.toLowerCase();
+    if (isSyntaxColour(settings.background)) rule.background = settings.background.toLowerCase();
+    if (typeof settings.fontStyle === 'string') {
+      const style = settings.fontStyle.trim().split(/\s+/).filter(Boolean).join(' ');
+      if (isSyntaxFontStyle(style)) rule.fontStyle = style;
+    }
+    if (scopes.length === 0 || (rule.foreground === undefined && rule.background === undefined && rule.fontStyle === undefined) || rules.length >= THEME_SYNTAX_RULES_MAX) {
+      leftOut++;
+      continue;
+    }
+    rules.push(rule);
+  }
+  return { rules, leftOut };
 }
 
 // --- Detection --------------------------------------------------------------
@@ -380,7 +453,7 @@ export function importThemeText(text: string): ThemeImportResult {
     if ('colors' in obj || 'tokenColors' in obj) {
       const r = vscodeToThemeFile(obj);
       if (!r.ok) return asFailure(r);
-      return { ok: true, format: 'vscode', theme: r.theme! };
+      return { ok: true, format: 'vscode', theme: r.theme!, syntaxLeftOut: r.syntaxLeftOut };
     }
     return { ok: false, field: '(file)', message: 'not a theme this command knows: a Plannotator theme ("plannotatorTheme": 1), a base16 scheme (base00 to base0F) or a VS Code colour theme ("colors").' };
   }

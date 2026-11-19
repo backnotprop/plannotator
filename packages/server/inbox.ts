@@ -7929,7 +7929,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
       // The person's own themes, for the window's first frame (packages/shared/theme-files.ts).
       // A literal (CUSTOM_THEMES_SCRIPT_PATH), so the API table check reads this route.
-      if (path === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(dataDir);
+      if (path === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams, dataDir);
       // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
       if (req.method === "GET") {
         const appIcon = inboxAppIconResponse(path, faviconState());

@@ -630,7 +630,7 @@ export async function startPlanReviewServer(options: {
 			handleFavicon(res, url.pathname);
 		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
 			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
-			handleCustomThemesScript(res);
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
 			await handleSaveNotesRequest(req, res, { serverSession, notion: notionAvailable });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {

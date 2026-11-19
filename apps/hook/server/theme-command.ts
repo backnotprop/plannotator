@@ -140,6 +140,9 @@ export async function runThemeCommand(argv: string[], deps: ThemeCommandDeps): P
         say(`Note: the ${half} half does not set ${missing.join(", ")}; those take Plannotator's own colours.`);
       }
     }
+    if (imported.syntaxLeftOut) {
+      say(`Note: ${imported.syntaxLeftOut} of the file's code colour rules were left out (a scope, colour or font style Plannotator does not take); the rest are kept.`);
+    }
     for (const { half, ratio } of bodyTextContrast(theme)) {
       if (ratio < BODY_TEXT_CONTRAST_NOTE_BELOW) {
         say(`Note: in the ${half} half, body text on the background is ${ratio.toFixed(1)}:1, under the ${BODY_TEXT_CONTRAST_NOTE_BELOW}:1 most people need to read comfortably. Added as it is.`);

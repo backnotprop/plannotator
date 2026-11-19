@@ -4535,7 +4535,7 @@ export async function startReviewServer(
 
           // Favicon
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
-          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript();
+          if (url.pathname === CUSTOM_THEMES_SCRIPT_PATH && req.method === "GET") return handleCustomThemesScript(url.searchParams);
 
           // Code review's diagram engine, fetched by the page only for a
           // preview or guide overview that holds a diagram fence.

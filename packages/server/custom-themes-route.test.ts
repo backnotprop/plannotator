@@ -4,7 +4,8 @@
  * frame. The failures these guard: a server that answers the page for this
  * path instead (the SPA fallback: the theme never loads), a cached answer (a
  * theme added since would not show on reload), and a script that does not
- * carry the theme added in the data dir.
+ * carry the theme added in the data dir, or a theme's code colours not
+ * answered on `?syntax=<id>` (or put in the script every page waits for).
  * The Pi mirror is apps/pi-extension/custom-themes-route.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -58,6 +59,14 @@ describe("the custom themes script on the Bun servers", () => {
         const body = await (await fetch(`${server.url}/plannotator-themes.js`)).text();
         expect(body).toContain(".theme-harbor {");
         expect(body).toContain("--background: #0f1419;");
+        // Code colours: asked for when code first renders, never in the script.
+        expect((await fetch(`${server.url}/plannotator-themes.js?syntax=harbor`)).status).toBe(404);
+        saveCustomTheme(dataDir, { plannotatorTheme: 1, id: "mono", name: "Mono", dark: { background: "#272822", syntax: [{ scope: "keyword", foreground: "#f92672" }] } });
+        const syntax = await fetch(`${server.url}/plannotator-themes.js?syntax=mono`);
+        expect(syntax.status).toBe(200);
+        expect(syntax.headers.get("content-type")).toStartWith("application/json");
+        expect((await syntax.json()).dark.rules).toEqual([{ scope: "keyword", foreground: "#f92672" }]);
+        expect(await (await fetch(`${server.url}/plannotator-themes.js`)).text()).not.toContain("#f92672");
       } finally {
         server.stop();
       }

@@ -63,4 +63,9 @@ test("the window's themes script carries an added theme, read fresh on every loa
   const body = await (await script()).text();
   expect(body).toContain(".theme-harbor {");
   expect(body).toContain('"id":"harbor"');
+  // A theme's code colours, asked for when code first renders in the window.
+  saveCustomTheme(dataDir, { plannotatorTheme: 1, id: "mono", name: "Mono", dark: { background: "#272822", syntax: [{ scope: "keyword", foreground: "#f92672" }] } });
+  const syntax = await fetch(`http://127.0.0.1:${server.port}/plannotator-themes.js?syntax=mono`);
+  expect(syntax.status).toBe(200);
+  expect((await syntax.json()).dark.rules).toEqual([{ scope: "keyword", foreground: "#f92672" }]);
 });

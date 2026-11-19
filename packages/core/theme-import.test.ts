@@ -5,13 +5,15 @@
  * a source colour mapped to the wrong token, a half picked wrong (a light
  * scheme drawn as dark), a neutral grey button made the primary, a translucent
  * colour kept translucent, a converted theme that does not pass the same
- * validation a hand-written one does, and a converted id taking a built-in's.
+ * validation a hand-written one does, a converted id taking a built-in's, and a
+ * theme's code colours (VS Code tokenColors, base16's scope table) lost, changed
+ * or carried with something the validator would refuse.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { THEME_TOKENS, validateThemeFile, type ThemeFile } from './theme-file';
-import { importThemeText, parseBase16Yaml, parseJsonc, themeIdFromName } from './theme-import';
+import { BASE16_SYNTAX, importThemeText, parseBase16Yaml, parseJsonc, themeIdFromName, vscodeSyntaxRules } from './theme-import';
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, 'fixtures', 'themes', name), 'utf8');
 
@@ -155,5 +157,52 @@ describe('detection and ids', () => {
     expect(themeIdFromName('Tokyo Night')).toBe('tokyo-night-custom');
     expect(themeIdFromName('Café Noir ☕')).toBe('cafe-noir');
     expect(themeIdFromName('!!!')).toBe('custom-theme');
+  });
+});
+
+describe('code colours', () => {
+  const ruleFor = (theme: ThemeFile, half: 'dark' | 'light', scope: string) =>
+    theme[half]!.syntax!.find((rule) => (Array.isArray(rule.scope) ? rule.scope : [rule.scope]).includes(scope));
+
+  test("a VS Code theme's tokenColors come across as written; what the validator would refuse is left out and counted", () => {
+    const r = importThemeText(fixture('monokai-classic.vscode-theme.json'));
+    if (!r.ok) throw new Error(r.message);
+    // The odd scope and the named colour; the scope-less default entry is the half's foreground, not a rule.
+    expect(r.syntaxLeftOut).toBe(2);
+    const { theme } = imported(fixture('monokai-classic.vscode-theme.json'));
+    const rules = theme.dark!.syntax!;
+    expect(rules).toHaveLength(32);
+    expect(ruleFor(theme, 'dark', 'keyword')).toEqual({ scope: 'keyword', foreground: '#f92672' });
+    expect(ruleFor(theme, 'dark', 'string')).toEqual({ scope: 'string', foreground: '#e6db74' });
+    // A comma list is split into scopes; font styles and backgrounds stay.
+    expect(ruleFor(theme, 'dark', 'entity.name.class')).toEqual({ scope: ['entity.name.type', 'entity.name.class', 'entity.name.namespace', 'entity.name.scope-resolution'], foreground: '#a6e22e', fontStyle: 'underline' });
+    expect(ruleFor(theme, 'dark', 'invalid')).toEqual({ scope: 'invalid', background: '#f92672', fontStyle: '', foreground: '#f8f8f0' });
+    // A descendant selector is kept whole.
+    expect(ruleFor(theme, 'dark', 'meta.structure.dictionary.json string.quoted.double.json')?.foreground).toBe('#cfcfc2');
+    expect(JSON.stringify(rules)).not.toContain('<script>');
+    expect(JSON.stringify(rules)).not.toContain('"red"');
+  });
+
+  test('tokenColors past the cap are left out and counted, never refused', () => {
+    const many = Array.from({ length: 650 }, (_, i) => ({ scope: `meta.rule${i}`, settings: { foreground: '#abcdef' } }));
+    const { rules, leftOut } = vscodeSyntaxRules(many);
+    expect(rules).toHaveLength(600);
+    expect(leftOut).toBe(50);
+  });
+
+  test('a base16 scheme gets the base16 scope table in its own colours', () => {
+    const { theme } = imported(fixture('tomorrow-night.base16.yaml'));
+    expect(theme.dark!.syntax).toHaveLength(BASE16_SYNTAX.length);
+    // Tomorrow Night: base03 #969896 comments, base0B #b5bd68 strings, base0E #b294bb keywords, base0D #81a2be functions.
+    expect(ruleFor(theme, 'dark', 'comment')).toMatchObject({ foreground: '#969896', fontStyle: 'italic' });
+    expect(ruleFor(theme, 'dark', 'string')?.foreground).toBe('#b5bd68');
+    expect(ruleFor(theme, 'dark', 'keyword')?.foreground).toBe('#b294bb');
+    expect(ruleFor(theme, 'dark', 'entity.name.function')?.foreground).toBe('#81a2be');
+    expect(ruleFor(theme, 'dark', 'constant.numeric')?.foreground).toBe('#de935f');
+  });
+
+  test('a VS Code theme with no tokenColors has no code colours (code keeps Plannotator\'s)', () => {
+    const { theme } = imported(JSON.stringify({ name: 'Bare', type: 'dark', colors: { 'editor.background': '#101010' } }));
+    expect(theme.dark!.syntax).toBeUndefined();
   });
 });

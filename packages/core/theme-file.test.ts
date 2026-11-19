@@ -4,8 +4,9 @@
  * reaching the CSS (url(), var(), a `;` or `}` that closes the rule and starts
  * another, a quote, a line break), a theme taking a built-in's id, a refusal
  * that does not name its field, a left-out token not falling back to the
- * default theme's value for that half, and the body-text contrast reading a
- * different number than WCAG's.
+ * default theme's value for that half, the body-text contrast reading a
+ * different number than WCAG's, and code colour rules (`syntax`) carrying
+ * anything but scopes, #hex colours and the four font styles to the highlighter.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -16,8 +17,13 @@ import {
   contrastRatio,
   customThemeInfo,
   isCustomThemeInfo,
+  isSyntaxColour,
+  isSyntaxScope,
   isThemeColour,
   missingThemeTokens,
+  syntaxTextMateTheme,
+  THEME_SYNTAX_RULES_MAX,
+  themeSyntaxPayload,
   parseThemeColour,
   themeFileCss,
   themeFileModeSupport,
@@ -217,5 +223,103 @@ describe('body text contrast (a note, never a refusal)', () => {
     const r = validateThemeFile(ok({ dark: { background: '#202020', foreground: '#3a3a3a' } }));
     expect(r.ok).toBe(true);
     if (r.ok) expect(bodyTextContrast(r.theme)[0]!.ratio).toBeLessThan(4.5);
+  });
+});
+
+describe('code colours (syntax)', () => {
+  const withSyntax = (syntax: unknown) => ok({ dark: { background: '#0f1419', syntax } });
+  const refusal = (syntax: unknown) => {
+    const r = validateThemeFile(withSyntax(syntax));
+    return r.ok ? null : r.problem;
+  };
+
+  test('rules pass as written, scopes as a string or a list, and stay out of the stylesheet', () => {
+    const rules = [
+      { scope: 'comment', foreground: '#75715e', fontStyle: 'italic' },
+      { scope: ['string', 'markup.inline.raw'], foreground: '#E6DB74' },
+      { scope: 'source.js meta.function-call, entity.name.function', foreground: '#a6e22e', fontStyle: 'bold underline' },
+      { scope: 'text.html.markdown - meta.code', background: '#3e3d3280', fontStyle: '' },
+    ];
+    const r = validateThemeFile(withSyntax(rules));
+    if (!r.ok) throw new Error(`${r.problem.field}: ${r.problem.message}`);
+    expect(r.theme.dark!.syntax).toEqual(rules);
+    expect(themeFileCss(r.theme)).not.toContain('syntax');
+    expect(themeFileCss(r.theme)).not.toContain('comment');
+    expect(customThemeInfo(r.theme).syntax).toEqual(['dark']);
+  });
+
+  test('each refusal names the rule and the field that is wrong', () => {
+    expect(refusal({ scope: 'comment' })?.field).toBe('dark.syntax');
+    expect(refusal([{ scope: 'comment', foreground: 'red' }])?.field).toBe('dark.syntax[0].foreground');
+    expect(refusal([{ scope: 'comment', foreground: 'rgb(1 2 3)' }])?.field).toBe('dark.syntax[0].foreground');
+    expect(refusal([{ scope: 'comment', fontStyle: 'oblique' }])?.field).toBe('dark.syntax[0].fontStyle');
+    expect(refusal([{ scope: 'comment', fontStyle: 'bold bold' }])?.field).toBe('dark.syntax[0].fontStyle');
+    expect(refusal([{ scope: 'comment', foreground: '#fff', name: 'Comment' }])?.field).toBe('dark.syntax[0].name');
+    expect(refusal([{ scope: 'comment', foreground: '#fff' }, { scope: 'a</style>', foreground: '#fff' }])?.field).toBe('dark.syntax[1].scope');
+    expect(refusal([{ scope: [], foreground: '#fff' }])?.field).toBe('dark.syntax[0].scope');
+    expect(refusal([{ scope: 'comment' }])?.field).toBe('dark.syntax[0]');
+    expect(refusal(Array.from({ length: THEME_SYNTAX_RULES_MAX + 1 }, () => ({ scope: 'comment', foreground: '#fff' })))?.field).toBe('dark.syntax');
+  });
+
+  test('a scope holds no markup, CSS or string character', () => {
+    for (const bad of ['a"b', "a'b", 'a<b', 'a;b', 'a{b}', 'a/b', 'a\\b', 'a\nb', 'a@b', 'a#b', '[a]', ' ', '...', 'x'.repeat(201)]) {
+      expect(isSyntaxScope(bad)).toBe(false);
+    }
+    for (const good of ['comment', 'source.ts meta.var.expr', 'string - string.regexp', 'L:source.js', '(a | b) & c', 'meta.tag.*']) {
+      expect(isSyntaxScope(good)).toBe(true);
+    }
+  });
+
+  test('fuzz: an accepted scope or code colour is made of its own characters only', () => {
+    const alphabet = 'abcdefgz09._ -,:>|&()*+#ABCDEF;{}<>"\'\\\n\t/@[]=!%$`';
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    const seeds = ['comment', 'entity.name.function', 'source.js meta.tag', 'string - string.regexp', '#a6e22e', '#fff', '#3e3d3280'];
+    let accepted = 0;
+    let refused = 0;
+    for (let i = 0; i < 40_000; i++) {
+      let s = seeds[Math.floor(rand() * seeds.length)]!;
+      const edits = 1 + Math.floor(rand() * 3);
+      for (let e = 0; e < edits; e++) {
+        const at = Math.floor(rand() * (s.length + 1));
+        const ch = alphabet[Math.floor(rand() * alphabet.length)]!;
+        const op = rand();
+        s = op < 0.4 ? s.slice(0, at) + ch + s.slice(at) : op < 0.7 ? s.slice(0, at) + s.slice(at + 1) : s.slice(0, at) + ch + s.slice(at + 1);
+      }
+      const asScope = isSyntaxScope(s);
+      const asColour = isSyntaxColour(s);
+      if (!asScope && !asColour) {
+        refused++;
+        continue;
+      }
+      accepted++;
+      if (asScope) expect(s).toMatch(/^[A-Za-z0-9._ ,:>|&()*+-]+$/);
+      if (asColour) expect(s).toMatch(/^#[0-9a-fA-F]{3,8}$/);
+      // `>` is a selector operator; `<` never is.
+      expect(s).not.toMatch(/[;{}<"'\\\n\t/@\[\]=!%$`]/);
+    }
+    expect(accepted).toBeGreaterThan(500);
+    expect(refused).toBeGreaterThan(500);
+  });
+
+  test('the page checks the code colours it fetches again, and turns them into a TextMate theme', () => {
+    const r = validateThemeFile(ok({ dark: { background: '#272822', foreground: '#f8f8f2', syntax: [{ scope: 'keyword', foreground: '#f92672' }] } }));
+    if (!r.ok) throw new Error('fixture');
+    const payload = themeSyntaxPayload(r.theme);
+    expect(Object.keys(payload)).toEqual(['dark']);
+    const theme = syntaxTextMateTheme('plannotator-custom-harbor-dark', 'dark', JSON.parse(JSON.stringify(payload.dark)));
+    expect(theme).toEqual({
+      name: 'plannotator-custom-harbor-dark',
+      type: 'dark',
+      colors: { 'editor.foreground': '#f8f8f2', 'editor.background': '#272822' },
+      tokenColors: [{ settings: { foreground: '#f8f8f2', background: '#272822' } }, { scope: 'keyword', settings: { foreground: '#f92672' } }],
+    });
+    // A forged answer (a rule the file could never hold) is refused whole.
+    const forged = { ...payload.dark!, rules: [...payload.dark!.rules, { scope: 'x', foreground: 'url(x)' }] };
+    expect(syntaxTextMateTheme('n', 'dark', forged)).toBeNull();
+    expect(syntaxTextMateTheme('n', 'dark', { ...payload.dark!, foreground: 'red;}' })).toBeNull();
+    // A ground written as oklch() reaches the highlighter as #hex.
+    const oklch = syntaxTextMateTheme('n', 'dark', { ...payload.dark!, background: 'oklch(0.2 0 0)' });
+    expect(oklch!.colors['editor.background']).toMatch(/^#[0-9a-f]{6,8}$/);
   });
 });

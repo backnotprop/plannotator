@@ -66,13 +66,28 @@ export type ThemeTokens = Record<ThemeToken, string> & Partial<Record<OptionalTh
 
 export type ThemeFileHalf = 'dark' | 'light';
 
+/**
+ * One code colour rule, a VS Code / TextMate `tokenColors` entry flattened:
+ * the scopes it colours (a string, comma-separated as TextMate allows, or a
+ * list) and at least one of a text colour, a background and a font style.
+ */
+export interface ThemeSyntaxRule {
+  scope: string | string[];
+  foreground?: string;
+  background?: string;
+  fontStyle?: string;
+}
+
+/** One half as written: its colours, and optionally its code colours (`syntax`). */
+export type ThemeFileHalfTokens = Partial<ThemeTokens> & { syntax?: ThemeSyntaxRule[] };
+
 /** A validated theme file. Each half is partial as written; `resolveThemeHalf` fills it. */
 export interface ThemeFile {
   plannotatorTheme: 1;
   id: string;
   name: string;
-  dark?: Partial<ThemeTokens>;
-  light?: Partial<ThemeTokens>;
+  dark?: ThemeFileHalfTokens;
+  light?: ThemeFileHalfTokens;
 }
 
 /** The marker key (and its one version) that says a JSON file is in this format. */
@@ -85,8 +100,20 @@ export const THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const THEME_NAME_MAX = 60;
 /** The longest colour value accepted (the longest real one, `rgba(100%, 100%, 100%, 0.5)`, is about 30). */
 export const THEME_COLOUR_MAX = 64;
-/** The largest theme file kept in the data dir. */
-export const THEME_FILE_MAX_BYTES = 16 * 1024;
+/**
+ * The largest theme file kept in the data dir. A theme's colours fit in 2 KB;
+ * the rest is room for code colours: the largest well-known VS Code themes
+ * carry a few hundred `tokenColors` rules, tens of KB a half, so two halves of
+ * up to THEME_SYNTAX_RULES_MAX rules fit with room.
+ */
+export const THEME_FILE_MAX_BYTES = 256 * 1024;
+/** The most code colour rules one half may carry (`syntax`). */
+export const THEME_SYNTAX_RULES_MAX = 600;
+/** The longest scope selector in a rule, and the most selectors one rule may list. */
+export const THEME_SCOPE_MAX = 200;
+export const THEME_SCOPES_PER_RULE_MAX = 100;
+/** The font styles a code colour rule may set (VS Code's set; "" clears them). */
+export const THEME_FONT_STYLES = ['italic', 'bold', 'underline', 'strikethrough'] as const;
 /** The most custom themes one data dir holds. */
 export const CUSTOM_THEME_LIMIT = 32;
 
@@ -333,6 +360,74 @@ export interface ThemeFileProblem {
 export type ThemeFileResult = { ok: true; theme: ThemeFile } | { ok: false; problem: ThemeFileProblem };
 
 const KNOWN_TOKENS: ReadonlySet<string> = new Set<string>([...THEME_TOKENS, ...OPTIONAL_THEME_TOKENS]);
+const SYNTAX_KEY = 'syntax';
+const RULE_KEYS: ReadonlySet<string> = new Set(['scope', 'foreground', 'background', 'fontStyle']);
+/**
+ * A scope selector: TextMate scope names (`entity.name.function`), descendant
+ * selectors with spaces, comma lists, and the selector operators `- > | & ( ) *`.
+ * No quotes, brackets, braces, semicolons, slashes, `<`, `@`, `#` or control
+ * characters; it is data for the highlighter, never markup or CSS.
+ */
+const SCOPE_RE = /^[A-Za-z0-9._ ,:>|&()*+-]+$/;
+const SYNTAX_HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** A code colour: hex only (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), as every VS Code and base16 theme writes them. */
+export function isSyntaxColour(value: unknown): value is string {
+  return typeof value === 'string' && SYNTAX_HEX_RE.test(value) && isThemeColour(value);
+}
+
+/** A font style: "" or space-separated, each of THEME_FONT_STYLES at most once. */
+export function isSyntaxFontStyle(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (value === '') return true;
+  const parts = value.split(' ');
+  return parts.length <= THEME_FONT_STYLES.length && new Set(parts).size === parts.length && parts.every((p) => (THEME_FONT_STYLES as readonly string[]).includes(p));
+}
+
+/** One scope selector string. */
+export function isSyntaxScope(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= THEME_SCOPE_MAX && SCOPE_RE.test(value) && /[A-Za-z]/.test(value);
+}
+
+/**
+ * Validate a half's `syntax` list. Returns the rules as kept (only the four
+ * known keys, every value checked) or the first problem, naming its field
+ * (`dark.syntax[3].foreground`).
+ */
+export function validateSyntaxRules(value: unknown, field: string): { ok: true; rules: ThemeSyntaxRule[] } | { ok: false; problem: ThemeFileProblem } {
+  const no = (f: string, message: string) => ({ ok: false as const, problem: { field: f, message } });
+  if (!Array.isArray(value)) return no(field, 'a list of code colour rules, like [{ "scope": "comment", "foreground": "#6a737d" }].');
+  if (value.length > THEME_SYNTAX_RULES_MAX) return no(field, `${value.length} rules; at most ${THEME_SYNTAX_RULES_MAX}.`);
+  const rules: ThemeSyntaxRule[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const at = `${field}[${i}]`;
+    const rule = value[i];
+    if (!isPlainObject(rule)) return no(at, 'a rule is an object: { "scope", "foreground", "background", "fontStyle" }.');
+    for (const key of Object.keys(rule)) {
+      if (!RULE_KEYS.has(key)) return no(`${at}.${key}`, 'not a rule field (scope, foreground, background, fontStyle).');
+    }
+    const { scope, foreground, background, fontStyle } = rule;
+    const scopes = Array.isArray(scope) ? scope : [scope];
+    if (scopes.length === 0 || scopes.length > THEME_SCOPES_PER_RULE_MAX || !scopes.every(isSyntaxScope)) {
+      return no(`${at}.scope`, `${shown(Array.isArray(scope) ? scopes.find((x) => !isSyntaxScope(x)) ?? scope : scope)} is not a scope: letters, digits and . _ - , : > | & ( ) * + and spaces, at most ${THEME_SCOPE_MAX}; a list holds at most ${THEME_SCOPES_PER_RULE_MAX}.`);
+    }
+    const out: ThemeSyntaxRule = { scope: Array.isArray(scope) ? [...(scope as string[])] : (scope as string) };
+    for (const [key, v] of [['foreground', foreground], ['background', background]] as const) {
+      if (v === undefined) continue;
+      if (!isSyntaxColour(v)) return no(`${at}.${key}`, `${shown(v)} is not a code colour. Use #rgb, #rrggbb or #rrggbbaa.`);
+      out[key] = v;
+    }
+    if (fontStyle !== undefined) {
+      if (!isSyntaxFontStyle(fontStyle)) return no(`${at}.fontStyle`, `${shown(fontStyle)} is not a font style: "", or any of ${THEME_FONT_STYLES.join(', ')} separated by spaces.`);
+      out.fontStyle = fontStyle;
+    }
+    if (out.foreground === undefined && out.background === undefined && out.fontStyle === undefined) {
+      return no(at, 'a rule sets a foreground, a background or a fontStyle.');
+    }
+    rules.push(out);
+  }
+  return { ok: true, rules };
+}
 const TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([THEME_FILE_MARKER, 'id', 'name', 'dark', 'light']);
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 // eslint-disable-next-line no-control-regex
@@ -379,11 +474,17 @@ export function validateThemeFile(input: unknown): ThemeFileResult {
     const tokens = input[half];
     if (tokens === undefined) continue;
     if (!isPlainObject(tokens)) return refuse(half, 'an object of colours, like { "background": "#101418" }.');
-    const out: Partial<ThemeTokens> = {};
+    const out: ThemeFileHalfTokens = {};
     for (const [key, value] of Object.entries(tokens)) {
+      if (key === SYNTAX_KEY) {
+        const checked = validateSyntaxRules(value, `${half}.${SYNTAX_KEY}`);
+        if (!checked.ok) return { ok: false, problem: (checked as { problem: ThemeFileProblem }).problem };
+        if ((checked as { rules: ThemeSyntaxRule[] }).rules.length > 0) out.syntax = (checked as { rules: ThemeSyntaxRule[] }).rules;
+        continue;
+      }
       if (!KNOWN_TOKENS.has(key)) {
         const hint = key.startsWith('--') && KNOWN_TOKENS.has(key.slice(2)) ? ` Write it without the leading --: "${key.slice(2)}".` : '';
-        return refuse(`${half}.${key}`, `not a theme colour.${hint || ` The colours: ${THEME_TOKENS.join(', ')}, and optionally ${OPTIONAL_THEME_TOKENS.join(', ')}.`}`);
+        return refuse(`${half}.${key}`, `not a theme colour.${hint || ` The colours: ${THEME_TOKENS.join(', ')}, and optionally ${OPTIONAL_THEME_TOKENS.join(', ')}; code colours go in "syntax".`}`);
       }
       if (!isThemeColour(value)) {
         return refuse(`${half}.${key}`, `${shown(value)} is not a colour. Use #rrggbb, rgb(), hsl() or oklch() with plain numbers.`);
@@ -404,9 +505,58 @@ export function themeFileModeSupport(theme: Pick<ThemeFile, 'dark' | 'light'>): 
   return theme.dark ? 'dark-only' : 'light-only';
 }
 
-/** One half's full token table: the file's colours, and the default theme's for the rest. */
-export function resolveThemeHalf(tokens: Partial<ThemeTokens> | undefined, half: ThemeFileHalf): ThemeTokens {
-  return { ...DEFAULT_THEME_TOKENS[half], ...(tokens ?? {}) };
+/** One half's full token table: the file's colours, and the default theme's for the rest (code colours are not tokens). */
+export function resolveThemeHalf(tokens: ThemeFileHalfTokens | undefined, half: ThemeFileHalf): ThemeTokens {
+  const { syntax: _syntax, ...colours } = tokens ?? {};
+  return { ...DEFAULT_THEME_TOKENS[half], ...colours };
+}
+
+/** The halves whose code colours the file sets (`syntax`). */
+export function themeSyntaxHalves(theme: Pick<ThemeFile, 'dark' | 'light'>): ThemeFileHalf[] {
+  return (['dark', 'light'] as const).filter((half) => (theme[half]?.syntax?.length ?? 0) > 0);
+}
+
+/** One half's code colours as the page fetches them: its rules and the text and ground they sit on. */
+export interface ThemeSyntaxHalf {
+  foreground: string;
+  background: string;
+  rules: ThemeSyntaxRule[];
+}
+
+/** A theme's code colours, per half that has them (`/plannotator-themes.js?syntax=<id>`). */
+export function themeSyntaxPayload(theme: ThemeFile): Partial<Record<ThemeFileHalf, ThemeSyntaxHalf>> {
+  const out: Partial<Record<ThemeFileHalf, ThemeSyntaxHalf>> = {};
+  for (const half of themeSyntaxHalves(theme)) {
+    const tokens = resolveThemeHalf(theme[half], half);
+    out[half] = { foreground: tokens.foreground, background: tokens.background, rules: theme[half]!.syntax! };
+  }
+  return out;
+}
+
+/**
+ * The TextMate (VS Code / Shiki) theme one half's code colours make, checked
+ * again (the page received it as data): every scope, colour and font style
+ * passes the validators or the whole half is refused (null). The highlighter
+ * colours whatever no rule names in the half's foreground.
+ */
+export function syntaxTextMateTheme(name: string, half: ThemeFileHalf, value: unknown): { name: string; type: ThemeFileHalf; colors: Record<string, string>; tokenColors: unknown[] } | null {
+  if (!isPlainObject(value)) return null;
+  const { foreground, background, rules } = value;
+  if (!isThemeColour(foreground) || !isThemeColour(background)) return null;
+  const checked = validateSyntaxRules(rules, 'syntax');
+  if (!checked.ok) return null;
+  const kept = (checked as { rules: ThemeSyntaxRule[] }).rules;
+  const fg = isSyntaxColour(foreground) ? foreground : rgbaToHex(parseThemeColour(foreground)!);
+  const bg = isSyntaxColour(background) ? background : rgbaToHex(parseThemeColour(background)!);
+  return {
+    name,
+    type: half,
+    colors: { 'editor.foreground': fg, 'editor.background': bg },
+    tokenColors: [
+      { settings: { foreground: fg, background: bg } },
+      ...kept.map(({ scope, ...settings }) => ({ scope, settings })),
+    ],
+  };
 }
 
 /** The tokens a file left out of one half (they take the default theme's value). */
@@ -457,6 +607,8 @@ export interface CustomThemeInfo {
   name: string;
   modeSupport: 'both' | 'dark-only' | 'light-only';
   colors: { dark: ThemeSwatches; light: ThemeSwatches };
+  /** The halves with code colours of their own, fetched when code first renders. */
+  syntax?: ThemeFileHalf[];
 }
 
 function swatchesOf(tokens: ThemeTokens): ThemeSwatches {
@@ -468,14 +620,16 @@ export function customThemeInfo(theme: ThemeFile): CustomThemeInfo {
   const modeSupport = themeFileModeSupport(theme);
   const dark = theme.dark ? swatchesOf(resolveThemeHalf(theme.dark, 'dark')) : undefined;
   const light = theme.light ? swatchesOf(resolveThemeHalf(theme.light, 'light')) : undefined;
-  return { id: theme.id, name: theme.name, modeSupport, colors: { dark: (dark ?? light)!, light: (light ?? dark)! } };
+  const syntax = themeSyntaxHalves(theme);
+  return { id: theme.id, name: theme.name, modeSupport, colors: { dark: (dark ?? light)!, light: (light ?? dark)! }, ...(syntax.length > 0 ? { syntax } : {}) };
 }
 
 /** Validate one registry entry as the page receives it (the page checks again: it is data from a script). */
 export function isCustomThemeInfo(value: unknown): value is CustomThemeInfo {
   if (!isPlainObject(value)) return false;
-  const { id, name, modeSupport, colors } = value;
+  const { id, name, modeSupport, colors, syntax } = value;
   if (typeof id !== 'string' || !THEME_ID_PATTERN.test(id) || isBuiltInThemeId(id)) return false;
+  if (syntax !== undefined && !(Array.isArray(syntax) && syntax.length <= 2 && syntax.every((h) => h === 'dark' || h === 'light'))) return false;
   if (typeof name !== 'string' || name.length === 0 || name.length > THEME_NAME_MAX) return false;
   if (modeSupport !== 'both' && modeSupport !== 'dark-only' && modeSupport !== 'light-only') return false;
   if (!isPlainObject(colors)) return false;

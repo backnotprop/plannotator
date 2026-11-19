@@ -21,6 +21,7 @@ import {
   THEME_FILE_MAX_BYTES,
   THEME_ID_PATTERN,
   themeFileCss,
+  themeSyntaxPayload,
   validateThemeFile,
   type CustomThemeInfo,
   type ThemeFile,
@@ -35,6 +36,30 @@ export function customThemesDir(dataDir: string): string {
 export interface SkippedThemeFile {
   file: string;
   reason: string;
+}
+
+/**
+ * Each file's last reading, keyed by path and checked against its size and
+ * modification time: every page load lists the themes (the page script), and a
+ * theme with code colours can run to a few hundred rules, so an unchanged file
+ * is not parsed and validated again.
+ */
+const readings = new Map<string, { size: number; mtimeMs: number; result: { theme: ThemeFile } | { reason: string } }>();
+
+function readThemeFile(path: string, file: string, size: number, mtimeMs: number): { theme: ThemeFile } | { reason: string } {
+  const last = readings.get(path);
+  if (last && last.size === size && last.mtimeMs === mtimeMs) return last.result;
+  let result: { theme: ThemeFile } | { reason: string };
+  try {
+    const checked = validateThemeFile(JSON.parse(readFileSync(path, "utf8")));
+    if (!checked.ok) result = { reason: `${checked.problem.field}: ${checked.problem.message}` };
+    else if (`${checked.theme.id}.json` !== file) result = { reason: `its id is "${checked.theme.id}"; the file must be named ${checked.theme.id}.json.` };
+    else result = { theme: checked.theme };
+  } catch (err) {
+    result = { reason: `not readable as JSON (${err instanceof Error ? err.message : String(err)}).` };
+  }
+  readings.set(path, { size, mtimeMs, result });
+  return result;
 }
 
 /** The custom themes in the data dir, sorted by name, and the files that were skipped. */
@@ -61,16 +86,9 @@ export function listCustomThemes(dataDir: string): { themes: ThemeFile[]; skippe
         skipped.push({ file, reason: `larger than ${THEME_FILE_MAX_BYTES / 1024} KB.` });
         continue;
       }
-      const checked = validateThemeFile(JSON.parse(readFileSync(path, "utf8")));
-      if (!checked.ok) {
-        skipped.push({ file, reason: `${checked.problem.field}: ${checked.problem.message}` });
-        continue;
-      }
-      if (`${checked.theme.id}.json` !== file) {
-        skipped.push({ file, reason: `its id is "${checked.theme.id}"; the file must be named ${checked.theme.id}.json.` });
-        continue;
-      }
-      themes.push(checked.theme);
+      const read = readThemeFile(path, file, stat.size, stat.mtimeMs);
+      if ("reason" in read) skipped.push({ file, reason: read.reason });
+      else themes.push(read.theme);
     } catch (err) {
       skipped.push({ file, reason: `not readable as JSON (${err instanceof Error ? err.message : String(err)}).` });
     }
@@ -105,7 +123,9 @@ export function saveCustomTheme(dataDir: string, theme: ThemeFile): SaveCustomTh
   if (!replaced && listCustomThemes(dataDir).themes.length >= CUSTOM_THEME_LIMIT) {
     return { ok: false, code: "too_many", message: `${CUSTOM_THEME_LIMIT} custom themes is the most; remove one first (plannotator theme remove <id>).` };
   }
-  const body = `${JSON.stringify(checked.theme, null, 2)}\n`;
+  // Indented to be read and edited by hand; compact when that would not fit (a theme with many code colour rules).
+  const pretty = `${JSON.stringify(checked.theme, null, 2)}\n`;
+  const body = Buffer.byteLength(pretty) <= THEME_FILE_MAX_BYTES ? pretty : `${JSON.stringify(checked.theme)}\n`;
   if (Buffer.byteLength(body) > THEME_FILE_MAX_BYTES) return { ok: false, code: "not_saved", message: `the theme is larger than ${THEME_FILE_MAX_BYTES / 1024} KB.` };
   try {
     mkdirSync(dir, { recursive: true });
@@ -169,12 +189,47 @@ export function customThemesScript(dataDir: string): string {
   return `(function(){var d=${scriptSafeJson(payload)};window.__PLANNOTATOR_CUSTOM_THEMES__=d.themes;if(!d.css)return;var s=document.createElement("style");s.id="plannotator-custom-themes";s.textContent=d.css;(document.head||document.documentElement).appendChild(s)})();\n`;
 }
 
-/** The route every server answers with customThemesScript. */
+/** The route every server answers with customThemesScript (and, with `?syntax=<id>`, customThemeSyntaxJson). */
 export const CUSTOM_THEMES_SCRIPT_PATH = "/plannotator-themes.js";
+
+/**
+ * One custom theme's code colours as JSON (`themeSyntaxPayload`: per half that
+ * has them, its rules and the text and ground they sit on), or null when there
+ * is no such theme or it has none. Kept out of the page script, which runs
+ * before the first paint on every page: the page asks for it when code first
+ * renders in that theme (packages/ui/utils/customSyntaxThemes.ts).
+ */
+export function customThemeSyntaxJson(dataDir: string, id: string): string | null {
+  const theme = readCustomTheme(dataDir, id);
+  if (!theme) return null;
+  const payload = themeSyntaxPayload(theme);
+  return Object.keys(payload).length > 0 ? JSON.stringify(payload) : null;
+}
+
+/** The route's answer for a request's query: the page script, or with `?syntax=<id>` that theme's code colours (404 when it has none). */
+export function customThemesAnswer(dataDir: string, search: URLSearchParams): { status: number; headers: Record<string, string>; body: string } {
+  const id = search.get("syntax");
+  if (id === null) return { status: 200, headers: CUSTOM_THEMES_SCRIPT_HEADERS, body: customThemesScript(dataDir) };
+  let json: string | null = null;
+  try {
+    json = THEME_ID_PATTERN.test(id) ? customThemeSyntaxJson(dataDir, id) : null;
+  } catch {
+    json = null;
+  }
+  if (json === null) return { status: 404, headers: { ...CUSTOM_THEME_SYNTAX_HEADERS, "Content-Type": "text/plain; charset=utf-8" }, body: "no code colours for that theme" };
+  return { status: 200, headers: CUSTOM_THEME_SYNTAX_HEADERS, body: json };
+}
 
 /** The headers of that answer: a script, read fresh on every page load (a theme added since shows on reload). */
 export const CUSTOM_THEMES_SCRIPT_HEADERS: Record<string, string> = {
   "Content-Type": "text/javascript; charset=utf-8",
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+};
+
+/** The headers of a theme's code colours: JSON, read fresh like the script. */
+export const CUSTOM_THEME_SYNTAX_HEADERS: Record<string, string> = {
+  "Content-Type": "application/json; charset=utf-8",
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
 };

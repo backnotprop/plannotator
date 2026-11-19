@@ -12,6 +12,8 @@ import { buildPierreFontCSS } from '../utils/pierreFontCss';
  * the import path the review editor has always used.
  */
 import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import * as pierreDiffs from '@pierre/diffs';
+import { connectCustomSyntaxThemes, type CustomSyntaxPierre } from '@plannotator/ui/utils/customSyntaxThemes';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
 export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
 
@@ -266,6 +268,8 @@ export function usePierreTheme(options?: {
     const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
     const border = styles.getPropertyValue('--border').trim();
     const primary = styles.getPropertyValue('--primary').trim();
+    // A custom theme's code colours are themes Pierre resolves by name: registered before the name reaches it.
+    connectCustomSyntaxThemes(pierreDiffs as unknown as CustomSyntaxPierre);
     const syntaxTheme = resolveSyntaxTheme(colorTheme, mode);
     if (!bg || !fg) return { type: mode, css: '', syntaxTheme };
     const fontCSS = buildPierreFontCSS(fontFamily, fontSize);

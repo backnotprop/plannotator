@@ -72,6 +72,9 @@ describe("plannotator theme", () => {
     expect(vscode.stdout).toContain('"Monokai Night" (monokai-night), converted from a VS Code theme');
     expect(w.themes()).toEqual(["instrument.json", "monokai-night.json", "tomorrow-night.json"]);
     expect(ours.stderr + base16.stderr + vscode.stderr).toBe("");
+    // The VS Code theme's code colours came with it; the two rules it could not take are a note, not a refusal.
+    expect(lines(vscode.stdout).filter((line) => line.startsWith("Note: 2 of the file's code colour rules were left out"))).toHaveLength(1);
+    expect(lines(base16.stdout).some((line) => line.includes("code colour"))).toBe(false);
   }, 60_000);
 
   test("add refuses a bad file in one stderr line naming the field, exits 1, and writes nothing", () => {

@@ -15,6 +15,8 @@ export interface ThemeInfo {
   builtIn: boolean;
   modeSupport: 'both' | 'dark-only' | 'light-only';
   syntaxHighlighting?: boolean;
+  /** A custom theme's halves with code colours of their own (customSyntaxThemes.ts). */
+  syntax?: ('dark' | 'light')[];
   colors: {
     dark: ThemeColors;
     light: ThemeColors;
@@ -635,7 +637,14 @@ function toCustomThemes(list: unknown): ThemeInfo[] {
   for (const entry of list) {
     if (!isCustomThemeInfo(entry) || seen.has(entry.id)) continue;
     seen.add(entry.id);
-    out.push({ id: entry.id, name: entry.name, builtIn: false, modeSupport: entry.modeSupport, colors: entry.colors });
+    out.push({
+      id: entry.id,
+      name: entry.name,
+      builtIn: false,
+      modeSupport: entry.modeSupport,
+      colors: entry.colors,
+      ...(entry.syntax?.length ? { syntax: [...entry.syntax], syntaxHighlighting: true } : {}),
+    });
   }
   return out;
 }
