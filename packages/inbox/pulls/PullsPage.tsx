@@ -298,6 +298,7 @@ export function PullsPage(given: PullsPageProps) {
             notRanked={ranked.notRanked}
             judgments={judgments}
             riskFailed={riskFailed}
+            autoRuns={risk.answer?.auto_runs}
             projectNames={props.projectNames}
             selected={props.threadId ?? open?.stack.id ?? null}
             phone={phone}
