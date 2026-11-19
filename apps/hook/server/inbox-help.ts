@@ -36,7 +36,9 @@ import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
-import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
+import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-reports";
+import { INBOX_HELP_TOPICS_LINES } from "./inbox-help-before-after";
+import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
@@ -49,6 +51,27 @@ export interface InboxToolGuide {
   args: readonly string[];
   lines: readonly string[];
 }
+
+/** The "Before and after" section's example (approval "before-after"): one place, a Before as quoted lines, two versions and a choice that keeps today's words. */
+export const INBOX_BEFORE_AFTER_EXAMPLE = [
+  ":::question",
+  "New words for the line above a file that changed after it was sent?",
+  "",
+  "Where: The line above a file you open from a thread, shown when the file changed on disk after the agent sent it.",
+  "Shows: ![A file opened from a thread, the line circled](/tmp/file-line.png)",
+  "Before: Changed since Claude Code sent it. [Open the version it sent](#)",
+  "Source: packages/inbox/components/FileLine.tsx:88",
+  "",
+  "- [ ] Say when",
+  "    After: Changed since Claude Code sent it at 5:40 PM. [Open the version it sent](#)",
+  "- [ ] Say edited",
+  "    After: Edited since Claude Code sent it. [Open the version it sent](#)",
+  "- [ ] Leave it",
+  "",
+  "Recommended: Say when",
+  "Why: the time says how stale the sent version is.",
+  ":::",
+].join("\n");
 
 /** The `http://127.0.0.1:<port>/mcp` address with the port left open: it changes. */
 export const INBOX_HELP_MCP_URL = "http://127.0.0.1:<port>/mcp";
@@ -114,6 +137,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread, `reply_to`, `supersedes` or `done` is refused.",
       `- ${INBOX_SHOWING_RULE}`,
       `- Pictures: ${INBOX_PICTURES_RULE}`,
+      `- Before and after: ${INBOX_CHANGE_RULE}`,
       `- ${INBOX_DELEGATED_OPTIONS_RULE}`,
       "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show; copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
       "- Fenced blocks in `body` that draw: a block fenced as `mermaid` or `dot` draws as a diagram, and one fenced as `html` draws as a live page in the message (a chart, an SVG drawing, a small mock). The page runs in a sandbox: its scripts run and it may load libraries, data, images and fonts over https, but it cannot reach the Inbox, the person's files or a path beside you (give images as https or data: URLs). Leave its background transparent so it sits in the message, and use the theme's variables: `var(--foreground)`, `var(--muted-foreground)`, `var(--border)`, `var(--chart-1)` to `var(--chart-5)`, `var(--font-sans)`. Let content set its height: do not use vh units or `height:100%` on html or body (the frame takes the page's height, so the page would grow without end). It shows up to 480 px tall, then Show more; the person can open it full screen or read its code. A block fenced as `svg` shows as an image.",
@@ -206,11 +230,12 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     lines: [
       "A routine in the Plannotator Inbox: a saved prompt that an agent on this computer runs on a schedule; every run replies in the routine's own Inbox thread, made at its first run, and the person replies there to that run. Make one only when the person asks for work to run on its own, on a schedule (\"every weekday at 9, triage new issues\").",
       "- `op`: `create`, `list`, `get`, `update`, `on`, `off`, `run` or `delete`. Every op but create and list takes `id` (`sch_…`). `update` changes only the fields you pass.",
-      "- create: `name` (a few words), `prompt` (what each run is asked, whole), `schedule`, and optionally `if_missed`, `folder` (`{ \"path\": … }`, run in that folder itself, never home, `/` or a hidden folder; default: your project folder; `{ \"scratch\": true }` for a new one), `agent` (`claude-code`, `codex`, `opencode` or `pi`; default your own), `model`, `effort`, `attachments` (full paths). `schedule`: `{ \"cron\": \"0 9 * * 1-5\", \"tz\": \"America/New_York\" }` (5-field cron), `{ \"at\": \"2026-11-20T17:00\" }` for once, or `null` (it runs only when someone runs it); `tz` is optional: this computer's zone. A schedule's runs are at least 15 minutes apart; a closer schedule is refused with `schedule_too_frequent`. `if_missed`: `run_once` (default: one run when the computer wakes) or `skip`.",
-      "- One you create arrives off. The person turns it on the first time, in the Inbox; before that, `on` and `run` answer `routine_not_approved` and change nothing. After that you may `update`, turn it `on` or `off`, `run` it and `delete` it. Changing its folder or its agent turns it off again until the person turns it back on.",
+      "- create: `name` (a few words), `prompt` (what each run is asked, whole), `schedule`, and optionally `if_missed`, `folder` (`{ \"path\": … }`, run in that folder itself, never home, `/` or a hidden folder; default: your project folder; `{ \"scratch\": true }` for a new one), `agent` (`claude-code`, `codex`, `opencode` or `pi`; default your own), `model`, `effort`, `attachments` (full paths). `schedule`: `{ \"cron\": \"0 9 * * 1-5\", \"tz\": \"America/New_York\" }` (5-field cron), `{ \"at\": \"<YYYY-MM-DDTHH:MM>\" }` for once, or `null` (it runs only when someone runs it); `tz` is optional: this computer's zone. A schedule's runs are at least 15 minutes apart; a closer schedule is refused with `schedule_too_frequent`. `if_missed`: `run_once` (default: one run when the computer wakes) or `skip`.",
+      "- One you create arrives off, unless the person asked you for it with `/create-routine` in the thread you pass as `thread_id`: then it is on, and the result says so. Off, the person turns it on the first time, in the Inbox; before that, `on` and `run` answer `routine_not_approved` and change nothing. After that you may `update`, turn it `on` or `off`, `run` it and `delete` it. Changing its folder or its agent turns it off again until the person turns it back on.",
       "- Every change posts one line for the person, with a link to the routine and, for an edit, what it was and what it is now: in `thread_id`, the thread you are working in, when you pass it, else in the routine's own thread. Runs never reply in `thread_id`.",
       "- Each run starts the agent the way New message in the Inbox does, in the person's own permission mode. Starting agents from the Inbox must be on (Settings → Agents).",
       "- The person turns routines on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `routine`, and a call answers `routines_off` and writes nothing.",
+      "- From a shell: `plannotator routine --help`, then `plannotator routine <command> --help` for each command's options and examples (`plannotator routine create --name … --cron … --prompt …`).",
     ],
   },
 };
@@ -295,33 +320,45 @@ export interface InboxHelpOptions {
    * "inbox-code-review-direction").
    */
   codeReview?: boolean;
+  /**
+   * The person turned Branch reviews on (config.json `inboxBranchReviews`, with Code review). Off (the default), the
+   * guide says nothing of it: no `branch` field on send_message, as the Inbox serves none then.
+   */
+  branchReviews?: boolean;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
   return platform === "win32" ? "windows" : platform === "darwin" ? "mac" : "linux";
 }
 
-function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): string[] {
+function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false, branchReviews = false): string[] {
   const guide = TOOL_GUIDE[name];
   // send_message's `steps` field exists only while steps are on.
   const withSteps = steps && name === "send_message";
   // submit_guide's `review` and `walkthrough` fields exist only while code review is on (the tool's own words, as served).
   const withReview = codeReview && name === "submit_guide";
-  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review", "walkthrough"] : [])];
+  // send_message's `branch` field exists only while Branch reviews is on (and Code review).
+  const withBranch = branchReviews && codeReview && name === "send_message";
+  const extra = [...(withSteps ? ["steps"] : []), ...(withBranch ? ["branch"] : []), ...(withReview ? ["review", "walkthrough"] : [])];
   const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...extra].map(code).join(", ")}.`, ""] : [];
   const lines = [
     ...guide.lines,
     ...(withSteps ? ["- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : []),
+    ...(withBranch ? [`- \`branch\`: ${INBOX_BRANCH_FIELD_DESCRIPTION}`] : []),
     ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`, `- \`walkthrough\`: ${INBOX_WALKTHROUGH_FIELD_DESCRIPTION}`] : []),
   ];
   return [`### ${name}`, "", ...args, ...lines, ""];
 }
+
+/** `plannotator inbox --help`'s one line for `plannotator routine`, shown with Routines on or off. */
+export const INBOX_ROUTINE_COMMAND_LINE = "  plannotator routine --help      Routines: work an agent runs on a schedule, each run reporting in the Inbox.";
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
   const steps = options.steps === true;
   const scheduled = options.scheduled === true;
   const codeReview = options.codeReview === true;
+  const branchReviews = codeReview && options.branchReviews === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
@@ -418,7 +455,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
     // `steps` only while the person has thread steps on.
-    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview)),
+    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview, branchReviews)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
@@ -490,6 +527,16 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "```markdown",
     INBOX_CONTRACT_EXAMPLE,
     "```",
+    "",
+    "### Before and after",
+    "",
+    "When a question proposes a change (wording, a screen, code, a setting, a behaviour), show it. Most questions need none of this; a new feature or a prototype has no before: send pictures instead.",
+    "",
+    "```markdown",
+    INBOX_BEFORE_AFTER_EXAMPLE,
+    "```",
+    "",
+    "Every form (several places, a version per choice, pictures and clips, new or removed), each with what the person sees: `plannotator inbox --help before-after`.",
     "",
     "### Trade-offs and prototypes",
     "",
@@ -569,6 +616,9 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_COMMAND_USAGE,
     // Thread steps from a shell, only while the person has them on.
     ...(steps ? ["", "  plannotator inbox steps [--session <id>] <thread> --json '<list>'", "                                  Your steps in a thread (see steps); '-' reads the list from stdin."] : []),
+    // Routines from a shell: one line whatever the setting, so an agent asked for one finds the command (its help says
+    // they must be on). Not on Windows, where there are no routines.
+    ...(ctx.platform !== "windows" ? ["", INBOX_ROUTINE_COMMAND_LINE] : []),
     "```",
     "",
     "`--tailscale` is the person's choice: never add it to a start you run. The MCP server and the agent tools answer only on this computer.",
@@ -582,6 +632,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- `plannotator uninstall` keeps the data. `plannotator uninstall --purge` stops a running Inbox, then deletes it (if it cannot stop it, it says so and keeps the data).",
     "- Both remove the `plannotator-inbox` MCP entries `plannotator inbox` added to the agents on this computer (`plannotator uninstall --dry-run` lists them); an entry changed by hand to run something else is left.",
     "- Never run uninstall, delete threads or projects, or edit these files for the person.",
+    "",
+    ...INBOX_HELP_TOPICS_LINES,
     "",
   ].join("\n");
 }

@@ -70,6 +70,22 @@ describe('a mention is an id and a range, never words matched', () => {
     expect(remapReplyMentions([m], words, 'CICI', 2)).toEqual([{ ...m, at: 2 }]);
   });
 
+  test('with no caret to say where, an edit is read where it touches no mention: one typed or taken out beside a label keeps it', () => {
+    const words = 'a Mn 1 and Mn 2 b';
+    const one = at(words, CI_ID, 'Mn 1');
+    const two = at(words, RATE_ID, 'Mn 2');
+    // "M" typed just before "Mn 1": the first place that explains it is after its "M", inside the label.
+    expect(remapReplyMentions([one, two], words, 'a MMn 1 and Mn 2 b')).toEqual([{ ...one, at: one.at + 1 }, { ...two, at: two.at + 1 }]);
+    // "n" taken out of "and" just before "Mn 2"'s... and a space taken out between two labels: the others stay.
+    expect(remapReplyMentions([one, two], words, 'a Mn 1 ad Mn 2 b')).toEqual([one, { ...two, at: two.at - 1 }]);
+    const close = 'Mn 1  Mn 2';
+    const a1 = at(close, CI_ID, 'Mn 1');
+    const a2 = at(close, RATE_ID, 'Mn 2');
+    expect(remapReplyMentions([a1, a2], close, 'Mn 1 Mn 2')).toEqual([a1, { ...a2, at: a2.at - 1 }]);
+    // A change that can only be inside a label still ends that one, and only that one.
+    expect(remapReplyMentions([one, two], words, 'a Mx 1 and Mn 2 b')).toEqual([two]);
+  });
+
   test('a saved mention that no longer stands where it says is dropped, never moved to other words', () => {
     const words = 'Plain words, then CI.';
     expect(standingReplyMentions(words, [{ thread_id: CI_ID, title: 'CI', label: 'CI', at: 0 }])).toEqual([]);

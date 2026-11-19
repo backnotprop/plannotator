@@ -68,8 +68,11 @@ export function useAIChat({
   const identityRef = useRef({ patch, diffType, base });
   identityRef.current = { patch, diffType, base };
 
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
   const ask = useCallback(
     (params: AskAIParams) => {
+      const chat = chatRef.current;
       if (sessionBridge) {
         // The session wrote (or can read) the changes; a pasted patch would stay
         // in its context window for good.
@@ -88,7 +91,7 @@ export function useAIChat({
       lastSentContextRef.current = ctx;
       return chat.ask({ viewing: viewingRef.current, contextPreamble, ...params });
     },
-    [chat, sessionBridge],
+    [sessionBridge],
   );
 
   // Re-asking on a separate provider starts a fresh session there, so it gets

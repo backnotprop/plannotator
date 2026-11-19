@@ -1,0 +1,1782 @@
+/*
+ * The canvas's own stylesheet. Plain CSS under one prefix (pcv-), no
+ * Tailwind, so a host needs no @source entry for this package: it imports
+ * this file and nothing else.
+ *
+ * Colours come from the host's theme where it has one (Plannotator's
+ * --background, --card, --border, --foreground, --primary) and fall back to
+ * Plannotator Graphite. Dark is the default, as in the product; a `.light`
+ * ancestor or data-theme="light" turns on the light half.
+ */
+
+.pcv {
+  --pcv-stage: var(--background, oklch(0.225 0.006 286));
+  --pcv-card: var(--card, oklch(0.295 0.006 286));
+  /* How light the board is (relative luminance), for choosing ink on a colour the board shows through. */
+  --pcv-ground-y: 0.02;
+  --pcv-line: var(--border, oklch(0.36 0.006 286));
+  --pcv-rule: oklch(0.435 0.006 286);
+  --pcv-ink: var(--foreground, oklch(0.945 0.003 286));
+  --pcv-muted: var(--muted-foreground, oklch(0.78 0.007 286));
+  --pcv-arrow: oklch(0.66 0.007 286);
+  --pcv-accent: var(--primary, oklch(0.765 0.124 283));
+  --pcv-on-accent: var(--primary-foreground, oklch(0.2 0.01 286));
+  --pcv-note: oklch(0.8 0.135 64);
+  --pcv-on-note: oklch(0.2 0.02 60);
+  --pcv-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px rgb(0 0 0 / 0.28);
+  --pcv-blue: oklch(0.74 0.1 250);
+  --pcv-blue-soft: oklch(0.335 0.038 250);
+  --pcv-green: oklch(0.74 0.12 155);
+  --pcv-green-soft: oklch(0.335 0.042 155);
+  --pcv-amber: oklch(0.78 0.12 85);
+  --pcv-amber-soft: oklch(0.345 0.042 85);
+  --pcv-red: oklch(0.77 0.124 25);
+  --pcv-red-soft: oklch(0.335 0.048 25);
+  --pcv-violet: oklch(0.78 0.11 290);
+  --pcv-violet-soft: oklch(0.34 0.05 290);
+  --pcv-font: var(--font-sans, 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif);
+  --pcv-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Also tells a sandboxed HTML item which theme it is drawn in. */
+  color-scheme: dark;
+  color: var(--pcv-ink);
+  font-family: var(--pcv-font);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.light .pcv,
+.pcv[data-theme='light'] {
+  color-scheme: light;
+  --pcv-stage: var(--background, oklch(0.97 0.005 260));
+  --pcv-card: var(--card, oklch(1 0 0));
+  --pcv-ground-y: 0.97;
+  --pcv-line: var(--border, oklch(0.885 0.009 260));
+  --pcv-rule: oklch(0.88 0.01 260);
+  --pcv-ink: var(--foreground, oklch(0.18 0.02 260));
+  --pcv-muted: var(--muted-foreground, oklch(0.4 0.02 260));
+  --pcv-arrow: oklch(0.5 0.02 260);
+  --pcv-accent: var(--primary, oklch(0.5 0.25 280));
+  --pcv-on-accent: var(--primary-foreground, oklch(1 0 0));
+  --pcv-note: oklch(0.83 0.125 66);
+  --pcv-on-note: oklch(0.22 0.03 60);
+  --pcv-shadow: 0 1px 2px rgb(15 20 40 / 0.06), 0 6px 18px rgb(15 20 40 / 0.1);
+  --pcv-blue: oklch(0.52 0.15 255);
+  --pcv-blue-soft: oklch(0.955 0.022 255);
+  --pcv-green: oklch(0.5 0.14 150);
+  --pcv-green-soft: oklch(0.955 0.032 150);
+  --pcv-amber: oklch(0.6 0.13 80);
+  --pcv-amber-soft: oklch(0.955 0.045 88);
+  --pcv-red: oklch(0.54 0.2 25);
+  --pcv-red-soft: oklch(0.955 0.026 25);
+  --pcv-violet: oklch(0.5 0.2 285);
+  --pcv-violet-soft: oklch(0.955 0.025 285);
+}
+
+/* ── The view ──────────────────────────────────────────────────────────── */
+
+.pcv-root {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  /* A plain, calm ground. No dots, no grid. */
+  background-color: var(--pcv-stage);
+  user-select: none;
+  -webkit-user-select: none;
+  contain: layout paint style;
+  /* The bars arrange themselves by the board's own width, not the window's: a board in a narrow pane is a narrow board. */
+  container: pcv-board / inline-size;
+}
+.pcv-root[data-interactive] {
+  touch-action: none;
+  cursor: default;
+}
+.pcv-root[data-tool='hand'] {
+  cursor: grab;
+}
+.pcv-root[data-tool='hand'][data-dragging] {
+  cursor: grabbing;
+}
+.pcv-root[data-tool='box'],
+.pcv-root[data-tool='note'],
+.pcv-root[data-tool='text'],
+.pcv-root[data-tool='arrow'],
+.pcv-root[data-tool='region'] {
+  cursor: crosshair;
+}
+
+.pcv-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+.pcv-obj {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  --pcv-fill: var(--pcv-card);
+  --pcv-stroke: var(--pcv-rule);
+  --pcv-on-fill: var(--pcv-ink);
+}
+.pcv-obj[data-color='blue'] { --pcv-fill: var(--pcv-blue-soft); --pcv-stroke: var(--pcv-blue); }
+.pcv-obj[data-color='green'] { --pcv-fill: var(--pcv-green-soft); --pcv-stroke: var(--pcv-green); }
+.pcv-obj[data-color='amber'] { --pcv-fill: var(--pcv-amber-soft); --pcv-stroke: var(--pcv-amber); }
+.pcv-obj[data-color='red'] { --pcv-fill: var(--pcv-red-soft); --pcv-stroke: var(--pcv-red); }
+.pcv-obj[data-color='violet'] { --pcv-fill: var(--pcv-violet-soft); --pcv-stroke: var(--pcv-violet); }
+/* Colours. Any colour may be chosen, a transparent one too; these keep words and lines readable.
+   --pcv-solid is the colour a solid fill is painted in: a named colour's line colour, or a custom colour
+   exactly as chosen.
+   --pcv-on-solid is the ink that goes on it: white or black, whichever is read on it at 4.5 to 1 or better.
+   It is chosen by how light the fill is (its relative luminance, against 0.18, where both inks pass), and a
+   see-through colour is weighed with the board that shows through it. The ink is never see-through itself.
+   --pcv-stroke is the colour for a line or for text on the board: the same hue, kept dark enough on a light
+   board and light enough on a dark one, and always opaque.
+   Only objects that need them carry --pcv-solid and --pcv-on-solid (a custom colour, a solid fill); the rules
+   that read them fall back to the line colour and the ink, so nothing is worked out for an ordinary object. */
+.pcv-obj[data-color='custom'],
+.pcv-arrow[data-color='custom'] {
+  --pcv-solid: var(--pcv-custom);
+  --pcv-on-solid: var(--pcv-on-note);
+  --pcv-fill: color-mix(in oklab, var(--pcv-custom) 14%, var(--pcv-card));
+  --pcv-stroke: var(--pcv-custom);
+}
+@supports (color: oklch(from red l c h)) {
+  .pcv-obj[data-color='custom'],
+  .pcv-arrow[data-color='custom'] {
+    --pcv-stroke: oklch(from var(--pcv-custom) max(l, 0.7) c h / 1);
+  }
+  .light .pcv-obj[data-color='custom'],
+  .light .pcv-arrow[data-color='custom'],
+  .pcv[data-theme='light'] .pcv-obj[data-color='custom'],
+  .pcv[data-theme='light'] .pcv-arrow[data-color='custom'] {
+    --pcv-stroke: oklch(from var(--pcv-custom) min(l, 0.56) c h / 1);
+  }
+}
+@supports (color: color(from red srgb-linear r g b)) {
+  .pcv-obj[data-fill='solid'] {
+    --pcv-on-solid: color(from var(--pcv-stroke) srgb-linear clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) / 1);
+  }
+  .pcv-obj[data-color='custom'] {
+    --pcv-on-solid: color(from var(--pcv-custom) srgb-linear clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) / 1);
+  }
+}
+
+/* Selection outlines and handles live in the overlay, the one element that
+   is told the zoom (--pcv-z), so their lines stay the same width on screen. */
+.pcv-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  --pcv-z: 1;
+}
+.pcv-outline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: calc(4px / var(--pcv-z));
+  outline: calc(1.5px / var(--pcv-z)) solid var(--pcv-accent);
+  outline-offset: calc(3px / var(--pcv-z));
+}
+
+.pcv-words {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+}
+.pcv-words[contenteditable] {
+  outline: none;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pcv-box {
+  display: flex;
+  flex-direction: column;
+  /* Words that do not fit are cut at the end, never from both ends. */
+  justify-content: safe center;
+  padding: 8px 14px;
+  border: 1px solid var(--pcv-stroke);
+  border-radius: 8px;
+  background: var(--pcv-fill);
+  overflow: hidden;
+}
+/* A box's title wraps to as many lines as its box has room for, three at most, and then ends in an ellipsis;
+   its detail is one line. (While it is typed into, all of it shows.) */
+.pcv-box-text {
+  flex: none;
+  font-weight: 600;
+  line-height: 1.35;
+}
+/* Asked for only by a title long enough to need it (`data-clamp`): a short one is laid out the plain way. */
+.pcv-box-text[data-clamp]:not([contenteditable]) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--pcv-lines, 3);
+  line-clamp: var(--pcv-lines, 3);
+  overflow: hidden;
+}
+.pcv-box-detail {
+  flex: none;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--pcv-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.pcv-note {
+  padding: 8px 10px;
+  border-radius: 8px 8px 8px 2px;
+  background: var(--pcv-note);
+  color: var(--pcv-on-note);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: var(--pcv-shadow);
+  overflow: hidden;
+}
+.pcv-note[data-color]:not([data-color='neutral']) {
+  background: var(--pcv-stroke);
+}
+.pcv-obj.pcv-note[data-color='custom'] {
+  background: var(--pcv-solid);
+  color: var(--pcv-on-solid);
+}
+
+.pcv-text {
+  font-size: 15px;
+  line-height: 1.4;
+}
+.pcv-text[data-size='small'] { font-size: 12.5px; color: var(--pcv-muted); }
+.pcv-text[data-size='large'] { font-size: 22px; font-weight: 650; line-height: 1.25; }
+.pcv-text[data-color]:not([data-color='neutral']) { color: var(--pcv-stroke); }
+
+.pcv-frame {
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+}
+.pcv-frame[data-color]:not([data-color='neutral']) {
+  border-color: var(--pcv-stroke);
+  background: color-mix(in oklab, var(--pcv-fill) 35%, transparent);
+}
+.pcv-image,
+.pcv-sprite,
+.pcv-html {
+  border-radius: 6px;
+}
+.pcv-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.pcv-image[data-color]:not([data-color='neutral']),
+.pcv-sprite[data-color]:not([data-color='neutral']),
+.pcv-html[data-color]:not([data-color='neutral']) {
+  box-shadow: 0 0 0 1.5px var(--pcv-stroke);
+}
+.pcv-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px dashed var(--pcv-rule);
+  border-radius: inherit;
+  color: var(--pcv-muted);
+  font-size: 12px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.pcv-sprite {
+  background-repeat: no-repeat;
+  background-size: calc(var(--pcv-frames) * 100%) 100%;
+  image-rendering: pixelated;
+  animation: pcv-sprite calc(var(--pcv-frames) / var(--pcv-fps) * 1s) steps(var(--pcv-frames)) infinite;
+}
+@keyframes pcv-sprite {
+  to {
+    background-position-x: calc(var(--pcv-sprite-w) * var(--pcv-frames) * -1);
+  }
+}
+
+.pcv-html iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  color-scheme: inherit;
+}
+
+.pcv-arrows {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+.pcv-arrow {
+  color: var(--pcv-arrow);
+}
+.pcv-arrow[data-color='blue'] { color: var(--pcv-blue); }
+.pcv-arrow[data-color='green'] { color: var(--pcv-green); }
+.pcv-arrow[data-color='amber'] { color: var(--pcv-amber); }
+.pcv-arrow[data-color='red'] { color: var(--pcv-red); }
+.pcv-arrow[data-color='violet'] { color: var(--pcv-violet); }
+.pcv-arrow[data-color='custom'] { color: var(--pcv-stroke); }
+.pcv-arrow-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pcv-arrow-bar {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.pcv-arrow circle {
+  fill: currentColor;
+}
+.pcv-arrow[data-dash] .pcv-arrow-line {
+  stroke-dasharray: 6 5;
+}
+.pcv-arrow polygon {
+  fill: currentColor;
+}
+.pcv-arrow text {
+  fill: var(--pcv-ink);
+  font-size: 12px;
+  font-weight: 500;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--pcv-stage);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  /* So that resting the pointer on a shortened label shows all of it. */
+  pointer-events: auto;
+}
+.pcv-arrow[data-selected] .pcv-arrow-line {
+  stroke: var(--pcv-accent);
+  stroke-width: 2.5;
+}
+.pcv-arrow[data-selected] polygon {
+  fill: var(--pcv-accent);
+}
+
+/* Level of detail. The attribute is written with the camera, not by React. */
+.pcv-root[data-lod='plain'] .pcv-note,
+.pcv-root[data-lod='far'] .pcv-note {
+  box-shadow: none;
+}
+.pcv-root[data-lod='plain'] .pcv-box-detail,
+.pcv-root[data-lod='far'] .pcv-box-detail {
+  display: none;
+}
+.pcv-root[data-lod='far'] .pcv-words,
+.pcv-root[data-lod='far'] .pcv-arrow text {
+  visibility: hidden;
+}
+.pcv-root[data-lod='far'] .pcv-sprite,
+.pcv-root[data-lod='plain'] .pcv-sprite {
+  animation: none;
+}
+
+/* ── Editor overlays ───────────────────────────────────────────────────── */
+
+.pcv-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(9px / var(--pcv-z));
+  height: calc(9px / var(--pcv-z));
+  margin: calc(-4.5px / var(--pcv-z)) 0 0 calc(-4.5px / var(--pcv-z));
+  box-sizing: border-box;
+  border: calc(1.5px / var(--pcv-z)) solid var(--pcv-accent);
+  border-radius: calc(2.5px / var(--pcv-z));
+  background: var(--pcv-card);
+}
+.pcv-handle::after {
+  /* A finger-sized target around a small square. */
+  content: '';
+  position: absolute;
+  inset: calc(-10px / var(--pcv-z));
+}
+.pcv-handle[data-handle='nw'],
+.pcv-handle[data-handle='se'] { cursor: nwse-resize; }
+.pcv-handle[data-handle='ne'],
+.pcv-handle[data-handle='sw'] { cursor: nesw-resize; }
+
+.pcv-marquee,
+.pcv-region {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: 3px;
+}
+.pcv-marquee {
+  border: 1px solid var(--pcv-accent);
+  background: color-mix(in oklab, var(--pcv-accent) 9%, transparent);
+}
+.pcv-region {
+  border: 1.5px dashed var(--pcv-accent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--pcv-accent) 6%, transparent);
+}
+.pcv-draft-arrow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  color: var(--pcv-accent);
+}
+
+/* ── Chrome: floating bars ─────────────────────────────────────────────── */
+
+.pcv-bar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+  z-index: 3;
+}
+.pcv-bar-dock {
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pcv-bar-history {
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.pcv-bar-zoom {
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.pcv-bar-top {
+  left: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+}
+.pcv-bar-selection {
+  left: 0;
+  top: 0;
+  border-radius: 10px;
+  max-width: calc(100% - 12px);
+  /* On a narrow board the colours scroll sideways under the action, which stays where it is. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pcv-bar-selection .pcv-btn-primary {
+  position: sticky;
+  right: 0;
+  /* Hides what scrolls beneath it, with the bar's own colour around its corners. */
+  box-shadow: 0 0 0 4px var(--pcv-card), -10px 0 10px -4px var(--pcv-card);
+}
+.pcv-bar[hidden] {
+  display: none;
+}
+
+.pcv-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--pcv-muted);
+  font: 500 13px/1 var(--pcv-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 120ms var(--pcv-ease), color 120ms var(--pcv-ease), transform 120ms var(--pcv-ease);
+}
+/* One icon set (Lucide), one size, one stroke. A button holding only an icon
+   is an exact square, so every glyph sits in the centre of an equal slot. */
+.pcv-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  stroke-width: 1.75;
+}
+.pcv-btn-icon {
+  width: 36px;
+  padding: 0;
+}
+/* Two glyphs carry their weight in one corner; shifted so they look centred. */
+.pcv-btn svg.lucide-mouse-pointer-2 {
+  transform: translate(1px, 1px);
+}
+.pcv-btn svg.lucide-move-up-right {
+  transform: translate(-0.5px, 0.5px);
+}
+@media (hover: hover) {
+  .pcv-btn:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--pcv-ink) 7%, transparent);
+    color: var(--pcv-ink);
+  }
+}
+.pcv-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.pcv-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-accent);
+}
+.pcv-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.pcv-btn[aria-pressed='true'] {
+  background: color-mix(in oklab, var(--pcv-accent) 16%, transparent);
+  color: var(--pcv-accent);
+}
+.pcv-btn-primary {
+  padding: 0 12px;
+  background: var(--pcv-accent);
+  color: var(--pcv-on-accent);
+  touch-action: none;
+}
+@media (hover: hover) {
+  .pcv-btn.pcv-btn-primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--pcv-accent) 88%, var(--pcv-ink));
+    color: var(--pcv-on-accent);
+  }
+}
+.pcv-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--pcv-line);
+}
+
+.pcv-swatch {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 36px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pcv-swatch::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  box-sizing: border-box;
+  border: 2px solid var(--pcv-swatch, var(--pcv-rule));
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--pcv-swatch, var(--pcv-card)) 22%, var(--pcv-card));
+  transition: transform 120ms var(--pcv-ease);
+}
+@media (hover: hover) {
+  .pcv-swatch:hover::before {
+    transform: scale(1.15);
+  }
+}
+.pcv-swatch:focus-visible::before {
+  box-shadow: 0 0 0 2px var(--pcv-card), 0 0 0 4px var(--pcv-accent);
+}
+.pcv-swatch[aria-pressed='true']::before {
+  background: var(--pcv-swatch, var(--pcv-rule));
+}
+.pcv-swatch-custom::before {
+  border-color: transparent;
+  background: conic-gradient(oklch(0.7 0.18 25), oklch(0.8 0.16 90), oklch(0.72 0.16 150), oklch(0.7 0.14 250), oklch(0.65 0.2 300), oklch(0.7 0.18 25));
+}
+.pcv-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+@container pcv-board (max-width: 760px) {
+  .pcv-bar-history {
+    left: 8px;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+  .pcv-bar-zoom {
+    right: 8px;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+  .pcv-bar-top {
+    left: 50%;
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    transform: translateX(-50%);
+  }
+  .pcv-bar-dock {
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .pcv-btn {
+    min-width: 40px;
+    height: 40px;
+  }
+  .pcv-btn-icon {
+    width: 40px;
+  }
+  .pcv-swatch {
+    height: 40px;
+  }
+}
+
+/* ── The figure in a plan ──────────────────────────────────────────────── */
+
+/* Part of the document: no box around it, the page's own ground behind it,
+   the caption set like the plan's small text. */
+.pcv-figure {
+  display: block;
+  margin: 1.5rem 0 1.75rem;
+  padding: 0;
+  max-width: 100%;
+}
+.pcv-figure-frame {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: background-color 160ms var(--pcv-ease);
+}
+.pcv-figure .pcv-root {
+  background-color: transparent;
+}
+/* The button that opens the canvas covers the figure and has no look of its
+   own; the figure shows hover and focus. */
+.pcv-figure-hit {
+  all: unset;
+  position: absolute;
+  inset: 0;
+  cursor: zoom-in;
+  border-radius: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .pcv-figure-frame:has(.pcv-figure-hit:hover) {
+    background-color: color-mix(in oklab, var(--pcv-ink) 4%, transparent);
+  }
+}
+.pcv-figure-hit:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--pcv-accent);
+}
+.pcv-figure-view {
+  position: relative;
+  width: 100%;
+}
+.pcv-figure-view > .pcv-root {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.pcv-figure-still {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.pcv-figure-empty {
+  padding: 20px 0;
+  color: var(--pcv-muted);
+  font-size: 13px;
+}
+.pcv-figure-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin-top: 8px;
+  color: var(--pcv-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.pcv-figure-title {
+  min-width: 1ch;
+  max-width: 100%;
+  color: var(--pcv-ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  outline: none;
+  border-radius: 3px;
+}
+.pcv-figure-title[contenteditable] {
+  cursor: text;
+}
+.pcv-figure-title[contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--pcv-muted);
+  font-weight: 400;
+}
+.pcv-figure-title[contenteditable]:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px color-mix(in oklab, var(--pcv-accent) 60%, transparent);
+}
+.pcv-figure-action {
+  all: unset;
+  color: var(--pcv-accent);
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 3px;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .pcv-figure-action:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+.pcv-figure-action:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px var(--pcv-accent);
+}
+@media (pointer: coarse) {
+  /* A finger-sized target without moving the words. */
+  .pcv-figure-action {
+    position: relative;
+  }
+  .pcv-figure-action::after {
+    content: '';
+    position: absolute;
+    inset: -12px -10px;
+  }
+}
+
+/* ── The opened canvas ─────────────────────────────────────────────────── */
+
+.pcv-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.pcv-stage-clip {
+  position: absolute;
+  inset: 0;
+}
+.pcv-stage[data-busy] > .pcv-stage-clip {
+  will-change: clip-path;
+}
+/* The capture the person clicked, drawn over the live canvas with the same
+   camera and faded out as the opening grows: when the canvas has moved on,
+   the old picture dissolves into the new one instead of being swapped. */
+.pcv-stage-ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+/* The edge of the opening: a soft shadow that falls on the plan around it. */
+.pcv-stage-rim {
+  position: absolute;
+  pointer-events: none;
+  /* A fine line that is the figure's own edge carried outward, a near shadow that seats it, and a wide soft
+     one that puts the plan further away. */
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--pcv-ink) 14%, transparent),
+    0 2px 6px rgb(0 0 0 / 0.1),
+    0 24px 80px 8px rgb(0 0 0 / 0.3);
+}
+.pcv-stage[data-fade] {
+  transition: opacity 140ms linear;
+}
+/* The bars arrive after the canvas has nearly opened, and leave first. */
+.pcv-stage .pcv-bar {
+  opacity: var(--pcv-chrome, 1);
+}
+.pcv-stage[data-busy] .pcv-bar {
+  pointer-events: none;
+}
+
+/* ── Dragging a snapshot into the plan ─────────────────────────────────── */
+
+.pcv-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 10px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+  font: 500 13px/1.3 var(--pcv-font);
+  pointer-events: none;
+  will-change: transform;
+}
+.pcv-drop-line {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1099;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: var(--pcv-accent);
+  pointer-events: none;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pcv-sprite {
+    animation: none;
+  }
+  .pcv-btn,
+  .pcv-swatch::before,
+  .pcv-figure-frame {
+    transition: none;
+  }
+  .pcv-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+
+/* ── Reference cards: a web page, an artifact, a place in a plan ───────── */
+
+.pcv-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pcv-stroke);
+  border-radius: 10px;
+  background: var(--pcv-fill);
+  overflow: hidden;
+}
+.pcv-card-image {
+  display: block;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  background: color-mix(in oklab, var(--pcv-ink) 5%, var(--pcv-card));
+  pointer-events: none;
+}
+.pcv-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 3px;
+  padding: 10px 12px 11px;
+  min-height: 0;
+}
+/* A card with no picture: its words rest at the foot, not under an empty space. */
+.pcv-card-body:first-child {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+.pcv-card-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pcv-muted);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+.pcv-card-icon {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.pcv-card-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+/* The site's own icon covers the glyph when it loads; when it does not, the glyph is already there. */
+.pcv-card-favicon {
+  position: absolute;
+  inset: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--pcv-fill);
+  object-fit: contain;
+}
+.pcv-card-site {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcv-card-title,
+.pcv-card-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+}
+.pcv-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.pcv-card-description {
+  color: var(--pcv-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pcv-root[data-lod='plain'] .pcv-card-description,
+.pcv-root[data-lod='far'] .pcv-card-description,
+.pcv-root[data-lod='far'] .pcv-card-source {
+  display: none;
+}
+
+/* A line telling the person something they did could not be done. Calm, and gone in a few seconds. */
+.pcv-notice {
+  position: absolute;
+  left: 50%;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 10px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+  font-size: 13px;
+  line-height: 1.4;
+  z-index: 4;
+}
+
+/* Read out, not shown. */
+.pcv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* An object that holds keyboard focus: the same ring as a selection, a little heavier, so it is told apart from one. */
+.pcv-obj:focus {
+  outline: none;
+}
+.pcv-obj:focus-visible {
+  outline: 2.5px solid var(--pcv-accent);
+  outline-offset: 4px;
+}
+
+/* ── Typed shapes ──────────────────────────────────────────────────────── */
+
+/* The plain box: centred words, a fine shadow that seats it on the ground. */
+.pcv-box {
+  align-items: center;
+  border-radius: 9px;
+  text-align: center;
+  box-shadow: 0 1px 1.5px rgb(15 20 40 / 0.07);
+}
+.pcv-shape {
+  display: block;
+}
+.pcv-shape-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.pcv-shape-fill {
+  fill: var(--pcv-fill);
+  stroke: var(--pcv-stroke);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+.pcv-shape-line {
+  fill: none;
+  stroke: var(--pcv-stroke);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+.pcv-shape[data-dash] .pcv-shape-fill,
+.pcv-shape[data-dash] .pcv-shape-line {
+  stroke-dasharray: 6 4;
+}
+.pcv-shape-text {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  text-align: center;
+  overflow: hidden;
+}
+/* An actor's name sits under the figure; a container's title in its header, to the left. */
+.pcv-shape[data-shape='actor'] .pcv-shape-text {
+  justify-content: flex-start;
+  overflow: visible;
+}
+.pcv-shape[data-shape='actor'] .pcv-shape-fill {
+  fill: var(--pcv-card);
+}
+.pcv-shape[data-shape='container'] .pcv-shape-text {
+  align-items: flex-start;
+  text-align: left;
+}
+.pcv-shape[data-shape='container'] .pcv-shape-fill {
+  fill: color-mix(in oklab, var(--pcv-fill) 35%, transparent);
+  stroke: var(--pcv-line);
+}
+.pcv-shape[data-shape='container'][data-color]:not([data-color='neutral']) .pcv-shape-fill {
+  stroke: var(--pcv-stroke);
+}
+.pcv-shape[data-shape='container'] .pcv-shape-line {
+  stroke: var(--pcv-line);
+}
+.pcv-lanes {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  overflow: hidden;
+}
+.pcv-lane {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pcv-muted);
+  font-size: 11.5px;
+}
+.pcv-lane span {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  /* A lane's name is as long as its lane is tall, and ends in an ellipsis. */
+  max-height: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pcv-root[data-lod='far'] .pcv-lane span {
+  visibility: hidden;
+}
+
+/* Forced colours remove box-shadow, which is how focus is drawn elsewhere: these outlines take over there. */
+@media (forced-colors: active) {
+  .pcv-btn:focus-visible,
+  .pcv-swatch:focus-visible,
+  .pcv-figure-hit:focus-visible,
+  .pcv-figure-action:focus-visible,
+  .pcv-figure-title[contenteditable]:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  .pcv-shape-fill,
+  .pcv-shape-line {
+    stroke: CanvasText;
+  }
+}
+
+/* A shape with no colour of its own is drawn in a firm neutral line, so its outline says what it is. */
+.pcv-box:not([data-color]),
+.pcv-box[data-color='neutral'],
+.pcv-shape:not([data-color]),
+.pcv-shape[data-color='neutral'] {
+  --pcv-stroke: color-mix(in oklab, var(--pcv-ink) 58%, var(--pcv-card));
+}
+/* A shape filled solid: the colour itself, with ink chosen to be read on it. */
+.pcv-shape[data-fill='solid'] .pcv-shape-fill {
+  fill: var(--pcv-solid, var(--pcv-stroke));
+}
+.pcv-shape[data-fill='solid']:not([data-shape='actor']) .pcv-words {
+  color: var(--pcv-on-solid, var(--pcv-ink));
+}
+.pcv-shape[data-fill='solid']:not([data-shape='actor']) .pcv-box-detail {
+  opacity: 0.82;
+}
+.pcv-shape[data-fill='none'] .pcv-shape-fill {
+  fill: none;
+}
+
+/* Far away on a crowded board: a flat patch of colour where each object is. */
+/* No outline: far out a one-pixel line would be a fraction of a pixel and vanish. The patch carries the colour itself. */
+.pcv-flat {
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--pcv-ink) 16%, var(--pcv-card));
+}
+.pcv-flat[data-color]:not([data-color='neutral']) {
+  background: color-mix(in oklab, var(--pcv-stroke) 55%, var(--pcv-fill));
+}
+.pcv-flat-note {
+  background: var(--pcv-note);
+  box-shadow: none;
+}
+/* A note keeps its own colour far away too. */
+.pcv-flat.pcv-flat-note[data-color]:not([data-color='neutral']) {
+  background: color-mix(in oklab, var(--pcv-stroke) 34%, white);
+}
+.pcv-flat.pcv-flat-note[data-color='custom'] {
+  background: var(--pcv-solid);
+}
+.pcv-flat.pcv-flat-frame {
+  background: color-mix(in oklab, var(--pcv-ink) 4%, transparent);
+  border-radius: 12px;
+}
+.pcv-flat-image,
+.pcv-flat-sprite,
+.pcv-flat-html,
+.pcv-flat-reference {
+  background: color-mix(in oklab, var(--pcv-ink) 8%, var(--pcv-card));
+  box-shadow: none;
+}
+
+/* ── The sketch look: proposed, not decided ────────────────────────────── */
+
+.pcv {
+  /* No handwriting face is bundled: the device's own is used. */
+  --pcv-hand: 'Bradley Hand', 'Segoe Print', 'Comic Sans MS', 'Chalkboard SE', cursive;
+}
+.pcv-sketch-wash {
+  fill: var(--pcv-fill);
+  stroke: none;
+}
+.pcv-shape[data-fill='none'] .pcv-sketch-wash,
+.pcv-shape[data-fill='hachure'] .pcv-sketch-wash,
+.pcv-shape[data-look='sketch']:not([data-fill]) .pcv-sketch-wash,
+.pcv-shape[data-fill='cross'] .pcv-sketch-wash {
+  fill: color-mix(in oklab, var(--pcv-fill) 45%, transparent);
+}
+.pcv-shape[data-fill='none'] .pcv-sketch-wash {
+  fill: none;
+}
+.pcv-shape[data-fill='solid'] .pcv-sketch-wash {
+  fill: color-mix(in oklab, var(--pcv-stroke) 30%, var(--pcv-fill));
+}
+.pcv-sketch-hatch {
+  fill: none;
+  /* Kept faint so words over it are still read. */
+  stroke: color-mix(in oklab, var(--pcv-stroke) 45%, transparent);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+.pcv-sketch-stroke {
+  fill: none;
+  stroke: var(--pcv-stroke);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pcv-shape[data-look='sketch'] .pcv-words {
+  font-family: var(--pcv-hand);
+  font-size: 16px;
+  font-weight: 400;
+}
+/* Hatching is the costly part to paint and too fine to see when small: it goes first. */
+.pcv-root[data-lod='plain'] .pcv-sketch-hatch {
+  display: none;
+}
+
+/* ── Surfaces: paper, panels, depth ────────────────────────────────────── */
+
+.pcv {
+  --pcv-paper: oklch(0.925 0.105 96);
+  --pcv-on-paper: oklch(0.24 0.03 80);
+  /* Shadows are drawn only close up on a board that is not crowded: see "Depth" below. */
+  --pcv-lift-1: 0 1px 1px rgb(20 20 40 / 0.08), 0 3px 8px rgb(20 20 40 / 0.1);
+  --pcv-lift-2: 0 2px 3px rgb(20 20 40 / 0.1), 0 14px 28px rgb(20 20 40 / 0.2);
+}
+
+/* A frame: a soft panel, its title on a chip above it. */
+.pcv-frame {
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--pcv-card) 55%, transparent);
+}
+.pcv-frame-chip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  /* Never wider on screen than its frame, however much it has grown (the view's own rule sets both); on a
+     frame too small to hold a word, wide enough to read some of the title. */
+  max-width: max(100%, 160px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  background: var(--pcv-card);
+  /* Grows as the board is zoomed out (a rule each view writes for itself), from its own corner. */
+  transform-origin: 0 100%;
+}
+.pcv-frame-chip::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pcv-muted);
+}
+.pcv-frame[data-color]:not([data-color='neutral']) .pcv-frame-chip::before {
+  background: var(--pcv-stroke);
+}
+.pcv-frame-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pcv-ink);
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.25;
+}
+
+/* A sticky note: paper, at a slight angle, that lifts level while it is carried. */
+.pcv-note {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 13px 10px;
+  border-radius: 2px;
+  background: linear-gradient(175deg, color-mix(in oklab, var(--pcv-paper) 96%, white), var(--pcv-paper) 62%, color-mix(in oklab, var(--pcv-paper) 92%, black));
+  color: var(--pcv-on-paper);
+  font-size: 13.5px;
+  line-height: 1.42;
+  box-shadow: none;
+  transition: box-shadow 140ms var(--pcv-ease);
+}
+.pcv-note > .pcv-words {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.pcv-obj.pcv-note[data-color]:not([data-color='neutral']) {
+  /* A named colour is the paper's colour: pale, so the words stay dark on it in either theme. */
+  --pcv-paper: color-mix(in oklab, var(--pcv-stroke) 34%, white);
+  background: linear-gradient(175deg, color-mix(in oklab, var(--pcv-paper) 96%, white), var(--pcv-paper) 62%, color-mix(in oklab, var(--pcv-paper) 92%, black));
+  color: var(--pcv-on-paper);
+}
+.pcv-obj.pcv-note[data-color='custom'] {
+  /* Any colour, exactly as chosen, with ink that can be read on it. */
+  background: var(--pcv-solid);
+  color: var(--pcv-on-solid);
+}
+.pcv-note[data-carried] {
+  z-index: 2;
+}
+
+/* Who added it. */
+.pcv-by {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  opacity: 0.78;
+}
+.pcv-face {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: oklch(0.52 0.17 28);
+  color: white;
+  font: 600 9.5px/1 var(--pcv-font);
+  overflow: hidden;
+}
+.pcv-face[data-kind='agent'] {
+  background: oklch(0.3 0.06 280);
+}
+.pcv-face svg {
+  width: 10px;
+  height: 10px;
+  stroke-width: 2;
+}
+.pcv-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pcv-by-badge {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  display: flex;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--pcv-card);
+}
+.pcv-by-badge .pcv-face {
+  width: 18px;
+  height: 18px;
+  font-size: 10.5px;
+}
+
+/* A picture: a card with its caption beneath. */
+.pcv-image {
+  border-radius: 8px;
+  background: var(--pcv-card);
+}
+.pcv-image img {
+  border-radius: 8px;
+}
+.pcv-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--pcv-muted);
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.pcv-caption .pcv-by-badge {
+  position: static;
+  padding: 0;
+  background: none;
+}
+.pcv-caption .pcv-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcv-card {
+  border-color: transparent;
+  overflow: visible;
+}
+.pcv-card > .pcv-card-image {
+  border-radius: 10px 10px 0 0;
+}
+.pcv-card[data-color]:not([data-color='neutral']) {
+  border-color: var(--pcv-stroke);
+}
+
+/* A stamp: a small token. */
+.pcv-stamp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: var(--pcv-card);
+  color: var(--pcv-stroke);
+  font: 600 13px/1 var(--pcv-font);
+}
+.pcv-stamp:not([data-color]),
+.pcv-stamp[data-color='neutral'] {
+  color: var(--pcv-accent);
+}
+.pcv-stamp svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+}
+
+/* Depth. Shadows are what costs frames when a board with very many objects on screen zooms, so they are
+   drawn only close up (full detail) and only while the board is not crowded. Elsewhere surfaces are flat. */
+.pcv-box {
+  box-shadow: none;
+}
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-box {
+  box-shadow: 0 1px 1.5px rgb(15 20 40 / 0.07);
+}
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-note,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-image,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-card,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-stamp,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-frame-chip,
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-by-badge {
+  box-shadow: var(--pcv-lift-1);
+}
+.pcv-root[data-lod='full']:not([data-crowded]) .pcv-note[data-carried] {
+  box-shadow: var(--pcv-lift-2);
+}
+.pcv-root:not([data-lod='full']) .pcv-caption,
+.pcv-root:not([data-lod='full']) .pcv-by,
+.pcv-root[data-lod='far'] .pcv-by-badge {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pcv-note {
+    transition: none;
+  }
+}
+
+/* ── Guides, ports and handles ─────────────────────────────────────────── */
+
+.pcv-guide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  background: var(--pcv-guide, oklch(0.62 0.21 12));
+}
+.pcv-guide[data-axis='x'] {
+  width: calc(1px / var(--pcv-z));
+}
+.pcv-guide[data-axis='y'] {
+  height: calc(1px / var(--pcv-z));
+}
+.pcv-guide-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.pcv-guide-badge span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--pcv-z)));
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--pcv-guide, oklch(0.62 0.21 12));
+  color: white;
+  font: 600 11px/1.2 var(--pcv-font);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pcv-port {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(9px / var(--pcv-z));
+  height: calc(9px / var(--pcv-z));
+  margin: calc(-4.5px / var(--pcv-z)) 0 0 calc(-4.5px / var(--pcv-z));
+  box-sizing: border-box;
+  border: calc(1.5px / var(--pcv-z)) solid var(--pcv-accent);
+  border-radius: 50%;
+  background: var(--pcv-card);
+  cursor: crosshair;
+}
+.pcv-port::after {
+  /* A finger-sized target round a small ring. */
+  content: '';
+  position: absolute;
+  inset: calc(-12px / var(--pcv-z));
+}
+.pcv-handle {
+  width: calc(11px / var(--pcv-z));
+  height: calc(11px / var(--pcv-z));
+  margin: calc(-5.5px / var(--pcv-z)) 0 0 calc(-5.5px / var(--pcv-z));
+  border-radius: calc(3.5px / var(--pcv-z));
+  box-shadow: 0 calc(1px / var(--pcv-z)) calc(3px / var(--pcv-z)) rgb(0 0 0 / 0.18);
+}
+@media (pointer: coarse) {
+  .pcv-port::after,
+  .pcv-handle::after {
+    inset: calc(-17px / var(--pcv-z));
+  }
+}
+
+/* ── The map ───────────────────────────────────────────────────────────── */
+
+.pcv-minimap {
+  position: absolute;
+  right: 16px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+  z-index: 3;
+}
+.pcv-minimap canvas {
+  display: block;
+}
+.pcv-minimap-view {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  border: 1.5px solid var(--pcv-accent);
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--pcv-accent) 12%, transparent);
+  pointer-events: none;
+}
+@container pcv-board (max-width: 760px) {
+  .pcv-minimap {
+    right: 8px;
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+}
+
+/* ── The selection's bar and its popovers ──────────────────────────────── */
+
+.pcv-selection {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  max-width: calc(100% - 12px);
+  will-change: transform;
+}
+.pcv-selection > .pcv-bar-selection {
+  position: relative;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.pcv-color-dot {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid var(--pcv-swatch, var(--pcv-rule));
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--pcv-swatch, var(--pcv-card)) 60%, var(--pcv-card));
+}
+.pcv-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 12px;
+  background: var(--pcv-card);
+  box-shadow: var(--pcv-shadow);
+  color: var(--pcv-ink);
+}
+.pcv-selection[data-up] > .pcv-popover {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+.pcv-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pcv-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 36px);
+  gap: 2px;
+}
+.pcv-popover-grid svg {
+  width: 22px;
+  height: 20px;
+}
+.pcv-popover-any {
+  gap: 6px;
+  padding-top: 4px;
+}
+.pcv-field {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  width: 140px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--pcv-line);
+  border-radius: 8px;
+  color: var(--pcv-ink);
+  font: 12.5px/1 var(--pcv-font);
+  cursor: text;
+}
+.pcv-field::placeholder {
+  color: var(--pcv-muted);
+}
+.pcv-field:focus-visible {
+  border-color: var(--pcv-accent);
+  box-shadow: 0 0 0 1px var(--pcv-accent);
+}
+@media (forced-colors: active) {
+  .pcv-field:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* ── A very narrow board ───────────────────────────────────────────────── */
+
+@container pcv-board (max-width: 400px) {
+  /* Every tool stays in reach: the buttons narrow, they are not cut off. */
+  .pcv-bar-dock,
+  .pcv-bar-top {
+    gap: 0;
+    padding: 3px;
+    max-width: calc(100% - 8px);
+    box-sizing: border-box;
+  }
+  .pcv-bar-dock .pcv-btn-icon,
+  .pcv-bar-zoom .pcv-btn-icon,
+  .pcv-bar-history .pcv-btn-icon {
+    min-width: 0;
+    width: 34px;
+  }
+  .pcv-bar-zoom,
+  .pcv-bar-history {
+    gap: 0;
+    padding: 3px;
+  }
+  .pcv-bar-dock .pcv-sep,
+  .pcv-bar-top .pcv-sep {
+    margin: 0 2px;
+  }
+  /* Buttons with words keep their icon and their name; the words are for wider boards. */
+  .pcv-bar-top .pcv-btn-label {
+    display: none;
+  }
+}
+
+/* ── Pictures ──────────────────────────────────────────────────────────── */
+
+/* A picture with see-through parts is usually dark ink with no ground of its own. On a dark board it gets a
+   light one, so it can be seen; on a light board it is left exactly as it is. */
+.pcv-image [data-clear] {
+  background: oklch(0.96 0.004 260);
+}
+.light .pcv-image [data-clear],
+.pcv[data-theme='light'] .pcv-image [data-clear] {
+  background: none;
+}
+.pcv-image canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* A note with another lying exactly on it leaves the shadow to the one on top. */
+.pcv-note[data-buried] {
+  box-shadow: none !important;
+}
+
+/* A figure is never so thin that it cannot be seen or pressed, however wide or tall what it shows. */
+.pcv-figure-view {
+  min-height: 64px;
+}
+
+/* ── A card whose page is being looked up ──────────────────────────────── */
+
+.pcv-card-body[data-pending] .pcv-card-title {
+  animation: pcv-pending 1.1s ease-in-out infinite alternate;
+}
+@keyframes pcv-pending {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pcv-card-body[data-pending] .pcv-card-title {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ── An empty board, and a board wider than the furthest zoom ──────────── */
+
+.pcv-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 48px);
+  color: var(--pcv-muted);
+  font: 14px/1.5 var(--pcv-font);
+  text-align: center;
+  pointer-events: none;
+}
+.pcv-edge {
+  all: unset;
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--pcv-card);
+  color: var(--pcv-ink);
+  box-shadow: var(--pcv-shadow);
+  cursor: pointer;
+}
+.pcv-edge svg {
+  width: 18px;
+  height: 18px;
+}
+.pcv-edge[data-edge='n'] { left: 50%; top: 12px; margin-left: -16px; }
+.pcv-edge[data-edge='s'] { left: 50%; bottom: 76px; margin-left: -16px; }
+.pcv-edge[data-edge='w'] { left: 12px; top: 50%; margin-top: -16px; }
+.pcv-edge[data-edge='e'] { right: 12px; top: 50%; margin-top: -16px; }
+.pcv-edge:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px var(--pcv-accent);
+}
+@media (pointer: coarse) {
+  .pcv-edge {
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (forced-colors: active) {
+  .pcv-edge {
+    border: 1px solid ButtonText;
+  }
+  .pcv-edge:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}

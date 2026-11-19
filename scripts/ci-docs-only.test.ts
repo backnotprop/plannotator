@@ -1,8 +1,9 @@
 /**
- * Guard for the docs-only gate (scripts/ci-docs-only.sh): a PR that changes
- * only root docs, LICENSE-*, .github/assets, adr/ or docs/ outside
- * docs/agent-guides passes the fast tier's unit, DOM, OpenCode package, engine
- * harness, Browser smoke and Semgrep jobs without running their steps.
+ * Guard for the docs-only rule (scripts/ci-docs-only.sh): a PR that changes
+ * only root docs, LICENSE-*, .github/assets, adr/, docs/ outside
+ * docs/agent-guides, or the iPhone app's Swift and Xcode files under
+ * apps/mobile/ios runs no test, build or scan but Gitleaks and the pickers
+ * (scripts/ci-affected.ts reads the script's verdict).
  *
  * What can regress, and the test that says so:
  *   - the allowlist takes a path some test, build or scanner reads, so a PR
@@ -11,9 +12,8 @@
  *   - the gate skips where it cannot know the diff: a push, a merge queue, a
  *     checkout that is not the PR merge commit, an empty diff, a rename out of
  *     packages/ (the git rows);
- *   - a gated job stops reporting SUCCESS under its own name (a job-level
- *     `if`), or reads a failed gate as "skip", or a cheap scanner gets gated
- *     (the workflow rows).
+ *   - the picker stops taking the script's verdict, or Gitleaks gets gated
+ *     (the picker rows).
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -23,16 +23,6 @@ import { dirname, join, resolve } from 'node:path';
 const repoRoot = resolve(import.meta.dir, '..');
 const SCRIPT = join(repoRoot, 'scripts/ci-docs-only.sh');
 
-/** The lanes the gate skips on a docs-only PR (workflow file → job ids). */
-const GATED: Record<string, string[]> = {
-  '.github/workflows/test.yml': ['checks', 'unit', 'dom', 'opencode-v2', 'claude-code-mod'],
-  '.github/workflows/browser-smoke.yml': ['smoke'],
-  '.github/workflows/security.yml': ['semgrep'],
-};
-/** Cheap lanes that read docs too (secrets, workflow config), so they always run. */
-const NEVER_GATED: Record<string, string[]> = {
-  '.github/workflows/security.yml': ['gitleaks', 'trivy', 'zizmor'],
-};
 
 const classifyRaw = (lines: string[]) =>
   Bun.spawnSync(['bash', SCRIPT, 'classify'], { stdin: new TextEncoder().encode(lines.join('\n')) }).stdout.toString().trim();
@@ -81,6 +71,18 @@ describe('which lanes a change runs', () => {
     ['a .js under .github/assets', ['.github/assets/x.js'], EVERYTHING],
     ['a shell script under adr/', ['adr/x.sh'], EVERYTHING],
     ['a .ts under adr/', ['adr/research/x.ts'], EVERYTHING],
+    // The iPhone app: only mobile-ios.yml builds its Swift and Xcode files.
+    ['the iPhone app\'s Swift, Xcode and asset files', ['apps/mobile/ios/App/InboxApp.swift', 'apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/App/Info.plist', 'apps/mobile/ios/App/Assets.xcassets/AppIcon.appiconset/Contents.json', 'apps/mobile/ios/Local.example.xcconfig', 'apps/mobile/ios/App/Inbox.entitlements'], CHEAP],
+    // Semgrep scans shell; `bun test` finds *.test.ts anywhere; the package walk finds package.json; tests read the contract.
+    ['the iPhone app\'s own ignore file', ['apps/mobile/ios/.gitignore'], CHEAP],
+    ['an ignore file elsewhere', ['apps/mobile/.gitignore'], EVERYTHING],
+    ['the iPhone app\'s CI script', ['apps/mobile/ios/ci.sh'], EVERYTHING],
+    ['the iPhone app\'s Swift lockfile', ['apps/mobile/ios/InboxCore/Package.resolved'], EVERYTHING],
+    ['a test file under apps/mobile/ios', ['apps/mobile/ios/x.test.ts'], EVERYTHING],
+    ['a package.json under apps/mobile/ios', ['apps/mobile/ios/package.json'], EVERYTHING],
+    ['JSON outside an asset catalog under apps/mobile/ios', ['apps/mobile/ios/fixture.json'], EVERYTHING],
+    ['the app contract', ['apps/mobile/contract/door.json', 'apps/mobile/contract/generated/swift/Wire.swift'], EVERYTHING],
+    ['Swift plus one .ts file', ['apps/mobile/ios/App/InboxApp.swift', 'packages/ui/utils/x.ts'], EVERYTHING],
   ];
   for (const [name, paths, expected] of rows) test(name, () => expect(lanes(paths)).toBe(expected));
 
@@ -201,40 +203,40 @@ describe('the gate in a job', () => {
   });
 });
 
-type Step = { id?: string; if?: string; run?: string; uses?: string; with?: Record<string, unknown>; 'continue-on-error'?: boolean };
-type Job = { if?: string; name?: string; steps?: Step[] };
+type Job = { if?: string; needs?: unknown };
 const jobsOf = (file: string) => (Bun.YAML.parse(readFileSync(join(repoRoot, file), 'utf8')) as { jobs: Record<string, Job> }).jobs;
 
-describe('the gated jobs', () => {
-  for (const [file, ids] of Object.entries(GATED)) {
-    for (const id of ids) {
-      test(`${file} ${id}: passes under its own name and runs every step unless the gate said skip`, () => {
-        const job = jobsOf(file)[id]!;
-        // A job-level `if` reports SKIPPED (a matrix job under an unexpanded name); the merge script wants SUCCESS by name.
-        expect(job.if, 'job-level if').toBeUndefined();
-        const steps = job.steps ?? [];
-        const at = steps.findIndex((s) => s.id === 'docs');
-        expect(at, 'gate step').toBeGreaterThan(0);
-        expect(steps.slice(0, at).every((s) => s.uses?.startsWith('actions/checkout@'))).toBe(true);
-        expect(steps[at - 1]!.with?.['fetch-depth'], 'the merge commit and both parents').toBe(2);
-        // The gate reads HEAD^1 as the base, true only of the default pull_request checkout (refs/pull/N/merge).
-        // A `ref: head.sha` makes HEAD^1 the branch's previous commit, so a "merge main" head would diff only main's changes.
-        expect(steps[at - 1]!.with?.ref, 'checkout ref override').toBeUndefined();
-        expect(steps[at - 1]!.with?.repository, 'checkout repository override').toBeUndefined();
-        expect(steps[at]!.run?.trim()).toBe('bash scripts/ci-docs-only.sh');
-        // A failed gate leaves no output, which must read as "run".
-        expect(steps[at]!['continue-on-error']).toBe(true);
-        for (const step of steps.slice(at + 1)) expect(step.if ?? '', step.id ?? step.run ?? step.uses).toContain("steps.docs.outputs.skip != 'true'");
-      });
-    }
-  }
-  for (const [file, ids] of Object.entries(NEVER_GATED)) {
-    for (const id of ids) {
-      test(`${file} ${id} always runs`, () => {
-        expect(JSON.stringify(jobsOf(file)[id])).not.toContain('steps.docs');
-      });
-    }
-  }
+describe('the picker takes this verdict', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-docs-only-picker-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const env = { PATH: process.env.PATH ?? '', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'ci', GIT_AUTHOR_EMAIL: 'ci@example.invalid', GIT_COMMITTER_NAME: 'ci', GIT_COMMITTER_EMAIL: 'ci@example.invalid' };
+  const git = (...args: string[]) => {
+    const r = Bun.spawnSync(['git', ...args], { cwd: dir, env });
+    if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.toString().trim();
+  };
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(dir, 'README.md'), 'a\n');
+  writeFileSync(join(dir, 'x.ts'), 'a\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+
+  test('a README change is docs only to scripts/ci-affected.ts; a README plus a .ts file is not', async () => {
+    const { docsOnly } = await import('./ci-affected');
+    writeFileSync(join(dir, 'README.md'), 'b\n');
+    git('commit', '-q', '-am', 'docs');
+    expect(docsOnly(base, git('rev-parse', 'HEAD'), dir)).toBe(true);
+    writeFileSync(join(dir, 'x.ts'), 'b\n');
+    git('commit', '-q', '-am', 'code');
+    expect(docsOnly(base, git('rev-parse', 'HEAD'), dir)).toBe(false);
+  });
+
+  test('Gitleaks always runs, docs only or not', () => {
+    const gitleaks = jobsOf('.github/workflows/security.yml').gitleaks!;
+    expect(gitleaks.if).toBeUndefined();
+    expect(gitleaks.needs).toBeUndefined();
+  });
 });
 
 describe('no code reads an allowlisted file', () => {
@@ -252,6 +254,8 @@ describe('no code reads an allowlisted file', () => {
   // Strings that name an allowlisted path without reading it from the checkout. Add one only after checking that.
   const MENTIONS: Record<string, string> = {
     'packages/core/fixtures/inbox-relay-vectors.json': 'its "about" text cites the design doc',
+    'packages/core/fixtures/inbox-relay-push-v2-vectors.json': 'its "about" text cites the design doc',
+    'packages/core/inbox-push-vectors.ts': 'it writes the push vectors\' "about" text, which cites the design doc',
     'packages/review-editor/dock/panels/artifactDocument.test.ts': 'an <img src> string in a fixture',
     'packages/shared/inbox/search.test.ts': 'an attachment path in a fixture',
     'tests/e2e/inbox-search-world.ts': 'writes its own file at that path in a temp project',

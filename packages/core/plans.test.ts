@@ -2,10 +2,15 @@
  * The plan library's records, pure. What regresses if these fail:
  * - a version's id stops matching `git hash-object` (an export or a later sync would see every version as changed);
  * - an id of the wrong kind, a bad version number or a foreign line passes as a record;
- * - the one write a window makes (a look) takes a field it should refuse.
+ * - the one write a window makes (a look) takes a field it should refuse;
+ * - an imported approval whose version was never found drops out of view ("No decision") instead of staying history
+ *   on the first version;
+ * - a page's file name loses its own name or kind.
  */
 import { describe, expect, test } from "bun:test";
 import {
+  planPictureSize,
+  planPictureTypeOf,
   checkPlanLookInput,
   gitBlobSha,
   isPlanDecision,
@@ -14,8 +19,11 @@ import {
   isPlanRecord,
   isPlanVersion,
   NO_ACTOR,
+  planApprovalState,
+  planDocumentFileName,
   planHeadingOf,
   planId,
+  type PlanEvent,
   sha1Hex,
 } from "./plans";
 
@@ -114,4 +122,47 @@ describe("planHeadingOf", () => {
     expect(planHeadingOf("## Only a subheading")).toBeNull();
     expect(planHeadingOf("")).toBeNull();
   });
+});
+
+describe("an approval whose version was never found", () => {
+  test("stays history on the first version: approved while v1 is the newest, then cleared, never lost", () => {
+    const event = { ...NO_ACTOR, id: "actev_1", plan_id: "pln_1", kind: "decision", at: "2026-11-02T09:00:00.000Z", subject: null, legacy: "feedback/p/index.jsonl#1", decision: { document_id: "doc_1", version: null, version_number: null, decision: "approved", at: "2026-11-02T09:00:00.000Z", feedback: null, feedback_record: null, snapshot: null } } as PlanEvent;
+    expect(planApprovalState([event], "doc_1", 1)).toMatchObject({ kind: "approved", version_number: 1 });
+    expect(planApprovalState([event], "doc_1", 3)).toEqual({ kind: "cleared", version_number: 3, from_version_number: 1, names: ["person"] });
+  });
+});
+
+describe("planDocumentFileName", () => {
+  test("the document's own file name, else its title with its kind's extension", () => {
+    expect(planDocumentFileName({ doc_path: "plans/rollout.md", title: "Rollout", kind: "markdown" })).toBe("rollout.md");
+    expect(planDocumentFileName({ doc_path: null, title: "Request flow", kind: "mermaid" })).toBe("Request flow.mmd");
+    expect(planDocumentFileName({ doc_path: null, title: "", kind: "html" })).toBe("Plan.html");
+  });
+});
+
+test("a picture page's type comes from its bytes, never its name", () => {
+  const bytes = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0));
+  expect(planPictureTypeOf(bytes("\x89PNG\r\n\x1a\n"))).toBe("image/png");
+  expect(planPictureTypeOf(bytes("\xff\xd8\xff\xe0"))).toBe("image/jpeg");
+  expect(planPictureTypeOf(bytes("GIF89a\x01\x00"))).toBe("image/gif");
+  expect(planPictureTypeOf(bytes("RIFF\x00\x00\x00\x00WEBPVP8 "))).toBe("image/webp");
+  expect(planPictureTypeOf(bytes("\x00\x00\x00\x1cftypavif"))).toBe("image/avif");
+  expect(planPictureTypeOf(new TextEncoder().encode('\uFEFF<?xml version="1.0"?>\n<!-- chart -->\n<svg xmlns="http://www.w3.org/2000/svg">'))).toBe("image/svg+xml");
+  // An HTML page that holds an SVG is no picture; nor is text.
+  expect(planPictureTypeOf(new TextEncoder().encode("<html><svg></svg></html>"))).toBeNull();
+  expect(planPictureTypeOf(new TextEncoder().encode("tier,rate"))).toBeNull();
+});
+
+test("a picture's size comes from its header, never a decode; a header that does not say is null", () => {
+  const bytes = (...parts: (number | string)[]) => Uint8Array.from(parts.flatMap((p) => (typeof p === "number" ? [p] : [...p].map((c) => c.charCodeAt(0)))));
+  const png = bytes(0x89, "PNG\r\n\x1a\n", 0, 0, 0, 13, "IHDR", 0, 0, 0x27, 0x10, 0, 0, 0x4e, 0x20);
+  expect(planPictureSize(png)).toEqual({ width: 10000, height: 20000 });
+  expect(planPictureSize(bytes("GIF89a", 0x40, 0x01, 0xf0, 0x00))).toEqual({ width: 320, height: 240 });
+  // A JPEG: an APP0 segment first, then the frame header (height 600, width 800).
+  const jpeg = bytes(0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0x02, 0x58, 0x03, 0x20, 3, 0, 0, 0);
+  expect(planPictureSize(jpeg)).toEqual({ width: 800, height: 600 });
+  const webp = bytes("RIFF", 0, 0, 0, 0, "WEBPVP8X", 10, 0, 0, 0, 0, 0, 0, 0, 0x1f, 0x4e, 0, 0x1f, 0x4e, 0);
+  expect(planPictureSize(webp)).toEqual({ width: 20000, height: 20000 });
+  expect(planPictureSize(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="99999">'))).toBeNull();
+  expect(planPictureSize(bytes(0xff, 0xd8, 0xff))).toBeNull();
 });

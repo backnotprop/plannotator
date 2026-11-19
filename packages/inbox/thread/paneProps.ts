@@ -74,6 +74,8 @@ export interface ThreadPaneProps {
   replyRequest?: string | null;
   onReplyOpened?: () => void;
   shapeButton?: ReactNode;
+  /** The thread's open board (ThreadShapeLayer): it takes the messages' and the reply's place under the header. */
+  board?: ReactNode;
   onSide?: (selected: string, source?: string) => void;
   onSideWords?: (words: string, taken?: () => void) => void;
   replyWords?: string | null;

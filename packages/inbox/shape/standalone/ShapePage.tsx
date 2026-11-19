@@ -25,7 +25,7 @@ import { createStandaloneShapeHost } from './host';
 const ShapeBoard = lazy(() => import('#shape-board'));
 
 const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'changed', 'know', 'code'];
-const PANELS: readonly ShapePanelTab[] = ['ask', 'refs'];
+const PANELS: readonly ShapePanelTab[] = ['refs'];
 
 export interface ShapeRoute {
   shape: string | null;
@@ -33,7 +33,7 @@ export interface ShapeRoute {
   panel: ShapePanelTab | null;
 }
 
-/** The page's state from its address: `#shape=shp_…&view=how&panel=ask`, else the grid. */
+/** The page's state from its address: `#shape=shp_…&view=how&panel=refs`, else the grid (an old `panel=ask`: none). */
 export function parseShapeHash(hash: string): ShapeRoute {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const shape = params.get('shape');

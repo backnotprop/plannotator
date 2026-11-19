@@ -27,9 +27,9 @@
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
-import { reviewBoxPull, type ReviewBoxPull } from '../compose/reviewBox';
+import { reviewBoxPull, type ReviewBoxBranch, type ReviewBoxPull } from '../compose/reviewBox';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
@@ -59,11 +59,14 @@ import {
   type PullFilter,
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
-import { ReviewsList } from './ReviewsList';
+import { ReviewsList, ReviewsMenu, reviewLinksOf } from './ReviewsList';
 import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
+import { canStartPullThread, isPullThread } from './startThread';
+import { PULL_THREAD_TAKEN, PullThreadStart } from './PullThreadStart';
+import { untiedPullThread } from './threadStarts';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
@@ -78,6 +81,8 @@ import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { SystemButton } from '../system/SystemButton';
 import { SystemPane } from '../system/SystemPane';
 import type { ReactNode } from 'react';
+import type { InboxToastModel } from '../components/Toast';
+import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showRepoWithToast, showWithToast } from './hiddenPulls';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -121,11 +126,18 @@ export interface PullsPageProps {
   onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
-  onOpenThread: (threadId: string) => void;
+  /**
+   * `replace`: in place of the PR's page in history (a PR whose page is its thread, `isPullThread`). `reply`: its reply
+   * box open (a thread the person just started from the PR's page); words: also these words in it, not sent (what a
+   * Start a thread's Send did not send).
+   */
+  onOpenThread: (threadId: string, replace?: boolean, reply?: boolean | string) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
+  onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
   /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape door. */
@@ -141,9 +153,13 @@ export interface PullsPageProps {
   prBoard?: ReactNode;
   onPullRequests?: () => void;
   prsSummary?: { open: number; needYou: number } | null;
+  /** The window's one toast: Hide's count with Undo (hiddenPulls.ts). Absent: no toast. */
+  onToast?: (toast: Omit<InboxToastModel, 'id'>, ms: number) => void;
 }
 
 const NO_JUDGMENTS: RiskJudgments = {};
+const NO_ROWS: readonly InboxReviewRow[] = [];
+const NO_LINKS: InboxPullsAnswer['links'] = {};
 const NO_FAILURES: RiskFailures = {};
 
 export function PullsPage(given: PullsPageProps) {
@@ -173,6 +189,8 @@ export function PullsPage(given: PullsPageProps) {
   const riskFailed: RiskFailures = risk.answer?.failed ?? NO_FAILURES;
   const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
   const [rulesOpen, setRulesOpen] = useState(false);
+  /** The Reviews row whose menu is open (ReviewsMenu). */
+  const [menuRow, setMenuRow] = useState<string | null>(null);
   const activeRisk = rulesSet ? riskFilter : 'all';
   const ranked = useMemo(() => (rows ? filterReviewRows(rows, activeRisk, judgments, riskFailed) : null), [rows, activeRisk, judgments, riskFailed]);
   const trigger = useFilterTrigger();
@@ -237,7 +255,19 @@ export function PullsPage(given: PullsPageProps) {
         </Tip>
       </div>
       {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
-      <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
+      <ReviewsMenu
+        className="ib-lbody"
+        busy={state.loading && !model}
+        rows={model && answer && ranked ? [...ranked.rows, ...ranked.notRanked] : NO_ROWS}
+        links={model && answer ? reviewLinksOf(model, answer) : NO_LINKS}
+        phone={phone}
+        onTarget={setMenuRow}
+        onHide={(pulls) => {
+          // The PR open beside the list leaves with its row.
+          if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
+          void hideWithUndo(pulls, props.onToast);
+        }}
+      >
         {!model && state.error && (
           <div className="ib-error" role="alert" style={{ margin: '8px 2px' }}>
             {state.error}
@@ -279,9 +309,15 @@ export function PullsPage(given: PullsPageProps) {
               else props.onOpenStack(row.stacks[0]?.id ?? null);
             }}
             onNew={props.onNew}
+            menuRow={menuRow}
+            onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
+            onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
+            onOpenThread={props.onOpenThread}
+            project={props.project}
+            onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}
           />
         )}
-      </div>
+      </ReviewsMenu>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (
@@ -412,6 +448,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
   const agent = linkAgentName(link);
+  // Start a thread pressed: the page is an empty thread for the PR (`PullThreadStart`) until it is sent or left.
+  const [drafting, setDrafting] = useState(false);
+  // A PR whose thread was started from its page: that thread is its page from then on (mock "V1"), in place of this one.
+  const threadPage = stack.layers.length === 1 && !!startLayer(stack) && isPullThread(link) ? link!.thread_id : null;
+  useEffect(() => {
+    if (threadPage) props.onOpenThread(threadPage, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadPage]);
   // The Board is optional: a card shows only while the Board is on and one links a layer (the answer has none otherwise).
   const card = stack.layers.map((l) => model.cards?.[l.key]).find((c) => !!c) ?? null;
   const now = useRelativeClock(true);
@@ -510,6 +554,44 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     ) : null;
   // One open PR opens its launchpad; a stack of several keeps this page.
   if (stack.layers.length === 1 && start) {
+    const newReview = (opener: HTMLElement) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener);
+    const hide = () => {
+      // The pane closes onto a row that leaves with it: focus goes to the Reviews row now in its place.
+      const list = () => document.querySelector('.pn-inbox .ib-lbody');
+      const gone = list()?.querySelector(`[data-pulls-row="${CSS.escape(props.item.stack.id)}"]`)?.getAttribute('data-reviews-row');
+      if (gone) focusWhenGone(itemsBy(list, 'data-reviews-row'), gone, () => document.querySelector<HTMLElement>('[data-pulls-heading]'));
+      props.onClose();
+      void hideWithUndo([start], props.onToast);
+    };
+    if (drafting && canStartPullThread(start, link, projects)) {
+      return (
+        <PullThreadStart
+          stack={stack}
+          pr={start}
+          projects={projects}
+          phone={phone}
+          stacked={!phone && !!props.stacked}
+          onClose={props.onClose}
+          onHide={hide}
+          onLeave={() => {
+            setDrafting(false);
+            // Back on the PR's page, on the button that left it.
+            requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-pulls-stack="${CSS.escape(stack.id)}"] [data-launch-go="start-thread"]`)?.focus());
+          }}
+          onGuide={canStart ? newReview : null}
+          onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+          onStarted={(threadId, carried) => {
+            props.state.reload();
+            props.onOpenThread(threadId, true, carried || true);
+          }}
+          onTaken={(threadId, carried, detail) => {
+            props.state.reload();
+            props.onOpenThread(threadId, true, carried || undefined);
+            props.onToast?.({ icon: 'check', lead: PULL_THREAD_TAKEN, detail }, 8000);
+          }}
+        />
+      );
+    }
     return (
       <PullLaunchpad
         stack={stack}
@@ -520,7 +602,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
-        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
+        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: newReview } : null}
+        startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
+        untiedThread={link ? null : untiedPullThread(start.key)}
         shapes={props.shapes ?? null}
         system={!!props.system}
         risk={riskLines}
@@ -529,6 +613,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
         onShape={(shape) => props.onOpenShape?.(shape)}
+        onHide={hide}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
       />
     );
@@ -609,7 +694,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
 const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; mentioned?: boolean; now: number }>(function ThreadLine({ link, ended, mentioned, now }, ref) {
   const name = linkAgentName(link) ?? 'Agent';
   // The ask (the person started it), until the agent's guided review arrives in the thread.
-  const asked = link.via === 'owner' && link.ask && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
+  // A thread started from the PR's page (`thread`) asked for nothing: the launchpad's own rule (`onItsWay`).
+  const asked = link.via === 'owner' && (link.ask === 'guide' || link.ask === 'custom') && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
   return (
     <div ref={ref} tabIndex={-1} className="ib-pr-thread" data-pulls-thread-line={ended ? 'ended' : asked ? 'asked' : 'live'} data-pulls-thread={link.thread_id}>
       <div className="ib-pr-thread-h">

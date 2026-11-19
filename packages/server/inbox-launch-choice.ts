@@ -7,7 +7,11 @@ const lastChoiceFile = (dataDir: string) => join(dataDir, "inbox", "launch", "la
 /** Only plain tokens survive a read: the file may have been edited by hand. */
 function cleanChoice(value: unknown): InboxLaunchChoice {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  return { ...(inboxLaunchTokenOk(raw.model) ? { model: raw.model } : {}), ...(inboxLaunchTokenOk(raw.effort) ? { effort: raw.effort } : {}) };
+  return {
+    ...(inboxLaunchTokenOk(raw.model) ? { model: raw.model } : {}),
+    ...(inboxLaunchTokenOk(raw.effort) ? { effort: raw.effort } : {}),
+    ...(inboxLaunchTokenOk(raw.primary_agent) ? { primary_agent: raw.primary_agent } : {}),
+  };
 }
 
 function readAll(dataDir: string): Record<string, InboxLaunchChoice> {

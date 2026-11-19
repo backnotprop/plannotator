@@ -16,7 +16,9 @@
  *   file name in `legacy`, and the chain is listed in the report's `gaps`.
  * - A file that may still be being written (modified less than `PLAN_IMPORT_SETTLE_MS` ago, or changed while it was
  *   read) is not read yet: its chain stops there (listed in `unsettled`) and a later run reads it whole. An empty
- *   `NNN.md` is no version (listed in `empty_files`).
+ *   `NNN.md` is no version (listed in `empty_files`): the chain's newest file, empty, is a stalled write and the chain
+ *   waits for it in its place; one with a later file after it is over. Versions follow file numbers, never arrival: a
+ *   file numbered below a version already taken is never taken (listed in `late_files`).
  * - A file that cannot be read stops that chain there (listed in `unreadable`); the next run tries again from it, so
  *   the order is kept.
  * - A folder with no `NNN.md` (left by an interrupted run) is no plan yet; annotate's chains (`annotate-…-<hash>`)
@@ -68,6 +70,11 @@ export interface PlanImportReport {
   unsettled: string[];
   /** Empty files, which are no version or decision (relative to the data dir). */
   empty_files: string[];
+  /**
+   * Files numbered below a version already taken from their chain (one that was empty when a later file was written,
+   * filled in since): never taken, so versions stay in file order (relative to the data dir).
+   */
+  late_files: string[];
   /** Feedback lines read this run that have no plan or version to land on yet. */
   orphan_feedback: number;
   snapshot_only_plans: number;
@@ -100,6 +107,7 @@ const emptyReport = (): PlanImportReport => ({
   unreadable: [],
   unsettled: [],
   empty_files: [],
+  late_files: [],
   orphan_feedback: 0,
   snapshot_only_plans: 0,
   duplicate_snapshots: 0,
@@ -177,6 +185,22 @@ function readSettled(path: string, now: () => number): SourceRead {
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const titleOfSlug = (slug: string) => (DATED_SLUG.exec(slug)?.[1] ?? slug).replace(/-+/g, " ").trim() || "Untitled plan";
 const IMPORTED_BY = { ...NO_ACTOR, author_via: "plan-review" };
+
+const AGENT_FIELD_MAX = 200;
+/**
+ * The agent session plan review recorded beside a history version (`NNN.agent.json`, packages/shared/storage.ts), as
+ * the version's agent; nothing when there is none or it does not read as one.
+ */
+function versionAgent(dir: string, n: number): { agent_host?: string; agent_session?: string; agent_name?: string | null } {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, `${String(n).padStart(3, "0")}.agent.json`), "utf8")) as Record<string, unknown> | null;
+    const ok = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= AGENT_FIELD_MAX;
+    if (!raw || !ok(raw.host) || !ok(raw.session)) return {};
+    return { agent_host: raw.host, agent_session: raw.session, agent_name: ok(raw.name) ? raw.name : null };
+  } catch {
+    return {};
+  }
+}
 
 /** A decision snapshot's status and a feedback decision mean the same outcome. */
 function sameOutcome(snapshot: "approved" | "denied", decision: PlanDecisionKind): boolean {
@@ -321,13 +345,20 @@ function* importChain(
   if (files.some((file, i) => file.n !== i + 1)) report.gaps.push(key);
 
   let plan: PlanRecord | null = entry ? store.get(entry.plan) : null;
+  const legacyOf = (name: string) => `history/${project}/${slug}/${name}`;
   const known = new Set(plan ? store.versions(plan.id).map((v) => v.legacy) : []);
+  // Versions follow file numbers, never arrival: a file numbered below the newest one taken is never taken after it.
+  const taken = Math.max(0, ...files.filter((file) => known.has(legacyOf(file.name))).map((file) => file.n));
   let complete = true;
   let newest: { text: string; at: string } | null = null;
   let added = 0;
-  for (const file of files) {
-    const legacy = `history/${project}/${slug}/${file.name}`;
+  for (const [i, file] of files.entries()) {
+    const legacy = legacyOf(file.name);
     if (known.has(legacy)) continue;
+    if (file.n < taken) {
+      report.late_files.push(legacy);
+      continue;
+    }
     const read = readSettled(join(dir, file.name), now);
     if (read.kind === "unreadable" || read.kind === "unsettled") {
       // Stop here, so the order is kept; the next run reads it again.
@@ -337,7 +368,12 @@ function* importChain(
     }
     if (read.kind === "empty") {
       report.empty_files.push(legacy);
-      continue;
+      // A later file was written: plan review writes in order, so this write is over and it is no version.
+      if (i < files.length - 1) continue;
+      // The newest file: a write that truncated it and stalled (a laptop asleep mid-write) fills it in place later,
+      // which does not change the folder's time. Wait for it in its place, with the chain not marked read.
+      complete = false;
+      break;
     }
     const at = read.at.toISOString();
     const text = decode(read.bytes);
@@ -354,7 +390,7 @@ function* importChain(
       }).plan;
       report.plans_created++;
     }
-    store.addVersion(plan.id, plan.primary_doc_id, { bytes: read.bytes, committed_at: at, source: "plan-review", ...IMPORTED_BY, legacy });
+    store.addVersion(plan.id, plan.primary_doc_id, { bytes: read.bytes, committed_at: at, source: "plan-review", ...IMPORTED_BY, ...versionAgent(dir, file.n), legacy });
     report.versions_added++;
     newest = { text, at };
     if (++added % VERSIONS_PER_STEP === 0) yield;
@@ -368,13 +404,16 @@ function* importChain(
     const heading = planHeadingOf(newest.text);
     if (heading && heading !== plan.name) store.updatePlan(plan.id, { name: heading }, newest.at);
   }
-  map.chains[key] = {
+  const next = {
     plan: plan.id,
     versions: store.versions(plan.id).length,
     last: files[files.length - 1]!.n,
     // Only a chain read to its end is skipped next time; one stopped at a file not read yet is read again.
     ...(complete && dirMtime !== undefined ? { dir_mtime: dirMtime } : {}),
   };
+  // Unchanged (a chain waiting on a file, read again on every pickup): the map is not written again for it.
+  if (entry && entry.plan === next.plan && entry.versions === next.versions && entry.last === next.last && entry.dir_mtime === next.dir_mtime) return false;
+  map.chains[key] = next;
   return true;
 }
 
@@ -628,6 +667,9 @@ function matchSnapshot(store: PlanStore, map: PlanLegacyMap, slug: string, text:
     const versions = store.versions(chain.plan);
     for (let i = versions.length - 1; i >= 0; i--) {
       const v = versions[i]!;
+      // Plan review decides on what the agent submitted: never on the person's own version (an edit, or a Restore
+      // holding an older version's text), which would put an old approval on the newest.
+      if (v.source === "person") continue;
       const bytes = store.versionBytes(chain.plan, v.document_id, v.version_number);
       if (!bytes) continue;
       const own = decode(bytes);

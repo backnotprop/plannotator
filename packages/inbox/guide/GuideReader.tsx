@@ -36,6 +36,7 @@ import type {
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
 import { openedLinesQuote } from '../attachments';
 import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
+import { useSemDiffClient } from './useSemDiffClient';
 import type { GuideFileNote, GuideLineNote, GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -113,6 +114,7 @@ export const GuideDiff: FC<
     onToggleViewed?: (filePath: string) => void;
     /** Reads a file's whole text for the expand arrows. Absent: the diff shows as it came. */
     fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
+    semDiffClient?: AllFilesCodeViewProps['semDiffClient'];
     fileOpenIn?: (filePath: string) => ReactNode;
     /** What the host draws under this file's lines (the PR page's threads). Absent: none. */
     lineNotes?: readonly GuideLineNote[];
@@ -234,6 +236,7 @@ function Reader({
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const wholeFiles = useRef<KeptWholeFiles>(new Map());
   const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
+  const semDiffClient = useSemDiffClient();
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -463,6 +466,7 @@ function Reader({
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
       fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
+      semDiffClient?: AllFilesCodeViewProps['semDiffClient'];
       fileOpenIn?: (filePath: string) => ReactNode;
       flushFiles?: boolean;
       headerKeepsFolder?: boolean;
@@ -480,6 +484,7 @@ function Reader({
       ...((phone || asItIs) && { diffStyleOverride: 'unified' as const }),
       ...(asItIs && { plainSeparators: true }),
       ...(fetchFileContent && { fetchFileContent }),
+      ...(fetchFileContent && semDiffClient && !asItIs && { semDiffClient }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -499,7 +504,7 @@ function Reader({
           }
         : {}),
     }),
-    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
+    [bare, contextNotes, renderContextNote, phone, asItIs, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, semDiffClient, fileOpenIn, lineNotes, fileNotes, wholeFileNotes, wholeNotesFor],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -552,7 +557,7 @@ function Reader({
       // The PR page's flush files draw no row after the last hunk until a file's text is read (flushFiles).
       opensWholeFiles: !!fetchFileContent && !bare,
       // The PR page: files edge to edge, each box exactly its header and code.
-      ...(bare ? { flushFiles: true } : {}),
+      ...(bare ? { flushFiles: true, keepsFileOrder: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
     [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, chapterDiagramsFolded, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
@@ -600,5 +605,6 @@ function Reader({
 // Held to the shape the window's strict typecheck reads (reader-module.d.ts).
 GuideReader satisfies typeof ReaderShape;
 
-// The PR page's All files rides this chunk: the review app's tree and file view (PullRepoParts.tsx).
+// The PR page's rail rides this chunk: the review app's trees and file view (PullRepoParts.tsx, PullChangesTree.tsx).
 export { PullAllFiles, PullRepoFile } from './PullRepoParts';
+export { PullChangesTree } from './PullChangesTree';

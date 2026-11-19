@@ -266,6 +266,34 @@ panel and the headless sessions never ask for the tool list),
 `packages/server/inbox-t3-wake.test.ts` (one owner per reply) and engine-harness
 cases in `apps/hook/tests/register.test.ts`.
 
+**A prompt waiting in the terminal (Inbox).** `TerminalPrompts`
+(`terminal-prompts.ts`) learns when the person must answer where the session
+runs only from hooks the mod has anyway, and never changes an answer: no
+wildcard hook and no hook on another tool's permission (the engine refuses a
+second matcherless `tool.*` hook, and the guard test in `register.test.ts`
+allows one `tool.*` hook, the run hook, matched on Bash and the mod's tool). A
+question: the `tool.call` hook sees an `AskUserQuestion` call (its dialog is
+inside the call) until the call settles, on every engine. A permission: Bash
+only, where the Bash-matched `tool.check` hook reads a verdict of `ask`, until
+the run hook sees that call's `tool.run` or the call settles. It is told only in
+a process that has seen `tool.run` fire (Claude Code 2.1.326+, and not where a
+guard sends `tool.run` past the user tier): elsewhere an approved call's run is
+unseen and would read as "asking" for its whole run, so no permission is told
+there at all. Another tool's permission prompt is never seen, so never told. A
+prompt also ends at that loop's next `turn.step` or at the turn's end. An `ask`
+is told only once it has held 1.5 s (`TERMINAL_PROMPT_SETTLE_MS`), so auto mode
+or a hook that answers at once never flashes (whether auto mode's classifier can
+take longer after an `ask` is not yet checked live). Never noted: a Bash command
+the mod takes over (`answeredByUs`). The InboxLink's `blocked` option sends
+`blocked: { kind }` in a `state` event on change and on every poll, with
+`blocked_at` (when its word last changed), after the registry check (nothing
+while no Inbox has run). Only the kind leaves the session. With the knob off the
+mod registers nothing and none of this runs. The Inbox side: "Status marks for
+every agent" in
+[inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
+`terminal-prompts.test.ts`, the guard in `register.test.ts`, and the engine
+matrix's case in `tests/register.test.ts`.
+
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of
 closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;
@@ -844,6 +872,99 @@ session's cwd (`$.process.run`'s default), the same as for the tool. Pi and
 OpenCode do not take over shell runs: there an agent-run `plannotator` command
 still runs the CLI (Pi registers the tool itself; see "Pi: the `plannotator`
 tool").
+
+**Behind Claude Code's guard: opened at `tool.run` (`hooks/mod/early-run.ts`).**
+Claude Code 2.1.326 added an "early run" rule to its built-in guard
+(`cc-plugin-sec-default`, seated on Team/Enterprise logins and by managed
+settings). The guard remembers each call the model makes until the call reaches
+`tool.run` (allowed, about to run), or until the person's next message when a
+hook answered or the session refused it. While it remembers a call, a
+person-installed mod's `$.process.run` that repeats the call is refused. A
+repeat is an argv that ends in a remembered Bash command, or an argv that hands
+a shell an item equal to one of the call's texts (the tool's `annotate`, its
+target). The guard checks each repeat as a Bash call with its own
+`$.tool.check`, past the user tier, so Claude Code also prints "its tool.check
+hook was skipped"; anything but `allow` is refused. The mod answers the tool and
+the take-over at `tool.call`, before the permission check, and the launch hands
+`/bin/sh` the call's words, so from 2.1.326 a guarded open could fail with
+`Plannotator could not start: plannotator: $.process.run: this repeats a Bash
+call that is not allowed; serve an allowed call at tool.run`:
+- The tool: always. The checked "commands" are its bare words (`annotate`, the
+  path), so a `Bash(plannotator:*)` rule cannot allow them.
+- A taken-over Bash command: the guard re-checks the remembered command itself,
+  so a rule that allows it passes. `plannotator annotate x.md --gate --json` on
+  its own is not refused at all: the launch drops `--json`, so its argv does not
+  end in the command. It fails without such a rule when the argv does end in the
+  command (no `--json`), or when an earlier remembered call shares its words,
+  such as a refused or answered tool call for the same file in the same turn.
+
+The mod still answers at `tool.call`, so nothing changes where the guard does
+not refuse: no guard, an engine before 2.1.326, a call that repeats nothing, or
+`list`/`close`, which start nothing. When the launch fails with the guard's
+refusal (`isEarlyRunRefusal`), `launch()` removes the launch folder, and the
+`tool.call` hook calls `next(e)` instead of answering (`heldUntilAllowed`). The
+session then decides the call by its rules and mode: auto mode's classifier, or
+a prompt for `mcp__plannotator__plannotator` or the Bash command. An allowed
+call reaches the mod's `tool.run` hook, where the guard has forgotten it, and is
+answered there with the same `runTool` launch (`answerModTool`,
+`answerShellCall`). A `tool.run` hook's `{ result }` is the call's result and
+the tool does not run (2.1.327: its core is the tool; a `$.tool.register` tool
+that no hook answers fails with "no hook answered this call: add
+on("tool.run", ...)"). A refused call never reaches `tool.run`, so it opens
+nothing and Claude reads the refusal. If the guard refuses the start at
+`tool.run` too, another call it still holds shares this one's words (one
+refused or answered in this turn); Claude then reads `HELD_AT_RUN_TEXT` (what to
+do: the guard lets go at the person's next message), not the guard's advice to
+serve at `tool.run`. The `tool.run` hook needs nothing from `tool.call` or
+`tool.check`: it answers every call of the mod's own tool that reaches it, and
+takes over a Bash command by the same rule as `tool.call`. It never answers
+`tool.check` or `tool.judge`, and never loosens or bypasses the guard; nothing
+hides the call's words from it (writing the arguments to a file would, and the
+mod must not).
+
+It is registered as `on('tool.*', RUN_MATCHER, ...)` and acts only when
+`next.event` is `tool.run`, because an engine before 2.1.326 refuses to load a
+module that names `tool.run`. `RUN_MATCHER` is `Bash` and
+`mcp__<server>__plannotator`. The engine picks a module's hooks for an event by
+pattern alone (read from the 2.1.327 binary), so the glob puts the mod in the
+chain of every `tool.*` event (`tool.call`, `tool.check`, `tool.judge`,
+`tool.run`, `tool.describe`, `tool.list`, `tool.register`, and `tool.offer`
+where the engine has it; 2.1.327 does not); the matcher only decides whether
+the hook runs. Where the guard sends one of them past the user
+tier, Claude Code prints "plannotator: its <event> hook was skipped" once per
+session, matcher or not (as for classic hooks, #2243): `tool.check` (printed
+before this change too, from the skip-rm-prompts hook), and `tool.describe` and
+`tool.offer` where the organization has its own tools (managed MCP servers,
+organization plugins). `tool.list` is never reported. No matcher key avoids
+it: in the engine harness (2.1.325 and 2.1.327) a probe whose matcher names
+`tool_use_id`, which `tool.describe` never carries, is reported skipped like the
+mod. Costs on a
+guarded machine: the first launch of each open is refused once, and the open
+then goes through the session's permission decision, which is the guard's
+requirement. At `tool.run` the guard excuses an allowed call's own words for
+other remembered calls of the same tool, so several opens in one message do not
+block each other there; what remains is the tool and Bash used with the same
+words in one turn.
+
+Before this fix, a guarded user can have the person type `/plannotator-annotate
+<file>` (or `/plannotator-review`, `/plannotator-last`): a person's command is
+not a model call, so the guard has nothing of its own to match. A refused model
+call with the same words is still remembered until the person's next message,
+so if the command is refused, send any message first. Or turn the mod off
+(`PLANNOTATOR_CLAUDE_MOD=0`, or `{ "claudeCodeMod": false }` in config.json): the
+classic CLI, skills and plan hook run as before mods, and Claude Code then also
+has no `plannotator_inbox` tool and no Inbox reply wake. Tests:
+`apps/hook/hooks/mod/early-run.test.ts` (the real hooks with a stand-in guard
+that refuses every start while a call is held, and an engine whose `tool.check`
+never reaches the mod) and the engine harness's "Claude Code's guard from
+2.1.326" (`apps/hook/tests/register.test.ts`), which CI runs on 2.1.287, 2.1.325
+and 2.1.327 (test.yml's matrix; `scripts/test-claude-code-mod.sh` writes the
+version under test into `tests/engine-under-test.ts`, so 2.1.326+ must raise
+`tool.run`). From 2.1.326 the kit raises a test's `$.tool.call` through the
+permission check and the plugins' `tool.run` hooks; there a stand-in guard that
+holds each call from `tool.call` to `tool.run` sees the tool and a taken-over
+Bash command each refused once and then opened once, at `tool.run`. On older
+engines the case only checks that the module loads.
 
 **Plan review.** The `tool.call` hook on the main loop's ExitPlanMode resolves
 the plan (the plan file when it is an absolute `.md` regular file within the

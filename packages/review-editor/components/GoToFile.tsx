@@ -5,6 +5,7 @@ import { REPO_FILES_SEARCH_ENDPOINT } from '@plannotator/shared/repo-files';
 import { altKey } from '@plannotator/ui/utils/platform';
 import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
+import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
 
 const RESULT_LIMIT = 50;
 const SERVER_DEBOUNCE_MS = 80;
@@ -28,13 +29,6 @@ interface Row {
   group?: 'recent' | 'changed';
 }
 
-const STATUS_LETTER: Record<DiffFile['status'], string> = { added: 'A', deleted: 'D', renamed: 'R', modified: 'M' };
-const STATUS_CLASS: Record<DiffFile['status'], string> = {
-  added: 'text-success',
-  deleted: 'text-destructive',
-  renamed: 'text-warning',
-  modified: 'text-primary',
-};
 
 /** The matched characters of a name, marked. */
 function Marked({ text, offset, positions }: { text: string; offset: number; positions: ReadonlySet<number> }) {
@@ -86,7 +80,12 @@ export const GoToFile: React.FC<GoToFileProps> = ({
   const listId = useId();
   const changed = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const changedSet = useMemo(() => new Set(changed.keys()), [changed]);
-  const localPaths = repo.status === 'ready' ? repo.paths : null;
+  const localPaths = useMemo(() => {
+    if (repo.status !== 'ready' || !repo.paths) return null;
+    const listed = new Set(repo.paths);
+    const missing = files.filter((file) => !listed.has(file.path)).map((file) => file.path);
+    return missing.length ? [...repo.paths, ...missing] : repo.paths;
+  }, [repo, files]);
   const lowerPaths = useMemo(() => localPaths?.map((path) => path.toLowerCase()), [localPaths]);
   // Searched on the server: a lazy listing, or one still loading.
   const searchOnServer = repoSupported && !localPaths && repo.status !== 'unavailable' && repo.status !== 'error';
@@ -239,7 +238,7 @@ export const GoToFile: React.FC<GoToFileProps> = ({
             return (
               <React.Fragment key={row.path}>
                 {heading && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70" role="presentation">
+                  <div className="px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground/70" role="presentation">
                     {heading}
                   </div>
                 )}
@@ -255,8 +254,8 @@ export const GoToFile: React.FC<GoToFileProps> = ({
                   className={`flex items-center gap-2 mx-1 px-2 h-8 rounded-md cursor-pointer text-[13px] ${index === active ? 'bg-primary/15' : ''}`}
                 >
                   {file ? (
-                    <span className={`w-4 text-center text-[10px] font-semibold flex-shrink-0 ${STATUS_CLASS[file.status]}`} data-goto-status={STATUS_LETTER[file.status]}>
-                      {STATUS_LETTER[file.status]}
+                    <span className={`w-4 text-center text-[12px] flex-shrink-0 ${fileStatusLetter(file.status).className}`} title={fileStatusLetter(file.status).title} data-goto-status={fileStatusLetter(file.status).letter}>
+                      {fileStatusLetter(file.status).letter}
                     </span>
                   ) : (
                     <svg className="w-4 h-4 text-muted-foreground/70 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
@@ -267,20 +266,20 @@ export const GoToFile: React.FC<GoToFileProps> = ({
                   <span className="truncate text-muted-foreground text-xs min-w-0"><Marked text={dir} offset={0} positions={positions} /></span>
                   <span className="flex-1" />
                   {file && (file.additions > 0 || file.deletions > 0) && (
-                    <span className="font-mono text-[11px] flex-shrink-0">
+                    <span className="font-mono text-xs flex-shrink-0">
                       {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
                       {file.deletions > 0 && <span className="text-destructive ml-1">-{file.deletions}</span>}
                     </span>
                   )}
                   {index === active && (
-                    <kbd className="text-[10px] font-mono px-1 rounded border border-border/60 text-muted-foreground flex-shrink-0">↵</kbd>
+                    <kbd className="text-xs font-mono px-1 rounded border border-border/60 text-muted-foreground flex-shrink-0">↵</kbd>
                   )}
                 </div>
               </React.Fragment>
             );
           })}
         </div>
-        <div className="flex items-center gap-3 px-3 h-8 border-t border-border/60 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-3 px-3 h-8 border-t border-border/60 text-xs text-muted-foreground">
           <span><kbd className="font-mono">↑</kbd> <kbd className="font-mono">↓</kbd> move</span>
           <span><kbd className="font-mono">↵</kbd> open</span>
           <span><kbd className="font-mono">{altKey}</kbd> <kbd className="font-mono">↵</kbd> open to the side</span>

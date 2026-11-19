@@ -76,6 +76,7 @@ import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -88,6 +89,7 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
+import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -145,7 +147,8 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undef
  * real sessions. Without the marker, both switches pass through as before.
  */
 export function detachedInboxEnv(env: Readonly<Record<string, string | undefined>>, dataDir: string): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = { ...env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
+  // Not the Rex pane it was started from (`withoutRexPane`): the Inbox outlives it, and its agents are not in it.
+  const out: Record<string, string | undefined> = { ...withoutRexPane(env), PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
   if (isAskAiChild(env)) {
     delete out.PLANNOTATOR_ASK_AI_CHILD;
     delete out.PLANNOTATOR_INBOX_TOOL;
@@ -429,6 +432,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       htmlContent,
       // Live sites (packages/server/inbox-live.ts): the live bridge's sources, as annotate's live sessions get them.
       liveBridge: { bridgeScript: BRIDGE_SCRIPT, bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP, annotationCss: ANNOTATION_HIGHLIGHT_CSS },
+      semDiff: loadEmbeddedSemDiff,
       selfCommand: selfCommand(),
       publishTailnet: tailscale,
       // Testing knob: how long a reply waits on a busy agent before it goes in by itself (default 5 minutes).

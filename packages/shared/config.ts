@@ -174,7 +174,6 @@ export interface PlannotatorConfig {
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
-    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
     semanticDiff?: boolean;
     /** Call-stack impact analysis powered by the optional CallDiff runtime. */
     callFlow?: boolean;
@@ -554,6 +553,13 @@ export interface PlannotatorConfig {
    */
   inboxBro?: boolean;
   /**
+   * Agent status (owner, 2026-11-18; off by default): the status mark on every agent's icon in the Inbox (working,
+   * waiting on you in the Inbox or in the agent; no idle mark). Off or unset: only agents in a Rex pane
+   * carry one, as before. Written by Settings → General → Appearance and the list's ⋮ menu
+   * (`POST /api/inbox/settings` `{ agent_status: { on } }`), read on every list.
+   */
+  inboxAgentStatus?: boolean;
+  /**
    * Floating reply drafts (approval "inbox-reply-floaters"; the owner, 2026-11-08: off by default). On: a reply draft
    * set aside or left behind floats in the Inbox's bottom right corner. Off or unset: it stays in Drafts. Written by
    * Settings → Capabilities → Experimental (`POST /api/inbox/settings` `{ float_drafts: { on } }`), read on every request.
@@ -608,8 +614,9 @@ export interface PlannotatorConfig {
    * each new pull request against them. Empty or unset `rules`: nothing runs.
    * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
    * The rules are the person's own words: never logged, never sent in telemetry.
+   * `branches` (Branch reviews): rank the branches agents report too; off unless `true`.
    */
-  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null; branches?: boolean };
   /**
    * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
    * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
@@ -634,6 +641,8 @@ export interface PlannotatorConfig {
    * no read of the library. Read on every request.
    */
   inboxPlans?: boolean;
+  /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
+  inboxSpacesView?: "cards" | "list";
   /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
@@ -645,6 +654,14 @@ export interface PlannotatorConfig {
    * Settings row; the settings read carries `split_view` only while on. Read on every request.
    */
   inboxSplitView?: boolean;
+  /**
+   * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
+   * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
+   * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no
+   * Settings row; the Reviews read (`GET /api/inbox/reviews`) carries `branch_reviews` only while on. Read on every
+   * request.
+   */
+  inboxBranchReviews?: boolean;
   /**
    * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
    * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,
@@ -680,7 +697,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string; routines?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
@@ -695,6 +712,8 @@ export interface PlannotatorConfig {
     priority?: { shownAt?: string; key?: string; dueAt?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
+    /** The Routines intro (reveals.ts `routines`): claimed once, as the Board's; its "Turn on" writes `inboxScheduledThreads`. */
+    routines?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
     grill_me_tip?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
@@ -799,9 +818,11 @@ export interface PlannotatorConfig {
    * is not a plain model name is ignored. `scratchDir`: Settings → Agents'
    * "Scratch folders", where "New scratch folder" makes each new folder (an
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
-   * folders only.
+   * folders only. `startIn`: Settings → Agents' "Start new agents in": `rex` starts each new agent that can run in
+   * Rex in a tab of Rex (superlogical.com/rex) when Rex is on this computer; anything else (the default) runs it in
+   * the background.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string; startIn?: "inbox" | "rex" };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -866,7 +887,7 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
-   * Let Claude Code agent jobs (code review, Code Tour, Guided Review) run
+   * Let Claude Code agent jobs (code review, Guided Review) run
    * under the user's own Claude Code sandbox setting. When true (default),
    * Plannotator passes nothing sandbox-related and the user's settings decide.
    * Set to false on systems where Claude Code's sandbox cannot start (Linux
@@ -1795,12 +1816,13 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
  * so as the default. `model` only when it is a plain model name;
  * `settingsFile` (Claude settings file) as typed, read at each start;
- * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
+ * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`);
+ * `startIn` `rex` only when it says exactly that (anything else: `inbox`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null; startIn: "inbox" | "rex" } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1812,6 +1834,7 @@ export function resolveInboxLaunch(
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
     settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
+    startIn: value.startIn === "rex" ? "rex" : "inbox",
   };
 }
 

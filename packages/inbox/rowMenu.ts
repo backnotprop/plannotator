@@ -8,7 +8,7 @@ import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@pla
 import { canMarkUnread, canToggleRead, offersRowMarkRead } from './markRead';
 import { priorityAction } from './priority';
 
-export type RowMenuAction = 'pin' | 'unpin' | 'priority-add' | 'priority-remove' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'archive' | 'unarchive';
+export type RowMenuAction = 'pin' | 'unpin' | 'priority-add' | 'priority-remove' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'hide-pulls' | 'archive' | 'unarchive';
 
 /**
  * The thread's address: the Inbox's one address on this computer
@@ -43,7 +43,9 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
  * its group, on a row whose Inbox keeps priority (`priority` absent: none)
  * and whose machine takes it from this one (`canPrioritize`); an archived row
  * offers only Remove. A row of the Archived group (`drawn` "archived", approval "inbox-archived-group") offers
- * Unarchive where Archive goes, and none of the read actions.
+ * Unarchive where Archive goes, and none of the read actions. Hide pull request (or Hide N pull requests) comes before
+ * Archive on a thread not archived with open PRs not hidden (`hide_pulls`, the server's inbox-pull-hidden.ts): the
+ * thread leaves the list while they stay hidden; nothing is done on the forge or to the thread.
  */
 export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxListGroupId | null = null, canSnooze = false, canPrioritize = true): RowMenuAction[] {
   const actions: RowMenuAction[] = [];
@@ -58,6 +60,7 @@ export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: 
     if (canMarkUnread(row)) actions.push('mark-unread');
     if ((row.read_at ?? null) !== null && canToggleRead(row)) actions.push('unread');
   }
+  if (row.resolved_at === null && (row.hide_pulls?.length ?? 0) > 0) actions.push('hide-pulls');
   if (row.resolved_at === null) actions.push('archive');
   else if (drawn === 'archived') actions.push('unarchive');
   return actions;

@@ -2,7 +2,7 @@
  * A project's letter-mark picture through the Inbox's real door: `GET` and `POST /api/inbox/projects/:id/picture`
  * on a running Inbox (temp data dir and HOME, loopback, a scripted GitHub and tailscale: nothing real is asked).
  * What can regress: the switches taken from the request instead of config.json (a page turning GitHub on by
- * itself; only the repo's logo, a local file, may be asked for with `logo=1`, for the list dialog's Detailed card), an SVG served without its sandbox headers, the 404 the window draws letters on, a tailnet guest
+ * itself; only the repo's logo, a local file, may be asked for with `logo=1`, for the list dialog's Detailed card), an SVG served without its sandbox headers, the empty 204 the window draws letters on, a tailnet guest
  * reading or setting a picture, and a refusal that is not one of the approved words (a phone photo's data URL
  * once got a developer's sentence in the toast).
  */
@@ -100,11 +100,11 @@ async function world(config: Record<string, unknown>, tailscale?: { magic: strin
 const errorOf = async (response: Response) => (await response.json()) as { error: string; code: string };
 
 describe("GET /api/inbox/projects/:id/picture", () => {
-  test("the switches come from config.json, never the request; the 404 the window draws letters on; an SVG sandboxed", async () => {
+  test("the switches come from config.json, never the request; the empty 204 the window draws letters on (no console error); an SVG sandboxed", async () => {
     const w = await world({ inboxRows: ["marksProjects"], inboxRowsDefaults: 99 });
     const none = await w.get();
-    expect(none.status).toBe(404);
-    expect((await errorOf(none)).code).toBe("no_picture");
+    expect(none.status).toBe(204);
+    expect(await none.text()).toBe("");
     expect(w.github).toEqual([]);
 
     // The list dialog's Detailed card asks for the repo's logo before the look is saved: served, from the folder;
@@ -169,7 +169,7 @@ describe("POST /api/inbox/projects/:id/picture", () => {
     const removed = await w.post(null);
     expect(removed.status).toBe(200);
     expect(((await removed.json()) as { project: { picture?: number } }).project.picture).toBeUndefined();
-    expect((await w.get()).status).toBe(404);
+    expect((await w.get()).status).toBe(204);
   });
 
   test("another site and another session's tab are refused, and nothing is set", async () => {
@@ -182,7 +182,7 @@ describe("POST /api/inbox/projects/:id/picture", () => {
       body: JSON.stringify({ picture: dataUrl(PNG, "image/png"), serverSession: "not-this-one" }),
     });
     expect(stale.status).toBe(409);
-    expect((await w.get()).status).toBe(404);
+    expect((await w.get()).status).toBe(204);
   });
 });
 

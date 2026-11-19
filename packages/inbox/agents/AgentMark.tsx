@@ -9,6 +9,7 @@ import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy
 import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, showAgentFace, unmountAgentMark } from './motion';
 import { ProjectTile, keptAgentFace, shownAgentFace, useAgentProjectTile, useProjectDefault } from './projectFace';
+import { RexMark, useRexMarkOf } from './rexMark';
 
 export { loadAgentFaceArt } from './faceArtLoad';
 
@@ -28,11 +29,29 @@ export { loadAgentFaceArt } from './faceArtLoad';
  */
 export type AgentMarkPicks = 'all' | 'shared' | 'none';
 
-export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string; host: string | null; name: string; agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'>; picks?: AgentMarkPicks }) {
+export function AgentMark({
+  id,
+  host,
+  name,
+  agent,
+  picks = 'all',
+  statusMarks = false,
+}: {
+  id: string;
+  host: string | null;
+  name: string;
+  agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'>;
+  picks?: AgentMarkPicks;
+  /** The sidebar's Agents list: the "Agent status" marks too, while the setting is on (rexMark.tsx `useRexMarkOf`). */
+  statusMarks?: boolean;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const [plain, setPlain] = useState<HTMLElement | null>(null);
   const kept = useAgentFace(id);
+  // Started in Rex: its pane's status on the mark's corner (rexMark.tsx); any other agent: none.
+  const rexMark = useRexMarkOf(agent?.session ?? id, statusMarks);
+  const rex = rexMark ? <RexMark mark={rexMark} seed={id} size={24} side /> : null;
   // Agent icons "From the project name" (Settings → Rows): no face picked draws the project's tile (projectFace.tsx).
   const projectDefault = useProjectDefault(id);
   const face = shownAgentFace(kept, projectDefault);
@@ -207,6 +226,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
               <ProjectTile tile={project} host={host} />
             </span>
           )}
+          {rex}
         </span>
         {plain && createPortal(<HostMark host={host} />, plain)}
       </>
@@ -246,6 +266,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
               <ProjectTile tile={project} host={host} />
             </span>
           )}
+          {rex}
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
       {fan && button.current && (

@@ -42,6 +42,8 @@ export interface InboxScheduledThread {
   thread_id: string | null;
   /** The runs counted in threads the person deleted: the next run's number counts on from it. */
   runs_before?: number;
+  /** The window's `idempotency_key` it was made with: a create sent again with it (a retry, a reloaded or restored tab, after a restart) answers this one. Never on the wire. */
+  create_key?: string;
   /** The agent session that made it, and the thread it asked from. */
   made_by?: { host: string; session: string; thread_id: string };
   /**

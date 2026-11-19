@@ -8,7 +8,7 @@ import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { BarePathContext, CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
+import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -606,6 +606,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const matchLocalLink = useLocalLinkMatch();
   const barePaths = useContext(BarePathContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
@@ -820,6 +821,21 @@ export const InlineMarkdown: React.FC<{
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
     if (match && !linkLabel) {
       const email = match[1];
+      // A host whose test takes `mailto:` (LocalLinkMatchContext) and answers `unavailable` gets inert text. Absent,
+      // `isLocalLinkTarget` never takes a scheme, so the mail link draws as always.
+      const mailLink = resolveLocalLink && matchLocalLink(`mailto:${email}`) ? resolveLocalLink(`mailto:${email}`) : null;
+      if (mailLink?.kind === 'unavailable') {
+        parts.push(
+          <HostTitle key={key++} title={mailLink.title}>
+            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+              {email}
+            </span>
+          </HostTitle>,
+        );
+        remaining = remaining.slice(match[0].length);
+        previousChar = ">";
+        continue;
+      }
       parts.push(
         <a
           key={key++}
@@ -1293,7 +1309,7 @@ export const InlineMarkdown: React.FC<{
       const isInPageAnchor = safeLinkUrl.startsWith('#');
       // A host's resolver (Viewer `resolveLocalLink`) decides local paths
       // first; null from it, or no resolver, keeps the branches below.
-      const localLink = resolveLocalLink && isLocalLinkTarget(linkUrl) ? resolveLocalLink(linkUrl) : null;
+      const localLink = resolveLocalLink && matchLocalLink(linkUrl) ? resolveLocalLink(linkUrl) : null;
 
       if (localLink?.kind === 'open') {
         const openLink = localLink.open;

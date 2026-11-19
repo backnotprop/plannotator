@@ -178,6 +178,29 @@ export function filterAgentRows(sections: readonly InboxListSection[], filter: A
   return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => agentRowOf(row, filter, self)) }));
 }
 
+/** What a Rex pane blocked on the person waits for (OSC 7501's `kind`), after "waiting on you in Rex". */
+export const REX_WAITING_WORDS: Record<'permission' | 'question' | 'auth' | 'other', string> = {
+  permission: ': a permission prompt',
+  question: ': a question',
+  auth: ': a sign-in',
+  other: '',
+};
+
+/** Its Rex pane's word, where the Inbox had none of its own (the server folded it into `state`); null otherwise. */
+function rexStateWords(agent: InboxAgent): string | null {
+  const rex = agent.rex_status;
+  if (agent.state === 'waiting' && agent.waiting === 0 && rex?.state === 'blocked') return `Waiting on you in Rex${REX_WAITING_WORDS[rex.kind ?? 'other']}`;
+  if (agent.state === 'idle' && rex?.state === 'done') return 'Done';
+  if (agent.state === 'idle' && rex?.state === 'error') return 'Stopped on an error';
+  return null;
+}
+
+/**
+ * A live agent whose host reports nothing about its turns (`turns_unknown`: Codex, Qwen Code, T3 Code, Antigravity, an
+ * MCP-only agent): the card says so instead of "Idle", which the Inbox cannot know.
+ */
+export const TURNS_UNKNOWN_WORDS = "Doesn't say when it's working";
+
 /** What an agent's hover card says, line by line; a fact the window does not have is left out. */
 export interface AgentFacts {
   title: string;
@@ -193,6 +216,7 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
     away ??
+    rexStateWords(agent) ??
     (agent.state === 'waiting'
       ? agent.waiting > 1
         ? `${agent.waiting} threads waiting on you`
@@ -200,14 +224,23 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
       : agent.state === 'working'
         ? 'Working'
         : agent.state === 'idle'
-          ? 'Idle'
+          ? agent.turns_unknown
+            ? TURNS_UNKNOWN_WORDS
+            : 'Idle'
           : 'Ended');
   const rows: [string, string][] = [];
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
+  if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };
+}
+
+/** What a session's line says it is doing: nothing for a live agent whose host reports no turns (never "idle"). */
+export function agentSessionState(agent: InboxAgent): InboxAgent['state'] | null {
+  return agent.turns_unknown && agent.state === 'idle' ? null : agent.state;
 }
 
 /**
@@ -268,7 +301,7 @@ export function threadSessions(
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);
       continue;
     }
-    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agent.state : group ? 'ended' : null });
+    out.push({ session: p.session, sessions: [p.session], host: p.host, machine: group?.machine ?? null, agentId: agent?.id ?? null, name, state: agent ? agentSessionState(agent) : group ? 'ended' : null });
   }
   return out;
 }

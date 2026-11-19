@@ -61,7 +61,7 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -101,6 +101,11 @@ export interface ServerOptions {
   hostControlToken?: string;
   /** The plan markdown content */
   plan: string;
+  /**
+   * The agent session that submitted the plan (its host, session id and name), when the host knows it: recorded beside
+   * the history version (`NNN.agent.json`), so the Inbox's Spaces home can say that agent is working on the plan.
+   */
+  historyAgent?: { host: string; session: string; name: string | null } | null;
   /** Origin identifier (e.g., "claude-code", "opencode") */
   origin: Origin;
   /**
@@ -357,7 +362,7 @@ export async function startPlannotatorServer(
   if (mode !== "archive") {
     repoInfo = await getRepoInfo();
     ({ project, slug: historySlug } = resolveHistoryChain(await historyProjects(options.historyRoot), slug));
-    const historyResult = saveToHistory(project, historySlug, plan);
+    const historyResult = saveToHistory(project, historySlug, plan, { agent: options.historyAgent });
     currentPlanPath = historyResult.path;
     previousPlan =
       historyResult.version > 1
@@ -736,10 +741,7 @@ export async function startPlannotatorServer(
             if (!planDocumentDrafts) return handleDraftLoad(draftKey);
             const loaded = loadSessionDraftWithDocuments({ patchKey: draftKey }, planDocumentDrafts);
             if (loaded.found) return Response.json(loaded.draft);
-            return Response.json(
-              { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) },
-              { status: 404 },
-            );
+            return missingDraftResponse(loaded.draftGeneration);
           }
 
           // API: per-document draft copies of the plan's linked documents
@@ -1023,7 +1025,7 @@ export async function startPlannotatorServer(
       // Same bookkeeping a resubmission gets from a fresh server.
       slug = generateSlug(next);
       historySlug = resolveHistorySlug(project, slug, { current: historySlug });
-      const historyResult = saveToHistory(project, historySlug, next);
+      const historyResult = saveToHistory(project, historySlug, next, { agent: options.historyAgent });
       currentPlanPath = historyResult.path;
       previousPlan = historyResult.version > 1 ? getPlanVersion(project, historySlug, historyResult.version - 1) : null;
       versionInfo = { version: historyResult.version, totalVersions: getVersionCount(project, historySlug), project };

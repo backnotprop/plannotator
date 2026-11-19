@@ -41,6 +41,7 @@ import {
 } from '@plannotator/ui/utils/skillReferences';
 import { INBOX_BUILTIN_SKILL_ROOT, inboxReviewSkill } from '@plannotator/core/inbox-review';
 import { shapeSkill } from '@plannotator/core/shape-skill';
+import { createRoutineSkill } from '@plannotator/core/create-routine-skill';
 import { inboxApi } from './api';
 import { annotationOf } from './attachments';
 
@@ -119,13 +120,13 @@ export function setReviewSkillsDiagrams(on: boolean): void {
 
 /**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
- * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
+ * Inbox lists while Code review is on, `/shape` while Shape is on, and `/create-routine` while Routines are on), from the window's own text, never read
  * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch), and its
  * chapter diagram lines `diagrams` (Chapter diagrams).
  */
 export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = reviewSkillsShape, diagrams: boolean = reviewSkillsDiagrams): SkillExportContent | undefined {
   if (ref.root !== 'plannotator') return undefined;
-  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name);
+  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name) ?? createRoutineSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
 }
 
