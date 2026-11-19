@@ -598,7 +598,7 @@ test('an iPhone in other row looks: a row with no preview keeps its marks beside
     const LOOKS: [string, string[], string, string[]][] = [
       // [the look, its options, what only it draws, the rows with no preview in it]
       ['Thread name first', ['smallNames', 'titleFirst'], `${lk('ib-lk-tfirst')} && !${lk('ib-lk-tbelow')} && ${pv} > 0`, [world.lone]],
-      ['Grey line under the name: None', ['smallNames', 'hidePreview'], `!${lk('ib-lk-tfirst')} && !${lk('ib-lk-tbelow')} && ${pv} === 0 && !document.querySelector('.ib-lm-tt')`, [world.lone, world.holding, world.guided]],
+      ['Grey line under the name: None', ['smallNames', 'hidePreview'], `${lk('ib-lk-small')} && !!document.querySelector('.ib-mrow') && !${lk('ib-lk-tfirst')} && !${lk('ib-lk-tbelow')} && ${pv} === 0 && !document.querySelector('.ib-lm-tt')`, [world.lone, world.holding, world.guided]],
       ['Letter marks, Inline', ['smallNames', 'marksThreads', 'markInline'], `!${lk('ib-lk-tfirst')} && ${pv} > 0 && !!document.querySelector('.ib-mrow .ib-lm-tt')`, [world.lone]],
     ];
     for (const [look, options, ready, ids] of LOOKS) {
