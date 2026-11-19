@@ -669,10 +669,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop });
-    const tap = async (path: string) => {
-      const note = (await headerOf(path)).querySelector<HTMLButtonElement>('[data-semantic-note="off"]')!;
-      await act(async () => note.click());
-    };
+    const tap = async (path: string) => flip(await headerOf(path));
     const held = () => [...document.querySelectorAll<HTMLElement>('div')].map((element) => element.style.paddingBottom).find(Boolean) ?? '';
     return { ...page, tap, held };
   }
