@@ -5138,8 +5138,9 @@ function Inbox() {
         writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace });
       }}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
+      onNewReview={(pick, opener, ask) => openCompose({ review: ask ? { pick, ask } : { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
       onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}
+      onOpenPicture={(id, attachmentId, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, ...(attachmentId ? { file: { id: attachmentId, version: 'current', focus: null, view: 'side' } } : { msg: messageId }) })}
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}

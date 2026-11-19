@@ -21,12 +21,12 @@
  *     the agent's own message) and Open review thread, no Board UI, no merge
  *     button.
  *  4. A PR with no review thread, one PR on its own: its launchpad (approval
- *     "pr-launchpad"). Start a guided review in the Guided review card opens
- *     the New review box filled in (approval "pr-page-review-with-agent");
- *     Start review sends the first message to the agent in To, and the PR is
- *     that thread's from then on (the guided review on its way, Open review
- *     thread; once it arrives, Open the guided review). The diff card's Open
- *     the diff is there in every state.
+ *     "pr-launchpad"). Guided review in its row of buttons opens the New
+ *     review box filled in (approval "pr-page-review-with-agent"); Start
+ *     review sends the first message to the agent in To, and the PR is that
+ *     thread's from then on (the guided review on its way, the thread's line;
+ *     once it arrives, the guide's line). Open the diff is the row's primary
+ *     in every state.
  *     (Start a new agent shows only while the Inbox can launch; the shots add
  *     compose's launch block to the sessions answer, since launching is not
  *     on main yet.)
@@ -940,8 +940,8 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   }
 }
 
-/** The stack view's and the launchpad's controls a phone must make full touch targets: the one button, Open the diff, the launchpad's card buttons, and in New review the choices and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-launch-go], .ib-cp-choice input, [data-compose-send]';
+/** The stack view's and the launchpad's controls a phone must make full touch targets: the one button, Open the diff, the launchpad's row of buttons and its lines, and in New review the choices and Start. */
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-launch-go], [data-launch-line], .ib-cp-choice input, [data-compose-send]';
 
 /**
  * Each target's right edge and its height to the touch: its own box, or its `::after` hit area where that is taller
@@ -953,7 +953,7 @@ const touchTargets = (els: Element[]) =>
     return { right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
   });
 
-test('one PR with no review thread, on its launchpad: Start a guided review, the New review box, "on its way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
+test('one PR with no review thread, on its launchpad: Guided review, the New review box, "on its way", the guided review arriving, the thread line, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
@@ -962,12 +962,12 @@ test('one PR with no review thread, on its launchpad: Start a guided review, the
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane).toHaveAttribute('data-launchpad', '');
-  // The Guided review card leads, its Start the primary; the diff card's Open the diff is there in every state; no thread, no Reply.
-  const primary = pane.locator('[data-launch-door="guide"] [data-launch-go="start"]');
-  await expect(primary).toHaveText('Start a guided review');
-  await expect(primary).toHaveClass(/ib-pri/);
-  await expect(pane.locator('[data-launch-door="diff"] [data-pulls-open-diff]')).toHaveText('Open the diff');
-  await expect(pane.locator('[data-launch-door="thread"]')).toContainText('None yet');
+  // One row: Open the diff the primary, Guided review beside it; no lines, no thread, no Reply.
+  const primary = pane.locator('[data-launch-row] [data-launch-go="guide"]');
+  await expect(primary).toHaveText('Guided review');
+  await expect(pane.locator('[data-launch-row] [data-pulls-open-diff]')).toHaveText('Open the diff');
+  await expect(pane.locator('[data-launch-row] [data-pulls-open-diff]')).toHaveClass(/ib-pri/);
+  await expect(pane.locator('[data-launch-line]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await expect(pane).not.toContainText(/\bhand/i);
@@ -1006,47 +1006,47 @@ test('one PR with no review thread, on its launchpad: Start a guided review, the
   expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
-  // Kept: a fresh read still ties it to that thread, and says what was asked; the wide card opens the thread (no second Start).
+  // Kept: a fresh read still ties it to that thread, and says what was asked; the thread's line opens it (no second start).
   await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
   await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Curating…');
-  await expect(page.locator('[data-launch-door="guide"]')).toContainText('is on its way from Claude Code');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
-  await expect(page.locator('[data-pulls-stack] [data-launch-go="start"]')).toHaveCount(0);
+  await expect(page.locator('[data-launch-line="guide"]')).toContainText('Claude Code is writing it…');
+  await expect(page.locator('[data-pulls-stack] [data-launch-line="thread"]')).toBeVisible();
+  await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeDisabled();
   await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
   await expect(page.locator('[data-pulls-stack]')).not.toContainText(/\bhand/i);
   await shot(page, '6-on-the-way');
   await phoneShot(browser, LOCALE, 'phone-6-on-the-way');
 
-  // The agent's guided review arrives through phase 1's path: the Guided review card opens it, the thread from its own card.
+  // The agent's guided review arrives through phase 1's path: its line opens it, the thread from its own line.
   await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'Fall back to English for missing strings');
   await page.reload();
   const stackPane = page.locator('[data-pulls-stack]');
-  await expect(stackPane.locator('[data-launch-door="guide"] [data-launch-go="guide"]')).toHaveText('Open the guided review');
-  await expect(stackPane.locator('[data-launch-go="start"], [data-launch-go="guide-thread"]')).toHaveCount(0);
-  await expect(stackPane.locator('[data-launch-door="thread"] [data-launch-go="thread"]')).toHaveText('Open review thread');
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toContainText('Open');
+  await expect(stackPane.locator('[data-launch-go="start-thread"]')).toHaveCount(0);
+  await expect(stackPane.locator('[data-launch-line="thread"]')).toContainText('Open');
   await shot(page, '6a-review-arrived');
   await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
   // The thread is named for the PR (owner, q-49bd0699 A), as the person's own name: the Inbox list shows it.
   await page.goto(world.url);
   await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
   await shot(page, '6t-thread-name', ['light']);
-  // Reviewed, the row still opens the PR's launchpad (the owner, 2026-11-09); its Review thread card opens the same
+  // Reviewed, the row still opens the PR's launchpad (the owner, 2026-11-09); its Thread line opens the same
   // thread, in Reviews, and the line over the thread's title leads back to the launchpad.
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
   await expect(page.locator('[data-pulls-stack][data-launchpad]')).toHaveAttribute('data-pulls-stack', LOCALE);
-  await expect(stackPane.locator('[data-launch-go="guide"]')).toBeVisible();
-  await stackPane.locator('[data-launch-door="thread"] [data-launch-go="thread"]').click();
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toBeVisible();
+  await stackPane.locator('[data-launch-line="thread"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${threadId}`);
   await expect(page.locator('[data-review-context]')).toContainText('#869');
   await page.locator('[data-review-open-pull]').click();
-  await expect(stackPane.locator('[data-launch-go="guide"]')).toBeVisible();
+  await expect(stackPane.locator('[data-launch-line="guide"]')).toBeVisible();
   await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
   await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(LOCALE)}`);
-  await page.locator('[data-pulls-stack] [data-launch-go="thread"]').click();
+  await page.locator('[data-pulls-stack] [data-launch-line="thread"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(threadId);
   await page.unroute('**/api/inbox/sessions*');
 });
@@ -2593,12 +2593,12 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
     await shot(page, 'phone-3-layer-review');
-    // A teammate's PR with no review thread, on its launchpad: Start a guided review, the box as a sheet, every choice a touch target.
+    // A teammate's PR with no review thread, on its launchpad: Guided review, the box as a sheet, every choice a touch target.
     await offerLaunch(page);
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     await shot(page, 'phone-4-no-thread');
-    await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
+    await page.locator('[data-pulls-stack] [data-launch-go="guide"]').click();
     const box = page.locator('[data-review-box]');
     await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -2983,14 +2983,14 @@ test('the walkthrough video (20 s or less): Start a guided review starts a revie
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
     await page.goto(`${world.url}#pulls`);
-    // A teammate's PR with no review thread, on its launchpad: Start a guided review, and Open the diff in its own card.
+    // A teammate's PR with no review thread, on its launchpad: Guided review, and Open the diff beside it.
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     const pane = page.locator('[data-pulls-stack][data-launchpad]');
-    await expect(pane.locator('[data-pulls-primary="review"]')).toBeVisible();
+    await expect(pane.locator('[data-launch-go="guide"]')).toBeVisible();
     await pause(2200);
-    await pane.locator('[data-launch-door="diff"] [data-pulls-open-diff]').hover();
+    await pane.locator('[data-launch-row] [data-pulls-open-diff]').hover();
     await pause(1300);
-    await pane.locator('[data-pulls-primary]').click();
+    await pane.locator('[data-launch-go="guide"]').click();
     await pause(900);
     const box = page.locator('[data-review-box]');
     await box.locator('[data-compose-to]').click();
@@ -3003,7 +3003,7 @@ test('the walkthrough video (20 s or less): Start a guided review starts a revie
     const opening = await world.claude.nextReply(threadId);
     await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
     await page.reload();
-    await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeVisible();
+    await expect(page.locator('[data-pulls-stack] [data-launch-line="guide"]')).toBeVisible();
     await pause(2500);
     // Open the diff: straight into the review mode, no stop on the way.
     await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();
@@ -4092,14 +4092,15 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   await expect(page.locator('[data-review-context]')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('Before one.')).toBeVisible();
 
-  // A thread handed a PR and archived before its review: the PR's launchpad offers Start a guided review again, not "on the way".
+  // A thread handed a PR and archived before its review: the PR's launchpad offers Guided review again, not "on the way".
   const handed = await claude.send({ project_path: world.projects.web, thread: 'handed-off', subject: 'Handed', body: 'On it.' });
   expect((await page.request.post(`${world.url}api/inbox/pulls/owner`, { data: { keys: [LOCALE], thread_id: handed.thread_id, ask: 'guide' } })).status()).toBe(200);
   await archive(handed.thread_id, true);
   await page.goto(`${world.url}#reviews`);
   await page.reload();
   await page.locator(`[data-pulls-row="${LOCALE}"], [data-pulls-row]`).filter({ hasText: '#869' }).first().click();
-  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Start a guided review');
+  await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeEnabled();
+  await expect(page.locator('[data-pulls-stack] [data-launch-line="guide"]')).toHaveCount(0);
 
   // Code review off: the thread's view is the off page on a fresh link, and the thread itself loses nothing.
   await setCodeReview(false);
