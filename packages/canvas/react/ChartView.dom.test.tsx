@@ -159,5 +159,51 @@ describe.skipIf(!hasDom)('a chart, mounted', () => {
     expect(far.host.querySelector('[data-id="ch"] path.pcv-ch-s-accent')).not.toBeNull();
     // What it shows is still said in words to someone who cannot see it.
     expect(far.host.querySelector('[data-id="ch"]')!.getAttribute('aria-label')).toContain('Line chart of minutes');
+    act(() => root!.unmount());
+    root = null;
+    far.host.remove();
+    // Under 20% even its title would be a few pixels tall: marks only.
+    const tiny = await mount(false, { title: 'Scan to alert' }, 0.15);
+    expect(tiny.host.querySelectorAll('[data-id="ch"] text').length).toBe(0);
+    expect(tiny.host.querySelector('[data-id="ch"] path.pcv-ch-s-accent')).not.toBeNull();
+  });
+
+  test('a change of detail keeps the mark elements: no element turns from a word into a mark, and the marks are the same nodes', async () => {
+    const camera = new CameraController({ x: 0, y: 0, z: 1 });
+    const store = new CanvasStore(createDocument('board', 'Board'));
+    const rows = [['W1', 'a', 5], ['W2', 'a', 3], ['W1', 'b', 9], ['W2', 'b', 7]];
+    store.dispatch({ type: 'add', objects: [{ id: 'ch', type: 'chart', x: 40, y: 40, w: 380, h: 240, mark: 'bar', title: 'Two series', fields: ['week', 'k', 'v'], rows, encode: { x: 'week', y: 'v', series: 'k' } } as unknown as CanvasObject] });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<CanvasView store={store} camera={camera} />);
+    });
+    const marks = () => [...host!.querySelectorAll<SVGPathElement>('[data-id="ch"] path')];
+    const words = () => [...host!.querySelectorAll('[data-id="ch"] text')].map((el) => el.textContent);
+    const full = marks();
+    const bars = full.filter((el) => el.classList.contains('pcv-ch-f-accent') || el.classList.contains('pcv-ch-f-ink'));
+    expect(bars.length).toBeGreaterThanOrEqual(2);
+    expect(words().length).toBeGreaterThan(5);
+    // Zoomed out to a third: the title and key stay, the small words go.
+    await act(async () => {
+      camera.set({ x: 0, y: 0, z: 0.3 });
+    });
+    expect(words()).toEqual(['TWO SERIES', 'a', 'b']);
+    const named = marks();
+    // Every path that was there is still in the page, the very same node, and still a path at the same place among the paths.
+    for (const [i, el] of full.entries()) {
+      if (i >= named.length) break;
+      expect(named[i]).toBe(el);
+      expect(el.isConnected).toBe(true);
+    }
+    expect(named.length).toBeGreaterThanOrEqual(bars.length);
+    // And back again: the same nodes once more.
+    await act(async () => {
+      camera.set({ x: 0, y: 0, z: 1 });
+    });
+    const again = marks();
+    expect(again).toHaveLength(full.length);
+    for (const [i, el] of full.entries()) expect(again[i]).toBe(el);
   });
 });

@@ -118,6 +118,17 @@ describe('a table that cannot be drawn is refused, with the reason', () => {
     expect(refused({ mark: 'dot', encode: { x: 'minutes', y: 'plan', size: 'week' } })).toContain('must be a number');
   });
 
+  test('an amount is drawn as a size, so it cannot be less than nothing: a negative one is refused, not drawn small', () => {
+    const grid = { mark: 'cell', fields: ['x', 'y', 'v'], rows: [['a', 'p', -5], ['b', 'p', 0], ['a', 'q', 5]], encode: { x: 'x', y: 'y', value: 'v' } };
+    expect(refused(grid)).toContain('must be 0 or more (it is encode.value, which is drawn as a size)');
+    expect(check({ ...grid, rows: [['a', 'p', 0], ['b', 'p', 0], ['a', 'q', 5]] }).ok).toBe(true);
+    const dots = { mark: 'dot', fields: ['x', 'y', 'v'], rows: [[1, 2, -1], [2, 3, 4]], encode: { x: 'x', y: 'y', size: 'v' } };
+    expect(refused(dots)).toContain('must be 0 or more (it is encode.size');
+    // Where a number is a place and not a size, less than nothing is a number like any other.
+    expect(check({ mark: 'bar', fields: ['x', 'v'], rows: [['a', -5], ['b', 5]], encode: { x: 'x', y: 'v' } }).ok).toBe(true);
+    expect(check({ ...dots, rows: [[-1, -2, 1], [2, 3, 4]] }).ok).toBe(true);
+  });
+
   test('no more series, small charts or names than can be told apart', () => {
     const many = (count: number) => ({ fields: ['x', 'kind', 'v'], rows: Array.from({ length: count }, (_row, i) => [i, `k${i}`, i]) });
     expect(check({ ...many(CHART_LIMITS.series), encode: { x: 'x', y: 'v', series: 'kind' } }).ok).toBe(true);

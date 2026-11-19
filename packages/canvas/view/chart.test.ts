@@ -202,11 +202,14 @@ describe('the look', () => {
     }
   });
 
+  const EIGHT = Array.from({ length: 16 }, (_row, i) => [`n${i % 2}`, `k${i % 8}`, 20]);
+  const seriesMarks = (shapes: ChartShape[]) => paths(shapes).filter((shape) => (shape.fill ?? shape.stroke) !== 'rule' && (shape.fill ?? shape.stroke) !== 'muted');
+  /** A series' marks in the plot (two bars here), not its one swatch in the key. */
+  const inPlot = (shape: Extract<ChartShape, { kind: 'path' }>) => shape.d.split('z').length - 1 >= 2;
+  const form = (shape: Extract<ChartShape, { kind: 'path' }>) => (shape.fill ? 'solid' : shape.d.includes('L') ? 'hatched' : 'hollow');
+
   test('the first five series differ by form, not by shade: two quiet solids, two hollow, then hatched ones', () => {
-    const rows = Array.from({ length: 16 }, (_row, i) => [`n${i % 2}`, `k${i % 8}`, i + 1]);
-    const bars = paths(chartShapes(chart({ mark: 'bar', fields: ['x', 'k', 'v'], rows, encode: { x: 'x', y: 'v', series: 'k' }, stack: true }), { detail: 'marks' })).filter((shape) => (shape.fill ?? shape.stroke) !== 'rule' && (shape.fill ?? shape.stroke) !== 'muted');
-    expect(bars).toHaveLength(8);
-    const form = (shape: (typeof bars)[number]) => (shape.fill ? 'solid' : shape.d.includes('L') ? 'hatched' : 'hollow');
+    const bars = seriesMarks(chartShapes(chart({ mark: 'bar', fields: ['x', 'k', 'v'], rows: EIGHT, encode: { x: 'x', y: 'v', series: 'k' }, stack: true, w: 380, h: 420 }))).filter(inPlot);
     expect(bars.map(form)).toEqual(['solid', 'solid', 'solid', 'hollow', 'hollow', 'hatched', 'hatched', 'hatched']);
     // The three hatches are three different hatches: lines that rise, lines that fall, and both.
     const slants = (d: string) => {
@@ -215,13 +218,102 @@ describe('the look', () => {
       return [...found].sort().join('+');
     };
     expect(bars.slice(5).map((shape) => slants(shape.d)).sort()).toEqual(['fall', 'fall+rise', 'rise']);
-    // In a grid of kinds a hollow tile would read as a hole: there the fourth and fifth are smaller solid tiles.
-    const grid = rows.map((row, i) => [`c${i}`, row[1], row[1]]);
-    const tiles = paths(chartShapes(chart({ mark: 'cell', fields: ['x', 'y', 'k'], rows: grid, encode: { x: 'x', y: 'y', series: 'k' } }), { detail: 'marks' })).filter((shape) => shape.fill === 'accent' || shape.fill === 'ink' || shape.stroke === 'accent' || shape.stroke === 'ink');
-    expect(tiles.slice(0, 5).every((shape) => !!shape.fill)).toBe(true);
-    const width = (shape: (typeof tiles)[number]) => Number(shape.d.match(/h([\d.]+)v/)![1]);
-    expect(width(tiles[3])).toBeLessThan(width(tiles[0]) * 0.7);
-    expect(width(tiles[4])).toBeLessThan(width(tiles[0]) * 0.7);
+  });
+
+  test('a form is drawn only where it can be read: a small mark, or a chart drawn small, is quiet solid steps, never stripes', () => {
+    const object = (h: number) => chart({ mark: 'bar', fields: ['x', 'k', 'v'], rows: EIGHT, encode: { x: 'x', y: 'v', series: 'k' }, stack: true, w: 380, h });
+    // The same stack in a short chart: every part is a few units high. All solid, each still at a step that can be seen.
+    const short = seriesMarks(chartShapes(object(150), { detail: 'marks' })).concat(seriesMarks(chartShapes(object(140))).filter(inPlot));
+    expect(short.length).toBeGreaterThanOrEqual(16);
+    for (const shape of short) {
+      expect(form(shape)).toBe('solid');
+      expect(shape.opacity ?? 1).toBeGreaterThanOrEqual(0.46);
+    }
+    // And in a tall chart drawn small (a figure in a plan): solid too, the key's swatches with it.
+    for (const detail of ['named', 'marks'] as const) for (const shape of seriesMarks(chartShapes(object(420), { detail }))) expect(form(shape)).toBe('solid');
+  });
+
+  test('in a grid of kinds the fourth and fifth kinds are whole tiles with a core, not outlines that read as holes', () => {
+    const grid = Array.from({ length: 16 }, (_row, i) => [`c${i}`, `k${i % 8}`, `k${i % 8}`]);
+    const tiles = seriesMarks(chartShapes(chart({ mark: 'cell', fields: ['x', 'y', 'k'], rows: grid, encode: { x: 'x', y: 'y', series: 'k' }, w: 520, h: 320 }), { detail: 'marks' }));
+    expect(tiles.every((shape) => form(shape) === 'solid')).toBe(true);
+    const full = seriesMarks(chartShapes(chart({ mark: 'cell', fields: ['x', 'y', 'k'], rows: grid, encode: { x: 'x', y: 'y', series: 'k' }, w: 520, h: 320 }))).filter((shape) => shape.d.split('M').length - 1 === 2);
+    const width = (shape: (typeof full)[number]) => Number(shape.d.match(/h([\d.]+)v/)![1]);
+    // Kinds one to three: one whole tile each. Kind four: a whole quiet tile, and a core half as wide in the colour.
+    const whole = width(full[0]);
+    expect(full.slice(0, 3).every((shape) => !!shape.fill && Math.abs(width(shape) - whole) < 0.01)).toBe(true);
+    expect([form(full[3]), full[3].fill, Math.abs(width(full[3]) - whole) < 0.01]).toEqual(['solid', 'ink', true]);
+    expect([form(full[4]), full[4].fill]).toEqual(['solid', 'accent']);
+    expect(width(full[4])).toBeCloseTo(whole / 2, 1);
+  });
+
+  test('a chart spends a bounded number of hatch lines: 500 hatched spans are drawn as quiet solids past it, and stay one path a series', () => {
+    const rows = Array.from({ length: 500 }, (_row, i) => [`lane ${i % 20}`, i * 2, i * 2 + 30, `k${i % 8}`]);
+    const shapes = chartShapes(chart({ mark: 'span', fields: ['lane', 'from', 'to', 'k'], rows, encode: { x: 'from', x2: 'to', y: 'lane', series: 'k' }, w: 20_000, h: 20_000 }));
+    const lines = paths(shapes).reduce((sum, shape) => sum + (shape.stroke && shape.d.includes('L') ? shape.d.split('L').length - 1 : 0), 0);
+    expect(lines).toBeLessThanOrEqual(4000);
+    // Every one of the 500 spans is still drawn, in at most two shapes a series.
+    const marks = seriesMarks(shapes).filter((shape) => shape.d.split('M').length - 1 > 20 || shape.d.split('z').length - 1 > 20);
+    expect(marks.reduce((sum, shape) => sum + (shape.d.match(/h[\d.-]+v[\d.-]+h[\d.-]+z/g)?.length ?? 0), 0)).toBeGreaterThanOrEqual(500);
+    expect(marks.length).toBeLessThanOrEqual(16);
+    // A small chart of the same kind has room: its hatched series are hatched.
+    const few = chartShapes(chart({ mark: 'span', fields: ['lane', 'from', 'to', 'k'], rows: rows.slice(0, 16), encode: { x: 'from', x2: 'to', y: 'lane', series: 'k' }, w: 900, h: 600 }));
+    expect(seriesMarks(few).some((shape) => form(shape) === 'hatched')).toBe(true);
+  });
+
+  test('the last name in a key is cut short, not counted: "+N" is only written for two or more', () => {
+    for (let count = 2; count <= 8; count++) {
+      for (const w of [220, 300, 380, 520]) {
+        const rows = Array.from({ length: count }, (_row, i) => [i, i, `series ${'x'.repeat(i * 3)}${i}`]);
+        const words = texts(chartShapes(chart({ mark: 'dot', fields: ['x', 'y', 'k'], rows, encode: { x: 'x', y: 'y', series: 'k' }, w, h: 300 })));
+        expect(words.filter((word) => word === '+1')).toEqual([]);
+        const counted = words.find((word) => /^\+\d+$/.test(word));
+        const named = words.filter((word) => word.startsWith('series')).length;
+        expect(named + (counted ? Number(counted.slice(1)) : 0)).toBe(count);
+      }
+    }
+    // Three lines and room for two and a half names in a chart drawn small: the third is cut with an ellipsis.
+    const rows = [[0, 'failing', 180], [6, 'failing', 76], [0, 'plan', 180], [9, 'plan', 0], [6, 'at this rate', 76], [9, 'at this rate', 4]];
+    const key = texts(chartShapes(chart({ mark: 'line', title: 'Tests still failing', fields: ['week', 'line', 'tests'], rows, encode: { x: 'week', y: 'tests', series: 'line' }, w: 520, h: 320 }), { detail: 'named' }));
+    expect(key.slice(1, 3)).toEqual(['failing', 'plan']);
+    expect(key[3]).toMatch(/^at .*…$|^at this rate$/);
+  });
+
+  test('with names at the line ends, the values on the rules stand in a gutter at the left: no line runs through them', () => {
+    const rows = [1, 2, 3].flatMap((voices) => [16, 64, 512].map((block) => [block, `${voices} voices`, 20 * voices + 600 / block]));
+    const shapes = chartShapes(chart({ mark: 'line', fields: ['block', 'voices', 'load'], rows, encode: { x: 'block', y: 'load', series: 'voices' }, w: 520, h: 320 }));
+    const lines = paths(shapes).filter((shape) => shape.stroke && shape.d.split('L').length === 3 && (shape.width ?? 1) >= 1.5);
+    expect(lines).toHaveLength(3);
+    const left = Math.min(...lines.map((shape) => Number(shape.d.match(/^M([\d.-]+) /)![1])));
+    const values = shapes.filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && /^\d+$/.test(shape.text) && shape.anchor === 'end' && shape.size === 9.5 && shape.y < 300);
+    expect(values.length).toBeGreaterThanOrEqual(3);
+    // Each ends before the plot begins, so before any line does.
+    for (const value of values) {
+      expect(value.x).toBeLessThan(left);
+      // And inside the chart: the gutter is room the plot gave up, not the chart's own edge.
+      expect(value.x - value.text.length * 9.5 * 0.61).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  test('a label moved away from its end is clear of the other labels and of the foot of the plot', () => {
+    // Three lines stop at the same place in the middle, low on the chart, where another runs on through.
+    const rows = [[0, 'on', 60], [9, 'on', 2], ...['a', 'b', 'c'].flatMap((name, i) => [[0, name, 40 + i], [5, name, 27 + i * 0.4]])];
+    const object = chart({ mark: 'line', fields: ['week', 'line', 'v'], rows, encode: { x: 'week', y: 'v', series: 'line' }, w: 520, h: 320 });
+    const shapes = chartShapes(object);
+    const labels = shapes.filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && / (on|a|b|c)$/.test(shape.text));
+    expect(labels).toHaveLength(4);
+    const box = (label: (typeof labels)[number]) => {
+      const wide = label.text.length * 6.1;
+      const l = label.anchor === 'end' ? label.x - wide : label.x;
+      return [l, label.y - 9, l + wide, label.y + 2];
+    };
+    for (let i = 0; i < labels.length; i++) for (let j = i + 1; j < labels.length; j++) {
+      const [a, b] = [box(labels[i]), box(labels[j])];
+      expect(a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]).toBe(false);
+    }
+    // None is written over the names along the x axis.
+    const foot = Math.min(...shapes.filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && /^\d$/.test(shape.text) && shape.y > 300).map((shape) => shape.y - 9));
+    for (const label of labels) expect(label.y).toBeLessThan(foot);
   });
 
   test('drawn small, a chart still says what it is: its title and a one-line key, larger, and none of the small words', () => {
@@ -339,6 +431,22 @@ describe('the look', () => {
     // Dish 0-6 and Dish 6-9 meet and share a row; "locked" 4-5 lies inside the first and stands under it.
     expect(listening[0]).toBe(listening[1]);
     expect(locked[0]).toBeGreaterThan(listening[0]);
+  });
+
+  test('a rule past the data is still inside the chart: the scale grows to hold it', () => {
+    const object = chart({ ...WEEKS, mark: 'bar', encode: { x: 'week', y: 'minutes' }, rules: [{ at: 40, label: 'limit' }] });
+    const rule = paths(chartShapes(object)).find((shape) => shape.dash)!;
+    const y = Number(rule.d.match(/^M[\d.]+ ([\d.-]+)H/)![1]);
+    expect(y).toBeGreaterThan(0);
+    expect(y).toBeLessThan(object.h);
+    expect(texts(chartShapes(object))).toContain('limit');
+  });
+
+  test('stacked bars stand on each other: the scale holds their sum, not their largest', () => {
+    const table = { fields: ['x', 'a', 'b'], rows: [['one', 60, 70], ['two', 10, 20]] };
+    const top = (stack: boolean) => Math.max(...texts(chartShapes(chart({ ...table, mark: 'bar', encode: { x: 'x', y: ['a', 'b'] }, ...(stack ? { stack: true } : {}) }))).map(Number).filter(Number.isFinite));
+    expect(top(false)).toBeLessThan(130);
+    expect(top(true)).toBeGreaterThanOrEqual(130);
   });
 
   test('one small chart for each value of the facet, each named', () => {

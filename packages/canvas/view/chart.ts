@@ -80,20 +80,58 @@ function hatch([x, y, w, h]: Box, rise: boolean): string {
   return d;
 }
 
+/** A box narrower or shorter than this is too small for a hatch or an outline to be read as one. */
+const READABLE = 7;
+/** The most hatch lines one chart draws. Past it, hatched series are drawn in their quiet solid step instead. */
+const HATCH_LINES = 4000;
+/** What a chart has left of that: shared by every series of one drawing. */
+interface Budget {
+  hatch: number;
+}
+
+interface BoxOptions {
+  budget: Budget;
+  /** In a grid of kinds, where a hollow box would look like a missing one. */
+  tile?: boolean;
+  /** The chart is drawn small (not at full detail): every form is its quiet solid step. */
+  plain?: boolean;
+}
+
 /**
- * All of one series' boxes (bars, spans, tiles, a legend's swatch) as one shape, in that series' form.
- * `tile`: in a grid of kinds, where a hollow box would look like a missing one.
+ * All of one series' boxes (bars, spans, tiles, a key's swatch), in that series' form. One shape, or
+ * two where some of the boxes cannot carry the form.
+ *
+ * A hollow or hatched form is drawn only where it can be read: on a box at least `READABLE` across and
+ * high, at full detail, and while the chart has hatch lines left to spend. Everywhere else the series is
+ * its quiet solid step (the colour at 0.82, ink at 0.55 or 0.46), so a small stack is steps, never a fuzz
+ * of stripes. In a grid of kinds a hollow tile would read as a hole, so there the hollow forms are a
+ * whole quiet tile with a core in the series' colour.
  */
-function boxes(all: Box[], series: number, tile = false): ChartShape {
+function boxes(all: Box[], series: number, how: BoxOptions): ChartShape[] {
   const paint = paintOf(series);
-  const outline = (inset: number) => all.map(([x, y, w, h]) => rect(x + inset, y + inset, Math.max(0.5, w - inset * 2), Math.max(0.5, h - inset * 2))).join('');
-  if (paint.form === 'solid') return { kind: 'path', d: outline(0), fill: paint.role, opacity: paint.opacity };
+  const path = (list: Box[], inset = 0) => list.map(([x, y, w, h]) => rect(x + inset, y + inset, Math.max(0.5, w - inset * 2), Math.max(0.5, h - inset * 2))).join('');
+  if (paint.form === 'solid') return [{ kind: 'path', d: path(all), fill: paint.role, opacity: paint.opacity }];
+  const quiet = (list: Box[]): ChartShape => ({ kind: 'path', d: path(list), fill: paint.role, opacity: paint.role === 'accent' ? 0.82 : paint.form === 'cross' ? 0.46 : 0.55 });
+  if (how.plain) return [quiet(all)];
+  // A tile's core is two flat steps, which read at half the size an outline or a hatch needs.
+  const least = how.tile && paint.form === 'hollow' ? READABLE / 2 : READABLE;
+  const big = all.filter(([, , w, h]) => Math.min(w, h) >= least);
+  const little = all.filter(([, , w, h]) => Math.min(w, h) < least);
+  const out: ChartShape[] = little.length ? [quiet(little)] : [];
+  if (big.length === 0) return out;
   if (paint.form === 'hollow') {
-    if (tile) return { kind: 'path', d: all.map(([x, y, w, h]) => rect(x + w * 0.22, y + h * 0.22, w * 0.56, h * 0.56)).join(''), fill: paint.role, opacity: paint.opacity };
-    return { kind: 'path', d: outline(0.75), stroke: paint.role, width: 1.5, opacity: paint.opacity };
+    if (how.tile) {
+      out.push({ kind: 'path', d: path(big), fill: 'ink', opacity: 0.46 });
+      out.push({ kind: 'path', d: big.map(([x, y, w, h]) => rect(x + w * 0.25, y + h * 0.25, w * 0.5, h * 0.5)).join(''), fill: paint.role, opacity: paint.role === 'accent' ? 1 : 0.65 });
+    } else out.push({ kind: 'path', d: path(big, 0.75), stroke: paint.role, width: 1.5, opacity: paint.opacity });
+    return out;
   }
-  const lines = all.map((box) => (paint.form === 'hatch' ? hatch(box, true) : paint.form === 'back' ? hatch(box, false) : hatch(box, true) + hatch(box, false))).join('');
-  return { kind: 'path', d: outline(0.5) + lines, stroke: paint.role, width: 1, opacity: paint.opacity };
+  const lines = big.reduce((sum, [, , w, h]) => sum + Math.min(HATCH_MAX, (w + h) / HATCH_GAP) * (paint.form === 'cross' ? 2 : 1), 0);
+  if (lines > how.budget.hatch) return [quiet(all)];
+  how.budget.hatch -= lines;
+  const drawn = big.map((box) => (paint.form === 'hatch' ? hatch(box, true) : paint.form === 'back' ? hatch(box, false) : hatch(box, true) + hatch(box, false))).join('');
+  out.push({ kind: 'path', d: path(big, 0.5) + drawn, stroke: paint.role, width: 1, opacity: paint.opacity });
+  return out;
 }
 /** A series' marks that are not boxes (dots, a stacked area): filled, or for a hollow series an outline. */
 const filled = (d: string, series: number): ChartShape => {
@@ -297,6 +335,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
   const small = tiny || w < 200 || h < 130;
   const pad = tiny ? 3 : small ? 8 : 14;
   const out: ChartShape[] = [];
+  const budget: Budget = { hatch: HATCH_LINES };
   const write = (on: boolean, x: number, y: number, value: string, size: number, fill: ChartRole, extra: Partial<Extract<ChartShape, { kind: 'text' }>> = {}) => {
     if (on && value) out.push({ kind: 'text', x, y, text: value, size, fill, face: 'mono', ...extra });
   };
@@ -366,24 +405,29 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
     for (let s = 0; s < keyed.length; s++) {
       const rest = keyed.length - s;
       const last = line === lines - 1;
-      // On the last line, room is kept for the count of what is left.
-      const more = rest > 1 ? mono(`+${rest - 1}`, size) + 6 * big : 0;
-      const label = fits(keyed[s], size, w - pad * 2 - swatch - 2 - (last ? more : 0));
-      const width = swatch + mono(label, size) + 14 * big;
-      if (at > pad && at + width > w - pad - (last ? more : 0)) {
-        if (last) {
+      // On the last line room is kept for what may be left: a count ("+3"), or the last name cut short.
+      const more = last && rest > 1 ? Math.max(mono(`+${rest - 1}`, size), swatch + mono('abc…', size)) + 6 * big : 0;
+      let label = fits(keyed[s], size, w - pad * 2 - swatch - 2 - more);
+      let width = swatch + mono(label, size) + 14 * big;
+      if (at > pad && at + width > w - pad - more) {
+        if (!last) {
+          at = pad;
+          line += 1;
+          y += 16 * big;
+          s -= 1;
+          continue;
+        }
+        if (rest > 1) {
           head(at, y + 9 * big, `+${rest}`, size, 'muted');
           break;
         }
-        at = pad;
-        line += 1;
-        y += 16 * big;
-        s -= 1;
-        continue;
+        // One name left and not room for all of it: as much of it as fits, never "+1" in place of a name.
+        label = fits(keyed[s], size, w - pad - at - swatch);
+        width = swatch + mono(label, size);
       }
       if (lineMark) out.push({ kind: 'path', d: `M${n(at)} ${n(y + 6 * big)}h${n(18 * big)}`, ...lineOf(s) });
       else if (mark === 'dot') out.push(filled(marker(s, at + 4.5 * big, y + 6 * big, 4 * big), s));
-      else out.push(boxes([[at + 0.75, y + 2.75 * big, 8 * big, 7 * big]], s, mark === 'cell'));
+      else out.push(...boxes([[at + 0.75, y + 2.75 * big, 8 * big, 7 * big]], s, { budget, tile: mark === 'cell', plain: !words }));
       head(at + swatch, y + 9 * big, label, size, s === 0 ? 'ink' : 'muted');
       at += width;
     }
@@ -446,7 +490,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
     }
     // The ground every tile of amounts stands on: where a cell is, however little it holds.
     if (ki === -1) hair(`${[...Array(columns.length + 1).keys()].map((i) => `M${n(area.l + i * cw)} ${n(area.t)}V${n(area.b)}`).join('')}${[...Array(lanes.length + 1).keys()].map((i) => `M${n(area.l)} ${n(area.t + i * ch)}H${n(area.r)}`).join('')}`);
-    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(ki !== -1 ? boxes(parts, group, true) : { kind: 'path', d: parts.map((box) => rect(...box)).join(''), fill: 'accent' });
+    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(...(ki !== -1 ? boxes(parts, group, { budget, tile: true, plain: !words }) : [{ kind: 'path' as const, d: parts.map((box) => rect(...box)).join(''), fill: 'accent' as const }]));
     if (!small) {
       const rowEvery = Math.max(1, Math.ceil(11 / ch));
       lanes.forEach((name, index) => {
@@ -510,7 +554,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
       if (!parts) groups.set(span.group, (parts = []));
       parts.push([px(span.from), top, Math.max(2, px(span.to) - px(span.from)), thick]);
     }
-    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(boxes(parts, group));
+    for (const [group, parts] of [...groups].sort((a, b) => a[0] - b[0])) out.push(...boxes(parts, group, { budget, plain: !words }));
     if (!small) {
       const rowEvery = Math.max(1, Math.ceil(11 / rowH));
       lanes.forEach((name, index) => {
@@ -641,7 +685,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
           if (mono(label, 9.5) <= b - a - 2) text(a + 1, top - 5, label, 9.5, point.s === 0 ? 'ink' : 'muted');
         }
       }
-      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(boxes(parts, s));
+      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(...boxes(parts, s, { budget, plain: !words }));
       if (!small) {
         const every = Math.max(1, Math.ceil(11 / band));
         names.forEach((name, i) => {
@@ -661,6 +705,10 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
     // Every small chart keeps the same margin, written in or not, so their marks line up down the page.
     const margin = ends ? endRoom : labelled || (faceted && !small) ? Math.max(...ticksOf(scale).map((tick) => mono(shortNumber(tick), 9.5))) + (unit ? mono(unit, 9.5) + 6 : 0) + 8 : 0;
     area.r = edge - Math.min(margin, panelW * 0.45);
+    // With names at the line ends the right margin is theirs, so the rules' values get a gutter of their own
+    // at the left, outside the plot: no line can run through them.
+    const gutter = ends ? Math.max(...ticksOf(scale).map((tick) => mono(shortNumber(tick), 9.5))) + 8 : 0;
+    area.l += gutter;
     const py = (value: number) => area.b - ((value - scale.lo) / (scale.hi - scale.lo)) * (area.b - area.t);
     const band = (area.r - area.l) / Math.max(1, names.length);
     const px = (value: ChartCell): number => {
@@ -687,8 +735,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
         text(edge, ty - 4, `${shortNumber(tick)}${tick === top && unit ? ` ${unit}` : ''}`, 9.5, 'muted', { anchor: 'end' });
       }
     } else if (ends) {
-      // With names at the line ends, the rules' values are written at the left, on the rules.
-      for (const tick of ticks) if (Math.abs(py(tick) - base) > 0.5) text(area.l, py(tick) - 4, shortNumber(tick), 9.5, 'muted');
+      for (const tick of ticks) text(area.l - 6, py(tick) + 3.5, shortNumber(tick), 9.5, 'muted', { anchor: 'end' });
     }
 
     if (mark === 'bar') {
@@ -705,7 +752,7 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
         // A stacked part stands a hair off the one under it, so two quiet parts do not read as one.
         parts.push([left, top, thick, Math.max(1, foot - top - (stacked && from !== 0 ? 0.75 : 0))]);
       }
-      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(boxes(parts, s));
+      for (const [s, parts] of [...paths].sort((a, b) => a[0] - b[0])) out.push(...boxes(parts, s, { budget, plain: !words }));
     } else if (mark === 'dot') {
       const paths = new Map<number, string[]>();
       for (const { point } of placed) {
@@ -755,28 +802,51 @@ export function chartShapes(object: ChartObject, options: ChartDrawOptions = {})
           }
           return false;
         };
+        // First the labels that are clear where a label belongs, beside the end: those are moved apart
+        // where two would sit on each other. Then the others, each to the first place that is clear of
+        // every line, of every label already placed, and of the foot of the plot where the x axis is named.
         const labels = [...lastOf].map(([s, end]) => {
           const said = endWords(s, end.value);
           const wide = mono(said, 10);
-          const places: { x: number; y: number; left?: true }[] = [
-            { x: end.x + 7, y: end.y + 3.5 },
-            { x: end.x + 6, y: end.y - 7 },
-            { x: end.x + 6, y: end.y + 15 },
-            { x: end.x - 6, y: end.y - 7, left: true },
-            { x: end.x - 6, y: end.y + 15, left: true },
-          ];
-          const clear = places.findIndex((place) => {
-            const l = place.left ? place.x - wide : place.x;
-            return l >= area.l && l + wide <= edge + 1 && place.y - 9 >= area.t - 12 && !crossed(s, l - 1, place.y - 9, l + wide + 1, place.y + 2);
-          });
-          const place = places[Math.max(0, clear)];
-          return { s, ...end, said, place, beside: clear <= 0, at: place.y };
+          const beside = !crossed(s, end.x + 6, end.y - 5.5, end.x + 8 + wide, end.y + 5.5);
+          return { s, ...end, said, wide, beside, place: { x: end.x + 7, y: end.y + 3.5 } as { x: number; y: number; left?: true }, at: end.y + 3.5 };
         });
-        // Those that stayed beside their ends are moved apart where two would sit on each other.
         spread(labels.filter((label) => label.beside), 11, area.t + 4, area.b + 3);
+        const taken: [l: number, t: number, r: number, b: number][] = labels.filter((label) => label.beside).map((label) => [label.place.x, label.at - 9, label.place.x + label.wide, label.at + 2]);
+        for (const label of labels) {
+          if (label.beside) continue;
+          const places: { x: number; y: number; left?: true }[] = [
+            { x: label.x + 6, y: label.y - 7 },
+            { x: label.x + 6, y: label.y + 15 },
+            { x: label.x - 6, y: label.y - 7, left: true },
+            { x: label.x - 6, y: label.y + 15, left: true },
+            { x: label.x + 6, y: label.y - 18 },
+            { x: label.x - 6, y: label.y - 18, left: true },
+            { x: label.x + 6, y: label.y + 26 },
+            { x: label.x - 6, y: label.y + 26, left: true },
+          ];
+          const boxOf = (place: { x: number; y: number; left?: true }): [number, number, number, number] => {
+            const l = place.left ? place.x - label.wide : place.x;
+            return [l - 1, place.y - 9, l + label.wide + 1, place.y + 2];
+          };
+          /** Inside the plot, off the names along its foot, and on no label that is already placed. */
+          const open = (place: { x: number; y: number; left?: true }): boolean => {
+            const [l, t, r, b] = boxOf(place);
+            if (l < area.l - 1 || r > edge + 2 || t < area.t - 12 || b > area.b - 2) return false;
+            return !taken.some(([tl, tt, tr, tb]) => l < tr && r > tl && t < tb && b > tt);
+          };
+          // Best: clear of every line too. Else on a line but on no other label. Else beside its end after all.
+          const free = places.find((place) => open(place) && !crossed(label.s, ...boxOf(place))) ?? places.find(open);
+          if (free) {
+            label.place = free;
+            label.at = free.y;
+          }
+          const l = label.place.left ? label.place.x - label.wide : label.place.x;
+          taken.push([l, label.at - 9, l + label.wide, label.at + 2]);
+        }
         for (const label of labels) {
           out.push({ kind: 'path', d: rect(label.x - 2.5 * heavy, label.y - 2.5 * heavy, 5 * heavy, 5 * heavy), fill: paintOf(label.s).role });
-          text(label.place.x, label.at, label.beside ? fits(label.said, 10, edge - label.place.x) : label.said, 10, label.s === 0 ? 'ink' : 'muted', { anchor: label.place.left ? 'end' : undefined });
+          text(label.place.x, label.at, label.place.left ? label.said : fits(label.said, 10, edge - label.place.x), 10, label.s === 0 ? 'ink' : 'muted', { anchor: label.place.left ? 'end' : undefined });
         }
       }
     }

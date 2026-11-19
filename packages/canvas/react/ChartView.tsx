@@ -28,16 +28,21 @@ export const ChartView = memo(function ChartView({ object, detail }: ChartViewPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mark, fields, rows, encode, stack, flip, dash, rules, title, unit, w, h, detail],
   );
+  // A path is keyed by its place among the paths and a word by its place among the words. So when the
+  // detail changes (words come or go, a key is added) no element turns from a word into a mark or back:
+  // the marks that are still there are the same elements, with new numbers in them at most.
+  let words = 0;
+  let marks = 0;
   return (
     <svg className="pcv-chart-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true" focusable="false">
-      {shapes.map((shape, index) =>
+      {shapes.map((shape) =>
         shape.kind === 'text' ? (
-          <text key={index} x={shape.x} y={shape.y} fontSize={shape.size} fontWeight={shape.weight} textAnchor={shape.anchor} className={`pcv-ch-f-${shape.fill} pcv-ch-${shape.face}`}>
+          <text key={`t${(words += 1)}`} x={shape.x} y={shape.y} fontSize={shape.size} fontWeight={shape.weight} textAnchor={shape.anchor} className={`pcv-ch-f-${shape.fill} pcv-ch-${shape.face}`}>
             {shape.text}
           </text>
         ) : (
           <path
-            key={index}
+            key={`p${(marks += 1)}`}
             d={shape.d}
             className={`${shape.fill ? `pcv-ch-f-${shape.fill}` : 'pcv-ch-f-none'}${shape.stroke ? ` pcv-ch-s-${shape.stroke}` : ''}`}
             strokeWidth={shape.stroke ? (shape.width ?? 1) : undefined}

@@ -3,7 +3,7 @@ import { createDocument } from '../model/document';
 import { CanvasStore } from '../events/store';
 import type { CanvasObject } from '../model/types';
 import { FIGURE_MIN, figureBox, fitName } from '../snapshot/SnapshotFigure';
-import { HTML_FRAMES_DROP, HTML_FRAMES_MAX, htmlFramesNext } from './CanvasView';
+import { CHART_NAMED_DROP, CHART_NAMED_MAX, HTML_FRAMES_DROP, HTML_FRAMES_MAX, chartDetailNext, htmlFramesNext } from './CanvasView';
 import { edgesBeyond, nearestBeyond } from './EdgeMarkers';
 import { ARROW_LABEL_MAX, shortLabel } from './objects';
 import { faceColor } from './people';
@@ -123,5 +123,38 @@ describe('HTML items when the board is zoomed out', () => {
     for (const onScreen of [3, 8, 9, 10, 11, 10, 9, 10, 9, 8, 9, 10, 11]) seen.push((kept = htmlFramesNext(kept, 'plain', onScreen)));
     expect(seen).toEqual([true, true, true, true, false, false, false, false, false, true, true, true, false]);
     expect(HTML_FRAMES_MAX).toBeLessThan(HTML_FRAMES_DROP);
+  });
+});
+
+describe('how much of a chart is written out', () => {
+  /** A walk: the zoom's level and how many objects are mounted at each step. How many times the detail changed. */
+  const changes = (steps: [zoom: 'full' | 'plain' | 'far', mounted: number][]): { seen: string[]; changes: number } => {
+    let named = true;
+    const seen: string[] = [];
+    for (const [zoom, mounted] of steps) {
+      const detail = chartDetailNext(named, zoom, mounted);
+      if (zoom === 'plain') named = detail === 'named';
+      seen.push(detail);
+    }
+    return { seen, changes: seen.filter((detail, i) => i > 0 && detail !== seen[i - 1]).length };
+  };
+
+  test('a pan that hovers round one number of mounted objects changes the detail once at most, not at every step', () => {
+    // Sixty pans across the old boundary (150), a few objects either side, below 45%.
+    for (const centre of [CHART_NAMED_MAX, 150, CHART_NAMED_DROP]) {
+      const walk = Array.from({ length: 60 }, (_step, i): ['plain', number] => ['plain', centre + [-4, 3, -2, 5, -5, 2][i % 6]]);
+      expect(changes(walk).changes).toBeLessThanOrEqual(1);
+    }
+    // It does change when the board really fills up, and back when it really empties: once each way.
+    const there = changes([['plain', 100], ['plain', 150], ['plain', CHART_NAMED_DROP + 1], ['plain', 150], ['plain', CHART_NAMED_MAX + 1], ['plain', CHART_NAMED_MAX], ['plain', 150]]);
+    expect(there.seen).toEqual(['named', 'named', 'marks', 'marks', 'marks', 'named', 'named']);
+  });
+
+  test('all of it at 45% and over; no words under 20%, however few objects; a title and key between, on a board that is not crowded', () => {
+    expect(chartDetailNext(true, 'full', 5000)).toBe('full');
+    expect(chartDetailNext(false, 'full', 1)).toBe('full');
+    expect(chartDetailNext(true, 'far', 1)).toBe('marks');
+    expect(chartDetailNext(true, 'plain', 12)).toBe('named');
+    expect(chartDetailNext(true, 'plain', 2000)).toBe('marks');
   });
 });

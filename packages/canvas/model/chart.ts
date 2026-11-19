@@ -143,8 +143,11 @@ export function checkChart(value: Record<string, unknown>, id: string): { ok: tr
     for (const y of ys as string[]) checks.push(numeric('y', y));
     if (mark === 'bar') checks.push(counted('x', encode.x, CHART_LIMITS.categories));
   }
-  if (encode.value) checks.push(numeric('value', encode.value));
-  if (encode.size) checks.push(numeric('size', encode.size));
+  // An amount is drawn as a SIZE (a cell's tile, a dot's width), and nothing is drawn as nothing. A size
+  // cannot be less than nothing, so a negative amount has no drawing: it is refused, not shown as a small one.
+  const amount = (key: string, name: string): Fail | null => numeric(key, name) ?? (rows.every((row) => (row[column(name)] as number) >= 0) ? null : fail(`${id}: every value of ${JSON.stringify(name)} must be 0 or more (it is encode.${key}, which is drawn as a size)`));
+  if (encode.value) checks.push(amount('value', encode.value));
+  if (encode.size) checks.push(amount('size', encode.size));
   if (encode.series) checks.push(counted('series', encode.series, CHART_LIMITS.series));
   if (encode.facet) checks.push(counted('facet', encode.facet, CHART_LIMITS.facets));
   for (const bad of checks) if (bad) return bad;

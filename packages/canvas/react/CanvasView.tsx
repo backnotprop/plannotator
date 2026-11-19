@@ -40,6 +40,7 @@ import { indexFor } from '../view/document-index';
 import { curveRoute, endAngles, findHops, pointAlong, routePath } from '../view/route-path';
 import { roughLine, seedOf } from '../view/rough';
 import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
+import type { ChartDetail } from './ChartView';
 import { ArrowView, type EditEnd, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
@@ -64,6 +65,20 @@ export const HTML_FRAMES_MAX = 8;
 export const HTML_FRAMES_DROP = 10;
 /** Whether HTML items are drawn as themselves, given whether they were a moment ago, the detail, and how many are on screen. */
 export const htmlFramesNext = (kept: boolean, lod: Lod, onScreen: number): boolean => lod === 'full' || (kept ? onScreen <= HTML_FRAMES_DROP : onScreen <= HTML_FRAMES_MAX);
+/**
+ * How much of a chart is written out (`ChartDrawOptions.detail`).
+ * - At 45% and over: all of it.
+ * - Under 20% its largest words would be a few pixels tall: no words, whatever the view holds.
+ * - Between the two (a figure in a plan, a phone): its title and a one-line key, set large, while the view
+ *   holds few enough objects; on a crowded board, no words. "Few enough" is a held band, as for HTML
+ *   frames: the words go when more than `CHART_NAMED_DROP` objects are mounted and come back at
+ *   `CHART_NAMED_MAX` or fewer, so a pan or a zoom that hovers round one number of mounted objects does
+ *   not turn every chart on the board over and back.
+ */
+export const CHART_NAMED_MAX = 140;
+export const CHART_NAMED_DROP = 160;
+export const chartDetailNext = (named: boolean, zoomLod: Lod, mounted: number): ChartDetail =>
+  zoomLod === 'full' ? 'full' : zoomLod === 'far' ? 'marks' : (named ? mounted <= CHART_NAMED_DROP : mounted <= CHART_NAMED_MAX) ? 'named' : 'marks';
 /** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
 const CROWDED = 500;
 
@@ -194,6 +209,7 @@ export function CanvasView({
   const [zoomLod, setZoomLod] = useState<Lod>(() => lodForZoom(camera.get().z));
   const lodRef = useRef(zoomLod);
   const framesKeptRef = useRef(true);
+  const chartNamedRef = useRef(true);
   const onSizeRef = useRef(onSize);
   onSizeRef.current = onSize;
 
@@ -310,10 +326,9 @@ export function CanvasView({
   }
   framesKeptRef.current = htmlFramesNext(framesKeptRef.current, lod, onScreen);
   const framesKept = framesKeptRef.current;
-  // How much of a chart is written out. On a crowded board far out: nothing. Below the zoom at which its
-  // smallest words would be about four pixels tall (a figure in a plan, a phone), however few objects the
-  // view holds: its title and a one-line key, set large, so it still says what it is. Otherwise all of it.
-  const chartDetail = lod !== 'full' ? 'marks' : zoomLod === 'full' ? 'full' : 'named';
+  // How much of a chart is written out (`chartDetailNext`), remembering whether it was `named` a moment ago.
+  const chartDetail = chartDetailNext(chartNamedRef.current, zoomLod, mounted.length);
+  if (zoomLod === 'plain') chartNamedRef.current = chartDetail === 'named';
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
