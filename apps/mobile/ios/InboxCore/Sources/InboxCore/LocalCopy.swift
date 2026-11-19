@@ -7,6 +7,8 @@ import InboxWire
 /// backups (SPEC 1.5). Brief S1 names SQLite; plain files hold the same data for this slice.
 public struct LocalCopy: Sendable {
   public let folder: URL?
+  /// Told of each file written, by name, after it is written (the tests read every outbox the phone keeps).
+  var watch: (@Sendable (String, Data) -> Void)?
 
   /// `folder` nil keeps nothing (the demo, and tests that do not ask for a copy).
   public init(folder: URL?) { self.folder = folder }
@@ -30,6 +32,7 @@ public struct LocalCopy: Sendable {
       values.isExcludedFromBackup = true
       var target = folder
       try? target.setResourceValues(values)
+      watch?(name, data)
     } catch {
       // A copy that cannot be written is only a slower next open.
     }
@@ -106,4 +109,7 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   /// A thread action: what the person saw of the thread at the tap, which the computer's row is checked against if
   /// the act waited (StateConflict).
   public var shown: ShownState?
+  /// The reverses an Undo made of an act whose answer never came carry that act's key. The first to meet the
+  /// computer's row says whether the act was taken: if there is nothing to take back, none of them goes.
+  public var undoes: String?
 }

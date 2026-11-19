@@ -174,7 +174,9 @@ public struct ShownState: Codable, Hashable, Sendable {
     pinnedAt = own(\.pinnedAt)
     snoozeUntil = shown.snoozed?.until
     priority = shown.priority != nil
-    priorityAt = shown.priority?.at == computer?.priority?.at ? shown.priority?.at : nil
+    let shownAt: String? = shown.priority?.at
+    let computerAt: String? = computer?.priority?.at
+    priorityAt = shownAt == computerAt ? shownAt : nil
     agentAt = Self.agentAt(shown)
   }
 
@@ -232,7 +234,12 @@ public enum StateConflict {
       return moved(shown?.readAt, row.readAt) ? .giveWay : .send
     case .markUnread:
       return row.unread ? .already : .send
-    case .seen, .orderStars, .restorePriority:
+    case .seen, .orderStars:
+      return .send
+    case .restorePriority(let at, _):
+      if row.priority?.at == at { return .already }
+      // Added or removed elsewhere meanwhile.
+      if let shown, shown.priority != (row.priority != nil) || moved(shown.priorityAt, row.priority?.at) { return .giveWay }
       return .send
     case .star, .restoreStar:
       return row.pinnedAt != nil ? .already : .send

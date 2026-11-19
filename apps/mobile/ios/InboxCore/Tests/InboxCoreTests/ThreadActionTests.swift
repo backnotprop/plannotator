@@ -196,6 +196,79 @@ final class ThreadActionTests: XCTestCase {
     XCTAssertNotEqual(session.listView()?.group(of: lost), .archived)
   }
 
+  func testUndoWhileAWaitedActIsCheckedSaysNothingGaveWay() async throws {
+    let door = StandInDoor()
+    let gate = Gate()
+    let thread = StandInData.docs
+    let session = await pairedSession(door: door, gate: gate)
+    await session.start()
+    await door.setOffline(true)
+    await session.act(.archive, on: thread)
+    let offer = try XCTUnwrap(session.undoOffer)
+    // An agent wrote meanwhile: the archive would give way, but the person takes it back first.
+    await door.agentWrites(thread: thread, body: "One more thing before you go.")
+    await door.clearCalls()
+    await door.setOffline(false)
+    await gate.stop { $0.method == .get && $0.path == "threads" }
+    let back = Task { @MainActor in await session.refresh() }
+    await gate.reached()
+    let undone = await session.undo(offer)
+    XCTAssertTrue(undone)
+    await gate.open()
+    await back.value
+
+    XCTAssertNil(session.actionNotice(thread), "taken back, so nothing gave way")
+    let resolves = await door.posts("/resolve")
+    XCTAssertTrue(resolves.isEmpty)
+  }
+
+  func testUndoOfAnActWhoseAnswerWasLostNeverLeavesTheOutboxWithNeither() async throws {
+    let door = StandInDoor()
+    let gate = Gate()
+    let thread = StandInData.docs
+    let outboxes = Outboxes()
+    var copy = LocalCopy(folder: folder())
+    copy.watch = { name, data in
+      if name == "outbox.json", let writes = try? JSONDecoder().decode([HeldWrite].self, from: data) { outboxes.add(writes) }
+    }
+    let session = await pairedSession(door: door, copy: copy, gate: gate)
+    await session.start()
+    await gate.lose({ $0.method == .post && $0.path.hasSuffix("/resolve") }, arrives: true)
+    await session.act(.archive, on: thread)
+    let offer = try XCTUnwrap(session.undoOffer)
+    outboxes.clear()
+    let undone = await session.undo(offer)
+    XCTAssertTrue(undone)
+    // The phone could stop between any two writes of its outbox: the first one Undo makes already holds the reverse.
+    let first = try XCTUnwrap(outboxes.all.first)
+    XCTAssertTrue(first.contains { $0.act == .unarchive }, "the reverse is kept before the archive is let go")
+    let kept = await door.rowState(thread)
+    XCTAssertNil(kept.resolvedAt)
+  }
+
+  func testUndoOfALostArchiveThatNeverArrivedSendsNoneOfItsReverses() async throws {
+    let door = StandInDoor()
+    let gate = Gate()
+    let thread = StandInData.bumps
+    await door.changeState(thread) { $0.priority = InboxRowPriority(person: true, at: "2026-11-18T07:00:00.000Z") }
+    let session = await pairedSession(door: door, gate: gate)
+    await session.start()
+    await gate.lose({ $0.method == .post && $0.path.hasSuffix("/resolve") }, arrives: false)
+    await session.act(.archive, on: thread)
+    // Meanwhile Priority was turned off in the window.
+    await door.changeState(thread) { $0.priority = nil }
+    await door.clearCalls()
+    let undone = await session.undo(try XCTUnwrap(session.undoOffer))
+    XCTAssertTrue(undone)
+
+    let priorities = await door.posts("/priority"), resolves = await door.posts("/resolve")
+    XCTAssertTrue(priorities.isEmpty, "the archive never arrived: its Priority is not put back over the window's change")
+    XCTAssertTrue(resolves.isEmpty)
+    let kept = await door.rowState(thread)
+    XCTAssertNil(kept.priority)
+    XCTAssertTrue(session.held.isEmpty)
+  }
+
   func testAWaitedActIsJudgedByTheComputersStampsNotThePhonesClock() async throws {
     let door = StandInDoor()
     let starred = StandInData.bumps, archived = StandInData.billing
@@ -548,4 +621,13 @@ final class HandClock: @unchecked Sendable {
   }
 
   var sessionClock: SessionClock { SessionClock(now: { [self] in now }, sleep: { [self] in await sleep($0) }) }
+}
+
+/// Every outbox the phone wrote, in order.
+final class Outboxes: @unchecked Sendable {
+  private let lock = NSLock()
+  private var kept: [[HeldWrite]] = []
+  func add(_ writes: [HeldWrite]) { lock.withLock { kept.append(writes) } }
+  func clear() { lock.withLock { kept = [] } }
+  var all: [[HeldWrite]] { lock.withLock { kept } }
 }

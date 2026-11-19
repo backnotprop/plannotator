@@ -197,7 +197,7 @@ public final class AttachmentCache: @unchecked Sendable {
       index[key] = entry
       return url
     }
-    saveIndex()
+    if found != nil { saveIndex() }
     return found
   }
 
@@ -210,11 +210,15 @@ public final class AttachmentCache: @unchecked Sendable {
     try? target.setResourceValues(values)
   }
 
+  /// Write the index into the folder. Never makes the folder: one that is gone was erased, and a write of bytes makes
+  /// it again.
   private func saveIndex() {
     guard let folder else { return }
-    let data = lock.withLock { try? JSONEncoder().encode(index) }
-    prepare()
-    try? data?.write(to: folder.appendingPathComponent("index.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    writing.withLock {
+      guard FileManager.default.fileExists(atPath: folder.path) else { return }
+      let data: Data? = lock.withLock { try? JSONEncoder().encode(index) }
+      try? data?.write(to: folder.appendingPathComponent("index.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
   }
 
   /// Keep bytes under a key, then make room.
@@ -259,7 +263,11 @@ public final class AttachmentCache: @unchecked Sendable {
   /// recently opened file. Never `keeping` (the file just kept), a file open in a viewer, or a fetch under way.
   func evict(keeping key: String?) {
     guard let folder else { return }
-    let busy = lock.withLock { Set(inUse.keys).union(key.map { [$0] } ?? []).map(Self.fileName) }
+    let busy: Set<String> = lock.withLock {
+      var keys: [String] = Array(inUse.keys)
+      if let key { keys.append(key) }
+      return Set(keys.map(Self.fileName))
+    }
     let parts = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? [])
       .filter { $0.pathExtension == "part" }
       .map { url -> (url: URL, size: Int64, changed: Date) in
@@ -322,6 +330,9 @@ public final class AttachmentCache: @unchecked Sendable {
 public enum ByteFetchError: Error, Hashable, Sendable {
   /// Bigger than the phone takes (`size`, when known, against `cap`).
   case tooLarge(size: Int64, cap: Int64)
+  /// The file changed on the computer while it came: the version the phone was told of is gone. Read the thread's
+  /// files again (`readAttachments`), then open the version the computer has now.
+  case changed
   /// The bytes are not the ones the computer named (their SHA-256 differs).
   case damaged
   /// The computer refused, in its words.
@@ -370,6 +381,16 @@ public struct ByteFetch: Sendable {
     }
     var meta = cache.partial(key) ?? AttachmentCache.Partial(etag: nil, total: nil, received: 0)
     if meta.received == 0 { cache.dropPartial(key) }
+    // A hash the bytes must have: a file that changed can never match it.
+    let named: Bool = sha256.map { !$0.hasPrefix("stat:") } ?? false
+    // The file starts again at most once: a file that keeps changing (a log, a video still rendering) ends the fetch.
+    var restarted = false
+    func again(_ failure: ByteFetchError) throws {
+      cache.dropPartial(key)
+      if restarted { throw failure }
+      restarted = true
+      meta = AttachmentCache.Partial(etag: nil, total: nil, received: 0)
+    }
     while meta.total.map({ meta.received < $0 }) ?? true {
       try Task.checkCancellation()
       // No If-Range: the door answers a mismatch with the whole file, uncapped. Each part names its version (ETag)
@@ -380,11 +401,22 @@ public struct ByteFetch: Sendable {
       case 206:
         guard let range = Self.contentRange(answer.headers["content-range"]) else { throw ByteFetchError.unreadable(status: 206) }
         if range.total > cap { throw ByteFetchError.tooLarge(size: range.total, cap: cap) }
-        let changed = meta.received > 0 && meta.etag != nil && answer.headers["etag"].map { $0 != meta.etag } == true
-        guard range.start == meta.received, !changed else {
-          // Not where this fetch stopped, or the file changed since: start the file again.
-          cache.dropPartial(key)
-          meta = AttachmentCache.Partial(etag: nil, total: nil, received: 0)
+        let etag: String? = answer.headers["etag"]
+        var changed = false
+        if meta.received > 0, let kept = meta.etag, let etag, etag != kept { changed = true }
+        if changed {
+          // Another version than the parts kept.
+          if named {
+            cache.dropPartial(key)
+            throw ByteFetchError.changed
+          }
+          try again(.changed)
+          continue
+        }
+        // Not where this fetch stopped, or the parts kept are gone (made room for): start the file again.
+        let partKept: Bool = meta.received == 0 || cache.partial(key)?.received == meta.received
+        guard range.start == meta.received, partKept else {
+          try again(.unreadable(status: 206))
           continue
         }
         guard try append(answer.body, to: key, fresh: meta.received == 0, since: since) else { throw CancellationError() }
@@ -396,9 +428,11 @@ public struct ByteFetch: Sendable {
         meta = AttachmentCache.Partial(etag: answer.headers["etag"], total: Int64(answer.body.count), received: Int64(answer.body.count))
       case 416:
         // Past the end: what the phone had is not this file. Start again.
-        cache.dropPartial(key)
-        if meta.received == 0 { throw ByteFetchError.unreadable(status: 416) }
-        meta = AttachmentCache.Partial(etag: nil, total: nil, received: 0)
+        if meta.received == 0 {
+          cache.dropPartial(key)
+          throw ByteFetchError.unreadable(status: 416)
+        }
+        try again(.unreadable(status: 416))
         continue
       default:
         throw ByteFetchError.unreadable(status: answer.status)
@@ -427,10 +461,12 @@ public struct ByteFetch: Sendable {
     let url = cache.partialURL(key)
     return try cache.write(since: since) {
       if let folder = cache.folder { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-      if fresh || !FileManager.default.fileExists(atPath: url.path) {
+      if fresh {
         try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         return
       }
+      // The parts before this one are gone: never a file missing its first bytes.
+      guard FileManager.default.fileExists(atPath: url.path) else { throw ByteFetchError.unreadable(status: 206) }
       let handle = try FileHandle(forWritingTo: url)
       defer { try? handle.close() }
       try handle.seekToEnd()

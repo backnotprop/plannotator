@@ -41,6 +41,8 @@ struct StandInState {
   /// Byte reads that stop after this many answers, as a lost connection would (nil: never).
   var failBytesAfter: Int?
   var byteReads = 0
+  /// Files that change after each byte read, as a log an agent appends to does, this many times more.
+  var churn: [String: Int] = [:]
 }
 
 extension StandInDoor {
@@ -78,6 +80,8 @@ extension StandInDoor {
   }
   /// The file changes on the computer after it was sent (nil: it is deleted).
   public func changeFile(_ id: String, to bytes: Data?) { state.files[id]?.current = bytes }
+  /// The file changes after each of the next `times` byte reads.
+  public func keepChanging(_ id: String, times: Int) { state.churn[id] = times }
   public func setPartCap(_ bytes: Int) { state.partCap = bytes }
   public func failBytes(after answers: Int?) {
     state.failBytesAfter = answers
@@ -160,6 +164,16 @@ extension StandInDoor {
   /// The byte routes: the version asked for, whole, or the part a Range names (at most `partCap`), as
   /// packages/server/inbox-byte-range.ts answers: 206 with Content-Range, 416 past the end, If-Range kept.
   func bytes(_ call: DoorCall, file id: String, ranged: Bool) -> DoorAnswerBytes {
+    let answer = answerBytes(call, file: id, ranged: ranged)
+    if let left = state.churn[id], left > 0, var changed = state.files[id]?.current, !changed.isEmpty {
+      state.churn[id] = left - 1
+      changed[0] = changed[0] &+ 1
+      state.files[id]?.current = changed
+    }
+    return answer
+  }
+
+  private func answerBytes(_ call: DoorCall, file id: String, ranged: Bool) -> DoorAnswerBytes {
     guard let file = state.files[id] else { return refuse(404, "attachment_not_found", "No attachment \(id).") }
     state.byteReads += 1
     if let fail = state.failBytesAfter, state.byteReads > fail { return refuse(503, "machine_unreachable", "The computer stopped answering.") }

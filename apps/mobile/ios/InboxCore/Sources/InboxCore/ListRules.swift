@@ -192,7 +192,9 @@ public struct ListView: Hashable, Sendable {
   public static func of(_ model: ListModel, now: Date = Date()) -> ListView {
     var seen: Set<ThreadID> = []
     var rows: [InboxListRow] = []
-    for row in model.sections.flatMap(\.threads) + (model.snoozed ?? []) where seen.insert(row.threadId).inserted { rows.append(row) }
+    var carried: [InboxListRow] = model.sections.flatMap(\.threads)
+    carried.append(contentsOf: model.snoozed ?? [])
+    for row in carried where seen.insert(row.threadId).inserted { rows.append(row) }
     let split = ListRules.splitSnoozed(rows.filter { !ListRules.archived($0) }, now: now)
     let sections = ListRules.sections(split.rows)
     let byID = Dictionary(rows.map { ($0.threadId, ListRules.asOf($0, now: now)) }, uniquingKeysWith: { first, _ in first })

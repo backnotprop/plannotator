@@ -757,13 +757,14 @@ public final class InboxSession {
 
   private func encode<Body: Encodable>(_ body: Body) -> Data { (try? JSONEncoder().encode(body)) ?? Data("{}".utf8) }
 
-  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil, shown: ShownState? = nil, waited: Bool = false) {
+  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil, shown: ShownState? = nil, waited: Bool = false, undoes: String? = nil) {
     // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
     // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers, and
     // has waited if it turns out not to (markWaited).
     let waits = waited || reach == .away
     var write = HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: clock.now(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil, act: act)
     write.shown = shown
+    write.undoes = undoes
     hold(write)
   }
 

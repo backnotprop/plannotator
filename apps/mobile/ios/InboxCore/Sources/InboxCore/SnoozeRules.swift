@@ -78,7 +78,13 @@ public struct SnoozeRules: Sendable {
     let wall = utc.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute)) ?? Date(timeIntervalSince1970: 0)
     let before = timeZone.secondsFromGMT(for: wall.addingTimeInterval(-43_200))
     let after = timeZone.secondsFromGMT(for: wall.addingTimeInterval(43_200))
-    let found = [before, after].map { wall.addingTimeInterval(-Double($0)) }.filter { timeZone.secondsFromGMT(for: $0) == Int(wall.timeIntervalSince1970 - $0.timeIntervalSince1970) }
+    // Of the two offsets around it, the ones that name this wall time.
+    var found: [Date] = []
+    for offset in [before, after] {
+      let moment: Date = wall.addingTimeInterval(-Double(offset))
+      let shift: Int = Int(wall.timeIntervalSince1970 - moment.timeIntervalSince1970)
+      if timeZone.secondsFromGMT(for: moment) == shift { found.append(moment) }
+    }
     return found.min() ?? wall.addingTimeInterval(-Double(before))
   }
 

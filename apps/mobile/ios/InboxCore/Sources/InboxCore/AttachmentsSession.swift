@@ -5,8 +5,8 @@ import InboxWire
 struct FileBook {
   /// What the computer last said of each thread's files (`GET threads/:id/attachments`).
   var states: [ThreadID: [InboxAttachmentState]] = [:]
-  /// Files open in a viewer, by file and version: the cache keys they hold.
-  var open: [String: [String]] = [:]
+  /// Files open in a viewer, by file, in the order opened: the version and the cache key each holds.
+  var open: [AttachmentID: [(version: AttachmentVersion, key: String)]] = [:]
 }
 
 /// Whether a file's bytes can be opened now.
@@ -95,20 +95,19 @@ extension InboxSession {
     let url = try await fetchAttachment(item, version: version, progress: progress)
     if let bytes, let key = keptKey(item, version: version) {
       bytes.hold(key)
-      files.open[Self.openKey(item, version), default: []].append(key)
+      files.open[item.id, default: []].append((version, key))
     }
     return url
   }
 
-  /// The viewer of a file opened with `openAttachment` closed: room can be made with it again.
+  /// The viewer of a file opened with `openAttachment` closed: room can be made with it again. `version`: the one
+  /// opened, when the file is open in two; else the one opened last (a refreshed item may open another version now).
   public func attachmentClosed(_ item: AttachmentItem, version: AttachmentVersion? = nil) {
-    let name = Self.openKey(item, version ?? item.opens)
-    guard var keys = files.open[name], !keys.isEmpty else { return }
-    bytes?.release(keys.removeLast())
-    files.open[name] = keys.isEmpty ? nil : keys
+    guard var opened = files.open[item.id], !opened.isEmpty else { return }
+    let index: Int = version.flatMap { asked in opened.lastIndex { $0.version == asked } } ?? opened.count - 1
+    bytes?.release(opened.remove(at: index).key)
+    files.open[item.id] = opened.isEmpty ? nil : opened
   }
-
-  static func openKey(_ item: AttachmentItem, _ version: AttachmentVersion) -> String { "\(item.id.rawValue)@\(version.rawValue)" }
 
   private func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
     // Opened: it goes last when room is made.

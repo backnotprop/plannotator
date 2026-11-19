@@ -31,6 +31,16 @@ struct ActionBook {
   var tick = 0
 }
 
+extension ListModel {
+  /// Every row the list carries: its sections, the snoozed band, then the stars (a thread can be in two).
+  var everyRow: [InboxListRow] {
+    var rows: [InboxListRow] = sections.flatMap(\.threads)
+    rows.append(contentsOf: snoozed ?? [])
+    rows.append(contentsOf: pins ?? [])
+    return rows
+  }
+}
+
 /// What time it is, and how to wait for a time. The system clock in the app; a clock the tests move by hand.
 public struct SessionClock: Sendable {
   public var now: @Sendable () -> Date
@@ -93,7 +103,9 @@ extension InboxSession {
 
   /// Every act still on the phone or landed and not yet in a list read, oldest first.
   private var drawnActs: [HeldWrite] {
-    book.landed.map(\.write) + held.filter { $0.kind == .state && $0.act != nil }
+    var acts: [HeldWrite] = book.landed.map(\.write)
+    for write in held where write.kind == .state && write.act != nil { acts.append(write) }
+    return acts
   }
 
   /// The list as the computer last said, with the person's acts drawn over it.
@@ -108,7 +120,10 @@ extension InboxSession {
     model.snoozed = model.snoozed?.map(draw)
     // The stars: drawn in their new order, each row as it stands.
     var rows: [ThreadID: InboxListRow] = [:]
-    for row in model.sections.flatMap(\.threads) + (model.snoozed ?? []) + (model.pins ?? []).map(draw) { rows[row.threadId] = rows[row.threadId] ?? row }
+    var drawn: [InboxListRow] = model.sections.flatMap(\.threads)
+    drawn.append(contentsOf: model.snoozed ?? [])
+    drawn.append(contentsOf: (model.pins ?? []).map(draw))
+    for row in drawn where rows[row.threadId] == nil { rows[row.threadId] = row }
     var order = (model.pins ?? []).map(\.threadId)
     for write in acts { order = write.act!.drawnStars(order, thread: ThreadID(write.thread)) }
     if model.pins != nil || acts.contains(where: { if case .star = $0.act { return true }; return false }) {
@@ -229,12 +244,13 @@ extension InboxSession {
       guard !reverse.isEmpty else { return false }
     }
     let shown = shownState(offer.thread, row(offer.thread, now: now))
-    if inDoubt { settle(offer.id) }
     for act in reverse {
       let key = UUID().uuidString
       let (request, body) = act.request(thread: offer.thread, key: key)
-      enqueue(kind: .state, thread: offer.thread, message: nil, request: request, body: body, key: key, act: act, shown: shown, waited: inDoubt)
+      enqueue(kind: .state, thread: offer.thread, message: nil, request: request, body: body, key: key, act: act, shown: shown, waited: inDoubt, undoes: inDoubt ? offer.id : nil)
     }
+    // Only now, with the reverse in the outbox: the phone never keeps neither.
+    if inDoubt { settle(offer.id) }
     await pump(offer.thread.rawValue)
     return true
   }
@@ -275,6 +291,7 @@ extension InboxSession {
 
   /// An act the computer took: drawn until the next list read holds it, and its answer kept for its Undo.
   func landAct(_ write: HeldWrite, _ answer: DoorAnswerBytes) {
+    leaveGroup(write)
     book.landSeq += 1
     book.landed.append(ActionBook.Landed(seq: book.landSeq, write: write))
     book.answers[write.id] = answer.body
@@ -291,6 +308,7 @@ extension InboxSession {
   /// An act the computer refused: the row goes back to what the computer has, and the person is told why. A thread
   /// gone from the computer settles it quietly.
   func noteRefusedAct(_ write: HeldWrite, _ notice: Notice) {
+    leaveGroup(write)
     let thread = ThreadID(write.thread)
     if case .refused(_, let code) = notice, [WireErrorCode.threadNotFound.rawValue, WireErrorCode.messageNotFound.rawValue].contains(code) {
       missingThreads.insert(thread)
@@ -303,13 +321,26 @@ extension InboxSession {
 
   /// The thread's row as the computer last said it, with none of the person's acts drawn over it.
   func computerRow(_ thread: ThreadID) -> InboxListRow? {
-    list.flatMap { model in (model.sections.flatMap(\.threads) + (model.snoozed ?? []) + (model.pins ?? [])).first { $0.threadId == thread } }
-      ?? book.archived?.threads.first { $0.threadId == thread }
+    if let model = list, let row = model.everyRow.first(where: { $0.threadId == thread }) { return row }
+    return book.archived?.threads.first { $0.threadId == thread }
   }
 
   /// What the person sees of a thread now, for an act made on it.
   func shownState(_ thread: ThreadID, _ shown: InboxListRow?) -> ShownState? {
     shown.map { ShownState(shown: $0, computer: computerRow(thread) ?? threads[thread]?.row) }
+  }
+
+  /// The computer answered one reverse of an act whose answer never came: the act was taken, so the others are
+  /// each judged on their own.
+  func leaveGroup(_ write: HeldWrite) {
+    guard let group = write.undoes else { return }
+    for index in held.indices where held[index].undoes == group { held[index].undoes = nil }
+  }
+
+  /// Settle a write, and with it the rest of its Undo's reverses when it leads them (HeldWrite.undoes).
+  private func settleWithGroup(_ write: HeldWrite) {
+    if let group = write.undoes { held.removeAll { $0.undoes == group && $0.id != write.id } }
+    settle(write.id)
   }
 
   /// A waited act meets the computer's row before it goes (StateConflict). True when it was settled here.
@@ -319,18 +350,23 @@ extension InboxSession {
       book.checked = true
       await readList()
     }
+    // Taken back (Undo) while the computer's row was read: nothing goes, and nothing is said.
+    guard held.contains(where: { $0.id == write.id }) else { return true }
     let thread = ThreadID(write.thread)
     // The acts the computer took since that read are not in it yet: drawn over it, so an act is judged against the
     // row the acts before it left (an Unarchive after an Archive that just went).
-    let since = book.landed.map(\.write).filter { $0.thread == write.thread }
-    let row = computerRow(thread).map { row in since.reduce(row) { $1.act?.drawn($0, at: SnoozeRules.iso($1.madeAt)) ?? $0 } }
+    var row: InboxListRow? = computerRow(thread)
+    for landed in book.landed where landed.write.thread == write.thread {
+      guard let drawn = landed.write.act, let before = row else { continue }
+      row = drawn.drawn(before, at: SnoozeRules.iso(landed.write.madeAt))
+    }
     switch StateConflict.decide(act, shown: write.shown, row: row) {
     case .send: return false
     case .already:
-      settle(write.id)
+      settleWithGroup(write)
       return true
     case .giveWay:
-      settle(write.id)
+      settleWithGroup(write)
       book.notices[thread] = .gaveWay
       if book.undo?.id == write.id { book.undo = nil }
       return true
@@ -343,7 +379,7 @@ extension InboxSession {
     book.wake = nil
     let now = now ?? clock.now()
     guard let model = list else { return }
-    let untils = (model.sections.flatMap(\.threads) + (model.snoozed ?? []) + (model.pins ?? [])).compactMap { $0.snoozed?.until }
+    let untils: [String] = model.everyRow.compactMap { $0.snoozed?.until }
     // Held to a day: a snooze months away wakes the timer early, and it sets itself again.
     guard let delay = SnoozeRules.delay(untils, now: now).map({ min($0, 86_400) }) else { return }
     let clock = self.clock
