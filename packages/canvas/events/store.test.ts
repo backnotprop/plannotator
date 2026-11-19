@@ -3,8 +3,11 @@ import { parseDocument, serializeDocument } from '../model/codec';
 import { createDocument } from '../model/document';
 import { isOrderKey, keyBetween } from '../model/order-key';
 import type { CanvasDocument, CanvasObject } from '../model/types';
+import { OBJECT_FIELDS } from '../model/codec';
+import { PATCH_FIELDS } from './plan';
 import { CanvasStore } from './store';
 import type { Command } from './types';
+import { decodeEnvelope } from './wire';
 
 const AGENT = { kind: 'agent', id: 'agent-1' } as const;
 
@@ -173,6 +176,19 @@ describe('undo and redo', () => {
     fresh.dispatch({ type: 'edit', id: 'a', patch: { text: 'late' } }, { gesture: 'gone', amend: true });
     expect(fresh.getDocument().objects.a).toMatchObject({ text: 'late' });
     expect(steps()).toBe(1);
+  });
+
+  test('a late change to a field its step also set is undone back to what the field was before the step', () => {
+    const store = seeded();
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Pasted' } }, { gesture: 'paste-2' });
+    store.dispatch({ type: 'move', ids: ['b'], dx: 5, dy: 0 });
+    // The same field again, later, as part of the first step.
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Pasted, with its title' } }, { gesture: 'paste-2', amend: true });
+    store.undo();
+    store.undo();
+    expect(store.getDocument().objects.a).toMatchObject({ text: 'a' });
+    store.redo();
+    expect(store.getDocument().objects.a).toMatchObject({ text: 'Pasted, with its title' });
   });
 
   test("an agent's change is not on the person's undo stack", () => {
@@ -361,9 +377,37 @@ describe('drawing order', () => {
     expect(isOrderKey('A0')).toBe(false);
     expect(isOrderKey('0')).toBe(false);
     expect(isOrderKey('A1')).toBe(true);
-    // Two neighbours with the same key: the new one goes above both, and is a key.
-    const twin = keyBetween('V', 'V');
-    expect(twin > 'V' && isOrderKey(twin)).toBe(true);
+  });
+
+  test('a key asked for between two neighbours with the same key lands just above them, passing nothing else', () => {
+    // Two people each put something on top at the same moment: both got the same key. Above them sit
+    // other things, some close.
+    let seed = 0x51ed27;
+    const random = (n: number) => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0), seed % n);
+    for (let round = 0; round < 200; round++) {
+      const keys: string[] = [keyBetween(null, null)];
+      for (let i = 0; i < 30; i++) {
+        const at = random(keys.length + 1);
+        keys.splice(at, 0, keyBetween(at > 0 ? keys[at - 1] : null, at < keys.length ? keys[at] : null));
+      }
+      const at = random(keys.length - 1);
+      const twin = keys[at];
+      const key = keyBetween(twin, twin);
+      expect(isOrderKey(key)).toBe(true);
+      expect(key > twin).toBe(true);
+      // Everything that was above the pair is still above the new key.
+      expect(key < keys[at + 1]).toBe(true);
+    }
+    // That key is one more digit, and a board can already hold it: halving the room above a key gets there.
+    expect(keyBetween('AAAAAB', 'AAAAAC')).toBe(keyBetween('AAAAAB', 'AAAAAB'));
+    // Neighbours handed over the wrong way round are treated the same: just above the higher.
+    const swapped = keyBetween('V1', 'V');
+    expect(swapped > 'V1' && swapped < 'V2').toBe(true);
+    // A key already as long as a key may be still gets a key above it.
+    const longest = `${'V'.repeat(95)}1`;
+    expect(isOrderKey(longest)).toBe(true);
+    const over = keyBetween(longest, longest);
+    expect(isOrderKey(over) && over > longest).toBe(true);
   });
 
   test('there is always a key between two keys, and keys stay short for a board that is added to', () => {
@@ -384,6 +428,99 @@ describe('drawing order', () => {
       expect(next < bottom!).toBe(true);
       bottom = next;
     }
+  });
+});
+
+describe('a key between two neighbours with the same key', () => {
+  test('given the next key above them, it is a key the board does not hold, above the pair and below everything else', () => {
+    let seed = 0x9e3779b1;
+    const random = (n: number) => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0), seed % n);
+    for (let round = 0; round < 60; round++) {
+      // A board built the hard way: mostly by squeezing between close neighbours, so keys grow long and
+      // sit as near each other as keys can; and now and then by twinning a key, as two people at once do.
+      const keys: string[] = round % 3 === 0 ? ['AAAAAB', 'AAAAAC'] : [keyBetween(null, null)];
+      for (let i = 0; i < 300; i++) {
+        const at = random(keys.length);
+        const twin = keys[at];
+        // The lowest key above the pair that is not the pair's own.
+        let up = at + 1;
+        while (up < keys.length && keys[up] === twin) up++;
+        const next = up < keys.length ? keys[up] : null;
+        if (random(4) === 0) {
+          keys.splice(at, 0, twin);
+          continue;
+        }
+        const key = random(2) === 0 ? keyBetween(twin, twin, next) : keyBetween(twin, next);
+        if (!isOrderKey(key)) throw new Error(`${key} is not a key`);
+        if (keys.includes(key)) throw new Error(`${key} is already on the board (above ${twin}, under ${next})`);
+        if (!(key > twin)) throw new Error(`${key} is not above ${twin}`);
+        if (next !== null && !(key < next)) throw new Error(`${key} is not below ${next}`);
+        keys.splice(up, 0, key);
+        for (let j = 1; j < keys.length; j++) if (keys[j - 1] > keys[j]) throw new Error('the board is out of order');
+      }
+    }
+  });
+});
+
+describe('the two lists of field names', () => {
+  test('every field an edit may change is a field a change may carry', () => {
+    // A name in PATCH_FIELDS and not in OBJECT_FIELDS could be edited here and would then be dropped
+    // from the event on every peer and from undo.
+    const missing: string[] = [];
+    for (const [type, fields] of Object.entries(PATCH_FIELDS)) for (const field of fields) if (!OBJECT_FIELDS.has(field)) missing.push(`${type}.${field}`);
+    expect(missing).toEqual([]);
+  });
+
+  test('an edit of each editable field reaches a peer and is undone, field by field', () => {
+    // One object of every type, and for each a value for every field `edit` may change on it.
+    const SAMPLES: Record<string, unknown> = {
+      text: 'New words', detail: 'More', title: 'A title', label: 'A label', alt: 'In words', description: 'About it', site: 'example.test',
+      image: 'asset:pic', icon: 'asset:icon', target: { kind: 'web', url: 'https://example.test/other' }, src: 'asset:other', html: '<b>new</b>',
+      size: 'large', frames: 3, fps: 9, from: { x: 1, y: 2 }, to: { x: 30, y: 40 }, link: { kind: 'plan', anchor: 'intro' },
+      shape: 'container', lanes: ['one', 'two'], kind: 'ask', count: 4, routing: 'straight',
+    };
+    const STYLES: Record<string, unknown> = { arrow: { ends: 'dot' }, default: { look: 'sketch' } };
+    const objects: CanvasObject[] = [
+      { id: 'box', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'b' },
+      { id: 'note', type: 'note', x: 0, y: 0, w: 100, h: 40, text: 'n' },
+      { id: 'text', type: 'text', x: 0, y: 0, w: 100, h: 40, text: 't' },
+      { id: 'frame', type: 'frame', x: 0, y: 0, w: 100, h: 40, title: 'f' },
+      { id: 'image', type: 'image', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '' },
+      { id: 'sprite', type: 'sprite', x: 0, y: 0, w: 100, h: 40, src: 'asset:a', alt: '', frames: 2, fps: 4 },
+      { id: 'html', type: 'html', x: 0, y: 0, w: 100, h: 40, html: '<i>h</i>' },
+      { id: 'reference', type: 'reference', x: 0, y: 0, w: 100, h: 40, target: { kind: 'web', url: 'https://example.test/' } },
+      { id: 'stamp', type: 'stamp', x: 0, y: 0, w: 30, h: 30, kind: 'check' },
+      { id: 'arrow', type: 'arrow', from: { x: 0, y: 0 }, to: { x: 9, y: 9 } },
+    ];
+    const store = new CanvasStore(createDocument('board'));
+    const peer = new CanvasStore(createDocument('board'));
+    store.onCommit((envelope) => {
+      const decoded = decodeEnvelope(JSON.stringify(envelope));
+      if (!decoded.ok) throw new Error(decoded.error);
+      peer.receive(decoded.value);
+    });
+    store.dispatch({ type: 'add', objects });
+    store.dispatch({ type: 'group', id: 'group', ids: ['box', 'note'] });
+    const checked = new Set<string>();
+    for (const [type, fields] of Object.entries(PATCH_FIELDS)) {
+      expect(store.getDocument().objects[type]?.type).toBe(type as CanvasObject['type']);
+      for (const field of fields) {
+        // Lanes belong to a container, so the shape goes first; the order in the list has it so.
+        const value = field === 'style' ? (STYLES[type] ?? STYLES.default) : SAMPLES[field];
+        if (value === undefined) throw new Error(`no sample for ${field}`);
+        const before = store.getDocument().objects[type];
+        const result = store.dispatch({ type: 'edit', id: type, patch: { [field]: value } });
+        if (!result.ok) throw new Error(`${type}.${field}: ${result.error}`);
+        expect((store.getDocument().objects[type] as unknown as Record<string, unknown>)[field]).toEqual(value);
+        expect(peer.getDocument().objects[type]).toEqual(store.getDocument().objects[type]);
+        store.undo();
+        expect(store.getDocument().objects[type]).toEqual(before);
+        expect(peer.getDocument().objects[type]).toEqual(before);
+        store.redo();
+        checked.add(field);
+      }
+    }
+    expect(checked.size).toBeGreaterThan(20);
   });
 });
 

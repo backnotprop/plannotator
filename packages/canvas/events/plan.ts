@@ -28,7 +28,11 @@ const done = (events: CanvasEvent[]): Checked<CanvasEvent[]> => ({ ok: true, val
 /** The smallest an object may be resized to, in world units. */
 export const MIN_OBJECT_SIZE = 16;
 
-const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
+/**
+ * What `edit` may change on each type. Every name here must also be in `OBJECT_FIELDS` (`model/codec.ts`),
+ * or the change it makes would be dropped when applied: `events/store.test.ts` holds the two lists together.
+ */
+export const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
   box: ['text', 'detail', 'link', 'style', 'shape', 'lanes'],
   note: ['text', 'link', 'style'],
   text: ['text', 'size', 'link', 'style'],
@@ -94,9 +98,10 @@ function planAdd(doc: CanvasDocument, objects: readonly unknown[], actor: Actor)
     if (!checked.ok) return checked;
     const object = checked.value;
     if (doc.objects[object.id] || incoming.has(object.id)) return fail(`${object.id}: that id is already used`);
-    // Who added it is who is adding it, and it goes on top, whatever the object says.
+    // Who added it is who is adding it, and it goes on top, whatever the object says. Only the two fields
+    // an actor has: whatever else the host's own object for a person carries is not the document's.
     top = keyBetween(top, null);
-    incoming.set(object.id, { ...object, by: actor, z: top });
+    incoming.set(object.id, { ...object, by: { kind: actor.kind, id: actor.id }, z: top });
   }
   const known = (id: ObjectId) => incoming.get(id) ?? doc.objects[id];
   for (const object of incoming.values()) {
@@ -187,7 +192,7 @@ function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectI
   if (doc.objects[groupId]) return fail(`${groupId}: that id is already used`);
   const members = uniqueKnown(doc, ids).filter((id) => id !== groupId);
   if (members.length < 2) return fail('a group needs at least two objects');
-  const group = checkObject({ id: groupId, type: 'group', by: actor, z: keyBetween(topKey(doc), null), ...(label ? { label } : {}) });
+  const group = checkObject({ id: groupId, type: 'group', by: { kind: actor.kind, id: actor.id }, z: keyBetween(topKey(doc), null), ...(label ? { label } : {}) });
   if (!group.ok) return group;
   const events: CanvasEvent[] = [{ type: 'object-added', object: group.value }];
   for (const id of members) push(events, doc.objects[id], { ...doc.objects[id], group: groupId });
