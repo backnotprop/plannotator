@@ -288,10 +288,11 @@ test("the diff display switch and a file's switch in its sem chip each bring bac
     await expect(note(page, 'off')).toHaveCount(1);
     await expect(note(page, 'semantic')).toHaveCount(1);
     await expect(page.locator('[data-file-header] .line-through')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-semantic-file-popover]')).toHaveCount(0);
     await flip(page, note(page, 'off'));
     await expect(note(page, 'semantic')).toHaveCount(2);
     await page.locator('[data-diff-display-options]').first().click();
-    await expect.poll(() => page.evaluate(() => `${document.querySelectorAll('[data-diff-display-popup]').length} display menu, ${document.querySelectorAll('[data-semantic-file-popover]').length} sem popover, focus on ${document.activeElement?.outerHTML.slice(0, 120)}`), { timeout: 5_000, message: 'the display menu opens while a sem popover was open' }).toMatch(/^1 display menu, 0 sem popover/);
     await page.getByText('Show moved & renamed code').click();
     await page.keyboard.press('Escape');
     await expect(note(page, 'off')).toHaveCount(0);

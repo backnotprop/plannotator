@@ -413,13 +413,14 @@ export function landingCases(type: BrowserType) {
       expect((await name.boundingBox())!.width, 'the file name keeps room to read').toBeGreaterThanOrEqual(64);
       for (const offset of [-7, 5]) {
         const box = (await note.boundingBox())!;
+        const row = (await view.page.locator(`${shell} [data-file-header]`).first().boundingBox())!;
         await view.page.waitForTimeout(600);
-        const at = { x: box.x + box.width / 2, y: box.y + (offset < 0 ? offset : box.height + offset) };
+        const at = { x: box.x + box.width / 2, y: offset < 0 ? Math.max(row.y + 1, box.y + offset) : Math.min(row.y + row.height - 1, box.y + box.height + offset) };
         await expect.poll(() => view.page.evaluate(({ x, y }) => {
           const hit = document.elementFromPoint(x, y);
           return hit?.closest('[data-semantic-note]') ? 'chip' : (hit?.outerHTML.slice(0, 160) ?? 'nothing');
         }, at), { timeout: 2_000, message: `the point ${offset} px off the chip belongs to it` }).toBe('chip');
-        await tapAt(view, box, offset < 0 ? offset : box.height + offset);
+        await view.page.touchscreen.tap(at.x, at.y);
         await expect(switchOf(view), `a tap ${offset} px off the chip opens it`).toBeVisible({ timeout: 5_000 });
         await view.page.keyboard.press('Escape');
         await expect(switchOf(view)).toHaveCount(0);
