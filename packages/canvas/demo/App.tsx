@@ -32,6 +32,7 @@ import type { PlanDropTarget } from '../react/plan-drop';
 import { CanvasRegistry, CanvasRegistryProvider } from '../snapshot/registry';
 import type { SnapshotOpenRequest } from '../snapshot/SnapshotFigure';
 import { indexFor } from '../view/document-index';
+import { MARKS_PLAN, createMarksStore } from './marks';
 import { PlanPane } from './PlanPane';
 import { DATA_SETS, type DataSet, EMPTY_PLAN, FAR_PLAN, ONE_PLAN, STACKED_PLAN, bigPlan, createBigStore, createEmptyStore, createFarStore, createOneStore, createStackedStore, createWorstStore, worstPlan } from './worst';
 import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
@@ -44,6 +45,7 @@ const count = Number(params.get('n')) || (bench === 'plan' ? 50 : 2000);
 const data = (DATA_SETS.some((set) => set.id === params.get('data')) ? params.get('data') : 'demo') as DataSet;
 
 function storeFor(set: DataSet): CanvasStore {
+  if (set === 'marks') return createMarksStore();
   if (set === 'worst') return createWorstStore();
   if (set === 'empty') return createEmptyStore();
   if (set === 'one') return createOneStore();
@@ -54,6 +56,7 @@ function storeFor(set: DataSet): CanvasStore {
   return createSampleStore();
 }
 function planFor(set: DataSet): string {
+  if (set === 'marks') return MARKS_PLAN;
   if (set === 'worst') return worstPlan();
   if (set === 'empty') return EMPTY_PLAN;
   if (set === 'one') return ONE_PLAN;
@@ -88,7 +91,7 @@ const snapshotCount = (count: number) => (count === 1 ? '1 snapshot' : `${count}
 const registry = new CanvasRegistry();
 
 /** The demo's people: one person and one agent. A product host answers from its own accounts. */
-const people: People = (actor) => (actor.kind === 'agent' ? { name: 'Planner' } : actor.id === 'ana' ? { name: 'Ana' } : null);
+const people: People = (actor) => (actor.kind === 'agent' ? { name: 'Planner' } : actor.id === 'ana' ? { name: 'Ana', color: '#B9A6FF' } : actor.id === 'ines' ? { name: 'Ines', color: '#6d4aff' } : null);
 
 // Where the demo keeps pictures: in memory, by content hash. A product host stores them itself.
 const assets = createMemoryAssets();
