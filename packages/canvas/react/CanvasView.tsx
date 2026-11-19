@@ -310,9 +310,10 @@ export function CanvasView({
   }
   framesKeptRef.current = htmlFramesNext(framesKeptRef.current, lod, onScreen);
   const framesKept = framesKeptRef.current;
-  // A chart's words are drawn only where they could be read: not on a crowded board far out, and not below
-  // the zoom at which its smallest words are about four pixels tall, however few objects the view holds.
-  const chartWords = lod === 'full' && zoomLod === 'full';
+  // How much of a chart is written out. On a crowded board far out: nothing. Below the zoom at which its
+  // smallest words would be about four pixels tall (a figure in a plan, a phone), however few objects the
+  // view holds: its title and a one-line key, set large, so it still says what it is. Otherwise all of it.
+  const chartDetail = lod !== 'full' ? 'marks' : zoomLod === 'full' ? 'full' : 'named';
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
@@ -363,7 +364,8 @@ export function CanvasView({
           object={object}
           selected={selection.has(id)}
           editing={editingId === id}
-          rich={object.type === 'chart' ? chartWords : object.type !== 'html' || lod === 'full' || framesKept}
+          rich={object.type === 'chart' ? chartDetail === 'full' : object.type !== 'html' || lod === 'full' || framesKept}
+          chartDetail={object.type === 'chart' ? chartDetail : undefined}
           resolveImageSrc={resolveImageSrc}
           onEditEnd={onEditEnd}
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}

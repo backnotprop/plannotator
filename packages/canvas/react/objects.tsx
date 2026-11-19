@@ -10,7 +10,7 @@ import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, type HtmlItemFace, checkHtmlI
 import { referenceCard } from '../model/reference';
 import { seedOf, seeded } from '../view/rough';
 import { describeChart } from '../view/chart';
-import { ChartView } from './ChartView';
+import { type ChartDetail, ChartView } from './ChartView';
 import { Face, usePerson } from './people';
 import { type Ground, groundUnder, lookAtPicture, pictureLooks } from './picture-look';
 import { previewsPending } from './references';
@@ -27,6 +27,8 @@ export interface ObjectViewProps {
   editing: boolean;
   /** Embedded HTML and sprites are drawn only when there is room to see them. */
   rich: boolean;
+  /** For a chart: how much of it is written out at this zoom (`ChartView`). Absent: by `rich`. */
+  chartDetail?: ChartDetail;
   resolveImageSrc?: (src: string) => string;
   onEditEnd?: EditEnd;
   /**
@@ -540,7 +542,7 @@ function ByBadge({ actor }: { actor: PlacedCanvasObject['by'] }) {
 
 const STAMP_GLYPHS = { check: Check, thumb: ThumbsUp, ask: CircleHelp } as const;
 
-export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex, carried, buried, over, overSrc }: ObjectViewProps) {
+export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, chartDetail, resolveImageSrc, onEditEnd, tabIndex, carried, buried, over, overSrc }: ObjectViewProps) {
   const ground = useGround(over, overSrc, object);
   const color = colorAttrs(object.color);
   const style: React.CSSProperties = {
@@ -631,7 +633,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
       return (
         // In a figure it is one picture with its data said in words; in an editor the object already carries that name.
         <div className="pcv-obj pcv-chart" {...common} {...(tabIndex === undefined ? { role: 'img', 'aria-label': describeChart(object) } : {})} data-mark={object.mark} style={style}>
-          <ChartView object={object} rich={rich} />
+          <ChartView object={object} detail={chartDetail ?? (rich ? 'full' : 'marks')} />
         </div>
       );
     case 'html':

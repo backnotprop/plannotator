@@ -7,21 +7,26 @@
  */
 import React, { memo, useMemo } from 'react';
 import type { ChartObject } from '../model/types';
-import { chartShapes } from '../view/chart';
+import { type ChartDrawOptions, chartShapes } from '../view/chart';
 
 export interface ChartViewProps {
   object: ChartObject;
-  /** False when the chart is too small on screen to read: its marks are drawn and none of its words. */
-  rich: boolean;
+  /**
+   * How much of it is written out (`ChartDrawOptions.detail`): everything; its title and key only, set
+   * large, when it is drawn small (a figure in a plan, a phone); or no words at all on a crowded board far out.
+   */
+  detail: ChartDetail;
 }
 
-export const ChartView = memo(function ChartView({ object, rich }: ChartViewProps) {
+export type ChartDetail = NonNullable<ChartDrawOptions['detail']>;
+
+export const ChartView = memo(function ChartView({ object, detail }: ChartViewProps) {
   const { mark, fields, rows, encode, stack, flip, dash, rules, title, unit, w, h } = object;
   // A move makes a new object and keeps every one of these: the chart is worked out again only when it changed.
   const shapes = useMemo(
-    () => chartShapes(object, { detail: rich ? 'full' : 'marks' }),
+    () => chartShapes(object, { detail }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mark, fields, rows, encode, stack, flip, dash, rules, title, unit, w, h, rich],
+    [mark, fields, rows, encode, stack, flip, dash, rules, title, unit, w, h, detail],
   );
   return (
     <svg className="pcv-chart-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true" focusable="false">

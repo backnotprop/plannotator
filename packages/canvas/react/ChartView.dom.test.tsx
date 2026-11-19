@@ -7,7 +7,7 @@
  *
  * Requires DOM: listed in tests/dom-test-list.txt.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,19 +17,8 @@ import type { CanvasObject } from '../model/types';
 import { decodeEnvelope } from '../events/wire';
 import { CameraController } from '../view/camera';
 import * as chartDrawing from '../view/chart';
-
-// Every time a chart's shapes are worked out is counted: the drawing itself is the real one.
-let drawn = 0;
-const realShapes = chartDrawing.chartShapes;
-mock.module('../view/chart', () => ({
-  ...chartDrawing,
-  chartShapes: (...args: Parameters<typeof realShapes>) => {
-    drawn += 1;
-    return realShapes(...args);
-  },
-}));
-const { CanvasEditor } = await import('./CanvasEditor');
-const { CanvasView } = await import('./CanvasView');
+import { CanvasEditor } from './CanvasEditor';
+import { CanvasView } from './CanvasView';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -108,10 +97,15 @@ describe.skipIf(!hasDom)('a chart, mounted', () => {
   });
 
   test('its shapes are worked out again only when the chart changed: not for a move, a peer\'s move or an undo', async () => {
+    // Every time a chart's shapes are worked out is counted, for this test only: the drawing itself is the
+    // real one, and the count is taken off again when the test ends, whatever happens in it.
+    const counted = spyOn(chartDrawing, 'chartShapes');
+    try {
+    const drawn = () => counted.mock.calls.length;
     const { host, store } = await mount(false, { title: 'Scan to alert' });
     const line = () => host!.querySelector('[data-id="ch"] path.pcv-ch-s-accent')!;
     const before = line().getAttribute('d');
-    const atStart = drawn;
+    const atStart = drawn();
     expect(atStart).toBeGreaterThan(0);
     // A drag here: thirty moves.
     for (let i = 0; i < 30; i++) {
@@ -132,22 +126,26 @@ describe.skipIf(!hasDom)('a chart, mounted', () => {
       store.undo();
     });
     expect(host.querySelector<HTMLElement>('[data-id="ch"]')!.style.transform).toBe('translate(40px, 40px)');
-    expect(drawn).toBe(atStart);
+    expect(drawn()).toBe(atStart);
     expect(line().getAttribute('d')).toBe(before);
     // Its rows change: once more, and the line is another line. Undone: back.
     await act(async () => {
       store.dispatch({ type: 'edit', id: 'ch', patch: { rows: [['W1', 1], ['W2', 9], ['W3', 30]] } });
     });
-    expect(drawn).toBe(atStart + 1);
+    expect(drawn()).toBe(atStart + 1);
     expect(line().getAttribute('d')).not.toBe(before);
     expect([...host.querySelectorAll('[data-id="ch"] text')].some((el) => el.textContent === '30')).toBe(true);
     await act(async () => {
       store.undo();
     });
     expect(line().getAttribute('d')).toBe(before);
+    } finally {
+      counted.mockRestore();
+    }
+    expect(chartDrawing.chartShapes).not.toBe(counted);
   });
 
-  test('too small on screen to read, it keeps its marks and draws none of its words, however few things the board holds', async () => {
+  test('drawn small it still says what it is: its title, and none of the small words, however few things the board holds', async () => {
     const shown = await mount(false, { title: 'Scan to alert' }, 1);
     expect(shown.host.querySelectorAll('[data-id="ch"] text').length).toBeGreaterThan(4);
     act(() => root!.unmount());
@@ -155,7 +153,9 @@ describe.skipIf(!hasDom)('a chart, mounted', () => {
     shown.host.remove();
     // At 30% its smallest words would be under three pixels tall.
     const far = await mount(false, { title: 'Scan to alert' }, 0.3);
-    expect(far.host.querySelectorAll('[data-id="ch"] text').length).toBe(0);
+    const words = [...far.host.querySelectorAll('[data-id="ch"] text')];
+    expect(words.map((el) => el.textContent)).toEqual(['SCAN TO ALERT']);
+    expect(Number(words[0].getAttribute('font-size')) * 0.3).toBeGreaterThanOrEqual(6);
     expect(far.host.querySelector('[data-id="ch"] path.pcv-ch-s-accent')).not.toBeNull();
     // What it shows is still said in words to someone who cannot see it.
     expect(far.host.querySelector('[data-id="ch"]')!.getAttribute('aria-label')).toContain('Line chart of minutes');
