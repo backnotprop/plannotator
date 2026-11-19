@@ -65,9 +65,11 @@ import {
   type InboxPullHost,
   inboxPullLabel,
   inboxPullSafeBranch,
+  type InboxPullAsk,
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
+  type InboxPullStack,
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
@@ -195,7 +197,9 @@ function shaOf(value: unknown): string | null {
 
 // --- the queries ---
 
-const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
+const GH_WRITERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+const GH_PULL = `number title url state isDraft authorAssociation updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
       repository { nameWithOwner } baseRepository { defaultBranchRef { name } } headRepository { nameWithOwner } author { login avatarUrl }
       reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { slug } } } }
       latestReviews(first: 5) { nodes { state author { login avatarUrl } } }
@@ -498,6 +502,7 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
         title: str(item.title),
         author,
         mine: login !== null && author === login,
+        ...(GH_WRITERS.has(str(item.authorAssociation)) ? { author_member: true as const } : {}),
         requested: flag === "requested" || earlier?.requested === true,
         ...(flag === "assigned" || earlier?.assigned === true ? { assigned: true } : {}),
         state,
@@ -724,6 +729,7 @@ export interface InboxPulls {
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  stack(key: string): InboxPullStack | null;
   /**
    * This Inbox merged the PR (the Pull requests page's Merge): every list from now on shows it merged, even a cached
    * answer read before the merge or a forge read that still says open (GitHub's search lags), for
@@ -1593,6 +1599,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     find(key) {
       return findKnown(key) ?? null;
     },
+    stack(key) {
+      const pull = findKnown(key);
+      return (pull && stackOf(pull)) ?? null;
+    },
     markMerged(key) {
       const at = now();
       mergedHere.set(key, at);
@@ -2102,6 +2112,7 @@ export interface InboxPullLinkStore {
   threadsOf(projectId: string): { thread_id: string; last_at: string }[];
   threadMessageIds(threadId: string): readonly string[];
   message(id: string): InboxMessage | null;
+  messageSeq?(id: string): number | null;
   threadSubject(threadId: string): string | null;
   /** The project a thread is in (canonical id), or null when there is no such thread. */
   threadProject(threadId: string): string | null;
@@ -2160,17 +2171,30 @@ export function previewOf(body: string): string {
 }
 
 /** What a thread says about the agent behind it. */
-function threadFacts(store: InboxPullLinkStore, threadId: string) {
+function threadFacts(store: InboxPullLinkStore, threadId: string, pictureItSince: string | null = null) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
-  for (let i = ids.length - 1; i >= 0 && (!last || !guide); i--) {
+  let pictureIt: InboxMessage | null = null;
+  let replied = false;
+  let pictureItSeen = false;
+  let looking = pictureItSince !== null;
+  for (let i = ids.length - 1; i >= 0 && (!last || !guide || looking); i--) {
     const message = store.message(ids[i]!);
-    if (!message || message.author.kind !== "agent") continue;
+    if (!message) continue;
+    if (looking && message.created_at < pictureItSince!) looking = false;
+    if (looking && message.author.kind === "person") replied = true;
+    if (message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
+    if (looking && message.picture_it) {
+      pictureIt = message;
+      looking = false;
+      const seq = store.messageSeq?.(message.id) ?? null;
+      pictureItSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
+    }
   }
-  return { last, guide };
+  return { last, guide, pictureIt, pictureItSeen };
 }
 
 /**
@@ -2201,7 +2225,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; picture_it_at?: string; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2245,8 +2269,8 @@ export function linkInboxPulls(
     }
   }
 
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
-    const { last, guide } = threadFacts(store, threadId);
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, pictureItSince: string | null = null): InboxPullLink => {
+    const { last, guide, pictureIt, pictureItSeen } = threadFacts(store, threadId, pictureItSince);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2259,6 +2283,7 @@ export function linkInboxPulls(
       guide: guide?.guide
         ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
         : null,
+      ...(pictureIt?.picture_it ? { picture_it_page: { message_id: pictureIt.id, title: pictureIt.picture_it.title, at: pictureIt.created_at, ...(pictureItSeen ? { seen: true as const } : {}) } } : {}),
     };
   };
 
@@ -2266,7 +2291,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.picture_it_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.picture_it_at ? { picture_it_asked_at: owner.picture_it_at } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);

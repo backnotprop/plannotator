@@ -2199,3 +2199,38 @@ export function inboxBlockedField(kind: InboxBlockedKind | null, at?: number): {
  * again at most 25 s after its last poll, and says a change at once.
  */
 export const INBOX_BLOCKED_STALE_MS = 45_000
+
+/**
+ * Whether the person has turned the Inbox on on this computer: a mark in the
+ * Inbox folder (`inbox/turned-on`) that only a person's run of `plannotator
+ * inbox` writes (bare, `--no-open`, `--open`: the `/plannotator-inbox`
+ * commands run `--open`). Until it says on, no host registers the agents' tool
+ * or its reminder, and nothing Plannotator starts by itself (`--background`, a
+ * detached start, `restart`, the MCP server, `inbox call` and the other
+ * commands that start the Inbox) starts it. Where an
+ * Inbox already ran (`inbox/inbox.json`, from before the mark or from an older
+ * `plannotator`), the first reader writes the mark on. Its text is
+ * `{"on":true,"by":...,"at":...}`; only `"on":false` reads off, so a mark that
+ * cannot be read keeps the Inbox on.
+ */
+export const INBOX_TURNED_ON_FILE = 'turned-on'
+
+/**
+ * The command every setup text gives an agent as its first Inbox step: it
+ * turns the Inbox on, starts it detached, opens it, prints the URL and
+ * returns, with or without a screen. Swap it here only.
+ */
+export const INBOX_SETUP_COMMAND = 'plannotator inbox --open'
+
+/** What an agent gets when it reaches for the Inbox before the person turned it on. */
+export const INBOX_OFF_LINE = `The Plannotator Inbox is off on this computer. \`${INBOX_SETUP_COMMAND}\` turns it on. If you are an agent, ask the person in the chat instead, and turn it on only if they ask you to.`
+
+/** Whether a mark's text says on: anything but `"on": false` does (in doubt, on). */
+export function inboxMarkSaysOn(text: string): boolean {
+  try {
+    return (JSON.parse(text) as { on?: unknown } | null)?.on !== false
+  } catch {
+    return true
+  }
+}
+

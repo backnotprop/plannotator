@@ -69,6 +69,7 @@ mock.module('@pierre/diffs/react', () => ({
         getHeight: () => 0,
         getTopForItem: () => 0,
         scrollTo: () => {},
+        render: () => {},
       }),
     }));
     return <div ref={props.containerRef} className={props.className} data-mock-scroll="" />;
@@ -576,6 +577,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 describe('AllFilesCodeView semantic notes that land after the person started reading', () => {
   const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
   const tops = new Map<Element, number>();
+  const heights = new Map<Element, number>();
   let pageHeight = 10_000;
   let hidden = false;
   const sizes = ['scrollHeight', 'clientHeight'] as const;
@@ -584,6 +586,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     restore?.();
     restore = null;
     tops.clear();
+    heights.clear();
     pageHeight = 10_000;
     hidden = false;
   });
@@ -601,7 +604,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
       };
     }
     Element.prototype.getBoundingClientRect = function (this: Element) {
-      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
+      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? heights.get(this) ?? 400 : 700);
     };
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
@@ -636,6 +639,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     };
     const swapped = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff.semanticOperations as unknown[] | undefined)?.length === 1;
     const move = (path: string, top: number) => void tops.set(nodes.get(path)!, top);
+    const resize = (path: string, height: number) => void heights.set(nodes.get(path)!, height);
     const redraw = async () => {
       await act(async () => {
         for (const item of items.values()) options.onPostRender(nodes.get(files.find((file) => item.id.includes(file))!)!, {}, 'update', { item });
@@ -650,8 +654,44 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
         await new Promise((resolve) => setTimeout(resolve, 25));
       });
     };
-    return { land, swapped, move, redraw, drawnKey, rerender };
+    return { land, swapped, move, resize, redraw, drawnKey, rerender };
   }
+
+  async function atTheEnd(files: string[], scrollTop: number) {
+    const page = await reading(files, Object.fromEntries(files.map((file, index) => [file, 100 + index * 200])));
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop });
+    const tap = async (path: string) => {
+      const note = (await headerOf(path)).querySelector<HTMLButtonElement>('[data-semantic-note="off"]')!;
+      await act(async () => note.click());
+    };
+    const held = () => [...document.querySelectorAll<HTMLElement>('div')].map((element) => element.style.paddingBottom).find(Boolean) ?? '';
+    return { ...page, tap, held };
+  }
+
+  test.skipIf(!hasDom)('a review that fits the window is not padded when a file folds, so no scrollbar comes and goes', async () => {
+    pageHeight = 700;
+    const page = await atTheEnd(['a.ts'], 0);
+    await page.tap('a.ts');
+    expect(page.swapped('a.ts')).toBe(true);
+    expect(page.held()).toBe('');
+  });
+
+  test.skipIf(!hasDom)('at the end of the page a tap on a second file while the first is still held holds the page for both', async () => {
+    const page = await atTheEnd(['a.ts', 'b.ts'], 10_000 - 700);
+    await page.tap('b.ts');
+    expect(page.held()).toBe('400px');
+    await page.tap('a.ts');
+    expect(page.held()).toBe('800px');
+  });
+
+  test.skipIf(!hasDom)('a file taller than what is left below the window holds the page even with more than a screen left', async () => {
+    const page = await atTheEnd(['a.ts'], 10_000 - 700 - 900);
+    page.resize('a.ts', 3000);
+    await page.tap('a.ts');
+    expect(page.held()).toBe('3000px');
+  });
 
   test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
     const quiet = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
@@ -666,14 +706,33 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
     const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
     expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
+    const name = offered?.getAttribute('aria-label');
     await act(async () => offered!.click());
     expect(engaged.swapped('a.ts')).toBe(true);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
+    const shown = (await headerOf('a.ts')).querySelector('[data-semantic-note]');
+    expect([shown?.getAttribute('aria-pressed'), shown?.getAttribute('aria-label')]).toEqual(['true', name]);
   });
 
   test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
     const page = await reading(['a.ts'], { 'a.ts': 100 });
     document.dispatchEvent(new Event('wheel'));
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a page left scrolled with no input still counts as read while its panel is detached and reads the top', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    const scrollTo = async (top: number, announce: boolean) => {
+      await act(async () => {
+        for (const element of document.querySelectorAll('div')) {
+          Object.defineProperty(element, 'scrollTop', { configurable: true, value: top });
+          if (announce) element.dispatchEvent(new Event('scroll'));
+        }
+      });
+    };
+    await scrollTo(400, true);
+    await scrollTo(0, false);
     hidden = true;
     await page.land();
     expect(page.swapped('a.ts')).toBe(false);
@@ -710,6 +769,49 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a file below when its note is worked out but on screen by the frame that would draw it is offered the note', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 3000 });
+    document.dispatchEvent(new Event('wheel'));
+    const realFrame = globalThis.requestAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      await page.land();
+      page.move('a.ts', 100);
+      await act(async () => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+    }
+    expect(page.swapped('a.ts')).toBe(false);
+    expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
+  });
+
+  test.skipIf(!hasDom)('the first step of a fling after a pause counts at its own speed, not spread over the pause', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 1300 });
+    document.dispatchEvent(new Event('wheel'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    const realFrame = globalThis.requestAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      await page.land();
+      for (const element of document.querySelectorAll('div')) {
+        Object.defineProperty(element, 'scrollTop', { configurable: true, value: 600 });
+        element.dispatchEvent(new Event('scroll'));
+      }
+      await act(async () => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+    }
+    expect(page.swapped('a.ts')).toBe(false);
   });
 
   test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
@@ -788,7 +890,21 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
     await page.land();
     expect(page.drawnKey('a.ts')).toContain(':c2');
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.textContent).toBe('2 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('2 moved');
+  });
+
+  test.skipIf(!hasDom)('turning Power Up off after the switch was turned on by hand offers the answer without it, and leaves the drawn file alone', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    await page.land();
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+    document.dispatchEvent(new Event('wheel'));
+    await act(async () => configStore.set('diffSemantic', false));
+    await act(async () => configStore.set('diffSemantic', true));
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+    await page.rerender({ powerUp: { active: false, rejected: [], provider: 'jev', retry: 0 } as never });
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c1');
   });
 
   test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {

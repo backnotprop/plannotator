@@ -191,6 +191,7 @@
     "./inbox/project-batch": "./inbox/project-batch.ts",
     "./inbox/search": "./inbox/search.ts",
     "./inbox/registry": "./inbox/registry.ts",
+    "./inbox/turned-on": "./inbox/turned-on.ts",
     "./inbox/pi-session-claim": "./inbox/pi-session-claim.ts",
     "./inbox/opencode-launch": "./inbox/opencode-launch.ts",
     "./inbox/qwen-sessions": "./inbox/qwen-sessions.ts",

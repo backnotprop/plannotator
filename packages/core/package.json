@@ -92,6 +92,7 @@
     "./create-routine-skill": "./create-routine-skill.ts",
     "./inbox-skills-compose": "./inbox-skills-compose.ts",
     "./skill-references-render": "./skill-references-render.ts",
+    "./inbox-pull-handoff": "./inbox-pull-handoff.ts",
     "./picture-it-skill": "./picture-it-skill.ts",
     "./picture-it-page": "./picture-it-page.ts",
     "./shape-kit.mjs": "./shape-kit.mjs",

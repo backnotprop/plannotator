@@ -18,7 +18,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
+import { PaneToolstrip } from '../parts/PaneToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -2657,17 +2657,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && isText && !linkedTop && !props.readOnly && (
-            <div className="ib-toolstrip">
-              <AnnotationToolstrip
-                inputMethod={inputMethod}
-                onInputMethodChange={setInputMethod}
-                mode={mode}
-                onModeChange={setMode}
-                showHelpLink={false}
-                hideQuickLabel
-                compact
-              />
-            </div>
+            <PaneToolstrip inputMethod={inputMethod} onInputMethodChange={setInputMethod} mode={mode} onModeChange={setMode} phone={phone} contents={contentsButton !== null} />
           )}
           {view && contentsButton && !linkedTop && (
             <ContentsPanel
