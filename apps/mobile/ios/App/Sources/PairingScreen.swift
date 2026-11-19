@@ -130,6 +130,7 @@ struct OfferedPairingSheet: View {
   @Environment(AppModel.self) private var model
 
   private var working: Bool { model.pairing == .working }
+  @State private var height: CGFloat = 260
 
   var body: some View {
     VStack(spacing: 18) {
@@ -173,9 +174,14 @@ struct OfferedPairingSheet: View {
         .buttonStyle(EqualChoice())
       }
     }
-    .padding(24)
+    .padding(.horizontal, 24)
+    .padding(.top, 28)
+    .padding(.bottom, 12)
     .frame(maxWidth: .infinity)
-    .presentationDetents([.medium])
+    // The sheet is as tall as what it says, and grows with the progress or failure lines.
+    .fixedSize(horizontal: false, vertical: true)
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+    .presentationDetents([.height(max(height, 120))])
     .presentationBackground(Token.background)
     // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
     .interactiveDismissDisabled(working)

@@ -108,9 +108,16 @@ struct MessageBodyView: View {
   }
 }
 
-/// Code, scrolling sideways when a line is longer than the page. The fading right edge says there is more.
+/// Code, scrolling sideways when a line is longer than the page, as the window's code block does
+/// (packages/ui/components/blocks/CodeBlock.tsx:75, `overflow-x-auto`). Where a line is cut, the edge fades out,
+/// so it reads as "there is more this way"; at the end of the scroll the fade goes.
 struct CodeBlock: View {
   let code: String
+  @State private var textWidth: CGFloat = 0
+  @State private var boxWidth: CGFloat = 0
+  @State private var atEnd = false
+  private var fades: Bool { textWidth > boxWidth + 1 && !atEnd }
+
   var body: some View {
     ScrollView(.horizontal) {
       Text(code)
@@ -122,13 +129,14 @@ struct CodeBlock: View {
     }
     .scrollIndicators(.visible)
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
+    .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.x + $0.containerSize.width >= $0.contentSize.width - 2 } action: { _, now in atEnd = now }
     .mask {
-      LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: overflows ? 0.88 : 1), .init(color: .black.opacity(overflows ? 0.15 : 1), location: 1)], startPoint: .leading, endPoint: .trailing)
+      HStack(spacing: 0) {
+        Color.black
+        LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: 56)
+      }
     }
     .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+    .animation(.easeOut(duration: 0.15), value: fades)
   }
-
-  @State private var textWidth: CGFloat = 0
-  @State private var boxWidth: CGFloat = 0
-  private var overflows: Bool { textWidth > boxWidth + 1 }
 }
