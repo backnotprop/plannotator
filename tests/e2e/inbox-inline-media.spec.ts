@@ -187,3 +187,74 @@ test('a sound and a video named in a message body play in place, beside a pictur
     await removeInboxScratch(scratch);
   }
 });
+
+test('a raw <img> naming a sound or a video plays in place and keeps playing when the message redraws', async ({ browserName }) => {
+  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  const scratch = inboxScratch('plannotator-inbox-inline-media-raw-e2e-');
+  const root = realpathSync(scratch);
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  const url = started.stdout.trim();
+  const project = scratchProject(join(root, 'src'), 'raw-media');
+  mkdirSync(join(project, 'media'), { recursive: true });
+  const wavPath = join(project, 'media', 'tone.wav');
+  const webmPath = join(project, 'media', 'clip.webm');
+  writeFileSync(wavPath, tone());
+  writeFileSync(webmPath, await recordClip());
+  const agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
+  const browser = browserName === 'webkit' ? await webkit.launch() : await chromium.launch({ args: CHROMIUM_ARGS });
+  try {
+    const sent = await agent.send({
+      project_path: project,
+      subject: 'Raw players',
+      body: [`<p>The run: <img src="${webmPath}" alt="Raw clip"> and the tone: <img src="${wavPath}" alt="Raw tone"></p>`, '', '![Later](media/later.png)'].join('\n'),
+    });
+    const id = sent.message_id as string;
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await page.goto(`${url}#thread=${sent.thread_id}`);
+    const body = page.locator(`[data-message-id="${id}"]`);
+    const video = body.locator('video[data-inline-media="video"]');
+    const audio = body.locator('audio[data-inline-media="audio"]');
+    await expect(video).toBeVisible();
+    await expect(audio).toBeVisible();
+    await expect(video).toHaveAttribute('controls', '');
+    await expect(audio).toHaveAttribute('controls', '');
+    await expect(body.locator('[data-image-unavailable]', { hasText: /^Raw (clip|tone)$/ })).toHaveCount(0);
+    for (const player of [video, audio]) {
+      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.readyState), { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+      expect(await player.evaluate((m: HTMLMediaElement) => ({ paused: m.paused, autoplay: m.autoplay, time: m.currentTime }))).toEqual({ paused: true, autoplay: false, time: 0 });
+      await player.evaluate(async (m: HTMLMediaElement) => {
+        m.muted = true;
+        m.loop = true;
+        m.dataset.marked = 'before-redraw';
+        await m.play();
+      });
+      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { timeout: 10_000 }).toBeGreaterThan(0.1);
+    }
+
+    writeFileSync(join(project, 'media', 'later.png'), PNG);
+    await agent.send({ project_path: project, reply_to: id, body: 'One more note.' });
+    await expect(page.getByText('One more note.')).toBeVisible();
+    await expect
+      .poll(async () => {
+        const thread = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}`, url))).json()) as { thread: { messages: { id: string; inline_images?: { ref: string }[] }[] } };
+        return thread.thread.messages.find((m) => m.id === id)?.inline_images?.map((image) => image.ref) ?? [];
+      }, { timeout: 30_000 })
+      .toContain('media/later.png');
+    await page.waitForTimeout(3000);
+    for (const player of [video, audio]) {
+      const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, paused: m.paused, ended: m.ended }));
+      expect(now).toEqual({ marked: 'before-redraw', paused: false, ended: false });
+      const t0 = await player.evaluate((m: HTMLMediaElement) => m.currentTime);
+      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { timeout: 5_000 }).not.toBe(t0);
+    }
+    await expect(body.locator('[data-image-unavailable]', { hasText: /^Raw (clip|tone)$/ })).toHaveCount(0);
+    await context.close();
+  } finally {
+    await agent.close().catch(() => {});
+    await browser.close().catch(() => {});
+    await removeInboxScratch(scratch);
+  }
+});
