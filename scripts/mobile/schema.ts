@@ -43,6 +43,8 @@ export const ROOTS: Record<string, string[]> = {
   'scripts/mobile/door-shapes.ts': [
     'DoorError', 'DoorPairRequest', 'DoorPairAnswer', 'DoorRevokeAnswer', 'DoorHelloFrame', 'DoorRecordFrame', 'DoorSeenBody',
     'DoorPicksBody', 'DoorPicksAnswer', 'DoorReplyBody',
+    'DoorResolveBody', 'DoorKeyBody', 'DoorMarkUnreadAnswer', 'DoorPinBody', 'DoorPinsBody',
+    'DoorSnoozeBody', 'DoorSnoozeAnswer', 'DoorPriorityBody', 'DoorPriorityAnswer', 'DoorThreadDraftAnswer', 'DoorThreadAttachmentsAnswer',
   ],
 };
 
