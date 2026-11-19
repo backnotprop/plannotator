@@ -148,6 +148,9 @@
       "id",
       "thread_id"
     ],
+    "InboxAgentMark": [
+      "state"
+    ],
     "InboxAgentPlace": [
       "kind",
       "line"
@@ -343,6 +346,9 @@
     "InboxListRowAck": [
       "at",
       "label"
+    ],
+    "InboxListRowLastAgent": [
+      "host"
     ],
     "InboxListRowProject": [
       "id",

@@ -12,6 +12,7 @@ import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { setMathRendererLoader, type MathRenderer, type MathRendererLoader } from './utils/math';
 import { setIdentityGenerator, type IdentityGenerator } from './utils/generateIdentity';
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
+import { setDirectiveRenderer, type DirectiveRenderer } from './components/blocks/directiveRenderer';
 import { setSkillInstructionsDestination } from './components/SkillReferenceMenu';
 import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
 import { setCodeHighlightWorker, setDeferOffscreenCodeHighlight, type CodeHighlightWorker } from './utils/codeHighlight';
@@ -52,6 +53,7 @@ export type {
   MathRendererLoader,
   IdentityGenerator,
   AlertIconRenderer,
+  DirectiveRenderer,
   FenceThemeResolver,
   RefCardTransport,
   CodeHighlightWorker,
@@ -121,6 +123,12 @@ export interface PlannotatorUIConfig {
    * today; the package bundles no icon set. A host with one registers a renderer.
    */
   alertIconRenderer?: AlertIconRenderer;
+  /**
+   * Draw a directive container (`:::kind`) the host owns. Asked for each
+   * directive block that is not a question; return a node, or `undefined` to
+   * keep the callout. Default: none, every such block is a callout as today.
+   */
+  directiveRenderer?: DirectiveRenderer;
   /**
    * Pick the Shiki theme code fences render in, per (palette id, resolved
    * mode). Return `undefined` to keep the default resolution (the palette's
@@ -266,6 +274,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.mathRendererLoader) setMathRendererLoader(config.mathRendererLoader);
   if (config.identityGenerator) setIdentityGenerator(config.identityGenerator);
   if (config.alertIconRenderer) setAlertIconRenderer(config.alertIconRenderer);
+  if (config.directiveRenderer) setDirectiveRenderer(config.directiveRenderer);
   if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);

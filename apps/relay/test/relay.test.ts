@@ -299,7 +299,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     const stored = readMailbox(relay, kept.mailbox_id);
     expect(stored.mailbox).toEqual({ secret_sha256: sha256(kept.secret) });
     expect(stored.devices).toEqual([
-      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null, agent: 0, signal_sha256: null, signal: null },
+      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null, agent: 0, signal_sha256: null, signal: null, apns_topic: null, live_token: null, live_environment: null },
     ]);
     expect((await device(phone.id)).carriage).toBe(true);
   });
@@ -391,10 +391,19 @@ describe("the relay with an Inbox, under wrangler dev", () => {
           { label: "No", recommended: false },
         ],
       },
+      // Push version 2 (section 4, "Push"): sealed like the rest.
+      kind: "question",
+      badge: expect.any(Number),
+      time_sensitive: false,
+      pad: expect.stringMatching(/^ *$/),
+      actions: [
+        { id: "choice.0", label: "Yes" },
+        { id: "choice.1", label: "No" },
+      ],
     });
   });
 
-  test("one message is one push however many questions it carries; news is none; a guided review is one", async () => {
+  test("one message is one push however many questions it carries; news in a thread is none; a guided review is one; a new thread is one to an app that registered its topic, none to one that did not", async () => {
     apple.pushes.length = 0;
     const two = await agent.send({
       project_path: w.project,
@@ -405,12 +414,26 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[0]!.body).e, phone.key)).question).toBeNull();
     expect(apple.pushes[0]!.headers["apns-collapse-id"]).toBe(collapseOf(two.thread_id));
 
-    await agent.send({ project_path: w.project, thread: "news", body: "The migration finished. Nothing to answer." });
+    await agent.send({ project_path: w.project, reply_to: two.thread_id, body: "The migration finished. Nothing to answer." });
     const guided = await agent.submitGuide({ ...GUIDE_BRIEF_EXAMPLE, project_path: w.project, thread: "token-refresh", idempotency_key: "guide-relay-1" });
     await until(() => apple.pushes.length, (n) => n === 2, "one push for the guided review");
     await sleep(1000);
     expect(apple.pushes.length).toBe(2);
-    expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[1]!.body).e, phone.key)).thread_id).toBe(guided.thread_id);
+    const review = JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[1]!.body).e, phone.key));
+    expect(review).toMatchObject({ thread_id: guided.thread_id, kind: "review" });
+
+    // A new thread that asks nothing: nothing to a phone whose app names no topic (the app in use before relay 1.1 keeps its pushes)...
+    await agent.send({ project_path: w.project, thread: "news", body: "The migration finished. Nothing to answer." });
+    await sleep(1000);
+    expect(apple.pushes.length).toBe(2);
+    // ...and push 2's `new_thread` once the app registers through relay 1.1 with its topic, as the window notifies for it.
+    expect((await atRelay("PUT", `/devices/${phone.id}/apns`, { token: TOKEN_OK, environment: "sandbox", topic: "ai.plannotator.app" })).status).toBe(204);
+    await sleep(500);
+    const fresh = await agent.send({ project_path: w.project, thread: "more news", body: "The backfill finished. Nothing to answer." });
+    await until(() => apple.pushes.length, (n) => n === 3, "one push for the new thread");
+    expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[2]!.body).e, phone.key))).toMatchObject({ thread_id: fresh.thread_id, kind: "new_thread", question: null });
+    // Back to the app in the field today for the tests after.
+    expect((await atRelay("PUT", `/devices/${phone.id}/apns`, { token: TOKEN_OK, environment: "sandbox" })).status).toBe(204);
   });
 
   test("Apple's 4096 bytes: a question whose context would pass them goes without its context", async () => {
@@ -988,7 +1011,7 @@ describe("a relay without the APNs key or an FCM service account", () => {
     expect(Object.keys(readMailbox(relay, tokenMailbox).devices[0]!)).not.toContain("fcm_token");
 
     relay = await startRelay("no-key", {}, { keep: true });
-    expect((await helloOf(relay.url, tokenMailbox, tokenSecret)).devices).toEqual([{ device_id: dev, cursor: 5, carriage: true, apns: true, fcm: false }]);
+    expect((await helloOf(relay.url, tokenMailbox, tokenSecret)).devices).toEqual([{ device_id: dev, cursor: 5, carriage: true, apns: true, fcm: false, topic: false }]);
     expect(readMailbox(relay, tokenMailbox).devices[0]).toMatchObject({ id: dev, apns_token: TOKEN_OK, fcm_token: null });
     expect((await at("PUT", `/devices/${dev}/fcm`, { token: "fcm-ok-r2" }, "phone")).status).toBe(204);
     expect(readMailbox(relay, tokenMailbox).devices[0]).toMatchObject({ id: dev, apns_token: null, fcm_token: "fcm-ok-r2" });
@@ -1100,6 +1123,14 @@ describe("FCM: an Android phone gets its pushes through Google's hosts, played l
           { label: "No", recommended: false },
         ],
       },
+      kind: "question",
+      badge: expect.any(Number),
+      time_sensitive: false,
+      pad: expect.stringMatching(/^ *$/),
+      actions: [
+        { id: "choice.0", label: "Yes" },
+        { id: "choice.1", label: "No" },
+      ],
     });
     // The JWT the relay signed: RS256 under the service account's key, checked by the token endpoint.
     expect(google.exchanges).toHaveLength(1);

@@ -21,7 +21,7 @@
  * `streams(world)` is the server's count of open streams less the reference.
  *
  * Notifications are fully stubbed (no OS notification is ever raised), the
- * sound is counted (oscillator frequencies), and whether a tab is in front is set by the
+ * sound is counted (oscillators), and whether a tab is in front is set by the
  * test (`visibilityState`, `hasFocus`), every tab starting in the background.
  */
 
@@ -55,7 +55,7 @@ declare global {
   interface Window {
     __plannotatorInboxEventLog: LogEntry[];
     __notified: { title: string; silent: boolean; at: number }[];
-    __sound: { freqs: number[] };
+    __sound: { oscillators: number };
     __front: { visible: boolean; focused: boolean };
   }
 }
@@ -82,15 +82,14 @@ export function stubPage(options: { noLocks?: boolean } = {}): void {
   }
   (window as unknown as { Notification: unknown }).Notification = FakeNotification;
   // The sound: counted, never played.
-  const sound = { freqs: [] as number[] };
+  const sound = { oscillators: 0 };
   window.__sound = sound;
-  const param = (onSet?: (value: number) => void) => ({ value: 1, setValueAtTime: (value: number) => onSet?.(value), linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
   class CountingAudioContext {
-    state = 'suspended';
+    state = 'running';
     currentTime = 0;
     destination = {};
     resume() {
-      this.state = 'running';
       return Promise.resolve();
     }
     close() {
@@ -100,7 +99,8 @@ export function stubPage(options: { noLocks?: boolean } = {}): void {
       return { gain: param(), connect: (to: unknown) => to };
     }
     createOscillator() {
-      return { type: 'sine', frequency: param((value) => sound.freqs.push(value)), connect: (to: unknown) => to, start() {}, stop() {} };
+      sound.oscillators++;
+      return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
     }
   }
   (window as unknown as { AudioContext: unknown }).AudioContext = CountingAudioContext;
