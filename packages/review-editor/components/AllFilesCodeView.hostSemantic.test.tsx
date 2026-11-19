@@ -725,6 +725,18 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(await settle()).toBe('400px');
   });
 
+  test.skipIf(!hasDom)('a hold that settled to nothing is not picked up by a later toggle on a page that now fits', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('a.ts');
+    expect(await settle()).toBe('');
+    content = 700;
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: 0 });
+    await page.tap('a.ts');
+    expect(await settle()).toBe('');
+  });
+
   test.skipIf(!hasDom)('a file taller than what is left below the window holds the page even with more than a screen left', async () => {
     const page = await atTheEnd(['a.ts'], 10_000 - 700 - 900);
     page.resize('a.ts', 3000);
@@ -745,7 +757,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
     const header = await headerOf('a.ts');
     const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect([offered?.textContent, offered?.title, header.querySelector('.line-through')]).toEqual(['sem1', '1 semantic change, not shown in the diff. Open to show them.', null]);
+    expect([offered?.textContent, offered?.dataset.semanticNote, header.querySelector('.line-through')]).toEqual(['sem1', 'off', null]);
     await flip(header);
     expect(engaged.swapped('a.ts')).toBe(true);
     expect(document.querySelector('[data-semantic-file-popover] [role="switch"]')?.isConnected).toBe(true);

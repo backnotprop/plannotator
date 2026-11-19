@@ -2182,14 +2182,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
-  const heldLengthRef = useRef<((keep?: boolean) => { px: number; height: number }) | null>(null);
+  const heldLengthRef = useRef<((keep?: boolean) => { px: number; height: number } | null) | null>(null);
   const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
     const root = scrollRef.current;
     const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
     const node = itemNodeRef.current.get(itemId);
     const most = page ? Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight) : 0;
-    if (root && page && (heldLengthRef.current || (page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most))) {
-      const held = heldLengthRef.current?.(true);
+    const held = heldLengthRef.current?.(true) ?? null;
+    if (root && page && (held || (page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most))) {
       const height = held?.height ?? page.scrollHeight;
       let px = (held?.px ?? 0) + most;
       root.style.paddingBottom = `${px}px`;
@@ -2226,7 +2226,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
         if (!keep) root.style.paddingBottom = '';
         heldLengthRef.current = null;
-        return { px, height };
+        return settled && px === 0 ? null : { px, height };
       };
     }
     showSemantic(itemId, on);

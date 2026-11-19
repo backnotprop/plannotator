@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { ChevronDown } from 'lucide-react';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
@@ -38,15 +38,20 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
   const changes = useMemo(() => fileSemanticChanges(state?.semanticChanges, filePath), [state?.semanticChanges, filePath]);
   const [open, setOpen] = useState(false);
   const found = semantic && semantic.state.status !== 'working' ? semantic.state : null;
-  if (!semantic && !state?.semanticDiffAvailable) return null;
+  const shown = semantic != null || state?.semanticDiffAvailable === true;
+  const interactive = shown && (found != null || (!touch && changes.length > 0));
+  useEffect(() => {
+    if (!interactive) setOpen(false);
+  }, [interactive]);
+  if (!shown) return null;
   if (!found && touch) return null;
-  if (!found && (semantic || changes.length === 0)) {
-    const pending = semantic != null || state?.semanticChanges === undefined;
+  if (!found && changes.length === 0) {
+    const pending = semantic?.state.status === 'working' || state?.semanticChanges === undefined;
     return (
       <span
         title={pending ? 'Semantic changes are still being worked out' : 'No semantic changes in this file'}
         data-semantic-file-badge={pending ? 'pending' : 0}
-        data-semantic-note={semantic ? 'working' : undefined}
+        data-semantic-note={semantic?.state.status}
         className={`${BADGE} ${NARROW_HIDDEN} opacity-50`}
       >
         <span className="font-semibold tracking-[0.02em]">sem</span>
@@ -67,9 +72,12 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
     state?.onLineSelection(range);
   };
   const on = found?.status !== 'off';
-  const count = changes.length || (found ? semanticNoteCount(found.summary) : 0);
+  const noted = found ? semanticNoteCount(found.summary) : 0;
+  const count = changes.length || noted;
   const changesText = `${count} semantic change${count === 1 ? '' : 's'}`;
-  const kinds = found ? semanticNoteParts(found.summary).join(', ') : `${count}`;
+  const kinds = found ? semanticNoteParts(found.summary).join(', ') : '';
+  const both = kinds !== '' && changes.length > noted;
+  const text = !kinds ? changesText : on ? (both ? `${changesText}; ${kinds}` : kinds) : both ? `${changesText}; ${kinds} not shown in the diff` : `${kinds}, not shown in the diff`;
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -81,8 +89,8 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
           <button
             type="button"
             onClick={(event) => event.stopPropagation()}
-            title={on ? `${changesText} in this file` : `${changesText}, not shown in the diff. Open to show them.`}
-            aria-label={`Semantic changes for ${filePath}: ${kinds}${on ? '' : ', not shown in the diff'}`}
+            title={on ? (kinds ? text : `${text} in this file`) : `${text}. Open to show ${noted === 1 ? 'it' : 'them'}.`}
+            aria-label={`Semantic changes for ${filePath}: ${text}`}
             data-semantic-file-badge={count}
             data-semantic-note={found?.status}
             className={`${BADGE} ${found ? `${touch ? REACH : REACH_COARSE} ${TIGHT_CHIP}` : NARROW_HIDDEN} transition-colors hover:text-foreground hover:bg-muted data-[popup-open]:text-foreground data-[popup-open]:bg-muted`}
@@ -110,7 +118,7 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
                 <SemanticDiffRows changes={changes} binaryChanges={[]} onOpenChange={openChange} onOpenBinary={() => {}} />
               </div>
             ) : (
-              <div className="px-2 py-1 text-muted-foreground">{kinds}</div>
+              <div className="px-2 py-1 text-muted-foreground">{kinds || changesText}</div>
             )}
           </Popover.Popup>
         </Popover.Positioner>
