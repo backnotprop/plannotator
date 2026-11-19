@@ -6,7 +6,7 @@ import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import { InboxApiError } from '../api';
-import { imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
+import { imageCommentAnnotation, imageFitAxis, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { useClearRows } from '../imageClear';
@@ -213,12 +213,12 @@ export function ImageAttachmentView({
     return () => cancelAnimationFrame(frame);
   }, [natural, failed]);
 
-  // A panorama fitted to the pane would be a sliver: Fit keeps a readable height (read from the left); a tall screenshot fits its width (read from the top).
-  // On a phone a panorama fits whole: its height there would crop most of it off the right, and a pinch reads it closer.
+  // Fit's axis (`imageFitAxis`, the swipe's neighbour picture's too): a panorama keeps a readable height from the left,
+  // whole on a phone; a tall screenshot fits its width from the top.
   const phone = usePhone();
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
-  const fitAxis: FitAxis = wide && !phone ? 'height' : tall ? 'width' : 'contain';
+  const fitAxis: FitAxis = natural ? imageFitAxis(natural, phone) : 'contain';
   // A touch phone draws on the picture full screen, zoomable, opening on the part the viewer showed.
   const touchPhone = useTouchPhone();
   const [drawFrom, setDrawFrom] = useState<NaturalBox | null>(null);
@@ -262,9 +262,9 @@ export function ImageAttachmentView({
     };
   }, []);
 
-  // A horizontal swipe on the image at Fit: more than 60 px across, less than 40 px up or down (a panorama pans instead).
+  // A horizontal swipe on the image at Fit: more than 60 px across, less than 40 px up or down (a panorama fitted to its height pans instead).
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const swipes = onSwipe !== undefined && mode === 'fit' && !(wide && !phone);
+  const swipes = onSwipe !== undefined && mode === 'fit' && fitAxis !== 'height';
 
   // A selected comment that carries a drawing shows the drawing over the image.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
