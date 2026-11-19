@@ -62,16 +62,19 @@ export type FitPadding = number | { x: number; y: number };
  * The room "fit" keeps round a whole board in an editor of this size.
  *
  * Above and below, the editor's bars lie over the board, so the room there
- * clears them (72 px, less only in a view too short to spare it). At the
- * sides nothing lies over the board: the room is a twentieth of the width,
- * 72 px at most and 12 at least. A wide view keeps the 72 px it always had;
- * a phone 390 px wide gives 20 px a side instead of 72, so a board that is
- * wider than it is tall, as most are, is drawn nearly half as large again.
+ * clears them: 72 px in any view 216 px tall or more, a third of the height
+ * in one shorter than that. At the sides nothing lies over the board: the
+ * room is a twentieth of the width, 72 px at most and 12 at least. So a
+ * view 1440 px wide or more is as it always was; a narrower one gives a
+ * board more of its width (36 px a side at 720, 20 px at 390, where it was
+ * 72), and a board that is wider than it is tall, as most are, is drawn
+ * larger for it.
  */
 export function fitPadding(size: Size): { x: number; y: number } {
   return {
     x: Math.round(Math.max(12, Math.min(72, size.w * 0.05))),
-    y: Math.round(Math.max(12, Math.min(72, size.h * 0.12))),
+    // The bars are as tall in a short view as in a tall one: the room for them shrinks only when a third of the view is less.
+    y: Math.round(Math.max(12, Math.min(72, size.h / 3))),
   };
 }
 

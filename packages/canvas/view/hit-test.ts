@@ -4,7 +4,7 @@
  */
 import { FRAME_TITLE_HEIGHT } from '../model/capture';
 import { arrowPoints, resolveArrow } from '../model/document';
-import { distanceToInk } from '../model/ink';
+import { PEN_WIDTH, distanceToInk } from '../model/ink';
 import {
   type Point,
   type Rect,
@@ -15,7 +15,6 @@ import {
 } from '../model/geometry';
 import { type ArrowEnd, type CanvasDocument, type CanvasObject, type FrameObject, type ObjectId, isPlaced } from '../model/types';
 import type { DocumentIndex } from './document-index';
-import { PEN_WIDTH } from './ink-path';
 import { curveRoute, distanceToRoute } from './route-path';
 import type { Router } from './routes';
 

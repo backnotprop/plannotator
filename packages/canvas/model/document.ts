@@ -10,6 +10,7 @@ import {
   rectFromPoints,
   unionRects,
 } from './geometry';
+import { inkBounds } from './ink';
 import { compareOrder, keyBetween } from './order-key';
 import {
   CANVAS_DOCUMENT_VERSION,
@@ -250,6 +251,8 @@ export function groupMembers(doc: CanvasDocument, groupId: ObjectId): ObjectId[]
 export function objectBounds(doc: CanvasDocument, id: ObjectId): Rect | null {
   const object = doc.objects[id];
   if (!object) return null;
+  // A drawn line covers its stroke, which runs half a pen's width past its box: that is what is mounted, captured and searched.
+  if (object.type === 'ink') return inkBounds(object);
   if (isPlaced(object)) return { x: object.x, y: object.y, w: object.w, h: object.h };
   if (object.type === 'arrow') {
     const geometry = resolveArrow(doc, object);

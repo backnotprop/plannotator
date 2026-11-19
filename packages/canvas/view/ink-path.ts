@@ -4,10 +4,9 @@
  * points still reads as one movement of the hand, with no corners of its
  * own. Pure: numbers in, a string out.
  */
-import type { InkPen } from '../model/types';
+import { PEN_WIDTH } from '../model/ink';
 
-/** How wide each pen draws, in board units. */
-export const PEN_WIDTH: Readonly<Record<InkPen, number>> = { fine: 2, marker: 4.5, highlighter: 18 };
+export { PEN_WIDTH };
 /** A highlighter is see-through, so what it goes over is still read. */
 export const HIGHLIGHTER_OPACITY = 0.4;
 

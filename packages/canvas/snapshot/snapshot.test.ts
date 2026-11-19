@@ -354,7 +354,8 @@ describe('the still picture fallback', () => {
     expect(svg).not.toMatch(/NaN|undefined/);
     // A snapshot of the line alone is its box and the room round it, and goes behind when the line is redrawn.
     store.dispatch({ type: 'add-snapshot', snapshot: { id: 'the-ring', title: 'Ring', source: { kind: 'objects', objects: ['ring'] } } });
-    expect(captured(store, 'the-ring').rect).toEqual({ x: 276, y: 76, w: 148, h: 98 });
+    // The capture holds the stroke, which runs nine units past a highlighter's box, and the room round that.
+    expect(captured(store, 'the-ring').rect).toEqual({ x: 267, y: 67, w: 166, h: 116 });
     expect(standing(store, 'the-ring')).toBe('current');
     store.dispatch({ type: 'edit', id: 'ring', patch: { points: [0, 0, 1, 1] } });
     expect(standing(store, 'the-ring')).toBe('behind');

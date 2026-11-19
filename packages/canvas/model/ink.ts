@@ -9,7 +9,16 @@
  * board, and reading it back. Nothing here draws.
  */
 import { type Point, type Rect, distanceToSegment } from './geometry';
-import type { InkObject } from './types';
+import type { InkObject, InkPen } from './types';
+
+/** How wide each pen draws, in board units. The stroke is centred on the line, so it reaches half of this past the object's box. */
+export const PEN_WIDTH: Readonly<Record<InkPen, number>> = { fine: 2, marker: 4.5, highlighter: 18 };
+
+/** The rect a drawn line covers: its box and the half pen's width its stroke reaches past it on every side. */
+export function inkBounds(ink: Pick<InkObject, 'pen'> & Rect): Rect {
+  const reach = PEN_WIDTH[ink.pen ?? 'marker'] / 2;
+  return { x: ink.x - reach, y: ink.y - reach, w: ink.w + reach * 2, h: ink.h + reach * 2 };
+}
 
 /** The most points a stored line holds. The same number as `LIMITS.inkPoints` (the codec imports nothing from here). */
 export const INK_MAX_POINTS = 1000;
