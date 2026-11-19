@@ -2,7 +2,9 @@
  * What this session waits on in its terminal now (INBOX_BLOCKED_FIELD, inbox-contract.ts): a permission prompt or a
  * question, the kind only, for the Inbox's Agents list. Kept by tool call id, from the mod's hooks (register.ts):
  *
- *  - `tool.check` answered `ask` for a call: a permission prompt (Claude Code's rules, a hook or a plugin asked);
+ *  - `tool.check` answered `ask` for a Bash call: a permission prompt (Claude Code's rules, a hook or a plugin asked).
+ *    Bash alone: the mod reads verdicts only through its Bash-matched hook, never a wildcard or a hook on another
+ *    tool's permission, so another tool's prompt is never seen;
  *  - `tool.call` of `AskUserQuestion`: a question;
  *  - the call runs (`tool.run`, 2.1.326+) or settles (its `tool.call` returns): a permission is over; a question is
  *    over when its call settles (its answer is the tool's result);

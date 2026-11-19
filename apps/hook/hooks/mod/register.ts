@@ -1219,7 +1219,24 @@ export function register(on: On) {
     return result
   })
 
+  // What waits on the person where the session runs (terminal-prompts.ts), for the Inbox's Agents list, read only
+  // from hooks the mod has anyway and never changing an answer (no wildcard, no hook on another tool's permission):
+  // an AskUserQuestion call is a question until its `tool.call` settles (the dialog is inside it); a Bash call whose
+  // `tool.check` (the Bash-matched hook below) said `ask` is a permission until it runs (`tool.run`, the run hook
+  // below, 2.1.326+) or settles. No other tool's permission prompt is seen, so none is told.
   on('tool.call', async ($: Engine, e: any, next: Next) => {
+    const callId = typeof e?.tool_use_id === 'string' && e.tool_use_id ? e.tool_use_id : null
+    const watching = allowed && callId && (e.tool === ASK_QUESTION_TOOL || e.tool === SHELL_TOOL) ? mod : null
+    if (!watching || watching.isDisposed || !callId) return answerToolCall($, e, next)
+    if (e.tool === ASK_QUESTION_TOOL) await watching.onQuestionAsked(callId, typeof e.agentId === 'string' ? e.agentId : undefined).catch(() => undefined)
+    try {
+      return await answerToolCall($, e, next)
+    } finally {
+      watching.onToolSettled(callId)
+    }
+  })
+
+  async function answerToolCall($: Engine, e: any, next: Next) {
     // Claude's `plannotator` tool: answered here, with the same detached
     // launch the slash commands use. No other hook or core runs for it,
     // unless Claude Code's guard holds the launch until the call is allowed:
@@ -1267,7 +1284,7 @@ export function register(on: On) {
     } finally {
       await instance.onPlanCallSettled(e.tool_use_id)
     }
-  })
+  }
 
   // `tool.run` (Claude Code 2.1.326+): a call the session allowed, about to
   // run. Here the mod opens a `plannotator` tool call or a taken-over Bash
@@ -1287,6 +1304,8 @@ export function register(on: On) {
   // for it (HELD_AT_RUN_TEXT), not the guard's advice to serve at tool.run.
   on('tool.*', RUN_MATCHER, async ($: Engine, e: any, next: Next) => {
     if (next?.event !== RUN_EVENT) return next(e)
+    // A Bash call runs: its permission prompt, if one was up, is over (and tool.run is seen in this process).
+    if (allowed && mod && !mod.isDisposed && typeof e.tool_use_id === 'string' && e.tool_use_id) mod.onToolRan(e.tool_use_id)
     if (allowed && toolName && e.tool === toolName) return answerAtRun(await answerModTool($, e))
     if (allowed?.reviews && e.tool === SHELL_TOOL) {
       const input = shellTakeOver(e.command, !!e.agentId)
@@ -1329,41 +1348,14 @@ export function register(on: On) {
     const verdict = await next(e)
     if (!allowed || typeof e.tool_use_id !== 'string') return verdict
     removalAsks.note(removalAskKey(e.agentId, e.input), verdict)
+    // A permission prompt for this Bash call (terminal-prompts.ts): the verdict is read, never changed.
+    const watching = mod
+    if (verdict?.decision === 'ask' && watching && !watching.isDisposed && !answeredByUs(e)) await watching.onToolAsked(e.tool_use_id, typeof e.agentId === 'string' ? e.agentId : undefined).catch(() => undefined)
     if (allowed.debugPath && verdict?.decision === 'ask' && isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'))) {
       const by = ['rule', 'hook', 'setting', 'plugin'].filter((key) => verdict[key]).map((key) => `${key} ${verdict[key]}`)
       hostOf($, allowed.debugPath).debug(`Bash ask (${e.agentId ? 'subagent' : 'main'}): ${String(verdict.reason ?? '').slice(0, 80)}${by.length ? ` [${by.join(', ')}]` : ''}`)
     }
     return verdict
-  })
-
-  // What waits on the person in this session's terminal (terminal-prompts.ts), for the Inbox's Agents list: a call
-  // whose `tool.check` answered `ask` (a permission prompt) until it runs or settles, an AskUserQuestion call (a
-  // question) until it settles. Only the kind leaves the session; never the input or the question. Through `tool.*`
-  // like the run hook above (an engine before 2.1.326 refuses a module that names `tool.run`), with no matcher: the
-  // glob already puts the mod in every `tool.*` chain, so no new "hook was skipped" line can come of it. Every result
-  // is passed on as it is.
-  on('tool.*', async ($: Engine, e: any, next: Next) => {
-    const event = next?.event
-    const callId = typeof e?.tool_use_id === 'string' && e.tool_use_id ? e.tool_use_id : null
-    const instance = allowed && callId ? mod : null
-    if (!instance || instance.isDisposed || !callId) return next(e)
-    const agentId = typeof e.agentId === 'string' ? e.agentId : undefined
-    if (event === 'tool.check') {
-      const verdict = await next(e)
-      if (verdict?.decision === 'ask' && !answeredByUs(e)) await instance.onToolAsked(callId, agentId).catch(() => undefined)
-      return verdict
-    }
-    if (event === RUN_EVENT) {
-      instance.onToolRan(callId)
-      return next(e)
-    }
-    if (event !== 'tool.call') return next(e)
-    if (e.tool === ASK_QUESTION_TOOL) await instance.onQuestionAsked(callId, agentId).catch(() => undefined)
-    try {
-      return await next(e)
-    } finally {
-      instance.onToolSettled(callId)
-    }
   })
 
   // A call one of our own hooks answers, however long that takes, is not a prompt in the terminal: ExitPlanMode (the

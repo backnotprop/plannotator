@@ -266,29 +266,33 @@ panel and the headless sessions never ask for the tool list),
 `packages/server/inbox-t3-wake.test.ts` (one owner per reply) and engine-harness
 cases in `apps/hook/tests/register.test.ts`.
 
-**A prompt waiting in the terminal (Inbox).** A matcherless `on('tool.*')`
-hook in `register.ts` tells `TerminalPrompts` (`terminal-prompts.ts`) when the
-person must answer in the terminal: a `tool.check` whose verdict is `ask` (a
-permission), or a `tool.call` of `AskUserQuestion` (a question). It names no
-`tool.run` (an older engine fails to load a module that does): a run is seen as
-`next.event`. A permission ends when its call runs or settles, at that loop's
-next `turn.step`, or at the turn's end; a question when its call settles or the
-turn ends. An `ask` is told only once it has held 1.5 s
-(`TERMINAL_PROMPT_SETTLE_MS`), so auto mode or a hook that answers at once never
-flashes (whether auto mode's classifier can take longer after an `ask` is not yet
-checked live). A permission is told only in a process that has seen `tool.run`
-fire: where the engine never delivers it (before 2.1.326, or a guard that sends
-it past the user tier) its end is unseen and an approved call would read as
-"asking" for its whole run, so no permission is told there at all; a question
-needs no `tool.run`. Never noted: ExitPlanMode (its review is in the browser, by
-the mod or the classic hook, however long it takes), the mod's own tools, and a
-Bash command the mod takes over (`answeredByUs`). The InboxLink's `blocked` option sends `blocked: { kind }` in a
-`state` event on change and on every poll, with `blocked_at` (when its word
-last changed), after the registry check (nothing
-while no Inbox has run). Only the kind leaves the session. The Inbox side:
-"Status marks for every agent" in
+**A prompt waiting in the terminal (Inbox).** `TerminalPrompts`
+(`terminal-prompts.ts`) learns when the person must answer where the session
+runs only from hooks the mod has anyway, and never changes an answer: no
+wildcard hook and no hook on another tool's permission (the engine refuses a
+second matcherless `tool.*` hook, and the guard test in `register.test.ts`
+allows one `tool.*` hook, the run hook, matched on Bash and the mod's tool). A
+question: the `tool.call` hook sees an `AskUserQuestion` call (its dialog is
+inside the call) until the call settles, on every engine. A permission: Bash
+only, where the Bash-matched `tool.check` hook reads a verdict of `ask`, until
+the run hook sees that call's `tool.run` or the call settles. It is told only in
+a process that has seen `tool.run` fire (Claude Code 2.1.326+, and not where a
+guard sends `tool.run` past the user tier): elsewhere an approved call's run is
+unseen and would read as "asking" for its whole run, so no permission is told
+there at all. Another tool's permission prompt is never seen, so never told. A
+prompt also ends at that loop's next `turn.step` or at the turn's end. An `ask`
+is told only once it has held 1.5 s (`TERMINAL_PROMPT_SETTLE_MS`), so auto mode
+or a hook that answers at once never flashes (whether auto mode's classifier can
+take longer after an `ask` is not yet checked live). Never noted: a Bash command
+the mod takes over (`answeredByUs`). The InboxLink's `blocked` option sends
+`blocked: { kind }` in a `state` event on change and on every poll, with
+`blocked_at` (when its word last changed), after the registry check (nothing
+while no Inbox has run). Only the kind leaves the session. With the knob off the
+mod registers nothing and none of this runs. The Inbox side: "Status marks for
+every agent" in
 [inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
-`terminal-prompts.test.ts`, and the engine matrix's case in `tests/register.test.ts`.
+`terminal-prompts.test.ts`, the guard in `register.test.ts`, and the engine
+matrix's case in `tests/register.test.ts`.
 
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of

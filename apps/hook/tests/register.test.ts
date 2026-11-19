@@ -1554,31 +1554,29 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
   })
 })
 
-// What waits on the person in the terminal (hooks/mod/terminal-prompts.ts), told to the Inbox's Agents list. The mod
-// watches every tool call through a matcherless `tool.*` hook (an engine before 2.1.326 refuses a module that names
-// tool.run). The failures this guards on each engine of test.yml's matrix (2.1.287, the pinned one, a current one):
-// the module not loading with that hook, a tool's own result or an AskUserQuestion answer not reaching the caller
-// unchanged (the hook must only watch), and, from 2.1.326, tool.run not raised (the mod tells a permission prompt only
-// once it has seen tool.run fire, review H1: without it an approved call would read as "asking" for its whole run).
-describe('watching for prompts in the terminal (the matcherless tool.* hook)', () => {
-  test('loads on every engine and passes every call through unchanged', async ($: any, on: any) => {
+// What waits on the person where the session runs (hooks/mod/terminal-prompts.ts), for the Inbox's Agents list. The
+// mod reads it only from hooks it has anyway (tool.call, the Bash-matched tool.check, the matched tool.* run hook),
+// never with a wildcard or a hook on another tool's permission (an engine refuses two matcherless `tool.*` hooks, and
+// a hook there changes how other tools' prompts behave). The failures this guards on each engine of test.yml's
+// matrix: a question's answer, a Bash call's result or a Bash verdict reaching the caller changed (the mod only
+// watches).
+describe('watching for prompts where the session runs', () => {
+  test("an AskUserQuestion answer, a Bash result and a Bash ask verdict reach the caller unchanged", async ($: any, on: any) => {
     world(on)
-    const ran: string[] = []
+    const called: string[] = []
+    // An ask for one command only (the call below is another): a Bash prompt as the session would raise it.
+    on('tool.check', ($: any, e: any, next: any) => (e.input?.command === 'rm -rf build' ? { decision: 'ask', reason: 'beneath' } : next(e)))
     on('tool.call', ($: any, e: any) => {
-      ran.push(e.tool)
-      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `read ${e.file_path}` }
+      called.push(e.tool)
+      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `ran ${e.command}` }
     })
     await $.session.start(SESSION)
-    const read = await $.tool.call({ tool: 'Read', file_path: '/work/notes.md' })
-    expect(read.result).toBe('read /work/notes.md')
     const asked = await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which database?' }] })
     expect(asked.result).toEqual({ answers: { 'Which database?': 'Postgres' } })
-    expect(ran).toEqual(['Read', 'AskUserQuestion'])
-    // From 2.1.326 the engine raises tool.run, which the mod needs before it tells any permission prompt.
-    if (CLAUDE_CODE_VERSION) {
-      const [a, b, c] = CLAUDE_CODE_VERSION.split('.').map(Number)
-      const from326 = a! > 2 || (a === 2 && (b! > 1 || (b === 1 && c! >= 326)))
-      expect(`${CLAUDE_CODE_VERSION} raises tool.run: ${typeof $.tool?.run === 'function'}`).toBe(`${CLAUDE_CODE_VERSION} raises tool.run: ${from326}`)
-    }
+    const ran = await $.tool.call({ tool: 'Bash', command: 'npm run build' })
+    expect(ran.result).toBe('ran npm run build')
+    expect(called).toEqual(['AskUserQuestion', 'Bash'])
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf build' } })
+    expect([verdict.decision, verdict.reason]).toEqual(['ask', 'beneath'])
   })
 })
