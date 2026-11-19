@@ -3,13 +3,19 @@
  * that is no longer there does nothing instead of throwing, because events
  * also arrive from peers and from an undo made after someone else's change.
  *
+ * A change to an object names only the fields it touches (`object-set`), so
+ * its inverse does too. That is what makes undo safe beside other people:
+ * undoing a move puts `x` and `y` back and leaves the text an agent wrote
+ * in between alone.
+ *
  * Applying a batch copies the object map once, so a drag of 500 objects is
  * one copy per frame, and every object the batch did not touch keeps its
  * identity (the renderer skips those with a reference check).
  */
+import { LIMITS, checkObject } from '../model/codec';
 import { bindingFault, groupCycle, idMap, isBoundEnd } from '../model/document';
 import type { CanvasDocument, CanvasObject, Snapshot } from '../model/types';
-import type { CanvasEvent } from './types';
+import type { CanvasEvent, ObjectFields } from './types';
 
 export interface Applied {
   doc: CanvasDocument;
@@ -19,31 +25,57 @@ export interface Applied {
   applied: CanvasEvent[];
 }
 
+export interface ApplyOptions {
+  /**
+   * Check every object an event makes or changes (`checkObject`). On for
+   * anything not planned a moment ago against this very document: a peer's
+   * events, an undo, a replay. Off for the planner's own output, which was
+   * just checked.
+   */
+  check?: boolean;
+}
+
 const clampIndex = (at: number | undefined, length: number): number =>
   at === undefined || !Number.isFinite(at) ? length : Math.max(0, Math.min(length, Math.trunc(at)));
+
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  for (const key of ka) if (!same((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) return false;
+  return true;
+}
+
+/** The `object-set` event that turns `before` into `after`, or null when they are the same. */
+export function setEvent(before: CanvasObject, after: CanvasObject): Extract<CanvasEvent, { type: 'object-set' }> | null {
+  const a = before as unknown as ObjectFields;
+  const b = after as unknown as ObjectFields;
+  const set: ObjectFields = {};
+  const unset: string[] = [];
+  for (const key of Object.keys(b)) if (key !== 'id' && key !== 'type' && !same(a[key], b[key])) set[key] = b[key];
+  for (const key of Object.keys(a)) if (!(key in b)) unset.push(key);
+  if (Object.keys(set).length === 0 && unset.length === 0) return null;
+  return { type: 'object-set', id: before.id, set, ...(unset.length ? { unset } : {}) };
+}
 
 /**
  * An object that would make the document go round in a circle: an arrow
  * stuck to an arrow or to a group it is inside, or a group inside itself.
  * The planner never makes one; a peer's event might, and it is dropped here.
- * (An end stuck to an object that is not there is allowed: that object may
- * have been removed by someone else a moment ago.)
  */
-function unsound(objects: Readonly<Record<string, CanvasObject>>, object: CanvasObject, before?: CanvasObject): boolean {
-  // The common case, a move or an edit, touches neither: nothing to look at.
+function unsound(objects: Readonly<Record<string, CanvasObject>>, object: CanvasObject, touched: readonly string[] | null): boolean {
   const ends = object.type === 'arrow' ? [object.from, object.to].filter(isBoundEnd) : [];
   if (!object.group && ends.length === 0) return false;
-  if (before && before.group === object.group && before.type === 'arrow' && object.type === 'arrow' && before.from === object.from && before.to === object.to) return false;
-  if (before && before.group === object.group && ends.length === 0) return false;
+  // A change that touched neither the group nor an arrow's ends cannot close a circle.
+  if (touched && !touched.some((key) => key === 'group' || key === 'from' || key === 'to')) return false;
   const lookup = (id: string) => (id === object.id ? object : objects[id]);
   if (object.group && groupCycle(lookup, object.id)) return true;
-  for (const end of ends) {
-    if (lookup(end.object) && bindingFault(lookup, object, end.object)) return true;
-  }
+  for (const end of ends) if (lookup(end.object) && bindingFault(lookup, object, end.object)) return true;
   return false;
 }
 
-export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[]): Applied {
+export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[], options: ApplyOptions = {}): Applied {
   let objects: Record<string, CanvasObject> | null = null;
   let order: string[] | null = null;
   let snapshots: Record<string, Snapshot> | null = null;
@@ -54,30 +86,72 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[])
   const objs = () => (objects ??= idMap(doc.objects));
   const ord = () => (order ??= [...doc.order]);
   const snaps = () => (snapshots ??= idMap(doc.snapshots));
-  const current = (id: string): CanvasObject | undefined => (objects ?? doc.objects)[id];
+  const now = (): Readonly<Record<string, CanvasObject>> => objects ?? doc.objects;
 
   for (const event of events) {
     switch (event.type) {
       case 'object-added': {
-        if (current(event.object.id) || unsound(objects ?? doc.objects, event.object)) break;
+        let object = event.object;
+        if (now()[object.id] || (order ?? doc.order).length >= LIMITS.objects) break;
+        // A group that is not there (removed by someone else a moment ago) is let go of.
+        if (object.group && now()[object.group]?.type !== 'group') {
+          const { group: _gone, ...rest } = object;
+          object = rest as CanvasObject;
+        }
+        if (unsound(now(), object, null)) break;
         const list = ord();
         const at = clampIndex(event.at, list.length);
-        objs()[event.object.id] = event.object;
-        list.splice(at, 0, event.object.id);
-        undo.push({ type: 'object-removed', id: event.object.id });
-        applied.push(event);
+        objs()[object.id] = object;
+        list.splice(at, 0, object.id);
+        undo.push({ type: 'object-removed', id: object.id });
+        applied.push(object === event.object ? event : { ...event, object });
         break;
       }
-      case 'object-changed': {
-        const before = current(event.object.id);
-        if (!before || before === event.object || unsound(objects ?? doc.objects, event.object, before)) break;
-        objs()[event.object.id] = event.object;
-        undo.push({ type: 'object-changed', object: before });
+      case 'object-set': {
+        const before = now()[event.id];
+        if (!before) break;
+        const from = before as unknown as ObjectFields;
+        const next: ObjectFields = { ...from };
+        const back: ObjectFields = {};
+        const backUnset: string[] = [];
+        const touched: string[] = [];
+        const take = (key: string, value: unknown, present: boolean) => {
+          if (key === 'id' || key === 'type') return;
+          const had = key in from;
+          if (present ? had && same(from[key], value) : !had) return;
+          if (had) back[key] = from[key];
+          else backUnset.push(key);
+          if (present) next[key] = value;
+          else delete next[key];
+          touched.push(key);
+        };
+        for (const key of Object.keys(event.set)) take(key, event.set[key], true);
+        for (const key of event.unset ?? []) if (!(key in event.set)) take(key, undefined, false);
+        if (typeof next.group === 'string' && now()[next.group]?.type !== 'group' && touched.includes('group')) {
+          // Put back into a group that has since gone: stay out of it.
+          delete next.group;
+          if (!('group' in from)) {
+            touched.splice(touched.indexOf('group'), 1);
+            backUnset.splice(backUnset.indexOf('group'), 1);
+          }
+        }
+        if (touched.length === 0) break;
+        let object = next as unknown as CanvasObject;
+        if (options.check) {
+          const checked = checkObject(next);
+          if (!checked.ok) break;
+          object = checked.value;
+          // A field this object's type does not have was dropped by the check: nothing changed after all.
+          if (same(before, object)) break;
+        }
+        if (unsound(now(), object, touched)) break;
+        objs()[event.id] = object;
+        undo.push({ type: 'object-set', id: event.id, set: back, ...(backUnset.length ? { unset: backUnset } : {}) });
         applied.push(event);
         break;
       }
       case 'object-removed': {
-        const before = current(event.id);
+        const before = now()[event.id];
         if (!before) break;
         const list = ord();
         const at = list.indexOf(event.id);
@@ -88,7 +162,7 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[])
         break;
       }
       case 'object-ordered': {
-        if (!current(event.id)) break;
+        if (!now()[event.id]) break;
         const list = ord();
         const from = list.indexOf(event.id);
         if (from === -1) break;
@@ -102,6 +176,7 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[])
       }
       case 'snapshot-put': {
         const before = (snapshots ?? doc.snapshots)[event.snapshot.id];
+        if (!before && Object.keys(snapshots ?? doc.snapshots).length >= LIMITS.snapshots) break;
         snaps()[event.snapshot.id] = event.snapshot;
         undo.push(before ? { type: 'snapshot-put', snapshot: before } : { type: 'snapshot-removed', id: event.snapshot.id });
         applied.push(event);
@@ -138,4 +213,30 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[])
     inverse: undo.reverse(),
     applied,
   };
+}
+
+/**
+ * Fold a run of changes into the fewest events that have the same effect:
+ * one `object-set` per object, each field at its last value. Only a list
+ * made of `object-set` alone is folded (a drag, a resize, a colour pick);
+ * anything else comes back as it was.
+ */
+export function compactSets(events: CanvasEvent[]): CanvasEvent[] {
+  if (events.length < 2 || events.some((event) => event.type !== 'object-set')) return events;
+  const byId = new Map<string, { set: ObjectFields; unset: Set<string> }>();
+  for (const event of events) {
+    if (event.type !== 'object-set') continue;
+    let entry = byId.get(event.id);
+    if (!entry) byId.set(event.id, (entry = { set: {}, unset: new Set() }));
+    for (const key of Object.keys(event.set)) {
+      entry.set[key] = event.set[key];
+      entry.unset.delete(key);
+    }
+    for (const key of event.unset ?? []) {
+      if (key in event.set) continue;
+      delete entry.set[key];
+      entry.unset.add(key);
+    }
+  }
+  return [...byId].map(([id, { set, unset }]) => ({ type: 'object-set', id, set, ...(unset.size ? { unset: [...unset] } : {}) }));
 }

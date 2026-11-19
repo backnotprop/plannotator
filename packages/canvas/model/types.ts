@@ -46,10 +46,22 @@ interface BaseObject {
   link?: CanvasLink;
   /** Who added it. Kept so a person's work and an agent's can be told apart. */
   by?: Actor['kind'];
+  /**
+   * How it is drawn beyond its type and colour: a small bag of named values
+   * (`{ stroke: 'dashed', roughness: 1 }`). Stored, checked and carried by
+   * every event; the renderer reads what it knows and ignores the rest, so a
+   * new visual style is a renderer change, not a document migration.
+   */
+  style?: ObjectStyle;
 }
 
+export type ObjectStyle = Record<string, string | number | boolean>;
+
 /** Objects with a place and a size of their own. */
-interface PlacedObject extends BaseObject, Rect {}
+interface PlacedObject extends BaseObject, Rect {
+  /** The outline it is drawn in, by name (`ellipse`, `diamond`, `cylinder`). Absent: the type's own. Stored for the renderer to come. */
+  shape?: string;
+}
 
 /** A card: a title line and an optional quieter second line. */
 export interface BoxObject extends PlacedObject {
@@ -150,6 +162,8 @@ export interface ArrowObject extends BaseObject {
   from: ArrowEnd;
   to: ArrowEnd;
   label?: string;
+  /** How the line runs between its ends, by name (`straight`, `elbow`, `curved`). Absent: straight. Stored for the renderer to come. */
+  routing?: string;
 }
 
 /** A set of objects that select and move as one. It has no look of its own. */

@@ -17,6 +17,7 @@ import {
   type CanvasDocument,
   type CanvasLink,
   type CanvasObject,
+  type ObjectStyle,
   type ReferenceTarget,
   type Snapshot,
   type SnapshotInput,
@@ -36,6 +37,7 @@ export const LIMITS = {
   snapshots: 2_000,
   spriteFrames: 512,
   spriteFps: 60,
+  styleKeys: 16,
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -45,6 +47,23 @@ const isText = (value: unknown, max: number): value is string => typeof value ==
 
 const isCoordinate = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= LIMITS.coordinate;
+
+const TOKEN_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const isToken = (value: unknown): value is string => typeof value === 'string' && TOKEN_RE.test(value);
+
+function readStyle(value: unknown): ObjectStyle | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length > LIMITS.styleKeys) return null;
+  const out: ObjectStyle = {};
+  for (const key of keys.sort()) {
+    const v = value[key];
+    if (!isToken(key)) return null;
+    if (typeof v === 'string' ? v.length > 64 : typeof v === 'number' ? !Number.isFinite(v) : typeof v !== 'boolean') return null;
+    out[key] = v as string | number | boolean;
+  }
+  return out;
+}
 
 function readRect(value: Record<string, unknown>): { x: number; y: number; w: number; h: number } | null {
   const { x, y, w, h } = value;
@@ -86,7 +105,7 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
   if (!isRecord(value)) return fail('an object must be a JSON object');
   if (!isValidId(value.id)) return fail('id must be 1 to 64 of a-z, 0-9, "-" and "_", starting with a letter or digit');
   const id = value.id;
-  const base: { id: string; color?: CanvasObject['color']; group?: string; link?: CanvasLink; by?: 'person' | 'agent' } = { id };
+  const base: { id: string; color?: CanvasObject['color']; group?: string; link?: CanvasLink; by?: 'person' | 'agent'; style?: ObjectStyle } = { id };
   if (value.color !== undefined) {
     const color = parseColor(value.color);
     if (!color) return fail(`${id}: color is not a named colour or a CSS colour`);
@@ -104,6 +123,17 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
   if (value.by !== undefined) {
     if (value.by !== 'person' && value.by !== 'agent') return fail(`${id}: by must be "person" or "agent"`);
     base.by = value.by;
+  }
+  if (value.style !== undefined) {
+    const style = readStyle(value.style);
+    if (!style) return fail(`${id}: style must be up to ${LIMITS.styleKeys} named values, each text, a number or true/false`);
+    if (Object.keys(style).length) base.style = style;
+  }
+  for (const key of ['shape', 'routing'] as const) {
+    const token = value[key];
+    if (token === undefined || token === '') continue;
+    if ((key === 'routing') !== (value.type === 'arrow') || value.type === 'group' || !isToken(token)) return fail(`${id}: ${key} is not a name this object can carry`);
+    (base as Record<string, unknown>)[key] = token;
   }
 
   const type = value.type;
@@ -282,7 +312,10 @@ export function parseDocument(input: unknown): Checked<CanvasDocument> {
     if (object.group && groupCycle(lookup, object.id)) return fail(`${object.id}: its groups hold each other`);
     if (object.type !== 'arrow') continue;
     for (const end of [object.from, object.to]) {
-      const fault = isBoundEnd(end) ? bindingFault(lookup, object, end.object) : null;
+      // An end stuck to an object that is not there is not a circle: the
+      // arrow cannot be drawn, and readers cope (`resolveArrow`). It can
+      // happen honestly, when two people delete and connect at once.
+      const fault = isBoundEnd(end) && objects[end.object] ? bindingFault(lookup, object, end.object) : null;
       if (fault) return fail(`${object.id}: ${fault}`);
     }
   }

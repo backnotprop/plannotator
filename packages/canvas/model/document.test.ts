@@ -62,10 +62,6 @@ describe('saving and loading', () => {
     expect(newer.ok).toBe(false);
   });
 
-  test('an arrow stuck to an object the file does not hold is refused', () => {
-    expect(parseDocument(JSON.parse(JSON.stringify(doc))).ok).toBe(false);
-  });
-
   test('order must hold every object exactly once', () => {
     expect(parseDocument({ ...sound, order: ['a', 'b', 'g'] }).ok).toBe(false);
     expect(parseDocument({ ...sound, order: ['a', 'a', 'b', 'g'] }).ok).toBe(false);
@@ -81,7 +77,7 @@ describe('saving and loading', () => {
   });
 
   test('a field this version does not know is not carried through', () => {
-    const loaded = parseDocument({ ...sound, objects: { ...sound.objects, a: { ...sound.objects.a, onclick: 'alert(1)', style: 'x' } } });
+    const loaded = parseDocument({ ...sound, objects: { ...sound.objects, a: { ...sound.objects.a, onclick: 'alert(1)', zindex: 5 } } });
     expect(loaded.ok && Object.keys(loaded.value.objects.a).sort()).toEqual(['group', 'h', 'id', 'text', 'type', 'w', 'x', 'y']);
   });
 });

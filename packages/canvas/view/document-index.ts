@@ -38,8 +38,8 @@ export class DocumentIndex {
   /** Bring the index up to `doc` after `events` were applied to reach it. */
   apply(doc: CanvasDocument, events: readonly CanvasEvent[]): void {
     for (const event of events) {
-      if (event.type === 'object-added' || event.type === 'object-changed') this.refresh(doc, event.object.id);
-      else if (event.type === 'object-removed') this.refresh(doc, event.id);
+      if (event.type === 'object-added') this.refresh(doc, event.object.id);
+      else if (event.type === 'object-set' || event.type === 'object-removed') this.refresh(doc, event.id);
     }
   }
 
@@ -112,7 +112,8 @@ export function indexFor(store: CanvasStore): DocumentIndex {
   let index = INDEXES.get(store);
   if (!index) {
     const made = new DocumentIndex(store.getDocument());
-    store.onCommit((envelope, doc) => made.apply(doc, envelope.events));
+    // After a rebase more may have changed than the envelope names: start again.
+    store.onCommit((envelope, doc) => (envelope.rebased ? made.rebuild(doc) : made.apply(doc, envelope.events)));
     INDEXES.set(store, made);
     index = made;
   }

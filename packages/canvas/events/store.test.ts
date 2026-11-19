@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { parseDocument, serializeDocument } from '../model/codec';
 import { createDocument } from '../model/document';
 import type { CanvasDocument, CanvasObject } from '../model/types';
 import { CanvasStore } from './store';
@@ -34,7 +35,7 @@ describe('commands become events and state', () => {
     const before = store.getDocument();
     const result = store.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 5 });
     const after = store.getDocument();
-    expect(result.ok && result.envelope?.events.map((event) => event.type)).toEqual(['object-changed']);
+    expect(result.ok && result.envelope?.events).toEqual([{ type: 'object-set', id: 'a', set: { x: 10, y: 5 } }]);
     expect(after.objects.a).toMatchObject({ x: 10, y: 5 });
     expect(after.objects.b).toBe(before.objects.b);
     expect(after.order).toBe(before.order);
@@ -124,6 +125,55 @@ describe('undo and redo', () => {
     expect(store.getDocument().objects.b).toMatchObject({ x: 340, y: 80 });
   });
 
+  test("undoing a move leaves alone what an agent changed on the same object in between", () => {
+    const store = seeded();
+    store.dispatch({ type: 'move', ids: ['a'], dx: 50, dy: 0 });
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Rewritten by the agent' } }, { actor: AGENT });
+    store.dispatch({ type: 'recolor', ids: ['a'], color: 'green' }, { actor: AGENT });
+    const undone = store.undo();
+    expect(store.getDocument().objects.a).toMatchObject({ x: 0, text: 'Rewritten by the agent', color: 'green' });
+    // What goes out to peers and the agent is the move coming back, nothing else.
+    expect(undone?.events).toEqual([{ type: 'object-set', id: 'a', set: { x: 0 } }]);
+    store.redo();
+    expect(store.getDocument().objects.a).toMatchObject({ x: 50, text: 'Rewritten by the agent', color: 'green' });
+  });
+
+  test('undoing a recolour after an agent moved the object keeps the move', () => {
+    const store = seeded();
+    store.dispatch({ type: 'recolor', ids: ['a'], color: 'red' });
+    store.dispatch({ type: 'move', ids: ['a'], dx: 0, dy: 90 }, { actor: AGENT });
+    store.undo();
+    expect(store.getDocument().objects.a).toMatchObject({ y: 90 });
+    expect('color' in store.getDocument().objects.a).toBe(false);
+  });
+
+  test('something that finishes an earlier action later joins that step and leaves redo alone', () => {
+    const store = seeded();
+    store.dispatch({ type: 'add', objects: [{ id: 'card', type: 'reference', x: 0, y: 300, w: 280, h: 84, target: { kind: 'web', url: 'https://example.test/' } }] }, { gesture: 'paste-1' });
+    store.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 0 });
+    store.undo();
+    expect(store.canRedo).toBe(true);
+    // The preview lands now.
+    store.dispatch({ type: 'edit', id: 'card', patch: { title: 'Filled in' } }, { gesture: 'paste-1', amend: true });
+    expect(store.canRedo).toBe(true);
+    store.redo();
+    expect(store.getDocument().objects.a).toMatchObject({ x: 10 });
+    store.undo();
+    // One more undo takes the whole paste away, title and all; redo brings it back whole.
+    store.undo();
+    expect(store.getDocument().objects.card).toBeUndefined();
+    store.redo();
+    expect(store.getDocument().objects.card).toMatchObject({ title: 'Filled in' });
+    // With its step gone, an amendment still applies, with no history of its own.
+    const fresh = seeded();
+    while (fresh.canUndo) fresh.undo();
+    fresh.redo();
+    const steps = () => { let n = 0; while (fresh.canUndo) { fresh.undo(); n++; } return n; };
+    fresh.dispatch({ type: 'edit', id: 'a', patch: { text: 'late' } }, { gesture: 'gone', amend: true });
+    expect(fresh.getDocument().objects.a).toMatchObject({ text: 'late' });
+    expect(steps()).toBe(1);
+  });
+
   test("an agent's change is not on the person's undo stack", () => {
     const store = seeded();
     store.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 0 });
@@ -173,13 +223,17 @@ describe('undo and redo', () => {
       else if (roll < 0.78) command = { type: 'ungroup', ids: [pick()] };
       else if (roll < 0.88) command = { type: 'recolor', ids: [pick()], color: random() < 0.5 ? 'blue' : null };
       else if (roll < 0.94) command = { type: 'reorder', ids: [pick()], to: random() < 0.5 ? 'front' : 'back' };
-      else command = { type: 'add', objects: [{ id: `ar${made++}`, type: 'arrow', from: { object: pick() }, to: { x: 5, y: 5 } }] };
+      else if (roll < 0.97) command = { type: 'add', objects: [{ id: `ar${made++}`, type: 'arrow', from: { object: pick() }, to: { x: 5, y: 5 } }] };
+      else command = { type: 'move', ids: [pick()], dx: random() < 0.5 ? 1e12 : -3e7, dy: 0 };
       const result = store.dispatch(command);
       if (result.ok && result.envelope) steps++;
       expectSound(store.getDocument());
     }
     expect(steps).toBeGreaterThan(100);
     const end = store.getDocument();
+    // Whatever the planner made, a saved file of it opens again.
+    const reloaded = parseDocument(serializeDocument(end));
+    expect(reloaded.ok && reloaded.value).toEqual(end);
     for (let i = 0; i < steps; i++) {
       store.undo();
       expectSound(store.getDocument());
@@ -187,6 +241,37 @@ describe('undo and redo', () => {
     expect(store.getDocument()).toEqual(start);
     for (let i = 0; i < steps; i++) store.redo();
     expect(store.getDocument()).toEqual(end);
+  });
+});
+
+describe('what a move may do', () => {
+  test('a move that would put an object off the board is refused, so every document still saves and loads', () => {
+    const store = seeded();
+    const before = store.getDocument();
+    expect(store.dispatch({ type: 'move', ids: ['a'], dx: 1e9, dy: 0 }, { actor: AGENT }).ok).toBe(false);
+    expect(store.dispatch({ type: 'move', ids: ['a', 'b'], dx: 0, dy: -2e7 }).ok).toBe(false);
+    expect(store.getDocument()).toBe(before);
+    expect(parseDocument(serializeDocument(store.getDocument())).ok).toBe(true);
+  });
+
+  test('an agent cannot pass its work off as a person\'s', () => {
+    const store = seeded();
+    store.dispatch({ type: 'add', objects: [{ ...box('claimed', 0, 400), by: 'person' }] }, { actor: AGENT });
+    expect(store.getDocument().objects.claimed.by).toBe('agent');
+  });
+
+  test('an object carries a style, a shape and a routing name through edits, saves and undo', () => {
+    const store = seeded();
+    expect(store.dispatch({ type: 'edit', id: 'a', patch: { shape: 'diamond', style: { stroke: 'dashed', roughness: 1.5, fill: true } } }).ok).toBe(true);
+    expect(store.dispatch({ type: 'edit', id: 'ab', patch: { routing: 'elbow' } }).ok).toBe(true);
+    const loaded = parseDocument(serializeDocument(store.getDocument()));
+    expect(loaded.ok && loaded.value.objects.a).toMatchObject({ shape: 'diamond', style: { stroke: 'dashed', roughness: 1.5, fill: true } });
+    expect(loaded.ok && loaded.value.objects.ab).toMatchObject({ routing: 'elbow' });
+    expect(store.dispatch({ type: 'edit', id: 'a', patch: { routing: 'elbow' } }).ok).toBe(false);
+    expect(store.dispatch({ type: 'edit', id: 'a', patch: { style: { 'Bad Key': 1 } as never } }).ok).toBe(false);
+    store.undo();
+    store.undo();
+    expect('shape' in store.getDocument().objects.a).toBe(false);
   });
 });
 
@@ -200,6 +285,28 @@ describe('the event stream', () => {
     store.dispatch({ type: 'recolor', ids: ['a'], color: 'red' }, { actor: AGENT });
     store.undo();
     expect(heard).toEqual(['person:local:move', 'agent:local:recolor', 'person:undo:-']);
+  });
+
+  test('a drag is one entry for the hand-over, with the whole distance, however many frames it took', () => {
+    const store = seeded();
+    const mark = store.cursor();
+    for (let i = 0; i < 60; i++) store.dispatch({ type: 'move', ids: ['a', 'b'], dx: 2, dy: 1 }, { gesture: 'drag-9' });
+    store.dispatch({ type: 'recolor', ids: ['c'], color: 'blue' });
+    const heard = store.since(mark);
+    expect(heard.kind).toBe('events');
+    if (heard.kind !== 'events') return;
+    expect(heard.envelopes).toHaveLength(2);
+    expect(heard.envelopes[0]).toMatchObject({ gesture: 'drag-9', command: { type: 'move', dx: 120, dy: 60 } });
+    expect(heard.envelopes[0].events).toEqual([
+      { type: 'object-set', id: 'a', set: { x: 120, y: 60 } },
+      { type: 'object-set', id: 'b', set: { x: 420, y: 60 } },
+    ]);
+    // A cursor taken half way through a gesture cannot be answered in events: the whole document, then.
+    const other = seeded();
+    for (let i = 0; i < 5; i++) other.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 }, { gesture: 'drag' });
+    const midway = other.cursor();
+    for (let i = 0; i < 5; i++) other.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 }, { gesture: 'drag' });
+    expect(other.since(midway).kind).toBe('resync');
   });
 
   test('since() hands over everything after a cursor', () => {

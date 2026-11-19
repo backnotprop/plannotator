@@ -17,6 +17,7 @@ import {
   type ObjectId,
   isPlaced,
 } from '../model/types';
+import { setEvent } from './reduce';
 import type { CanvasEvent, Command, ObjectPatch } from './types';
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -26,20 +27,32 @@ const done = (events: CanvasEvent[]): Checked<CanvasEvent[]> => ({ ok: true, val
 export const MIN_OBJECT_SIZE = 16;
 
 const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
-  box: ['text', 'detail', 'link'],
-  note: ['text', 'link'],
-  text: ['text', 'size', 'link'],
-  frame: ['title', 'link'],
-  image: ['src', 'alt', 'link'],
-  sprite: ['src', 'alt', 'frames', 'fps', 'link'],
-  html: ['html', 'link'],
-  reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link'],
-  arrow: ['from', 'to', 'label', 'link'],
+  box: ['text', 'detail', 'link', 'style', 'shape'],
+  note: ['text', 'link', 'style', 'shape'],
+  text: ['text', 'size', 'link', 'style', 'shape'],
+  frame: ['title', 'link', 'style', 'shape'],
+  image: ['src', 'alt', 'link', 'style', 'shape'],
+  sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style', 'shape'],
+  html: ['html', 'link', 'style', 'shape'],
+  reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style', 'shape'],
+  arrow: ['from', 'to', 'label', 'link', 'style', 'routing'],
   group: ['label', 'link'],
 };
 
 /** Fields an edit removes when given `null` or an empty string. */
-const OPTIONAL_FIELDS = new Set(['link', 'detail', 'label', 'description', 'site', 'image', 'icon']);
+const OPTIONAL_FIELDS = new Set(['link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'routing']);
+
+/** Add the event that turns `before` into `after`, when they differ. */
+function push(events: CanvasEvent[], before: CanvasObject, after: CanvasObject): void {
+  const event = setEvent(before, after);
+  if (event) events.push(event);
+}
+
+function changes(pairs: [CanvasObject, CanvasObject][]): CanvasEvent[] {
+  const events: CanvasEvent[] = [];
+  for (const [before, after] of pairs) push(events, before, after);
+  return events;
+}
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -61,7 +74,8 @@ function planAdd(doc: CanvasDocument, objects: readonly unknown[], actor: Actor)
     if (!checked.ok) return checked;
     const object = checked.value;
     if (doc.objects[object.id] || incoming.has(object.id)) return fail(`${object.id}: that id is already used`);
-    incoming.set(object.id, object.by ? object : { ...object, by: actor.kind });
+    // Who added it is who is adding it, whatever the object says.
+    incoming.set(object.id, { ...object, by: actor.kind });
   }
   const known = (id: ObjectId) => incoming.get(id) ?? doc.objects[id];
   for (const object of incoming.values()) {
@@ -111,10 +125,7 @@ function planDelete(doc: CanvasDocument, ids: readonly ObjectId[]): Checked<Canv
       doomed.add(object.id);
       continue;
     }
-    events.push({
-      type: 'object-changed',
-      object: { ...object, from: fromLost ? geometry.from : object.from, to: toLost ? geometry.to : object.to },
-    });
+    push(events, object, { ...object, from: fromLost ? geometry.from : object.from, to: toLost ? geometry.to : object.to });
   }
   for (const id of doomed) events.push({ type: 'object-removed', id });
   return done(events);
@@ -147,7 +158,7 @@ function planEdit(doc: CanvasDocument, id: ObjectId, patch: ObjectPatch): Checke
       if (fault) return fail(`${id}: ${fault}`);
     }
   }
-  return done([{ type: 'object-changed', object: checked.value }]);
+  return done(changes([[object, checked.value]]));
 }
 
 function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectId[], label: string | undefined, actor: Actor): Checked<CanvasEvent[]> {
@@ -158,7 +169,7 @@ function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectI
   const group = checkObject({ id: groupId, type: 'group', by: actor.kind, ...(label ? { label } : {}) });
   if (!group.ok) return group;
   const events: CanvasEvent[] = [{ type: 'object-added', object: group.value }];
-  for (const id of members) events.push({ type: 'object-changed', object: { ...doc.objects[id], group: groupId } });
+  for (const id of members) push(events, doc.objects[id], { ...doc.objects[id], group: groupId });
   return done(events);
 }
 
@@ -173,7 +184,7 @@ function planUngroup(doc: CanvasDocument, ids: readonly ObjectId[]): Checked<Can
     let parent = doc.objects[object.group]?.group;
     while (parent && dissolved.has(parent)) parent = doc.objects[parent]?.group;
     const { group: _old, ...rest } = object;
-    events.push({ type: 'object-changed', object: (parent ? { ...rest, group: parent } : rest) as CanvasObject });
+    push(events, object, (parent ? { ...rest, group: parent } : rest) as CanvasObject);
   }
   for (const id of groups) events.push({ type: 'object-removed', id });
   return done(events);
@@ -192,14 +203,16 @@ export function planCommand(doc: CanvasDocument, command: Command, actor: Actor)
       const events: CanvasEvent[] = [];
       for (const id of ids) {
         const object = doc.objects[id];
-        if (isPlaced(object)) {
-          events.push({ type: 'object-changed', object: { ...object, x: object.x + command.dx, y: object.y + command.dy } });
-        } else if (object.type === 'arrow' && (!isBoundEnd(object.from) || !isBoundEnd(object.to))) {
-          events.push({
-            type: 'object-changed',
-            object: { ...object, from: moveEnd(object.from, command.dx, command.dy), to: moveEnd(object.to, command.dx, command.dy) },
-          });
+        let next: CanvasObject | null = null;
+        if (isPlaced(object)) next = { ...object, x: object.x + command.dx, y: object.y + command.dy };
+        else if (object.type === 'arrow' && (!isBoundEnd(object.from) || !isBoundEnd(object.to))) {
+          next = { ...object, from: moveEnd(object.from, command.dx, command.dy), to: moveEnd(object.to, command.dx, command.dy) };
         }
+        if (!next) continue;
+        // A move is held to the same limits as everything else: what it makes must be an object a saved file may hold.
+        const checked = checkObject(next);
+        if (!checked.ok) return fail(`${id}: that would move it off the board`);
+        push(events, object, next);
       }
       return done(events);
     }
@@ -213,7 +226,7 @@ export function planCommand(doc: CanvasDocument, command: Command, actor: Actor)
       const next = { ...object, x: r.x, y: r.y, w: Math.max(MIN_OBJECT_SIZE, r.w), h: Math.max(MIN_OBJECT_SIZE, r.h) };
       const checked = checkObject(next);
       if (!checked.ok) return checked;
-      return done([{ type: 'object-changed', object: checked.value }]);
+      return done(changes([[object, checked.value]]));
     }
 
     case 'edit':
@@ -225,10 +238,12 @@ export function planCommand(doc: CanvasDocument, command: Command, actor: Actor)
       const color = command.color === null ? null : parseColor(command.color);
       if (command.color !== null && !color) return fail('that is not a named colour or a CSS colour');
       return done(
-        ids.map((id) => {
-          const { color: _old, ...rest } = doc.objects[id];
-          return { type: 'object-changed', object: (color ? { ...rest, color } : rest) as CanvasObject };
-        }),
+        changes(
+          ids.map((id) => {
+            const { color: _old, ...rest } = doc.objects[id];
+            return [doc.objects[id], (color ? { ...rest, color } : rest) as CanvasObject];
+          }),
+        ),
       );
     }
 

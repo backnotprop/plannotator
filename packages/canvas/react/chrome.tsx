@@ -25,6 +25,7 @@ import React, { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import { NAMED_COLORS, type CanvasColor, type NamedColor } from '../model/color';
 import { boundsOf } from '../model/document';
+import { createId } from '../model/ids';
 import type { Rect } from '../model/geometry';
 import type { CanvasDocument, ObjectId } from '../model/types';
 import { type CameraController, worldRectToScreen } from '../view/camera';
@@ -169,7 +170,8 @@ export interface SelectionBarProps {
   region: Rect | null;
   /** Hidden while something is dragged, so it does not chase the pointer. */
   hidden: boolean;
-  onRecolor: (color: CanvasColor | null) => void;
+  /** `gesture`: picks sharing one are one undo step (dragging through the colour well). */
+  onRecolor: (color: CanvasColor | null, gesture?: string) => void;
   onDelete: () => void;
   onGroup: () => void;
   onUngroup: () => void;
@@ -181,6 +183,8 @@ export interface SelectionBarProps {
 
 export function SelectionBar({ camera, doc, selection, region, hidden, onRecolor, onDelete, onGroup, onUngroup, onOpen, addToPlan }: SelectionBarProps) {
   const bar = useRef<HTMLDivElement>(null);
+  // One id for each time the colour well is opened: every colour passed over on the way is one undo step.
+  const pick = useRef('');
   const ids = [...selection];
   const target = region ?? boundsOf(doc, ids);
   const show = !hidden && !!target;
@@ -221,7 +225,15 @@ export function SelectionBar({ camera, doc, selection, region, hidden, onRecolor
             />
           ))}
           <label className="pcv-swatch pcv-swatch-custom" title={CANVAS_STRINGS.customColor}>
-            <input type="color" aria-label={CANVAS_STRINGS.customColor} onChange={(event) => onRecolor({ custom: event.target.value })} />
+            <input
+              type="color"
+              aria-label={CANVAS_STRINGS.customColor}
+              value={typeof current === 'object' && /^#[0-9a-f]{6}$/i.test(current.custom) ? current.custom : '#8a8f9c'}
+              onPointerDown={() => (pick.current = createId('pick'))}
+              onFocus={() => (pick.current ||= createId('pick'))}
+              onBlur={() => (pick.current = '')}
+              onChange={(event) => onRecolor({ custom: event.target.value }, (pick.current ||= createId('pick')))}
+            />
           </label>
           <span className="pcv-sep" aria-hidden="true" />
           {oneGroup ? (

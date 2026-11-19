@@ -121,7 +121,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
   );
 
   const selected = [...ui.selection];
-  const recolor = (color: CanvasColor | null) => store.dispatch({ type: 'recolor', ids: selected, color });
+  const recolor = (color: CanvasColor | null, gesture?: string) => store.dispatch({ type: 'recolor', ids: selected, color }, { gesture });
   const remove = () => store.dispatch({ type: 'delete', ids: selected });
   const group = () => store.dispatch({ type: 'group', id: createId('group'), ids: selected });
   const ungroup = () => store.dispatch({ type: 'ungroup', ids: [...new Set(selected.map((id) => doc.objects[id]?.group).filter((id): id is string => !!id))] });

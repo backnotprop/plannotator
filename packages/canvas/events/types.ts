@@ -14,6 +14,10 @@
  * An **envelope** is one committed change: who, what they asked, what
  * happened. It is what an agent receives, what a sync backend carries, and
  * what the hand-over reads (`CanvasStore.since`).
+ *
+ * Events are field-level on purpose. Adding a field to an object type (a
+ * shape, a style, an arrow's routing) needs no new event and no migration:
+ * it is one more name `object-set` may carry.
  */
 import type { CanvasColor } from '../model/color';
 import type { Rect } from '../model/geometry';
@@ -23,6 +27,7 @@ import type {
   CanvasLink,
   CanvasObject,
   ObjectId,
+  ObjectStyle,
   ReferenceTarget,
   Snapshot,
   SnapshotId,
@@ -51,6 +56,10 @@ export interface ObjectPatch {
   to?: ArrowEnd;
   /** `null` removes the link. */
   link?: CanvasLink | null;
+  /** How it is drawn: see `ObjectStyle`. `null` removes it. */
+  style?: ObjectStyle | null;
+  shape?: string | null;
+  routing?: string | null;
 }
 
 export type Command =
@@ -75,11 +84,20 @@ export type Command =
 
 export type CommandType = Command['type'];
 
+/** Field values of an object, by field name. Checked against the object's type when they are applied. */
+export type ObjectFields = Record<string, unknown>;
+
 export type CanvasEvent =
   /** `at` is the place in the drawing order; absent means on top. */
   | { type: 'object-added'; object: CanvasObject; at?: number }
-  /** The whole new object. Ignored when the object is gone. */
-  | { type: 'object-changed'; object: CanvasObject }
+  /**
+   * Some fields of one object took new values (`set`) or were taken away
+   * (`unset`). Only what changed is named, so two people changing different
+   * fields of one object both keep their change, and undoing one of them
+   * puts back only what that one touched. `id` and `type` are never set.
+   * Ignored when the object is gone.
+   */
+  | { type: 'object-set'; id: ObjectId; set: ObjectFields; unset?: string[] }
   | { type: 'object-removed'; id: ObjectId }
   | { type: 'object-ordered'; id: ObjectId; at: number }
   | { type: 'snapshot-put'; snapshot: Snapshot }
@@ -95,6 +113,15 @@ export interface Envelope {
   seq: number;
   actor: Actor;
   origin: EnvelopeOrigin;
+  /** Commits of one gesture (a drag, a colour pick) share this. They are one undo step and one entry in the log. */
+  gesture?: string;
+  /**
+   * A peer's change arrived while changes made here were still on their way
+   * out, so those were applied again on top of it. More may differ from the
+   * document before than `events` names; a listener that keeps something in
+   * step event by event should rebuild it.
+   */
+  rebased?: boolean;
   /** What was asked for. Absent on undo, redo and on a peer's bare events. */
   command?: Command;
   events: CanvasEvent[];

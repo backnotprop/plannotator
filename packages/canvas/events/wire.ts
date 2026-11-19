@@ -99,13 +99,20 @@ export function decodeCommand(input: unknown): Checked<Command> {
 function decodeEvent(value: unknown): Checked<CanvasEvent> {
   if (!isRecord(value)) return fail('an event must be a JSON object');
   switch (value.type) {
-    case 'object-added':
-    case 'object-changed': {
+    case 'object-added': {
       const object = checkObject(value.object);
       if (!object.ok) return object;
-      if (value.type === 'object-changed') return { ok: true, value: { type: 'object-changed', object: object.value } };
       if (value.at !== undefined && !isNumber(value.at)) return fail('at must be a number');
       return { ok: true, value: { type: 'object-added', object: object.value, ...(value.at !== undefined ? { at: value.at } : {}) } };
+    }
+    case 'object-set': {
+      // The fields are checked against the object they land on, when they are applied (`applyEvents` with `check`).
+      if (typeof value.id !== 'string' || !isRecord(value.set)) return fail('object-set needs "id" and "set"');
+      const names = Object.keys(value.set);
+      if (names.length > 32 || names.includes('id') || names.includes('type')) return fail('object-set may not set that');
+      const unset = value.unset;
+      if (unset !== undefined && (!Array.isArray(unset) || unset.length > 32 || !unset.every((key) => typeof key === 'string' && key.length <= 32))) return fail('unset must be a list of field names');
+      return { ok: true, value: { type: 'object-set', id: value.id, set: { ...value.set }, ...(unset?.length ? { unset: unset as string[] } : {}) } };
     }
     case 'object-removed':
       if (typeof value.id !== 'string') return fail('object-removed needs "id"');
@@ -130,7 +137,7 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
 }
 
 /** A peer's envelope, checked event by event. What `CanvasStore.receive` takes. */
-export function decodeEnvelope(input: unknown): Checked<Pick<Envelope, 'id' | 'actor' | 'events'>> {
+export function decodeEnvelope(input: unknown): Checked<Pick<Envelope, 'id' | 'actor' | 'events'> & Pick<Partial<Envelope>, 'gesture'>> {
   let raw = input;
   if (typeof input === 'string') {
     try {
@@ -150,5 +157,6 @@ export function decodeEnvelope(input: unknown): Checked<Pick<Envelope, 'id' | 'a
     if (!event.ok) return event;
     events.push(event.value);
   }
-  return { ok: true, value: { id: raw.id, actor, events } };
+  const gesture = typeof raw.gesture === 'string' && raw.gesture.length <= 128 ? raw.gesture : undefined;
+  return { ok: true, value: { id: raw.id, actor, events, ...(gesture ? { gesture } : {}) } };
 }

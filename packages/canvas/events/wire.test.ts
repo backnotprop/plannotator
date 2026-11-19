@@ -95,51 +95,130 @@ describe('an agent hears what a person does', () => {
 });
 
 describe('the sync seam', () => {
-  /** A backend that delivers every envelope to every other peer, twice, to prove repeats are harmless. */
-  function loopback(): () => SyncPort {
-    const peers: ((envelope: Envelope) => void)[] = [];
-    return () => {
-      let mine: ((envelope: Envelope) => void) | null = null;
-      return {
-        publish: (envelope) => {
-          for (const peer of peers) {
-            if (peer === mine) continue;
-            peer(JSON.parse(JSON.stringify(envelope)));
-            peer(JSON.parse(JSON.stringify(envelope)));
+  /**
+   * A backend as the seam asks for one: it puts every envelope in one order
+   * and hands each, as JSON, to every peer, the sender included. `flush`
+   * delivers what has been published; until then peers have not heard each
+   * other, which is how two people change something "at the same moment".
+   */
+  function backend() {
+    const peers: ((envelope: unknown) => void)[] = [];
+    const queue: string[] = [];
+    return {
+      port: (): SyncPort => ({
+        publish: (envelope) => void queue.push(JSON.stringify(envelope)),
+        subscribe: (onEnvelope) => {
+          peers.push(onEnvelope);
+          return () => void peers.splice(peers.indexOf(onEnvelope), 1);
+        },
+      }),
+      /** Deliver everything published so far. `twice`: each envelope is handed over two times. */
+      flush(twice = false) {
+        while (queue.length) {
+          const json = queue.shift()!;
+          for (const peer of [...peers]) {
+            peer(json);
+            if (twice) peer(JSON.parse(json));
           }
-        },
-        subscribe: (onRemote) => {
-          mine = onRemote;
-          peers.push(onRemote);
-          return () => peers.splice(peers.indexOf(onRemote), 1);
-        },
-      };
+        }
+      },
+      inject: (raw: unknown) => peers.forEach((peer) => peer(raw)),
     };
   }
 
-  test('two stores joined through a port end up with the same document, undo included', () => {
-    const port = loopback();
+  const pair = () => {
+    const net = backend();
     const one = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'one' } });
     const two = new CanvasStore(createDocument('board'), { actor: { kind: 'person', id: 'two' } });
-    const stopOne = connectSync(one, port());
-    connectSync(two, port());
-
+    const stopOne = connectSync(one, net.port());
+    connectSync(two, net.port());
     one.dispatch({ type: 'add', objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' }] });
-    two.dispatch({ type: 'move', ids: ['a'], dx: 50, dy: 0 });
+    net.flush();
+    return { net, one, two, stopOne };
+  };
+
+  test('two people setting the same field at the same moment both end on the one the backend ordered last', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'move', ids: ['a'], dx: 1, dy: 0 });
+    two.dispatch({ type: 'move', ids: ['a'], dx: 2, dy: 0 });
+    // Each sees its own change at once.
+    expect(one.getDocument().objects.a).toMatchObject({ x: 1 });
+    expect(two.getDocument().objects.a).toMatchObject({ x: 2 });
+    net.flush();
+    expect(one.getDocument().objects.a).toMatchObject({ x: 2 });
+    expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('two people changing different fields of one object both keep their change', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'move', ids: ['a'], dx: 40, dy: 0 });
+    two.dispatch({ type: 'edit', id: 'a', patch: { text: 'Renamed' } });
+    two.dispatch({ type: 'recolor', ids: ['a'], color: 'red' });
+    net.flush();
+    expect(one.getDocument().objects.a).toMatchObject({ x: 40, text: 'Renamed', color: 'red' });
+    expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('a change to something another person deleted at the same moment is dropped, everywhere the same', () => {
+    const { net, one, two } = pair();
+    one.dispatch({ type: 'delete', ids: ['a'] });
+    two.dispatch({ type: 'move', ids: ['a'], dx: 5, dy: 0 });
     two.dispatch({ type: 'add', objects: [{ id: 'b', type: 'note', x: 0, y: 100, w: 100, h: 40, text: 'B' }] });
-    one.dispatch({ type: 'recolor', ids: ['b'], color: 'green' });
-    two.undo();
-    expect(two.getDocument().objects.b).toBeUndefined();
-    expect(one.getDocument()).toEqual(two.getDocument());
-    // A change from the other side never becomes mine to undo.
+    net.flush();
+    expect(one.getDocument().objects.a).toBeUndefined();
+    expect(Object.keys(two.getDocument().objects)).toEqual(['b']);
+    expect(two.getDocument()).toEqual(one.getDocument());
+  });
+
+  test('many interleaved changes, delivered twice over, leave every peer with the same document', () => {
+    const { net, one, two } = pair();
+    let seed = 5;
+    const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 4294967296);
+    let made = 0;
+    for (let round = 0; round < 60; round++) {
+      for (const store of [one, two]) {
+        const ids = Object.keys(store.getDocument().objects);
+        const pick = () => ids[Math.floor(random() * ids.length)];
+        const roll = random();
+        if (roll < 0.3 || ids.length < 2) store.dispatch({ type: 'add', objects: [{ id: `n${made++}`, type: 'note', x: random() * 500, y: random() * 500, w: 80, h: 40, text: '' }] });
+        else if (roll < 0.6) store.dispatch({ type: 'move', ids: [pick(), pick()], dx: random() * 20, dy: random() * 20 });
+        else if (roll < 0.75) store.dispatch({ type: 'recolor', ids: [pick()], color: random() < 0.5 ? 'blue' : null });
+        else if (roll < 0.85) store.dispatch({ type: 'delete', ids: [pick()] });
+        else if (roll < 0.95) store.dispatch({ type: 'reorder', ids: [pick()], to: random() < 0.5 ? 'front' : 'back' });
+        else store.undo();
+      }
+      if (random() < 0.4) net.flush(true);
+    }
+    net.flush(true);
+    expect(two.getDocument()).toEqual(one.getDocument());
+    expect(Object.keys(one.getDocument().objects).length).toBeGreaterThan(5);
+  });
+
+  test("a change from the other side is never mine to undo, and after disconnecting nothing more arrives", () => {
+    const { net, one, two, stopOne } = pair();
+    two.dispatch({ type: 'move', ids: ['a'], dx: 50, dy: 0 });
+    net.flush();
     expect(one.canUndo).toBe(true);
     one.undo();
-    one.undo();
+    net.flush();
     expect(one.canUndo).toBe(false);
-    expect(one.getDocument().objects.a).toBeUndefined();
-
+    expect(two.getDocument().objects.a).toBeUndefined();
     stopOne();
     two.dispatch({ type: 'add', objects: [{ id: 'c', type: 'note', x: 0, y: 0, w: 10, h: 10, text: '' }] });
+    net.flush();
     expect(one.getDocument().objects.c).toBeUndefined();
+  });
+
+  test('what comes off the wire is decoded: an envelope that does not pass is dropped whole', () => {
+    const { net, one } = pair();
+    const before = one.getDocument();
+    net.inject('not json');
+    net.inject({ id: 'x1', actor: { kind: 'agent', id: 'z' }, events: [{ type: 'object-added', object: { id: 'p', type: 'image', x: 0, y: 0, w: 9, h: 9, src: 'javascript:1', alt: '' } }] });
+    net.inject({ id: 'x2', actor: { kind: 'root', id: 'z' }, events: [] });
+    // Passes the decoder, but the field is not one a box can hold: dropped when applied.
+    net.inject({ id: 'x3', actor: { kind: 'agent', id: 'z' }, events: [{ type: 'object-set', id: 'a', set: { w: -5 } }, { type: 'object-set', id: 'a', set: { html: '<script>' } }] });
+    expect(one.getDocument()).toBe(before);
+    net.inject({ id: 'x4', actor: { kind: 'agent', id: 'z' }, events: [{ type: 'object-set', id: 'a', set: { text: 'ok' } }] });
+    expect(one.getDocument().objects.a).toMatchObject({ text: 'ok' });
   });
 });

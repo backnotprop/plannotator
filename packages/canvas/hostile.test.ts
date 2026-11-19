@@ -60,7 +60,9 @@ describe('arrows and groups that go round in a circle', () => {
     expect(parseDocument(withObjects([])).ok).toBe(true);
     expect(parseDocument(withObjects([arrow('x', 'y', 'a'), arrow('y', 'x', 'a')])).ok).toBe(false);
     expect(parseDocument(withObjects([arrow('x', 'g', 'a', { group: 'g' })])).ok).toBe(false);
-    expect(parseDocument(withObjects([arrow('x', 'ghost', 'a')])).ok).toBe(false);
+    // Stuck to an object that is not there: not a circle. It loads, and simply cannot be drawn.
+    const dangling = parseDocument(withObjects([arrow('x', 'ghost', 'a')]));
+    expect(dangling.ok && resolveArrow(dangling.value, dangling.value.objects.x as ArrowObject)).toBeNull();
     expect(parseDocument(withObjects([box('z', { group: 'a' })])).ok).toBe(false);
     expect(parseDocument(withObjects([{ id: 'g2', type: 'group', group: 'g3' }, { id: 'g3', type: 'group', group: 'g2' }])).ok).toBe(false);
   });
@@ -69,15 +71,22 @@ describe('arrows and groups that go round in a circle', () => {
     const store = board();
     store.dispatch({ type: 'add', objects: [arrow('ab', 'a', 'b')] });
     const doc = store.getDocument();
-    const result = applyEvents(doc, [
+    const result = applyEvents(
+      doc,
+      [
       { type: 'object-added', object: arrow('bad', 'ab', 'a') },
-      { type: 'object-changed', object: { ...(doc.objects.ab as ArrowObject), from: { object: 'ab' } } },
-      { type: 'object-changed', object: { ...doc.objects.g, group: 'g' } as CanvasObject },
+      { type: 'object-set', id: 'ab', set: { from: { object: 'ab' } } },
+      { type: 'object-set', id: 'g', set: { group: 'g' } },
+      { type: 'object-set', id: 'a', set: { x: 'far' } },
+      { type: 'object-set', id: 'a', set: { type: 'html', html: '<b>' } },
       { type: 'object-added', object: box('fine', { y: 500 }) },
-    ]);
+      ],
+      { check: true },
+    );
     expect(result.applied.map((event) => event.type)).toEqual(['object-added']);
     expect(result.doc.objects.fine).toBeDefined();
     expect(result.doc.objects.bad).toBeUndefined();
+    expect(result.doc.objects.a).toBe(doc.objects.a);
   });
 
   test('a document that holds a circle anyway is still read without hanging', () => {

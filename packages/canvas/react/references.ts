@@ -40,7 +40,7 @@ export function referenceFromPaste(text: string, resolve?: PasteResolver): Paste
  * Add a card centred on `at`. A web card is on the board at once, showing
  * its address; when the preview lands it fills in, and grows to hold a
  * picture if the person has not resized it meanwhile. The fill-in joins the
- * add as one undo step. Returns the card's id, or null when it was refused.
+ * paste's own undo step wherever that step is by then, and leaves redo alone. Returns the card's id, or null when it was refused.
  */
 export function addReference(store: CanvasStore, at: Point, reference: PastedReference, preview?: LinkPreviewPort): string | null {
   const id = createId('ref');
@@ -59,10 +59,11 @@ export function addReference(store: CanvasStore, at: Point, reference: PastedRef
       const icon = isSafeImageSrc(found.icon) ? found.icon : undefined;
       const patch = { title: found.title?.slice(0, 300), description: found.description?.slice(0, 600), site: found.site?.slice(0, 300), image, icon };
       if (!Object.values(patch).some(Boolean)) return;
-      store.dispatch({ type: 'edit', id, patch }, { gesture });
+      // Part of the paste, wherever that step now is; never a step of its own, never the end of a redo.
+      store.dispatch({ type: 'edit', id, patch }, { gesture, amend: true });
       const now = store.getDocument().objects[id];
       if (image && now?.type === 'reference' && now.w === CARD_SIZE.w && now.h === CARD_SIZE.h) {
-        store.dispatch({ type: 'resize', id, rect: { x: now.x, y: now.y, ...CARD_SIZE_WITH_IMAGE } }, { gesture });
+        store.dispatch({ type: 'resize', id, rect: { x: now.x, y: now.y, ...CARD_SIZE_WITH_IMAGE } }, { gesture, amend: true });
       }
     });
   }
