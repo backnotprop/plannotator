@@ -269,7 +269,9 @@ import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
-import { createInboxRex, inboxRexSocketPath, type InboxRex, type InboxRexStatus } from "./inbox-rex";
+import { createInboxRex, type InboxRex, type InboxRexReach, type InboxRexStatus } from "./inbox-rex";
+import { inboxRaiseAfterFarShow } from "./inbox-rex-far";
+import { inboxRexHeadless, inboxRexSockets } from "./inbox-rex-where";
 import { withRexMark, withRexStatus } from "./inbox-rex-status";
 import { createInboxAgentStatusSetting } from "./inbox-agent-status-setting";
 import { createInboxCodexAccount } from "./inbox-codex-account";
@@ -505,7 +507,7 @@ function isPageOrigin(value: string): boolean {
 export interface InboxServerOptions {
   /** Default: `getPlannotatorDataDir()`. */
   dataDir?: string;
-  /** This computer's Rex (inbox-rex.ts). Default: the app's server socket on macOS (under a sandboxed test, its own home's). */
+  /** This computer's Rex (inbox-rex.ts). Default: where Rex's server listens on this system (inbox-rex-where.ts; under a sandboxed test, only the socket it names). */
   rex?: InboxRex;
   liveReviewCommand?: string[];
   /** The running binary's version; `dev` for a source run. */
@@ -1352,7 +1354,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: lets the save of a held switch (Shape, heldSwitch) reach the windows. */
-  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -3425,6 +3427,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Thread panes, several threads side by side (config.json `inboxSplitView`; Settings → General → Appearance, off
+   * unless the person turned it on; docs/agent-guides/inbox-window.md "Free layout"). A window preference: nothing an
+   * agent reads changes. `event: capabilities` names it only when it was the change, so every window, the one that
+   * saved it too, turns the panes on or off at once, with no reload.
+   */
+  const splitViewOn = () => loadConfig().inboxSplitView === true;
+  const saveSplitView = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "split_view: { on: boolean }.", { field: "split_view" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: splitViewOn() };
+    const was = splitViewOn();
+    saveConfig({ inboxSplitView: on });
+    if (splitViewOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("split_view");
+    return { on };
+  };
+
+  /**
    * The list's "Show archived" (approval "inbox-archived-group", off by default): one switch on every linked machine
    * (inbox-show-archived.ts). `event: show-archived` tells every window, and a linked machine that asks
    * (`show-archived=1`), which then reads this list and takes the newer switch.
@@ -4032,8 +4054,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...systemWire(),
     /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
     ...chapterDiagramsWire(),
-    /** The second thread pane's preview (config.json `inboxSplitView`): present only while on, so a window off draws nothing new. */
-    ...(loadConfig().inboxSplitView === true ? { split_view: { on: true } } : {}),
+    /** Thread panes (config.json `inboxSplitView`, Settings → General → Appearance): off unless the person turned them on. */
+    split_view: { on: splitViewOn() },
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. */
@@ -4245,10 +4267,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => {
+        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "split_view" | "scheduled_threads" | "seam") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...(changed === "split_view" ? { split_view: { on: splitViewOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -5025,9 +5047,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
   // Rex (superlogical.com/rex): where agents live and what their panes say, starting agents in Rex, Show in Rex. Only an existing server is ever reached.
   // Under test (bun test, or a sandboxed binary) no Rex is reached but one a test names: `options.rex`, or a sandbox's
-  // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is.
-  const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSocketPath(process.platform, homedir());
-  const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, version, sessionsFile: join(store.dir, "rex-sessions.json") });
+  // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is. Any system Rex runs on (inbox-rex-where.ts):
+  // on a Mac the app's server; elsewhere a server with no app beside it (`headless`; a sandbox says so itself with
+  // PLANNOTATOR_TEST_REX_HEADLESS, whatever system the test runs on).
+  const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSockets(process.platform, homedir(), process.env, process.getuid?.() ?? null);
+  const rexHeadless = process.env.PLANNOTATOR_TEST_SANDBOX ? process.env.PLANNOTATOR_TEST_REX_HEADLESS === "1" : inboxRexHeadless(process.platform);
+  const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, headless: rexHeadless, version, sessionsFile: join(store.dir, "rex-sessions.json") });
   rexVersion = rex.version;
   rexWatch = () => rex.watch(rexHints([...live.placedSessions(), ...(launch.rexPanes()?.keys() ?? [])]));
   /**
@@ -5071,11 +5096,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * This Inbox's agents with where they live (inbox-rex.ts), for every window (a phone, the tailnet and a linked
    * machine too): each place Rex last confirmed, as one line, and what that pane says the agent is doing
-   * (`withRexStatus`, the marks). `show` (Show in Rex) only for a window on this computer (`here`): elsewhere it would
-   * move a screen no one there looks at. Answered at once from the last read; a stale one starts the next in the
+   * (`withRexStatus`, the marks). `show` (Show in Rex) by where the window is (`reach`; null: a phone, which has no
+   * such item): this computer's own while Rex's app is attached here; another computer's (the tailnet, a linked
+   * machine) while a Rex app is attached to this Rex from elsewhere, never through a Mac's own app, which would move
+   * a screen no one there looks at. Answered at once from the last read; a stale one starts the next in the
    * background (never waited on).
    */
-  const withRexPlaces = (groups: InboxAgentsGroup[], here: boolean): InboxAgentsGroup[] => {
+  const withRexPlaces = (groups: InboxAgentsGroup[], reach: InboxRexReach | null): InboxAgentsGroup[] => {
     const at = groups.findIndex((group) => !group.machine || group.machine === machines.selfId);
     const own = at >= 0 ? groups[at]! : null;
     if (!own) return groups;
@@ -5084,7 +5111,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const shown = rex.places(hints);
     if (shown.size === 0) return groups;
     const statuses = rex.statuses(hints);
-    const show = here && rex.offersShow();
+    const show = reach !== null && rex.offersShow(reach);
     // The icons' status marks, from a fresh read.
     const fresh = rex.freshStatuses(hints);
     const agents = own.agents.map((agent) => {
@@ -5960,8 +5987,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const faces = fromMachine ? agentFacesFile.wire() : null;
         const phone = door !== undefined && !fromMachine;
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
-        // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex only in one on this computer.
-        const agents = withRexPlaces(listed, via === "local" && door === undefined);
+        // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
+        const agents = withRexPlaces(listed, phone ? null : via === "local" && door === undefined ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -5970,23 +5997,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
-      // Show in Rex (inbox-rex.ts): Rex's app on this computer goes to the pane a live session said it lives in, on the
-      // person's click, for any session the list places in Rex (`rexHints`). Only this computer's windows offer it (it
-      // moves this screen); another site's page never asks.
+      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click,
+      // for any session the list places in Rex (`rexHints`). From this computer's own window: this computer's app (on a
+      // Mac). From another computer's (the tailnet, or a linked machine's window through its door): the Rex apps
+      // attached to this Rex from elsewhere. Another site's page never asks.
       if (path === "/api/inbox/rex/show") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        // From a linked machine: only for a press in a window there (its Inbox marks it), never an agent's bare call.
+        const rexDoor = fromDeviceDoor.get(req);
+        if (rexDoor && !rexDoor.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
         const session = typeof body.session === "string" ? body.session : "";
         const place = session ? rexHints([session]).get(session) : undefined;
         if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);
-        return json(await rex.show(place));
+        return json(await rex.show(place, via === "local" && !fromDeviceDoor.has(req) ? "here" : "away"));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
-        if (answer) return answer;
+        // A linked machine's Rex showed a pane for this computer's own window: this computer's Rex app comes to the front (inbox-rex-far.ts).
+        if (answer) return via === "local" && !fromDeviceDoor.has(req) ? await inboxRaiseAfterFarShow(path, answer, rex) : answer;
       }
       if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(url.searchParams.get("machines") === "1" ? await mergedArchivedModel(url) : archivedModel(url));
       // Decision mode (experimental, approval "inbox-decision-mode"): a read-only projection of every
@@ -6882,6 +6914,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.agent_status === undefined &&
           body.float_drafts === undefined &&
           body.mark_read_warning === undefined &&
+          body.split_view === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
@@ -6893,7 +6926,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, agent_status, float_drafts, mark_read_warning, split_view, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -6941,6 +6974,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.agent_status !== undefined) agentStatus.save(body.agent_status, true);
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
         if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
+        if (body.split_view !== undefined) saveSplitView(body.split_view, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
@@ -6975,6 +7009,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const agentStatusNow = body.agent_status === undefined ? { on: agentStatus.on() } : agentStatus.save(body.agent_status);
         const floatDrafts = body.float_drafts === undefined ? { on: floatDraftsOn() } : saveFloatDrafts(body.float_drafts);
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
+        const splitView = body.split_view === undefined ? { on: splitViewOn() } : saveSplitView(body.split_view);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
@@ -6984,7 +7019,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, ...(body.sound === undefined ? {} : { sound_rev: soundRev }), tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, agent_status: agentStatusNow, float_drafts: floatDrafts, mark_read_warning: markReadWarning, split_view: splitView, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

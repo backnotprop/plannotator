@@ -13,7 +13,7 @@ import { createId } from '../model/ids';
 import type { ObjectId, ReferenceObject, Snapshot } from '../model/types';
 import { type AssetPort, pictureResolver } from '../model/assets';
 import type { LinkPreviewPort } from '../model/reference';
-import { CameraController, type Size, fitRect, screenToWorld, viewportRect, worldToScreen, zoomAt } from '../view/camera';
+import { CameraController, type Size, fitPadding, fitRect, screenToWorld, viewportRect, worldToScreen, zoomAt } from '../view/camera';
 import { neighbourInReadingOrder, readingOrder } from '../view/reading-order';
 import { portPoint } from '../view/routes';
 import { indexFor } from '../view/document-index';
@@ -103,7 +103,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
 
   const fit = useCallback(() => {
     const all = boundsOf(store.getDocument(), store.getDocument().order);
-    if (all && size.current.w > 0) camera.set(fitRect(all, size.current, 72, 1));
+    if (all && size.current.w > 0) camera.set(fitRect(all, size.current, fitPadding(size.current), 1));
   }, [camera, store]);
 
   const onSize = useCallback(
@@ -372,7 +372,7 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
 
   // Ports: a ring at the middle of each side of the one selected shape. Dragging from one draws a connector.
   const portRings =
-    single && 'w' in single && single.type !== 'frame' && single.type !== 'stamp' && !ui.editingId && ui.carried.size === 0
+    single && 'w' in single && single.type !== 'frame' && single.type !== 'stamp' && single.type !== 'ink' && !ui.editingId && ui.carried.size === 0
       ? (['n', 'e', 's', 'w'] as const).map((side) => {
           const at = portPoint(single, side);
           return <div key={side} className="pcv-port" data-port={side} data-for={single.id} style={{ transform: `translate(${at.x}px, ${at.y}px)` }} />;

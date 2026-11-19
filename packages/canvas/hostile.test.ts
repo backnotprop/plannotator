@@ -6,13 +6,14 @@
 import { describe, expect, test } from 'bun:test';
 import { applyEvents } from './events/reduce';
 import { CanvasStore } from './events/store';
-import { decodeCommand } from './events/wire';
+import { decodeCommand, decodeEnvelope } from './events/wire';
 import { parseSnapshotBlock } from './snapshot/block';
 import { resolveSnapshot } from './snapshot/resolve';
 import { hitTest } from './view/hit-test';
 import { routesFor } from './view/routes';
 import { indexFor } from './view/document-index';
 import { captureOf } from './model/capture';
+import { CHART_LIMITS } from './model/chart';
 import { parseDocument, serializeDocument } from './model/codec';
 import { createDocument, objectBounds, resolveArrow } from './model/document';
 import type { ArrowObject, CanvasDocument, CanvasObject } from './model/types';
@@ -263,5 +264,135 @@ describe('a change whose field name is a name on every object', () => {
       expect(Object.getPrototypeOf(changed)).toBe(Object.prototype);
       expect(parseDocument(JSON.parse(serializeDocument(mixed.doc))).ok).toBe(true);
     }
+  });
+});
+
+describe('a drawn line and a heading from a peer', () => {
+  const PEER = { kind: 'person', id: 'peer' } as const;
+  const ink = { id: 'ring', type: 'ink', x: 0, y: 0, w: 100, h: 100, points: [0, 0, 1, 1] };
+
+  test('an envelope that adds a line with too many points, or points that are not numbers, is refused whole', () => {
+    for (const points of [new Array(2002).fill(0.5), [0, 0, 'x', 1], [0, 0, 1e9, 1], { length: 4 }, null]) {
+      const envelope = decodeEnvelope(JSON.stringify({ id: 'e1', actor: PEER, events: [{ type: 'object-added', object: { ...ink, points } }] }));
+      expect(envelope.ok).toBe(false);
+    }
+    expect(decodeEnvelope({ id: 'e1', actor: PEER, events: [{ type: 'object-added', object: ink }] }).ok).toBe(true);
+  });
+
+  test('a change that would make a line no line, or put points on something else, does nothing', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [ink, box('a'), { id: 't', type: 'text', x: 0, y: 0, w: 100, h: 30, text: 'T' }] as CanvasObject[] });
+    const before = store.getDocument();
+    const sets: [string, Record<string, unknown>][] = [
+      ['ring', { points: [0, 0, 5, 5] }],
+      ['ring', { points: [0, 0, 1] }],
+      ['ring', { points: 'M0 0L1 1' }],
+      ['ring', { points: new Array(4000).fill(0) }],
+      ['ring', { pen: 'constructor' }],
+      ['a', { points: [0, 0, 1, 1] }],
+      ['a', { pen: 'fine' }],
+      ['a', { face: 'serif' }],
+      ['t', { size: '__proto__' }],
+      ['t', { face: 'hasOwnProperty' }],
+    ];
+    for (const [id, set] of sets) {
+      const envelope = decodeEnvelope({ id: `e-${id}-${Object.keys(set)[0]}-${JSON.stringify(set).length}`, actor: PEER, events: [{ type: 'object-set', id, set }] });
+      expect(envelope.ok).toBe(true);
+      if (envelope.ok) store.receive(envelope.value);
+      expect(applyEvents(before, [{ type: 'object-set', id, set }], { check: true }).applied).toEqual([]);
+    }
+    expect(store.getDocument()).toBe(before);
+    // A good one goes through, field by field.
+    const good = decodeEnvelope({ id: 'good', actor: PEER, events: [{ type: 'object-set', id: 'ring', set: { pen: 'fine', points: [0, 1, 1, 0] } }, { type: 'object-set', id: 't', set: { size: 'title', face: 'mono' } }] });
+    expect(good.ok && store.receive(good.value)).toBeTruthy();
+    expect(store.getDocument().objects.ring).toMatchObject({ pen: 'fine', points: [0, 1, 1, 0] });
+    expect(store.getDocument().objects.t).toMatchObject({ size: 'title', face: 'mono' });
+  });
+
+  test('a board of lines at their longest saves, loads, is found by the pointer and is captured', () => {
+    const store = new CanvasStore(createDocument('board'));
+    const points = Array.from({ length: 2000 }, (_, i) => (i % 2 ? (i % 7) / 6 : i / 1999));
+    const objects = Array.from({ length: 50 }, (_, i) => ({ id: `ink${i}`, type: 'ink', x: i * 10, y: i * 10, w: 400, h: 200, points, pen: i % 2 ? 'highlighter' : 'fine' }));
+    expect(store.dispatch({ type: 'add', objects: objects as CanvasObject[] }, { actor: AGENT }).ok).toBe(true);
+    const loaded = parseDocument(serializeDocument(store.getDocument()));
+    expect(loaded.ok && Object.keys(loaded.value.objects).length).toBe(50);
+    expect(hitTest(store.getDocument(), indexFor(store), { x: 0, y: 0 })).toBe('ink0');
+    expect(captureOf(store.getDocument(), { kind: 'region', rect: { x: 0, y: 0, w: 2000, h: 2000 } })?.objects.length).toBe(50);
+  });
+});
+
+describe('a chart that tries to break the board', () => {
+  const GOOD = { id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, mark: 'bar', fields: ['week', 'minutes'], rows: [['W1', 11], ['W2', 4]], encode: { x: 'week', y: 'minutes' } };
+  /** Each one a table the drawing could not be trusted with. */
+  const BAD: Record<string, unknown>[] = [
+    { rows: [['W1', NaN]] },
+    { rows: [['W1', Infinity]] },
+    { rows: [['W1', '11']] },
+    { rows: [['W1', 11, 12]] },
+    { rows: [['W1']] },
+    { rows: 'W1,11' },
+    { rows: Array.from({ length: CHART_LIMITS.rows + 1 }, (_row, i) => [`W${i}`, i]) },
+    { fields: ['__proto__', 'minutes'], encode: { x: '__proto__', y: 'minutes' } },
+    { fields: ['constructor', 'minutes'], encode: { x: 'constructor', y: 'minutes' } },
+    { fields: ['<script>', 'minutes'], encode: { x: '<script>', y: 'minutes' } },
+    { encode: { x: 'week', y: 'toString' } },
+    { encode: { x: 'week', y: 'minutes', __proto__: null, series: 'hasOwnProperty' } },
+    { mark: 'span' },
+    { mark: 'pie' },
+    { rules: [{ at: 1e300 }] },
+    { color: { custom: 'url(https://x.test/)' } },
+  ];
+
+  test('the planner refuses it from an agent, as a new chart and as an edit, and the board is as it was', () => {
+    const store = board();
+    expect(store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] }, { actor: AGENT }).ok).toBe(true);
+    const before = store.getDocument();
+    for (const bad of BAD) {
+      expect(store.dispatch({ type: 'add', objects: [{ ...GOOD, id: 'c2', ...bad } as unknown as CanvasObject] }, { actor: AGENT }).ok).toBe(false);
+      const { color: _color, ...patch } = bad;
+      if (Object.keys(patch).length) expect(store.dispatch({ type: 'edit', id: 'c', patch: patch as never }, { actor: AGENT }).ok).toBe(false);
+      expect(store.getDocument()).toBe(before);
+    }
+  });
+
+  test('from a peer it is dropped: as a whole chart at the wire, as a change when it lands', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] });
+    const before = store.getDocument();
+    const actor = { kind: 'person', id: 'peer' };
+    for (const [i, bad] of BAD.entries()) {
+      // What JSON carries of it: NaN and Infinity arrive as null, which is no cell either.
+      const added = decodeEnvelope(JSON.stringify({ id: `add-${i}`, actor, events: [{ type: 'object-added', object: { ...GOOD, id: 'c2', ...bad } }] }));
+      expect(added.ok).toBe(false);
+      const { color: _color, ...set } = bad;
+      if (Object.keys(set).length === 0) continue;
+      const changed = decodeEnvelope(JSON.stringify({ id: `set-${i}`, actor, events: [{ type: 'object-set', id: 'c', set }] }));
+      expect(changed.ok).toBe(true);
+      if (changed.ok) store.receive(changed.value);
+      expect(store.getDocument().objects.c).toBe(before.objects.c);
+    }
+    // And the board still saves and loads.
+    expect(parseDocument(JSON.parse(serializeDocument(store.getDocument()))).ok).toBe(true);
+  });
+
+  test('a saved file holding one is refused, not opened', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [GOOD as unknown as CanvasObject] });
+    const saved = JSON.parse(serializeDocument(store.getDocument()));
+    expect(parseDocument(saved).ok).toBe(true);
+    for (const bad of BAD) {
+      const file = JSON.parse(JSON.stringify({ ...saved, objects: { ...saved.objects, c: { ...saved.objects.c, ...bad } } }));
+      expect(parseDocument(file).ok).toBe(false);
+    }
+  });
+
+  test('a chart is found where it is drawn: hit, bounds, and a snapshot of it', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [{ ...GOOD, x: 500, y: 300 } as unknown as CanvasObject] });
+    const doc = store.getDocument();
+    expect(objectBounds(doc, 'c')).toEqual({ x: 500, y: 300, w: 380, h: 240 });
+    expect(hitTest(doc, indexFor(store), { x: 600, y: 400 }, 6, routesFor(store))).toBe('c');
+    expect(hitTest(doc, indexFor(store), { x: 100, y: 100 }, 6, routesFor(store))).toBeNull();
+    expect(captureOf(doc, { kind: 'objects', objects: ['c'] })?.objects.map((object) => object.id)).toEqual(['c']);
   });
 });

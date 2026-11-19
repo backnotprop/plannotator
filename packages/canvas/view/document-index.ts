@@ -9,6 +9,7 @@
  */
 import { isBoundEnd, objectBounds } from '../model/document';
 import { expandRect } from '../model/geometry';
+import { inkBounds } from '../model/ink';
 import type { CanvasStore } from '../events/store';
 import type { CanvasEvent } from '../events/types';
 import { type CanvasDocument, type ObjectId, isPlaced } from '../model/types';
@@ -88,7 +89,8 @@ export class DocumentIndex {
       return;
     }
     if (isPlaced(object)) {
-      this.spatial.set(id, object);
+      // A drawn line is indexed by what it covers, stroke included, so the pointer finds the half of a line that lies outside its box.
+      this.spatial.set(id, object.type === 'ink' ? inkBounds(object) : object);
       return;
     }
     const ends: ObjectId[] = [];

@@ -77,6 +77,7 @@ import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
+import { INBOX_REX_SERVER_ENV, inboxRexServerSocket } from "@plannotator/server/inbox-rex-where";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -149,6 +150,10 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undef
 export function detachedInboxEnv(env: Readonly<Record<string, string | undefined>>, dataDir: string): Record<string, string | undefined> {
   // Not the Rex pane it was started from (`withoutRexPane`): the Inbox outlives it, and its agents are not in it.
   const out: Record<string, string | undefined> = { ...withoutRexPane(env), PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
+  // Which Rex server is this computer's stays known (the person's `REX_SERVER`, or the one Rex's terminal named), under
+  // the Inbox's own name: only a socket on this computer, and never the pane's ids.
+  const rexServer = inboxRexServerSocket(env.REX_SERVER);
+  if (rexServer && !out[INBOX_REX_SERVER_ENV]) out[INBOX_REX_SERVER_ENV] = rexServer;
   if (isAskAiChild(env)) {
     delete out.PLANNOTATOR_ASK_AI_CHILD;
     delete out.PLANNOTATOR_INBOX_TOOL;

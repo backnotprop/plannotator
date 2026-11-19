@@ -411,6 +411,7 @@ packages/review-editor/components/guide/GuideExportButton.test.tsx
 packages/review-editor/hooks/useReviewSearch.test.tsx
 packages/review-editor/hooks/useTokenHover.test.tsx
 packages/review-editor/components/TokenHoverCard.test.tsx
+packages/review-editor/components/tokenHoverAffordance.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
@@ -525,8 +526,10 @@ packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
 packages/ui/components/blocks/directiveRenderer.seam.test.tsx
+packages/canvas/react/objects.dom.test.tsx
 packages/canvas/snapshot/CanvasStage.dom.test.tsx
 packages/canvas/react/HtmlItem.dom.test.tsx
+packages/canvas/react/ChartView.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx
@@ -619,6 +622,7 @@ apps/vscode-extension/src/guides/webview/diagram-loader.test.ts
 packages/review-editor/components/AnnotationToolbar.askOnly.test.tsx
 packages/ui/components/Settings.notion.test.tsx
 packages/inbox/cookieHostSettings.test.tsx
+packages/inbox/splitViewSettings.test.tsx
 packages/ui/components/Settings.cookieHost.test.tsx
 packages/review-editor/components/FileTree.allFiles.test.tsx
 packages/review-editor/components/ReviewPanelHeader.test.tsx
