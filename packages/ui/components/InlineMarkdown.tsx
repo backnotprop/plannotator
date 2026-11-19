@@ -496,26 +496,32 @@ const HostResolvedImage: React.FC<{
   );
 };
 
-const HostResolvedMedia: React.FC<{ src: string; alt: string; media: 'audio' | 'video' }> = ({ src, alt, media }) => {
+const HostResolvedMedia: React.FC<{ src: string; alt: string; writtenSrc: string; media: 'audio' | 'video' }> = ({ src, alt, writtenSrc, media }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  if (failedSrc === src) {
-    return (
-      <span className={`${UNAVAILABLE_IMAGE_CLASS} annotation-exclude`} title={media === 'audio' ? 'Sound could not be loaded' : 'Video could not be loaded'} data-image-unavailable="">
-        {alt || (media === 'audio' ? 'Sound' : 'Video')}
-      </span>
-    );
-  }
+  const failed = failedSrc === src;
+  const noun = media === 'audio' ? 'Sound' : 'Video';
   const props = {
     src,
     controls: true,
     preload: 'metadata',
-    'aria-label': alt || undefined,
+    'aria-label': failed ? undefined : alt || writtenSrc.replace(/[?#].*$/, '').split(/[\\/]/).pop() || noun,
     title: alt || undefined,
+    hidden: failed || undefined,
+    'aria-hidden': failed || undefined,
     'data-inline-media': media,
-    className: media === 'video' ? 'annotation-exclude block max-w-full max-h-[70vh] rounded my-2' : 'annotation-exclude block max-w-full my-2',
+    className: failed ? undefined : media === 'video' ? 'annotation-exclude block max-w-full max-h-[70vh] rounded my-2' : 'annotation-exclude block max-w-full my-2',
     onError: () => setFailedSrc(src),
   } as const;
-  return media === 'audio' ? <audio {...props} /> : <video {...props} playsInline />;
+  return (
+    <>
+      {failed && (
+        <span key="unavailable" className={`${UNAVAILABLE_IMAGE_CLASS} annotation-exclude`} title={`${noun} could not be loaded`} data-image-unavailable="">
+          {alt || noun}
+        </span>
+      )}
+      {media === 'audio' ? <audio key="media" {...props} /> : <video key="media" {...props} playsInline />}
+    </>
+  );
 };
 
 /**
@@ -1204,7 +1210,9 @@ export const InlineMarkdown: React.FC<{
       const tag = imgTagAttributes(match[0]);
       const resolved = tag.src ? resolveImage!(tag.src) : null;
       const shown = resolved?.kind === 'src' ? resolved.src : !resolved && /^https?:\/\//i.test(tag.src) ? tag.src : null;
-      if (shown) {
+      if (shown && resolved?.kind === 'src' && resolved.media) {
+        parts.push(<HostResolvedMedia key={key++} src={shown} alt={tag.alt} writtenSrc={tag.src} media={resolved.media} />);
+      } else if (shown) {
         parts.push(<HostResolvedImage key={key++} src={shown} alt={tag.alt} width={tag.width ?? (resolved?.kind === 'src' ? resolved.width : undefined)} height={tag.height} writtenSrc={tag.src} onImageClick={onImageClick} />);
       } else if (tag.src) {
         parts.push(
@@ -1248,7 +1256,7 @@ export const InlineMarkdown: React.FC<{
           : getImageSrc(src, imageBaseDir);
       parts.push(
         resolvedImage?.kind === 'src' && resolvedImage.media ? (
-          <HostResolvedMedia key={key++} src={imgSrc} alt={alt} media={resolvedImage.media} />
+          <HostResolvedMedia key={key++} src={imgSrc} alt={alt} writtenSrc={src} media={resolvedImage.media} />
         ) : resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.

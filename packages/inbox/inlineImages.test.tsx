@@ -330,7 +330,8 @@ test.skipIf(!hasDom)('a picture choice carries the size recorded when the messag
 });
 
 test.skipIf(!hasDom)('a sound or a video the body shows is a native player in place, and a picture stays a picture', async () => {
-  await render(['![B](design/b.png)', '', 'Listen: ![Voice note](notes/hi.m4a)', '', '![Demo](rec/demo.MOV)'].join('\n'), [B], []);
+  await render(['![B](design/b.png)', '', 'Listen: ![Voice note](notes/hi.m4a)', '', '![Demo](rec/demo.MOV)', '', '![](rec/untitled.webm)'].join('\n'), [B], []);
+  expect(host!.querySelector('[data-inline-media][src$="untitled.webm"]')!.getAttribute('aria-label')).toBe('untitled.webm');
   const url = (path: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(path)}`;
   expect(host!.querySelector<HTMLImageElement>('img[alt="B"]')!.getAttribute('src')).toBe(url('design/b.png'));
   expect(host!.querySelectorAll('img')).toHaveLength(1);
