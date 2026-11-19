@@ -228,20 +228,20 @@ struct ThreadScreen: View {
       }
     }
     // Rows above the newest message keep finding their own heights for a moment after the thread opens: until the
-    // person touches or scrolls, and for its first 2 seconds, the page lands again whenever where it lands moves.
-    .onChange(of: cards[Self.landing]?.minY) { _, _ in
-      guard !scroll.landed else { return }
-      Task {
-        try? await Task.sleep(for: .milliseconds(40))
-        if !scroll.landed { land(waiting, proxy) }
-      }
-    }
+    // person touches or scrolls, and for its first 2 seconds, the page lands again whenever where it lands moved.
     .task {
+      let until = Date().addingTimeInterval(2)
       try? await Task.sleep(for: .milliseconds(60))
       if !scroll.landed { land(waiting, proxy) }
-      try? await Task.sleep(for: .milliseconds(700))
-      if !scroll.landed { land(waiting, proxy) }
-      try? await Task.sleep(for: .milliseconds(1240))
+      var landedAt = cards[Self.landing]?.minY
+      while !scroll.landed, Date() < until {
+        try? await Task.sleep(for: .milliseconds(100))
+        guard !scroll.landed, let now = cards[Self.landing]?.minY else { continue }
+        if landedAt.map({ abs($0 - now) > 0.5 }) ?? true {
+          land(waiting, proxy)
+          landedAt = now
+        }
+      }
       scroll.landed = true
     }
     .scrollDismissesKeyboard(.interactively)
@@ -500,8 +500,6 @@ enum TextLines {
 }
 
 /// A line inside a card, named after the card it is in.
-/// The rule between two messages, with 4 points of air each side counted as a line where the page may rest: the
-/// page's top never stops on the rule itself, leaving a sliver of it under the title bar.
 private struct Rule: View {
   let key: String
 
