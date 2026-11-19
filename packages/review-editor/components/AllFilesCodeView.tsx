@@ -2182,14 +2182,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
-  const heldLengthRef = useRef<(() => void) | null>(null);
+  const heldLengthRef = useRef<((keep?: boolean) => number) | null>(null);
   const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
     const root = scrollRef.current;
     const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
-    if (root && page && !heldLengthRef.current && page.scrollHeight - page.scrollTop - page.clientHeight <= page.clientHeight) {
+    const node = itemNodeRef.current.get(itemId);
+    const most = page ? Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight) : 0;
+    if (root && page && page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most) {
       const height = page.scrollHeight;
-      const node = itemNodeRef.current.get(itemId);
-      let px = Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight);
+      let px = (heldLengthRef.current?.(true) ?? 0) + most;
       root.style.paddingBottom = `${px}px`;
       let settled = false;
       let calm = 0;
@@ -2218,17 +2219,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const gestures = ['wheel', 'touchstart', 'keydown'] as const;
       moves.addEventListener('scroll', check, { passive: true });
       for (const type of gestures) document.addEventListener(type, gesture, { capture: true, passive: true });
-      heldLengthRef.current = () => {
+      heldLengthRef.current = (keep = false) => {
         cancelAnimationFrame(frame);
         moves.removeEventListener('scroll', check);
         for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
-        root.style.paddingBottom = '';
+        if (!keep) root.style.paddingBottom = '';
         heldLengthRef.current = null;
+        return px;
       };
     }
     showSemantic(itemId, on);
   });
-  useEffect(() => () => heldLengthRef.current?.(), [fileSetKey]);
+  useEffect(() => () => void heldLengthRef.current?.(), [fileSetKey]);
 
   const allMinimapMarks = useMemo(
     () => (semanticNotes.size === 0 ? minimapMarks : [...(minimapMarks ?? []), ...[...semanticNotes.values()].flat()]),

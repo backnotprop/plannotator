@@ -584,6 +584,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 describe('AllFilesCodeView semantic notes that land after the person started reading', () => {
   const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
   const tops = new Map<Element, number>();
+  const heights = new Map<Element, number>();
   let pageHeight = 10_000;
   let hidden = false;
   const sizes = ['scrollHeight', 'clientHeight'] as const;
@@ -592,6 +593,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     restore?.();
     restore = null;
     tops.clear();
+    heights.clear();
     pageHeight = 10_000;
     hidden = false;
   });
@@ -609,7 +611,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
       };
     }
     Element.prototype.getBoundingClientRect = function (this: Element) {
-      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
+      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? heights.get(this) ?? 400 : 700);
     };
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
@@ -644,6 +646,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     };
     const swapped = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff.semanticOperations as unknown[] | undefined)?.length === 1;
     const move = (path: string, top: number) => void tops.set(nodes.get(path)!, top);
+    const resize = (path: string, height: number) => void heights.set(nodes.get(path)!, height);
     const redraw = async () => {
       await act(async () => {
         for (const item of items.values()) options.onPostRender(nodes.get(files.find((file) => item.id.includes(file))!)!, {}, 'update', { item });
@@ -658,8 +661,44 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
         await new Promise((resolve) => setTimeout(resolve, 25));
       });
     };
-    return { land, swapped, move, redraw, drawnKey, rerender };
+    return { land, swapped, move, resize, redraw, drawnKey, rerender };
   }
+
+  async function atTheEnd(files: string[], scrollTop: number) {
+    const page = await reading(files, Object.fromEntries(files.map((file, index) => [file, 100 + index * 200])));
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop });
+    const tap = async (path: string) => {
+      const note = (await headerOf(path)).querySelector<HTMLButtonElement>('[data-semantic-note="off"]')!;
+      await act(async () => note.click());
+    };
+    const held = () => [...document.querySelectorAll<HTMLElement>('div')].map((element) => element.style.paddingBottom).find(Boolean) ?? '';
+    return { ...page, tap, held };
+  }
+
+  test.skipIf(!hasDom)('a review that fits the window is not padded when a file folds, so no scrollbar comes and goes', async () => {
+    pageHeight = 700;
+    const page = await atTheEnd(['a.ts'], 0);
+    await page.tap('a.ts');
+    expect(page.swapped('a.ts')).toBe(true);
+    expect(page.held()).toBe('');
+  });
+
+  test.skipIf(!hasDom)('at the end of the page a tap on a second file while the first is still held holds the page for both', async () => {
+    const page = await atTheEnd(['a.ts', 'b.ts'], 10_000 - 700);
+    await page.tap('b.ts');
+    expect(page.held()).toBe('400px');
+    await page.tap('a.ts');
+    expect(page.held()).toBe('800px');
+  });
+
+  test.skipIf(!hasDom)('a file taller than what is left below the window holds the page even with more than a screen left', async () => {
+    const page = await atTheEnd(['a.ts'], 10_000 - 700 - 900);
+    page.resize('a.ts', 3000);
+    await page.tap('a.ts');
+    expect(page.held()).toBe('3000px');
+  });
 
   test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
     const quiet = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
