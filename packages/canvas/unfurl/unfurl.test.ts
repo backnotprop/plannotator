@@ -6,10 +6,10 @@ import { pastedUrl, referenceCard } from '../model/reference';
 import type { ReferenceObject } from '../model/types';
 import { CARD_SIZE, CARD_SIZE_WITH_IMAGE, addReference, referenceFromPaste } from '../react/references';
 import { isPrivateAddress } from './address';
-import { type UnfurlOptions, createUnfurler, resolveHost, unfurlUrl as unfurlReal } from './fetch';
+import { type PinnedFetch, type UnfurlOptions, createUnfurler, resolveHost, unfurlFault, unfurlUrl as unfurlReal } from './fetch';
 import { readLinkPreview } from '../react/link-preview';
 import { parseLinkPreview } from './parse';
-import { createUnfurlHandler } from './route';
+import { createUnfurlHandler, isLoopbackHost } from './route';
 
 const PAGE = `<!doctype html><html><head>
 <title>Plain &amp; simple title</title>
@@ -24,7 +24,11 @@ line two'>
 
 /** Every name in these tests resolves here, to a public address, unless a test says otherwise. No test asks real DNS. */
 const PUBLIC = async () => ['93.184.216.34'];
-const unfurlUrl = (address: string, options: UnfurlOptions = {}) => unfurlReal(address, { lookup: PUBLIC, ...options });
+/** The stand-in network as a pin: the request is made at the address that was checked, which a plain `fetch` cannot promise. */
+const pinned = (fetch: typeof globalThis.fetch): PinnedFetch => (url, _address, init) => fetch(url.href, init);
+/** A test's `fetch` stands for the network; unless the test allows private addresses, it is reached through a pin. */
+const unfurlUrl = (address: string, options: UnfurlOptions = {}) =>
+  unfurlReal(address, { lookup: PUBLIC, ...options, ...(options.fetch && !options.allowPrivate && !options.pin ? { pin: pinned(options.fetch) } : {}) });
 
 /** A stand-in for the network: a map from address to response. */
 function net(pages: Record<string, () => Response>): { fetch: typeof fetch; calls: string[] } {
@@ -152,10 +156,10 @@ describe('fetching a preview', () => {
   });
 
   test('an address is judged by its bytes, however it is written', () => {
-    for (const address of ['127.0.0.1', '0.0.0.0', '10.255.255.255', '100.127.0.1', '169.254.169.254', '172.31.0.1', '192.168.0.1', '224.0.0.1', '255.255.255.255', '::', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:a00:1', '0:0:0:0:0:ffff:c0a8:0101', '64:ff9b::7f00:1', '2002:7f00:1::', 'fc00::1', 'fdff::1', 'fe80::1%en0', 'febf::1', 'ff02::1', '[::1]', 'not an address', '']) {
+    for (const address of ['127.0.0.1', '0.0.0.0', '10.255.255.255', '100.127.0.1', '169.254.169.254', '172.31.0.1', '192.168.0.1', '192.88.99.1', '224.0.0.1', '255.255.255.255', '::', '::1', '64:ff9b:1::808:808', '64:ff9b:1:ffff::1', '::ffff:192.88.99.7', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:a00:1', '0:0:0:0:0:ffff:c0a8:0101', '64:ff9b::7f00:1', '2002:7f00:1::', 'fc00::1', 'fdff::1', 'fe80::1%en0', 'febf::1', 'ff02::1', '[::1]', 'not an address', '']) {
       expect(isPrivateAddress(address)).toBe(true);
     }
-    for (const address of ['8.8.8.8', '93.184.216.34', '172.32.0.1', '100.128.0.1', '2606:4700:4700::1111', '::ffff:8.8.8.8', '::ffff:808:808', '64:ff9b::808:808', '2002:808:808::']) {
+    for (const address of ['8.8.8.8', '93.184.216.34', '172.32.0.1', '100.128.0.1', '192.88.98.1', '192.88.100.1', '64:ff9b:2::808:808', '2606:4700:4700::1111', '::ffff:8.8.8.8', '::ffff:808:808', '64:ff9b::808:808', '2002:808:808::']) {
       expect(isPrivateAddress(address)).toBe(false);
     }
   });
@@ -188,11 +192,56 @@ describe('fetching a preview', () => {
     expect(await unfurlUrl('http://127.0.0.1:3000/', { fetch, allowPrivate: true })).toMatchObject({ title: 'T', image: 'http://192.168.1.10/cam.jpg' });
   });
 
-  test('with the lookup turned off on purpose, numbers are still checked and names go through', async () => {
+  test('a fetcher that could not keep private addresses out is refused when it is made, not at the first paste', async () => {
     const { fetch } = net({ 'https://named.example.test/': html('<title>Named</title>') });
-    expect(await unfurlReal('http://[::ffff:7f00:1]/', { fetch, lookup: false })).toBeNull();
-    expect(await unfurlReal('https://named.example.test/', { fetch, lookup: false })).toMatchObject({ title: 'Named' });
+    const pin = pinned(fetch);
+    // A fetch of the host's own (or Node): the request would go by name after the check, so a name could answer
+    // with a public address when checked and 127.0.0.1 when connected to.
+    expect(() => createUnfurler({ fetch, lookup: PUBLIC })).toThrow(/pin/);
+    expect(() => createUnfurlHandler({ fetch, lookup: PUBLIC })).toThrow(/pin/);
+    await expect(unfurlReal("https://named.example.test/", { fetch, lookup: PUBLIC })).rejects.toThrow(/pin/);
+    // With no lookup a name is never checked at all, pin or no pin.
+    expect(() => createUnfurler({ pin, lookup: false })).toThrow(/lookup/);
+    expect(() => createUnfurler({ fetch, lookup: false })).toThrow();
+    expect(() => createUnfurler({ fetch, pin, lookup: PUBLIC, allowPrivate: false })).not.toThrow();
+    // A server one person runs for themselves says so, and may then do either.
+    expect(unfurlFault({ fetch, allowPrivate: true })).toBeNull();
+    expect(await unfurlReal('https://named.example.test/', { fetch, lookup: false, allowPrivate: true })).toMatchObject({ title: 'Named' });
     expect(await resolveHost(new URL('http://printer.local/'), { lookup: false })).toEqual({ address: null, private: true });
+    // Under Bun with nothing passed, Bun's own pin applies.
+    expect(unfurlFault({})).toBeNull();
+  });
+
+  test('a name that never resolves is given up on when the time is up, and is not remembered as unpreviewable', async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    let hang = true;
+    const lookup = (_host: string, signal?: AbortSignal) => {
+      signals.push(signal);
+      return hang ? new Promise<string[]>(() => {}) : Promise.resolve(['93.184.216.34']);
+    };
+    const { fetch } = net({ 'https://stuck.example.test/': html('<title>Here now</title>') });
+    const unfurl = createUnfurler({ pin: pinned(fetch), lookup, timeoutMs: 40 });
+    const started = Date.now();
+    expect(await unfurl('https://stuck.example.test/')).toEqual({ url: 'https://stuck.example.test/', site: 'stuck.example.test' });
+    expect(Date.now() - started).toBeLessThan(2000);
+    // The lookup was handed the signal, so a resolver that can stop does.
+    expect(signals[0]?.aborted).toBe(true);
+    // It was a failure, not an answer: the next paste asks again.
+    hang = false;
+    expect(await unfurl('https://stuck.example.test/')).toMatchObject({ title: 'Here now' });
+    // The asker going away ends the wait too.
+    hang = true;
+    const gone = new AbortController();
+    const waiting = unfurlReal('https://stuck.example.test/', { pin: pinned(fetch), lookup, signal: gone.signal });
+    gone.abort();
+    expect(await waiting).toEqual({ url: 'https://stuck.example.test/', site: 'stuck.example.test' });
+  });
+
+  test('a route that reads the local network answers only a request that names this machine', () => {
+    for (const host of ['localhost', 'localhost:3017', 'LOCALHOST:3017', '127.0.0.1', '127.0.0.1:3017', '[::1]', '[::1]:3017']) expect(isLoopbackHost(host)).toBe(true);
+    for (const host of [undefined, null, '', 'evil.example', 'evil.example:3017', '127.0.0.1.evil.example', 'localhost.evil.example:80', 'evil.example#localhost', '127.0.0.2', '0.0.0.0:3017', '[::1].evil.example', 'localhost:99999999', 'localhost:', 'a'.repeat(300)]) {
+      expect(isLoopbackHost(host)).toBe(false);
+    }
   });
 
   test('a site that failed is asked again next time; a real answer is kept', async () => {
@@ -203,7 +252,7 @@ describe('fetching a preview', () => {
       if (!up) throw new Error('down');
       return new Response('<title>Back</title>', { headers: { 'content-type': 'text/html' } });
     }) as typeof fetch;
-    const unfurl = createUnfurler({ fetch: flaky, lookup: PUBLIC });
+    const unfurl = createUnfurler({ pin: pinned(flaky), lookup: PUBLIC });
     expect(await unfurl('https://flaky.example.test/')).toEqual({ url: 'https://flaky.example.test/', site: 'flaky.example.test' });
     up = true;
     expect(await unfurl('https://flaky.example.test/')).toMatchObject({ title: 'Back' });
@@ -218,7 +267,7 @@ describe('fetching a preview', () => {
 
   test('the same address asked twice is fetched once', async () => {
     const { fetch, calls } = net({ 'https://notes.example.test/posts/1': html(PAGE) });
-    const unfurl = createUnfurler({ fetch, lookup: PUBLIC });
+    const unfurl = createUnfurler({ pin: pinned(fetch), lookup: PUBLIC });
     const [a, b] = await Promise.all([unfurl('https://notes.example.test/posts/1'), unfurl('https://notes.example.test/posts/1')]);
     expect(a).toEqual(b);
     await unfurl('https://notes.example.test/posts/1');
@@ -227,7 +276,7 @@ describe('fetching a preview', () => {
 
   test('the route answers with JSON, or with nothing for an address it will not preview', async () => {
     const { fetch } = net({ 'https://notes.example.test/posts/1': html(PAGE) });
-    const handle = createUnfurlHandler({ fetch, lookup: PUBLIC });
+    const handle = createUnfurlHandler({ pin: pinned(fetch), lookup: PUBLIC });
     const ok = await handle(new Request(`http://server.test/unfurl?url=${encodeURIComponent('https://notes.example.test/posts/1')}`));
     expect(ok.status).toBe(200);
     expect(ok.headers.get('content-type')).toContain('application/json');

@@ -62,6 +62,7 @@ function privateV4([a, b, c]: number[]): boolean {
     (a === 172 && b >= 16 && b <= 31) || // private
     (a === 192 && b === 168) || // private
     (a === 192 && b === 0 && (c === 0 || c === 2)) || // protocol assignments, documentation
+    (a === 192 && b === 88 && c === 99) || // the old 6to4 relay anycast: whoever answers is somebody's relay, not the site
     (a === 198 && (b === 18 || b === 19)) || // benchmarking
     (a === 198 && b === 51 && c === 100) || // documentation
     (a === 203 && b === 0 && c === 113) || // documentation
@@ -75,6 +76,8 @@ function privateV6(bytes: number[]): boolean {
   if (zeros(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) return privateV4(embedded); // IPv4-mapped
   if (zeros(0, 12)) return true; // unspecified, loopback, and the old IPv4-compatible form
   if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zeros(4, 12)) return privateV4(embedded); // NAT64
+  // NAT64 for local use (64:ff9b:1::/48): a translator on someone's own network, never a public address.
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes[4] === 0x00 && bytes[5] === 0x01) return true;
   if (bytes[0] === 0x20 && bytes[1] === 0x02) return privateV4(bytes.slice(2, 6)); // 6to4
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00) return true; // Teredo
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true; // documentation
