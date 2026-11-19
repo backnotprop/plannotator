@@ -1,6 +1,6 @@
 ## The canvas (`packages/canvas`)
 
-Plannotator's own canvas: boxes, notes, text, arrows, frames, groups, pictures, sprites, custom HTML and reference cards on a plain board, with **snapshots** (captures of part of the board) that embed in a plan. It is a package with **no product surface yet**: nothing in the apps imports it. Its only consumer is its own development demo (`bun run --cwd packages/canvas demo`, port 3017). This is separate from Shape (the agent's living board in `guides-and-shared-ui.md`).
+Plannotator's own canvas: boxes, notes, text, arrows, frames, groups, pictures, sprites, charts, custom HTML and reference cards on a plain board, with **snapshots** (captures of part of the board) that embed in a plan. It is a package with **no product surface yet**: nothing in the apps imports it. Its only consumer is its own development demo (`bun run --cwd packages/canvas demo`, port 3017). This is separate from Shape (the agent's living board in `guides-and-shared-ui.md`).
 
 The owner's rules for it: any colour on any object, set by a person or an agent; no keyboard shortcuts; no dot grid (a plain ground); an agent hears about changes through a hand-over or comments sent in bulk, not live (the seam is `CanvasStore.since`; neither is built).
 
@@ -12,7 +12,7 @@ Each layer imports only the ones above it, and `layers.test.ts` fails on any imp
 |---|---|
 | `model/` | The document: plain JSON, typed, versioned (`CANVAS_DOCUMENT_VERSION`, `MIGRATIONS`). `types.ts` (objects, `Snapshot`, `ReferenceTarget`), `codec.ts` (fail-closed `parseDocument` / `checkObject`; unknown fields are dropped), `document.ts` (bounds, arrow geometry, groups), `capture.ts` (taking and comparing a snapshot's capture), `color.ts`, `html-item.ts` (the sandbox contract), `reference.ts`. |
 | `events/` | The only way a document changes. `plan.ts` turns a **command** into **events** after checking it; `reduce.ts` applies events and returns their inverse; `store.ts` (`CanvasStore`) commits an **envelope** and tells its listeners. `wire.ts` checks commands and envelopes that arrive as JSON. `sync.ts` is the collaboration seam. |
-| `view/` | Pure screen maths: `shape-outline.ts` (every box shape's outline), `route.ts` + `routes.ts` + `route-path.ts` (the connector router), `rough.ts` (the sketch look), `guides.ts` (alignment while dragging), `snapshot-source.ts` (a selection or a region as a snapshot to ask for), `camera.ts`, `spatial-index.ts` (uniform grid), `document-index.ts` (the index kept current from the event stream, one per store), `cull.ts` (render window, level of detail), `hit-test.ts`. |
+| `view/` | Pure screen maths: `chart.ts` (a chart's shapes), `shape-outline.ts` (every box shape's outline), `route.ts` + `routes.ts` + `route-path.ts` (the connector router), `rough.ts` (the sketch look), `guides.ts` (alignment while dragging), `snapshot-source.ts` (a selection or a region as a snapshot to ask for), `camera.ts`, `spatial-index.ts` (uniform grid), `document-index.ts` (the index kept current from the event stream, one per store), `cull.ts` (render window, level of detail), `hit-test.ts`. |
 | `react/` | `CanvasView` (the renderer, read-only) and `CanvasEditor` around it (`gestures.ts`, `editor-state.ts`, `chrome.tsx` with the selection bar, colour and style popovers, `Minimap.tsx`, `people.tsx`, `references.ts`, `pictures.ts`, `plan-drop.ts`, `link-preview.ts`). |
 | `snapshot/` | Snapshots: `resolve.ts` (current, behind, detached), `create.ts`, `block.ts` (the Markdown block), `SnapshotFigure`, `frozen.ts`, `CanvasStage` + `transition.ts` (the portal), `picture.ts` (the still fallback), `plan-drop.ts`, `registry.tsx`, `directive.tsx`. |
 | `unfurl/` | Link previews, server-side: `address.ts`, `parse.ts`, `fetch.ts`, `route.ts`. |
@@ -150,6 +150,39 @@ Any object takes a named colour (the canvas's six, which follow the theme) or an
 
 `model/html-item.ts` is the contract and the only way `HtmlObject.html` is drawn (`alt` on the object is its text alternative, since the frame is inert): an iframe with an empty `sandbox`, a CSP of `default-src 'none'` with inline styles and `data:` pictures, `inert`. No script, no network, no navigation, no access to the page. `react/HtmlItem.dom.test.tsx` holds the element that is really mounted to it: the attributes on the frame, the policy ahead of the item's first byte, and none of the item in the page itself. Do not add a sandbox token or loosen the policy for convenience; a scripted item is an owner decision with its own review.
 
+### Charts
+
+A chart is an object like any other (`ChartObject`, `model/types.ts`): **a small table and which field goes where**, never a picture and never markup. Whoever adds it sends numbers; the canvas draws them. `?board=charts` in the demo is twelve of them.
+
+```
+{ type: 'chart', x, y, w, h,
+  mark: 'bar' | 'line' | 'area' | 'dot' | 'cell' | 'span',
+  fields: ['week', 'minutes'],              // the table's column names
+  rows: [['W31', 11.2], ['W32', 10.8]],     // each row as long as fields
+  encode: { x: 'week', y: 'minutes' },      // every value is one of the fields
+  stack?, flip?, dash?, rules?, title?, unit? }
+```
+
+| Word | What it does | Drawn for |
+|---|---|---|
+| `encode.x`, `encode.y` | Along the bottom and up the side. `y` may be up to four fields, each a series. | every mark |
+| `encode.series` | Rows with the same value are one series. Not together with several `y` fields. | every mark |
+| `encode.x2` | Where a span ends. | `span` (needed) |
+| `encode.value` | How strong a cell is, in five steps. | `cell` (it or `series` is needed) |
+| `encode.size` | How large a dot is. | `dot` |
+| `encode.facet` | One small chart for each value, on shared scales. | `bar`, `line`, `area`, `dot` |
+| `stack` | Series on top of each other. | `bar`, `area` |
+| `flip` | Bars sideways, names down the left. | `bar` (not with `facet`) |
+| `dash` | Series drawn dashed, by name. | `line`, and the outline of an `area` that is not stacked |
+| `rules` | `{ at, label?, on?: 'x' }`: a dashed line at a value with a word. Across, `at` is a number; upright it may be a name on the x axis. The scale grows to hold it. | every mark but `cell`; `span` draws upright ones only |
+
+- **The codec is the whole defence** (`checkChart`, `model/chart.ts`; limits in `CHART_LIMITS`): 500 rows, 12 fields, 80 characters a cell, numbers finite and at most 1e12 either way, 4 `y` fields, 8 series, 12 facets, 8 rules, 200 names on an axis that gives each one room. A field's name is letters, digits, spaces and `_ - . % /`, at most 32, and never a name every object has (`constructor`, `toString`). What a mark measures must be all numbers: there is **no empty cell**. Everything else is refused with a reason. An option that means nothing for the mark (`stack` on a line) is kept and not drawn, so the mark can be changed without first undoing options.
+- **One drawing** (`chartShapes`, `view/chart.ts`): a list of two kinds of shape, paths and words, each naming a ROLE for its paint (`ink`, `muted`, `rule`, `accent`), never a colour. The board turns them into SVG elements (`react/ChartView.tsx`; words are React text, never markup, and `.pcv-ch-*` in `canvas.css` are the roles), the still picture turns the same shapes into SVG text with every word escaped (`chartToSvg`, used by `snapshotToSvg`). So a chart is the same on the board, in a figure and in a file. No library and no dependency.
+- **The look is fixed**, so nobody styles a chart to get a good one: a small caps title, the latest value of the first series large on a line or an area, hairline rules with their values in a margin of their own, flat marks. The object's `color` is the accent and marks the first series (`--pcv-chart-accent`: the theme's accent when the chart has no colour; a custom colour is the readable shade the package already works out, `--pcv-stroke`). The other series are quieter steps of ink and of the accent (`SERIES`). A person changes the mark, the colour and the fields. Nothing in a chart moves: no transition, no animation.
+- **Cost.** All the marks of one series are one path, however many rows (500 stacked bars of four series are four paths), and a cell chart is at most five. `ChartView` works the shapes out again only when the table, the encoding or the size changed, not on a move. Too small on screen to read (`rich` false: a view of more than 150 objects, below 45%), a chart draws its marks and none of its words; with more than 4,000 mounted it is a flat patch like everything else. The map draws it as a patch.
+- **Events.** A chart's fields travel in `object-set` like any others. `fields`, `rows` and `encode` must agree, so an edit sends together what changes together. **A change to one cell sends the whole `rows`** (a few kilobytes for 500 rows of four numbers; about half a megabyte for a table at every limit at once), and two people editing different cells at once end on one of the two tables. That is accepted for a chart that carries its own rows; cell-level changes belong to shared data sets, which are not built.
+- **In words** (`describeChart`): what a screen reader is told for a chart, what a snapshot's description holds, and what an agent should read back in place of the rows: `Scan to alert. Line chart of minutes from 11.2 to 1.3 min by week: 3 rows, W1 to W3.`
+
 ### Worst-case data
 
 `demo/worst.ts` is the regression fixture for input at its limits: the longest words, every script, colours with no contrast or no opacity, pictures that fail, shapes at their smallest and largest. Open the demo with `?data=worst` (also `empty`, `one`, `huge`, `max`, `stacked`, `far`; add `&view=canvas` or `&view=split`, `&theme=dark`). In `bun run demo` a switch at the bottom of the page changes the set. When a rule below changes, look at this board in both themes before and after.
@@ -178,6 +211,15 @@ Measured (headed benchmark, `bun run --cwd packages/canvas bench --headed`):
 - Opening a snapshot of a 10,000-object board has a 248 ms worst frame.
 - A figure of more than 4,000 objects draws flat patches with no words (the one exception to "a figure always has its words").
 
+Charts:
+
+- No empty cells, no time scale (a date is a name or a number), no log scale, and a `span` runs between numbers only. `facet` charts share one scale; there is none of their own each.
+- Words are fitted by counting characters, not by measuring them, so a wide script may be cut later than it should.
+- Eight series is the most that can be told apart, and past four they are hard to: the steps are of two colours only.
+- A person has no way yet to change a chart's mark or fields by hand (no editor UI); they can move, resize, recolour and delete one. An agent or a host edits the rest.
+- No flow chart. Boxes and connectors draw one.
+- Looked at in Chromium on a desktop only, like the rest.
+
 Not drawn:
 
 - `curve` connectors are accepted and drawn as straight lines.
@@ -203,6 +245,6 @@ For whichever product wires the canvas in:
 
 `bun run --cwd packages/canvas bench` builds the demo, opens it in Chromium and prints each budget with what was measured, as it goes (`--headed` for a visible window with GPU raster: use that run as the evidence; headless numbers are flattered by its software frame clock). It is not run in CI. Budgets are stated at 60 fps whatever the display. Besides frame times it measures what a frame rate cannot show: frames in which a figure is on screen with nothing drawn yet, heap and DOM nodes over scroll passes and over 50 open/close cycles, that the plan is where it was after coming back, a drag on the real pointer path at 100%, a board with pictures, HTML items, cards and long notes, the canvas being edited behind 50 figures, 10,000 objects, and the `will-change` finding above (with and without).
 
-`LIMITS.objects` is 10,000 because that is what has been measured: at 10,000 a pan with the whole board in view still drops frames (every object is mounted at that zoom, each as one flat element), while work at 100% holds. The benchmark also has rows for 2,000 typed shapes with 1,500 routed connectors and for a board where a third of the shapes are sketched.
+`LIMITS.objects` is 10,000 because that is what has been measured: at 10,000 a pan with the whole board in view still drops frames (every object is mounted at that zoom, each as one flat element), while work at 100% holds. The benchmark also has rows for 2,000 typed shapes with 1,500 routed connectors and for a board where a third of the shapes are sketched, and for a board of 200 charts (`?bench=canvas&charts=200`).
 
 Tests are `*.test.ts` beside the code and run in the unit lanes; `hostile.test.ts` and `layers.test.ts` sit at the package root. Three are DOM tests listed in `tests/dom-test-list.txt`: `packages/ui/components/blocks/directiveRenderer.seam.test.tsx`, `packages/canvas/snapshot/CanvasStage.dom.test.tsx` (opening a figure and coming back leaves the plan where it was) and `packages/canvas/react/HtmlItem.dom.test.tsx` (the frame a custom HTML item is really drawn in).
