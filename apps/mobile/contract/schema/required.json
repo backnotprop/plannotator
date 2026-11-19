@@ -612,6 +612,10 @@
       "session",
       "wakes"
     ],
+    "InboxShowMePage": [
+      "attachment_id",
+      "title"
+    ],
     "InboxSupersededBy": [
       "key",
       "message_id"

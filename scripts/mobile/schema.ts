@@ -98,6 +98,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/review-threads.ts',
   'packages/core/shape-scene.ts',
   'packages/core/shape.ts',
+  'packages/core/show-me-page.ts',
   'packages/core/text-cut.ts',
   'packages/core/ulid.ts',
   'packages/shared/inbox/devices.ts',

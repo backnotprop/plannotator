@@ -3107,6 +3107,9 @@
             "$ref": "#/$defs/InboxLiveSiteRef"
           }
         },
+        "show_me": {
+          "$ref": "#/$defs/InboxShowMePage"
+        },
         "delivery": {
           "anyOf": [
             {
@@ -5238,6 +5241,23 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxShowMePage": {
+      "type": "object",
+      "properties": {
+        "attachment_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "title"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/show-me-page.ts"
     },
     "InboxSupersededBy": {
       "type": "object",
