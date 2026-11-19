@@ -269,8 +269,8 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const client = new Client({ name: "inbox-pulls-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   clients.push(client);
-  const send = async (body: string, thread: string) => {
-    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code" } })) as { structuredContent: { thread_id: string } };
+  const send = async (body: string, thread: string, extra: Record<string, unknown> = {}) => {
+    const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code", ...extra } })) as { structuredContent: { thread_id: string } };
     return result.structuredContent.thread_id;
   };
   const pulls = async (query = "") => fetch(`${base}/api/inbox/pulls${query}`);
@@ -972,6 +972,40 @@ describe("on", () => {
     const moved = await linkOf();
     expect(moved).toMatchObject({ thread_id: other, ask: "guide" });
     expect(moved?.page).toBeUndefined();
+  });
+
+  test("a Show me asked of a PR's thread keeps its guided review on the way beside it, and its page is served once the agent sends one", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
+    expect((await w.own([key], talk, { ask: "show_me" })).status).toBe(200);
+    const asked = await linkOf();
+    expect(asked).toMatchObject({ via: "owner", thread_id: talk, ask: "guide" });
+    expect(typeof asked?.show_me_asked_at).toBe("string");
+    expect(asked?.show_me_page).toBeUndefined();
+    const page = join(w.root, "show-me.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="show-me"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.show_me_page).toMatchObject({ title: "Retries" });
+    expect((await w.own([key], talk, { ask: "show-me" })).status).toBe(422);
+  });
+
+  test("a Show me page is marked seen once the person has looked at its thread", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "show_me" })).status).toBe(200);
+    const page = join(w.root, "show-me.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="show-me"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.show_me_page?.seen).toBeUndefined();
+    w.server.store.markSeen(talk);
+    expect((await linkOf())?.show_me_page).toMatchObject({ title: "Retries", seen: true });
   });
 
   test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {

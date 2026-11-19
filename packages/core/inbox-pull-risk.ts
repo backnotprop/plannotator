@@ -73,7 +73,37 @@ export interface InboxPullRiskAnswer {
   pending: number;
   /** Why the agent's last run failed (not signed in, refused the diff, an answer that made no sense), or null. */
   last_failure: string | null;
+  auto?: InboxPullRiskAuto | null;
+  auto_runs?: Record<string, InboxPullRiskAutoRun>;
+  auto_would_start?: Record<InboxPullRiskAuto["level"], number>;
 }
+
+export type InboxPullRiskAutoMake = "guide" | "show_me" | "both";
+export const INBOX_PULL_RISK_AUTO_MAKES: readonly InboxPullRiskAutoMake[] = ["guide", "show_me", "both"];
+
+export interface InboxPullRiskAuto {
+  level: "high" | "medium";
+  make: InboxPullRiskAutoMake;
+  agent?: string;
+}
+
+export interface InboxPullRiskAutoRun {
+  at: string;
+  level: InboxPullRiskLevel;
+  made: InboxPullRiskAutoMake;
+  state: "queued" | "started" | "failed";
+  thread_id: string | null;
+  reason?: string;
+}
+
+export function inboxPullRiskAutoOf(value: unknown): InboxPullRiskAuto | null {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!raw || (raw.level !== "high" && raw.level !== "medium") || !INBOX_PULL_RISK_AUTO_MAKES.includes(raw.make as InboxPullRiskAutoMake)) return null;
+  const agent = typeof raw.agent === "string" && raw.agent.trim() ? raw.agent.trim() : null;
+  return { level: raw.level, make: raw.make as InboxPullRiskAutoMake, ...(agent ? { agent } : {}) };
+}
+
+export const inboxPullRiskReaches = (level: InboxPullRiskLevel, auto: Pick<InboxPullRiskAuto, "level">): boolean => level === "high" || (level === "medium" && auto.level === "medium");
 
 /** `GET /api/inbox/pulls/risk/models`: what the chosen agent offers, and the pick to start on. */
 export interface InboxPullRiskModels {
