@@ -275,12 +275,20 @@ permission), or a `tool.call` of `AskUserQuestion` (a question). It names no
 next `turn.step`, or at the turn's end; a question when its call settles or the
 turn ends. An `ask` is told only once it has held 1.5 s
 (`TERMINAL_PROMPT_SETTLE_MS`), so auto mode or a hook that answers at once never
-flashes. The InboxLink's `blocked` option sends `blocked: { kind }` in a
-`state` event on change and on every poll, after the registry check (nothing
+flashes (whether auto mode's classifier can take longer after an `ask` is not yet
+checked live). A permission is told only in a process that has seen `tool.run`
+fire: where the engine never delivers it (before 2.1.326, or a guard that sends
+it past the user tier) its end is unseen and an approved call would read as
+"asking" for its whole run, so no permission is told there at all; a question
+needs no `tool.run`. Never noted: ExitPlanMode (its review is in the browser, by
+the mod or the classic hook, however long it takes), the mod's own tools, and a
+Bash command the mod takes over (`answeredByUs`). The InboxLink's `blocked` option sends `blocked: { kind }` in a
+`state` event on change and on every poll, with `blocked_at` (when its word
+last changed), after the registry check (nothing
 while no Inbox has run). Only the kind leaves the session. The Inbox side:
 "Status marks for every agent" in
 [inbox-notifications-and-agents.md](inbox-notifications-and-agents.md). Tests:
-`terminal-prompts.test.ts`.
+`terminal-prompts.test.ts`, and the engine matrix's case in `tests/register.test.ts`.
 
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of

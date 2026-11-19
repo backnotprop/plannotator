@@ -1350,7 +1350,7 @@ export function register(on: On) {
     const agentId = typeof e.agentId === 'string' ? e.agentId : undefined
     if (event === 'tool.check') {
       const verdict = await next(e)
-      if (verdict?.decision === 'ask') await instance.onToolAsked(callId, agentId).catch(() => undefined)
+      if (verdict?.decision === 'ask' && !answeredByUs(e)) await instance.onToolAsked(callId, agentId).catch(() => undefined)
       return verdict
     }
     if (event === RUN_EVENT) {
@@ -1365,6 +1365,19 @@ export function register(on: On) {
       instance.onToolSettled(callId)
     }
   })
+
+  // A call one of our own hooks answers, however long that takes, is not a prompt in the terminal: ExitPlanMode (the
+  // plan review opens in the browser, through the mod or the classic hook), the mod's own tools, and a Bash command the
+  // mod takes over. Never noted as a permission prompt.
+  function answeredByUs(e: any): boolean {
+    const tool = typeof e?.tool === 'string' ? e.tool : ''
+    if (tool === PLAN_TOOL || (toolName && tool === toolName) || (inboxToolName && tool === inboxToolName)) return true
+    if (tool === SHELL_TOOL) {
+      const command = typeof e?.input?.command === 'string' ? e.input.command : typeof e?.command === 'string' ? e.command : ''
+      return !!command && !!shellTakeOver(command, !!e.agentId)
+    }
+    return false
+  }
 
   on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)

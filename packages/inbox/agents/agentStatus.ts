@@ -12,7 +12,7 @@ import { useSyncExternalStore } from 'react';
 import type { InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import { apiPost } from '../api';
 import { inboxUrl } from '../inboxUrl';
-import { inboxAgentsNow, onInboxAgentsSet, subscribeInboxAgents } from '../agentsList';
+import { inboxAgentsNow, onInboxAgentsRead, subscribeInboxAgents } from '../agentsList';
 
 /** The switch's words (Settings' row and the ⋮ menu's item). */
 export const AGENT_STATUS_LABEL = 'Show agent status';
@@ -21,6 +21,9 @@ export const AGENT_STATUS_DESC = 'A mark on each agent: working, or waiting on y
 
 /** Pressed here and not yet in a list read: what the switch shows meanwhile. */
 let pending: boolean | null = null;
+/** The press `pending` came from, and whether its save has landed: past that, the next list read is the truth. */
+let presses = 0;
+let landed = false;
 const listeners = new Set<() => void>();
 const tell = () => {
   for (const listener of listeners) listener();
@@ -36,9 +39,10 @@ export function agentStatusOn(): boolean {
   return pending ?? agentStatusOf(inboxAgentsNow());
 }
 
-// A list read that agrees with a press ends it.
-onInboxAgentsSet(() => {
-  if (pending !== null && agentStatusOf(inboxAgentsNow()) === pending) {
+// A list read that agrees with a press ends it; so does any list read once the press's save landed: the list carries
+// the saved value, so the last save wins in every window (another window's later press included).
+onInboxAgentsRead(() => {
+  if (pending !== null && (landed || agentStatusOf(inboxAgentsNow()) === pending)) {
     pending = null;
     tell();
   }
@@ -60,11 +64,15 @@ export function useAgentStatusOn(): boolean {
 
 /** The person turned it on or off: shown at once, then saved; a save that fails puts back what the list says. */
 export async function setAgentStatus(on: boolean): Promise<void> {
+  const press = ++presses;
   pending = on;
+  landed = false;
   tell();
   try {
     await apiPost(inboxUrl('/settings'), { agent_status: { on } });
+    if (press === presses) landed = true;
   } catch {
+    if (press !== presses) return;
     pending = null;
     tell();
   }
@@ -73,5 +81,6 @@ export async function setAgentStatus(on: boolean): Promise<void> {
 /** Tests only: no press waiting. */
 export function resetAgentStatusForTests(): void {
   pending = null;
+  landed = false;
   tell();
 }

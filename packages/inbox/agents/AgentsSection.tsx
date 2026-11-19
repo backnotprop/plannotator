@@ -296,7 +296,7 @@ const AgentRow = memo(
             </span>
           </button>
         </Tip>
-        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} />
+        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} statusMarks />
         {hasMenu && (
           <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
             <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${entry.name} options`} data-agent-more={entry.agent.id}>

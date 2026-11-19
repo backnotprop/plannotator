@@ -1271,6 +1271,8 @@ export class InboxLink {
   private lastHeld = false
   /** What the Inbox was last told the session waits on in its terminal (`blocked` on the poll and the state events). */
   private lastBlocked: InboxBlockedKind | null = null
+  /** When `lastBlocked` last changed (this host's clock; INBOX_BLOCKED_AT_FIELD): null until the first tick that read it. */
+  private blockedAt: number | null = null
   /** Send now could not go into the running turn (the engine refused the row): these wait for idle, as before. */
   private noSteer = new Set<string>()
   /** The engine refused a row once (an engine without `$.session.append`): stop offering Send now. */
@@ -1582,6 +1584,8 @@ export class InboxLink {
     const sendNow = await this.sendNowNow()
     const held = this.heldForInput
     const blocked = this.options.blocked?.(now) ?? null
+    if (this.blockedAt === null) this.blockedAt = now
+    else if (blocked !== this.lastBlocked) this.blockedAt = Math.max(now, this.blockedAt + 1)
     if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld || blocked !== this.lastBlocked) {
       const known = this.busy !== null
       if (busy !== this.busy && !busy) this.idleSince = now
@@ -1593,7 +1597,7 @@ export class InboxLink {
       // whether Claude Code holds this session's replies until the person types (the window's "Stopped"), and
       // what it waits on in its terminal (the Agents list's mark; the kind only).
       if (known && this.leader)
-        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held, ...inboxBlockedField(blocked) })
+        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held, ...inboxBlockedField(blocked, this.blockedAt) })
     }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
@@ -1775,7 +1779,7 @@ export class InboxLink {
       // Claude Code refused a reply and holds them all until the person types there: the window says "Stopped".
       ...(this.heldForInput ? { [INBOX_HELD_POLL_FIELD]: true } : {}),
       // A prompt up in its terminal (the kind only): said again on every poll while it lasts.
-      ...inboxBlockedField(this.lastBlocked),
+      ...inboxBlockedField(this.lastBlocked, this.blockedAt ?? undefined),
       [INBOX_STEER_POLLS_POLL_FIELD]: true,
       // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
       [INBOX_TAGS_POLL_FIELD]: true,

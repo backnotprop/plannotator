@@ -465,7 +465,6 @@
       "InboxAgentMark.kind.permission",
       "InboxAgentMark.kind.question",
       "InboxAgentMark.state.blocked",
-      "InboxAgentMark.state.idle",
       "InboxAgentMark.state.working",
       "InboxAgentMark.where.inbox",
       "InboxAgentMark.where.terminal",

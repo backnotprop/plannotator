@@ -51,11 +51,20 @@ export function setInboxAgents(next: unknown): void {
         })
     : null;
   const json = JSON.stringify(clean);
-  if (json === currentJson) return;
-  current = clean === null ? null : Object.freeze(clean);
-  currentJson = json;
-  for (const listener of listeners) listener();
-  for (const listener of quiet) listener();
+  if (json !== currentJson) {
+    current = clean === null ? null : Object.freeze(clean);
+    currentJson = json;
+    for (const listener of listeners) listener();
+    for (const listener of quiet) listener();
+  }
+  for (const listener of reads) listener();
+}
+
+const reads = new Set<() => void>();
+/** Hear every list read, one that changes nothing included (agents/agentStatus.ts: a landed press yields to the list). */
+export function onInboxAgentsRead(listener: () => void): () => void {
+  reads.add(listener);
+  return () => reads.delete(listener);
 }
 
 const quiet = new Set<() => void>();

@@ -358,6 +358,8 @@ select, input or editor), `PiTerminalPrompts` (`apps/pi-extension/inbox.ts`)
 makes the Inbox link say `blocked: { kind: 'question' }` on its polls and in a
 `state` event (Pi asks no permission of its own, so it is always `question`).
 Nested prompts count; a settled run, a session change or shutdown clears it.
+The event does not say what a prompt is for, so a permission-gate extension's
+confirm is told as a question too.
 Only the kind leaves Pi, never the prompt's title. An older Pi never raises the
 events: nothing is said. The Inbox side and the rule: "Status marks for every
 agent" in [inbox-notifications-and-agents.md](inbox-notifications-and-agents.md).

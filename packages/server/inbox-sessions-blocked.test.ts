@@ -4,14 +4,15 @@
  * said again within INBOX_BLOCKED_STALE_MS is dropped. The failures these guard: a prompt shown after its connection
  * stopped saying it (a lost end, a hung plugin), after a poll or event without it, or for a session that is no longer
  * live; a field this Inbox does not know shown at all; an older connection (no field) ever reading as blocked; the
- * Agents signature not moving when it changes (the windows would not read the list again). A real store in a temp
+ * Agents signature not moving when it changes, expiry included (the windows would not read the list again); a poll
+ * built before the event that cleared it, arriving after, setting it again (`blocked_at` orders them). A real store in a temp
  * folder: no server.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
+import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
@@ -86,4 +87,32 @@ test("a change moves the Agents signature (the windows read the list again)", as
   // Gone stale on its own: the signature moves back with no poll.
   pass(INBOX_BLOCKED_STALE_MS + 1_000);
   expect(live.agentsSignature(0)).not.toBe(up);
+});
+
+test("a body whose word is older than the one held changes nothing; one without blocked_at (an older connection) stands", async () => {
+  const { live, poll, state, blocked } = world();
+  await poll({});
+  // The prompt comes up (word at 100), and is answered (word at 200)...
+  state({ [INBOX_BLOCKED_FIELD]: { kind: "permission" }, [INBOX_BLOCKED_AT_FIELD]: 100 });
+  state({ [INBOX_BLOCKED_AT_FIELD]: 200 });
+  expect(blocked()).toBeNull();
+  // ...then a poll built while it was up arrives: it is older, so it stays answered.
+  const release = await live.pollStarted("ses-1", "claude-code", { busy: true, [INBOX_BLOCKED_FIELD]: { kind: "permission" }, [INBOX_BLOCKED_AT_FIELD]: 100 });
+  expect(blocked()).toBeNull();
+  release();
+  state({ [INBOX_BLOCKED_FIELD]: { kind: "question" }, [INBOX_BLOCKED_AT_FIELD]: 300 });
+  expect(blocked()).toBe("question");
+  // A body with no blocked_at (an older connection's) is the latest, as before.
+  state({});
+  expect(blocked()).toBeNull();
+});
+
+test("gone stale while the session stays live: the signature moves (the windows drop the mark)", async () => {
+  const { live, pass } = world();
+  const release = await live.pollStarted("ses-1", "claude-code", { busy: true, [INBOX_BLOCKED_FIELD]: { kind: "permission" } });
+  const up = live.agentsSignature(0);
+  pass(INBOX_BLOCKED_STALE_MS + 1_000);
+  expect(live.agentSessions(0).find((entry) => entry.session === "ses-1")?.live).toBe(true);
+  expect(live.agentsSignature(0)).not.toBe(up);
+  release();
 });

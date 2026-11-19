@@ -4,15 +4,17 @@
  * apps/opencode-plugin/inbox-blocked.test.ts). The failures these guard:
  *  - a prompt coming up or going not told to the Inbox at once (a `state` event), or not repeated on each poll;
  *  - a `state` event or poll that still says blocked after the prompt is over (the field must be absent then);
- *  - anything but the kind sent (a title, a command).
+ *  - anything but the kind sent (a title, a command);
+ *  - a word without `blocked_at`, or one not later than the word before it (the Inbox orders by it);
+ *  - the silent link rule broken: a request while no Inbox has run (no registry), prompt or not.
  * A stand-in connection records what would go to the Inbox: no Inbox, no server, no agent.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InboxWake, type InboxAgentConnection, type InboxWakeTarget } from "./agent-link";
-import { INBOX_BLOCKED_FIELD, INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, type InboxBlockedKind } from "./connection";
+import { InboxAgentConnection, InboxWake, type InboxWakeTarget } from "./agent-link";
+import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, type InboxBlockedKind } from "./connection";
 
 const dirs: string[] = [];
 const wakes: InboxWake[] = [];
@@ -67,5 +69,33 @@ describe("the shared link tells the Inbox what waits in the terminal", () => {
     const goneAt = polls().length;
     await until(() => polls().length > goneAt + 1);
     expect(INBOX_BLOCKED_FIELD in polls().at(-1)!).toBe(false);
+    // Each word says when it changed, the clearing one later than the one it clears.
+    const up = states().find((body) => body[INBOX_BLOCKED_FIELD] !== undefined)!;
+    const gone = states().at(-1)!;
+    expect(gone[INBOX_BLOCKED_AT_FIELD] as number).toBeGreaterThan(up[INBOX_BLOCKED_AT_FIELD] as number);
+    expect(typeof polls().at(-1)![INBOX_BLOCKED_AT_FIELD]).toBe("number");
+  });
+
+  test("no Inbox has run (no registry): a prompt up sends nothing", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-agent-link-silent-"));
+    dirs.push(dataDir);
+    const realFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+      return new Response("{}");
+    }) as unknown as typeof fetch;
+    try {
+      let read = 0;
+      const connection = new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [], env: {} });
+      const target: InboxWakeTarget = { isBusy: () => true, deliver: async () => {}, notify: () => {}, blocked: () => (read++, "permission") };
+      const wake = new InboxWake(connection, "ses-1", target, 5);
+      wakes.push(wake);
+      wake.start();
+      await until(() => read > 3);
+      expect(requests).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

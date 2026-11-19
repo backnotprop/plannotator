@@ -103,9 +103,14 @@ function sharedMark(key: string): ShownMark | null {
   return mark;
 }
 
-/** The mark an agent's icon carries now (an agent's id or one of its sessions), or null: today's icon. */
-export function useRexMarkOf(agent: string | null | undefined): ShownMark | null {
-  const read = () => (agent ? markKey(marksNow(inboxAgentsNow(), agentStatusOn())?.get(agent)) : '');
+/**
+ * The mark an agent's icon carries now (an agent's id or one of its sessions), or null: today's icon. `statusMarks`:
+ * this icon shows an agent as an agent (the sidebar's Agents list), so it carries the "Agent status" marks too while
+ * the setting is on. Every other icon of an agent (a thread row, the Board, a thread's header, the sender line) carries
+ * Rex's marks only: a per-agent mark there would speak for threads it is not true of (owner ruling, 2026-11-18).
+ */
+export function useRexMarkOf(agent: string | null | undefined, statusMarks = false): ShownMark | null {
+  const read = () => (agent ? markKey(marksNow(inboxAgentsNow(), statusMarks && agentStatusOn())?.get(agent)) : '');
   return sharedMark(useSyncExternalStore(subscribeAgentStatus, read, read));
 }
 

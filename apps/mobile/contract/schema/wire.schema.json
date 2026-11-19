@@ -1209,7 +1209,6 @@
           "type": "string",
           "enum": [
             "blocked",
-            "idle",
             "working"
           ],
           "x-open": true

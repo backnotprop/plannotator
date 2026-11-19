@@ -131,7 +131,8 @@ test('off by default; on from the ⋮ menu, a terminal permission prompt shows a
   await expect(markOf(page, 'ses-claude')).toHaveAttribute('aria-label', 'Working');
   await expect(markOf(page, 'ses-codex')).toHaveCount(0);
   // Kept: config.json says it, a reload keeps it.
-  expect(JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).inboxAgentStatus).toBe(true);
+  // The mark shows from the press itself, before its save lands: wait for the save.
+  await expect.poll(() => JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).inboxAgentStatus).toBe(true);
   await page.reload();
   await expect(markOf(page, 'ses-claude')).toHaveAttribute('aria-label', 'Working');
 

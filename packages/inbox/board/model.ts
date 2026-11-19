@@ -565,11 +565,14 @@ function dayOfMonth(iso: string): string {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/** The working state of a card's agent, from the live sessions: working, idle, or ended (not live). */
+/**
+ * The working state of a card's agent, from the live sessions: working, idle, or ended (not live). Null when unknown,
+ * a live host that reports no turns (`busy` null) included: never "idle" for it.
+ */
 export function agentState(session: string | null, live: readonly { session: string; busy: boolean | null }[] | null): 'working' | 'idle' | 'ended' | null {
   if (!session || live === null) return null;
   const found = live.find((s) => s.session === session);
-  return found ? (found.busy ? 'working' : 'idle') : 'ended';
+  return found ? (found.busy === true ? 'working' : found.busy === false ? 'idle' : null) : 'ended';
 }
 
 /**

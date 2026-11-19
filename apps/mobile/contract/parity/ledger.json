@@ -19884,20 +19884,6 @@
       }
     },
     {
-      "id": "undecided-enum-inboxagentmark-state-idle",
-      "title": "enum:InboxAgentMark.state.idle",
-      "surface": [
-        "enum:InboxAgentMark.state.idle"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-19",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
       "id": "undecided-enum-inboxagentmark-state-working",
       "title": "enum:InboxAgentMark.state.working",
       "surface": [

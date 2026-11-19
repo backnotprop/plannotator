@@ -1553,3 +1553,32 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
     expect(w.logs.filter((line) => line.startsWith('passed by: ')).sort()).toEqual(['passed by: matcher-probe tool.describe', 'passed by: plannotator tool.describe'])
   })
 })
+
+// What waits on the person in the terminal (hooks/mod/terminal-prompts.ts), told to the Inbox's Agents list. The mod
+// watches every tool call through a matcherless `tool.*` hook (an engine before 2.1.326 refuses a module that names
+// tool.run). The failures this guards on each engine of test.yml's matrix (2.1.287, the pinned one, a current one):
+// the module not loading with that hook, a tool's own result or an AskUserQuestion answer not reaching the caller
+// unchanged (the hook must only watch), and, from 2.1.326, tool.run not raised (the mod tells a permission prompt only
+// once it has seen tool.run fire, review H1: without it an approved call would read as "asking" for its whole run).
+describe('watching for prompts in the terminal (the matcherless tool.* hook)', () => {
+  test('loads on every engine and passes every call through unchanged', async ($: any, on: any) => {
+    world(on)
+    const ran: string[] = []
+    on('tool.call', ($: any, e: any) => {
+      ran.push(e.tool)
+      return e.tool === 'AskUserQuestion' ? { result: { answers: { 'Which database?': 'Postgres' } } } : { result: `read ${e.file_path}` }
+    })
+    await $.session.start(SESSION)
+    const read = await $.tool.call({ tool: 'Read', file_path: '/work/notes.md' })
+    expect(read.result).toBe('read /work/notes.md')
+    const asked = await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which database?' }] })
+    expect(asked.result).toEqual({ answers: { 'Which database?': 'Postgres' } })
+    expect(ran).toEqual(['Read', 'AskUserQuestion'])
+    // From 2.1.326 the engine raises tool.run, which the mod needs before it tells any permission prompt.
+    if (CLAUDE_CODE_VERSION) {
+      const [a, b, c] = CLAUDE_CODE_VERSION.split('.').map(Number)
+      const from326 = a! > 2 || (a === 2 && (b! > 1 || (b === 1 && c! >= 326)))
+      expect(`${CLAUDE_CODE_VERSION} raises tool.run: ${typeof $.tool?.run === 'function'}`).toBe(`${CLAUDE_CODE_VERSION} raises tool.run: ${from326}`)
+    }
+  })
+})

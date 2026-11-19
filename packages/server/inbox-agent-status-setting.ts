@@ -21,8 +21,20 @@ export interface InboxAgentStatusSetting {
 export function createInboxAgentStatusSetting(deps: {
   loadConfig: () => Pick<PlannotatorConfig, "inboxAgentStatus">;
   saveConfig: (change: Pick<PlannotatorConfig, "inboxAgentStatus">) => void;
+  /**
+   * What config.json is now (its stat), so it is read and parsed again only when it changed: the 1 s delivery watch
+   * and every list read ask (inbox-launch.ts keeps its config the same way). Absent: read every time.
+   */
+  configKey?: () => string;
 }): InboxAgentStatusSetting {
-  const on = () => deps.loadConfig().inboxAgentStatus === true;
+  let cache: { key: string; on: boolean } | null = null;
+  const on = () => {
+    const key = deps.configKey?.();
+    if (key !== undefined && cache?.key === key) return cache.on;
+    const value = deps.loadConfig().inboxAgentStatus === true;
+    if (key !== undefined) cache = { key, on: value };
+    return value;
+  };
   return {
     on,
     save(input, validateOnly = false) {

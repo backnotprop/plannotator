@@ -1760,17 +1760,15 @@ public enum InboxAgentMarkKind: Codable, Hashable, Sendable, RawRepresentable {
 
 public enum InboxAgentMarkState: Codable, Hashable, Sendable, RawRepresentable {
   case blocked
-  case idle
   case working
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxAgentMarkState] = [.blocked, .idle, .working]
+  public static let known: [InboxAgentMarkState] = [.blocked, .working]
 
   public init(rawValue: String) {
     switch rawValue {
     case "blocked": self = .blocked
-    case "idle": self = .idle
     case "working": self = .working
     default: self = .unknown(rawValue)
     }
@@ -1779,7 +1777,6 @@ public enum InboxAgentMarkState: Codable, Hashable, Sendable, RawRepresentable {
   public var rawValue: String {
     switch self {
     case .blocked: return "blocked"
-    case .idle: return "idle"
     case .working: return "working"
     case .unknown(let value): return value
     }

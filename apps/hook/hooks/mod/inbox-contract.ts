@@ -2155,8 +2155,17 @@ export const INBOX_UNDELIVERED_AFTER_MS = 60_000
  * and drops one not said again within INBOX_BLOCKED_STALE_MS. Only the
  * Agents list's status mark reads it. An older Inbox ignores it; an older
  * connection never sends it.
+ *
+ * With it (or without it), a connection sends INBOX_BLOCKED_AT_FIELD: when,
+ * by its own clock, its word last changed. A body whose word is older than
+ * the one the Inbox holds (a poll built before the `state` event that
+ * cleared it, arriving after) changes nothing. A body without it (an older
+ * connection) is taken as the latest, as before.
  */
 export const INBOX_BLOCKED_FIELD = 'blocked'
+
+/** When the connection's `blocked` word last changed, in ms by its own clock (see INBOX_BLOCKED_FIELD). */
+export const INBOX_BLOCKED_AT_FIELD = 'blocked_at'
 
 /** What a session waits on in its terminal (INBOX_BLOCKED_FIELD). */
 export type InboxBlockedKind = 'permission' | 'question'
@@ -2168,9 +2177,12 @@ export function parseInboxBlocked(value: unknown): InboxBlockedKind | null {
   return kind === 'permission' || kind === 'question' ? kind : null
 }
 
-/** The field for a poll or `state` body: `{ blocked: { kind } }` while blocked, else nothing (which clears it). */
-export function inboxBlockedField(kind: InboxBlockedKind | null): { blocked?: { kind: InboxBlockedKind } } {
-  return kind ? { [INBOX_BLOCKED_FIELD]: { kind } } : {}
+/**
+ * The fields for a poll or `state` body: `{ blocked: { kind } }` while blocked, else nothing (which clears it), and
+ * `blocked_at`, when that word last changed (`at`, the connection's own clock), so an older body never undoes a newer one.
+ */
+export function inboxBlockedField(kind: InboxBlockedKind | null, at?: number): { blocked?: { kind: InboxBlockedKind }; blocked_at?: number } {
+  return { ...(kind ? { [INBOX_BLOCKED_FIELD]: { kind } } : {}), ...(typeof at === 'number' && Number.isFinite(at) ? { [INBOX_BLOCKED_AT_FIELD]: at } : {}) }
 }
 
 /**

@@ -6,6 +6,9 @@
  *  - with it on: a state drawn as another, or its words wrong; a thread waiting in the Inbox drawn as a bare disc; a prompt in the agent's terminal not saying so in its
  *    label ("in its terminal", never as if it waited in the Inbox); a host that reports no turns drawn at all;
  *  - a fresh Rex record not winning;
+ *  - a setting mark on a thread row's icon (owner ruling, 2026-11-18: only where an agent is shown as an agent, the
+ *    sidebar's Agents list; a per-agent "Waiting on you" on each of its rows is false for rows that do not wait),
+ *    while Rex's marks keep showing there;
  *  - the two switches (Settings' row, the ⋮ menu's item) disagreeing, or a press not saved as `agent_status`;
  *  - a press that does not show at once, or that a list read which already agrees does not settle.
  *
@@ -34,6 +37,7 @@ if (hasDom) {
 }
 
 const { HostMark } = (hasDom ? await import('../icons') : {}) as typeof import('../icons');
+const { AgentMark } = (hasDom ? await import('./AgentMark') : {}) as typeof import('./AgentMark');
 const motion = (hasDom ? await import('./motion') : {}) as typeof import('./motion');
 const faces = (hasDom ? await import('./agentFaces') : {}) as typeof import('./agentFaces');
 const { setInboxAgents } = (hasDom ? await import('../agentsList') : {}) as typeof import('../agentsList');
@@ -91,9 +95,9 @@ const agent = (id: string, over: { status?: InboxAgentMark; rex?: InboxRexMark; 
 const list = (agents: InboxAgent[], on: boolean): InboxAgentsGroup[] => [{ agents, total: agents.length, ended_today: 0, ...(on ? { status_marks: true as const } : {}) }];
 
 const AGENTS = [
-  agent('ses_rex', { rex: { state: 'working' }, status: { state: 'idle' } }),
+  agent('ses_rex', { rex: { state: 'working' }, status: { state: 'working' } }),
   agent('ses_work', { status: { state: 'working' } }),
-  agent('ses_idle', { status: { state: 'idle' } }),
+  agent('ses_rest'),
   agent('ses_here', { status: { state: 'blocked', where: 'inbox' } }),
   agent('ses_perm', { status: { state: 'blocked', kind: 'permission', where: 'terminal' } }),
   agent('ses_q', { status: { state: 'blocked', kind: 'question', where: 'terminal' } }),
@@ -108,14 +112,18 @@ function draw(node: React.ReactNode) {
   act(() => root!.render(node));
   return host;
 }
+/** The sidebar's Agents list: each agent's own mark (AgentMark, as AgentsSection draws it). */
 const icons = () => (
   <>
     {AGENTS.map((a) => (
-      <HostMark key={a.id} host="claude-code" agent={a.id} />
+      <div key={a.id} className="ib-sbagent" data-agent={a.id}>
+        <AgentMark id={a.id} host="claude-code" name={a.id} agent={a} statusMarks />
+      </div>
     ))}
   </>
 );
-const marksOf = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.ib-mk')].map((mk) => mk.querySelector<HTMLElement>('.ib-rxm')?.getAttribute('aria-label') ?? null);
+const marksOf = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[data-agent]')].map((row) => row.querySelector<HTMLElement>('.ib-rxm')?.getAttribute('aria-label') ?? null);
+const markOf = (el: HTMLElement, i: number) => el.querySelectorAll<HTMLElement>('[data-agent]')[i]!.querySelector<HTMLElement>('.ib-rxm')!;
 const settle = async () => {
   for (let i = 0; i < 4; i++) await act(async () => await new Promise((done) => setTimeout(done, 0)));
 };
@@ -126,17 +134,31 @@ test.skipIf(!hasDom)('off (the default): only the Rex agent carries a mark, and 
   expect(marksOf(el)).toEqual(['Working', null, null, null, null, null, null]);
 });
 
-test.skipIf(!hasDom)('on: each agent its mark and words, a terminal prompt saying where; a host that reports no turns none; Rex wins', () => {
+test.skipIf(!hasDom)('on: each agent its mark and words, a terminal prompt saying where; at rest and a host that reports no turns none; Rex wins', () => {
   setInboxAgents(list(AGENTS, true));
   const el = draw(icons());
-  expect(marksOf(el)).toEqual(['Working', 'Working', 'Idle', 'Waiting on you', 'Asking for permission in its terminal', 'Asking a question in its terminal', null]);
-  const perm = el.querySelectorAll<HTMLElement>('.ib-mk')[4]!.querySelector<HTMLElement>('.ib-rxm')!;
+  expect(marksOf(el)).toEqual(['Working', 'Working', null, 'Waiting on you', 'Asking for permission in its terminal', 'Asking a question in its terminal', null]);
+  const perm = markOf(el, 4);
   // The same jelly mark Rex draws for a blocked pane, its words as its text alternative only.
   expect([perm.dataset.rxState, perm.dataset.rxWhere, perm.getAttribute('title'), perm.hasAttribute('data-rx-wait')]).toEqual(['permission', 'terminal', 'Asking for permission in its terminal', true]);
   // Waiting on the person in the Inbox: Rex's question jelly (the "?"), never the bare waiting disc; its own words.
-  const here = el.querySelectorAll<HTMLElement>('.ib-mk')[3]!.querySelector<HTMLElement>('.ib-rxm')!;
+  const here = markOf(el, 3);
   expect([here.dataset.rxState, here.getAttribute('aria-label')]).toEqual(['question', 'Waiting on you']);
   expect(el.textContent).toBe('');
+});
+
+test.skipIf(!hasDom)("on: a thread row's icon never gains a setting mark (one waiting row, one finished row of the same agent); Rex's still shows", () => {
+  setInboxAgents(list(AGENTS, true));
+  // Two rows of the agent that waits on the person in the Inbox (one row waits, one is finished), and a Rex agent's row.
+  const el = draw(
+    <>
+      <HostMark host="claude-code" agent="ses_here" />
+      <HostMark host="claude-code" agent="ses_here" />
+      <HostMark host="claude-code" agent="ses_perm" />
+      <HostMark host="claude-code" agent="ses_rex" />
+    </>,
+  );
+  expect([...el.querySelectorAll<HTMLElement>('.ib-mk')].map((mk) => mk.querySelector('.ib-rxm')?.getAttribute('aria-label') ?? null)).toEqual([null, null, null, 'Working']);
 });
 
 test.skipIf(!hasDom)('the two switches agree: one press shows at once in both and on every icon, and is saved as agent_status', async () => {
@@ -172,4 +194,16 @@ test.skipIf(!hasDom)('the two switches agree: one press shows at once in both an
   act(() => setInboxAgents(list(AGENTS, false)));
   expect([sw().getAttribute('aria-checked'), item().getAttribute('aria-checked')]).toEqual(['false', 'false']);
   expect(marksOf(el)).toEqual(['Working', null, null, null, null, null, null]);
+});
+
+test.skipIf(!hasDom)("two windows: once this window's save landed, a list carrying another window's later save wins (no stale press)", async () => {
+  setInboxAgents(list(AGENTS, false));
+  const el = draw(<AgentStatusRow />);
+  const sw = () => el.querySelector<HTMLElement>('[data-settings-agent-status] [role="switch"]')!;
+  act(() => sw().click());
+  await settle();
+  expect(saves).toEqual([{ agent_status: { on: true } }]);
+  // Before this window read a list that says on, the other window turned it off: the list now says off.
+  act(() => setInboxAgents(list(AGENTS, false)));
+  expect(sw().getAttribute('aria-checked')).toBe('false');
 });

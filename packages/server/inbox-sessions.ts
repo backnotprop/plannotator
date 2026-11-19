@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
+import { INBOX_BLOCKED_AT_FIELD, INBOX_BLOCKED_FIELD, INBOX_BLOCKED_STALE_MS, parseInboxBlocked, type InboxBlockedKind } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
@@ -210,6 +210,8 @@ interface SeenSession {
    * INBOX_BLOCKED_STALE_MS. Absent: none said.
    */
   blocked?: { kind: InboxBlockedKind; at: number } | null;
+  /** When, by its connection's clock, the word above last changed (INBOX_BLOCKED_AT_FIELD); absent from an older connection. */
+  blockedSaid?: number;
   /**
    * A session the Inbox wakes itself, with no connection that polls (Codex:
    * `codex queue`; packages/server/inbox-codex-wake.ts): seen from its MCP
@@ -450,8 +452,15 @@ export function createInboxLiveSessions(options: {
     entry.held = held;
   };
 
-  /** A poll's or `state` event's `blocked` (INBOX_BLOCKED_FIELD): the latest word stands, with when it was said. */
+  /**
+   * A poll's or `state` event's `blocked` (INBOX_BLOCKED_FIELD): the latest word stands, with when it was said. A body
+   * whose word is older than the one held (its `blocked_at` before the held one's: a poll built before the event that
+   * cleared it, arriving after) changes nothing.
+   */
   const setBlocked = (entry: SeenSession, body: Record<string, unknown>, at: number) => {
+    const said = finiteMs(body[INBOX_BLOCKED_AT_FIELD]);
+    if (said !== null && entry.blockedSaid !== undefined && said < entry.blockedSaid) return;
+    if (said !== null) entry.blockedSaid = said;
     const kind = parseInboxBlocked(body[INBOX_BLOCKED_FIELD]);
     entry.blocked = kind ? { kind, at } : null;
   };

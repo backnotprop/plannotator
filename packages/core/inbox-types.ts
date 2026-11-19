@@ -3647,9 +3647,12 @@ export interface InboxAgent {
   turns_unknown?: true;
 }
 
-/** An agent's status mark from what the Inbox knows (`InboxAgent.status_mark`): the jelly marks' states it can claim. */
+/**
+ * An agent's status mark from what the Inbox knows (`InboxAgent.status_mark`): the jelly marks' states it can claim.
+ * No idle (owner ruling, 2026-11-18): an agent at rest draws no mark.
+ */
 export interface InboxAgentMark {
-  state: "working" | "idle" | "blocked";
+  state: "working" | "blocked";
   /** For `blocked` in its terminal: a permission prompt or a question. */
   kind?: "permission" | "question";
   /** For `blocked`: where it waits on the person, here in the Inbox (a thread) or in its own terminal. */
@@ -3660,7 +3663,7 @@ export interface InboxAgentMark {
 export function inboxAgentMarkChecked(value: unknown): InboxAgentMark | null {
   const mark = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const state = mark?.state;
-  if (state !== "working" && state !== "idle" && state !== "blocked") return null;
+  if (state !== "working" && state !== "blocked") return null;
   if (state !== "blocked") return { state };
   if (mark!.where === "terminal" && (mark!.kind === "permission" || mark!.kind === "question")) return { state, kind: mark!.kind, where: "terminal" };
   return mark!.where === "inbox" ? { state, where: "inbox" } : null;

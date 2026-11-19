@@ -11,9 +11,9 @@
  *  - a thread of it waits on the person (Stopped on you, Holding up work, Waiting on you): `blocked`, `where: "inbox"`,
  *    whatever its host reports;
  *  - a turn runs (its connection said busy, or its launch is starting or working): `working`;
- *  - at rest, and its host reports turns (its connection said not busy), or its launch was stopped: `idle`;
- *  - otherwise (a host that reports nothing about turns): no mark, and a live one says so (`turns_unknown`), so the
- *    window never calls it idle.
+ *  - otherwise no mark. At rest draws nothing (owner ruling, 2026-11-18: the approved marks are working, asking and
+ *    done; no idle mark), the same as a host that reports nothing about turns. A live one of those says so
+ *    (`turns_unknown`), so the window never calls it idle in words either.
  *
  * What it never claims: `done` (only a terminal knows the person has not looked yet: Rex's record says it), `ended`
  * from silence (an ended agent has no mark at all), anything from a title or screen text, any free text (a mark is a
@@ -44,6 +44,5 @@ function agentStatusMark(agent: InboxAgent, facts: InboxAgentTurnFacts | null): 
   if (agent.live && !agent.launch && facts?.blocked) return { state: "blocked", kind: facts.blocked, where: "terminal" };
   if (agent.waiting > 0) return { state: "blocked", where: "inbox" };
   if (agent.state === "working") return { state: "working" };
-  if (agent.state === "idle" && (facts?.busy === false || agent.launch?.run === "stopped")) return { state: "idle" };
   return null;
 }

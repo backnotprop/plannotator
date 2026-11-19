@@ -11,6 +11,11 @@
  *
  * Told only once it has held SETTLE_MS: an `ask` that auto mode's classifier or a PermissionRequest hook answers at
  * once is never shown. Never the tool's input, its command or the question's words.
+ *
+ * A permission is told only in a process that has seen `tool.run` fire (`runSeen`): its end is the call's run, and
+ * where the engine never delivers that event to the mod (Claude Code before 2.1.326, or a guard that sends it past the
+ * user tier) the prompt would read as "asking" for the whole run of the approved tool. There, no permission is told
+ * at all (an under-claim). A question needs no `tool.run`: it ends when its call settles.
  */
 import type { InboxBlockedKind } from './inbox-contract'
 
@@ -29,6 +34,8 @@ interface Prompt {
 
 export class TerminalPrompts {
   private readonly prompts = new Map<string, Prompt>()
+  /** `tool.run` reached the mod in this process: the end of a permission is seen, so it may be told. */
+  private runSeen = false
 
   /** `tool.check` said `ask` for this call (a question's own check keeps it a question). */
   asked(callId: string, agentId: string | undefined, now: number): void {
@@ -43,6 +50,7 @@ export class TerminalPrompts {
 
   /** The call was allowed and runs now: a permission prompt is over (a question is answered as the call settles). */
   ran(callId: string): void {
+    this.runSeen = true
     if (this.prompts.get(callId)?.kind === 'permission') this.prompts.delete(callId)
   }
 
@@ -67,7 +75,10 @@ export class TerminalPrompts {
     let out: InboxBlockedKind | null = null
     for (const prompt of this.prompts.values()) {
       if (now - prompt.since < TERMINAL_PROMPT_SETTLE_MS) continue
-      if (prompt.kind === 'permission') return 'permission'
+      if (prompt.kind === 'permission') {
+        if (this.runSeen) return 'permission'
+        continue
+      }
       out = 'question'
     }
     return out

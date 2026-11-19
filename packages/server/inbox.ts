@@ -42,7 +42,7 @@
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -2125,7 +2125,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /** "Agent status" (config.json `inboxAgentStatus`, off by default): the windows draw every agent's status mark. */
-  const agentStatus = createInboxAgentStatusSetting({ loadConfig, saveConfig });
+  const agentStatus = createInboxAgentStatusSetting({
+    loadConfig,
+    saveConfig,
+    // config.json's stat: parsed again only when it changed (the 1 s delivery watch asks, as inbox-launch.ts's cache).
+    configKey: () => {
+      try {
+        const stat = statSync(join(getPlannotatorDataDir(), "config.json"));
+        return `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+      } catch {
+        return "absent";
+      }
+    },
+  });
   /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
   const agentsOf = (own: InboxListRow[], now: Date, listed?: ReadonlySet<string>): InboxAgentsGroup => {
     const projectById = (id: string) => {

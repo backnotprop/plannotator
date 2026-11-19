@@ -580,6 +580,8 @@ export class InboxWake {
   private lastSteerable: boolean | null = null;
   /** What the session waits on in its terminal, as last told to the Inbox (`target.blocked`). */
   private blocked: InboxBlockedKind | null = null;
+  /** When `blocked` last changed (INBOX_BLOCKED_AT_FIELD): this link's start until the first change. */
+  private blockedAt = Date.now();
 
   constructor(
     private readonly connection: InboxAgentConnection,
@@ -709,7 +711,7 @@ export class InboxWake {
     this.lastSteerable = steerable;
     if (known && this.leader && !this.disposed) {
       void this.connection
-        .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: steerable, ...inboxBlockedField(this.blocked) })
+        .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: steerable, ...inboxBlockedField(this.blocked, this.blockedAt) })
         .catch(() => null);
     }
   }
@@ -728,13 +730,14 @@ export class InboxWake {
     }
     if (blocked === this.blocked) return;
     this.blocked = blocked;
+    this.blockedAt = Math.max(Date.now(), this.blockedAt + 1);
     if (!this.leader || this.disposed) return;
     void this.connection
       .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, {
         type: "state",
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         [INBOX_SEND_NOW_POLL_FIELD]: this.steerable,
-        ...inboxBlockedField(blocked),
+        ...inboxBlockedField(blocked, this.blockedAt),
       })
       .catch(() => null);
   }
@@ -784,7 +787,7 @@ export class InboxWake {
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
         // A prompt up in its terminal (blocked.ts): said again on every poll while it lasts.
-        ...inboxBlockedField(this.blocked),
+        ...inboxBlockedField(this.blocked, this.blockedAt),
         [INBOX_STEER_POLLS_POLL_FIELD]: true,
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,

@@ -3,6 +3,8 @@
  * must never claim (the owner's truth rules, 2026-11-18). The failures these guard:
  *  - a host that reports nothing about turns (`busy` null: Codex, Qwen Code, T3 Code, Antigravity) drawn working or
  *    idle, or its row still read as idle (`turns_unknown` missing);
+ *  - any idle mark at all (owner ruling, 2026-11-18: working, asking and done are the approved marks; at rest draws
+ *    nothing), a stopped launch included;
  *  - a thread waiting on the person not drawn "waiting on you here", or a terminal prompt not winning over it;
  *  - a terminal prompt drawn for a session the Inbox launched (its own launch shows that prompt here);
  *  - an ended agent, or one that ended only because its host went quiet, carrying any mark; `done` ever claimed;
@@ -43,7 +45,7 @@ const wait = (sessionId: string, host = "claude-code") => ({ thread_id: `thr_${s
 const byId = (agents: InboxAgent[]) => Object.fromEntries(agents.map((agent) => [agent.id, agent]));
 
 describe("what each agent's mark says", () => {
-  test("a host that reports turns: working while busy, idle when not; one that reports nothing: no mark and turns_unknown", () => {
+  test("a host that reports turns: working while busy, no mark at rest (no idle mark); one that reports nothing: no mark and turns_unknown", () => {
     const { agents } = inboxAgentsGroup(
       evidence({
         sessions: [session("cc-busy", { busy: true }), session("cc-idle", { busy: false }), session("codex-1", { host: "codex", busy: null }), session("qwen-1", { host: "qwen-code", busy: null })],
@@ -51,7 +53,7 @@ describe("what each agent's mark says", () => {
     );
     const a = byId(agents);
     expect(a["cc-busy"]!.status_mark).toEqual({ state: "working" });
-    expect(a["cc-idle"]!.status_mark).toEqual({ state: "idle" });
+    expect(a["cc-idle"]!.status_mark).toBeUndefined();
     for (const id of ["codex-1", "qwen-1"]) {
       expect(a[id]!.status_mark).toBeUndefined();
       expect(a[id]!.turns_unknown).toBe(true);
@@ -78,7 +80,7 @@ describe("what each agent's mark says", () => {
     expect(a["pi-q"]!.state).toBe("working");
   });
 
-  test("a session the Inbox launched never shows a terminal prompt (its launch shows it here); a stopped launch is idle", () => {
+  test("a session the Inbox launched never shows a terminal prompt (its launch shows it here); a stopped launch has no mark", () => {
     const launch = (id: string, sessionId: string, run: InboxAgentLaunch["run"]): InboxAgentLaunch => ({ launch_id: id, session: sessionId, thread_id: `thr_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: new Date(T).toISOString(), started: true, run, scratch: null });
     const { agents } = inboxAgentsGroup(
       evidence({
@@ -88,7 +90,7 @@ describe("what each agent's mark says", () => {
     );
     const a = byId(agents);
     expect(a["lch_1"]!.status_mark).toEqual({ state: "working" });
-    expect(a["lch_2"]!.status_mark).toEqual({ state: "idle" });
+    expect(a["lch_2"]!.status_mark).toBeUndefined();
   });
 
   test("ended, however it ended (a quiet host's hour included): no mark, nothing unknown; never done", () => {
@@ -104,6 +106,7 @@ describe("what each agent's mark says", () => {
     }
     // No state the Inbox can work out is `done` (only a Rex record says it): every mark checked.
     expect(inboxAgentMarkChecked({ state: "done" })).toBeNull();
+    expect(inboxAgentMarkChecked({ state: "idle" })).toBeNull();
   });
 });
 
