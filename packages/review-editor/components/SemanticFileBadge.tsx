@@ -13,6 +13,8 @@ const NARROW_HIDDEN = '@max-[479px]/file-header:hidden';
 const REACH = 'relative before:absolute before:inset-x-0 before:-inset-y-2';
 const REACH_COARSE = 'relative [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-2';
 const COUNT = 'w-[3ch] py-px rounded-sm tabular-nums text-center';
+const TIGHT_CHIP = '@max-[339px]/file-header:w-auto @max-[339px]/file-header:px-1';
+const TIGHT_WORD = '@max-[339px]/file-header:hidden';
 
 export type SemanticFileSwitch = { state: SemanticFileState; onToggle: () => void };
 
@@ -82,11 +84,11 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
             aria-label={`Semantic changes for ${filePath}: ${kinds}${on ? '' : ', not shown in the diff'}`}
             data-semantic-file-badge={count}
             data-semantic-note={found?.status}
-            className={`${BADGE} ${found ? (touch ? REACH : REACH_COARSE) : NARROW_HIDDEN} transition-colors hover:text-foreground hover:bg-muted data-[popup-open]:text-foreground data-[popup-open]:bg-muted`}
+            className={`${BADGE} ${found ? `${touch ? REACH : REACH_COARSE} ${TIGHT_CHIP}` : NARROW_HIDDEN} transition-colors hover:text-foreground hover:bg-muted data-[popup-open]:text-foreground data-[popup-open]:bg-muted`}
           />
         }
       >
-        <span className="font-semibold tracking-[0.02em]">sem</span>
+        <span className={`font-semibold tracking-[0.02em] ${TIGHT_WORD}`}>sem</span>
         <span className={`${COUNT} ${on ? 'bg-primary/15 text-primary' : 'text-primary/80 ring-1 ring-inset ring-primary/40'}`}>{count}</span>
       </Popover.Trigger>
       <Popover.Portal>
