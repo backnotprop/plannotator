@@ -58,6 +58,8 @@ export function parityEnv(home: string, dataDir: string): Record<string, string>
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
+    // The seed's scratch data dir counts as one the person turned the Inbox on in (packages/shared/inbox/turned-on.ts).
+    PLANNOTATOR_TEST_INBOX_ON: '1',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_PHONES: '0',
     // No offer to add a note to an agent's instructions (the scratch HOME has a ~/.claude for the restart line).
