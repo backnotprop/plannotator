@@ -410,6 +410,10 @@
       "id",
       "name"
     ],
+    "InboxPictureItPage": [
+      "attachment_id",
+      "title"
+    ],
     "InboxProject": [
       "created_at",
       "id",

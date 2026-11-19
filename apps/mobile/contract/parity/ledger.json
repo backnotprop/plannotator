@@ -20205,6 +20205,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-picture-it",
+      "title": "field:InboxMessageWire.picture_it",
+      "surface": [
+        "field:InboxMessageWire.picture_it"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxpictureitpage-attachment-id",
+      "title": "field:InboxPictureItPage.attachment_id",
+      "surface": [
+        "field:InboxPictureItPage.attachment_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxpictureitpage-title",
+      "title": "field:InboxPictureItPage.title",
+      "surface": [
+        "field:InboxPictureItPage.title"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -3189,6 +3189,9 @@
             "$ref": "#/$defs/InboxLiveSiteRef"
           }
         },
+        "picture_it": {
+          "$ref": "#/$defs/InboxPictureItPage"
+        },
         "delivery": {
           "anyOf": [
             {
@@ -3755,6 +3758,23 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxPictureItPage": {
+      "type": "object",
+      "properties": {
+        "attachment_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "title"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/picture-it-page.ts"
     },
     "InboxProject": {
       "type": "object",
