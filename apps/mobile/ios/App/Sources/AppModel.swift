@@ -281,6 +281,10 @@ struct LaunchOptions {
         case "permission":
           await door.add(StandInData.permissionThread(now: Date()))
           await session.refresh()
+        case "long":
+          // A 300-message thread, to measure how a long thread opens and scrolls.
+          await door.add(StandInData.longThread(now: Date()))
+          await session.refresh()
         case "allowed":
           await session.open(StandInData.permission)
           if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first {

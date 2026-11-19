@@ -199,15 +199,25 @@ public final class InboxSession {
     case .refused(let failure):
       note(failure)
       reach = standing == .ok ? .away : .here
+      if reach == .away { markWaited() }
       stopListening()
       return false
     case .silent:
       client = nil
       reach = .away
+      markWaited()
       stopListening()
       if !held.isEmpty { retryLater() }
       return false
     }
+  }
+
+  /// The computer did not answer: everything still on the phone has waited, a tap made while the app was still
+  /// connecting included. None of it goes over an answer made elsewhere meanwhile (PickConflict.decide).
+  private func markWaited() {
+    guard held.contains(where: { $0.waited != true }) else { return }
+    for index in held.indices { held[index].waited = true }
+    copy.saveOutbox(held)
   }
 
   /// What a refusal says about the pairing itself.
@@ -229,6 +239,7 @@ public final class InboxSession {
     case .unreachable:
       reach = .away
       client = nil
+      markWaited()
       stopListening()
     default: break
     }
@@ -507,10 +518,13 @@ public final class InboxSession {
       settle(write.id)
       return true
     }
-    let current = threads[ThreadID(write.thread)]?.thread.messages.first { $0.id == message }?.questions?.first { q in stale.contains { $0.0 == q.key } }
-    let outcome = PickConflict.decide(
+    let inbox = threads[ThreadID(write.thread)]?.thread.messages.first { $0.id == message }?.questions ?? []
+    let current = inbox.first { q in stale.contains { $0.0 == q.key } }
+    var outcome = PickConflict.decide(
       failure, tries: write.tries ?? 0, waited: write.waited == true, tapped: write.madeAt,
       inboxAnswered: current?.answer != nil, inboxPickedAt: current?.pickedAt.flatMap { TimeWords.date($0) })
+    // The other place chose what the phone chose: nothing gave way, and nothing is said.
+    if outcome == .giveWay, body.questions.allSatisfy({ pick in QuestionAnswers.same(pick.answer, inbox.first { $0.key == pick.key }?.answer) }) { outcome = .adopt }
     switch outcome {
     case .retry(let revision)?:
       // The person's own later writes on this question name the revision this pick read: they go at the Inbox's.
@@ -533,6 +547,11 @@ public final class InboxSession {
         for (key, _) in stale { refusals[ref(write.message, key)] = .gaveWay }
         pullBackSends(after: write, notice: .refused("", code: "question_revision_conflict"))
       }
+    case .lost?:
+      // Refused every time, and nothing in the Inbox: the card says the pick was not saved, and a Send behind it
+      // waits for the person, as when it gives way.
+      for (key, _) in stale { refusals[ref(write.message, key)] = .refused("", code: "question_revision_conflict") }
+      pullBackSends(after: write, notice: .refused("", code: "question_revision_conflict"))
     default:
       // The Inbox's answer is drawn, quietly; a Send behind it carries that answer, at the Inbox's revision.
       for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: now) }
@@ -689,7 +708,8 @@ public final class InboxSession {
 
   private func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false) {
     // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
-    // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers.
+    // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers, and
+    // has waited if it turns out not to (markWaited).
     let waits = reach == .away
     hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil))
   }

@@ -43,6 +43,9 @@ public enum PickConflict {
     case adopt
     /// The phone's pick is older than the answer the Inbox holds: that answer stays, and the person is told.
     case giveWay
+    /// A waited pick was refused every time it went again, and the Inbox holds no answer: it is dropped, and the
+    /// person is told it was not saved, never left to think it was.
+    case lost
   }
 
   /// The phone's own rule, on top of the window's. The window takes the order saves reach the Inbox for the order
@@ -55,7 +58,7 @@ public enum PickConflict {
   public static func decide(_ failure: DoorFailure, tries: Int, waited: Bool, tapped: Date, inboxAnswered: Bool, inboxPickedAt: Date?, rule: Rule = PickConflict.rule) -> Outcome? {
     guard let step = step(failure, tries: tries, rule: rule) else { return nil }
     if waited, inboxAnswered, inboxPickedAt.map({ $0 > tapped }) ?? true { return .giveWay }
-    if waited, case .adopt = step, !inboxAnswered, let now = revision(failure), tries < retries + 2 { return .retry(revision: now) }
+    if waited, case .adopt = step, !inboxAnswered, let now = revision(failure) { return tries < retries + 2 ? .retry(revision: now) : .lost }
     switch step {
     case .retry(let revision): return .retry(revision: revision)
     case .adopt: return .adopt

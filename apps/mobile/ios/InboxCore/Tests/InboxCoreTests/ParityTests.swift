@@ -114,6 +114,11 @@ final class ParityTests: XCTestCase {
     XCTAssertEqual(PickConflict.decide(conflict, tries: 0, waited: true, tapped: tapped, inboxAnswered: true, inboxPickedAt: nil), .giveWay)
     // Nothing in the Inbox (picked and taken back elsewhere): nothing to give way to.
     XCTAssertEqual(PickConflict.decide(conflict, tries: 0, waited: true, tapped: tapped, inboxAnswered: false, inboxPickedAt: nil), .retry(revision: 3))
+    // Refused every time it went again, with still nothing in the Inbox: dropped, and the person is told.
+    XCTAssertEqual(PickConflict.decide(conflict, tries: PickConflict.retries + 2, waited: true, tapped: tapped, inboxAnswered: false, inboxPickedAt: nil), .lost)
+    func answer(_ selected: [String], note: String?) -> QuestionAnswer { QuestionAnswer(v: 1, key: "q", kind: .multi, prompt: "p", selected: selected, note: note) }
+    XCTAssertTrue(QuestionAnswers.same(answer(["A", "B"], note: " x "), answer(["B", "A"], note: "x")), "the same answer, in another order")
+    XCTAssertFalse(QuestionAnswers.same(answer(["A"], note: nil), answer(["A"], note: "but later")), "a note makes it another answer")
     // A pick that never waited follows the window's rule, whatever the clocks say.
     XCTAssertEqual(PickConflict.decide(conflict, tries: 0, waited: false, tapped: tapped, inboxAnswered: true, inboxPickedAt: tapped.addingTimeInterval(60)), .retry(revision: 3))
     XCTAssertEqual(PickConflict.decide(conflict, tries: PickConflict.retries, waited: false, tapped: tapped, inboxAnswered: true, inboxPickedAt: nil), .adopt)
@@ -168,6 +173,51 @@ final class ParityTests: XCTestCase {
     XCTAssertEqual(session.reach, .connecting)
     session.hold(pick: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""), thread: StandInData.retry, message: asked.id, question: question)
     XCTAssertNil(session.held.first?.waited, "it goes the moment the computer answers, and is the later click")
+  }
+
+  func testATapMadeAsTheAppOpensWhileTheComputerIsAwayNeverGoesOverANewerAnswer() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    let thread = try XCTUnwrap(StandInData.threads(now: Date()).first { $0.threadId == StandInData.retry })
+    let asked = try XCTUnwrap(thread.messages.last)
+    let question = try XCTUnwrap(asked.questions?.first)
+    // On a train: the app opens, the laptop is asleep, and the person taps a choice at once, before the app knows.
+    await door.setOffline(true)
+    XCTAssertEqual(session.reach, .connecting)
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
+    XCTAssertEqual(session.reach, .away)
+    XCTAssertEqual(session.held.first?.waited, true, "the computer never answered: the tap has waited")
+    // Later the laptop is answered differently; then the phone reaches it.
+    await door.setOffline(false)
+    await door.setOptions { $0.racesPicks = 1 }
+    await session.refresh()
+
+    let stored = await door.thread(StandInData.retry)?.messages.last?.questions?.first
+    XCTAssertEqual(stored?.answer?.selected, ["Everyone at once"], "the newer answer stands: the old tap is not delivered as a fresh click")
+    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .gaveWay)
+    XCTAssertTrue(session.held.isEmpty)
+  }
+
+  func testAWaitedPickThatMatchesTheNewerAnswerSaysNothingAndItsSendGoes() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    let (asked, question) = try retry(session)
+    await door.setOffline(true)
+    await session.refresh()
+    // The phone picks what the laptop will pick later (the stand-in's race picks the last choice).
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""))
+    await session.send(thread: StandInData.retry, words: "Go ahead")
+    await door.setOffline(false)
+    await door.setOptions { $0.racesPicks = 1 }
+    await session.refresh()
+
+    XCTAssertNil(session.refusal(message: asked.id, key: question.key), "both chose the same: nothing gave way")
+    XCTAssertNil(session.takeReturnedWords(StandInData.retry), "the words were not handed back")
+    let replies = await door.posts("/reply").map(body)
+    XCTAssertEqual(replies.map { $0["words"]?.text }, ["Go ahead"], "the Send behind the pick went")
+    XCTAssertTrue(session.held.isEmpty)
   }
 
   func testAPickTheAgentReplacedSaysSoAndASendBehindItStopsUntilThePersonChooses() async throws {

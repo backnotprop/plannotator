@@ -290,6 +290,9 @@ struct QuestionCard: View {
 
   @ViewBuilder private var status: some View {
     let line: String? = {
+      // The pick gave way: the line over the choices says whose answer is shown; "in your draft" would name it as
+      // the person's own.
+      if session.refusal(message: message, key: question.key) == .gaveWay { return nil }
       let held = session.isHeldPick(message: message, key: question.key)
       switch question.state {
       case .picked:

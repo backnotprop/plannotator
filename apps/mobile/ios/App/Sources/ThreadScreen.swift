@@ -115,7 +115,8 @@ struct ThreadScreen: View {
     let held = session.heldReplies(id)
     return ScrollViewReader { proxy in
     ScrollView {
-      VStack(alignment: .leading, spacing: 0) {
+      // Built as it scrolls: a long thread lays out, and says where its lines are, only near the screen.
+      LazyVStack(alignment: .leading, spacing: 0) {
         ForEach(shown[..<landing], id: \.id) { message in
           MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
           Divider().overlay(Token.border).padding(.top, 18).padding(.bottom, message.id == shown[landing - 1].id ? 6 : 18)
@@ -160,6 +161,8 @@ struct ThreadScreen: View {
     .toolbarBackground(Token.background, for: .navigationBar)
     .toolbarBackgroundVisibility(.visible, for: .navigationBar)
     .scrollPosition($position)
+    // The person moved the page themselves: it has landed, and the second landing never pulls it back.
+    .onScrollPhaseChange { _, phase in if phase == .interacting { scroll.landed = true } }
     // What is on screen, in the content's coordinates. The container's size is already what is left between the
     // title bar and the reply field (and the keyboard, when it is up).
     .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentOffset.y + $0.contentInsets.top, $0.contentOffset.y + $0.contentInsets.top + $0.containerSize.height] } action: { _, now in
@@ -270,25 +273,42 @@ struct ThreadScreen: View {
   private func snap(_ prefer: CGFloat, low: CGFloat, high: CGFloat, within: CGRect?) -> CGFloat {
     let frames = cards.filter { $0.key != Self.landing && $0.key != CardFrames.part }
     let lines = frames.filter { $0.key.hasPrefix("b/") }.map(\.value)
-    // At the top nothing may be cut, a card's edge included, but the tall card the person is at work in.
-    let walls = frames.filter { !$0.key.hasPrefix("e/") }.filter { within == nil || $0.value != within }
-    // A card that ends right at the edge counts as cut too: its last hairline would show under the bar.
-    // A line's box already holds its descent, so a line that ends at the edge is whole. A card that starts at the
-    // edge or just under it is cut too: the bar clips its corners. It keeps its air, or most of it.
-    func top(_ y: CGFloat) -> Bool {
-      !walls.contains { key, frame in
-        let line = key.hasPrefix("b/")
-        if frame.minY < y - 0.5 { return frame.maxY > y - (line ? -0.5 : 2) }
-        return !line && frame.minY < y + Self.margin - 3.5
+    // A card is no wall: the page may rest inside a tall one, between two of its lines. Only its edges are: its
+    // rounded top and foot are never cut (but those of the tall card the person is at work in).
+    let edges = frames.filter { !$0.key.hasPrefix("b/") && !$0.key.hasPrefix("e/") }.map(\.value).filter { within == nil || $0 != within }
+    // A paragraph that fits in half the page is read whole: the page opens in the middle of its sentences only
+    // when no other resting place keeps every line out of the fade.
+    let paragraphs = frames.filter { $0.key.hasPrefix("e/") && $0.value.height <= scroll.height / 2 }.map(\.value)
+    // A line's box already holds its descent, so a line that ends at the edge is whole.
+    func top(_ y: CGFloat, whole: Bool = true) -> Bool {
+      if (lines + (whole ? paragraphs : [])).contains(where: { $0.minY < y - 0.5 && $0.maxY > y + 0.5 }) { return false }
+      return !edges.contains { card in
+        // A card that starts at the edge or just under it: the bar clips its corners. It keeps its air, or most of it.
+        if card.minY >= y - 0.5 { return card.minY < y + Self.margin - 3.5 }
+        // A card that ends at the edge or just under it, or whose rounded top the edge runs through.
+        return (card.maxY > y - 2 && card.maxY < y + Self.corner) || y < card.minY + Self.corner
       }
     }
     // At the bottom, a line that reaches into the fade is cut, however little of it shows.
     let edge = scroll.height
-    func bottom(_ y: CGFloat) -> Bool {
+    func clean(_ y: CGFloat) -> Bool {
       let fadeTop: CGFloat = y + edge
       let fadeEnd: CGFloat = fadeTop + Composer.fade
       return !lines.contains { line in line.minY < fadeEnd && line.maxY > fadeTop + 0.5 }
     }
+    // And a card's top or foot is whole over the fade or past it out of sight: never half in it. A top that shows
+    // keeps its air; a foot may touch the fade's first, still clear, points, and a top in its last, solid, point is
+    // out of sight.
+    func rims(_ y: CGFloat) -> Bool {
+      let fadeTop: CGFloat = y + edge
+      let fadeEnd: CGFloat = fadeTop + Composer.fade
+      return !edges.contains { card in
+        let top = card.minY < fadeEnd - 1.5 && card.minY + Self.corner > fadeTop - Self.air
+        let foot = card.maxY > fadeTop + 2.5 && card.maxY - Self.corner < fadeEnd
+        return top || foot
+      }
+    }
+    func bottom(_ y: CGFloat) -> Bool { clean(y) && rims(y) }
     let clamped: CGFloat = min(max(prefer, low), high)
     var places: [CGFloat] = [clamped, low, high]
     // A card keeps its full air under the bar; a line may rest a little closer, or right at the edge when the line
@@ -307,19 +327,42 @@ struct ThreadScreen: View {
       places.append(line.maxY + 1 - edge)
       places.append(line.minY - Composer.fade - 1 - edge)
     }
-    // The air over the fade may be given up for it, and the card's own empty foot may go into the fade: no line
-    // of it may (the bottom check holds them out).
+    // Or where a card's top or foot ends up out of sight, or whole with its air.
+    for card in edges {
+      places.append(card.minY - Composer.fade - edge)
+      places.append(card.minY + Self.corner + Self.air - edge)
+      places.append(card.maxY + Self.air - edge)
+      places.append(card.maxY - 2 - edge)
+    }
+    // The air over the fade may be given up for it, and the card's own empty foot may go into the fade when
+    // nothing cleaner is in reach: no line of it may. When no place keeps both edges clean (large type, a tall
+    // card), the top still opens on the start of a sentence and no card's rim shows half in the fade: a line may
+    // run into it sooner than a rim may.
     let reach = low - Self.clear - Composer.fade
-    places = places.filter { y in y >= reach - 0.5 && y <= high + 0.5 && top(y) }
+    places = places.filter { y in y >= reach - 0.5 && y <= high + 0.5 && top(y, whole: false) }
     let inside = places.filter { $0 >= low - 0.5 }
-    let pool = [inside.filter(bottom), places.filter(bottom), inside, places].first { !$0.isEmpty } ?? []
+    let read = places.filter { top($0) }
+    let readInside = inside.filter { top($0) }
+    let tests: [(CGFloat) -> Bool] = [bottom, rims, clean]
+    let tiers: [[CGFloat]] = tests.flatMap { test in [readInside.filter(test), read.filter(test)] }
+      + tests.flatMap { test in [inside.filter(test), places.filter(test)] } + [readInside, read]
+    let pool: [CGFloat] = tiers.first { !$0.isEmpty } ?? []
     // Nowhere clean in reach: the card's own top, which cuts nothing above it.
     return pool.min { abs($0 - clamped) < abs($1 - clamped) } ?? high
   }
 
   /// Bring a card on screen.
   private func show(_ key: String, _ proxy: ScrollViewProxy) {
-    guard let card = cards[key], scroll.height > 0 else { return proxy.scrollTo(key, anchor: .top) }
+    guard let card = cards[key], scroll.height > 0 else {
+      // A card far up a long thread is not laid out yet: go to its message, then rest on the card once it is.
+      let message = key.split(separator: "/").dropFirst().first.map { "m/\($0)" }
+      proxy.scrollTo(message ?? key, anchor: .top)
+      Task {
+        try? await Task.sleep(for: .milliseconds(80))
+        if cards[key] != nil { withAnimation { show(key, proxy) } }
+      }
+      return
+    }
     if let tail = cards[Self.landing] { settle(at: rest(for: card), end: tail.maxY + Self.clear) } else { position.scrollTo(y: rest(for: card)) }
   }
 
@@ -353,6 +396,10 @@ struct ThreadScreen: View {
   /// The air kept over the reply field's fade (the fade is part of the foot: the page's room ends where it
   /// begins), so a card resting there keeps its edge and corners.
   static let clear: CGFloat = 12
+  /// A card's rounded corner: the part of its top or foot an edge never runs through.
+  static let corner: CGFloat = 22
+  /// The least air a card's edge keeps over the reply field's fade when it shows.
+  static let air: CGFloat = 6
 }
 
 /// The names the thread scrolls to.
@@ -622,7 +669,8 @@ struct Composer: View {
       Label(PhoneWords.away(session.computer.name), systemImage: "moon.fill")
         .font(.footnote)
         .foregroundStyle(Token.mutedForeground)
-        .padding(.horizontal, 6)
+        // In line with the page's words and icons above it (the page's margin is 20, the foot's 12).
+        .padding(.horizontal, 8)
     }
     // Under the guard only the guard speaks: the refusal behind it names keys.
     if let notice = session.notices[id], !guarded {
@@ -630,7 +678,7 @@ struct Composer: View {
       Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
         .font(.footnote)
         .foregroundStyle(Token.destructive)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
     }
     if guarded, let stale = session.stale[id] {
       // As wide as the cards above it.
@@ -788,7 +836,10 @@ struct StaleGuard: View {
       }
       .buttonStyle(ChoiceStyle())
     }
-    .padding(14)
+    .padding([.top, .horizontal], 14)
+    // Keep editing's touch area already holds air under its words: the words end as far from the edge as the
+    // heading starts.
+    .padding(.bottom, 4)
     .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.warning.opacity(0.5)))
     .accessibilityElement(children: .contain)

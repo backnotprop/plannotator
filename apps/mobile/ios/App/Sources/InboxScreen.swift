@@ -206,7 +206,8 @@ struct UpdateNotice: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .firstTextBaseline, spacing: 10) {
-        Image(systemName: "arrow.down.app").font(.footnote).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+        // As large as the words beside it.
+        Image(systemName: "arrow.down.app").font(.subheadline.weight(.semibold)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 2) {
           Text(PhoneWords.updatePhone).fontWeight(.semibold)
           Text(PhoneWords.updateStillReads).foregroundStyle(Token.mutedForeground)

@@ -207,6 +207,35 @@ public enum StandInData {
     return InboxThread(threadId: permission, project: project("api-server"), threadName: "Migrate billing tables: permission", messages: [message])
   }
 
+  public static let long = ThreadID("msg_STANDIN0000000000000009")
+
+  /// A long working session, `count` messages: an agent and the person taking turns, paragraphs, lists and code,
+  /// and one open question at its end. For measuring how a long thread opens and scrolls.
+  public static func longThread(now: Date, count: Int = 300) -> InboxThread {
+    let claude = agent("claude-code", "ses_long")
+    let bodies = [
+      "I read the relay client and the retry tests. The socket closes when the laptop sleeps, and nothing opens it again until the app restarts.",
+      "Two things changed in `relay/client.ts`:\n\n- the wait doubles after each failed try, capped at a minute\n- a little jitter keeps phones from all coming back at once",
+      "```ts\nconst wait = Math.min(60_000, 1000 * 2 ** tries)\nawait sleep(wait + jitter(250))\n```\n\nThe tests for the cap pass. The jitter test is flaky on CI; I am looking at why.",
+      "Found it: the test used the real clock. It uses the fake one now and passed fifty runs in a row.",
+    ]
+    var messages: [InboxMessageWire] = []
+    for index in 0..<max(count - 1, 0) {
+      let agentTurn = index % 2 == 0
+      let id = MessageID(String(format: "msg_LONG%018d", index))
+      messages.append(InboxMessageWire(
+        seq: Int64(1000 + index), id: id, projectId: ProjectID("prj_api-server"), threadId: long, author: agentTurn ? claude : InboxAuthor(kind: .person),
+        body: agentTurn ? bodies[(index / 2) % bodies.count] : "Thanks. Keep going, and tell me when the next part is done.",
+        createdAt: iso(now.addingTimeInterval(Double(index - count) * 120))))
+    }
+    let ask = MessageID(String(format: "msg_LONG%018d", count))
+    messages.append(InboxMessageWire(
+      questions: [question("q_long", .single, "Ship it today?", choices: [choice("Yes", recommended: true), choice("Tomorrow")], stopped: nil, message: ask)],
+      seq: Int64(1000 + count), id: ask, projectId: ProjectID("prj_api-server"), threadId: long, author: claude,
+      body: "All of it is done and the tests pass.\n\n:::question\nShip it today?\n\n- [ ] Yes\n- [ ] Tomorrow\n:::", createdAt: iso(now.addingTimeInterval(-60))))
+    return InboxThread(threadId: long, project: project("api-server"), threadName: "A long session", messages: messages)
+  }
+
   // MARK: The stand-in's own, simple reading of a thread as a row
 
   static func words(of answer: QuestionAnswer) -> String {
