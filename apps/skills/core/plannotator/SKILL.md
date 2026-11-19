@@ -193,8 +193,8 @@ The Inbox is off until the person turns it on, by running `plannotator inbox` in
 - For many Inbox calls in a row (a tidy above all), `plannotator inbox call` runs any action from a script and prints its result as JSON; `plannotator inbox --help` says how.
 - To put a thread's decisions on its pull request, run `plannotator inbox export-decisions --thread <id> --pr <ref>`: updated in place when run again.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
-- Never run bare `plannotator inbox`, `plannotator inbox on` or `off` yourself: only the person turns the Inbox on or off. Once it is on, calls start a stopped Inbox in the background. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
-- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address. While it is off, tell them to run `plannotator inbox` themselves.
+- Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
+- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
 
 ## plannotator t3
 
