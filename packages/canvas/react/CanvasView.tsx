@@ -30,7 +30,7 @@
  */
 import React, { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
-import { boundsOf, isBoundEnd, resolveArrow } from '../model/document';
+import { arrowPoints, boundsOf, isBoundEnd, resolveArrow } from '../model/document';
 import type { Point, Rect } from '../model/geometry';
 import { type ArrowEnd, type ArrowObject, type CanvasDocument, type ObjectId, isPlaced } from '../model/types';
 import type { Camera, CameraController, Size } from '../view/camera';
@@ -39,7 +39,7 @@ import { indexFor } from '../view/document-index';
 import { endAngles, findHops, pointAlong, routePath } from '../view/route-path';
 import { roughLine, seedOf } from '../view/rough';
 import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
-import { ArrowView, FlatView, ObjectView, objectLabel } from './objects';
+import { ArrowView, type EditEnd, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
 /**
@@ -50,6 +50,13 @@ const NONE: ReadonlySet<ObjectId> = new Set();
 const FLAT_ABOVE = 4000;
 /** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
 const CROWDED = 500;
+
+/** How long a line is, end to end. */
+function lengthOf(points: readonly Point[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  return Math.round(total);
+}
 
 /** A connector in the sketch look: its route drawn by hand, the same way every time. */
 const SKETCH_LINES = new Map<string, string>();
@@ -94,7 +101,12 @@ export interface CanvasViewProps {
   tabStop?: ObjectId | null;
   /** The objects being dragged right now. */
   carried?: ReadonlySet<ObjectId>;
-  onEditEnd?: (id: ObjectId, text: string) => void;
+  onEditEnd?: EditEnd;
+  /**
+   * Never draw at the wordless lowest detail (a figure in a plan: a picture of a diagram with no words tells a
+   * reader nothing). A view holding so many objects that each is a flat patch is the one exception.
+   */
+  wordsAlways?: boolean;
   /** Turn a relative picture address into one the browser can load. */
   resolveImageSrc?: (src: string) => string;
   /** Extra world rects to keep mounted (where a camera animation is heading). */
@@ -128,6 +140,7 @@ export function CanvasView({
   tabStop,
   carried,
   onEditEnd,
+  wordsAlways,
   resolveImageSrc,
   keepMounted = null,
   overscan = OVERSCAN,
@@ -191,7 +204,7 @@ export function CanvasView({
       const chip = Math.round(Math.max(1, Math.min(3.3, 0.9 / c.z)) * 8) / 8;
       if (chip !== chipRef.current && chipStyle.current) {
         chipRef.current = chip;
-        chipStyle.current.textContent = `[data-pcv-view="${viewId}"] .pcv-frame-chip{transform:scale(${chip});max-width:${(100 / chip).toFixed(2)}%}`;
+        chipStyle.current.textContent = `[data-pcv-view="${viewId}"] .pcv-frame-chip{transform:scale(${chip});max-width:max(${(100 / chip).toFixed(2)}%,${(160 / chip).toFixed(1)}px)}`;
       }
       const nextLod = lodForZoom(c.z);
       if (nextLod !== lodRef.current) {
@@ -242,7 +255,24 @@ export function CanvasView({
     return visibleIds(doc, index, unionWindow(window_, keepMounted));
   }, [doc, index, window_, keepMounted]);
 
-  const lod = lodFor(zoomLod === 'full' ? 1 : zoomLod === 'plain' ? 0.3 : 0.1, mounted.length);
+  const asked = lodFor(zoomLod === 'full' ? 1 : zoomLod === 'plain' ? 0.3 : 0.1, mounted.length);
+  const flat = asked === 'far' && mounted.length > FLAT_ABOVE;
+  const lod: Lod = asked === 'far' && wordsAlways && !flat ? 'plain' : asked;
+
+  // Notes lying exactly on one another (pasted twice, or put there by an agent): only the top one casts a
+  // shadow, or a pile's shadows add up to a black halo. Looked for only where shadows are drawn at all.
+  const buried = new Set<ObjectId>();
+  if (lod === 'full' && mounted.length <= CROWDED) {
+    const top = new Map<string, ObjectId>();
+    for (const id of mounted) {
+      const object = doc.objects[id];
+      if (object?.type !== 'note') continue;
+      const key = `${object.x},${object.y},${object.w},${object.h}`;
+      const under = top.get(key);
+      if (under) buried.add(under);
+      top.set(key, id);
+    }
+  }
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
@@ -261,9 +291,9 @@ export function CanvasView({
       if (routed) lines.push({ arrow: object, points: routed.points });
       else {
         const g = resolveArrow(doc, object);
-        if (g) lines.push({ arrow: object, points: [g.from, g.to] });
+        if (g) lines.push({ arrow: object, points: arrowPoints(g) });
       }
-    } else if (object.type !== 'group' && lod === 'far' && mounted.length > FLAT_ABOVE && editingId !== id && tabStop !== id) {
+    } else if (object.type !== 'group' && flat && editingId !== id && tabStop !== id) {
       // Far out on a crowded board: a flat patch each. Bare text has nothing to show at this size.
       if (object.type !== 'text') placed.push(<FlatView key={id} object={object} />);
       if (selection.size === 1 && selection.has(id)) {
@@ -281,6 +311,7 @@ export function CanvasView({
           onEditEnd={onEditEnd}
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}
           carried={carried?.has(id) ?? false}
+          buried={buried.has(id)}
         />,
       );
       // The selection outline is its own element in the overlay, so its
@@ -304,6 +335,7 @@ export function CanvasView({
         key={arrow.id}
         arrow={arrow}
         label={arrowLabel(doc, arrow)}
+        room={arrow.label ? lengthOf(points) : 0}
         d={arrow.style?.look === 'sketch' ? sketchLine(arrow, points) : routePath(points, hops?.[i])}
         x1={points[0].x}
         y1={points[0].y}

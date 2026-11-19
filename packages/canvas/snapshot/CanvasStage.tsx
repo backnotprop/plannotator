@@ -79,6 +79,13 @@ export function openCamera(target: Rect, viewport: Size) {
   return fitRect(target, viewport, padding, 1.25);
 }
 
+/**
+ * Past this many objects the capture is not drawn a second time over the canvas while it opens: twice a very
+ * large board in one frame is a frame of half a second, and at that size the two pictures cannot be told apart.
+ */
+export const GHOST_MAX_OBJECTS = 1500;
+const ghostOf = (capture: SnapshotCapture | null | undefined): SnapshotCapture | null => (capture && capture.objects.length <= GHOST_MAX_OBJECTS ? capture : null);
+
 export function CanvasStage({ request, registry, ...rest }: CanvasStageProps) {
   const store = useRegisteredCanvas(request?.canvas ?? '', registry);
   if (!request || !store || typeof document === 'undefined') return null;
@@ -113,7 +120,8 @@ function OpenStage({ request, store, onClosed, recede, ...editor }: { request: S
   // The capture, drawn over the live canvas while the opening moves. Always, not only when the canvas has
   // moved on: the capture holds just what the figure shows, so as it dissolves the rest of the board arrives
   // around the picture instead of being sliced by the opening's edge.
-  const [ghost, setGhost] = useState<SnapshotCapture | null>(() => store.getDocument().snapshots[request.snapshot]?.capture ?? null);
+  const [ghost, setGhostNow] = useState<SnapshotCapture | null>(() => ghostOf(store.getDocument().snapshots[request.snapshot]?.capture));
+  const setGhost = useCallback((capture: SnapshotCapture | null) => setGhostNow(ghostOf(capture)), []);
 
   /** The world rectangle the opening looks at: the snapshot's own, or the whole board. */
   const place = useCallback((): Rect | null => {
@@ -343,16 +351,16 @@ function OpenStage({ request, store, onClosed, recede, ...editor }: { request: S
           }}
           lead={
             <div className="pcv-bar pcv-bar-top">
-              <button ref={back} type="button" className="pcv-btn" onClick={close}>
+              <button ref={back} type="button" className="pcv-btn" aria-label={SNAPSHOT_STRINGS.back} onClick={close}>
                 <ArrowLeft />
-                {SNAPSHOT_STRINGS.back}
+                <span className="pcv-btn-label">{SNAPSHOT_STRINGS.back}</span>
               </button>
               {behind ? (
                 <>
                   <span className="pcv-sep" aria-hidden="true" />
-                  <button type="button" className="pcv-btn" onClick={() => store.dispatch({ type: 'update-snapshot', id: request.snapshot })}>
+                  <button type="button" className="pcv-btn" aria-label={SNAPSHOT_STRINGS.updateSnapshot} onClick={() => store.dispatch({ type: 'update-snapshot', id: request.snapshot })}>
                     <RefreshCw />
-                    {SNAPSHOT_STRINGS.updateSnapshot}
+                    <span className="pcv-btn-label">{SNAPSHOT_STRINGS.updateSnapshot}</span>
                   </button>
                 </>
               ) : null}

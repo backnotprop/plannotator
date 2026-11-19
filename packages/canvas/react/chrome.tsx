@@ -80,6 +80,9 @@ export const CANVAS_STRINGS = {
   ends: { arrow: 'Arrow', none: 'No ends', dot: 'Dot', 'bar-arrow': 'Measure' },
   fills: { tint: 'Tint', solid: 'Solid', hachure: 'Hatched', cross: 'Cross-hatched', none: 'No fill' },
   textNotKept: 'That text is too long to keep',
+  emptyBoard: 'Paste a link or a picture, or pick a tool.',
+  moreThisWay: 'More of the board this way',
+  dropNotPicture: 'Only pictures and links can be dropped here',
   pictureProblems: {
     unavailable: 'Pictures cannot be added here',
     'too-large': 'That picture is too large to add',

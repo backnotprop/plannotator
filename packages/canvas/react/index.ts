@@ -11,3 +11,4 @@ export * from './memory-assets';
 export * from './pictures';
 export * from './people';
 export * from './Minimap';
+export * from './EdgeMarkers';

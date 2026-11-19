@@ -7,12 +7,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import type { CanvasStore } from '../events/store';
 import type { CanvasColor } from '../model/color';
 import { boundsOf, objectBounds } from '../model/document';
-import { rectContainsRect } from '../model/geometry';
+import { LIMITS } from '../model/codec';
+import { type Point, rectContainsRect } from '../model/geometry';
 import { createId } from '../model/ids';
 import type { ObjectId, ReferenceObject, Snapshot } from '../model/types';
 import { type AssetPort, pictureResolver } from '../model/assets';
 import type { LinkPreviewPort } from '../model/reference';
-import { CameraController, type Size, fitRect, viewportRect, worldToScreen, zoomAt } from '../view/camera';
+import { CameraController, type Size, fitRect, screenToWorld, viewportRect, worldToScreen, zoomAt } from '../view/camera';
 import { neighbourInReadingOrder, readingOrder } from '../view/reading-order';
 import { portPoint } from '../view/routes';
 import { indexFor } from '../view/document-index';
@@ -21,6 +22,7 @@ import { CanvasView } from './CanvasView';
 import { CANVAS_STRINGS, HistoryBar, SelectionBar, type StyleChange, ToolDock, ZoomBar } from './chrome';
 import { EditorState } from './editor-state';
 import { GestureController, firstEditGesture } from './gestures';
+import { EdgeMarkers } from './EdgeMarkers';
 import { Minimap } from './Minimap';
 import { addPicture, looksLikePicture } from './pictures';
 import { type PlanDropTarget, beginPlanDrag } from './plan-drop';
@@ -132,8 +134,10 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
   }, [notice]);
 
   const onEditEnd = useCallback(
-    (id: ObjectId, text: string) => {
+    (id: ObjectId, text: string, words?: HTMLElement) => {
       const object = store.getDocument().objects[id];
+      // Bare text is as tall as its words: the box that is grabbed and outlined is the box that is seen.
+      const wordsHeight = object?.type === 'text' && words ? Math.ceil(words.scrollHeight) : 0;
       state.set({ editingId: null });
       if (!object) return;
       const first = firstEditGesture(id);
@@ -155,7 +159,13 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
       }
       if (text === object.text) return;
       // The words typed straight after placing it join that step.
-      if (!store.dispatch({ type: 'edit', id, patch: { text } }, { gesture: first }).ok) setNotice(CANVAS_STRINGS.textNotKept);
+      if (!store.dispatch({ type: 'edit', id, patch: { text } }, { gesture: first }).ok) {
+        setNotice(CANVAS_STRINGS.textNotKept);
+        return;
+      }
+      if (object.type === 'text' && wordsHeight > object.h) {
+        store.dispatch({ type: 'resize', id, rect: { x: object.x, y: object.y, w: object.w, h: Math.min(wordsHeight, LIMITS.size) } }, { gesture: first });
+      }
     },
     [state, store],
   );
@@ -216,8 +226,8 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
   const addImageFile = useCallback(
-    (file: File) => {
-      void addPicture(store, assetsRef.current, file, viewCentre()).then((result) => {
+    (file: File, at?: Point) => {
+      void addPicture(store, assetsRef.current, file, at ?? viewCentre()).then((result) => {
         if ('id' in result) state.select([result.id]);
         else setNotice(CANVAS_STRINGS.pictureProblems[result.problem]);
       });
@@ -414,6 +424,26 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
           if (!(event.target as HTMLElement).closest?.('.pcv-bar, [contenteditable], input, button')) event.preventDefault();
         },
         onKeyDown: onBoardKey,
+        // Something dragged in from outside is always taken here, so the browser never leaves the page for it.
+        // A picture is added where it was let go; a link becomes a card; anything else is said to be neither.
+        onDragOver: (event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        },
+        onDrop: (event) => {
+          event.preventDefault();
+          const box = event.currentTarget.getBoundingClientRect();
+          const at = screenToWorld(camera.get(), { x: event.clientX - box.left, y: event.clientY - box.top });
+          const files = [...event.dataTransfer.files];
+          const pictures = files.filter(looksLikePicture);
+          pictures.forEach((file, i) => addImageFile(file, { x: at.x + i * 24, y: at.y + i * 24 }));
+          if (pictures.length) return;
+          const text = files.length ? '' : event.dataTransfer.getData('text/uri-list').split('\n').find((line) => line && !line.startsWith('#')) || event.dataTransfer.getData('text/plain');
+          const reference = text ? referenceFromPaste(text, ports.current.resolvePaste) : null;
+          const id = reference ? addReference(store, at, reference, ports.current.linkPreview) : null;
+          if (id) state.select([id]);
+          else setNotice(CANVAS_STRINGS.dropNotPicture);
+        },
         // Focus arriving on an object by keyboard selects it, so its bar appears.
         onFocus: (event) => {
           const el = event.target as HTMLElement;
@@ -466,10 +496,13 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
           <ToolDock state={state} tool={ui.tool} onPickImage={assets ? () => filePicker.current?.click() : undefined} canSnapshot={!!onAddToPlan} />
           <HistoryBar store={store} />
           <ZoomBar camera={camera} onZoom={zoomBy} onFit={fit} onReset={() => zoomBy(1 / camera.get().z)} map={mapOpen} onMap={() => setMapOpen((open) => !open)} />
+          <EdgeMarkers store={store} camera={camera} viewSize={() => size.current} label={CANVAS_STRINGS.moreThisWay} />
           {mapOpen ? <Minimap store={store} camera={camera} viewSize={() => size.current} label={CANVAS_STRINGS.mapLabel} /> : null}
           {children}
         </>
       )}
+      {/* An empty board says how to begin, once; the first object takes the line away. */}
+      {doc.order.length === 0 && !chromeHidden && !ui.draftArrow && !ui.marquee ? <div className="pcv-empty">{CANVAS_STRINGS.emptyBoard}</div> : null}
       {notice ? (
         <div className="pcv-notice" role="status">
           {notice}

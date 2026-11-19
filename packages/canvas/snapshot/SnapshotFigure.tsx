@@ -17,6 +17,7 @@
  */
 import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
+import { LIMITS } from '../model/codec';
 import type { CanvasDocument, SnapshotCapture } from '../model/types';
 import { CanvasView } from '../react/CanvasView';
 import { CameraController, type Size, fitRect } from '../view/camera';
@@ -97,9 +98,29 @@ function Picture({ capture, resolveImageSrc }: { capture: SnapshotCapture; resol
         size.current = next;
         refit();
       }}
+      wordsAlways
       rootProps={{ 'aria-hidden': true }}
     />
   );
+}
+
+/** A typed name as it is kept: one line, no longer than a title may be, cut at the end of a word and marked as cut. */
+export function fitName(typed: string): string {
+  const line = typed.replace(/\s+/g, ' ').trim();
+  if (line.length <= LIMITS.title) return line;
+  const cut = line.slice(0, LIMITS.title - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > LIMITS.title * 0.8 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/** The smallest box a figure is drawn in, so that a very wide, very tall or tiny snapshot can still be seen and pressed. */
+export const FIGURE_MIN = { w: 160, h: 64 } as const;
+
+/** The box a figure of `rect` is drawn in: the shape of what it shows, never larger than life or taller than the cap, never smaller than `FIGURE_MIN`. */
+export function figureBox(rect: { w: number; h: number }): { w: number; h: number } {
+  const w = Math.min(rect.w * FIGURE_MAX_ZOOM, (FIGURE_MAX_HEIGHT * rect.w) / rect.h);
+  const h = (w * rect.h) / rect.w;
+  return { w: Math.ceil(Math.max(w, FIGURE_MIN.w)), h: Math.ceil(Math.max(h, FIGURE_MIN.h)) };
 }
 
 /** The snapshot's name, typed in place. Leaving the field saves it. */
@@ -121,7 +142,7 @@ function Name({ store, snapshot, title, placeholder }: { store: CanvasStore; sna
         }
       }}
       onBlur={(event) => {
-        const next = event.currentTarget.innerText.replace(/\s+/g, ' ').trim().slice(0, 300);
+        const next = fitName(event.currentTarget.innerText);
         if (next !== title) store.dispatch({ type: 'edit-snapshot', id: snapshot, title: next });
         // An emptied field must be truly empty for the placeholder to show.
         if (!next) event.currentTarget.textContent = '';
@@ -185,14 +206,15 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
   // The figure is exactly the shape of what it shows, never larger than
   // life and never taller than the cap.
   const { rect } = capture;
-  const width = Math.ceil(Math.min(rect.w * FIGURE_MAX_ZOOM, (FIGURE_MAX_HEIGHT * rect.w) / rect.h));
+  const box = figureBox(rect);
+  const width = box.w;
   const count = SNAPSHOT_STRINGS.items(capture.objects.length);
   const described = describeCapture(capture);
 
   return (
     <figure className="pcv pcv-figure" style={{ width: `min(100%, ${width}px)` }} data-standing={standing} data-canvas={canvas} data-snapshot={id}>
       <div className="pcv-figure-frame">
-        <div ref={view} className="pcv-figure-view" style={{ aspectRatio: `${rect.w} / ${rect.h}` }}>
+        <div ref={view} className="pcv-figure-view" style={{ aspectRatio: `${box.w} / ${box.h}` }}>
           {near ? <Picture capture={capture} resolveImageSrc={resolveImageSrc} /> : null}
         </div>
         {canOpen ? (

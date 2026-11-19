@@ -37,6 +37,34 @@ export function referenceFromPaste(text: string, resolve?: PasteResolver): Paste
 }
 
 /**
+ * The cards whose page is being looked up right now, by id. Not part of the document: it is this person's
+ * wait, and it ends when the answer comes or the lookup gives up.
+ */
+export const previewsPending = (() => {
+  const ids = new Set<string>();
+  const listeners = new Set<() => void>();
+  const tell = () => {
+    for (const listener of [...listeners]) listener();
+  };
+  return {
+    has: (id: string) => ids.has(id),
+    begin(id: string) {
+      ids.add(id);
+      tell();
+    },
+    end(id: string) {
+      if (ids.delete(id)) tell();
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+})();
+
+/**
  * Add a card centred on `at`. A web card is on the board at once, showing
  * its address; when the preview lands it fills in, and grows to hold a
  * picture if the person has not resized it meanwhile. The fill-in joins the
@@ -51,7 +79,11 @@ export function addReference(store: CanvasStore, at: Point, reference: PastedRef
   if (!added.ok) return null;
   const { target } = reference;
   if (target.kind === 'web' && preview && !reference.title) {
-    void preview(target.url).then((found) => {
+    previewsPending.begin(id);
+    void preview(target.url)
+      .catch(() => null)
+      .then((found) => {
+      previewsPending.end(id);
       const current = store.getDocument().objects[id];
       if (!found || !current || current.type !== 'reference') return;
       // A picture address the card may not hold is left out, not allowed to sink the rest.
