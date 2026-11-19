@@ -1,5 +1,5 @@
 import { lineOf, thingsOf, type Thing } from './reading';
-import { boxOf, boxesOverlap, centerOf, COLOR_NAMES, unionBox, type Box, type CanvasElement, type CanvasScene } from './scene';
+import { boxGap as boxGapOf, boxOf, boxesOverlap, centerOf, COLOR_NAMES, unionBox, type Box, type CanvasElement, type CanvasScene } from './scene';
 
 /**
  * An agent's changes to a canvas, by intent: "add a box right of the gateway",
@@ -43,6 +43,8 @@ const PLACES = ['near', 'rightOf', 'leftOf', 'above', 'below', 'in'] as const;
 type Place = (typeof PLACES)[number];
 const ADD_KINDS = ['box', 'ellipse', 'diamond', 'note', 'text', 'frame', 'mermaid'];
 const GAP = 110;
+/** How far from what is on the canvas an agent may place a thing by coordinates. */
+const AT_REACH = 20_000;
 const FONT = 20;
 const LINE = 25;
 // Wider than the hand-drawn face really is: a label measured too narrow is cut off, one too wide only sits centred.
@@ -193,15 +195,39 @@ function touch(work: Work, el: CanvasElement, change: Partial<CanvasElement>): v
   if (work.original.has(el.id)) work.touched.add(el.id);
 }
 
+/** Wide characters (Chinese, Japanese, Korean, full-width forms) take two columns; marks that sit on a letter take none. */
+function columns(text: string): number {
+  let n = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    if ((c >= 0x300 && c <= 0x36f) || (c >= 0x200b && c <= 0x200f) || c === 0xfeff) continue;
+    n += (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) || (c >= 0xffe0 && c <= 0xffe6) || c >= 0x1f300 ? 2 : 1;
+  }
+  return n;
+}
+
+/** Lines no wider than `maxChars` columns. A word longer than a line (and text with no spaces, as Chinese has none) breaks inside. */
 function wrap(text: string, maxChars: number): string[] {
   const out: string[] = [];
+  const push = (word: string, line: string): string => {
+    if (columns(word) <= maxChars) return word;
+    let part = line ? '' : '';
+    for (const ch of word) {
+      if (columns(part + ch) > maxChars) {
+        out.push(part);
+        part = ch;
+      } else part += ch;
+    }
+    return part;
+  };
   for (const para of text.split('\n')) {
     let line = '';
     for (const word of para.split(/\s+/).filter(Boolean)) {
-      if (line && (line + ' ' + word).length > maxChars) {
+      if (line && columns(`${line} ${word}`) > maxChars) {
         out.push(line);
-        line = word;
-      } else line = line ? `${line} ${word}` : word;
+        line = push(word, '');
+      } else if (!line) line = push(word, '');
+      else line = `${line} ${word}`;
     }
     out.push(line);
   }
@@ -209,7 +235,7 @@ function wrap(text: string, maxChars: number): string[] {
 }
 
 function textSize(lines: string[]): { w: number; h: number } {
-  return { w: Math.max(10, Math.ceil(Math.max(...lines.map((l) => l.length)) * CHAR)), h: lines.length * LINE };
+  return { w: Math.max(10, Math.ceil(Math.max(...lines.map(columns)) * CHAR)), h: lines.length * LINE };
 }
 
 function textElement(work: Work, words: string, box: Box, extra: Partial<CanvasElement> = {}): CanvasElement {
@@ -228,7 +254,9 @@ function textElement(work: Work, words: string, box: Box, extra: Partial<CanvasE
 }
 
 function label(work: Work, container: CanvasElement, words: string, at: [number, number]): CanvasElement {
-  const lines = wrap(words, container.type === 'arrow' ? 26 : Math.max(8, Math.floor((Math.abs(container.width) - 20) / CHAR)));
+  // An arrow's words fit along it, between the two things; a shape's words fit inside it (a diamond or an ellipse holds about half its width).
+  const run = container.type === 'arrow' ? Math.hypot(container.width, container.height) * 0.62 : (Math.abs(container.width) - 20) * (container.type === 'diamond' ? 0.5 : container.type === 'ellipse' ? 0.7 : 1);
+  const lines = wrap(words, Math.max(6, Math.floor(run / CHAR)));
   const size = textSize(lines);
   const el = textElement(work, lines.join('\n'), { x: at[0] - size.w / 2, y: at[1] - size.h / 2, w: size.w, h: size.h }, {
     originalText: words,
@@ -339,6 +367,10 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
     const at = op.at as unknown;
     if (!Array.isArray(at) || at.length !== 2 || !at.every((n) => typeof n === 'number' && Number.isFinite(n))) throw new RefError('"at" is [x, y]');
     const box = { x: at[0] as number, y: at[1] as number, w: size.w, h: size.h };
+    // Somewhere a person would ever find it: on the board's own ground, not a continent away.
+    const ground = unionBox(taken);
+    const far = taken.length === 0 ? Math.max(Math.abs(box.x), Math.abs(box.y)) > AT_REACH : boxGapOf(ground, box) > AT_REACH;
+    if (far) throw new RefError(`"at" [${at[0]}, ${at[1]}] is too far from ${taken.length === 0 ? 'the origin' : `what is on the canvas (around ${Math.round(ground.x)},${Math.round(ground.y)} ${Math.round(ground.w)}x${Math.round(ground.h)})`}: stay within ${AT_REACH} of it, or place by near, rightOf, leftOf, above, below`);
     return { box, frame: frameAt(work, box) };
   }
   const named = PLACES.filter((p) => op[p] !== undefined);
@@ -384,6 +416,29 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
         return { x: a.x + a.w / 2 - size.w / 2, y: a.y + a.h + d, w: size.w, h: size.h };
     }
   };
+  if (place === 'near') {
+    for (let ring = 1; ring <= 12; ring++) {
+      const cells: [number, number][] = [];
+      if (ring === 1) cells.push([1, 0], [0, 1], [-1, 0], [0, -1]);
+      else for (let dy = -ring; dy <= ring; dy++) for (let dx = -ring; dx <= ring; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) cells.push([dx, dy]);
+      {
+        for (const [dx, dy] of cells) {
+          // The first ring is the four sides (right, below, left, above), as before; then the corners and outward.
+          const box = {
+            x: a.x + a.w / 2 - size.w / 2 + dx * (Math.max(a.w, size.w) / 2 + size.w / 2 + 50),
+            y: a.y + a.h / 2 - size.h / 2 + dy * (Math.max(a.h, size.h) / 2 + size.h / 2 + 50),
+            w: size.w,
+            h: size.h,
+          };
+          if (!isFree(box, taken, lines)) continue;
+          const home = anchor.frame ? things.find((t) => t.id === anchor.frame) : undefined;
+          const where = dx === 0 ? (dy < 0 ? 'above' : 'below') : dy === 0 ? (dx < 0 ? 'left of' : 'right of') : `${dy < 0 ? 'above' : 'below'} and ${dx < 0 ? 'left of' : 'right of'}`;
+          work.notes.push(`near put it ${where} ${anchor.id}; rightOf, leftOf, above or below picks a side`);
+          return { box, frame: home ? elementsOf(work, home)[0] : frameAt(work, box) };
+        }
+      }
+    }
+  }
   for (let step = 0; step < 40; step++) {
     for (const side of tries) {
       const box = at(side, step);
@@ -485,7 +540,10 @@ function text(value: unknown, field: string, required = true): string {
   }
   if (typeof value !== 'string') throw new RefError(`"${field}" is text`);
   if (value.length > 4000) throw new RefError(`"${field}" is longer than 4,000 characters`);
-  return value;
+  // Characters nobody can see are not words.
+  const seen = value.replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, '');
+  if (required && !seen.trim()) throw new RefError(`"${field}" has no words in it`);
+  return seen;
 }
 
 function describe(work: Work, el: CanvasElement): string {
@@ -552,10 +610,17 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
     settle(work, [el], spot);
     return { line: `added ${describe(work, el)}`, box: spot.box };
   }
-  const lines = wrap(words, kind === 'note' ? 22 : 20);
+  // Long words get a wider thing, so a long note is a block and not a strip.
+  const wide = Math.min(64, Math.max(kind === 'note' ? 22 : 20, Math.ceil(Math.sqrt(columns(words)) * 2.4)));
+  const lines = wrap(words, wide);
   const inner = textSize(lines);
-  const pad = kind === 'box' || kind === 'note' ? { w: 40, h: 34 } : { w: 80, h: 60 };
-  const size = sizeOf(op, { w: Math.max(kind === 'note' ? 180 : 140, inner.w + pad.w), h: Math.max(kind === 'note' ? 120 : 64, inner.h + pad.h) });
+  const natural =
+    kind === 'diamond'
+      ? { w: Math.max(160, inner.w * 2 + 40), h: Math.max(90, inner.h * 2 + 30) }
+      : kind === 'ellipse'
+        ? { w: Math.max(150, Math.ceil(inner.w * 1.45) + 30), h: Math.max(80, Math.ceil(inner.h * 1.45) + 24) }
+        : { w: Math.max(kind === 'note' ? 180 : 140, inner.w + 40), h: Math.max(kind === 'note' ? 120 : 64, inner.h + 34) };
+  const size = sizeOf(op, natural);
   const spot = findSpot(work, op, size, new Set(), fallback);
   const paint = color ?? (kind === 'note' ? COLOR_NAMES.yellow! : null);
   const el = base(work, kind === 'box' || kind === 'note' ? 'rectangle' : kind, spot.box, {
@@ -572,7 +637,7 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
 function sizeOf(op: CanvasOp, natural: { w: number; h: number }): { w: number; h: number } {
   if (op.size === undefined) return natural;
   const size = op.size as unknown;
-  if (!Array.isArray(size) || size.length !== 2 || !size.every((n) => typeof n === 'number' && n > 0 && n <= 20000)) throw new RefError('"size" is [width, height]');
+  if (!Array.isArray(size) || size.length !== 2 || !size.every((n) => typeof n === 'number' && n > 0 && n <= 20000)) throw new RefError('"size" is [width, height], each above 0 and at most 20000');
   return { w: Math.max(natural.w, size[0] as number), h: Math.max(natural.h, size[1] as number) };
 }
 

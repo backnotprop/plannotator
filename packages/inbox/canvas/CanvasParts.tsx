@@ -54,14 +54,14 @@ export function SketchButton({ threadId, open, onToggle, where, size = 16 }: { t
   };
   if (where === 'reply') {
     return (
-      <Tip content="Sketch on this thread's canvas">
+      <Tip content="Sketch">
         <button type="button" className="ib-ricon" aria-label="Sketch" data-reply-sketch="" onClick={press}>
           <Icon name="pen" size={size} />
         </button>
       </Tip>
     );
   }
-  const tip = mark?.changed ? 'Canvas: an agent changed it since you looked' : mark ? "Open this thread's canvas" : "Sketch on this thread's canvas";
+  const tip = mark?.changed ? 'Canvas, changed by an agent' : mark ? 'Canvas' : 'Sketch';
   return (
     <Tip content={tip}>
       <button
@@ -89,7 +89,7 @@ export function RowCanvasMark({ threadId }: { threadId: string }) {
     <span
       role="img"
       aria-label={mark.changed ? 'Canvas, changed by an agent since you looked' : 'Has a canvas'}
-      title={mark.changed ? 'Canvas: an agent changed it since you looked' : 'Has a canvas'}
+      title={mark.changed ? 'Canvas, changed by an agent' : 'Canvas'}
       data-row-canvas={mark.changed ? 'changed' : 'has'}
       style={{ display: 'inline-flex', flex: 'none', alignItems: 'center', marginLeft: 6, color: mark.changed ? 'var(--primary)' : 'var(--muted-foreground)', opacity: mark.changed ? 1 : 0.7 }}
     >
@@ -115,7 +115,7 @@ const WINDOW: CSSProperties = {
   color: 'var(--foreground)',
   overflow: 'hidden',
 };
-const HEAD: CSSProperties = { flex: 'none', display: 'flex', alignItems: 'center', gap: 6, height: 48, padding: '0 10px 0 6px', boxShadow: '0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent)' };
+const HEAD: CSSProperties = { touchAction: 'none', flex: 'none', display: 'flex', alignItems: 'center', gap: 6, height: 48, padding: '0 10px 0 6px', boxShadow: '0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent)' };
 const BACK: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 34, padding: '0 10px 0 6px', border: 0, borderRadius: 9, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 14, fontWeight: 550, cursor: 'pointer', flex: 'none' };
 const TITLE: CSSProperties = { flex: 1, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted-foreground)' };
 
@@ -148,7 +148,12 @@ export function CanvasLayer({
   useEffect(() => {
     opener.current = document.activeElement;
     back.current?.focus({ preventScroll: true });
+    // The Inbox behind the canvas takes no focus and no keys while the canvas is open: Tab stays in the layer.
+    const behind = document.getElementById('root');
+    const wasInert = behind?.hasAttribute('inert') ?? true;
+    if (behind && !wasInert) behind.setAttribute('inert', '');
     return () => {
+      if (behind && !wasInert) behind.removeAttribute('inert');
       // Focus goes back to the button that opened the canvas.
       const el = opener.current;
       if (el instanceof HTMLElement && el.isConnected) el.focus({ preventScroll: true });
@@ -156,15 +161,17 @@ export function CanvasLayer({
     };
   }, []);
   return createPortal(
-    <dialog open role="dialog" aria-label={`Canvas of ${subject}`} style={WINDOW} data-canvas-layer={threadId}>
+    <dialog open role="dialog" aria-modal="true" aria-label={`Canvas of ${subject}`} style={WINDOW} data-canvas-layer={threadId}>
+      {/* The Inbox's own scope, so its icons and buttons look here as they do in the window (the layer sits on the page's body). */}
+      <div className="pn-inbox" style={{ display: 'contents' }}>
       <header style={HEAD}>
         <button type="button" ref={back} style={BACK} onClick={onClose} data-canvas-back="" aria-label="Back to the thread">
           <Icon name="chevL" size={16} />
           Thread
         </button>
-        <h2 style={TITLE}>{subject}</h2>
-        <Tip content="Back to the thread">
-          <button type="button" className="ib-iconbtn" aria-label="Close the canvas" onClick={onClose} data-canvas-close="">
+        <h2 style={TITLE} title={subject}>{subject}</h2>
+        <Tip content="Close">
+          <button type="button" className="ib-iconbtn" style={{ minWidth: 30, minHeight: 30, flex: 'none' }} aria-label="Close the canvas" onClick={onClose} data-canvas-close="">
             <Icon name="x" size={16} />
           </button>
         </Tip>
@@ -172,6 +179,7 @@ export function CanvasLayer({
       <PanePart loading={<div style={{ flex: 1 }} aria-busy="true" />} onFailed={failed}>
         <CanvasBoard threadId={threadId} dark={dark} agent={agent} draft={draft} onWords={onWords} onSend={onSend} />
       </PanePart>
+      </div>
     </dialog>,
     document.body,
   );
