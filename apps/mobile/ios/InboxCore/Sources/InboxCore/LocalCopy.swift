@@ -103,4 +103,7 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var quiet: Bool?
   /// A thread action: what it does, so the list draws it while it waits.
   public var act: ThreadAct?
+  /// A thread action: what the person saw of the thread at the tap, which the computer's row is checked against if
+  /// the act waited (StateConflict).
+  public var shown: ShownState?
 }

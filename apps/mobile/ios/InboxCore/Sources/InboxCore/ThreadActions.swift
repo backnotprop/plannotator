@@ -144,11 +144,48 @@ public enum ThreadAct: Codable, Hashable, Sendable {
   }
 }
 
+/// What the person saw of a thread when they tapped an act: the state each act turns. A waited act is judged against
+/// it, never by a clock. A stamp is kept only when it is the computer's own; a state the phone drew itself (from an
+/// act not in a list read yet) keeps none, since only the computer's stamps compare with the computer's.
+public struct ShownState: Codable, Hashable, Sendable {
+  public var archived: Bool
+  public var resolvedAt: String?
+  public var readAt: String?
+  public var unread: Bool
+  public var starred: Bool
+  public var pinnedAt: String?
+  public var snoozeUntil: String?
+  public var priority: Bool
+  public var priorityAt: String?
+  /// When an agent last wrote, by the computer's stamp.
+  public var agentAt: String?
+
+  /// `shown`: the row as the phone drew it at the tap; `computer`: that row as the computer last said it.
+  public init(shown: InboxListRow, computer: InboxListRow?) {
+    func own(_ path: KeyPath<InboxListRow, String?>) -> String? {
+      guard let stamp = shown[keyPath: path], let computer, computer[keyPath: path] == stamp else { return nil }
+      return stamp
+    }
+    archived = ListRules.archived(shown)
+    resolvedAt = own(\.resolvedAt)
+    readAt = own(\.readAt)
+    unread = shown.unread
+    starred = shown.pinnedAt != nil
+    pinnedAt = own(\.pinnedAt)
+    snoozeUntil = shown.snoozed?.until
+    priority = shown.priority != nil
+    priorityAt = shown.priority?.at == computer?.priority?.at ? shown.priority?.at : nil
+    agentAt = Self.agentAt(shown)
+  }
+
+  static func agentAt(_ row: InboxListRow) -> String? { row.lastAgentAt ?? (row.lastAuthor == .agent ? row.lastAt : nil) }
+}
+
 /// A thread action that waited on the phone (made while the computer was away) meets the computer's row before it
-/// goes. The phone's rule beside PickConflict's: an act never goes over a change made elsewhere after the person's
-/// tap, and an act the row already shows is not sent at all. The time of a change is the computer's own stamp on
-/// the row (`resolved_at`, `pinned_at`, `snoozed.at`, `priority.at`, `read_at`, `last_agent_at`); the tap's is the
-/// phone's clock at the tap. A state with no stamp (unstarred, unsnoozed) cannot say when it came, so the act goes.
+/// goes. The phone's rule beside PickConflict's, which compares revisions: the act goes when the computer's row still
+/// shows what the person saw at the tap; an act the row already shows is not sent at all; anything else was changed
+/// elsewhere meanwhile, and the computer's state stands. Only the computer's own stamps are compared, with each
+/// other: never with the phone's clock.
 public enum StateConflict {
   public enum Outcome: Hashable, Sendable {
     /// Send it.
@@ -159,28 +196,40 @@ public enum StateConflict {
     case giveWay
   }
 
-  static func after(_ stamp: String?, _ tapped: Date) -> Bool {
-    guard let stamp, let date = SnoozeRules.date(stamp) else { return false }
-    return date > tapped
+  /// The computer's stamp moved from the one the person saw. Nil on either side says nothing.
+  static func moved(_ seen: String?, _ now: String?) -> Bool {
+    guard let seen, let now else { return false }
+    return seen != now
   }
 
-  public static func decide(_ act: ThreadAct, row: InboxListRow?, tapped: Date) -> Outcome {
+  /// An agent wrote after the tap and is the last to have written: Archive and Mark read never bury what it said.
+  static func agentWrote(_ shown: ShownState, _ row: InboxListRow) -> Bool {
+    guard row.lastAuthor == .agent, let now = ShownState.agentAt(row) else { return false }
+    return now != shown.agentAt
+  }
+
+  /// `shown`: what the person saw at the tap (nil: not known, so only an act the row already shows is held back).
+  public static func decide(_ act: ThreadAct, shown: ShownState?, row: InboxListRow?) -> Outcome {
     // A thread the list no longer has: the computer answers for it (a 404 settles it).
     guard let row else { return .send }
     let archived = ListRules.archived(row)
     switch act {
     case .archive:
-      return archived ? .already : .send
+      if archived { return .already }
+      if let shown, agentWrote(shown, row) { return .giveWay }
+      return .send
     case .unarchive:
       if !archived { return .already }
-      return after(row.resolvedAt, tapped) ? .giveWay : .send
+      return moved(shown?.resolvedAt, row.resolvedAt) ? .giveWay : .send
     case .read:
-      if after(row.readAt, tapped) { return .already }
+      // Read elsewhere meanwhile, and nothing came after.
+      if let readAt = row.readAt, !row.unread, row.unseen == 0, shown?.readAt != readAt { return .already }
       // Mark read closes what waits unanswered: never questions an agent asked after the person looked.
-      if after(row.lastAgentAt ?? row.lastAt, tapped), row.lastAuthor == .agent { return .giveWay }
+      if let shown, agentWrote(shown, row) { return .giveWay }
       return .send
     case .moveBack:
-      return row.readAt == nil ? .already : .send
+      if row.readAt == nil { return .already }
+      return moved(shown?.readAt, row.readAt) ? .giveWay : .send
     case .markUnread:
       return row.unread ? .already : .send
     case .seen, .orderStars, .restorePriority:
@@ -189,16 +238,19 @@ public enum StateConflict {
       return row.pinnedAt != nil ? .already : .send
     case .unstar:
       if row.pinnedAt == nil { return .already }
-      return after(row.pinnedAt, tapped) ? .giveWay : .send
+      return moved(shown?.pinnedAt, row.pinnedAt) ? .giveWay : .send
     case .snooze(let until, _):
       if row.snoozed?.until == until { return .already }
-      return after(row.snoozed?.at, tapped) ? .giveWay : .send
+      // Snoozed elsewhere to another time meanwhile.
+      if let shown, let now = row.snoozed?.until, now != shown.snoozeUntil { return .giveWay }
+      return .send
     case .unsnooze:
       guard let snooze = row.snoozed else { return .already }
-      return after(snooze.at, tapped) ? .giveWay : .send
+      if let shown, snooze.until != shown.snoozeUntil { return .giveWay }
+      return .send
     case .priority(let on):
       if (row.priority != nil) == on { return .already }
-      return after(row.priority?.at, tapped) ? .giveWay : .send
+      return moved(shown?.priorityAt, row.priority?.at) ? .giveWay : .send
     }
   }
 }

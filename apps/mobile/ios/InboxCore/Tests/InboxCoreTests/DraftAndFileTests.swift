@@ -123,13 +123,13 @@ final class DraftAndFileTests: XCTestCase {
 
   private func bytes(_ count: Int, seed: UInt8 = 7) -> Data { Data((0..<count).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ Int(seed)) }) }
 
-  private func withFile(_ data: Data, kind: InboxAttachmentKind = .file, name: String = "rollout-notes.pdf", budget: Int64 = AttachmentCache.defaultBudget) async throws
+  private func withFile(_ data: Data, kind: InboxAttachmentKind = .file, name: String = "rollout-notes.pdf", budget: Int64 = AttachmentCache.defaultBudget, gate: Gate? = nil) async throws
     -> (door: StandInDoor, session: InboxSession, item: AttachmentItem, cache: AttachmentCache)
   {
     let door = StandInDoor()
     _ = await door.addFile(thread: StandInData.docs, name: name, kind: kind, bytes: data)
     let cache = AttachmentCache(folder: folder(), budget: budget)
-    let session = await pairedSession(door: door, bytes: cache)
+    let session = await pairedSession(door: door, bytes: cache, gate: gate)
     await session.start()
     await session.open(StandInData.docs)
     await session.readAttachments(StandInData.docs)
@@ -190,7 +190,46 @@ final class DraftAndFileTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: url), data)
     let first = await door.calls.first { $0.path.hasSuffix("/download") }
     XCTAssertEqual(first?.headers["Range"], "bytes=6000-8394607", "from where it stopped")
-    XCTAssertNotNil(first?.headers["If-Range"], "only if the file is still the same")
+  }
+
+  func testAFileThatChangedBetweenPartsStartsAgainInPartsNeverWhole() async throws {
+    let gate = Gate()
+    let (door, session, item, cache) = try await withFile(bytes(10_000), gate: gate)
+    await door.setPartCap(3_000)
+    await door.failBytes(after: 2)
+    _ = try? await session.openAttachment(item)
+    // The agent rendered the file again before the phone asked for the rest.
+    await door.failBytes(after: nil)
+    await door.changeFile(item.id.rawValue, to: bytes(10_000, seed: 5))
+    await door.clearCalls()
+    let before = await gate.answers.count
+    do {
+      _ = try await session.openAttachment(item)
+      XCTFail("not the bytes the phone was told of")
+    } catch AttachmentError.fetch(.damaged) {}
+    // A whole answer has no cap: the phone never asks in a way the door answers with one.
+    let answers = await gate.answers.dropFirst(before).filter { $0.path.hasSuffix("/download") }.map(\.status)
+    XCTAssertFalse(answers.isEmpty)
+    XCTAssertEqual(Set(answers), [206], "every answer a part")
+    let calls = await door.calls.filter { $0.path.hasSuffix("/download") }
+    XCTAssertTrue(calls.allSatisfy { $0.headers["If-Range"] == nil })
+    XCTAssertEqual(calls.dropFirst().first?.headers["Range"], "bytes=0-8388607", "started again from the first byte")
+    XCTAssertEqual(cache.used, 0, "nothing kept")
+  }
+
+  func testErasingTheCacheDuringAFetchKeepsNothingOfIt() async throws {
+    let gate = Gate()
+    let (door, session, item, cache) = try await withFile(bytes(9_000), gate: gate)
+    await door.setPartCap(3_000)
+    await gate.stop { $0.path.hasSuffix("/download") }
+    let fetch = Task { @MainActor in try await session.openAttachment(item) }
+    await gate.reached()
+    // The computer is removed while a part is on its way.
+    cache.erase()
+    await gate.open()
+    _ = try? await fetch.value
+    XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(cache.folder).path), "no byte of a removed computer comes back")
+    XCTAssertEqual(cache.used, 0)
   }
 
   func testCancellingAFetchStopsItAndTheNextOneResumes() async throws {
@@ -271,6 +310,31 @@ final class DraftAndFileTests: XCTestCase {
     cache.budget = 4
     XCTAssertEqual(cache.used, 4)
     XCTAssertTrue(cache.contains("c"))
+  }
+
+  func testAFileOpenInAViewerStaysAndStoppedPartsCountAgainstTheBudget() async throws {
+    let (_, session, item, cache) = try await withFile(bytes(4_000), budget: 10_000)
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let url = try await session.openAttachment(item)
+    let index = try XCTUnwrap(cache.folder).appendingPathComponent("index.json")
+    let written = try FileManager.default.attributesOfItem(atPath: index.path)[.modificationDate] as? Date
+    // Asking whether a file is kept, as a list row does, writes nothing.
+    for _ in 0..<3 { XCTAssertEqual(session.availability(item), .kept(url)) }
+    XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: index.path)[.modificationDate] as? Date, written)
+
+    // Open in a viewer: a newer file makes room with something else.
+    cache.store("newer", data: Data(count: 7_000), now: start.addingTimeInterval(100))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "never pulled from under the viewer")
+    session.attachmentClosed(item)
+    cache.store("newest", data: Data(count: 7_000), now: start.addingTimeInterval(200))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "closed: it can go")
+
+    // The part of a fetch that stopped counts, and goes first.
+    let part = cache.partialURL("stopped")
+    try Data(count: 5_000).write(to: part)
+    cache.store("small", data: Data(count: 1_000), now: start.addingTimeInterval(300))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: part.path))
+    XCTAssertTrue(cache.contains("newest"))
   }
 
   func testRemovingTheComputerErasesItsFiles() async throws {

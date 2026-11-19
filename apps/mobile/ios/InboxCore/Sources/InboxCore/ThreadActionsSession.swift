@@ -17,6 +17,8 @@ struct ActionBook {
   var answerOrder: [String] = []
   /// Writes on their way now: too late to take back without a reply of their own.
   var inFlight: Set<String> = []
+  /// Writes sent with no definite answer: the computer may have taken them, so an Undo sends the reverse.
+  var inDoubt: Set<String> = []
   /// A list read this pump already made for a waited act.
   var checked = false
   var needsListRead = false
@@ -27,6 +29,20 @@ struct ActionBook {
   var wake: Task<Void, Never>?
   /// Moves when a snooze ends, so what reads the list draws again.
   var tick = 0
+}
+
+/// What time it is, and how to wait for a time. The system clock in the app; a clock the tests move by hand.
+public struct SessionClock: Sendable {
+  public var now: @Sendable () -> Date
+  /// Wait this many seconds (throws when the waiting task is cancelled).
+  public var sleep: @Sendable (TimeInterval) async throws -> Void
+
+  public init(now: @escaping @Sendable () -> Date, sleep: @escaping @Sendable (TimeInterval) async throws -> Void) {
+    self.now = now
+    self.sleep = sleep
+  }
+
+  public static let system = SessionClock(now: { Date() }, sleep: { try await Task.sleep(for: .milliseconds(Int($0 * 1000))) })
 }
 
 /// The Undo the window's toast offers after an act, for 7 seconds (`MARK_READ_UNDO_MS`, contract check list-11).
@@ -101,14 +117,16 @@ extension InboxSession {
     return model
   }
 
-  /// The list drawn at `now`: groups, stars, badge and when it next changes by itself.
-  public func listView(now: Date = Date()) -> ListView? {
+  /// The list drawn at `now` (the session's clock when nil): groups, stars, badge and when it next changes by itself.
+  public func listView(now: Date? = nil) -> ListView? {
     _ = book.tick
+    let now = now ?? clock.now()
     return shownList().map { ListView.of($0, now: now) }
   }
 
   /// A thread's row as the list draws it, else as its last read carried it.
-  public func row(_ thread: ThreadID, now: Date = Date()) -> InboxListRow? {
+  public func row(_ thread: ThreadID, now: Date? = nil) -> InboxListRow? {
+    let now = now ?? clock.now()
     if let row = listView(now: now)?.row(thread) { return row }
     if let row = archivedRows().first(where: { $0.threadId == thread }) { return row }
     guard let row = threads[thread]?.row else { return nil }
@@ -162,9 +180,9 @@ extension InboxSession {
     let starIndex = list?.pins?.firstIndex { $0.threadId == thread }
     let key = UUID().uuidString
     let (request, body) = act.request(thread: thread, key: key)
-    enqueue(kind: .state, thread: thread, message: nil, request: request, body: body, key: key, act: act)
+    enqueue(kind: .state, thread: thread, message: nil, request: request, body: body, key: key, act: act, shown: shownState(thread, earlier))
     if undo, let kind = Self.undoKind(act, earlier: earlier) {
-      book.undo = UndoOffer(id: key, thread: thread, kind: kind, expires: Date().addingTimeInterval(UndoOffer.seconds), earlier: earlier, starIndex: starIndex)
+      book.undo = UndoOffer(id: key, thread: thread, kind: kind, expires: clock.now().addingTimeInterval(UndoOffer.seconds), earlier: earlier, starIndex: starIndex)
     }
     await pump(thread.rawValue)
     if book.notices[thread] != nil { return .refused }
@@ -188,12 +206,14 @@ extension InboxSession {
   }
 
   /// Undo an act. When the act has not left the phone yet, it is taken back and nothing is sent; otherwise the
-  /// window's reverse is sent after it. False when the offer is gone (its 7 seconds passed, or another replaced it).
+  /// window's reverse is sent after it. False when the offer is gone (its 7 seconds passed, or another replaced it),
+  /// or there is nothing it can send back.
   @discardableResult
-  public func undo(_ offer: UndoOffer, now: Date = Date()) async -> Bool {
+  public func undo(_ offer: UndoOffer, now: Date? = nil) async -> Bool {
+    let now = now ?? clock.now()
     guard now < offer.expires, book.undo?.id == offer.id else { return false }
     book.undo = nil
-    if held.contains(where: { $0.id == offer.id }), !book.inFlight.contains(offer.id) {
+    if held.contains(where: { $0.id == offer.id }), !book.inFlight.contains(offer.id), !book.inDoubt.contains(offer.id) {
       settle(offer.id)
       return true
     }
@@ -201,10 +221,19 @@ extension InboxSession {
     while book.inFlight.contains(offer.id) { try? await Task.sleep(for: .milliseconds(15)) }
     // Refused, so nothing to undo: the refusal says so.
     if book.notices[offer.thread] != nil, !book.landed.contains(where: { $0.write.id == offer.id }), book.answers[offer.id] == nil { return false }
-    for act in reverse(of: offer, now: now) {
+    let reverse = reverse(of: offer, now: now)
+    // Sent with no definite answer, so still held: whether the computer took it is not known. It goes no further, and
+    // each reverse waits to meet the computer's row, which says whether there is anything to take back.
+    let inDoubt = held.contains { $0.id == offer.id }
+    if inDoubt {
+      guard !reverse.isEmpty else { return false }
+    }
+    let shown = shownState(offer.thread, row(offer.thread, now: now))
+    if inDoubt { settle(offer.id) }
+    for act in reverse {
       let key = UUID().uuidString
       let (request, body) = act.request(thread: offer.thread, key: key)
-      enqueue(kind: .state, thread: offer.thread, message: nil, request: request, body: body, key: key, act: act)
+      enqueue(kind: .state, thread: offer.thread, message: nil, request: request, body: body, key: key, act: act, shown: shown, waited: inDoubt)
     }
     await pump(offer.thread.rawValue)
     return true
@@ -272,6 +301,17 @@ extension InboxSession {
     book.needsListRead = true
   }
 
+  /// The thread's row as the computer last said it, with none of the person's acts drawn over it.
+  func computerRow(_ thread: ThreadID) -> InboxListRow? {
+    list.flatMap { model in (model.sections.flatMap(\.threads) + (model.snoozed ?? []) + (model.pins ?? [])).first { $0.threadId == thread } }
+      ?? book.archived?.threads.first { $0.threadId == thread }
+  }
+
+  /// What the person sees of a thread now, for an act made on it.
+  func shownState(_ thread: ThreadID, _ shown: InboxListRow?) -> ShownState? {
+    shown.map { ShownState(shown: $0, computer: computerRow(thread) ?? threads[thread]?.row) }
+  }
+
   /// A waited act meets the computer's row before it goes (StateConflict). True when it was settled here.
   func settleWaitedAct(_ write: HeldWrite) async -> Bool {
     guard write.waited == true, let act = write.act else { return false }
@@ -280,9 +320,11 @@ extension InboxSession {
       await readList()
     }
     let thread = ThreadID(write.thread)
-    let raw = list.flatMap { model in (model.sections.flatMap(\.threads) + (model.snoozed ?? []) + (model.pins ?? [])).first { $0.threadId == thread } }
-      ?? book.archived?.threads.first { $0.threadId == thread }
-    switch StateConflict.decide(act, row: raw, tapped: write.madeAt) {
+    // The acts the computer took since that read are not in it yet: drawn over it, so an act is judged against the
+    // row the acts before it left (an Unarchive after an Archive that just went).
+    let since = book.landed.map(\.write).filter { $0.thread == write.thread }
+    let row = computerRow(thread).map { row in since.reduce(row) { $1.act?.drawn($0, at: SnoozeRules.iso($1.madeAt)) ?? $0 } }
+    switch StateConflict.decide(act, shown: write.shown, row: row) {
     case .send: return false
     case .already:
       settle(write.id)
@@ -296,15 +338,17 @@ extension InboxSession {
   }
 
   /// Keep a timer for the soonest snooze: when it ends, the list draws again and is read again.
-  func armWake(now: Date = Date()) {
+  func armWake(now: Date? = nil) {
     book.wake?.cancel()
     book.wake = nil
+    let now = now ?? clock.now()
     guard let model = list else { return }
     let untils = (model.sections.flatMap(\.threads) + (model.snoozed ?? []) + (model.pins ?? [])).compactMap { $0.snoozed?.until }
     // Held to a day: a snooze months away wakes the timer early, and it sets itself again.
     guard let delay = SnoozeRules.delay(untils, now: now).map({ min($0, 86_400) }) else { return }
+    let clock = self.clock
     book.wake = Task { [weak self] in
-      try? await Task.sleep(for: .milliseconds(Int(delay * 1000) + 50))
+      try? await clock.sleep(delay + 0.05)
       guard !Task.isCancelled, let self else { return }
       self.book.tick += 1
       if self.client != nil { await self.readList() } else { self.armWake() }

@@ -110,6 +110,135 @@ final class ThreadActionTests: XCTestCase {
     XCTAssertTrue(session.listView()!.pins.contains { $0.threadId == thread })
   }
 
+  func testOppositeActsThatWaitedEndAsTappedLast() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await door.setOffline(true)
+    let archived = StandInData.docs, starred = StandInData.bumps
+    // Archived, then unarchived from Archived; starred, then unstarred: all while the computer was away.
+    await session.act(.archive, on: archived)
+    await session.act(.unarchive, on: archived)
+    await session.act(.star, on: starred)
+    await session.act(.unstar, on: starred)
+    await door.clearCalls()
+    await door.setOffline(false)
+    await session.refresh()
+
+    XCTAssertTrue(session.held.isEmpty)
+    let archive = await door.rowState(archived), star = await door.rowState(starred)
+    XCTAssertNil(archive.resolvedAt, "unarchived, as tapped last")
+    XCTAssertNil(star.pinnedAt, "unstarred, as tapped last")
+    XCTAssertNotEqual(session.listView()?.group(of: archived), .archived)
+    XCTAssertFalse(session.listView()!.pins.contains { $0.threadId == starred })
+    XCTAssertNil(session.actionNotice(archived))
+    XCTAssertNil(session.actionNotice(starred))
+  }
+
+  func testUndoWhileAWaitedActIsCheckedSendsNothing() async throws {
+    let door = StandInDoor()
+    let gate = Gate()
+    let thread = StandInData.docs
+    let session = await pairedSession(door: door, gate: gate)
+    await session.start()
+    await door.setOffline(true)
+    await session.act(.archive, on: thread)
+    let offer = try XCTUnwrap(session.undoOffer)
+    await door.clearCalls()
+    await door.setOffline(false)
+    // The computer answers again; the list the waited archive is checked against is on its way.
+    await gate.stop { $0.method == .get && $0.path == "threads" }
+    let back = Task { @MainActor in await session.refresh() }
+    await gate.reached()
+    let undone = await session.undo(offer)
+    XCTAssertTrue(undone)
+    await gate.open()
+    await back.value
+
+    let resolves = await door.posts("/resolve")
+    XCTAssertTrue(resolves.isEmpty, "taken back: never sent")
+    let kept = await door.rowState(thread)
+    XCTAssertNil(kept.resolvedAt)
+    XCTAssertNotEqual(session.listView()?.group(of: thread), .archived)
+  }
+
+  func testUndoOfAnActWhoseAnswerWasLostEndsAsTheComputerHadItBefore() async throws {
+    let door = StandInDoor()
+    let gate = Gate()
+    let session = await pairedSession(door: door, gate: gate)
+    await session.start()
+    let resolve: @Sendable (DoorCall) -> Bool = { $0.method == .post && $0.path.hasSuffix("/resolve") }
+
+    // The computer took the archive, and the connection went before its answer came.
+    let took = StandInData.docs
+    await gate.lose(resolve, arrives: true)
+    await session.act(.archive, on: took)
+    var kept = await door.rowState(took)
+    XCTAssertNotNil(kept.resolvedAt)
+    var undone = await session.undo(try XCTUnwrap(session.undoOffer))
+    XCTAssertTrue(undone)
+    kept = await door.rowState(took)
+    XCTAssertNil(kept.resolvedAt, "the archive the computer took is taken back")
+    XCTAssertTrue(session.held.isEmpty)
+
+    // The connection went before the archive reached the computer: nothing to take back, and nothing more is sent.
+    let lost = StandInData.bumps
+    await gate.lose(resolve, arrives: false)
+    await session.act(.archive, on: lost)
+    await door.clearCalls()
+    undone = await session.undo(try XCTUnwrap(session.undoOffer))
+    XCTAssertTrue(undone)
+    let resolves = await door.posts("/resolve")
+    XCTAssertTrue(resolves.isEmpty)
+    kept = await door.rowState(lost)
+    XCTAssertNil(kept.resolvedAt)
+    XCTAssertTrue(session.held.isEmpty)
+    XCTAssertNotEqual(session.listView()?.group(of: lost), .archived)
+  }
+
+  func testAWaitedActIsJudgedByTheComputersStampsNotThePhonesClock() async throws {
+    let door = StandInDoor()
+    let starred = StandInData.bumps, archived = StandInData.billing
+    await door.changeState(starred) { $0.pinnedAt = "2026-11-01T09:00:00.000Z" }
+    // The computer's clock runs an hour ahead of the phone's.
+    let ahead = SnoozeRules.iso(Date().addingTimeInterval(3600))
+    await door.changeState(archived) { $0.resolvedAt = ahead }
+    let session = await pairedSession(door: door)
+    await session.start()
+    await door.setOffline(true)
+    await session.act(.unstar, on: starred)
+    await session.act(.unarchive, on: archived)
+    // Meanwhile the window starred it again, stamped by a clock behind the phone's.
+    await door.changeState(starred) { $0.pinnedAt = "2026-11-02T09:00:00.000Z" }
+    await door.clearCalls()
+    await door.setOffline(false)
+    await session.refresh()
+
+    let star = await door.rowState(starred), archive = await door.rowState(archived)
+    XCTAssertEqual(star.pinnedAt, "2026-11-02T09:00:00.000Z", "never sent over the newer star")
+    XCTAssertEqual(session.actionNotice(starred), .gaveWay)
+    XCTAssertNil(archive.resolvedAt, "nothing changed it after the tap: the unarchive goes")
+    XCTAssertNil(session.actionNotice(archived))
+  }
+
+  func testAWaitedArchiveGivesWayToAnAgentThatWroteAfterTheTap() async throws {
+    let door = StandInDoor()
+    let thread = StandInData.docs
+    let session = await pairedSession(door: door)
+    await session.start()
+    await door.setOffline(true)
+    await session.act(.archive, on: thread)
+    await door.agentWrites(thread: thread, body: "One more thing before you go.")
+    await door.clearCalls()
+    await door.setOffline(false)
+    await session.refresh()
+
+    let resolves = await door.posts("/resolve")
+    XCTAssertTrue(resolves.isEmpty, "never buried in Archived")
+    XCTAssertEqual(session.actionNotice(thread), .gaveWay)
+    XCTAssertTrue(session.held.isEmpty)
+  }
+
   func testAWaitedActTheComputerAlreadyShowsIsNotSent() async throws {
     let door = StandInDoor()
     let thread = StandInData.docs
@@ -280,12 +409,18 @@ final class ThreadActionTests: XCTestCase {
   func testASnoozeEndsWhileTheAppIsOpen() async throws {
     let door = StandInDoor()
     let thread = StandInData.bumps
-    let session = await pairedSession(door: door)
+    let clock = HandClock(Date())
+    let issued = await door.issueToken()
+    let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
+    let session = InboxSession(computer: computer, app: testApp, clock: clock.sessionClock) { _ in [StandInTransport(door: door)] }
     await session.start()
-    await session.act(.snooze(until: soon(0.6), at: nil), on: thread)
+    await session.act(.snooze(until: SnoozeRules.iso(clock.now.addingTimeInterval(3600)), at: nil), on: thread)
     XCTAssertEqual(session.listView()?.group(of: thread), .snoozed)
     let reads = await door.calls.filter { $0.path == "threads" }.count
-    try await Task.sleep(for: .milliseconds(1200))
+    let wake = try XCTUnwrap(session.book.wake, "a timer waits for the snooze's end")
+
+    clock.move(by: 3601)
+    await wake.value
     // Its time is over: back in its own section, bold, and the list was read again.
     let view = try XCTUnwrap(session.listView())
     XCTAssertNotEqual(view.group(of: thread), .snoozed)
@@ -318,29 +453,99 @@ final class ThreadActionTests: XCTestCase {
   }
 
   func testStateConflictRules() throws {
-    let tap = try XCTUnwrap(SnoozeRules.date("2026-11-18T12:00:00.000Z"))
     var row = try Contract.json("fixtures/rows.json").at("rows").items[13].without("note").decoded(InboxListRow.self)
     row.pinnedAt = nil
-    XCTAssertEqual(StateConflict.decide(.star, row: row, tapped: tap), .send)
-    XCTAssertEqual(StateConflict.decide(.unstar, row: row, tapped: tap), .already)
-    row.pinnedAt = "2026-11-18T11:00:00.000Z"
-    XCTAssertEqual(StateConflict.decide(.unstar, row: row, tapped: tap), .send, "starred before the tap")
-    row.pinnedAt = "2026-11-18T12:00:01.000Z"
-    XCTAssertEqual(StateConflict.decide(.unstar, row: row, tapped: tap), .giveWay, "starred again after it")
-    row.snoozed = InboxRowSnooze(until: "2026-11-20T08:00:00.000Z", at: "2026-11-18T12:30:00.000Z")
-    XCTAssertEqual(StateConflict.decide(.snooze(until: "2026-11-19T08:00:00.000Z", at: nil), row: row, tapped: tap), .giveWay)
-    XCTAssertEqual(StateConflict.decide(.snooze(until: "2026-11-20T08:00:00.000Z", at: nil), row: row, tapped: tap), .already)
-    XCTAssertEqual(StateConflict.decide(.unsnooze, row: row, tapped: tap), .giveWay)
-    row.resolvedAt = "2026-11-18T12:10:00.000Z"
-    XCTAssertEqual(StateConflict.decide(.archive, row: row, tapped: tap), .already)
-    XCTAssertEqual(StateConflict.decide(.unarchive, row: row, tapped: tap), .giveWay, "archived elsewhere after the tap")
-    // Mark read never closes questions an agent asked after the person looked.
+    row.snoozed = nil
     row.resolvedAt = nil
-    row.lastAuthor = .agent
-    row.lastAgentAt = "2026-11-18T12:05:00.000Z"
-    XCTAssertEqual(StateConflict.decide(.read, row: row, tapped: tap), .giveWay)
-    row.lastAgentAt = "2026-11-18T11:05:00.000Z"
-    XCTAssertEqual(StateConflict.decide(.read, row: row, tapped: tap), .send)
-    XCTAssertEqual(StateConflict.decide(.archive, row: nil, tapped: tap), .send, "a thread the list lacks: the computer answers")
+    row.lastAgentAt = nil
+    row.lastAuthor = .person
+    row.readAt = nil
+    let unstarred = ShownState(shown: row, computer: row)
+    XCTAssertEqual(StateConflict.decide(.star, shown: unstarred, row: row), .send)
+    XCTAssertEqual(StateConflict.decide(.unstar, shown: unstarred, row: row), .already)
+
+    // Starred at the tap: the computer's star still the one the person saw, or a newer one.
+    var starred = row
+    starred.pinnedAt = "2026-11-18T11:00:00.000Z"
+    let seenStar = ShownState(shown: starred, computer: starred)
+    XCTAssertEqual(StateConflict.decide(.unstar, shown: seenStar, row: starred), .send, "the star the person saw")
+    var restarred = starred
+    restarred.pinnedAt = "2026-11-18T10:00:00.000Z"
+    XCTAssertEqual(StateConflict.decide(.unstar, shown: seenStar, row: restarred), .giveWay, "starred again elsewhere, whatever its clock said")
+    // A star the phone drew itself (not read back yet) has no stamp of the computer's to compare.
+    let drawnStar = ShownState(shown: starred, computer: row)
+    XCTAssertNil(drawnStar.pinnedAt)
+    XCTAssertEqual(StateConflict.decide(.unstar, shown: drawnStar, row: restarred), .send)
+
+    // Snoozes compare by their end.
+    var snoozed = row
+    snoozed.snoozed = InboxRowSnooze(until: "2026-11-20T08:00:00.000Z", at: "2026-11-18T12:30:00.000Z")
+    XCTAssertEqual(StateConflict.decide(.snooze(until: "2026-11-19T08:00:00.000Z", at: nil), shown: unstarred, row: snoozed), .giveWay, "snoozed elsewhere meanwhile")
+    XCTAssertEqual(StateConflict.decide(.snooze(until: "2026-11-20T08:00:00.000Z", at: nil), shown: unstarred, row: snoozed), .already)
+    XCTAssertEqual(StateConflict.decide(.unsnooze, shown: unstarred, row: snoozed), .giveWay)
+    XCTAssertEqual(StateConflict.decide(.unsnooze, shown: ShownState(shown: snoozed, computer: snoozed), row: snoozed), .send)
+
+    // Archive.
+    var archived = row
+    archived.resolvedAt = "2026-11-18T12:10:00.000Z"
+    XCTAssertEqual(StateConflict.decide(.archive, shown: unstarred, row: archived), .already)
+    let seenArchive = ShownState(shown: archived, computer: archived)
+    XCTAssertEqual(StateConflict.decide(.unarchive, shown: seenArchive, row: archived), .send)
+    var rearchived = archived
+    rearchived.resolvedAt = "2026-11-18T09:00:00.000Z"
+    XCTAssertEqual(StateConflict.decide(.unarchive, shown: seenArchive, row: rearchived), .giveWay, "archived again elsewhere")
+    XCTAssertEqual(StateConflict.decide(.unarchive, shown: seenArchive, row: row), .already)
+
+    // Archive and Mark read never go over what an agent wrote after the tap.
+    var asked = row
+    asked.lastAuthor = .agent
+    asked.lastAgentAt = "2026-11-18T08:05:00.000Z"
+    XCTAssertEqual(StateConflict.decide(.read, shown: unstarred, row: asked), .giveWay)
+    XCTAssertEqual(StateConflict.decide(.archive, shown: unstarred, row: asked), .giveWay)
+    let seenAsk = ShownState(shown: asked, computer: asked)
+    XCTAssertEqual(StateConflict.decide(.read, shown: seenAsk, row: asked), .send, "the person saw it")
+    XCTAssertEqual(StateConflict.decide(.archive, shown: seenAsk, row: asked), .send)
+    var read = asked
+    read.readAt = "2026-11-18T08:06:00.000Z"
+    read.unread = false
+    read.unseen = 0
+    XCTAssertEqual(StateConflict.decide(.read, shown: seenAsk, row: read), .already, "read elsewhere")
+
+    XCTAssertEqual(StateConflict.decide(.archive, shown: unstarred, row: nil), .send, "a thread the list lacks: the computer answers")
   }
+}
+
+/// A clock the test moves by hand: a wait ends when the clock is moved past it, never by the time a run takes.
+final class HandClock: @unchecked Sendable {
+  private let lock = NSLock()
+  private var time: Date
+  private var waits: [(until: Date, waiter: CheckedContinuation<Void, Never>)] = []
+
+  init(_ start: Date) { time = start }
+
+  var now: Date { lock.withLock { time } }
+
+  func move(by seconds: TimeInterval) {
+    let due: [CheckedContinuation<Void, Never>] = lock.withLock {
+      time = time.addingTimeInterval(seconds)
+      let due = waits.filter { $0.until <= time }.map(\.waiter)
+      waits.removeAll { $0.until <= time }
+      return due
+    }
+    for waiter in due { waiter.resume() }
+  }
+
+  func sleep(_ seconds: TimeInterval) async {
+    await withCheckedContinuation { waiter in
+      let now: Bool = lock.withLock {
+        let until = time.addingTimeInterval(seconds)
+        if until <= time { return true }
+        waits.append((until, waiter))
+        return false
+      }
+      if now { waiter.resume() }
+    }
+  }
+
+  var sessionClock: SessionClock { SessionClock(now: { [self] in now }, sleep: { [self] in await sleep($0) }) }
 }

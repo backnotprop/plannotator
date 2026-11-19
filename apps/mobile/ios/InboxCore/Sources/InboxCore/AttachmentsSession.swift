@@ -5,6 +5,8 @@ import InboxWire
 struct FileBook {
   /// What the computer last said of each thread's files (`GET threads/:id/attachments`).
   var states: [ThreadID: [InboxAttachmentState]] = [:]
+  /// Files open in a viewer, by file and version: the cache keys they hold.
+  var open: [String: [String]] = [:]
 }
 
 /// Whether a file's bytes can be opened now.
@@ -69,20 +71,48 @@ extension InboxSession {
     }
   }
 
-  /// Whether a file opens now: kept on the phone, fetchable, or neither until the computer answers.
+  /// Whether a file opens now: kept on the phone, fetchable, or neither until the computer answers. Asking writes
+  /// nothing and does not count as opening the file.
   public func availability(_ item: AttachmentItem, version: AttachmentVersion? = nil) -> AttachmentAvailability {
-    let version = version ?? item.opens
-    if let kept = bytes?.file(Self.cacheKey(item, version)) { return .kept(kept) }
-    // The sent version of a file kept as the current one with the same bytes.
-    if version == .current, item.changedSinceSent != true, let kept = bytes?.file(Self.cacheKey(item, .sent)) { return .kept(kept) }
+    if let key = keptKey(item, version: version ?? item.opens), let kept = bytes?.kept(key) { return .kept(kept) }
     return client != nil && standing == .ok ? .fetchable : .notKept
+  }
+
+  /// The cache key a file opens from, when it is kept: its own, or, for the current version of a file that did not
+  /// change, the version it sent (the same bytes).
+  func keptKey(_ item: AttachmentItem, version: AttachmentVersion) -> String? {
+    let own = Self.cacheKey(item, version)
+    if bytes?.contains(own) == true { return own }
+    if version == .current, item.changedSinceSent != true, bytes?.contains(Self.cacheKey(item, .sent)) == true { return Self.cacheKey(item, .sent) }
+    return nil
   }
 
   /// A file's bytes as a file on the phone: from the cache when kept, else fetched through the door into it, checked
   /// against the hash the computer named. Cancelling the calling task stops the fetch; the next one resumes it.
+  /// The file stays kept while it is open: call `attachmentClosed` when the viewer closes.
   public func openAttachment(_ item: AttachmentItem, version: AttachmentVersion? = nil, progress: @Sendable @escaping (Int64, Int64?) -> Void = { _, _ in }) async throws -> URL {
     let version = version ?? item.opens
-    if case .kept(let url) = availability(item, version: version) { return url }
+    let url = try await fetchAttachment(item, version: version, progress: progress)
+    if let bytes, let key = keptKey(item, version: version) {
+      bytes.hold(key)
+      files.open[Self.openKey(item, version), default: []].append(key)
+    }
+    return url
+  }
+
+  /// The viewer of a file opened with `openAttachment` closed: room can be made with it again.
+  public func attachmentClosed(_ item: AttachmentItem, version: AttachmentVersion? = nil) {
+    let name = Self.openKey(item, version ?? item.opens)
+    guard var keys = files.open[name], !keys.isEmpty else { return }
+    bytes?.release(keys.removeLast())
+    files.open[name] = keys.isEmpty ? nil : keys
+  }
+
+  static func openKey(_ item: AttachmentItem, _ version: AttachmentVersion) -> String { "\(item.id.rawValue)@\(version.rawValue)" }
+
+  private func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
+    // Opened: it goes last when room is made.
+    if let key = keptKey(item, version: version), let kept = bytes?.file(key) { return kept }
     if version == .current, let unavailable = item.unavailable { throw AttachmentError.unavailable(unavailable.message) }
     if client == nil { _ = await connect() }
     guard let client, let bytes else { throw AttachmentError.notKept }

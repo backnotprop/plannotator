@@ -80,6 +80,8 @@ public final class InboxSession {
   /// Attachments: what the computer says of each, and the bytes kept on the phone (AttachmentsSession.swift).
   var files = FileBook()
   let bytes: AttachmentCache?
+  /// What time it is, and how the session waits for a time (a snooze's end).
+  let clock: SessionClock
 
   private let app: AppIdentity
   private let connector: DoorConnector
@@ -93,8 +95,9 @@ public final class InboxSession {
   private var pumping: Set<String> = []
   private let retryEvery: Duration
 
-  public init(computer: PairedComputer, app: AppIdentity, copy: LocalCopy = LocalCopy(folder: nil), retryEvery: Duration = .seconds(15), bytes: AttachmentCache? = nil, connector: @escaping DoorConnector) {
+  public init(computer: PairedComputer, app: AppIdentity, copy: LocalCopy = LocalCopy(folder: nil), retryEvery: Duration = .seconds(15), bytes: AttachmentCache? = nil, clock: SessionClock = .system, connector: @escaping DoorConnector) {
     self.retryEvery = retryEvery
+    self.clock = clock
     self.bytes = bytes
     self.computer = computer
     self.app = app
@@ -598,6 +601,8 @@ public final class InboxSession {
     }
     // A thread action that waited meets the computer's row first: it never goes over a newer change made elsewhere.
     if write.kind == .state, await settleWaitedAct(write) { return true }
+    // Taken back (Undo) while the computer's row was read: nothing goes.
+    guard held.contains(where: { $0.id == write.id }) else { return true }
     book.inFlight.insert(write.id)
     defer { book.inFlight.remove(write.id) }
     do {
@@ -610,6 +615,8 @@ public final class InboxSession {
       if removed { return false }
       note(failure)
       guard failure.isDefinite else {
+        // Sent, and no definite answer: the computer may have taken it.
+        if case .unreachable(_, mayHaveArrived: false) = failure {} else { book.inDoubt.insert(write.id) }
         if let index = held.firstIndex(where: { $0.id == write.id }), held[index].waited != true {
           held[index].waited = true
           copy.saveOutbox(held)
@@ -640,6 +647,7 @@ public final class InboxSession {
       if write.kind != .seen, write.kind != .state { await readThread(ThreadID(write.thread)) }
       return true
     } catch {
+      book.inDoubt.insert(write.id)
       return false
     }
   }
@@ -749,12 +757,14 @@ public final class InboxSession {
 
   private func encode<Body: Encodable>(_ body: Body) -> Data { (try? JSONEncoder().encode(body)) ?? Data("{}".utf8) }
 
-  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil) {
+  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil, shown: ShownState? = nil, waited: Bool = false) {
     // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
     // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers, and
     // has waited if it turns out not to (markWaited).
-    let waits = reach == .away
-    hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil, act: act))
+    let waits = waited || reach == .away
+    var write = HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: clock.now(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil, act: act)
+    write.shown = shown
+    hold(write)
   }
 
   private func markSeen(_ id: ThreadID) async {
