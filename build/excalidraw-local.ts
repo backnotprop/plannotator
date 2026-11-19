@@ -29,6 +29,10 @@ export function excalidrawLocal(root: string): Plugin {
     enforce: 'pre',
     resolveId(source, importer) {
       if (importer && /@excalidraw[\\/+]excalidraw/.test(importer) && /subset-(?:shared|worker)\.chunk\.js$/.test(source)) return SUBSET_OFF;
+      // Two mermaids ship: the Inbox's own (12) and the one Excalidraw's converter is built for (11). Answering the
+      // converter's import with the Inbox's 12 was tried (2.2 MB less in the binary): flowcharts and sequence diagrams
+      // still convert, but the converter reads mermaid 11's layout, and with 12 edge labels land on boxes and edges
+      // kink. The second copy stays, lazy, until the converter supports mermaid 12.
       return null;
     },
     load(id) {

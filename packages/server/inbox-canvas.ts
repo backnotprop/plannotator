@@ -51,25 +51,27 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { decodePng, encodePng } from "./inbox-icon-trim";
 import { fail, guarded, okComplete } from "./inbox-mcp-result";
 
+const CANVAS_VERBS = [
+  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram; an open Inbox window draws it, so it is refused while none is open). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "size": [width, height] and "color": black, gray, red, pink, violet, blue, teal, green, yellow, orange.',
+  '{"connect": "<thing>", "to": "<thing>", "label": "..."} (or {"from": "<thing>", "to": "<thing>"}; the arrow points at "to")   {"set": "<thing>", "text": "...", "color": "..."}',
+  '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
+  '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
+];
+const CANVAS_BASE_RULE =
+  'Send "base": the rev of your last answer about this canvas. A change lands only on things an answer has shown you as they are now: if someone changed one since, or you were never shown it, nothing changes and the answer shows it, after which the same change goes through. A call with no session is remembered by nothing, so its base must be the current rev.';
+
 export const INBOX_CANVAS_DESCRIPTION = [
   "A thread's canvas: a shared Excalidraw drawing the person sketches on, which you read and change. With only thread_id it answers the canvas as text, one line per thing, and its rev.",
   '"picture": true also writes a PNG of it and gives the path; "picture": "<thing>" (or a list) is that part only. "in": "<frame>" reads one frame.',
-  '"do": [...] changes it, all or nothing; send "base": the rev of your last answer. Name a thing by the id at the start of its line, or by its words. Each change has one verb:',
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "color".',
-  '{"connect": "<thing>", "to": "<thing>", "label": "..."}   {"set": "<thing>", "text": "...", "color": "..."}',
-  '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
-  '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
-  "If someone changed the same thing since your base, you are told what they did and nothing changes. The person sees your change on the canvas at once; nothing is sent to them.",
+  `"do": [...] changes it, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words. Each change has one verb:`,
+  ...CANVAS_VERBS,
+  "The person sees your change on the canvas at once and can undo it; nothing is sent to them.",
 ].join("\n");
 
 /** The `do` field: the whole grammar, so an agent that sees only the fields (the `plannotator_inbox` tool) can write a change. */
 export const INBOX_CANVAS_DO_DESCRIPTION = [
-  'Changes to the canvas, all or nothing; send "base" (the rev of your last answer) with them. Name a thing by the id at the start of its line, or by its words. One verb per change:',
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  add: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "color".',
-  '{"connect": "<thing>", "to": "<thing>", "label": "..."}   {"set": "<thing>", "text": "...", "color": "..."}',
-  '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
-  '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
-  "If someone changed the same thing since your base, you are told what they did and nothing changes.",
+  `Changes to the canvas, all or nothing. ${CANVAS_BASE_RULE} Name a thing by the id at the start of its line, or by its words. One verb per change:`,
+  ...CANVAS_VERBS,
 ].join("\n");
 
 const PICTURE_WAIT_MS = 8_000;
@@ -579,7 +581,7 @@ export function createInboxCanvas(options: {
               in: z.string().optional().describe("The canvas action: read only this frame (its id or title). With only thread_id the action answers the thread's canvas (the drawing the person sketches on) as text, one line per thing, and its rev."),
               after_thing: z.string().optional().describe("Continue a long reading of the canvas after this thing id (a cut reading ends with the exact call)."),
               picture: z.union([z.boolean(), z.string(), z.array(z.string())]).optional().describe('true: a PNG of the whole canvas. A thing or a list of things: a PNG of that part. The answer gives the file path.'),
-              base: z.number().int().optional().describe('With "do": the rev your last answer about this canvas gave.'),
+              base: z.number().int().optional().describe('With "do": the rev your last answer about this canvas gave (with no session: the current rev).'),
               do: z.array(z.record(z.string(), z.unknown())).optional().describe(INBOX_CANVAS_DO_DESCRIPTION),
               project_path: z.string().optional(),
               agent_session: z.string().optional(),
