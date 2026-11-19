@@ -13,5 +13,7 @@ This folder is the one source that the native app and the window are both built 
 | `parity/surface.json` | yes | `bun scripts/mobile/surface.ts` |
 | `parity/ledger.json` | no | One row per feature with the phone's decision; `tests/mobile-parity.test.ts` checks it covers the surface. |
 | `flows/*.md` | no | One file per flow with numbered checks. |
+| `fixtures/*.json` | no | Invented inputs for the conformance suites. |
+| `vectors/*.json` | yes | `bun scripts/mobile/vectors.ts` and `bun scripts/mobile/vectors-stream.ts` |
 
 Do not edit a generated file. Change its source in the product, or a generator in `scripts/mobile/`, then run the generators. `tests/mobile-vectors.test.ts` fails when a generated file is stale.
