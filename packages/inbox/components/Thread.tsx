@@ -3628,8 +3628,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            // Never for a reply to a script's post (its own question answered): that reply is the script's.
-            askerEnded: wordsEnded && wordsAsking && !(repliedTo && inboxSessionlessSend(repliedTo)) ? { name: wordsAsking.name } : null,
+            askerEnded: wordsEnded && wordsAsking && !(repliedTo && inboxSessionlessSend(repliedTo)) ? { name: wordsAsking.name } : null, // never for a reply to a script's post
             stuck,
             handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
