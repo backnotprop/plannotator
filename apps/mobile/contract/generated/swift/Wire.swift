@@ -9962,7 +9962,7 @@ public enum DoorRoutes {
   /// `GET markups/:id`: the window's `/api/inbox/markups/{name}`.
   public static let getMarkup = DoorRoute(name: "GET markups/:id", method: .get, path: "markups/{name}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET messages/:id/image`: the window's `/api/inbox/messages/{message}/image`.
-  public static let getMessageImage = DoorRoute(name: "GET messages/:id/image", method: .get, path: "messages/{message}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getMessageImage = DoorRoute(name: "GET messages/:id/image", method: .get, path: "messages/{message}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
   /// `GET html-assets/:id/:path`: the window's `/api/html-assets/{token}/{path}`.
   public static let getHtmlAsset = DoorRoute(name: "GET html-assets/:id/:path", method: .get, path: "html-assets/{token}/{path}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `POST annotations`: the window's `/api/inbox/annotations`.

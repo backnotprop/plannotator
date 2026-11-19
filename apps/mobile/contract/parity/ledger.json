@@ -8427,6 +8427,21 @@
       }
     },
     {
+      "id": "files-096-media",
+      "title": "Sound and video written in a message body play in place (native player, by byte range)",
+      "surface": [
+        "door:GET messages/:id/image",
+        "window:/api/inbox/messages/:id/image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
       "id": "files-097",
       "title": "Each picture is drawn whole: at most column width, own size, 70% of window height (floor 320 px); very tall ones get \"Show all\" / \"Show less\"",
       "surface": [
