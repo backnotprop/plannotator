@@ -53,18 +53,104 @@ export const HTML_ITEM_FRAME_ATTRS = {
 const escapeAttr = (value: string): string => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
 /**
+ * A face the HOST lends to HTML items, so an item can be set in the product's
+ * own type. The policy lets fonts be `data:` only and nothing is fetched, so
+ * the bytes travel inside the item's document: the host gives each face as a
+ * `data:` URL and the package writes the `@font-face` rule, ahead of the
+ * item's markup. An item's author only names a family in their own CSS. They
+ * cannot add to this list, change a rule in it or give it an address.
+ */
+export interface HtmlItemFace {
+  /** The name an item writes in `font-family`. Letters, digits, spaces, `-` and `_`; it starts with a letter. */
+  family: string;
+  /** The font's bytes: `data:font/woff2;base64,…` (also woff, ttf, otf). */
+  src: string;
+  /** One weight, or the two ends of a variable font's range. Absent: any weight is drawn with this file. */
+  weight?: number | [number, number];
+  style?: 'normal' | 'italic';
+}
+
+/** How much type a host may lend: the faces, the size of one (the length of its `data:` URL) and of all together. */
+export const HTML_ITEM_FACE_LIMITS = { faces: 6, faceLength: 256_000, totalLength: 512_000 } as const;
+
+const FAMILY_RE = /^[A-Za-z][A-Za-z0-9 _-]{0,47}$/;
+/** A font as a `data:` URL: one of four font types, base64, and nothing but the base64 alphabet after the comma. */
+const FONT_DATA_RE = /^data:(?:font\/(woff2|woff|ttf|otf)|application\/font-(woff2|woff)|application\/x-font-(ttf|otf|woff));base64,[A-Za-z0-9+/]+={0,2}$/;
+const FONT_FORMATS: Record<string, string> = { woff2: 'woff2', woff: 'woff', ttf: 'truetype', otf: 'opentype' };
+
+const isWeight = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000;
+
+/**
+ * The faces of a host's list that may be lent, each rebuilt from its checked
+ * fields. Anything that is not understood is left out, never guessed at: a
+ * family that is not a plain name, an address that is not a font's bytes as
+ * base64, a face over its size, a second face with a family, weight and
+ * style already taken, and every face after the list or the total is full.
+ */
+export function checkHtmlItemFaces(input: unknown): HtmlItemFace[] {
+  if (!Array.isArray(input)) return [];
+  const out: HtmlItemFace[] = [];
+  const taken = new Set<string>();
+  let total = 0;
+  for (let i = 0; i < input.length && i < 64 && out.length < HTML_ITEM_FACE_LIMITS.faces; i++) {
+    const value: unknown = input[i];
+    if (typeof value !== 'object' || value === null) continue;
+    const { family, src, weight, style } = value as Record<string, unknown>;
+    if (typeof family !== 'string' || !FAMILY_RE.test(family)) continue;
+    if (typeof src !== 'string' || src.length > HTML_ITEM_FACE_LIMITS.faceLength || !FONT_DATA_RE.test(src)) continue;
+    if (total + src.length > HTML_ITEM_FACE_LIMITS.totalLength) continue;
+    const face: HtmlItemFace = { family: family.trim(), src };
+    if (isWeight(weight)) face.weight = weight;
+    else if (Array.isArray(weight) && weight.length === 2 && isWeight(weight[0]) && isWeight(weight[1]) && weight[0] <= weight[1]) face.weight = [weight[0], weight[1]];
+    else if (weight !== undefined) continue;
+    if (style === 'italic' || style === 'normal') face.style = style;
+    else if (style !== undefined) continue;
+    const key = `${face.family.toLowerCase()}|${String(face.weight ?? '')}|${face.style ?? ''}`;
+    if (taken.has(key)) continue;
+    taken.add(key);
+    total += src.length;
+    out.push(face);
+  }
+  return out;
+}
+
+/**
+ * The `@font-face` rules for the faces this item names. A face the item's
+ * markup never mentions is left out, so an item that does not ask pays
+ * nothing. Every face goes through `checkHtmlItemFaces` again here: what is
+ * written is only ever a plain name, a number and base64.
+ */
+export function htmlItemFaceCss(html: string, faces: readonly HtmlItemFace[] | null | undefined): string {
+  if (!faces?.length) return '';
+  const text = html.toLowerCase();
+  let css = '';
+  for (const face of checkHtmlItemFaces(faces)) {
+    if (!text.includes(face.family.toLowerCase())) continue;
+    const kind = FONT_DATA_RE.exec(face.src);
+    const format = FONT_FORMATS[kind?.[1] ?? kind?.[2] ?? kind?.[3] ?? ''];
+    const weight = face.weight === undefined ? '' : `font-weight:${Array.isArray(face.weight) ? face.weight.join(' ') : face.weight};`;
+    css += `@font-face{font-family:"${face.family}";src:url(${face.src}) format("${format}");${weight}${face.style ? `font-style:${face.style};` : ''}font-display:block}`;
+  }
+  return css;
+}
+
+/**
  * The whole document the iframe shows. The policy is the first thing in the
  * head, before any of the item's own markup, so nothing the item says can
  * come ahead of it; a later policy can only narrow an earlier one. `scheme`
  * is the theme the item is drawn in; it must match the frame element's own
- * colour scheme, or the browser gives the frame an opaque backdrop.
+ * colour scheme, or the browser gives the frame an opaque backdrop. `faces`
+ * is the host's lent type (`HtmlItemFace`): its rules sit in the head, in a
+ * style block that is closed before the item's markup begins.
  */
-export function htmlItemSrcdoc(html: string, scheme: 'light' | 'dark' | null = null): string {
+export function htmlItemSrcdoc(html: string, scheme: 'light' | 'dark' | null = null, faces?: readonly HtmlItemFace[] | null): string {
   const body = html.length > HTML_ITEM_MAX_LENGTH ? '' : html;
+  const lent = htmlItemFaceCss(body, faces);
   return (
     '<!doctype html><html><head>' +
     `<meta http-equiv="Content-Security-Policy" content="${escapeAttr(HTML_ITEM_CSP)}">` +
     '<meta charset="utf-8">' +
+    (lent ? `<style>${lent}</style>` : '') +
     '<style>html,body{margin:0;background:transparent;overflow:hidden}' +
     'body{font:14px/1.45 system-ui,sans-serif;color:CanvasText}' +
     `:root{color-scheme:${scheme ?? 'light dark'}}` +

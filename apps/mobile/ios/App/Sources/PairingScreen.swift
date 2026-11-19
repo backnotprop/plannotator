@@ -130,10 +130,54 @@ struct OfferedPairingSheet: View {
   @Environment(AppModel.self) private var model
 
   private var working: Bool { model.pairing == .working }
-  @State private var height: CGFloat = 260
+  @Environment(\.dynamicTypeSize) private var typeSize
+  /// The words and actions, measured: the sheet is as tall as they are. Measured before the sheet is presented
+  /// (`initial`), so it opens at its height and never resizes on its first frame.
+  @State private var fitted: CGFloat
+
+  /// The width the sheet is shown at, told back so the next measure is taken at it.
+  var shownWidth: (CGFloat) -> Void = { _ in }
+
+  init(link: PairLink, initial: CGFloat, shownWidth: @escaping (CGFloat) -> Void = { _ in }) {
+    self.link = link
+    self.shownWidth = shownWidth
+    _fitted = State(initialValue: initial)
+  }
+
+  /// Presented as the system presents a confirmation: a sheet over the dimmed list, as tall as what it says, the
+  /// two actions at its foot. Large words take the whole height; words that still do not fit scroll.
+  var body: some View {
+    ScrollView {
+      OfferedPairingContent(link: link)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fitted = $0 }
+    }
+    .scrollBounceBehavior(.basedOnSize)
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { shownWidth($0) }
+    .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(fitted)])
+    .presentationDragIndicator(.hidden)
+    // Solid, a step lighter than the list in the dark: nothing of the list shows through the words.
+    .presentationBackground(Token.card)
+    // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
+    .interactiveDismissDisabled(working)
+  }
+}
+
+/// What the pairing sheet says, with its margins: measured once off screen before the sheet opens, then shown in it.
+struct OfferedPairingContent: View {
+  let link: PairLink
+  @Environment(AppModel.self) private var model
+
+  private var working: Bool { model.pairing == .working }
 
   var body: some View {
-    VStack(spacing: 18) {
+    content
+      .padding(.horizontal, 24)
+      .padding(.top, 32)
+      .padding(.bottom, 16)
+  }
+
+  private var content: some View {
+    VStack(spacing: 28) {
       VStack(spacing: 10) {
         Text(PhoneWords.pairAsk).font(.headline).foregroundStyle(Token.mutedForeground)
         // What the phone can vouch for: where the link leads.
@@ -168,34 +212,24 @@ struct OfferedPairingSheet: View {
           .accessibilityElement(children: .combine)
         }
         HStack(spacing: 12) {
-          Button(PhoneWords.cancel) { model.declineOffered() }
-          Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }
+          Button(PhoneWords.cancel) { model.declineOffered() }.buttonStyle(SheetChoice(leads: false))
+          Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }.buttonStyle(SheetChoice(leads: true))
         }
-        .buttonStyle(EqualChoice())
       }
     }
-    .padding(.horizontal, 24)
-    .padding(.top, 28)
-    .padding(.bottom, 12)
-    .frame(maxWidth: .infinity)
-    // The sheet is as tall as what it says, and grows with the progress or failure lines.
-    .fixedSize(horizontal: false, vertical: true)
-    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-    .presentationDetents([.height(max(height, 120))])
-    .presentationBackground(Token.background)
-    // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
-    .interactiveDismissDisabled(working)
   }
 }
 
-/// Two actions of equal weight: neither is the default.
-struct EqualChoice: ButtonStyle {
+/// The sheet's two actions, the same size: Pair is the filled one, Cancel the quiet one beside it.
+struct SheetChoice: ButtonStyle {
+  let leads: Bool
+
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .font(.body.weight(.semibold))
-      .foregroundStyle(Token.foreground)
+      .foregroundStyle(leads ? Token.primaryForeground : Token.foreground)
       .frame(maxWidth: .infinity, minHeight: 50)
-      .background(Token.muted.opacity(configuration.isPressed ? 0.6 : 1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .background((leads ? Token.primary : Token.muted).opacity(configuration.isPressed ? 0.6 : 1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
   }
 }
 

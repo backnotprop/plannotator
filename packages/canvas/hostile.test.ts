@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import { applyEvents } from './events/reduce';
 import { CanvasStore } from './events/store';
-import { decodeCommand } from './events/wire';
+import { decodeCommand, decodeEnvelope } from './events/wire';
 import { parseSnapshotBlock } from './snapshot/block';
 import { resolveSnapshot } from './snapshot/resolve';
 import { hitTest } from './view/hit-test';
@@ -263,5 +263,59 @@ describe('a change whose field name is a name on every object', () => {
       expect(Object.getPrototypeOf(changed)).toBe(Object.prototype);
       expect(parseDocument(JSON.parse(serializeDocument(mixed.doc))).ok).toBe(true);
     }
+  });
+});
+
+describe('a drawn line and a heading from a peer', () => {
+  const PEER = { kind: 'person', id: 'peer' } as const;
+  const ink = { id: 'ring', type: 'ink', x: 0, y: 0, w: 100, h: 100, points: [0, 0, 1, 1] };
+
+  test('an envelope that adds a line with too many points, or points that are not numbers, is refused whole', () => {
+    for (const points of [new Array(2002).fill(0.5), [0, 0, 'x', 1], [0, 0, 1e9, 1], { length: 4 }, null]) {
+      const envelope = decodeEnvelope(JSON.stringify({ id: 'e1', actor: PEER, events: [{ type: 'object-added', object: { ...ink, points } }] }));
+      expect(envelope.ok).toBe(false);
+    }
+    expect(decodeEnvelope({ id: 'e1', actor: PEER, events: [{ type: 'object-added', object: ink }] }).ok).toBe(true);
+  });
+
+  test('a change that would make a line no line, or put points on something else, does nothing', () => {
+    const store = new CanvasStore(createDocument('board'));
+    store.dispatch({ type: 'add', objects: [ink, box('a'), { id: 't', type: 'text', x: 0, y: 0, w: 100, h: 30, text: 'T' }] as CanvasObject[] });
+    const before = store.getDocument();
+    const sets: [string, Record<string, unknown>][] = [
+      ['ring', { points: [0, 0, 5, 5] }],
+      ['ring', { points: [0, 0, 1] }],
+      ['ring', { points: 'M0 0L1 1' }],
+      ['ring', { points: new Array(4000).fill(0) }],
+      ['ring', { pen: 'constructor' }],
+      ['a', { points: [0, 0, 1, 1] }],
+      ['a', { pen: 'fine' }],
+      ['a', { face: 'serif' }],
+      ['t', { size: '__proto__' }],
+      ['t', { face: 'hasOwnProperty' }],
+    ];
+    for (const [id, set] of sets) {
+      const envelope = decodeEnvelope({ id: `e-${id}-${Object.keys(set)[0]}-${JSON.stringify(set).length}`, actor: PEER, events: [{ type: 'object-set', id, set }] });
+      expect(envelope.ok).toBe(true);
+      if (envelope.ok) store.receive(envelope.value);
+      expect(applyEvents(before, [{ type: 'object-set', id, set }], { check: true }).applied).toEqual([]);
+    }
+    expect(store.getDocument()).toBe(before);
+    // A good one goes through, field by field.
+    const good = decodeEnvelope({ id: 'good', actor: PEER, events: [{ type: 'object-set', id: 'ring', set: { pen: 'fine', points: [0, 1, 1, 0] } }, { type: 'object-set', id: 't', set: { size: 'title', face: 'mono' } }] });
+    expect(good.ok && store.receive(good.value)).toBeTruthy();
+    expect(store.getDocument().objects.ring).toMatchObject({ pen: 'fine', points: [0, 1, 1, 0] });
+    expect(store.getDocument().objects.t).toMatchObject({ size: 'title', face: 'mono' });
+  });
+
+  test('a board of lines at their longest saves, loads, is found by the pointer and is captured', () => {
+    const store = new CanvasStore(createDocument('board'));
+    const points = Array.from({ length: 2000 }, (_, i) => (i % 2 ? (i % 7) / 6 : i / 1999));
+    const objects = Array.from({ length: 50 }, (_, i) => ({ id: `ink${i}`, type: 'ink', x: i * 10, y: i * 10, w: 400, h: 200, points, pen: i % 2 ? 'highlighter' : 'fine' }));
+    expect(store.dispatch({ type: 'add', objects: objects as CanvasObject[] }, { actor: AGENT }).ok).toBe(true);
+    const loaded = parseDocument(serializeDocument(store.getDocument()));
+    expect(loaded.ok && Object.keys(loaded.value.objects).length).toBe(50);
+    expect(hitTest(store.getDocument(), indexFor(store), { x: 0, y: 0 })).toBe('ink0');
+    expect(captureOf(store.getDocument(), { kind: 'region', rect: { x: 0, y: 0, w: 2000, h: 2000 } })?.objects.length).toBe(50);
   });
 });

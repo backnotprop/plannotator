@@ -10,31 +10,54 @@
  */
 
 .pcv {
-  --pcv-stage: var(--background, oklch(0.225 0.006 286));
+  /* Ink and line colours for a dark ground (-d) and for a light one (-l). The board's theme picks one set;
+     words and lines lying over a picture pick by the picture ("Over a picture", below). */
+  --pcv-stage-d: oklch(0.225 0.006 286);
+  --pcv-stage-l: oklch(0.97 0.005 260);
+  --pcv-ink-d: oklch(0.945 0.003 286);
+  --pcv-ink-l: oklch(0.18 0.02 260);
+  --pcv-muted-d: oklch(0.78 0.007 286);
+  --pcv-muted-l: oklch(0.4 0.02 260);
+  --pcv-arrow-d: oklch(0.66 0.007 286);
+  --pcv-arrow-l: oklch(0.5 0.02 260);
+  --pcv-blue-d: oklch(0.74 0.1 250);
+  --pcv-blue-l: oklch(0.52 0.15 255);
+  --pcv-green-d: oklch(0.74 0.12 155);
+  --pcv-green-l: oklch(0.5 0.14 150);
+  --pcv-amber-d: oklch(0.78 0.12 85);
+  --pcv-amber-l: oklch(0.6 0.13 80);
+  --pcv-red-d: oklch(0.77 0.124 25);
+  --pcv-red-l: oklch(0.54 0.2 25);
+  --pcv-violet-d: oklch(0.78 0.11 290);
+  --pcv-violet-l: oklch(0.5 0.2 285);
+  --pcv-stage: var(--background, var(--pcv-stage-d));
   --pcv-card: var(--card, oklch(0.295 0.006 286));
   /* How light the board is (relative luminance), for choosing ink on a colour the board shows through. */
   --pcv-ground-y: 0.02;
   --pcv-line: var(--border, oklch(0.36 0.006 286));
   --pcv-rule: oklch(0.435 0.006 286);
-  --pcv-ink: var(--foreground, oklch(0.945 0.003 286));
-  --pcv-muted: var(--muted-foreground, oklch(0.78 0.007 286));
-  --pcv-arrow: oklch(0.66 0.007 286);
+  --pcv-ink: var(--foreground, var(--pcv-ink-d));
+  --pcv-muted: var(--muted-foreground, var(--pcv-muted-d));
+  --pcv-arrow: var(--pcv-arrow-d);
   --pcv-accent: var(--primary, oklch(0.765 0.124 283));
   --pcv-on-accent: var(--primary-foreground, oklch(0.2 0.01 286));
   --pcv-note: oklch(0.8 0.135 64);
   --pcv-on-note: oklch(0.2 0.02 60);
   --pcv-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px rgb(0 0 0 / 0.28);
-  --pcv-blue: oklch(0.74 0.1 250);
+  --pcv-blue: var(--pcv-blue-d);
   --pcv-blue-soft: oklch(0.335 0.038 250);
-  --pcv-green: oklch(0.74 0.12 155);
+  --pcv-green: var(--pcv-green-d);
   --pcv-green-soft: oklch(0.335 0.042 155);
-  --pcv-amber: oklch(0.78 0.12 85);
+  --pcv-amber: var(--pcv-amber-d);
   --pcv-amber-soft: oklch(0.345 0.042 85);
-  --pcv-red: oklch(0.77 0.124 25);
+  --pcv-red: var(--pcv-red-d);
   --pcv-red-soft: oklch(0.335 0.048 25);
-  --pcv-violet: oklch(0.78 0.11 290);
+  --pcv-violet: var(--pcv-violet-d);
   --pcv-violet-soft: oklch(0.34 0.05 290);
   --pcv-font: var(--font-sans, 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif);
+  /* The other faces bare text can be set in. None is bundled: each list is faces devices are likely to have. */
+  --pcv-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --pcv-mono: var(--font-mono, 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace);
   --pcv-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Also tells a sandboxed HTML item which theme it is drawn in. */
   color-scheme: dark;
@@ -48,28 +71,28 @@
 .light .pcv,
 .pcv[data-theme='light'] {
   color-scheme: light;
-  --pcv-stage: var(--background, oklch(0.97 0.005 260));
+  --pcv-stage: var(--background, var(--pcv-stage-l));
   --pcv-card: var(--card, oklch(1 0 0));
   --pcv-ground-y: 0.97;
   --pcv-line: var(--border, oklch(0.885 0.009 260));
   --pcv-rule: oklch(0.88 0.01 260);
-  --pcv-ink: var(--foreground, oklch(0.18 0.02 260));
-  --pcv-muted: var(--muted-foreground, oklch(0.4 0.02 260));
-  --pcv-arrow: oklch(0.5 0.02 260);
+  --pcv-ink: var(--foreground, var(--pcv-ink-l));
+  --pcv-muted: var(--muted-foreground, var(--pcv-muted-l));
+  --pcv-arrow: var(--pcv-arrow-l);
   --pcv-accent: var(--primary, oklch(0.5 0.25 280));
   --pcv-on-accent: var(--primary-foreground, oklch(1 0 0));
   --pcv-note: oklch(0.83 0.125 66);
   --pcv-on-note: oklch(0.22 0.03 60);
   --pcv-shadow: 0 1px 2px rgb(15 20 40 / 0.06), 0 6px 18px rgb(15 20 40 / 0.1);
-  --pcv-blue: oklch(0.52 0.15 255);
+  --pcv-blue: var(--pcv-blue-l);
   --pcv-blue-soft: oklch(0.955 0.022 255);
-  --pcv-green: oklch(0.5 0.14 150);
+  --pcv-green: var(--pcv-green-l);
   --pcv-green-soft: oklch(0.955 0.032 150);
-  --pcv-amber: oklch(0.6 0.13 80);
+  --pcv-amber: var(--pcv-amber-l);
   --pcv-amber-soft: oklch(0.955 0.045 88);
-  --pcv-red: oklch(0.54 0.2 25);
+  --pcv-red: var(--pcv-red-l);
   --pcv-red-soft: oklch(0.955 0.026 25);
-  --pcv-violet: oklch(0.5 0.2 285);
+  --pcv-violet: var(--pcv-violet-l);
   --pcv-violet-soft: oklch(0.955 0.025 285);
 }
 
@@ -208,6 +231,21 @@
   background: var(--pcv-fill);
   overflow: hidden;
 }
+/* The style of a plain box, as of any shape: filled with its colour, or not filled; a dashed line. */
+.pcv-box[data-fill='solid'] {
+  background: var(--pcv-solid, var(--pcv-stroke));
+  color: var(--pcv-on-solid, var(--pcv-ink));
+}
+.pcv-box[data-fill='solid'] .pcv-box-detail {
+  color: inherit;
+  opacity: 0.82;
+}
+.pcv-box[data-fill='none'] {
+  background: none;
+}
+.pcv-box[data-dash] {
+  border-style: dashed;
+}
 /* A box's title wraps to as many lines as its box has room for, three at most, and then ends in an ellipsis;
    its detail is one line. (While it is typed into, all of it shows.) */
 .pcv-box-text {
@@ -244,13 +282,6 @@
   box-shadow: var(--pcv-shadow);
   overflow: hidden;
 }
-.pcv-note[data-color]:not([data-color='neutral']) {
-  background: var(--pcv-stroke);
-}
-.pcv-obj.pcv-note[data-color='custom'] {
-  background: var(--pcv-solid);
-  color: var(--pcv-on-solid);
-}
 
 .pcv-text {
   font-size: 15px;
@@ -258,6 +289,14 @@
 }
 .pcv-text[data-size='small'] { font-size: 12.5px; color: var(--pcv-muted); }
 .pcv-text[data-size='large'] { font-size: 22px; font-weight: 650; line-height: 1.25; }
+/* The words a board is read by from far off (sizes: `TEXT_SIZE_PX`). */
+.pcv-text[data-size='title'] { font-size: 40px; font-weight: 680; line-height: 1.15; letter-spacing: -0.015em; }
+.pcv-text[data-size='display'] { font-size: 84px; font-weight: 700; line-height: 1.05; letter-spacing: -0.03em; }
+.pcv-text[data-face='serif'] { font-family: var(--pcv-serif); }
+.pcv-text[data-face='serif'][data-size='title'],
+.pcv-text[data-face='serif'][data-size='display'] { font-weight: 500; letter-spacing: -0.02em; }
+.pcv-text[data-face='mono'] { font-family: var(--pcv-mono); letter-spacing: 0; }
+.pcv-text[data-face='hand'] { font-family: var(--pcv-hand); letter-spacing: 0; }
 .pcv-text[data-color]:not([data-color='neutral']) { color: var(--pcv-stroke); }
 
 .pcv-frame {
@@ -314,6 +353,13 @@
   }
 }
 
+.pcv-html-frame {
+  width: 100%;
+  height: 100%;
+}
+.pcv-html-frame[hidden] {
+  display: none;
+}
 .pcv-html iframe {
   display: block;
   width: 100%;
@@ -395,6 +441,13 @@
 .pcv-root[data-lod='far'] .pcv-words,
 .pcv-root[data-lod='far'] .pcv-arrow text {
   visibility: hidden;
+}
+/* What is still read from far out stays: a frame's title (its chip grows as the board shrinks) and bare text
+   in the two heading sizes. A board of many pictures zoomed to fit keeps its name and its parts' names. */
+.pcv-root[data-lod='far'] .pcv-frame-title,
+.pcv-root[data-lod='far'] .pcv-text[data-size='title'] .pcv-words,
+.pcv-root[data-lod='far'] .pcv-text[data-size='display'] .pcv-words {
+  visibility: visible;
 }
 .pcv-root[data-lod='far'] .pcv-sprite,
 .pcv-root[data-lod='plain'] .pcv-sprite {
@@ -1159,7 +1212,7 @@
   box-shadow: none;
 }
 /* A note keeps its own colour far away too. */
-.pcv-flat.pcv-flat-note[data-color]:not([data-color='neutral']) {
+.pcv-flat.pcv-flat-note[data-color]:not([data-color='neutral'], [data-color='custom']) {
   background: color-mix(in oklab, var(--pcv-stroke) 34%, white);
 }
 .pcv-flat.pcv-flat-note[data-color='custom'] {
@@ -1295,7 +1348,7 @@
   min-height: 0;
   overflow: hidden;
 }
-.pcv-obj.pcv-note[data-color]:not([data-color='neutral']) {
+.pcv-obj.pcv-note[data-color]:not([data-color='neutral'], [data-color='custom']) {
   /* A named colour is the paper's colour: pale, so the words stay dark on it in either theme. */
   --pcv-paper: color-mix(in oklab, var(--pcv-stroke) 34%, white);
   background: linear-gradient(175deg, color-mix(in oklab, var(--pcv-paper) 96%, white), var(--pcv-paper) 62%, color-mix(in oklab, var(--pcv-paper) 92%, black));
@@ -1328,13 +1381,27 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: oklch(0.52 0.17 28);
-  color: white;
+  /* With no colour from the host: a quiet neutral, the same for everyone, that follows the theme. Dark enough
+     on a light board, and light enough on a dark one, for the initial on it to be read at 4.5 to 1 or better. */
+  background: color-mix(in oklab, var(--pcv-ink) 66%, var(--pcv-card));
+  color: var(--pcv-stage);
   font: 600 9.5px/1 var(--pcv-font);
   overflow: hidden;
 }
 .pcv-face[data-kind='agent'] {
   background: oklch(0.3 0.06 280);
+  color: white;
+}
+/* A colour the host gave for this person (`PersonLabel.color`), exactly, with the ink that is read on it:
+   white or black by the colour's lightness, as on any solid fill ("Colours", above). */
+.pcv-face[data-own] {
+  background: var(--pcv-face);
+  color: white;
+}
+@supports (color: color(from red srgb-linear r g b)) {
+  .pcv-face[data-own] {
+    color: color(from var(--pcv-face) srgb-linear clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) / 1);
+  }
 }
 .pcv-face svg {
   width: 10px;
@@ -1401,6 +1468,82 @@
 }
 .pcv-card[data-color]:not([data-color='neutral']) {
   border-color: var(--pcv-stroke);
+}
+
+/* A line drawn by hand. With no colour it is the board's ink. A named or a custom colour is the line colour
+   every other line on the board gets: kept dark enough on a light board and light enough on a dark one (see
+   "Colours" above), because the board under it differs between the two themes and a line must be seen on both. */
+.pcv-ink {
+  color: var(--pcv-ink);
+}
+.pcv-ink[data-color]:not([data-color='neutral']) {
+  color: var(--pcv-stroke);
+}
+.pcv-ink svg {
+  display: block;
+  overflow: visible;
+}
+.pcv-ink path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pcv-ink[data-pen='fine'] path {
+  stroke-width: 2;
+}
+.pcv-ink[data-pen='highlighter'] path {
+  stroke-width: 18;
+  stroke-opacity: 0.4;
+}
+
+/* Over a picture. Bare text, a drawn line or a connector that lies on a picture is read against the picture,
+   which is the same in both themes, not against the board (`data-ground`, `react/picture-look.ts`):
+   - with no colour or a named one, it takes the ink and line colours for a light ground or a dark one, by how
+     light the picture is under it (when the picture could not be looked at, the board's theme, as before);
+   - a custom colour is drawn exactly as chosen: whoever chose it chose it against that picture. Only when the
+     picture was looked at; otherwise the board's rule holds. */
+.pcv-obj[data-ground='light'],
+.pcv-arrow[data-ground='light'] {
+  --pcv-ink: var(--pcv-ink-l);
+  --pcv-muted: var(--pcv-muted-l);
+  --pcv-arrow: var(--pcv-arrow-l);
+  --pcv-stage: var(--pcv-stage-l);
+  --pcv-blue: var(--pcv-blue-l);
+  --pcv-green: var(--pcv-green-l);
+  --pcv-amber: var(--pcv-amber-l);
+  --pcv-red: var(--pcv-red-l);
+  --pcv-violet: var(--pcv-violet-l);
+}
+.pcv-obj[data-ground='dark'],
+.pcv-arrow[data-ground='dark'] {
+  --pcv-ink: var(--pcv-ink-d);
+  --pcv-muted: var(--pcv-muted-d);
+  --pcv-arrow: var(--pcv-arrow-d);
+  --pcv-stage: var(--pcv-stage-d);
+  --pcv-blue: var(--pcv-blue-d);
+  --pcv-green: var(--pcv-green-d);
+  --pcv-amber: var(--pcv-amber-d);
+  --pcv-red: var(--pcv-red-d);
+  --pcv-violet: var(--pcv-violet-d);
+}
+.pcv .pcv-text[data-ground] {
+  color: var(--pcv-ink);
+}
+.pcv .pcv-text[data-ground][data-size='small'] {
+  color: var(--pcv-muted);
+}
+.pcv .pcv-text[data-ground][data-color]:not([data-color='neutral']) {
+  color: var(--pcv-stroke);
+}
+/* Exactly as chosen only over a picture that was looked at. One that is still loading, failed to load or
+   cannot be read gives no ground (`data-ground='picture'`): the board's own rule stays, so the mark is seen. */
+.pcv .pcv-obj[data-ground='light'][data-color='custom'],
+.pcv .pcv-obj[data-ground='dark'][data-color='custom'],
+.pcv .pcv-arrow[data-ground='light'][data-color='custom'],
+.pcv .pcv-arrow[data-ground='dark'][data-color='custom'] {
+  --pcv-stroke: var(--pcv-custom);
 }
 
 /* A stamp: a small token. */
@@ -1779,4 +1922,12 @@
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
+}
+
+/* An HTML item that is not drawn as itself (a view zoomed out with many of them in it): its words in a quiet
+   box. Never a blank, and not the dashed box of something that failed to load. */
+.pcv-html .pcv-missing {
+  border-style: solid;
+  border-color: var(--pcv-line);
+  background: color-mix(in oklab, var(--pcv-card) 70%, transparent);
 }
