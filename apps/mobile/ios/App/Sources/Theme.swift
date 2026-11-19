@@ -16,6 +16,9 @@ enum Token {
   static let success = Color("success")
   static let warning = Color("warning")
   static let destructive = Color("destructive")
+  static let destructiveForeground = Color("destructive-foreground")
+  static let popover = Color("popover")
+  static let ring = Color("ring")
   static let codeBackground = Color("code-bg")
   static let input = Color("input")
   /// tokens.json `radius`.
@@ -56,14 +59,6 @@ struct AgentMark: View {
 /// Runs of words with their own weight or colour, as one line of text.
 func run(_ parts: Text...) -> Text {
   parts.dropFirst().reduce(parts.first ?? Text(verbatim: "")) { Text("\($0)\($1)") }
-}
-
-extension View {
-  /// A field's ground: a tint and a hairline, so it reads as a field on a card in the dark too.
-  func fieldGround(radius: CGFloat = Token.radius) -> some View {
-    background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-      .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Token.foreground.opacity(0.14)))
-  }
 }
 
 enum Names {
