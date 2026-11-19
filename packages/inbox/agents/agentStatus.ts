@@ -1,7 +1,7 @@
 /**
  * The "Agent status" setting in the window (owner, 2026-11-18; off by default; the server's side is
  * packages/server/inbox-agent-status-setting.ts). On, every agent's icon carries its status mark
- * (`InboxAgent.status_mark`: working, waiting on you here or in its terminal, idle where its host reports turns);
+ * (`InboxAgent.status_mark`: working, or waiting on you in the Inbox or in the agent; no idle mark);
  * off, only agents in a Rex pane carry one (`rex_mark`, which shows either way).
  *
  * Its two switches, Settings → General → Appearance's row and the list's ⋮ menu item, read and write this one store,
@@ -17,7 +17,7 @@ import { inboxAgentsNow, onInboxAgentsRead, subscribeInboxAgents } from '../agen
 /** The switch's words (Settings' row and the ⋮ menu's item). */
 export const AGENT_STATUS_LABEL = 'Show agent status';
 /** Settings' row only, under its label. */
-export const AGENT_STATUS_DESC = 'A mark on each agent: working, or waiting on you here or in its terminal. Also in the ⋮ menu.';
+export const AGENT_STATUS_DESC = 'A mark on each agent: working, or waiting on you in the Inbox or in the agent. Also in the ⋮ menu.';
 
 /** Pressed here and not yet in a list read: what the switch shows meanwhile. */
 let pending: boolean | null = null;

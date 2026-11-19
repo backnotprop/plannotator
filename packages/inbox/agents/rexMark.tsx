@@ -3,7 +3,7 @@
  * and motion are the approved "Final: jelly"; drawing in rexMarkArt.tsx, motion in rexMark.css). For an agent in a
  * Rex pane the server puts its pane's fresh status record on the agent (`rex_mark`), drawn always. For every agent
  * (owner, 2026-11-18), while the person's "Agent status" setting is on (agentStatus.ts), the same marks from what the
- * Inbox knows (`status_mark`: working, waiting on you here or in its terminal, idle); a fresh Rex record wins. With
+ * Inbox knows (`status_mark`: working, or waiting on you in the Inbox or in the agent); a fresh Rex record wins. With
  * neither the icon is exactly today's.
  *
  * One component for every icon of an agent: `HostMark` (icons.tsx) draws it inside the icon's own box, and the
@@ -46,8 +46,8 @@ export type ShownMark = InboxRexMark & { where?: 'inbox' | 'terminal' };
 
 /** A mark of an agent that waits on the person in its own terminal (its connection said so): words that say where. */
 export const TERMINAL_MARK_WORDS: Record<'permission' | 'question', string> = {
-  permission: 'Asking for permission in its terminal',
-  question: 'Asking a question in its terminal',
+  permission: 'Waiting for your permission in the agent',
+  question: 'Waiting for your answer in the agent',
 };
 
 /**

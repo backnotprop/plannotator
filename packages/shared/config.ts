@@ -554,7 +554,7 @@ export interface PlannotatorConfig {
   inboxBro?: boolean;
   /**
    * Agent status (owner, 2026-11-18; off by default): the status mark on every agent's icon in the Inbox (working,
-   * waiting on you here or in its terminal, idle where its host reports turns). Off or unset: only agents in a Rex pane
+   * waiting on you in the Inbox or in the agent; no idle mark). Off or unset: only agents in a Rex pane
    * carry one, as before. Written by Settings → General → Appearance and the list's ⋮ menu
    * (`POST /api/inbox/settings` `{ agent_status: { on } }`), read on every list.
    */

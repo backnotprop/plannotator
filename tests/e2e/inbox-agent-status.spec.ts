@@ -7,7 +7,7 @@
  *  2. The ⋮ menu's "Show agent status" turns it on; Settings' row says on too.
  *  3. A session busy: "Working". A session that reports no turns (Codex: no `busy`): no mark.
  *  4. The session says it waits on a permission prompt in its terminal (`blocked: { kind: 'permission' }`): the
- *     waiting mark, named "Asking for permission in its terminal"; the prompt answered (a `state` event without it):
+ *     waiting mark, named "Waiting for your permission in the agent"; the prompt answered (a `state` event without it):
  *     back to "Working". Off again: no mark.
  *
  * Build the binary first (see inbox.spec.ts).
@@ -138,7 +138,7 @@ test('off by default; on from the ⋮ menu, a terminal permission prompt shows a
 
   const claude = world.polls[0]!;
   await claude.say('permission');
-  await expect(markOf(page, 'ses-claude')).toHaveAttribute('aria-label', 'Asking for permission in its terminal');
+  await expect(markOf(page, 'ses-claude')).toHaveAttribute('aria-label', 'Waiting for your permission in the agent');
   await expect(markOf(page, 'ses-claude')).toHaveAttribute('data-rx-where', 'terminal');
   await claude.say(null);
   await expect(markOf(page, 'ses-claude')).toHaveAttribute('aria-label', 'Working');

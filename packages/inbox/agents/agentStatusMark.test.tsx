@@ -4,7 +4,7 @@
  *  - a mark drawn with the setting off (the default), or a Rex agent's mark gone with it (Rex marks shipped and show
  *    regardless);
  *  - with it on: a state drawn as another, or its words wrong; a thread waiting in the Inbox drawn as a bare disc; a prompt in the agent's terminal not saying so in its
- *    label ("in its terminal", never as if it waited in the Inbox); a host that reports no turns drawn at all;
+ *    label ("in the agent", never as if it waited in the Inbox); a host that reports no turns drawn at all;
  *  - a fresh Rex record not winning;
  *  - a setting mark on a thread row's icon (owner ruling, 2026-11-18: only where an agent is shown as an agent, the
  *    sidebar's Agents list; a per-agent "Waiting on you" on each of its rows is false for rows that do not wait),
@@ -137,10 +137,10 @@ test.skipIf(!hasDom)('off (the default): only the Rex agent carries a mark, and 
 test.skipIf(!hasDom)('on: each agent its mark and words, a terminal prompt saying where; at rest and a host that reports no turns none; Rex wins', () => {
   setInboxAgents(list(AGENTS, true));
   const el = draw(icons());
-  expect(marksOf(el)).toEqual(['Working', 'Working', null, 'Waiting on you', 'Asking for permission in its terminal', 'Asking a question in its terminal', null]);
+  expect(marksOf(el)).toEqual(['Working', 'Working', null, 'Waiting on you', 'Waiting for your permission in the agent', 'Waiting for your answer in the agent', null]);
   const perm = markOf(el, 4);
   // The same jelly mark Rex draws for a blocked pane, its words as its text alternative only.
-  expect([perm.dataset.rxState, perm.dataset.rxWhere, perm.getAttribute('title'), perm.hasAttribute('data-rx-wait')]).toEqual(['permission', 'terminal', 'Asking for permission in its terminal', true]);
+  expect([perm.dataset.rxState, perm.dataset.rxWhere, perm.getAttribute('title'), perm.hasAttribute('data-rx-wait')]).toEqual(['permission', 'terminal', 'Waiting for your permission in the agent', true]);
   // Waiting on the person in the Inbox: Rex's question jelly (the "?"), never the bare waiting disc; its own words.
   const here = markOf(el, 3);
   expect([here.dataset.rxState, here.getAttribute('aria-label')]).toEqual(['question', 'Waiting on you']);
