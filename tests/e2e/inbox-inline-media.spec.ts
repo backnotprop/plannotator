@@ -108,9 +108,11 @@ test('a sound and a video named in a message body play in place, beside a pictur
     const id = sent.message_id as string;
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce' });
     const page = await context.newPage();
-    const statuses: number[] = [];
-    page.on('response', (r) => {
-      if (r.url().includes('/image?') && r.url().includes(encodeURIComponent('tone.wav'))) statuses.push(r.status());
+    const ranged: { range: string; status: number }[] = [];
+    page.on('response', async (r) => {
+      if (!r.url().includes('/image?') || !r.url().includes(encodeURIComponent('tone.wav'))) return;
+      const range = await r.request().headerValue('range');
+      if (range) ranged.push({ range, status: r.status() });
     });
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const body = page.locator(`[data-message-id="${id}"]`);
@@ -121,7 +123,12 @@ test('a sound and a video named in a message body play in place, beside a pictur
     await expect(video).toHaveAttribute('controls', '');
     await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration), { timeout: 30_000 }).toBeCloseTo(1, 1);
     expect(await audio.evaluate((a: HTMLAudioElement) => ({ paused: a.paused, autoplay: a.autoplay, time: a.currentTime }))).toEqual({ paused: true, autoplay: false, time: 0 });
-    expect(statuses, 'the tone loaded by Range').toContain(206);
+    for (const r of ranged) expect(r.status, `Range ${r.range}`).toBe(206);
+    const slice = await audio.evaluate(async (a: HTMLAudioElement) => {
+      const res = await fetch(a.currentSrc, { headers: { Range: 'bytes=100-199' } });
+      return { status: res.status, range: res.headers.get('content-range'), bytes: (await res.arrayBuffer()).byteLength };
+    });
+    expect(slice).toEqual({ status: 206, range: 'bytes 100-199/16044', bytes: 100 });
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 30_000 }).toBeGreaterThan(0);
     const picture = body.locator('img[alt="A screenshot"]');
     await expect.poll(() => picture.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth)).toBe(1);
