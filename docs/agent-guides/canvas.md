@@ -138,6 +138,24 @@ Any object takes a named colour (the canvas's six, which follow the theme) or an
 
 `model/html-item.ts` is the contract and the only way `HtmlObject.html` is drawn (`alt` on the object is its text alternative, since the frame is inert): an iframe with an empty `sandbox`, a CSP of `default-src 'none'` with inline styles and `data:` pictures, `inert`. No script, no network, no navigation, no access to the page. Do not add a sandbox token or loosen the policy for convenience; a scripted item is an owner decision with its own review.
 
+### Worst-case data
+
+`demo/worst.ts` is the regression fixture for input at its limits: the longest words, every script, colours with no contrast or no opacity, pictures that fail, shapes at their smallest and largest. Open the demo with `?data=worst` (also `empty`, `one`, `huge`, `max`, `stacked`, `far`; add `&view=canvas` or `&view=split`, `&theme=dark`). In `bun run demo` a switch at the bottom of the page changes the set. When a rule below changes, look at this board in both themes before and after.
+
+What holds, and where:
+
+- **What saves, loads.** A snapshot's rectangle, asked for or captured, has one bound (`readArea` in `model/codec.ts`, `LIMITS.area`): anywhere objects can be, as large as all of them. `hostile.test.ts` saves and loads a board at its limits.
+- **Words that do not fit are cut at the end, with an ellipsis.** A box's title wraps to the lines its box has room for, three at most (`titleLines` sets `--pcv-lines`); its detail is one line; a lane's name is as long as its lane is tall; a frame's title is one line. A box title, a frame title and an arrow label that were cut show all of themselves on hover (`title`), and are whole in the object's accessible name. An arrow label is 40 characters at most and fewer on a short line (`shortLabel`). A card's file name is cut in the middle (`shortName`). Text objects grow to fit when typing ends.
+- **Any colour, always readable.** Ink on a solid fill is white or black by the fill's relative luminance against 0.18, where both pass 4.5 to 1 (`--pcv-on-solid` in `canvas.css`); a see-through colour is weighed with the board behind it (`--pcv-ground-y`). Lines and ink are always opaque.
+- **An arrow from an object to itself is a loop** (`selfLoop` in `model/document.ts`), for the board, the still picture and hit-testing.
+- **A figure can always be seen and pressed**: never smaller than `FIGURE_MIN` (`figureBox`), and never at the wordless lowest detail (`wordsAlways` on `CanvasView`), except that a view of more than 4,000 objects is flat patches.
+- **A drop never leaves the page.** The editor takes every drop: a picture is added through the asset port, a link becomes a card, anything else gets a line.
+- **Pictures.** One with see-through parts gets a light ground on a dark board (looked at once per address; a picture from another site cannot be looked at and is left alone). With reduced motion every picture that could be animated is its first frame, drawn into a canvas. A sprite whose sheet does not load shows its words.
+- **An HTML item with more than its box shows** fades out at its foot. The item runs no script, so the fade is CSS tied to a scroll timeline: browsers without `animation-timeline` show no fade.
+- **A link being looked up** dims its title until the answer or the timeout (`previewsPending`, not part of the document).
+- **An empty board** shows one line; **a board wider than the furthest zoom** (5%) shows a mark on each edge with more beyond it, which goes to the nearest thing that way (`EdgeMarkers`).
+- **Opening a snapshot of more than 1,500 objects** does not draw the capture a second time over the canvas (`GHOST_MAX_OBJECTS`).
+
 ### Measuring
 
 `bun run --cwd packages/canvas bench` builds the demo, opens it in Chromium and prints each budget with what was measured, as it goes (`--headed` for a visible window with GPU raster: use that run as the evidence; headless numbers are flattered by its software frame clock). It is not run in CI. Budgets are stated at 60 fps whatever the display. Besides frame times it measures what a frame rate cannot show: frames in which a figure is on screen with nothing drawn yet, heap and DOM nodes over scroll passes and over 50 open/close cycles, that the plan is where it was after coming back, a drag on the real pointer path at 100%, a board with pictures, HTML items, cards and long notes, the canvas being edited behind 50 figures, 10,000 objects, and the `will-change` finding above (with and without).

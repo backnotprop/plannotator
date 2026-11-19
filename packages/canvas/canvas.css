@@ -135,12 +135,9 @@
    It is chosen by how light the fill is (its relative luminance, against 0.18, where both inks pass), and a
    see-through colour is weighed with the board that shows through it. The ink is never see-through itself.
    --pcv-stroke is the colour for a line or for text on the board: the same hue, kept dark enough on a light
-   board and light enough on a dark one, and always opaque. */
-.pcv-obj,
-.pcv-arrow {
-  --pcv-solid: var(--pcv-stroke);
-  --pcv-on-solid: var(--pcv-ink);
-}
+   board and light enough on a dark one, and always opaque.
+   Only objects that need them carry --pcv-solid and --pcv-on-solid (a custom colour, a solid fill); the rules
+   that read them fall back to the line colour and the ink, so nothing is worked out for an ordinary object. */
 .pcv-obj[data-color='custom'],
 .pcv-arrow[data-color='custom'] {
   --pcv-solid: var(--pcv-custom);
@@ -161,10 +158,11 @@
   }
 }
 @supports (color: color(from red srgb-linear r g b)) {
-  /* Only where a solid colour is painted: the working-out is not asked of every object on the board. */
-  .pcv-obj[data-color='custom'],
   .pcv-obj[data-fill='solid'] {
-    --pcv-on-solid: color(from var(--pcv-solid) srgb-linear clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) / 1);
+    --pcv-on-solid: color(from var(--pcv-stroke) srgb-linear clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) / 1);
+  }
+  .pcv-obj[data-color='custom'] {
+    --pcv-on-solid: color(from var(--pcv-custom) srgb-linear clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) clamp(0, (0.18 - ((0.2126 * r + 0.7152 * g + 0.0722 * b) * alpha + (1 - alpha) * var(--pcv-ground-y))) * 1000, 1) / 1);
   }
 }
 
@@ -217,7 +215,8 @@
   font-weight: 600;
   line-height: 1.35;
 }
-.pcv-box-text:not([contenteditable]) {
+/* Asked for only by a title long enough to need it (`data-clamp`): a short one is laid out the plain way. */
+.pcv-box-text[data-clamp]:not([contenteditable]) {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--pcv-lines, 3);
@@ -1134,10 +1133,10 @@
 }
 /* A shape filled solid: the colour itself, with ink chosen to be read on it. */
 .pcv-shape[data-fill='solid'] .pcv-shape-fill {
-  fill: var(--pcv-solid);
+  fill: var(--pcv-solid, var(--pcv-stroke));
 }
 .pcv-shape[data-fill='solid']:not([data-shape='actor']) .pcv-words {
-  color: var(--pcv-on-solid);
+  color: var(--pcv-on-solid, var(--pcv-ink));
 }
 .pcv-shape[data-fill='solid']:not([data-shape='actor']) .pcv-box-detail {
   opacity: 0.82;

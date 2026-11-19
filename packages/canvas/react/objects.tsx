@@ -41,6 +41,17 @@ export type EditEnd = (id: string, text: string, words?: HTMLElement) => void;
 /** Past this many characters a box's title is likely cut short, so all of it is offered on hover. */
 const LONG_WORDS = 48;
 
+/**
+ * Whether a box's title may be too long for its box, by a count that errs towards yes: about seven units of
+ * width to a character (wide scripts take more, so any character outside Latin counts as two).
+ */
+function mayOverflow(text: string, width: number, lines: number): boolean {
+  if (text.includes('\n')) return true;
+  let units = 0;
+  for (let i = 0; i < text.length; i++) units += text.charCodeAt(i) > 0x24f ? 2 : 1;
+  return units * 7 > Math.max(1, width) * lines;
+}
+
 /** How many lines of a box's title its box has room for: three at most, one at least. */
 function titleLines(room: number, detail: boolean): number {
   return Math.max(1, Math.min(3, Math.floor((room - (detail ? 18 : 0)) / 17)));
@@ -53,7 +64,7 @@ export function colorAttrs(color: CanvasColor | undefined): { 'data-color'?: str
   return { 'data-color': 'custom', style: { ['--pcv-custom' as string]: color.custom } };
 }
 
-function Words({ id, text, editing, className, onEditEnd, title }: { id: string; text: string; editing: boolean; className?: string; onEditEnd?: EditEnd; title?: string }) {
+function Words({ id, text, editing, className, onEditEnd, title, clamp }: { id: string; text: string; editing: boolean; className?: string; onEditEnd?: EditEnd; title?: string; clamp?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -67,7 +78,7 @@ function Words({ id, text, editing, className, onEditEnd, title }: { id: string;
   }, [editing]);
   if (!editing) {
     return (
-      <div key="view" className={className ? `pcv-words ${className}` : 'pcv-words'} dir="auto" title={title}>
+      <div key="view" className={className ? `pcv-words ${className}` : 'pcv-words'} dir="auto" title={title} data-clamp={clamp ? '' : undefined}>
         {text}
       </div>
     );
@@ -387,6 +398,8 @@ function ShapedBox({ object, editing, onEditEnd }: { object: BoxObject; editing:
   const paths = shapePaths(shape, object.w, object.h, lanes.length);
   const sketch = object.style?.look === 'sketch' ? sketchPaths(object, lanes.length) : null;
   const [top, right, bottom, left] = paths.text;
+  const lines = titleLines(object.h - top - bottom, !!object.detail && shape !== 'container' && shape !== 'actor');
+  const clamp = mayOverflow(object.text, object.w - left - right, lines);
   return (
     <>
       <svg className="pcv-shape-svg" width={object.w} height={object.h} viewBox={`0 0 ${object.w} ${object.h}`} aria-hidden="true" focusable="false">
@@ -406,8 +419,8 @@ function ShapedBox({ object, editing, onEditEnd }: { object: BoxObject; editing:
           </>
         )}
       </svg>
-      <div className="pcv-shape-text" style={{ padding: `${top}px ${right}px ${bottom}px ${left}px`, ['--pcv-lines' as string]: titleLines(object.h - top - bottom, !!object.detail && shape !== 'container' && shape !== 'actor') }}>
-        <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} title={object.text.length > LONG_WORDS ? object.text : undefined} />
+      <div className="pcv-shape-text" style={{ padding: `${top}px ${right}px ${bottom}px ${left}px`, ...(clamp ? { ['--pcv-lines' as string]: lines } : null) }}>
+        <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} clamp={clamp} title={clamp && object.text.length > LONG_WORDS ? object.text : undefined} />
         {object.detail && !editing && shape !== 'container' && shape !== 'actor' ? <div className="pcv-words pcv-box-detail" dir="auto">{object.detail}</div> : null}
       </div>
       {lanes.length ? (
@@ -420,6 +433,18 @@ function ShapedBox({ object, editing, onEditEnd }: { object: BoxObject; editing:
         </div>
       ) : null}
     </>
+  );
+}
+
+/** A plain box: its title, clamped to its room only when it is long enough to need that, and one line of detail. */
+function BoxWords({ object, editing, onEditEnd, common, style }: { object: BoxObject; editing: boolean; onEditEnd?: EditEnd; common: object; style: React.CSSProperties }) {
+  const lines = titleLines(object.h - 18, !!object.detail);
+  const clamp = mayOverflow(object.text, object.w - 30, lines);
+  return (
+    <div className="pcv-obj pcv-box" {...common} style={clamp ? { ...style, ['--pcv-lines' as string]: lines } : style}>
+      <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} clamp={clamp} title={clamp && object.text.length > LONG_WORDS ? object.text : undefined} />
+      {object.detail && !editing ? <div className="pcv-words pcv-box-detail" dir="auto">{object.detail}</div> : null}
+    </div>
   );
 }
 
@@ -505,12 +530,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
           </div>
         );
       }
-      return (
-        <div className="pcv-obj pcv-box" {...common} style={{ ...style, ['--pcv-lines' as string]: titleLines(object.h - 18, !!object.detail) }}>
-          <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} title={object.text.length > LONG_WORDS ? object.text : undefined} />
-          {object.detail && !editing ? <div className="pcv-words pcv-box-detail" dir="auto">{object.detail}</div> : null}
-        </div>
-      );
+      return <BoxWords object={object} editing={editing} onEditEnd={onEditEnd} common={common} style={style} />;
     case 'note':
       return (
         // A note rests at a slight angle and lifts, level, while it is carried.
