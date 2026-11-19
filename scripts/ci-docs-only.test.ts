@@ -74,6 +74,8 @@ describe('which lanes a change runs', () => {
     // The iPhone app: only mobile-ios.yml builds its Swift and Xcode files.
     ['the iPhone app\'s Swift, Xcode and asset files', ['apps/mobile/ios/App/InboxApp.swift', 'apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/App/Info.plist', 'apps/mobile/ios/App/Assets.xcassets/AppIcon.appiconset/Contents.json', 'apps/mobile/ios/Local.example.xcconfig', 'apps/mobile/ios/App/Inbox.entitlements'], CHEAP],
     // Semgrep scans shell; `bun test` finds *.test.ts anywhere; the package walk finds package.json; tests read the contract.
+    ['the iPhone app\'s own ignore file', ['apps/mobile/ios/.gitignore'], CHEAP],
+    ['an ignore file elsewhere', ['apps/mobile/.gitignore'], EVERYTHING],
     ['the iPhone app\'s CI script', ['apps/mobile/ios/ci.sh'], EVERYTHING],
     ['the iPhone app\'s Swift lockfile', ['apps/mobile/ios/InboxCore/Package.resolved'], EVERYTHING],
     ['a test file under apps/mobile/ios', ['apps/mobile/ios/x.test.ts'], EVERYTHING],

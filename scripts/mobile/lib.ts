@@ -24,6 +24,8 @@ export const OUT = {
   catalog: 'apps/mobile/contract/generated/swift/Tokens.xcassets/Contents.json',
   words: 'apps/mobile/contract/words/words.json',
   wordsSwift: 'apps/mobile/contract/generated/swift/Words.swift',
+  surface: 'apps/mobile/contract/parity/surface.json',
+  ledger: 'apps/mobile/contract/parity/ledger.json',
 } as const;
 
 /**
@@ -34,6 +36,11 @@ export const VERSION_FILE = 'apps/mobile/contract/VERSION';
 
 export function contractVersion(): number {
   return DOOR_CONTRACT;
+}
+
+/** Write a repository file, by its path from the root (always a path named as a literal by the caller). */
+export function writeRepoText(path: string, text: string): void {
+  writeFileSync(join(ROOT, path), text);
 }
 
 /** Whether a repository file exists, by its path from the root (always a path named as a literal by the caller). */
