@@ -3215,6 +3215,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox .ib-q-opt.ib-on .ib-q-lbl { color: var(--foreground); }
 .pn-inbox .ib-q-lbl b { font-weight: 550; }
 :root:not(.light) .pn-inbox .ib-q { color-scheme: dark; }
+:root:not(.light) .pn-inbox [data-inline-media] { color-scheme: dark; }
 /* "Replaces …" on the newer card: light, a pointer back, not a second banner. */
 .pn-inbox .ib-q-replaces { margin: 6px 0 0; display: flex; align-items: flex-start; gap: 6px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); user-select: none; }
 .pn-inbox .ib-q-replaces svg.ib-ic { margin-top: 2.5px; }

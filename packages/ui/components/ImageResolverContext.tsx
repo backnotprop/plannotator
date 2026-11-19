@@ -22,6 +22,7 @@ export type ImageResolution =
        * while the browser decodes only the copy.
        */
       width?: number;
+      media?: "audio" | "video";
     }
   | { kind: "unavailable"; title: string };
 
