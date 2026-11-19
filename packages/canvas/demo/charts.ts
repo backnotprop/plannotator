@@ -151,3 +151,31 @@ export function createChartsStore(): CanvasStore {
   }
   return store;
 }
+
+/**
+ * `?bench=canvas&charts=200`: a board of nothing but charts, every mark in turn, each with a table of a
+ * size a real one has. For the benchmark's chart rows.
+ */
+export function createChartBenchStore(count: number): CanvasStore {
+  const store = new CanvasStore(createDocument('chart-bench', `${count} charts`));
+  const random = seeded(29);
+  const columns = Math.ceil(Math.sqrt(count * 2));
+  const objects: unknown[] = [];
+  for (let i = 0; i < count; i++) {
+    const place = { id: `c${i}`, type: 'chart', x: (i % columns) * 420, y: Math.floor(i / columns) * 280, w: 380, h: 240, title: `Series ${i + 1}` };
+    const walk = (length: number, from: number) => {
+      let value = from;
+      return Array.from({ length }, () => (value = Math.max(1, Math.round(value + (random() - 0.45) * from * 0.2))));
+    };
+    const kind = i % 6;
+    if (kind === 0) objects.push({ ...place, mark: 'bar', fields: ['week', 'a', 'b'], rows: walk(24, 60).map((a, w) => [`W${w + 1}`, a, Math.round(a * 0.6)]), encode: { x: 'week', y: ['a', 'b'] }, stack: true });
+    else if (kind === 1) objects.push({ ...place, mark: 'line', unit: 'ms', fields: ['day', 'p50', 'p95'], rows: walk(60, 120).map((p50, d) => [d + 1, p50, Math.round(p50 * 2.4)]), encode: { x: 'day', y: ['p50', 'p95'] }, dash: ['p95'], rules: [{ at: 200, label: 'limit' }] });
+    else if (kind === 2) objects.push({ ...place, mark: 'area', fields: ['hour', 'waiting'], rows: walk(48, 90).map((waiting, h) => [`${h}h`, waiting]), encode: { x: 'hour', y: 'waiting' }, color: 'amber' });
+    else if (kind === 3) objects.push({ ...place, mark: 'dot', fields: ['x', 'y', 'kind', 'votes'], rows: walk(40, 50).map((y, d) => [Math.round(random() * 100), y, `k${d % 4}`, d % 9]), encode: { x: 'x', y: 'y', series: 'kind', size: 'votes' } });
+    else if (kind === 4) objects.push({ ...place, mark: 'cell', fields: ['bin', 'player', 'minutes'], rows: Array.from({ length: 96 }, (_cell, c) => [`${(c % 12) * 5}`, `p0${Math.floor(c / 12) + 1}`, Math.round(random() * 5)]), encode: { x: 'bin', y: 'player', value: 'minutes' } });
+    else objects.push({ ...place, mark: 'span', fields: ['lane', 'from', 'to', 'state'], rows: Array.from({ length: 12 }, (_span, s) => [`Lane ${(s % 4) + 1}`, s, s + 1 + Math.round(random() * 3), `s${s % 3}`]), encode: { x: 'from', x2: 'to', y: 'lane', series: 'state' }, color: 'green' });
+  }
+  const result = store.dispatch({ type: 'add', objects: objects as CanvasObject[] } as Command, { actor: AGENT });
+  if (!result.ok) throw new Error(result.error);
+  return store;
+}

@@ -441,11 +441,11 @@ try {
    * A drag the way a person makes one: pointer events on an object, one move a frame, through hit-testing and
    * the gesture code, at 100% where text and shadows are drawn. Returns frame times.
    */
-  const pointerDrag = () =>
-    page.evaluate(() => {
+  const pointerDrag = (what = '.pcv-box, .pcv-shape') =>
+    page.evaluate((what) => {
       const root = document.querySelector<HTMLElement>('.pcv-root')!;
       const view = root.getBoundingClientRect();
-      const boxes = [...root.querySelectorAll<HTMLElement>('.pcv-box, .pcv-shape')];
+      const boxes = [...root.querySelectorAll<HTMLElement>(what)];
       const inMiddle = (el: HTMLElement) => {
         const box = el.getBoundingClientRect();
         return box.left > view.left + 300 && box.right < view.right - 300 && box.top > view.top + 200 && box.bottom < view.bottom - 250;
@@ -466,7 +466,7 @@ try {
           fire('pointerup', start.x, start.y);
           return times;
         });
-    });
+    }, what);
   await zoomTo100();
   await page.waitForTimeout(300);
   frameRow(`Canvas, ${count} objects, at 100%: drag an object with the pointer`, await pointerDrag(), interval);
@@ -551,6 +551,23 @@ try {
   await zoomTo100();
   await page.waitForTimeout(500);
   frameRow(`Canvas, 2000 typed shapes of which ${rough} sketched, at 100% (hatching drawn): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+
+  // ── Charts: 200 of them, every mark, each drawn from its rows ────────────
+  await open(page, `${server.url}/?bench=canvas&charts=200`);
+  await page.waitForTimeout(600);
+  const charts = await page.evaluate(() => Object.values((window as unknown as { __canvas: { store: { getDocument(): { objects: Record<string, { type: string }> } } } }).__canvas.store.getDocument().objects).filter((object) => object.type === 'chart').length);
+  results.charts = charts;
+  frameRow(`Canvas, ${charts} charts, whole board in view (${await mounted()} mounted, marks only): pan`, await wheel(4000, fitPan), interval);
+  frameRow(`Canvas, ${charts} charts: zoom in and out through every level of detail`, await wheel(5000, 'send({ ctrlKey: true, deltaY: Math.sin(t / 5000 * Math.PI * 4) > 0 ? -4 : 4 });'), interval);
+  await zoomTo100();
+  await page.waitForTimeout(500);
+  frameRow(`Canvas, ${charts} charts, at 100% (${await mounted()} mounted, words drawn): pan across the board`, await wheel(5000, 'const dir = Math.floor(t / 1250) % 2 ? -1 : 1; send({ deltaX: 26 * dir, deltaY: 9 * dir });'), interval);
+  frameRow(`Canvas, ${charts} charts, at 100%: drag a chart with the pointer`, await pointerDrag('.pcv-chart'), interval);
+  const chartNodes = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('.pcv-chart')];
+    return all.length ? Math.round(all.reduce((sum, el) => sum + el.querySelectorAll('*').length, 0) / all.length) : 0;
+  });
+  row(`Canvas, ${charts} charts, at 100%: elements in one chart`, 'at most 80 on average', `${chartNodes} on average`, chartNodes > 0 && chartNodes <= 80);
 
   // ── 10,000 objects: past what the budgets were set for; measured so the number is known ──
   await open(page, `${server.url}/?bench=canvas&n=10000`);

@@ -34,7 +34,7 @@ import type { SnapshotOpenRequest } from '../snapshot/SnapshotFigure';
 import { indexFor } from '../view/document-index';
 import { PlanPane } from './PlanPane';
 import { DATA_SETS, type DataSet, EMPTY_PLAN, FAR_PLAN, ONE_PLAN, STACKED_PLAN, bigPlan, createBigStore, createEmptyStore, createFarStore, createOneStore, createStackedStore, createWorstStore, worstPlan } from './worst';
-import { CHARTS_PLAN, createChartsStore } from './charts';
+import { CHARTS_PLAN, createChartBenchStore, createChartsStore } from './charts';
 import { CHART_IMAGE, SAMPLE_CANVAS_ID, SAMPLE_PLAN, createLargeStore, createLongPlan, createSampleStore, createTypedStore } from './sample';
 
 const params = new URLSearchParams(location.search);
@@ -130,7 +130,7 @@ function useTheme(): [boolean, () => void] {
 }
 
 function BenchCanvas() {
-  const store = useMemo(() => (params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
+  const store = useMemo(() => (params.has('charts') ? createChartBenchStore(Number(params.get('charts')) || 200) : params.has('typed') ? createTypedStore(count, Number(params.get('connectors')) || 1500, Number(params.get('sketch')) || 0) : createLargeStore(count, 0, params.has('rich'))), []);
   useEffect(() => {
     (window as unknown as { __canvas: unknown }).__canvas = { store };
   }, [store]);
