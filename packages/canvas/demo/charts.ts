@@ -92,7 +92,7 @@ const engineRows: ChartCell[][] = [['Wavefold', 9.4], ['Phase', 12.8], ['Sample'
 // The night the relay was heard: who was on which task, hour by hour after 18:00.
 const nightRows: ChartCell[][] = [
   ['Dish', 0, 4.5, 'listening'], ['Dish', 4.5, 6, 'locked'], ['Dish', 6, 13, 'listening'],
-  ['Decode', 4.5, 9, 'working'], ['Decode', 9, 9.5, 'locked'],
+  ['Decode', 4.5, 9, 'working'], ['Decode', 8, 9.5, 'locked'],
   ['Log', 0, 13, 'listening'],
   ['Crew', 2, 3, 'working'], ['Crew', 4.5, 10, 'working'],
 ];
