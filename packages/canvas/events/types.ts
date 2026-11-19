@@ -27,6 +27,10 @@ import type {
   ArrowRouting,
   BoxShape,
   CanvasLink,
+  ChartCell,
+  ChartEncode,
+  ChartMark,
+  ChartRule,
   CanvasObject,
   ObjectId,
   ObjectStyle,
@@ -52,6 +56,16 @@ export interface ObjectPatch {
   target?: ReferenceTarget;
   src?: string;
   html?: string;
+  /** A chart's own fields: see `ChartObject`. `fields`, `rows` and `encode` must agree, so send together what changes together. */
+  mark?: ChartMark;
+  fields?: string[];
+  rows?: ChartCell[][];
+  encode?: ChartEncode;
+  stack?: true | null;
+  flip?: true | null;
+  dash?: string[] | null;
+  rules?: ChartRule[] | null;
+  unit?: string | null;
   size?: 'small' | 'medium' | 'large';
   frames?: number;
   fps?: number;

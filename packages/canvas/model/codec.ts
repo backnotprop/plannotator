@@ -9,6 +9,7 @@ import { bindingFault, groupCycle, idMap, isBoundEnd, orderOf, withOrderKeys } f
 import { isFiniteRect } from './geometry';
 import { isOrderKey } from './order-key';
 import { isPictureRef } from './assets';
+import { checkChart } from './chart';
 import { HTML_ITEM_MAX_LENGTH, isWebUrl } from './html-item';
 import { isValidId } from './ids';
 import {
@@ -66,6 +67,7 @@ const FIELD_NAMES = [
   'id', 'type', 'x', 'y', 'w', 'h', 'z', 'group', 'color', 'style', 'by', 'link',
   'text', 'detail', 'shape', 'lanes', 'size', 'title', 'src', 'alt', 'frames', 'fps', 'html',
   'target', 'description', 'site', 'image', 'icon', 'from', 'to', 'label', 'routing', 'kind', 'count',
+  'mark', 'fields', 'rows', 'encode', 'stack', 'flip', 'dash', 'rules', 'unit',
 ] as const satisfies readonly ObjectField[];
 
 /**
@@ -255,6 +257,11 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       if (!isText(value.html, HTML_ITEM_MAX_LENGTH) || !value.html.trim()) return fail(`${id}: html is missing, empty or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
       if (value.alt !== undefined && !isText(value.alt, LIMITS.title)) return fail(`${id}: alt is too long`);
       return { ok: true, value: { ...base, ...r, type, html: value.html, ...(value.alt ? { alt: value.alt as string } : {}) } };
+    case 'chart': {
+      const chart = checkChart(value, id);
+      if (!chart.ok) return chart;
+      return { ok: true, value: { ...base, ...r, type, ...chart.value } };
+    }
     case 'stamp': {
       if (!(STAMP_KINDS as readonly unknown[]).includes(value.kind)) return fail(`${id}: kind must be one of ${STAMP_KINDS.join(', ')}`);
       const count = value.count;

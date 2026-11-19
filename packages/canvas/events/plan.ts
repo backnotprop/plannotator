@@ -40,6 +40,7 @@ export const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof
   image: ['src', 'alt', 'link', 'style'],
   sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style'],
   html: ['html', 'alt', 'link', 'style'],
+  chart: ['mark', 'fields', 'rows', 'encode', 'stack', 'flip', 'dash', 'rules', 'title', 'unit', 'link'],
   reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style'],
   stamp: ['kind', 'count', 'link'],
   arrow: ['from', 'to', 'label', 'link', 'style', 'routing'],
@@ -47,7 +48,7 @@ export const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof
 };
 
 /** Fields an edit removes when given `null` or an empty string. */
-const OPTIONAL_FIELDS = new Set(['count', 'alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing']);
+const OPTIONAL_FIELDS = new Set(['count', 'alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing', 'stack', 'flip', 'dash', 'rules', 'unit']);
 
 /** Add the event that turns `before` into `after`, when they differ. */
 function push(events: CanvasEvent[], before: CanvasObject, after: CanvasObject): void {
