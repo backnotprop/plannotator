@@ -67,8 +67,13 @@ function midpoint(a: string, b: string | null): string {
 export function keyBetween(below: string | null, above: string | null): string {
   if (below === null && above === null) return fromInt(Math.floor(MAX / 2));
   // Two neighbours with the same key (two people who each put something on top at the same moment) have
-  // nothing between them: the new key goes just above both, and the ids settle the rest.
-  if (below !== null && above !== null && below >= above) return midpoint(below, null);
+  // nothing between them: the new key goes JUST above both, by one more digit, so it passes nothing else
+  // on the board (halfway to the top would jump over whatever lies above them). Every key that sorts above
+  // the pair and does not start with their key still sorts above the new one.
+  if (below !== null && above !== null && below >= above) {
+    const key = below + DIGITS[BASE >> 1];
+    return ORDER_KEY_RE.test(key) ? key : midpoint(below, null);
+  }
   let key: string;
   if (above === null) {
     const next = toInt(below!) + STEP;

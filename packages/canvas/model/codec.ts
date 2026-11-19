@@ -58,15 +58,30 @@ export const LIMITS = {
   spriteFps: 60,
 } as const;
 
+/** Every field name of every object type, as the types have them. */
+type FieldOf<T> = T extends unknown ? keyof T : never;
+type ObjectField = FieldOf<CanvasObject>;
+
+const FIELD_NAMES = [
+  'id', 'type', 'x', 'y', 'w', 'h', 'z', 'group', 'color', 'style', 'by', 'link',
+  'text', 'detail', 'shape', 'lanes', 'size', 'title', 'src', 'alt', 'frames', 'fps', 'html',
+  'target', 'description', 'site', 'image', 'icon', 'from', 'to', 'label', 'routing', 'kind', 'count',
+] as const satisfies readonly ObjectField[];
+
+/**
+ * A field added to an object type in `model/types.ts` and not listed above does not compile: this names the
+ * ones that are missing. A change to an object carries only listed names, so a field left out would be
+ * dropped from every peer's change and from undo.
+ */
+type MissingField = Exclude<ObjectField, (typeof FIELD_NAMES)[number]>;
+const EVERY_FIELD_IS_LISTED: [MissingField] extends [never] ? true : { missing: MissingField } = true;
+void EVERY_FIELD_IS_LISTED;
+
 /**
  * Every field name an object of any type may carry. A change to an object names its fields; a name that is
  * not here is not a field (and `__proto__`, `constructor` and `prototype` are not here).
  */
-export const OBJECT_FIELDS: ReadonlySet<string> = new Set([
-  'id', 'type', 'x', 'y', 'w', 'h', 'z', 'group', 'color', 'style', 'by', 'link',
-  'text', 'detail', 'shape', 'lanes', 'size', 'title', 'src', 'alt', 'frames', 'fps', 'html',
-  'target', 'description', 'site', 'image', 'icon', 'from', 'to', 'label', 'routing', 'kind', 'count',
-]);
+export const OBJECT_FIELDS: ReadonlySet<string> = new Set(FIELD_NAMES);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

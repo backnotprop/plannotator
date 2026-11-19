@@ -28,7 +28,11 @@ const done = (events: CanvasEvent[]): Checked<CanvasEvent[]> => ({ ok: true, val
 /** The smallest an object may be resized to, in world units. */
 export const MIN_OBJECT_SIZE = 16;
 
-const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
+/**
+ * What `edit` may change on each type. Every name here must also be in `OBJECT_FIELDS` (`model/codec.ts`),
+ * or the change it makes would be dropped when applied: `events/store.test.ts` holds the two lists together.
+ */
+export const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
   box: ['text', 'detail', 'link', 'style', 'shape', 'lanes'],
   note: ['text', 'link', 'style'],
   text: ['text', 'size', 'link', 'style'],
