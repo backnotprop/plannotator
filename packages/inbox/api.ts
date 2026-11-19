@@ -66,6 +66,7 @@ import type {
 } from '@plannotator/core/inbox-types';
 import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { inboxPickBody } from '@plannotator/core/inbox-answers';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
@@ -336,7 +337,7 @@ export interface SettingsModel {
   notifications: NotificationSettings;
   /** Whether a notification can reach the person now (open windows, how many may notify). Absent from an older Inbox. */
   notify_reach?: InboxNotifyReach;
-  /** The question sound (config.json inboxSound). Absent from an Inbox that predates it. */
+  /** The Inbox's sound (config.json inboxSound). Absent from an Inbox that predates it. */
   sound?: InboxSoundSettings;
   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
   list_intro?: { due: boolean };
@@ -1430,11 +1431,7 @@ export const inboxApi = {
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean; keepalive?: boolean } = {}) =>
-    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
-      questions: [{ key, revision, answer }],
-      ...(options.unsentOnly ? { unsent_only: true } : {}),
-      ...(options.confirmFull ? { confirm_full: true } : {}),
-    }, { keepalive: options.keepalive }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
+    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), inboxPickBody(key, revision, answer, options), { keepalive: options.keepalive }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
    * or taking it back (`null`). `staged` (the thread's checklist; approval
@@ -1588,7 +1585,7 @@ export const inboxApi = {
         body: JSON.stringify(report),
       }),
     ),
-  saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>(inboxUrl('/settings'), { sound: change }),
+  saveSound: (change: { enabled?: boolean; volume?: number; when?: InboxSoundSettings['when'] }) => post<{ sound: InboxSoundSettings; sound_rev?: number }>(inboxUrl('/settings'), { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
   /**

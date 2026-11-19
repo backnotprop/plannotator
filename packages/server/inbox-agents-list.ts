@@ -44,6 +44,7 @@ import { basename } from "node:path";
 import type { InboxFirstSeen } from "./inbox-first-seen";
 import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
 import type { InboxAgentSession } from "./inbox-sessions";
+import { withAgentStatusMark } from "./inbox-agent-mark";
 
 /** A launched session (inbox-launch.ts `agents`). */
 export interface InboxAgentLaunch {
@@ -252,7 +253,10 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
     const stay = new Set([...all].sort((a, b) => keepRank(a) - keepRank(b) || order(a, b)).slice(0, cap));
     return all.filter((agent) => stay.has(agent));
   })();
-  return { agents: kept, total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
+  // Each agent's status mark (inbox-agent-mark.ts), from what its session's connection says now.
+  const facts = new Map(evidence.sessions.map((entry) => [entry.session, { busy: entry.busy, blocked: entry.blocked ?? null }] as const));
+  const marked = kept.map((agent) => withAgentStatusMark(agent, facts.get(agent.session) ?? null));
+  return { agents: marked, total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
 }
 
 /** The merged view's agents: this Inbox's group first, named by its id, then each linked machine's (`machines.agents`). */
@@ -269,8 +273,9 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   if (!group || typeof group !== "object" || !Array.isArray((group as InboxAgentsGroup).agents)) return null;
   const raw = group as Partial<InboxAgentsGroup>;
   // Where it lives in that machine's Rex, its pane's status and mark, as that machine's Inbox read them (checked as
-  // sent): never Show in Rex, which moves that machine's screen.
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => inboxAgentNamesChecked(agent));
+  // sent). Show in Rex as that machine offers it to a linked machine's reader: only while a Rex app is attached to its
+  // Rex from another computer, never for its own screen's app (an older Inbox there offers none).
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => inboxAgentNamesChecked(agent, { show: true }));
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};

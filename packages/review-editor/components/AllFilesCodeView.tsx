@@ -374,8 +374,12 @@ export interface AllFilesCodeViewProps {
    * the caller decides what a hoverable symbol is. Stitching a fragmented
    * identifier is app-only work, and this component is also compiled into the
    * read-only portable guide viewer, which passes neither handler.
+   *
+   * Return `false` when the token is not a symbol a card can open for (a
+   * comment, punctuation, a keyword): the view then paints no hover underline
+   * or hand cursor on it.
    */
-  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => boolean | void;
   onTokenHoverLeave?: () => void;
   /** The token under the pointer, and the last one clicked: where code
    *  review's F12 looks. The portable viewer passes none. */
@@ -3409,18 +3413,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (pointedPath != null) onTokenTarget('enter', props, pointedPath);
       }
       if (!onTokenHoverEnter || item.type !== 'diff') return;
+      // File identity comes from the owning item, exactly as handleTokenClick
+      // resolves it — never from an active-file side channel.
+      const filePath = itemIdToFilePath.get(item.id);
+      if (filePath == null) return;
       // The hovered-token treatment (underline + pointer cursor), the same one
       // DiffViewer paints and the one the announcement dialog's try-it shows.
       // This view is the DEFAULT review surface, so leaving it out meant the
       // affordance the demo advertises was absent from the surface most
       // reviewers actually use. Gated on the hover handler, so a read-only or
-      // portable host (which passes none) still paints nothing.
-      props.tokenElement.classList.add('pn-token-hover');
-      // File identity comes from the owning item, exactly as handleTokenClick
-      // resolves it — never from an active-file side channel.
-      const filePath = itemIdToFilePath.get(item.id);
-      if (filePath == null) return;
-      onTokenHoverEnter(props, filePath);
+      // portable host (which passes none) still paints nothing, and on its
+      // answer, so a comment or a `;` that can never open a card does not
+      // look clickable.
+      if (onTokenHoverEnter(props, filePath) !== false) {
+        props.tokenElement.classList.add('pn-token-hover');
+      }
     },
   );
 
