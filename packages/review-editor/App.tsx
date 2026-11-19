@@ -79,7 +79,7 @@ import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
 import { createSemDiffClient } from './semDiff/semDiffClient';
 import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
-import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
+import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpProvider, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
 import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
@@ -818,14 +818,14 @@ const ReviewApp: React.FC = () => {
   const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
-  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: 'jev' | 'clef' | null }>({ configured: false, provider: null });
+  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: PowerUpProvider | null; endpoint?: string }>({ configured: false, provider: null });
   useEffect(() => {
     if (!semDiffClient) return;
     let cancelled = false;
     const load = () => {
       fetch('/api/sem-diff/opinion/settings')
         .then((res) => (res.ok ? res.json() : null))
-        .then((data: { configured: boolean; provider: 'jev' | 'clef' | null } | null) => {
+        .then((data: { configured: boolean; provider: PowerUpProvider | null; endpoint?: string } | null) => {
           if (!cancelled && data) setPowerUpConfigured(data);
         })
         .catch(() => {});
@@ -6126,6 +6126,7 @@ const ReviewApp: React.FC = () => {
                   <PowerUpStatusSlot
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
+                    endpoint={powerUpConfigured.endpoint}
                     onRetry={() => setPowerUpRetry((n) => n + 1)}
                     onSettings={() => setOpenSettingsMenu('semantic')}
                   />
