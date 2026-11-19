@@ -144,6 +144,8 @@ The app shows each agent with the product's own icon (`.github/assets/icons`). `
 ## CI
 
 - The contract files are data. The test picker reads them like any other data file. Only `.github/workflows/mobile-ios.yml` builds Swift, and only when `apps/mobile/ios/**` or `apps/mobile/contract/generated/swift/**` changes. It is never a required check.
+- It also starts for the product's agent icons, `.github/assets/icons/**`, because the app carries checked copies of them (see "The agents' marks"). An icon change still runs no Inbox test: the icons stay on the docs-only list.
+- It does not start for `apps/mobile/contract/vectors` or `fixtures`, though the app's conformance tests read them: an Inbox pull request never gets a mobile job. A disagreement shows in the nightly run, or on the next pull request that touches the app.
 - `apps/mobile/ios/ci.sh` typechecks `Wire.swift` and `Words.swift` on that job.
 - A generator never lists a folder of the checkout. Every path it reads or writes is a literal in `scripts/mobile/lib.ts` or in the generator, so the picker can see it. If a generator lists a folder, every pull request runs the contract test.
 

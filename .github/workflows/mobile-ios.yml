@@ -11,11 +11,15 @@ name: Mobile iOS
 #
 # It starts for the iOS app (apps/mobile/ios), the contract's generated Swift
 # (apps/mobile/contract/generated/swift), the product's agent icons
-# (.github/assets/icons: the app carries copies, apps/mobile/ios/agent-marks.sh
-# checks them) and this file: not for Android files or the contract's JSON
-# data, which no step here reads. The parity ledger's
-# clock has its own workflow, mobile-ledger.yml, so recording a ledger row
-# never starts a macOS build.
+# (.github/assets/icons: the app carries copies, and
+# apps/mobile/ios/agent-marks.sh checks them) and this file. It does not start
+# for Android files.
+#
+# It does not start for the contract's JSON data either, although the app's
+# conformance tests read apps/mobile/contract/vectors and fixtures: those
+# change with the Inbox's own code, and an Inbox pull request must never get a
+# mobile job. A rule the app then disagrees with shows in the nightly run, or
+# on the next pull request that touches the app.
 #
 # Concurrency is per job, so the two kinds of run never cancel each other.
 # `ios` runs in a group per branch: a new push cancels only the same pull

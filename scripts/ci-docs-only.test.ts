@@ -268,13 +268,18 @@ describe('no code reads an allowlisted file', () => {
     expect(folders.filter((f) => !allowlist.test(f))).toEqual([]);
   });
 
-  // Code that does read allowlisted files, on a workflow of its own whose path filter names them: a docs-only
-  // pull request skips none of ITS runs, so the read is safe. Each entry is held to that by the test below.
+  // The one reader of allowlisted files: it runs on a workflow of its own whose path filter names what it reads,
+  // so a docs-only pull request skips none of ITS runs. Held to that by the test below.
+  const ICONS = '.github/assets/icons';
   const OWN_FILTER: Record<string, { workflow: string; paths: string; why: string }> = {
-    'apps/mobile/ios/agent-marks.sh': { workflow: 'mobile-ios.yml', paths: '.github/assets/icons/**', why: 'copies the agent icons into the iPhone app and checks the copies' },
-    '.github/workflows/mobile-ios.yml': { workflow: 'mobile-ios.yml', paths: '.github/assets/icons/**', why: 'its own path filter' },
-    'scripts/ci-affected-map.test.ts': { workflow: 'mobile-ios.yml', paths: '.github/assets/icons/**', why: 'pins that path filter' },
+    'apps/mobile/ios/agent-marks.sh': { workflow: 'mobile-ios.yml', paths: `${ICONS}/**`, why: 'copies the agent icons into the iPhone app and checks the copies' },
   };
+  // Files that name the icons folder without reading it: that workflow's own path filter, and the test that pins it.
+  const ICON_MENTIONS = new Set(['.github/workflows/mobile-ios.yml', 'scripts/ci-affected-map.test.ts']);
+  // A hit is let through only by its LINE: the file is one of the above and the line names the icons folder and
+  // no other docs, adr or assets path. Any other such path in those files is a hit like anywhere else.
+  const iconLineOnly = (file: string, text: string, needles: ReadonlySet<string>) =>
+    (file in OWN_FILTER || ICON_MENTIONS.has(file)) && text.includes(ICONS) && ![...needles].some((needle) => text.split(ICONS).join('').includes(needle));
 
   test('code that reads an allowlisted file runs on a workflow whose own path filter names it', () => {
     for (const [file, { workflow, paths }] of Object.entries(OWN_FILTER)) {
@@ -287,10 +292,21 @@ describe('no code reads an allowlisted file', () => {
     expect(readFileSync(join(repoRoot, 'apps/mobile/ios/ci.sh'), 'utf8')).toContain('agent-marks.sh" --check');
   });
 
+  test('only a line that names the icons folder, in those files, is let through', () => {
+    const needles = new Set(['github/assets', 'docs/releases', 'adr/']);
+    expect(iconLineOnly('apps/mobile/ios/agent-marks.sh', 'icons="$here/../../../.github/assets/icons"', needles)).toBe(true);
+    expect(iconLineOnly('.github/workflows/mobile-ios.yml', "      - '.github/assets/icons/**'", needles)).toBe(true);
+    // Another assets, docs or adr path in the same files is a hit, and so is the icons folder in any other file.
+    expect(iconLineOnly('apps/mobile/ios/agent-marks.sh', 'cp "$here/../../../.github/assets/inbox-dark.webp" x', needles)).toBe(false);
+    expect(iconLineOnly('apps/mobile/ios/agent-marks.sh', 'cat .github/assets/icons/a.svg docs/releases/x.md', needles)).toBe(false);
+    expect(iconLineOnly('apps/mobile/ios/agent-marks.sh', 'cat adr/x.md', needles)).toBe(false);
+    expect(iconLineOnly('apps/mobile/ios/ci.sh', 'ls .github/assets/icons', needles)).toBe(false);
+  });
+
   test('a path under docs/, adr/ or .github/assets appears in no code', () => {
     const needles = new Set(['github/assets', 'docs/releases', 'adr/']);
     for (const f of docs) if (f.includes('/')) { needles.add(f); if (f.startsWith('docs/')) needles.add(f.split('/').pop()!); }
-    const hits = grep(['-F', ...[...needles].flatMap((x) => ['-e', x])]).filter((m) => !(m[1]! in MENTIONS) && !(m[1]! in OWN_FILTER));
+    const hits = grep(['-F', ...[...needles].flatMap((x) => ['-e', x])]).filter((m) => !(m[1]! in MENTIONS) && !iconLineOnly(m[1]!, m[3]!, needles));
     expect(hits.map((m) => `${m[1]}:${m[2]}: ${m[3]!.trim().slice(0, 120)}`)).toEqual([]);
   });
 
