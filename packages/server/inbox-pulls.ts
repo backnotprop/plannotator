@@ -197,7 +197,9 @@ function shaOf(value: unknown): string | null {
 
 // --- the queries ---
 
-const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
+const GH_WRITERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+const GH_PULL = `number title url state isDraft authorAssociation updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
       repository { nameWithOwner } baseRepository { defaultBranchRef { name } } headRepository { nameWithOwner } author { login avatarUrl }
       reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { slug } } } }
       latestReviews(first: 5) { nodes { state author { login avatarUrl } } }
@@ -500,6 +502,7 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
         title: str(item.title),
         author,
         mine: login !== null && author === login,
+        ...(GH_WRITERS.has(str(item.authorAssociation)) ? { author_member: true as const } : {}),
         requested: flag === "requested" || earlier?.requested === true,
         ...(flag === "assigned" || earlier?.assigned === true ? { assigned: true } : {}),
         state,
@@ -2168,21 +2171,25 @@ export function previewOf(body: string): string {
 }
 
 /** What a thread says about the agent behind it. */
-function threadFacts(store: InboxPullLinkStore, threadId: string) {
+function threadFacts(store: InboxPullLinkStore, threadId: string, showMeSince: string | null = null) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
   let showMe: InboxMessage | null = null;
   let replied = false;
   let showMeSeen = false;
-  for (let i = ids.length - 1; i >= 0 && (!last || !guide || !showMe); i--) {
+  let looking = showMeSince !== null;
+  for (let i = ids.length - 1; i >= 0 && (!last || !guide || looking); i--) {
     const message = store.message(ids[i]!);
-    if (message?.author.kind === "person" && !showMe) replied = true;
-    if (!message || message.author.kind !== "agent") continue;
+    if (!message) continue;
+    if (looking && message.created_at < showMeSince!) looking = false;
+    if (looking && message.author.kind === "person") replied = true;
+    if (message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
-    if (!showMe && message.show_me) {
+    if (looking && message.show_me) {
       showMe = message;
+      looking = false;
       const seq = store.messageSeq?.(message.id) ?? null;
       showMeSeen = replied || (seq !== null && (store.message(threadId)?.person_seen_seq ?? 0) >= seq);
     }
@@ -2262,8 +2269,8 @@ export function linkInboxPulls(
     }
   }
 
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
-    const { last, guide, showMe, showMeSeen } = threadFacts(store, threadId);
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, showMeSince: string | null = null): InboxPullLink => {
+    const { last, guide, showMe, showMeSeen } = threadFacts(store, threadId, showMeSince);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2284,7 +2291,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.show_me_at ? { show_me_asked_at: owner.show_me_at } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject, owner.show_me_at ?? null), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.show_me_at ? { show_me_asked_at: owner.show_me_at } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);

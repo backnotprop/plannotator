@@ -31,11 +31,11 @@ const engine = (onJudged?: (pull: InboxPull, level: string) => void) =>
 
 test("the automatic run's setting: saved and served by the risk rules, kept by a save that leaves it out, cleared by null, a bad one refused", () => {
   const risk = engine();
-  risk.save({ rules: "Billing.", provider: "pi-sdk", model: null, auto: { level: "high", make: "both", agent: "codex" } });
-  expect(risk.answer().auto).toEqual({ level: "high", make: "both", agent: "codex" });
+  risk.save({ rules: "Billing.", provider: "pi-sdk", model: null, auto: { level: "high", make: "show_me", agent: "codex" } });
+  expect(risk.answer().auto).toEqual({ level: "high", make: "show_me", agent: "codex" });
   risk.save({ rules: "Billing and auth.", provider: "pi-sdk", model: null });
-  expect((loadConfig().inboxPullRisk as { auto?: unknown }).auto).toEqual({ level: "high", make: "both", agent: "codex" });
-  for (const bad of [{ level: "low", make: "guide" }, { level: "high", make: "draw" }, "high"]) {
+  expect((loadConfig().inboxPullRisk as { auto?: unknown }).auto).toEqual({ level: "high", make: "show_me", agent: "codex" });
+  for (const bad of [{ level: "low", make: "guide" }, { level: "high", make: "both" }, "high"]) {
     expect(() => risk.save({ rules: "x", provider: "pi-sdk", model: null, auto: bad })).toThrow();
   }
   risk.save({ rules: "Billing.", provider: "pi-sdk", model: null, auto: null });

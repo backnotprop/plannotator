@@ -8,6 +8,7 @@ import {
   type InboxMessageWire,
   type InboxPull,
   type InboxPullLink,
+  INBOX_PULL_RISK_AUTO_TRIES,
   type InboxPullRiskAutoRun,
   type InboxPullStack,
   type InboxReviewRow,
@@ -164,13 +165,14 @@ export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<I
   const link = row.link;
   if (run.state === 'failed') {
     const open = row.stacks[0] ? openLayers(row.stacks[0]).length > 0 : false;
-    return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}` : null;
+    const again = (run.tries ?? 1) < INBOX_PULL_RISK_AUTO_TRIES ? ' It will try again.' : '';
+    return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}${again}` : null;
   }
   if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
   const page = run.made !== 'guide' && link.show_me_page && link.show_me_page.at >= run.at ? link.show_me_page : null;
   if (page) return !page.seen && !row.review ? `Show me ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
   if (link.agent?.ended || row.review) return null;
-  return run.made === 'show_me' ? 'Making a Show me page…' : run.made === 'both' ? 'Making a guided review and a Show me page…' : 'Making a guided review…';
+  return run.made === 'show_me' ? 'Making a Show me page…' : 'Making a guided review…';
 }
 
 export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>): ReviewRowLine {

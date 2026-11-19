@@ -1237,7 +1237,7 @@ describe("parsing", () => {
       JSON.stringify({
         data: {
           viewer: { login: "dana" },
-          requested: { nodes: [ghPull(880, { author: { login: "tomas" } })] },
+          requested: { nodes: [ghPull(880, { author: { login: "tomas" } }), ghPull(881, { author: { login: "ines" }, authorAssociation: "COLLABORATOR" }), ghPull(882, { author: { login: "zed" }, authorAssociation: "CONTRIBUTOR" })] },
           authored: {
             nodes: [
               ghPull(872, { reviewDecision: "APPROVED", latestReviews: { nodes: [{ state: "APPROVED", author: { login: "priya" } }] } }),
@@ -1252,6 +1252,7 @@ describe("parsing", () => {
     const by = Object.fromEntries(answer.pulls.map((p) => [p.number, p]));
     expect(answer.login).toBe("dana");
     expect(by[880]).toMatchObject({ requested: true, mine: false, author: "tomas" });
+    expect([by[880]!.author_member, by[881]!.author_member, by[882]!.author_member]).toEqual([undefined, true, undefined]);
     expect(by[872]).toMatchObject({ mine: true, review: "approved", approved_by: "priya", checks: "success" });
     expect(by[414]).toMatchObject({ state: "draft", checks: "pending" });
     expect(by[411]).toMatchObject({ state: "merged", merged_at: "2026-11-02T10:00:00Z" });

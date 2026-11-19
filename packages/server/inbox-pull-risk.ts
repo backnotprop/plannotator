@@ -627,7 +627,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       if (typeof body.provider === "string" && !RISK_AGENTS.some((a) => a.id === body.provider)) throw new InboxError("validation_error", "provider: an agent from the list, or null.", { field: "provider" });
       if (body.model !== null && typeof body.model !== "string") throw new InboxError("validation_error", "model: a model from the list, or null.", { field: "model" });
       if (body.branches !== undefined && typeof body.branches !== "boolean") throw new InboxError("validation_error", "branches: true or false.", { field: "branches" });
-      if (body.auto !== undefined && body.auto !== null && !inboxPullRiskAutoOf(body.auto)) throw new InboxError("validation_error", "auto: { level: high or medium, make: guide, show_me or both, agent? }, or null.", { field: "auto" });
+      if (body.auto !== undefined && body.auto !== null && !inboxPullRiskAutoOf(body.auto)) throw new InboxError("validation_error", "auto: { level: high or medium, make: guide or show_me, agent? }, or null.", { field: "auto" });
       const auto = body.auto === undefined ? settings().auto : inboxPullRiskAutoOf(body.auto);
       // Absent (a window from before Branch reviews, or with it off): what the person chose stays.
       const branches = typeof body.branches === "boolean" ? body.branches : settings().branches;

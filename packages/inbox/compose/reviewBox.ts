@@ -21,7 +21,7 @@ export interface ReviewBoxRequest {
   ask?: 'show_me';
 }
 
-export const reviewBoxPullAsk = (ask: ReviewBoxRequest['ask'], body: string): Exclude<PullHandoffAsk, { kind: 'both' }> => (ask === 'show_me' ? { kind: 'show_me', words: body } : body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' });
+export const reviewBoxPullAsk = (ask: ReviewBoxRequest['ask'], body: string): PullHandoffAsk => (ask === 'show_me' ? { kind: 'show_me', words: body } : body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' });
 
 export interface ReviewBoxBranch {
   name: string;

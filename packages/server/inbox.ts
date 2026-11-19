@@ -345,7 +345,7 @@ import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
-import { pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
+import { pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
@@ -5220,7 +5220,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     pullOf: (key) => pulls.find(key),
     stackOf: (key) => pulls.stack(key),
     levelOf: (pull) => pullRisk.levelOf(pull),
-    hasThread: async (pull) => !!linkInboxPulls([pull], pullLinkStore, new Map([[`${pull.host}/${pull.repo}`.toLowerCase(), await pullRepoProjects(pull)]]), pullOwnersNow())[pull.key],
+    hasThread: async (pull) => machines?.pullLinkedThere(pull.key) === true || !!linkInboxPulls([pull], pullLinkStore, new Map([[`${pull.host}/${pull.repo}`.toLowerCase(), await pullRepoProjects(pull)]]), pullOwnersNow())[pull.key],
+    settled: (run) => pullRiskAutoSettled(pullLinkStore, run),
     start: pullRiskAutoStart({
       store,
       launch,
@@ -5230,13 +5231,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       own: (layers, threadId, made) => {
         const keys = layers.map((layer) => layer.key);
         const theirs = layers.every((layer) => !layer.mine);
-        pullOwners.set(keys, threadId, { ask: made === "show_me" ? "show_me" : "guide", theirs });
-        if (made === "both") pullOwners.set(keys, threadId, { ask: "show_me", theirs });
+        pullOwners.set(keys, threadId, { ask: made, theirs });
         couplePulls(keys, threadId);
       },
     }),
   });
-  pullRiskAuto.resume();
   /**
    * A thread started from a PR's page that the window never tied (a list found it by its first message,
    * `linkInboxPulls`): kept as the PR's owner now, as the tie would have, with the same coupling (`theirs`, the

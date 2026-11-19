@@ -78,8 +78,9 @@ export interface InboxPullRiskAnswer {
   auto_would_start?: Record<InboxPullRiskAuto["level"], number>;
 }
 
-export type InboxPullRiskAutoMake = "guide" | "show_me" | "both";
-export const INBOX_PULL_RISK_AUTO_MAKES: readonly InboxPullRiskAutoMake[] = ["guide", "show_me", "both"];
+export type InboxPullRiskAutoMake = "guide" | "show_me";
+export const INBOX_PULL_RISK_AUTO_MAKES: readonly InboxPullRiskAutoMake[] = ["guide", "show_me"];
+export const INBOX_PULL_RISK_AUTO_TRIES = 3;
 
 export interface InboxPullRiskAuto {
   level: "high" | "medium";
@@ -94,6 +95,10 @@ export interface InboxPullRiskAutoRun {
   state: "queued" | "started" | "failed";
   thread_id: string | null;
   reason?: string;
+  started_at?: string;
+  done?: true;
+  tries?: number;
+  failed_at?: string;
 }
 
 export function inboxPullRiskAutoOf(value: unknown): InboxPullRiskAuto | null {

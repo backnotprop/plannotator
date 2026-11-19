@@ -19,7 +19,7 @@ import {
 } from '@plannotator/core/inbox-types';
 import { openLayers } from '@plannotator/core/inbox-pull-handoff';
 import { agentName } from '../tags';
-import { stackLink, startLayer } from './topology';
+import { startLayer } from './topology';
 import { person, possessiveTail, wordsText, type Words } from './words';
 
 export * from '@plannotator/core/inbox-pull-handoff';
@@ -106,23 +106,6 @@ export function pullRows(groups: InboxPullGroups): InboxPullItem[] {
 export const isOpenPull = inboxPullIsOpen;
 
 
-/** The open layer a layer is based on (its base is that layer's head), or null. */
-function parentIn(open: readonly InboxPull[], pull: InboxPull): InboxPull | null {
-  return open.find((other) => other.key !== pull.key && other.head === pull.base) ?? null;
-}
-
-/** Two open PRs on one branch: the open layers are not one chain (each based on the one under it). */
-function isTree(open: readonly InboxPull[]): boolean {
-  return !open.every((pull, i) => i === 0 || parentIn(open, pull) === open[i - 1]);
-}
-
-/** The open layers from the bottom up to `tip`, each based on the one under it (the layers its Whole stack reads). */
-export function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
-  const chain: InboxPull[] = [];
-  for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentIn(open, at)) chain.unshift(at);
-  return chain;
-}
-
 /** The agent's name as the Inbox writes it ("Claude Code", "Codex"), or the name it gave itself. */
 export function linkAgentName(link: InboxPullLink | null): string | null {
   if (!link?.agent) return null;
@@ -147,36 +130,6 @@ export function handoffKeys(stack: InboxPullStack): string[] {
  * asked for a guided review; its row and page open the thread.
  */
 export const isPullThread = (link: Pick<InboxPullLink, 'via' | 'ask' | 'page'> | null | undefined): boolean => link?.via === 'owner' && (link.ask === 'thread' || link.page === true);
-
-
-/**
- * The stack a hand-off is about: the open layers no agent's thread has yet (`thread` null: No agent yet), or the ones
- * `thread` has (a new review thread after its agent ended); null when there are none.
- * - A chain (each open layer based on the one under it) is one stack: handed over whole, and once a thread has it
- *   (`stackLink`) nothing of it is left to hand.
- * - A tree (two open PRs on one branch): the topmost open layer that thread has (or no thread has), down its chain
- *   while the layers under it are that thread's too (or no thread's). Those are the layers the review's Whole stack
- *   reads for it, so the list, step 1's "from" and "to" branches and "in list order" stay true. A hand-off covers the
- *   chain to the top first (#412 and #414). Their sibling #413 is what `thread` null answers after that, but the page
- *   offers no hand-off for it (the stack view shows the stack's agent, as for any linked stack).
- * The merged layers under the stack stay when the hand-off starts at its bottom.
- */
-export function handoffStack(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>, thread: string | null = null): InboxPullStack | null {
-  const open = openLayers(stack);
-  if (open.length === 0) return null;
-  if (!isTree(open)) return thread !== null || !stackLink(stack, links) ? stack : null;
-  const whose = (pull: InboxPull) => links[pull.key]?.thread_id ?? null;
-  const tip = [...open].reverse().find((l) => whose(l) === thread);
-  if (!tip) return null;
-  const layers: InboxPull[] = [];
-  for (const at of chainTo(open, tip).reverse()) {
-    if (whose(at) !== thread) break;
-    layers.unshift(at);
-  }
-  return layers[0]!.base === stack.open_base
-    ? { ...stack, layers: [...stack.layers.filter((l) => !isOpenPull(l)), ...layers] }
-    : { ...stack, layers, base: layers[0]!.base, open_base: layers[0]!.base };
-}
 
 
 /** A PR the person's review was asked for (the owner's words): "Review requested · tomas's PR", or "Review requested" with no author. */

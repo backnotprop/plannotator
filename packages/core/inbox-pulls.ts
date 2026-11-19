@@ -37,6 +37,7 @@ export interface InboxPull {
   author: string | null;
   /** The person (the CLI's signed-in account) wrote it. */
   mine: boolean;
+  author_member?: true;
   /** Review was requested from the person (or one of their teams). */
   requested: boolean;
   /** The person is one of its assignees (GitHub `assignee:@me`, GitLab `assignedMergeRequests`); absent from an older Inbox. */
