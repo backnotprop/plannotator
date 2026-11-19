@@ -65,7 +65,9 @@ import {
   type InboxToolInfo,
   inboxBlockedField,
   type InboxBlockedKind,
+  INBOX_OFF_LINE,
 } from "./connection";
+import { isInboxTurnedOn } from "./turned-on";
 import { directFetchInit } from "../loopback-proxy";
 
 /** The longest a host's start waits for a running Inbox's `tools/list` (the mod's bound). */
@@ -314,6 +316,8 @@ export class InboxAgentConnection {
 
   /** The running Inbox, starting a stopped one detached (no browser) first. */
   async ensureRunning(): Promise<InboxRegistryView | { error: string }> {
+    // Not turned on here (turned-on.ts): nothing is reached or started.
+    if (!isInboxTurnedOn(this.dataDir)) return { error: INBOX_OFF_LINE };
     const known = readRegistry(this.dataDir);
     if (known && (await this.isRunning(known))) return known;
     const started = await this.startInbox();
@@ -324,6 +328,7 @@ export class InboxAgentConnection {
     }
     if (started.exitCode !== 0) {
       const why = started.output.trim() || `exit ${started.exitCode}`;
+      if (why.includes(INBOX_OFF_LINE)) return { error: INBOX_OFF_LINE };
       if (/unknown command/i.test(why)) return { error: "The plannotator on PATH has no Inbox (an older version); update Plannotator." };
       return { error: `The Plannotator Inbox did not start: ${why}` };
     }

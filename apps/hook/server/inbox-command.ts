@@ -50,6 +50,8 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAskAiChild } from "@plannotator/shared/child-env";
 import { isNewerStableVersion } from "@plannotator/shared/update-check";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { INBOX_OFF_LINE } from "@plannotator/shared/inbox/connection";
+import { INBOX_LOGIN_ITEM_ENV, isInboxTurnedOn, markInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import {
   acquireInboxStartLock,
   inboxStartLockStale,
@@ -200,6 +202,8 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
  * needed. Never opens a browser. Throws when it cannot be started.
  */
 export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
+  // Until the person turns the Inbox on here (turned-on.ts), nothing reaches or starts it.
+  if (!isInboxTurnedOn(dataDir)) throw new Error(INBOX_OFF_LINE);
   const trace = inboxStartTrace(dataDir, "starter");
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
@@ -692,6 +696,10 @@ async function stopCommand(dataDir: string): Promise<number> {
  * in between waits for this start instead of racing it.
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  if (!isInboxTurnedOn(dataDir)) {
+    process.stderr.write(`${INBOX_OFF_LINE}\n`);
+    return 1;
+  }
   const unreachable = await outOfReach(await inboxStatus(dataDir));
   if (unreachable) {
     process.stderr.write(`${unreachable.error.message}\n`);
@@ -871,6 +879,17 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
 
+  // A person's run (bare, --no-open, --open) turns the Inbox on here; Plannotator's own
+  // starts (--background, a detached start, the start at login) never do, and start
+  // nothing until the person has (turned-on.ts).
+  const loginItem = process.env[INBOX_LOGIN_ITEM_ENV] === "1";
+  delete process.env[INBOX_LOGIN_ITEM_ENV];
+  if (!detached && !loginItem && !background) markInboxTurnedOn(dataDir);
+  else if (!isInboxTurnedOn(dataDir)) {
+    process.stderr.write(`${INBOX_OFF_LINE}\n`);
+    process.exit(1);
+  }
+
   await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
@@ -898,6 +917,9 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       if (open && !opened && (await openBrowserDetached(url, { isRemote: isRemoteSession() })) === "remote") {
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
+      // --open is the setup's one step (it returns, where bare `plannotator inbox` may serve in the foreground): it
+      // connects the agents it finds, as the person's bare run does, and names them on stderr.
+      if (open && connect) await connectRunningInbox(entry);
       process.stdout.write(`${url}\n`);
       process.exit(0);
     } catch (error) {

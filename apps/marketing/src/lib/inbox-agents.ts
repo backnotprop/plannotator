@@ -22,6 +22,7 @@
 // When one of those changes, change the entry here; the pages follow.
 
 import { inboxToolCostText } from '../../../../packages/core/inbox-types';
+import { INBOX_SETUP_COMMAND } from '../../../../packages/shared/inbox/connection';
 
 export type Tier = 'plugin' | 'hooks' | 'mcp' | 'cloud';
 
@@ -49,7 +50,7 @@ export interface Step {
   see?: string;
   /**
    * The install prompt (/inbox/prompt.md) gives this step to an agent setting up the Inbox for itself: before
-   * `plannotator inbox` (it turns a plugin's tool on only when it finds the plugin) or after it. A step only
+   * `plannotator inbox --open` (it turns a plugin's tool on only when it finds the plugin) or after it. A step only
    * Plannotator's own features need (a review plugin, a hook the installer adds) has none.
    */
   prompt?: 'before' | 'after';
@@ -166,7 +167,9 @@ export const INSTALL_WIN = 'irm https://plannotator.ai/install.ps1 | iex';
 export const TEST = 'Send me a test question in the Plannotator Inbox, and read my answer when I tell you I sent it.';
 const MCP_JSON = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
 
-const openInbox = (see: string): Step => ({ do: 'Open the Inbox. It connects the agents it finds on this computer.', code: 'plannotator inbox', see });
+/** The setup's turn-on step: it turns the Inbox on, starts it detached, opens it, connects the agents it finds and returns. Always before a restart, a connection or a "you should see" that needs the Inbox. */
+export const TURN_ON = INBOX_SETUP_COMMAND;
+const openInbox = (see: string): Step => ({ do: 'Open the Inbox. It connects the agents it finds on this computer.', code: TURN_ON, see });
 /**
  * The OpenClaw plugin's install line (apps/openclaw-plugin/README.md). The `npm:`
  * prefix installs from npm (OpenClaw's docs/cli/plugins/install.md, "npm only"; it
@@ -266,7 +269,7 @@ const byHandMcp = (name: string): Step => ({
 const installCloud: Step = { do: 'Install Plannotator 0.28.63 or newer on your computer. The same command updates an older one.', code: INSTALL };
 const pairStep = (kind: string): Step => ({
   do: `Open the Inbox. In Settings → Cloud agents press Pair a cloud agent, pick ${kind} and give it a name.`,
-  code: 'plannotator inbox',
+  code: TURN_ON,
   see: 'One message to copy, under the name you gave it. It is shown only this once.',
 });
 const cloudTool = (name: string): Cell => ({
@@ -342,13 +345,13 @@ export const AGENTS: Agent[] = [
         see: '`claude plugin list` shows `plannotator@plannotator`.',
         prompt: 'before',
       },
+      openInbox('The Inbox opens in your browser. Settings → Agents shows Claude Code as `Connected` through `Plannotator’s plugin`.'),
       {
         do: 'Quit Claude Code and start it again. `claude --continue` brings back the conversation you were in.',
         code: 'claude --continue',
         see: 'Claude has a `plannotator_inbox` tool. It needs Claude Code 2.1.287 or newer.',
         prompt: 'after',
       },
-      openInbox('The Inbox opens in your browser. Settings → Agents shows Claude Code as `Connected` through `Plannotator’s plugin`.'),
     ],
     other: [
       onWindows,
@@ -477,7 +480,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL, see: 'The installer’s `PI USERS` part prints the extension command.' },
       { do: 'Add the extension. It needs Pi 0.79.1 or newer.', code: 'pi install npm:@plannotator/pi-extension', prompt: 'before' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists Pi through `Plannotator’s extension`.'),
-      { do: '`plannotator inbox` turned the tool on when it found the extension. Type `/reload` in Pi.', code: '/reload', see: 'Pi has a `plannotator_inbox` tool.', prompt: 'after' },
+      { do: `\`${TURN_ON}\` turned the tool on when it found the extension. Type \`/reload\` in Pi.`, code: '/reload', see: 'Pi has a `plannotator_inbox` tool.', prompt: 'after' },
     ],
     other: [
       onWindows,
@@ -489,7 +492,7 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'Pi has no `plannotator_inbox` tool',
-        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the extension. If you turned the tool off yourself, turn it on in Settings → Agents. Then `/reload` in Pi (`/restart` in Oh My Pi).',
+        fix: `Run \`${TURN_ON}\` once: it turns the tool on when it finds the extension. If you turned the tool off yourself, turn it on in Settings → Agents. Then \`/reload\` in Pi (\`/restart\` in Oh My Pi).`,
         src: 'IB:74,437-438; packages/server/inbox-agents.ts:1582-1590 (a tool way saves inboxTool on)',
       },
       {
@@ -558,7 +561,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL, see: 'The installer ends with `Then restart OpenCode (OpenCode 2: run opencode2 reload).`' },
       { do: 'Add the plugin to `opencode.json`. This is OpenCode 2.', file: 'opencode.json', code: '{ "plugins": [{ "package": "@plannotator/opencode@latest" }] }', prompt: 'before' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists OpenCode through `Plannotator’s plugin`.'),
-      { do: '`plannotator inbox` turned the tool on when it found the plugin. Reload OpenCode.', code: 'opencode2 reload', see: '`opencode2 plugin list` shows `plannotator` and OpenCode has a `plannotator_inbox` tool.', prompt: 'after' },
+      { do: `\`${TURN_ON}\` turned the tool on when it found the plugin. Reload OpenCode.`, code: 'opencode2 reload', see: '`opencode2 plugin list` shows `plannotator` and OpenCode has a `plannotator_inbox` tool.', prompt: 'after' },
     ],
     other: [
       onWindows,
@@ -569,7 +572,7 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'OpenCode has no `plannotator_inbox` tool',
-        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin in your global OpenCode config. If you turned the tool off yourself, turn it on in Settings → Agents. Then run `opencode2 reload` on OpenCode 2 or restart OpenCode 1.',
+        fix: `Run \`${TURN_ON}\` once: it turns the tool on when it finds the plugin in your global OpenCode config. If you turned the tool off yourself, turn it on in Settings → Agents. Then run \`opencode2 reload\` on OpenCode 2 or restart OpenCode 1.`,
         src: 'IB:74,220,437-438; packages/server/inbox-agents.ts:1582-1590',
       },
       {
@@ -626,7 +629,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL },
       { do: 'Add the plugin to the profile you use.', code: 'dsh plugin --profile <profile> add @plannotator/dsh', prompt: 'before' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists DeepSeek Harness.'),
-      { do: '`plannotator inbox` turned the tool on when it found the plugin. Restart DeepSeek Harness.', see: 'The agent has a `plannotator_inbox` tool.', prompt: 'after' },
+      { do: `\`${TURN_ON}\` turned the tool on when it found the plugin. Restart DeepSeek Harness.`, see: 'The agent has a `plannotator_inbox` tool.', prompt: 'after' },
     ],
     other: [
       { title: 'DeepSeek Harness Desktop', steps: [{ do: 'Open and quit Desktop once. Then add the plugin to its profile.', code: 'dsh plugin --profile desktop add @plannotator/dsh' }] },
@@ -637,7 +640,7 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'The agent has no `plannotator_inbox` tool',
-        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then restart DeepSeek Harness.',
+        fix: `Run \`${TURN_ON}\` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then restart DeepSeek Harness.`,
         src: 'IB:75,230; HELP:385; packages/server/inbox-agents.ts:1582-1590',
       },
       {
@@ -685,7 +688,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL },
       { do: 'Add the plugin.', code: 'cline plugin install npm:@plannotator/cline', prompt: 'before' },
       openInbox('The Inbox opens in your browser. Settings → Agents lists Cline.'),
-      { do: '`plannotator inbox` turned the tool on when it found the plugin. Start a new Cline session.', see: 'The new session has a `plannotator_inbox` tool.', prompt: 'after' },
+      { do: `\`${TURN_ON}\` turned the tool on when it found the plugin. Start a new Cline session.`, see: 'The new session has a `plannotator_inbox` tool.', prompt: 'after' },
     ],
     other: [
       {
@@ -698,7 +701,7 @@ export const AGENTS: Agent[] = [
     trouble: [
       {
         symptom: 'Cline has no `plannotator_inbox` tool',
-        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new session. A running session keeps the tools it started with.',
+        fix: `Run \`${TURN_ON}\` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new session. A running session keeps the tools it started with.`,
         src: 'HELP:386,392 (Cline with its plugin); packages/server/inbox-agents.ts:1234-1243 (AG cline: a tool way with the plugin)',
       },
       {
@@ -749,19 +752,19 @@ export const AGENTS: Agent[] = [
         prompt: 'before',
       },
       openInbox('The Inbox opens in your browser. Settings → Agents lists OpenClaw.'),
-      { do: '`plannotator inbox` turned the tool on when it found the plugin. Send a new message in one of your own OpenClaw chats.', see: 'The agent has a `plannotator_inbox` tool.', prompt: 'after' },
+      { do: `\`${TURN_ON}\` turned the tool on when it found the plugin. Send a new message in one of your own OpenClaw chats.`, see: 'The agent has a `plannotator_inbox` tool.', prompt: 'after' },
     ],
     other: [
       {
         title: 'Turn the tool on by hand',
-        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must have run once on this computer. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
+        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must be on. It applies from the next message in each chat.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "openclaw": true } }' }],
       },
     ],
     check: wakeCheck('OpenClaw'),
     trouble: [
       {
         symptom: 'OpenClaw has no `plannotator_inbox` tool',
-        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. It applies from the next message in each chat.',
+        fix: `Run \`${TURN_ON}\` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. It applies from the next message in each chat.`,
         src: 'apps/openclaw-plugin/README.md:31; NA:257,262',
       },
       {
@@ -822,23 +825,23 @@ export const AGENTS: Agent[] = [
       openInbox(
         'The terminal says `Connected Hermes Agent … to the Inbox` and that Plannotator turned on Hermes Agent’s `plugins.entries.plannotator.allow_gateway_injection` so your replies can start a turn in the session that asked.',
       ),
-      { do: '`plannotator inbox` turned the tool on when it found the plugin. Start a new Hermes session.', see: 'The session has a `plannotator_inbox` tool.', prompt: 'after' },
+      { do: `\`${TURN_ON}\` turned the tool on when it found the plugin. Start a new Hermes session.`, see: 'The session has a `plannotator_inbox` tool.', prompt: 'after' },
     ],
     other: [
       {
         title: 'Let replies start a turn yourself',
-        steps: [{ do: 'Run this when `plannotator inbox` couldn’t. It applies without restarting Hermes.', code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true' }],
+        steps: [{ do: `Run this when \`${TURN_ON}\` couldn’t. It applies without restarting Hermes.`, code: 'hermes config set plugins.entries.plannotator.allow_gateway_injection true' }],
       },
       {
         title: 'Turn the tool on by hand',
-        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must have run once on this computer. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
+        steps: [{ do: 'Merge this into your Plannotator config. The Inbox must be on. It applies to new Hermes sessions.', file: '~/.plannotator/config.json', code: '{ "inboxTool": { "hermes": true } }' }],
       },
     ],
     check: wakeCheck('Hermes Agent'),
     trouble: [
       {
         symptom: 'Hermes has no `plannotator_inbox` tool',
-        fix: 'Run `plannotator inbox` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new Hermes session. A running one keeps the tools it started with.',
+        fix: `Run \`${TURN_ON}\` once: it turns the tool on when it finds the plugin. If you turned the tool off yourself, turn it on in Settings → Agents. Then start a new Hermes session. A running one keeps the tools it started with.`,
         src: 'IB:76,252; apps/hermes-plugin/README.md:20; NA:266',
       },
       {
@@ -1042,6 +1045,7 @@ export const AGENTS: Agent[] = [
         code: 'claude plugin marketplace add backnotprop/plannotator\nclaude plugin install plannotator@plannotator',
         prompt: 'before',
       },
+      openInbox('The Inbox opens in your browser.'),
       { do: 'Start a new Claude thread in T3.', see: 'Claude in the thread has a `plannotator_inbox` tool. It needs Claude Code 2.1.287 or newer.', prompt: 'after' },
       { do: 'So your replies still arrive after T3 stops an idle Claude, sign Plannotator in to T3 once. In T3 open Settings → Environments. Open the environment’s menu and choose Copy MCP URL.' },
       {
@@ -1279,6 +1283,7 @@ export const AGENTS: Agent[] = [
     },
     setup: [
       { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The Inbox opens in your browser.'),
       { do: 'In Copilot CLI add the plugin. Then restart Copilot CLI.', code: '/plugin marketplace add backnotprop/plannotator\n/plugin install plannotator-copilot@plannotator' },
       byHandMcp('Copilot CLI'),
     ],
@@ -1318,8 +1323,8 @@ export const AGENTS: Agent[] = [
         do: 'Add the plugin.',
         code: 'mkdir -p ~/.config/amp/plugins\ncurl -fsSL https://raw.githubusercontent.com/backnotprop/plannotator/main/apps/amp-plugin/plannotator.ts \\\n  -o ~/.config/amp/plugins/plannotator.ts',
       },
-      { do: 'Restart Amp or run `plugins: reload` from the command palette.', see: 'The palette lists Plannotator: Review changes.' },
       openInbox('The terminal says `Connected Amp … to the Inbox`.'),
+      { do: 'Restart Amp or run `plugins: reload` from the command palette.', see: 'The palette lists Plannotator: Review changes.' },
     ],
     other: [{ title: 'Connect the Inbox yourself', steps: [{ do: 'Run it in a terminal.', code: 'amp mcp add plannotator-inbox -- plannotator inbox mcp' }] }],
     check: readCheck('Amp'),
@@ -1352,6 +1357,7 @@ export const AGENTS: Agent[] = [
     },
     setup: [
       { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The Inbox opens in your browser.'),
       { do: 'Add the plugin. Then open a new Droid session.', code: 'droid plugin marketplace add https://github.com/backnotprop/plannotator\ndroid plugin install plannotator@plannotator', see: '`/plannotator-inbox` opens the Inbox.' },
       byHandMcp('Droid'),
     ],
@@ -1424,6 +1430,7 @@ export const AGENTS: Agent[] = [
         code: INSTALL,
         see: '`Plan review is configured through the Vibe pre_tool hook on exit_plan_mode`',
       },
+      openInbox('The Inbox opens in your browser.'),
       byHandMcp('Vibe'),
     ],
     other: [{ title: 'On Windows', steps: [{ do: 'The installer adds no hook there and prints the steps to add it by hand. The last-reply skill doesn’t work there yet.', code: INSTALL_WIN }] }],
