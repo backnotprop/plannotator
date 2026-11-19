@@ -337,6 +337,9 @@ describe('the native app (apps/mobile)', () => {
 
   test('the app\'s files add nothing to an ordinary change, and its code files keep the ordinary rules', () => {
     expect(lanesOf(run([ch('packages/a/src.ts'), ch('apps/mobile/ios/App.swift')]))).toEqual(lanesOf(run([ch('packages/a/src.ts')])));
+    // The app's own ignore file (Swift's and Xcode's build output) is one of the native kinds; one anywhere else is not.
+    for (const f of ['apps/mobile/ios/App/.gitignore', 'apps/mobile/ios/InboxCore/.gitignore']) expect(nativeAppFile(f), f).toBe(true);
+    for (const f of ['.gitignore', 'apps/mobile/.gitignore', 'apps/mobile/contract/.gitignore', 'apps/mobile/ios/x.gitignore.ts']) expect(nativeAppFile(f), f).toBe(false);
     for (const f of ['apps/mobile/ios/tool.ts', 'apps/mobile/ios/x.test.ts', 'apps/mobile/ios/package.json', 'apps/mobile/ios/ci.sh', 'apps/mobile/ios/tsconfig.json', 'apps/mobile/ios/bunfig.toml', 'apps/mobile/ios/tool.py', 'apps/mobile/ios/x.yml', 'apps/mobile/ios/InboxCore/Package.resolved', 'apps/mobile/android/build.sh', 'apps/mobile/android/x.json']) {
       expect(nativeAppFile(f), f).toBe(false);
     }
@@ -570,7 +573,7 @@ describe('the real graph', () => {
   test("the app contract's check runs for a wire change, not for the window's or the shared UI's code", () => {
     // Picked at all (a tree-scanning pick would run it on every pull request).
     const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.some((t) => t.path === 'tests/mobile-vectors.test.ts');
-    // A file the schema reaches only by `import type` too (scripts/mobile/schema.ts SCHEMA_SOURCES).
+    // A file the schema reaches only by `import type` too (SCHEMA_SOURCES, scripts/mobile/schema-sources.ts).
     for (const wire of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts']) expect(picks(wire), wire).toBe(true);
     for (const window of ['packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) expect(picks(window), window).toBe(false);
   });
