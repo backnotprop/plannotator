@@ -117,6 +117,31 @@ final class FirstSliceTests: XCTestCase {
     XCTAssertLessThanOrEqual(skip?.frame.maxY ?? .infinity, foot.frame.minY, "the card ends above the foot")
   }
 
+  /// At the largest text size the rows above the newest message measure themselves again while the thread lands
+  /// (the question's place reaches the page a moment after the message's), and once more when something reads
+  /// the whole page, as this test does and VoiceOver does: the page still rests on the question, every time the
+  /// thread opens. It did not, about one opening in three, when the landing watched the message's place alone and
+  /// nothing kept the page's place afterwards. Opened several times: one opening can land right by luck.
+  @MainActor
+  func testAThreadLandsOnItsQuestionAtTheLargestTextSize() {
+    for run in 1...5 {
+      let app = XCUIApplication()
+      app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-open", "msg_STANDIN0000000000000003"]
+      app.launch()
+      // Nothing is asked of the app while it lands, as when a person opens it: asking makes it measure again.
+      sleep(6)
+      let prompt = app.staticTexts["How should this roll out?"]
+      XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+      // Reading the page built the rows above: the page is given a moment to take its place again.
+      sleep(1)
+      let bar = app.navigationBars.firstMatch.frame.maxY
+      let foot = app.buttons["1 open question"].frame.minY
+      XCTAssertGreaterThanOrEqual(prompt.frame.minY, bar, "opening \(run): the question is above the page")
+      XCTAssertLessThan(prompt.frame.minY, foot, "opening \(run): the question is below the page")
+      app.terminate()
+    }
+  }
+
   /// A Can't do it reason being typed on the newest message survives the agent writing again meanwhile: the
   /// message is no longer the newest, and its card is built anew where older messages are.
   @MainActor

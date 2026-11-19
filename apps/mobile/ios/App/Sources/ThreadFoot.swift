@@ -35,6 +35,10 @@ struct Composer: View {
     return session.canSend(thread: id, words: words) && !session.sending.contains(id)
   }
   @Environment(\.dynamicTypeSize) private var typeSize
+  /// One line of the reply field at this text size: the controls beside the words are centred on it, and stay
+  /// at the foot of the field when the words run to more lines.
+  @ScaledMetric(relativeTo: .body) private var textLine: CGFloat = Size.mark
+  private var oneLine: CGFloat { max(Size.replyRow, textLine + 2 * Space.step) }
   private var hint: String { hasPicks ? PhoneWords.noteOrSend : PhoneWords.reply }
   /// The stale guard is up: it stands in place of the reply's own actions, as in the window.
   private var guarded: Bool { session.stopped.contains(id) && !(session.stale[id] ?? []).isEmpty }
@@ -158,7 +162,7 @@ struct Composer: View {
         Hairline().padding(.horizontal, Space.card)
       }
       HStack(alignment: .bottom, spacing: 0) {
-        if jumps, waits == nil { jumpMark.padding(.vertical, Space.hair) }
+        if jumps, waits == nil { jumpMark.frame(minHeight: oneLine) }
         TextField("", text: $words, axis: .vertical)
           .lineLimit(1...6)
           .font(TextRole.body)
@@ -199,6 +203,7 @@ struct Composer: View {
         .accessibilityLabel(PhoneWords.send)
         // Send is a control of the foot's bar: it grows with the text to the bar's limit.
         .barSized()
+        .frame(minHeight: oneLine)
       }
     }
     .glassEffect(.regular, in: .rect(cornerRadius: Radius.foot))

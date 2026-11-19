@@ -20,10 +20,17 @@ final class ScrollBox {
   /// A card the page was sent to before it was built (far up a long thread): shown once its frame arrives.
   @ObservationIgnored var wanted: String?
 
+  /// Where the page rests once it has landed: how far its top is under the start of the newest message's block,
+  /// and which message that is. Kept until the person moves the page or touches a card: while it is kept, rows
+  /// above that measure themselves again never carry the page off what it landed on.
+  @ObservationIgnored var rest: CGFloat?
+  @ObservationIgnored var restFor: String?
+
   func act(_ key: String) {
     acted = key
     actedAt = Date()
     landed = true
+    rest = nil
   }
 
   /// The card a reveal may still follow: the one touched within the last few seconds.
@@ -162,7 +169,16 @@ struct ThreadScreen: View {
         }
         .padding(.top, Space.step)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tail = $0 }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.content)) } action: { cards[Self.landing] = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.content)) } action: { now in
+          let before = cards[Self.landing]
+          cards[Self.landing] = now
+          // The block moved after the page had landed, and not by the person's hand: rows above it were measured
+          // again (they are built as they scroll, and VoiceOver or a search of the page builds them all). The page
+          // stays on what it landed on. A newer message of the agent's is another block: it moves nothing.
+          guard scroll.rest != nil, let before, abs(now.minY - before.minY) > 0.5 else { return }
+          guard shown.indices.contains(landing), scroll.restFor == shown[landing].id.rawValue else { return scroll.rest = nil }
+          keepPlace()
+        }
         .id(Self.landing)
         // Room under a short last message, so it can still start at the top.
         Color.clear.containerRelativeFrame(.vertical) { length, _ in max(0, length - tail) }
@@ -210,6 +226,7 @@ struct ThreadScreen: View {
     .onScrollPhaseChange { _, phase in
       guard phase == .interacting else { return }
       scroll.landed = true
+      scroll.rest = nil
       // And a card a jump still went for is no longer wanted: the person is reading somewhere else.
       scroll.wanted = nil
     }
@@ -234,9 +251,17 @@ struct ThreadScreen: View {
     .environment(scroll)
     // The person's own Send is followed to the end. A message that arrives while they read moves nothing.
     .onChange(of: shown.count) { _, _ in
-      if shown.last?.author.kind == .person { withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) } }
+      if shown.last?.author.kind == .person {
+        scroll.rest = nil
+        withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) }
+      }
     }
-    .onChange(of: held.count) { _, now in if now > 0 { withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) } } }
+    .onChange(of: held.count) { _, now in
+      if now > 0 {
+        scroll.rest = nil
+        withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) }
+      }
+    }
     // Land once the page is measured (a thread already on the phone is laid out before it is on screen).
     .onChange(of: tail) { _, _ in
       guard !scroll.landed else { return }
@@ -247,19 +272,35 @@ struct ThreadScreen: View {
       }
     }
     // Rows above the newest message keep finding their own heights for a moment after the thread opens: until the
-    // person touches or scrolls, and for its first 2 seconds, the page lands again whenever where it lands moved.
+    // person touches or scrolls, the page lands again whenever what it lands on moved. What it lands on is two
+    // things that reach this view by different roads (the newest message's place, measured here; the card's, sent
+    // up from the card), so after the rows above measure themselves again one can be new while the other is still
+    // old, and a landing made between the two rests in the wrong place. Both are watched: the landing is made
+    // again when either moved. It goes on for 2 seconds, and past them while the place is still moving (a late
+    // measuring is followed to its end, never left half way), for 2 seconds more at most.
     .task {
-      let until = Date().addingTimeInterval(2)
+      let until = Date().addingTimeInterval(Self.landingTime)
       try? await Task.sleep(for: .milliseconds(60))
       if !scroll.landed { land(waiting, proxy) }
-      var landedAt = cards[Self.landing]?.minY
-      while !scroll.landed, Date() < until {
+      var landedOn = landingMarks(waiting)
+      var movedAt = Date()
+      while !scroll.landed {
+        let now = Date()
+        if now >= until.addingTimeInterval(Self.landingTime) { break }
+        if now >= until, now.timeIntervalSince(movedAt) >= Self.landingStill { break }
         try? await Task.sleep(for: .milliseconds(100))
-        guard !scroll.landed, let now = cards[Self.landing]?.minY else { continue }
-        if landedAt.map({ abs($0 - now) > 0.5 }) ?? true {
+        guard !scroll.landed else { break }
+        let marks = landingMarks(waiting)
+        if marks != landedOn {
           land(waiting, proxy)
-          landedAt = now
+          landedOn = marks
+          movedAt = Date()
         }
+      }
+      // Landed by itself, not by the person's hand: from here the page keeps its place on this message.
+      if !scroll.landed, let block = cards[Self.landing], shown.indices.contains(landing) {
+        scroll.rest = scroll.top - block.minY
+        scroll.restFor = shown[landing].id.rawValue
       }
       scroll.landed = true
     }
@@ -267,10 +308,12 @@ struct ThreadScreen: View {
     .refreshable { await session.refresh() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items, inCard: keyboard && !composing) { card in
+        scroll.rest = nil
         scroll.landed = true
         withAnimation { show(card, proxy) }
       } jump: {
         // The next card that still waits, after the one last visited, then from the start.
+        scroll.rest = nil
         scroll.landed = true
         let open = waiting.map(\.id)
         guard !open.isEmpty else { return }
@@ -287,6 +330,15 @@ struct ThreadScreen: View {
     }
   }
 
+  /// Where the things a landing reads are now, to the point: the newest message's block, then each card that
+  /// waits (-1 for one not laid out yet). A landing is made again when any of them moved.
+  private func landingMarks(_ waiting: [(id: String, open: Bool)]) -> [Int] {
+    ([cards[Self.landing]] + waiting.map { cards[$0.id] }).flatMap { frame -> [Int] in
+      guard let frame else { return [-1, -1] }
+      return [Int(frame.minY.rounded()), Int(frame.height.rounded())]
+    }
+  }
+
   /// Land on the newest agent message. When what it asks would end under the reply field, the page rests further
   /// down instead, with the card whole over the field.
   private func land(_ waiting: [(id: String, open: Bool)], _ proxy: ScrollViewProxy) {
@@ -299,6 +351,20 @@ struct ThreadScreen: View {
       y = rest(for: card, prefer: start.minY)
     }
     settle(at: y, end: start.maxY + Self.clear)
+  }
+
+  /// Put the page back where it rested on the newest message, after rows above it were measured again. The scroll
+  /// view settles its own place over a few frames when its content changes height, so the place is checked a few
+  /// times and set again while it is off.
+  private func keepPlace() {
+    Task {
+      for _ in 0..<4 {
+        try? await Task.sleep(for: .milliseconds(40))
+        guard let rest = scroll.rest, let block = cards[Self.landing] else { return }
+        let y = block.minY + rest
+        if abs(scroll.top - y) > 0.5 { settle(at: y, end: block.maxY + Self.clear) }
+      }
+    }
   }
 
   /// Rest the page's top at `y`. A thread that ends too soon for that is given the room it lacks first, so the
@@ -455,6 +521,10 @@ struct ThreadScreen: View {
     }
   }
 
+  /// How long the page lands again after a thread opens, and how long its place must have been still before
+  /// the landing is taken as final once that time is up.
+  private static let landingTime: TimeInterval = 2
+  private static let landingStill: TimeInterval = 0.3
   private static let end = "end"
   nonisolated private static let landing = "landing"
   nonisolated private static let content = "content"

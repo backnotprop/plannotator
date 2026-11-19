@@ -304,7 +304,7 @@ struct QuestionCard: View {
       draft.noteOpen.toggle()
       focus = draft.noteOpen ? .note : nil
     } label: {
-      quietWords(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote)
+      quietWords(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote, whole: spread)
     }
     Button {
       save()
@@ -312,7 +312,7 @@ struct QuestionCard: View {
         CardSaver.apply(CardAnswers.toggleSkip(now), session: session, thread: thread, message: message, question: now)
       }
     } label: {
-      quietWords(skipped ? PhoneWords.undoSkip : PhoneWords.skip, leading: spread ? Space.page : 0)
+      quietWords(skipped ? PhoneWords.undoSkip : PhoneWords.skip, leading: spread ? Space.page : 0, whole: spread)
     }
     if spread { Spacer(minLength: Space.step) }
     if CardAnswers.offersAccept(question) {
@@ -321,6 +321,7 @@ struct QuestionCard: View {
         apply(CardAnswers.acceptRecommended(question))
       } label: {
         Text(PhoneWords.acceptRecommended)
+          .fixedSize(horizontal: spread, vertical: true)
           .font(TextRole.link)
           .foregroundStyle(Token.primary)
           .padding(.horizontal, Space.step)
@@ -331,9 +332,11 @@ struct QuestionCard: View {
     }
   }
 
-  /// Words alone to touch: the air before them is theirs to touch too, and the whole is 44 points at least.
-  private func quietWords(_ words: String, leading: CGFloat = 0) -> some View {
-    Text(words).font(TextRole.link).foregroundStyle(Token.primary).padding(.leading, leading).touchTarget()
+  /// Words alone to touch: the air before them is theirs to touch too, and the whole is 44 points at least. In
+  /// the one row they are `whole`: never squeezed onto two lines there (when they do not fit whole, the row gives
+  /// way to one under the other, where they may wrap).
+  private func quietWords(_ words: String, leading: CGFloat = 0, whole: Bool) -> some View {
+    Text(words).font(TextRole.link).foregroundStyle(Token.primary).fixedSize(horizontal: whole, vertical: true).padding(.leading, leading).touchTarget()
   }
 
   @ViewBuilder private var status: some View {
