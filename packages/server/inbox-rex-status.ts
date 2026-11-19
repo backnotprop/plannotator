@@ -9,8 +9,11 @@
 import type { InboxAgent, InboxRexMark } from "@plannotator/core/inbox-types";
 import type { InboxRexStatus } from "./inbox-rex";
 
-export function withRexStatus(agent: InboxAgent, status: InboxRexStatus | null | undefined): InboxAgent {
-  if (!status || agent.state === "waiting" || agent.state === "ended") return agent;
+export function withRexStatus(given: InboxAgent, status: InboxRexStatus | null | undefined): InboxAgent {
+  if (!status) return given;
+  // Its pane reports its turns, whatever its connection does: never "turns unknown" (inbox-agent-mark.ts).
+  const { turns_unknown: _unknown, ...agent } = given;
+  if (agent.state === "waiting" || agent.state === "ended") return agent;
   if (status.state === "blocked") return { ...agent, state: "waiting", rex_status: { state: "blocked", ...(status.kind ? { kind: status.kind } : {}) } };
   if (status.state === "working") return agent.state === "working" ? agent : { ...agent, state: "working" };
   if ((status.state === "done" || status.state === "error") && agent.state === "idle") return { ...agent, rex_status: { state: status.state } };
@@ -25,5 +28,8 @@ export function withRexStatus(agent: InboxAgent, status: InboxRexStatus | null |
 export function withRexMark(agent: InboxAgent, status: InboxRexStatus | null | undefined): InboxAgent {
   if (!status || agent.state === "ended") return agent;
   const mark: InboxRexMark = { state: status.state, ...(status.state === "blocked" && status.kind ? { kind: status.kind } : {}) };
-  return { ...agent, rex_mark: mark };
+  // A fresh Rex record wins over the mark the Inbox worked out itself (inbox-agent-mark.ts): Rex knows more (done,
+  // blocked in the pane). One mark per agent.
+  const { status_mark: _own, ...rest } = agent;
+  return { ...rest, rex_mark: mark };
 }

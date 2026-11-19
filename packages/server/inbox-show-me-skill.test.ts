@@ -23,3 +23,8 @@ test("a skill of the person's own named show-me wins over the built-in", async (
   const mine = await rows(inboxSkillCatalog(false, () => [{ name: "show-me", root: "/x", description: "mine" }] as never, false, false));
   expect(mine).toEqual([{ name: "show-me", root: "/x", description: "mine" } as Row]);
 });
+
+test("the page's file is named without a path only one system has, so Windows agents can save it too", () => {
+  expect(SHOW_ME_SKILL.body).not.toMatch(/\/tmp\b|[A-Z]:\\/);
+  expect(SHOW_ME_SKILL.body).toContain("temp folder");
+});

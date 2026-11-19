@@ -8,7 +8,6 @@ import {
   type InboxMessageWire,
   type InboxPull,
   type InboxPullLink,
-  type InboxPullRiskAutoRun,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -114,7 +113,7 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
     case 'branch_ready':
       return { status: ['Ready for review'], tone: null };
     case 'curating':
-      return { status: [row.started?.ask === 'show_me' ? 'Making a Show me page…' : 'Curating…'], tone: null };
+      return { status: ['Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
       if (verdict?.verdict !== 'changes_requested') return { status: ['You answered'], tone: null };
@@ -152,28 +151,7 @@ export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][
   return (handed ? row.landed.find((landing) => landing.key === handed.key) : row.landed[0]) ?? null;
 }
 
-const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
-
-export function reviewRowAutoRun(row: Pick<InboxReviewRow, 'stacks'>, runs: Readonly<Record<string, InboxPullRiskAutoRun>> | undefined): InboxPullRiskAutoRun | null {
-  const layer = runs ? row.stacks[0]?.layers.find((pull) => runs[pull.key]) : undefined;
-  return layer ? runs![layer.key]! : null;
-}
-
-export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<InboxReviewRow, 'link' | 'review' | 'thread_id' | 'stacks'>): string | null {
-  if (!run) return null;
-  const link = row.link;
-  if (run.state === 'failed') {
-    const open = row.stacks[0] ? openLayers(row.stacks[0]).length > 0 : false;
-    return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}` : null;
-  }
-  if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
-  const page = run.made !== 'guide' && link.show_me_page && link.show_me_page.at >= run.at ? link.show_me_page : null;
-  if (page) return !page.seen && !row.review ? `Show me ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
-  if (link.agent?.ended || row.review) return null;
-  return run.made === 'show_me' ? 'Making a Show me page…' : run.made === 'both' ? 'Making a guided review and a Show me page…' : 'Making a guided review…';
-}
-
-export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>): ReviewRowLine {
+export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
@@ -181,8 +159,7 @@ export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<st
   const said = statusOf(row);
   const { tone } = said;
   // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
-  const auto = reviewRowAutoWords(reviewRowAutoRun(row, autoRuns), row);
-  const parts: Words = auto ? [auto] : reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
+  const parts: Words = reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
   const status = wordsText(parts);
   if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status, parts, tone };
   if (stack) {
@@ -351,8 +328,8 @@ export function reviewViewOf(
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : row.started?.ask === 'show_me' ? 'Making a Show me page…' : 'Curating the review…',
-    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : ask === 'show_me' ? 'Show me' : 'Guided review'}` : null,
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

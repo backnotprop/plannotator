@@ -7,7 +7,7 @@
 
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -337,7 +337,7 @@ export interface SettingsModel {
   notifications: NotificationSettings;
   /** Whether a notification can reach the person now (open windows, how many may notify). Absent from an older Inbox. */
   notify_reach?: InboxNotifyReach;
-  /** The question sound (config.json inboxSound). Absent from an Inbox that predates it. */
+  /** The Inbox's sound (config.json inboxSound). Absent from an Inbox that predates it. */
   sound?: InboxSoundSettings;
   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
   list_intro?: { due: boolean };
@@ -1145,7 +1145,7 @@ export interface StartThreadInput {
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
   /** New review on local changes: what it is of, so its row shows "Curating…" before a review arrives. */
-  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' | 'show_me' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' | 'show_me' } | { kind: 'walkthrough' };
+  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' } | { kind: 'walkthrough' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
   /** Settings → Rows' ask box: the agent also receives how to change the rows. */
@@ -1585,7 +1585,7 @@ export const inboxApi = {
         body: JSON.stringify(report),
       }),
     ),
-  saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>(inboxUrl('/settings'), { sound: change }),
+  saveSound: (change: { enabled?: boolean; volume?: number; when?: InboxSoundSettings['when'] }) => post<{ sound: InboxSoundSettings; sound_rev?: number }>(inboxUrl('/settings'), { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
   /**
@@ -1804,7 +1804,7 @@ export const inboxApi = {
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal, from?: string) =>
     get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a review thread for PRs (a stack's open layers, or the board's picks of one repository); `machine`: the thread's, whose list has them. */
-  pullOwner: (keys: readonly string[], threadId: string, ask?: InboxPullAsk, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
+  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom' | 'thread', machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
   /**
    * Post a review to the PR on GitHub/GitLab (`POST /api/inbox/pulls/review`): the raw answer, which the review app's

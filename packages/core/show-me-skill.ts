@@ -32,7 +32,7 @@ The page must read at 390 px wide. Give each SVG \`width:100%\` and a \`max-widt
 
 ## Send it
 
-Write one HTML file, everything inline (CSS and SVG, no scripts, nothing from the web), saved as \`/tmp/show-me-<topic>.html\`. Send it with send_message: \`reply_to\` this message, the file in \`attachments\`, a one-sentence body. Do not change code while you make it. If I comment on the page, send the new version in this thread.
+Write one HTML file, everything inline (CSS and SVG, no scripts, nothing from the web), saved in your temp folder as \`show-me-<topic>.html\`. Send it with send_message: \`reply_to\` this message, the file in \`attachments\`, a one-sentence body. Do not change code while you make it. If I comment on the page, send the new version in this thread.
 `;
 
 export const SHOW_ME_SKILL: ShowMeSkillText = {

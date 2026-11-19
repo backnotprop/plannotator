@@ -3,7 +3,7 @@ import { agentTakesTiles, useAgentFacesKey } from '../agents/agentFaces';
 import type { AgentFace } from '../agents/faceChoices';
 import { shownAgentFace } from '../agents/projectFace';
 import { useRowMarks } from '../letterMarks';
-import type { ThreadSession } from '../agents/model';
+import { agentSessionState, type ThreadSession } from '../agents/model';
 import { inboxAgentsFlat, useInboxAgents } from '../agentsList';
 import { HostMark } from '../icons';
 import { agentName } from '../tags';
@@ -68,7 +68,8 @@ export interface ThreadSessionsProps {
 export function ThreadSessions({ sessions, phone = false, agentFilter = null, onAgentFilter }: ThreadSessionsProps) {
   const groups = useInboxAgents();
   // The same id on two machines is two agents: each is found under its own machine.
-  const live = new Map(inboxAgentsFlat(groups).map((a) => [`${a.machine ?? ''}\n${a.id}`, a.state] as const));
+  // A live agent whose host reports no turns says nothing here (never "idle"): `agentSessionState`.
+  const live = new Map<string, ThreadSession['state']>(inboxAgentsFlat(groups).map((a) => [`${a.machine ?? ''}\n${a.id}`, agentSessionState(a)]));
   // As each mark draws it (icons.tsx `HostMark`): Settings → Rows' "From the project name" decides what none shows.
   const { projectIcons } = useRowMarks();
   const faces = useAgentFacesKey(sessions.map((s) => s.session)).split('\n').map((face, i) => shownAgentFace(face as AgentFace, projectIcons && agentTakesTiles(sessions[i]?.session)));
@@ -163,7 +164,8 @@ export function ThreadSessions({ sessions, phone = false, agentFilter = null, on
         <div className="ib-ss-band" onClick={press}>
           <ul className="ib-ss-list" aria-label={count}>
             {sessions.map((s, i) => {
-              const state = (s.agentId ? live.get(`${s.machine ?? ''}\n${s.agentId}`) : undefined) ?? s.state;
+              const key = `${s.machine ?? ''}\n${s.agentId}`;
+              const state = s.agentId && live.has(key) ? (live.get(key) ?? null) : s.state;
               return (
                 <li key={s.session} className="ib-ss-item" data-session={s.session} data-state={state ?? undefined}>
                   {/* A mark starts each run of sessions that look alike. */}

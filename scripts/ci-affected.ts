@@ -99,9 +99,10 @@ const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|o
  * that changes only these runs no test lane and no Checks. The kinds are
  * listed, because skipping is the risky direction: anything else there (a
  * shell script, a tsconfig, a lockfile such as Package.resolved, .ts or
- * package.json) keeps the ordinary rules.
+ * package.json) keeps the ordinary rules. A `.gitignore` there is one of the
+ * kinds: it names Swift's and Xcode's own build output and no test reads it.
  */
-const NATIVE_IOS = /^apps\/mobile\/ios\/(([^/]+\/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|([^/]+\/)*[^/]+\.xcassets\/([^/]+\/)*Contents\.json)$/;
+const NATIVE_IOS = /^apps\/mobile\/ios\/(([^/]+\/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|([^/]+\/)*[^/]+\.xcassets\/([^/]+\/)*Contents\.json|([^/]+\/)*\.gitignore)$/;
 const NATIVE_ANDROID = /^apps\/mobile\/android\/(([^/]+\/)*[^/]+\.(kt|kts|java|gradle|pro|md|png|webp|jpe?g|svg)|([^/]+\/)*res\/([^/]+\/)*[^/]+\.xml|([^/]+\/)*AndroidManifest\.xml|gradle\.properties|gradle\/wrapper\/gradle-wrapper\.(jar|properties))$/;
 
 export function nativeAppFile(path: string): boolean {
@@ -288,6 +289,7 @@ export const JOB_MAP: Record<string, Record<string, string>> = {
   'inbox-claude-code.yml': { 'inbox-claude-code': 'paths' },
   'relay.yml': { relay: 'paths' },
   'mobile-ios.yml': { ios: 'paths', 'ios-nightly': 'no-pr' },
+  'mobile-contract.yml': { contract: 'paths', ledger: 'paths' },
   'e2e-slice.yml': { plan: 'slice', slice: 'slice' },
   'inbox-e2e.yml': { head: 'label', build: 'label', plan: 'label', 'inbox-window-e2e': 'label', blame: 'label', 'full-ci': 'label' },
   'dast.yml': { 'passive-baseline': 'no-pr' },

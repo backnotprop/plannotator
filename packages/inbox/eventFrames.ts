@@ -20,7 +20,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -48,6 +48,8 @@ export interface InboxEventHandlers {
   onSnoozes?: () => void;
   onThreadPulls?: (threadIds: string[]) => void;
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
+  /** The sound's switch, volume or choice was saved in any window: its settings as the Inbox now has them. */
+  onSound?: (sound: unknown, rev?: number) => void;
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
   /** The list's "Show archived" was saved here, in another window or on a linked machine: `{ on, rev }`. */
   onShowArchived?: (value: unknown) => void;
@@ -147,6 +149,13 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
         handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
+      } catch {
+      }
+      return;
+    case 'sound':
+      try {
+        const data = JSON.parse(frame.data) as { sound?: unknown; rev?: unknown };
+        handlers.onSound?.(data.sound, typeof data.rev === 'number' ? data.rev : undefined);
       } catch {
       }
       return;
