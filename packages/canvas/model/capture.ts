@@ -9,7 +9,7 @@
  * source again and compare (`capturesEqual`). There is no clock and no
  * version counter to keep in step between peers, and "changed" means exactly
  * "a new capture would look different", per source kind:
- * - a frame: the frame itself, or anything now in its rectangle;
+ * - a frame: the frame itself, or anything now wholly inside it;
  * - a set of objects: any of them changed or was deleted;
  * - a region: anything now in the rectangle.
  *
@@ -25,6 +25,8 @@ import { type CanvasDocument, type CanvasObject, type ObjectId, type SnapshotCap
 
 /** The strip above a frame that holds its title, in world units. */
 export const FRAME_TITLE_HEIGHT = 24;
+/** World units kept around a frame so its own line is not cut. */
+export const FRAME_EDGE = 2;
 /** World units of air around a chosen set of objects. */
 export const SNAPSHOT_PADDING = 24;
 
@@ -65,8 +67,16 @@ export function captureOf(doc: CanvasDocument, source: SnapshotSource, query?: R
   if (source.kind === 'frame') {
     const frame = doc.objects[source.frame];
     if (!frame || frame.type !== 'frame') return null;
-    rect = expandRect({ x: frame.x, y: frame.y - FRAME_TITLE_HEIGHT, w: frame.w, h: frame.h + FRAME_TITLE_HEIGHT }, SNAPSHOT_PADDING / 2);
-    ids = inRect(doc, rect, query);
+    // The frame and what is wholly inside it: a neighbour that only overlaps the edge is not part of it and
+    // is not drawn in slices. The frame's title strip is left out of the rectangle, because the figure's
+    // caption already says the name.
+    const own: Rect = { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    rect = expandRect(own, FRAME_EDGE);
+    ids = inRect(doc, own, query).filter((id) => {
+      if (id === frame.id) return true;
+      const bounds = objectBounds(doc, id);
+      return !!bounds && rectContainsRect(own, bounds);
+    });
   } else if (source.kind === 'region') {
     rect = source.rect;
     ids = inRect(doc, rect, query);

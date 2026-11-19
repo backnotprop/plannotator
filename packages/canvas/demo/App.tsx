@@ -95,7 +95,9 @@ function PlanAndCanvas() {
   const [markdown, setMarkdown] = useState(() => (bench === 'plan' ? createLongPlan(count) : SAMPLE_PLAN));
   const [request, setRequest] = useState<SnapshotOpenRequest | null>(null);
   const [arrived, setArrived] = useState<string | null>(null);
-  const [layout, setLayout] = useState<'split' | 'plan'>(bench === 'plan' ? 'plan' : 'split');
+  // The plan alone is the product's case: the canvas is reached through a figure. Side by side is for
+  // dragging a snapshot from the board into the plan.
+  const [layout, setLayout] = useState<'split' | 'plan'>(params.get('view') === 'split' ? 'split' : 'plan');
   const plan = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLDivElement>(null);
   const doc = useSyncExternalStore(store.subscribe, store.getDocument, store.getDocument);
@@ -210,7 +212,10 @@ function PlanAndCanvas() {
       <div ref={shell} className="demo-shell pcv">
         <header className="demo-head">
           <h1>Canvas demo</h1>
-          <button type="button" className="pcv-btn" aria-pressed={layout === 'split'} onClick={() => setLayout(layout === 'split' ? 'plan' : 'split')}>
+          <button type="button" className="pcv-btn" aria-pressed={layout === 'plan'} onClick={() => setLayout('plan')}>
+            Plan
+          </button>
+          <button type="button" className="pcv-btn" aria-pressed={layout === 'split'} onClick={() => setLayout('split')}>
             Side by side
           </button>
           <button type="button" className="pcv-btn" onClick={agentAddsImage}>
@@ -233,7 +238,8 @@ function PlanAndCanvas() {
         <div className="demo-body" data-layout={layout}>
           <PlanPane ref={plan} blocks={blocks} arrived={arrived} />
           {layout === 'split' ? (
-            <div className="demo-canvas">{available ? <CanvasEditor store={store} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} /> : null}</div>
+            // While the canvas is open from a figure, the pane's own copy of it stands down: one canvas on screen, not two.
+            <div className="demo-canvas" data-handoff={request ? '' : undefined}>{available ? <CanvasEditor store={store} onAddToPlan={addToPlan} assets={assets} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} /> : null}</div>
           ) : null}
         </div>
       </div>

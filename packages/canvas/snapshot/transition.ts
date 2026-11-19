@@ -23,8 +23,12 @@ export interface Spring {
   v: number;
 }
 
-/** Stiffness. With critical damping this settles in about 350 ms. */
-export const SPRING_STIFFNESS = 260;
+/**
+ * Stiffness. With critical damping the opening is nine-tenths grown in about 0.4 s and at rest well inside a
+ * second: quick enough to feel direct, slow enough that the eye follows the plan going back and the picture
+ * becoming the canvas. (At 260 it was all over in 0.15 s and read as a pop.)
+ */
+export const SPRING_STIFFNESS = 100;
 const DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS);
 /** Close enough to the target, and slow enough, to stop. */
 const REST_DISTANCE = 0.0005;
@@ -94,20 +98,33 @@ export function frameAt(ends: TransitionEnds, p: number): TransitionFrame {
 export const insetToClipPath = (inset: TransitionFrame['inset']): string =>
   `inset(${inset.top}px ${inset.right}px ${inset.bottom}px ${inset.left}px round ${inset.radius}px)`;
 
-/** Over how much of the motion the capture dissolves into the live canvas. */
-export const GHOST_SPAN = 0.45;
+/** The capture stays whole until here, then dissolves until `GHOST_END`: long enough to be seen happening. */
+export const GHOST_HOLD = 0.1;
+export const GHOST_END = 0.62;
 
 /**
- * How visible the capture is over the live canvas: whole at the figure, gone
- * before the opening is half grown, eased so it neither snaps nor lingers.
+ * How visible the capture is over the live canvas. Whole at the figure and
+ * for the first moment of travel (so the eye has it), then a smooth dissolve
+ * that is over before the opening is two-thirds grown.
  */
 export function ghostOpacity(p: number): number {
-  const t = Math.max(0, Math.min(1, p / GHOST_SPAN));
+  const t = Math.max(0, Math.min(1, (p - GHOST_HOLD) / (GHOST_END - GHOST_HOLD)));
   return 1 - t * t * (3 - 2 * t);
 }
 
-/** How far the plan stands back behind the opening: a little smaller, a little dimmer. */
-export function recedeAt(p: number): { scale: number; opacity: number } {
+/**
+ * How far the plan stands back behind the opening: smaller, softer and
+ * dimmer, as something further away is. Eased so most of the going-away
+ * happens early, while the opening is still small enough to see it.
+ */
+export function recedeAt(p: number): { scale: number; opacity: number; blur: number } {
   const t = Math.max(0, Math.min(1, p));
-  return { scale: 1 - 0.035 * t, opacity: 1 - 0.55 * t };
+  const e = 1 - Math.pow(1 - t, 3);
+  return { scale: 1 - 0.06 * e, opacity: 1 - 0.5 * e, blur: 3 * e };
+}
+
+/** The edge of the opening: there as soon as it starts to grow, gone as it reaches the window's own edge. */
+export function rimOpacity(p: number): number {
+  const t = Math.max(0, Math.min(1, p));
+  return Math.min(1, t * 8) * Math.min(1, (1 - t) * 3);
 }

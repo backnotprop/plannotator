@@ -76,6 +76,9 @@ body {
   min-height: 0;
   border-left: 1px solid var(--border);
 }
+.demo-canvas[data-handoff] > * {
+  visibility: hidden;
+}
 .demo-new {
   animation: demo-arrive 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }

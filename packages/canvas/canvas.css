@@ -755,6 +755,8 @@
 .pcv-stage-clip {
   position: absolute;
   inset: 0;
+}
+.pcv-stage[data-busy] > .pcv-stage-clip {
   will-change: clip-path;
 }
 /* The capture the person clicked, drawn over the live canvas with the same
@@ -770,7 +772,12 @@
 .pcv-stage-rim {
   position: absolute;
   pointer-events: none;
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--pcv-ink) 10%, transparent), 0 18px 60px rgb(0 0 0 / 0.28);
+  /* A fine line that is the figure's own edge carried outward, a near shadow that seats it, and a wide soft
+     one that puts the plan further away. */
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--pcv-ink) 14%, transparent),
+    0 2px 6px rgb(0 0 0 / 0.1),
+    0 24px 80px 8px rgb(0 0 0 / 0.3);
 }
 .pcv-stage[data-fade] {
   transition: opacity 140ms linear;
@@ -934,4 +941,23 @@
   font-size: 13px;
   line-height: 1.4;
   z-index: 4;
+}
+
+/* Read out, not shown. */
+.pcv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* An object that holds keyboard focus: the same ring as a selection, a little heavier, so it is told apart from one. */
+.pcv-obj:focus {
+  outline: none;
+}
+.pcv-obj:focus-visible {
+  outline: 2.5px solid var(--pcv-accent);
+  outline-offset: 4px;
 }

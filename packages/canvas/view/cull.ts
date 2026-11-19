@@ -29,6 +29,17 @@ export const LOD_FAR_BELOW = 0.2;
 
 export const lodForZoom = (z: number): Lod => (z < LOD_FAR_BELOW ? 'far' : z < LOD_PLAIN_BELOW ? 'plain' : 'full');
 
+/** At or under this many mounted objects everything is drawn in full, whatever the zoom. */
+export const LOD_SMALL_VIEW = 150;
+
+/**
+ * The detail to draw at. Less detail exists to protect a view that holds
+ * very many objects; a view that holds few (a figure in a plan, a phone
+ * looking at one frame) draws everything however small it is, so an HTML
+ * item or a second line never goes blank just because the view is narrow.
+ */
+export const lodFor = (z: number, mounted: number): Lod => (mounted <= LOD_SMALL_VIEW ? 'full' : lodForZoom(z));
+
 export function renderWindow(camera: Camera, size: Size, overscan = OVERSCAN): Rect {
   const view = viewportRect(camera, size);
   const padX = view.w * overscan;

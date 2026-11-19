@@ -11,7 +11,7 @@ import { createSnapshotDirectiveRenderer } from './directive';
 import { snapshotToSvg } from './picture';
 import { nearestGap } from '../react/plan-drop';
 import { behindSnapshots, resolveSnapshot } from './resolve';
-import { frameAt, ghostOpacity, recedeAt, springAtRest, stepSpring } from './transition';
+import { frameAt, ghostOpacity, recedeAt, rimOpacity, springAtRest, stepSpring } from './transition';
 
 function board(): CanvasStore {
   const store = new CanvasStore(createDocument('board', 'Board'));
@@ -57,14 +57,23 @@ describe('a snapshot is a capture taken at one moment', () => {
     expect(captured(store, 'by-frame').objects.find((object) => object.id === 'b')).toBe(doc.objects.b);
   });
 
-  test('an arrow that leaves the capture has that end fixed where it was, so the capture draws alone', () => {
+  test('an arrow that leaves a region has that end fixed where it was, so the capture draws alone', () => {
     const store = board();
-    const into = captured(store, 'by-frame').objects.find((object) => object.id === 'into');
+    const into = captured(store, 'by-region').objects.find((object) => object.id === 'into');
     expect(into).toMatchObject({ type: 'arrow', to: { object: 'c' } });
     expect(into && 'from' in into && 'x' in into.from).toBe(true);
-    // The frozen document resolves every arrow without the canvas.
-    const svg = snapshotToSvg(store.getDocument(), 'by-frame')!;
-    expect(svg.match(/<line /g)).toHaveLength(2);
+  });
+
+  test('a frame snapshot is the frame and what is wholly inside it: no sliced neighbours, no title strip', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [{ id: 'straddles', type: 'note', x: 560, y: 100, w: 120, h: 60, text: 'Half in' }] });
+    store.dispatch({ type: 'update-snapshot', id: 'by-frame' });
+    const capture = captured(store, 'by-frame');
+    expect(capture.objects.map((object) => object.id)).toEqual(['frame', 'a', 'b', 'c', 'ab']);
+    // The rectangle hugs the frame; its title, drawn above it, falls outside and the caption carries the name.
+    expect(capture.rect).toEqual({ x: -2, y: -2, w: 604, h: 304 });
+    // The frozen document resolves its arrow without the canvas.
+    expect(snapshotToSvg(store.getDocument(), 'by-frame')!.match(/<line /g)).toHaveLength(1);
   });
 
   test('the capture is taken by the planner; one sent from outside is ignored', () => {
@@ -83,8 +92,8 @@ describe('a snapshot knows when it is behind', () => {
     store.dispatch({ type: 'move', ids: ['elsewhere'], dx: 0, dy: 500 });
     store.dispatch({ type: 'recolor', ids: ['elsewhere'], color: 'red' });
     expect(standing(store, 'by-objects')).toBe('current');
-    // The frame and the region both show an arrow coming from the moved object, so their picture did change.
-    expect(standing(store, 'by-frame')).toBe('behind');
+    expect(standing(store, 'by-frame')).toBe('current');
+    // The region shows an arrow coming in from the moved object, so its picture did change.
     expect(standing(store, 'by-region')).toBe('behind');
   });
 
@@ -100,7 +109,7 @@ describe('a snapshot knows when it is behind', () => {
     expect(standing(store, 'by-objects')).toBe('behind');
   });
 
-  test('a frame is behind when the frame changes or anything in its rectangle does, arrivals included', () => {
+  test('a frame is behind when the frame changes or anything inside it does, arrivals included', () => {
     const store = board();
     expect(standing(store, 'by-frame')).toBe('current');
     store.dispatch({ type: 'add', objects: [{ id: 'new', type: 'note', x: 220, y: 40, w: 50, h: 40, text: 'New' }] });
@@ -388,8 +397,9 @@ describe('the open transition', () => {
       last = spring.p;
       frames++;
     }
-    expect(frames).toBeGreaterThan(10);
-    expect(frames).toBeLessThan(45);
+    // Long enough to follow (not a pop), and at rest well inside a second and a half.
+    expect(frames).toBeGreaterThan(30);
+    expect(frames).toBeLessThan(80);
   });
 
   test('turned round mid-flight it carries on from where it is, without a jump', () => {
@@ -404,16 +414,25 @@ describe('the open transition', () => {
     expect(springAtRest(back, 0)).toBe(true);
   });
 
-  test('the capture dissolves early and the plan stands back a little, both whole at the figure', () => {
+  test('the capture holds, then dissolves before the opening is two-thirds grown; the plan stands back with depth', () => {
     expect(ghostOpacity(0)).toBe(1);
-    expect(ghostOpacity(0.2)).toBeGreaterThan(0.3);
-    expect(ghostOpacity(0.2)).toBeLessThan(1);
-    expect(ghostOpacity(0.5)).toBe(0);
+    expect(ghostOpacity(0.08)).toBe(1);
+    expect(ghostOpacity(0.35)).toBeGreaterThan(0.3);
+    expect(ghostOpacity(0.35)).toBeLessThan(0.8);
+    expect(ghostOpacity(0.62)).toBe(0);
     expect(ghostOpacity(1)).toBe(0);
-    expect(recedeAt(0)).toEqual({ scale: 1, opacity: 1 });
-    expect(recedeAt(1).scale).toBeGreaterThan(0.95);
-    expect(recedeAt(1).scale).toBeLessThan(1);
-    expect(recedeAt(1).opacity).toBeGreaterThan(0.3);
+    for (let p = 0; p < 1; p += 0.05) expect(ghostOpacity(p + 0.05)).toBeLessThanOrEqual(ghostOpacity(p));
+    expect(recedeAt(0)).toEqual({ scale: 1, opacity: 1, blur: 0 });
+    const away = recedeAt(1);
+    expect(away.scale).toBeGreaterThan(0.9);
+    expect(away.scale).toBeLessThan(0.97);
+    expect(away.blur).toBeGreaterThan(1);
+    expect(away.opacity).toBeGreaterThan(0.3);
+    // Most of the going-away happens early, while there is still plan to see around the opening.
+    expect(1 - recedeAt(0.3).scale).toBeGreaterThan((1 - away.scale) * 0.6);
+    expect(rimOpacity(0)).toBe(0);
+    expect(rimOpacity(0.3)).toBe(1);
+    expect(rimOpacity(1)).toBe(0);
   });
 
   test('a long frame does not blow it up', () => {

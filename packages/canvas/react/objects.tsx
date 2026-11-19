@@ -19,6 +19,11 @@ export interface ObjectViewProps {
   rich: boolean;
   resolveImageSrc?: (src: string) => string;
   onEditEnd?: (id: string, text: string) => void;
+  /**
+   * Present in an editor: the object can take focus. 0 for the one object Tab lands on from outside the board,
+   * -1 for the rest (the editor moves focus between them in reading order). Absent: not focusable (a figure).
+   */
+  tabIndex?: 0 | -1;
 }
 
 /** `data-color` and, for a custom colour, the variable the stylesheet reads. */
@@ -91,12 +96,12 @@ function spriteStyle(object: SpriteObject, resolveImageSrc?: (src: string) => st
 
 /** The only way custom HTML is ever drawn. See `model/html-item.ts`. */
 function HtmlFrame({ object }: { object: HtmlObject }) {
-  const frame = useRef<HTMLIFrameElement>(null);
-  const [scheme, setScheme] = useState<'light' | 'dark' | null>(null);
+  const probe = useRef<HTMLSpanElement>(null);
+  const [scheme, setScheme] = useState<'light' | 'dark' | null | undefined>(undefined);
   // The item is told the theme it sits in, and told again when it changes.
   useLayoutEffect(() => {
     const read = () => {
-      const value = frame.current ? getComputedStyle(frame.current).colorScheme : '';
+      const value = probe.current?.parentElement ? getComputedStyle(probe.current.parentElement).colorScheme : '';
       setScheme(value === 'dark' || value === 'light' ? value : null);
     };
     read();
@@ -104,7 +109,13 @@ function HtmlFrame({ object }: { object: HtmlObject }) {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     return () => observer.disconnect();
   }, []);
-  return <iframe ref={frame} title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme)} {...HTML_ITEM_FRAME_ATTRS} />;
+  // The frame is mounted once its theme is known, so an item is loaded once, not once per guess.
+  return (
+    <>
+      <span ref={probe} hidden />
+      {scheme !== undefined ? <iframe title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme)} {...HTML_ITEM_FRAME_ATTRS} /> : null}
+    </>
+  );
 }
 
 /** The words a card shows for what kind of thing it points at, when the thing has no site of its own. */
@@ -151,7 +162,18 @@ function Card({ object, resolveImageSrc }: { object: ReferenceObject; resolveIma
   );
 }
 
-export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd }: ObjectViewProps) {
+/** What an object is called when it has no words of its own. */
+export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card' } as const;
+
+/** What a screen reader says for an object: its own words, else what it is. */
+export function objectLabel(object: PlacedCanvasObject): string {
+  const words =
+    object.type === 'frame' ? object.title : object.type === 'reference' ? referenceCard(object).title : 'text' in object ? object.text : 'alt' in object ? (object.alt ?? '') : '';
+  const line = words.split('\n')[0].trim();
+  return line ? `${OBJECT_NAMES[object.type]}: ${line}` : OBJECT_NAMES[object.type];
+}
+
+export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex }: ObjectViewProps) {
   const color = colorAttrs(object.color);
   const style: React.CSSProperties = {
     ...color.style,
@@ -163,6 +185,8 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
     'data-id': object.id,
     'data-color': color['data-color'],
     'data-selected': selected ? '' : undefined,
+    // In an editor each object is something focus can land on, named by its words.
+    ...(tabIndex !== undefined ? { tabIndex, role: 'group', 'aria-label': objectLabel(object) } : {}),
   };
   switch (object.type) {
     case 'box':
@@ -198,7 +222,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
       );
     case 'sprite':
       return isSafeImageSrc(resolveImageSrc ? resolveImageSrc(object.src) : object.src) ? (
-        <div className="pcv-obj pcv-sprite" role="img" aria-label={object.alt} {...common} style={{ ...style, ...spriteStyle(object, resolveImageSrc) }} />
+        <div className="pcv-obj pcv-sprite" {...common} {...(tabIndex === undefined ? { role: 'img', 'aria-label': object.alt } : {})} style={{ ...style, ...spriteStyle(object, resolveImageSrc) }} />
       ) : (
         <div className="pcv-obj pcv-sprite" {...common} style={{ ...style, animation: 'none' }}>
           <div className="pcv-missing">{object.alt}</div>
@@ -212,7 +236,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
       );
     case 'html':
       return (
-        <div className="pcv-obj pcv-html" role={object.alt ? 'img' : undefined} aria-label={object.alt} {...common} style={style}>
+        <div className="pcv-obj pcv-html" {...common} {...(tabIndex === undefined && object.alt ? { role: 'img', 'aria-label': object.alt } : {})} style={style}>
           {rich ? <HtmlFrame object={object} /> : <div className="pcv-missing" />}
         </div>
       );

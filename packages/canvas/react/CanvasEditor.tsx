@@ -6,12 +6,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import type { CanvasColor } from '../model/color';
-import { boundsOf } from '../model/document';
+import { boundsOf, objectBounds } from '../model/document';
+import { rectContainsRect } from '../model/geometry';
 import { createId } from '../model/ids';
 import type { ObjectId, ReferenceObject, Snapshot } from '../model/types';
 import { type AssetPort, pictureResolver } from '../model/assets';
 import type { LinkPreviewPort } from '../model/reference';
-import { CameraController, type Size, fitRect, worldToScreen, zoomAt } from '../view/camera';
+import { CameraController, type Size, fitRect, viewportRect, worldToScreen, zoomAt } from '../view/camera';
+import { neighbourInReadingOrder, readingOrder } from '../view/reading-order';
 import { indexFor } from '../view/document-index';
 import { snapshotFromRegion, snapshotFromSelection } from '../view/snapshot-source';
 import { CanvasView } from './CanvasView';
@@ -53,6 +55,8 @@ export interface CanvasEditorProps {
   overscan?: number;
   /** Host controls drawn with the editor's own bars (a "back" button). */
   children?: React.ReactNode;
+  /** Host controls that come first in the Tab order, before the board's objects (the way out of an opened canvas). */
+  lead?: React.ReactNode;
   /** Hide the bars (while a transition is running). */
   chromeHidden?: boolean;
   className?: string;
@@ -60,7 +64,7 @@ export interface CanvasEditorProps {
 
 const HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
 
-export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveImageSrc, assets, linkPreview, resolvePaste, onOpenReference, onUserCamera, keepMounted, overscan, children, chromeHidden, className }: CanvasEditorProps) {
+export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveImageSrc, assets, linkPreview, resolvePaste, onOpenReference, onUserCamera, keepMounted, overscan, children, lead, chromeHidden, className }: CanvasEditorProps) {
   const ownCamera = useMemo(() => new CameraController(), []);
   const camera = givenCamera ?? ownCamera;
   const state = useMemo(() => new EditorState(), []);
@@ -244,6 +248,81 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
     else if (reference.target.kind === 'web') window.open(reference.target.url, '_blank', 'noopener,noreferrer');
   };
 
+  // ── Reaching objects without a pointer ──────────────────────────────────
+  // Tab comes onto the board at one object, then walks the objects in reading order; from an object it goes
+  // to that object's own bar and on to the next object. Enter starts typing in it, or opens a card. These are
+  // how a keyboard reaches what a pointer reaches, not shortcuts: no key does anything a button does not.
+  const order = useMemo(() => readingOrder(doc), [doc]);
+  const tabStop = (selected.length === 1 && order.includes(selected[0]) ? selected[0] : order[0]) ?? null;
+
+  const focusObject = useCallback(
+    (id: ObjectId) => {
+      const bounds = objectBounds(store.getDocument(), id);
+      if (!bounds) return;
+      state.select([id]);
+      // Bring it into view if it is not, keeping the zoom.
+      const view = viewportRect(camera.get(), size.current);
+      if (!rectContainsRect(view, bounds)) {
+        camera.set({ x: bounds.x + bounds.w / 2 - view.w / 2, y: bounds.y + bounds.h / 2 - view.h / 2, z: camera.get().z });
+      }
+      requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`.pcv-obj[data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
+    },
+    [camera, state, store],
+  );
+
+  const onBoardKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (event.nativeEvent.isComposing) return;
+    if (target.isContentEditable) {
+      // Escape ends typing and leaves focus on the object that was being typed in.
+      if (event.key === 'Escape') {
+        const owner = target.closest<HTMLElement>('.pcv-obj');
+        event.stopPropagation();
+        target.blur();
+        owner?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    const current = store.getDocument();
+    if (target.classList.contains('pcv-obj')) {
+      const id = target.dataset.id ?? '';
+      const object = current.objects[id];
+      if (event.key === 'Enter' && object) {
+        event.preventDefault();
+        if (object.type === 'reference') openReference(object);
+        else if (object.type === 'box' || object.type === 'note' || object.type === 'text' || object.type === 'frame') state.set({ editingId: id });
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const bar = root.current?.querySelector<HTMLElement>('.pcv-bar-selection button, .pcv-bar-selection input');
+      if (!event.shiftKey && bar) {
+        event.preventDefault();
+        bar.focus();
+        return;
+      }
+      const next = neighbourInReadingOrder(current, id, event.shiftKey ? -1 : 1);
+      if (next) {
+        event.preventDefault();
+        focusObject(next);
+      }
+      return;
+    }
+    const bar = target.closest<HTMLElement>('.pcv-bar-selection');
+    if (event.key === 'Tab' && bar && selected.length === 1) {
+      const stops = [...bar.querySelectorAll<HTMLElement>('button, input')];
+      if (event.shiftKey && target === stops[0]) {
+        event.preventDefault();
+        focusObject(selected[0]);
+      } else if (!event.shiftKey && target === stops[stops.length - 1]) {
+        const next = neighbourInReadingOrder(current, selected[0], 1);
+        if (next) {
+          event.preventDefault();
+          focusObject(next);
+        }
+      }
+    }
+  };
+
   const single = selected.length === 1 ? doc.objects[selected[0]] : undefined;
   const handles =
     single && 'w' in single && !ui.editingId
@@ -270,10 +349,12 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
       camera={camera}
       selection={ui.selection}
       editingId={ui.editingId}
+      tabStop={tabStop}
       onEditEnd={onEditEnd}
       resolveImageSrc={resolvePicture}
       keepMounted={keepMounted}
       overscan={overscan}
+      lead={chromeHidden ? null : lead}
       onSize={onSize}
       rootRef={root}
       rootProps={{
@@ -284,6 +365,13 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
         // press, and the browser's own focus change would take that straight back. Bars and fields keep theirs.
         onMouseDown: (event) => {
           if (!(event.target as HTMLElement).closest?.('.pcv-bar, [contenteditable], input, button')) event.preventDefault();
+        },
+        onKeyDown: onBoardKey,
+        // Focus arriving on an object by keyboard selects it, so its bar appears.
+        onFocus: (event) => {
+          const el = event.target as HTMLElement;
+          const id = el.classList.contains('pcv-obj') ? el.dataset.id : undefined;
+          if (id && !(ui.selection.size === 1 && ui.selection.has(id)) && el.matches(':focus-visible')) state.select([id]);
         },
         onPointerDown: gestures.onPointerDown,
         onPointerMove: gestures.onPointerMove,

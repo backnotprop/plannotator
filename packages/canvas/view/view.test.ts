@@ -3,7 +3,8 @@ import { CanvasStore } from '../events/store';
 import { createDocument } from '../model/document';
 import type { CanvasObject } from '../model/types';
 import { cameraPlacing, fitRect, lerpCamera, screenToWorld, viewportRect, worldRectToScreen, worldToScreen, zoomAt } from './camera';
-import { lodForZoom, renderWindow, visibleIds, windowIsStale } from './cull';
+import { lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from './cull';
+import { neighbourInReadingOrder, readingOrder } from './reading-order';
 import { indexFor } from './document-index';
 import { hitTest, objectsInRect, withFrameContents } from './hit-test';
 import { SpatialIndex } from './spatial-index';
@@ -192,6 +193,18 @@ describe('hit-testing', () => {
   });
 });
 
+describe('the order a keyboard walks the board in', () => {
+  test('top to bottom, left to right within a row, whatever order things were made in', () => {
+    const store = new CanvasStore(createDocument('board'));
+    const at = (id: string, x: number, y: number): CanvasObject => ({ id, type: 'box', x, y, w: 100, h: 40, text: id });
+    store.dispatch({ type: 'add', objects: [at('bottom-right', 400, 300), at('top-right', 400, 10), at('bottom-left', 0, 310), at('top-left', 0, 0), { id: 'arrow', type: 'arrow', from: { x: 0, y: 0 }, to: { x: 9, y: 9 } }] });
+    expect(readingOrder(store.getDocument())).toEqual(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+    expect(neighbourInReadingOrder(store.getDocument(), 'top-right', 1)).toBe('bottom-left');
+    expect(neighbourInReadingOrder(store.getDocument(), 'top-left', -1)).toBeNull();
+    expect(neighbourInReadingOrder(store.getDocument(), 'bottom-right', 1)).toBeNull();
+  });
+});
+
 describe('culling and level of detail', () => {
   function big(): CanvasStore {
     const store = new CanvasStore(createDocument('board'));
@@ -237,9 +250,14 @@ describe('culling and level of detail', () => {
     expect(windowIsStale(window, zoomAt(camera, 3.5, { x: 500, y: 400 }), size)).toBe(true);
   });
 
-  test('detail drops as the board zooms out', () => {
+  test('detail drops as a crowded board zooms out, and never for a view that holds few objects', () => {
     expect(lodForZoom(1)).toBe('full');
     expect(lodForZoom(0.3)).toBe('plain');
     expect(lodForZoom(0.1)).toBe('far');
+    expect(lodFor(0.1, 2000)).toBe('far');
+    expect(lodFor(0.3, 400)).toBe('plain');
+    // A figure in a narrow column, a phone looking at one frame: small on screen, but everything is drawn.
+    expect(lodFor(0.1, 40)).toBe('full');
+    expect(lodFor(0.31, 150)).toBe('full');
   });
 });

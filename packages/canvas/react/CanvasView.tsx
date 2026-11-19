@@ -34,7 +34,7 @@ import { resolveArrow } from '../model/document';
 import type { Rect } from '../model/geometry';
 import type { ObjectId } from '../model/types';
 import type { Camera, CameraController, Size } from '../view/camera';
-import { type Lod, OVERSCAN, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
+import { type Lod, OVERSCAN, lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
 import { indexFor } from '../view/document-index';
 import { ArrowView, ObjectView } from './objects';
 
@@ -45,6 +45,11 @@ export interface CanvasViewProps {
   camera: CameraController;
   selection?: ReadonlySet<ObjectId>;
   editingId?: ObjectId | null;
+  /**
+   * Makes objects focusable (an editor). The id is the one object Tab lands on from outside the board; the
+   * editor moves focus between the rest. Undefined: nothing on the board takes focus (a figure).
+   */
+  tabStop?: ObjectId | null;
   onEditEnd?: (id: ObjectId, text: string) => void;
   /** Turn a relative picture address into one the browser can load. */
   resolveImageSrc?: (src: string) => string;
@@ -58,6 +63,8 @@ export interface CanvasViewProps {
   worldOverlay?: React.ReactNode;
   /** Drawn over the view in screen space. */
   children?: React.ReactNode;
+  /** Drawn over the view like `children`, but first in the document: first in the Tab order and for a screen reader. */
+  lead?: React.ReactNode;
   rootRef?: React.Ref<HTMLDivElement>;
   rootProps?: React.HTMLAttributes<HTMLDivElement> & Record<`data-${string}`, string | undefined>;
 }
@@ -74,6 +81,7 @@ export function CanvasView({
   camera,
   selection = NONE,
   editingId = null,
+  tabStop,
   onEditEnd,
   resolveImageSrc,
   keepMounted = null,
@@ -81,6 +89,7 @@ export function CanvasView({
   onSize,
   worldOverlay,
   children,
+  lead,
   rootRef,
   rootProps,
 }: CanvasViewProps) {
@@ -94,8 +103,9 @@ export function CanvasView({
   const size = useRef<Size>({ w: 0, h: 0 });
   const [window_, setWindow] = useState<Rect | null>(null);
   const windowRef = useRef<Rect | null>(null);
-  const [lod, setLod] = useState<Lod>(() => lodForZoom(camera.get().z));
-  const lodRef = useRef(lod);
+  // The detail the zoom alone would ask for; how many objects are mounted has the last word (`lodFor`).
+  const [zoomLod, setZoomLod] = useState<Lod>(() => lodForZoom(camera.get().z));
+  const lodRef = useRef(zoomLod);
   const onSizeRef = useRef(onSize);
   onSizeRef.current = onSize;
 
@@ -126,8 +136,7 @@ export function CanvasView({
       const nextLod = lodForZoom(c.z);
       if (nextLod !== lodRef.current) {
         lodRef.current = nextLod;
-        rootEl.dataset.lod = nextLod;
-        setLod(nextLod);
+        setZoomLod(nextLod);
       }
       if (size.current.w > 0 && windowIsStale(windowRef.current, c, size.current, overscanRef.current)) {
         windowRef.current = renderWindow(c, size.current, overscanRef.current);
@@ -173,6 +182,8 @@ export function CanvasView({
     return visibleIds(doc, index, unionWindow(window_, keepMounted));
   }, [doc, index, window_, keepMounted]);
 
+  const lod = lodFor(zoomLod === 'full' ? 1 : zoomLod === 'plain' ? 0.3 : 0.1, mounted.length);
+
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
   const overlayNodes: React.ReactNode[] = [];
@@ -192,6 +203,7 @@ export function CanvasView({
           rich={object.type !== 'html' || lod === 'full'}
           resolveImageSrc={resolveImageSrc}
           onEditEnd={onEditEnd}
+          tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}
         />,
       );
       // The selection outline is its own element in the overlay, so its
@@ -204,6 +216,7 @@ export function CanvasView({
 
   return (
     <div {...rootProps} ref={setRoot} className={rootProps?.className ? `pcv pcv-root ${rootProps.className}` : 'pcv pcv-root'} data-lod={lod}>
+      {lead}
       <div ref={world} className="pcv-world">
         {placed}
         <svg className="pcv-arrows" aria-hidden="true">

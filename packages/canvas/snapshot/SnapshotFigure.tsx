@@ -15,7 +15,7 @@
  * IntersectionObserver with a margin); far away it is an empty box of the
  * right size. Whether it is behind is worked out only while it draws.
  */
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import type { CanvasDocument, SnapshotCapture } from '../model/types';
 import { CanvasView } from '../react/CanvasView';
@@ -55,6 +55,27 @@ export interface SnapshotFigureProps {
   /** Absent: the figure is not clickable. */
   onOpen?: (request: SnapshotOpenRequest) => void;
   resolveImageSrc?: (src: string) => string;
+}
+
+/** The nearest ancestor that scrolls up and down, or null for the window. */
+export function scrollRootOf(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return node;
+  }
+  return null;
+}
+
+/** What a capture shows, in words: the words of its objects, in drawing order, for someone who cannot see it. */
+export function describeCapture(capture: SnapshotCapture, max = 12): string {
+  const words: string[] = [];
+  for (const object of capture.objects) {
+    const text = object.type === 'frame' ? object.title : 'text' in object ? object.text : 'alt' in object ? (object.alt ?? '') : object.type === 'reference' ? (object.title ?? '') : object.type === 'arrow' ? (object.label ?? '') : '';
+    const line = text.split('\n')[0].trim();
+    if (line) words.push(line);
+    if (words.length === max) break;
+  }
+  return words.join(', ');
 }
 
 const NO_SUBSCRIBE = () => () => {};
@@ -119,6 +140,7 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
   const view = useRef<HTMLDivElement>(null);
   const hit = useRef<HTMLButtonElement>(null);
   const [near, setNear] = useState(false);
+  const describeId = useId();
 
   useEffect(() => {
     const el = view.current;
@@ -126,7 +148,9 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
       setNear(true);
       return;
     }
-    const observer = new IntersectionObserver(([entry]) => setNear(entry.isIntersecting), { rootMargin: `${FIGURE_NEAR_MARGIN}px 0px` });
+    // The margin only widens the observer's own root. A plan usually scrolls inside a pane, not the window, so the
+    // root must be that pane, or a figure would start drawing only once it is already on screen.
+    const observer = new IntersectionObserver(([entry]) => setNear(entry.isIntersecting), { root: scrollRootOf(el), rootMargin: `${FIGURE_NEAR_MARGIN}px 0px` });
     observer.observe(el);
     return () => observer.disconnect();
   }, [!!capture]);
@@ -163,6 +187,7 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
   const { rect } = capture;
   const width = Math.ceil(Math.min(rect.w * FIGURE_MAX_ZOOM, (FIGURE_MAX_HEIGHT * rect.w) / rect.h));
   const count = SNAPSHOT_STRINGS.items(capture.objects.length);
+  const described = describeCapture(capture);
 
   return (
     <figure className="pcv pcv-figure" style={{ width: `min(100%, ${width}px)` }} data-standing={standing} data-canvas={canvas} data-snapshot={id}>
@@ -176,10 +201,16 @@ export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry
             type="button"
             className="pcv-figure-hit"
             aria-label={name ? SNAPSHOT_STRINGS.openNamed(name) : SNAPSHOT_STRINGS.open}
+            aria-describedby={described ? `${describeId}` : undefined}
             onClick={() => view.current && onOpen?.({ canvas, snapshot: id, origin: view.current, returnFocus: hit.current })}
           />
         ) : null}
       </div>
+      {described ? (
+        <span id={describeId} className="pcv-sr">
+          {described}
+        </span>
+      ) : null}
       <figcaption className="pcv-figure-caption">
         {title !== undefined ? (
           <span className="pcv-figure-title">{title}</span>
