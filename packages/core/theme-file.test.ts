@@ -138,7 +138,7 @@ describe('validating a theme file', () => {
   });
 
   test('a name with an invisible or text-direction character is refused (it could read as another name in a terminal)', () => {
-    for (const name of ['Harbor\u202e', 'Har\u200bbor', '\u2066Harbor\u2069', 'Harbor\ufeff']) {
+    for (const name of ['Harbor\u202e', 'Har\u200bbor', '\u2066Harbor\u2069', 'Harbor\ufeff', 'Har\u00adbor', 'Har\u034fbor', 'Har\u180ebor', 'Harbor\ufff9', 'Harbor\ufffb']) {
       const r = validateThemeFile(ok({ name }));
       expect(r.ok ? null : r.problem.field).toBe('name');
     }

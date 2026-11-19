@@ -216,11 +216,14 @@ describe("plannotator theme", () => {
     expect(help.stdout).toContain("plannotator theme add <file>");
     expect(w.run().code).toBe(2);
     expect(w.run("paint").code).toBe(2);
-    // The help's example is what an agent writing a theme from scratch copies: its dark half adds as written, with every colour set.
+    // The help's example is what an agent writing a theme from scratch copies: copied whole it adds,
+    // and its dark half sets every colour.
     const from = help.stdout.indexOf('  {\n    "plannotatorTheme"');
-    const to = help.stdout.indexOf('    "light": {', from);
-    const example = `${help.stdout.slice(from, to).trimEnd().replace(/,$/, "")}\n}`;
-    const added = w.run("add", w.file("example.json", example));
+    const end = help.stdout.indexOf("\n  }\n", from) + "\n  }".length;
+    const whole = help.stdout.slice(from, end);
+    expect(w.run("add", w.file("whole.json", whole)).code).toBe(0);
+    const darkOnly = { ...JSON.parse(whole), id: "harbor-dark", light: undefined };
+    const added = w.run("add", w.file("example.json", JSON.stringify(darkOnly)));
     expect(added.code).toBe(0);
     expect(added.stdout).not.toContain("Note:");
   }, 60_000);

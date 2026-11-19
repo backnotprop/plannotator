@@ -454,10 +454,12 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 /**
  * Characters that change how a name reads without being seen: the bidi marks,
  * embeddings, overrides and isolates (a name could print its letters in
- * another order in `theme list`), and the invisible spaces and joiners other
- * than ZWJ and ZWNJ (which emoji sequences and Persian need).
+ * another order in `theme list`), the invisible spaces and joiners other than
+ * ZWJ and ZWNJ (which emoji sequences and Persian need), the soft hyphen, the
+ * combining grapheme joiner, the Mongolian vowel separator and the
+ * interlinear annotation marks.
  */
-export const INVISIBLE_NAME_CHARS = /[\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+export const INVISIBLE_NAME_CHARS = /[\u00ad\u034f\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]/g;
 
 /** Show a refused value in a message: short, quoted, control characters visible. */
 function shown(value: unknown): string {
