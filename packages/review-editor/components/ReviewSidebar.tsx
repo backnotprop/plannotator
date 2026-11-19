@@ -740,7 +740,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                         `${sample?.prRepo ? `${sample.prRepo}` : ''}#${sample?.prNumber ?? '?'} ${sample?.prTitle ?? ''}`;
                       return (
                         <div key={prUrl}>
-                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-xs font-medium text-accent/80 border-b border-border/30 mb-1">
+                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-xs font-medium text-accent-text/80 border-b border-border/30 mb-1">
                             {prLabel}
                           </div>
                           <div className="space-y-4">

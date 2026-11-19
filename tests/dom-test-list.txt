@@ -855,3 +855,6 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/inbox/projectTagMenu.test.tsx
+packages/inbox/projectTagsFilter.test.tsx
+packages/inbox/tagWritesPending.test.tsx
