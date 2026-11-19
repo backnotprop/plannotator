@@ -191,7 +191,7 @@ describe("starting an agent in T3 Code on another linked machine, on two real In
         const { thread_id } = (await sent.json()) as Json;
         const run = await waitFor(`${here.name} reads the line`, async () => {
           const read = await getJson(here, `/api/inbox/m/${there.id}/threads/${thread_id}`);
-          return read.run?.t3 ? read.run : null;
+          return read.run?.t3?.unavailable ? read.run : null;
         }, 20_000);
         expect(run.t3).toEqual({ unavailable: true });
         expect(startsOn(there)).toBe(before);
