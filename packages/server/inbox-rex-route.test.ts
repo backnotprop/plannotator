@@ -446,8 +446,11 @@ describe("a Rex with no app on its computer, and Show in Rex from another comput
     };
     await until(async () => (await listed())?.place?.show === true);
     const ask = (headers: Record<string, string>) => fetch(`${w.base}/api/inbox/device/rex/show`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ session, idempotency_key: crypto.randomUUID() }) });
+    // Only a press in a window there: an agent's bare call through that machine's token moves nothing.
+    expect((await ask(machine)).status).toBe(403);
+    expect(performed(w.fake)).toEqual([]);
     const shown = await ask({ ...machine, "X-Plannotator-Window": "1" });
-    expect({ status: shown.status, body: await shown.json() }).toEqual({ status: 200, body: { shown: true } });
+    expect({ status: shown.status, body: await shown.json() }).toEqual({ status: 200, body: { shown: true, by: ["far-a1"] } });
     expect(performed(w.fake)).toEqual([w.fake.farAppId("a1")]);
     // That app gone: the linked machine's list stops offering it (this Mac's own app is never a linked machine's to move).
     w.fake.setFarApps([]);

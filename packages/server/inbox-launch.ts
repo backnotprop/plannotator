@@ -93,7 +93,7 @@ import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 import type { InboxRex, InboxRexStatus } from "./inbox-rex";
 import { inboxListingSessionAgents, inboxProcessListing, inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
 import { inboxId, inboxLaunchInRex, inboxLaunchRexUnstoppable, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_COULDNT, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_SERVER_AWAY_AGAIN, INBOX_REX_SHARED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_COULDNT, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -713,7 +713,7 @@ export function createInboxLaunch(options: {
       connector: host.connector,
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
-      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && ownPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
+      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const, ...(launch.rex.why === "server" || launch.rex.why === "shared" ? { why: launch.rex.why } : {}) } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && ownPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
       ...(launch.clone?.state === "cloning"
@@ -871,8 +871,10 @@ export function createInboxLaunch(options: {
     host: LaunchHost,
     launch: InboxLaunchRecord,
     input: { name: string; login: LaunchEnv; resume: boolean },
-  ): Promise<{ ok: true; session: string; ref: string; line: string | null; pane: InboxPlace | null } | ({ ok: false } & LaunchStartFailure) | { away: "absent" | "refused" }> => {
-    if (!options.rex || !host.rexCommand) return { away: "absent" };
+  ): Promise<{ ok: true; session: string; ref: string; line: string | null; pane: InboxPlace | null } | ({ ok: false } & LaunchStartFailure) | { away: "absent" | "server" | "shared" | "refused" }> => {
+    // Why Rex is not here: a Mac's app is not open; a headless Rex's server is not running.
+    const absent = options.rex?.headless ? ("server" as const) : ("absent" as const);
+    if (!options.rex || !host.rexCommand) return { away: absent };
     const made = await host.rexCommand(launch, input);
     if (!made.ok) return made;
     const opened = await options.rex.open({
@@ -885,7 +887,7 @@ export function createInboxLaunch(options: {
     log(`Inbox launch ${launch.id}: Rex ${opened.opened ? "made the tab" : opened.sent ? "was asked, no answer" : !opened.opened && opened.refused ? "said no" : "is not here"}`);
     if (opened.opened) return { ok: true, session: made.session, ref: made.ref, line: opened.line, pane: opened.block ? { kind: "rex", session: opened.session, block: opened.block } : null };
     if (opened.sent) return { ok: true, session: made.session, ref: made.ref, line: null, pane: null };
-    return { away: opened.refused ? "refused" : "absent" };
+    return { away: opened.refused ? "refused" : opened.shared ? "shared" : absent };
   };
 
   /** A launch's Rex record once Rex made its tab: where, and the pane (for Stop). */
@@ -918,7 +920,7 @@ export function createInboxLaunch(options: {
       const viaRex = asked && !("away" in asked) ? asked : null;
       const result = viaRex ?? (await host.start(launch, { name, login }));
       // Rex not here, or it said no: it started in the background, and the line says why.
-      const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const } : viaRex?.ok && viaRex.line ? rexRecord(viaRex.line, viaRex.pane) : undefined;
+      const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const, ...(away === "server" || away === "shared" ? { why: away } : {}) } : viaRex?.ok && viaRex.line ? rexRecord(viaRex.line, viaRex.pane) : undefined;
       // Deleted while it started: the session it made goes too (one in Rex is Rex's: left), and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok && viaRex === null) {
@@ -1157,7 +1159,7 @@ ${result.text}`);
     const login = await readLogin();
     const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
     const made = await startInRex(root, host, launch, { name: head.thread_name ?? head.subject ?? "Inbox", login, resume: true });
-    if ("away" in made) return { exitCode: 1, text: `rex: ${made.away}`, failure: { code: "failed", text: made.away === "refused" ? INBOX_REX_REFUSED_AGAIN : INBOX_REX_NOT_HERE_AGAIN } };
+    if ("away" in made) return { exitCode: 1, text: `rex: ${made.away}`, failure: { code: "failed", text: made.away === "refused" ? INBOX_REX_REFUSED_AGAIN : made.away === "server" ? INBOX_REX_SERVER_AWAY_AGAIN : made.away === "shared" ? INBOX_REX_SHARED_AGAIN : INBOX_REX_NOT_HERE_AGAIN } };
     if (made.ok) {
       // Its new tab is where it runs now (Stop closes that pane). No answer: the old pane is not it any more.
       const now = store.message(root.id);
@@ -1465,6 +1467,8 @@ ${result.text}`);
           // message's agent pick, a save's answer or another reader, so with the default setting nothing else contacts it.
           start_in: config().startIn,
           ...(rexHere !== undefined ? { rex_here: rexHere } : {}),
+          // Rex there is a server with no app beside it: "not here" means its server is not running (the row's words).
+          ...(options.rex?.headless ? { rex_headless: true as const } : {}),
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
         }
       : { enabled: false, full_permissions: false }),

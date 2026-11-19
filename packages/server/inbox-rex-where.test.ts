@@ -46,6 +46,12 @@ describe("the places a Rex server may listen", () => {
     expect(paths("linux", "/home/ada", { REX_SERVER: "ssh://ada@build.example.com" }, 1000)[0]).toBe("/run/user/1000/rex/server.sock");
   });
 
+  test("a Mac with REX_SERVER or REX_RUNTIME_DIR set (an Inbox started from a Rex tab keeps them): the app's own server still comes first", () => {
+    const app = "/Users/ada/Library/Application Support/rex/server.sock";
+    expect(inboxRexSockets("darwin", "/Users/ada", { REX_SERVER: "/tmp/other/server.sock", REX_RUNTIME_DIR: "/tmp/rt" }, 501)).toEqual([{ path: app }, { path: "/tmp/other/server.sock", named: true }, { path: "/tmp/rt/server.sock" }]);
+    expect(inboxRexSockets("darwin", "/Users/ada", { PLANNOTATOR_INBOX_REX_SERVER: app }, 501)).toEqual([{ path: app }]);
+  });
+
   test("a Mac with nothing set looks only where it always did: the app's server", () => {
     expect(inboxRexSockets("darwin", "/Users/ada", { XDG_RUNTIME_DIR: "/ignored/there" }, 501)).toEqual([{ path: "/Users/ada/Library/Application Support/rex/server.sock" }]);
   });
@@ -82,12 +88,24 @@ describe("which of them is this computer's Rex", () => {
     expect(fake.connections().opened).toBe(1);
   });
 
-  test("another account's socket: only when it was named (a shared server), never one found by convention", async () => {
+  test("another account's socket: never one found by convention; one that was named (a shared server) is read, and no agent is ever started on it", async () => {
     const fake = startFakeRex({ app: false });
     fakes.push(fake);
     const notMine = (process.getuid?.() ?? 501) + 1;
     expect(await rexOn([{ path: fake.socketPath }], notMine).appAttachedNow()).toBe(false);
     expect(fake.connections().opened).toBe(0);
-    expect(await rexOn([{ path: fake.socketPath, named: true }], notMine).appAttachedNow()).toBe(true);
+    // Named: where an agent lives there is read.
+    const shared = rexOn([{ path: fake.socketPath, named: true }], notMine);
+    const ids = fake.addSession("team", "shell");
+    const hints = new Map([["ses_1", { kind: "rex" as const, session: ids.session, block: ids.block }]]);
+    shared.places(hints);
+    await shared.settled();
+    expect(shared.places(hints).get("ses_1")).toBe("Rex · team / shell");
+    // But it is not "Rex here" for starting agents, and a start asks it nothing: the agent would run as that account.
+    expect(await shared.appAttachedNow()).toBe(false);
+    const before = fake.calls.length;
+    expect(await shared.open({ project: "billing-svc", projectKey: "prj_bill", tab: "Claude Code", command: "cd /work && exec claude" })).toEqual({ opened: false, sent: false, shared: true });
+    expect(fake.calls.slice(before)).toEqual([]);
+    expect(fake.sessions).toHaveLength(1);
   });
 });

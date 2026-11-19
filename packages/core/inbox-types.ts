@@ -1210,6 +1210,12 @@ export interface InboxLaunchRecord {
 export interface InboxLaunchRex {
   line?: string;
   unavailable?: true;
+  /**
+   * With `unavailable`, why, where it is not "Rex's app isn't open here" (a Mac): `server`, Rex on that computer is a
+   * server with no app (Linux, FreeBSD) and it did not answer; `shared`, the Rex server there is another account's
+   * (a shared server named by `REX_SERVER`), where the Inbox reads but never starts an agent.
+   */
+  why?: "server" | "shared";
   refused?: true;
   session?: string;
   block?: string;
@@ -1316,7 +1322,7 @@ export interface InboxRun {
    * has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own
    * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
    */
-  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
+  rex?: { line: string | null; unavailable?: true; why?: "server" | "shared"; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */

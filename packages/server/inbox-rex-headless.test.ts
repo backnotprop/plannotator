@@ -104,7 +104,7 @@ describe("Show in Rex with no app on this computer", () => {
       const ids = fake.addSession("billing-svc", "Claude Code");
       await read(rex, new Map([["ses_1", placeOf(ids)]]));
       expect(rex.offersShow()).toBe(true);
-      expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
+      expect(await rex.show(placeOf(ids))).toEqual({ shown: true, by: ["far-a1"] });
       const asked = fake.calls.find((call) => call.method === "client.perform")!.payload;
       expect(asked).toMatchObject({ client_id: fake.farAppId("a1"), action: "session.select", args: { session_id: ids.session, window_id: ids.window } });
       expect(fake.calls.find((call) => call.method === "session.focus_block")!.payload).toMatchObject({ session_id: ids.session, block_id: ids.block });
@@ -115,9 +115,35 @@ describe("Show in Rex with no app on this computer", () => {
   test("several apps attached (the person's Mac and phone): each is asked, and one that goes there is a Show", async () => {
     const { fake, rex } = headless([{ id: "a1", remote: false }, { id: "a2", platform: "ios" }, { id: "a3", actions: ["pane.split"] }, { id: "a4", lost: true }]);
     const ids = fake.addSession("billing-svc", "Claude Code");
-    expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: true, by: ["far-a2"] });
     // The one whose connection dropped is not asked.
     expect(performs(fake).sort()).toEqual([fake.farAppId("a1"), fake.farAppId("a2"), fake.farAppId("a3")]);
+  });
+
+  test("another person's app is never asked: a colleague's on this server by ssh as their own account moves nothing", async () => {
+    const other = (process.getuid?.() ?? 501) + 1;
+    const { fake, rex } = headless([{ id: "a1", transport: "ssh" }, { id: "b1", transport: "ssh", uid: other }]);
+    const ids = fake.addSession("billing-svc", "Claude Code");
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: true, by: ["far-a1"] });
+    expect(performs(fake)).toEqual([fake.farAppId("a1")]);
+    // Only theirs attached: not offered, and a Show asks nobody.
+    fake.setFarApps([{ id: "b1", transport: "ssh", uid: other }]);
+    await read(rex, new Map([["ses_1", placeOf(ids)]]));
+    expect(rex.offersShow()).toBe(false);
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false });
+    expect(performs(fake)).toEqual([fake.farAppId("a1")]);
+  });
+
+  test("a shared server (another account's, named by REX_SERVER): only apps that came in as this account are asked; a tailnet login there may be anyone's", async () => {
+    // "This user" is another uid than the socket's owner, as on a shared server.
+    const me = (process.getuid?.() ?? 501) + 1;
+    const fake = startFakeRex({ app: false, apps: [{ id: "a1", transport: "ssh", uid: me }, { id: "b1", transport: "ssh" }, { id: "c1", transport: "tailscale" }] });
+    fakes.push(fake);
+    const rex = createInboxRex({ socketPath: [{ path: fake.socketPath, named: true }], headless: true, uid: me, readTimeoutMs: 1_000, showTimeoutMs: 2_000 });
+    rexes.push(rex);
+    const ids = fake.addSession("team", "Claude Code");
+    expect(await rex.show(placeOf(ids))).toMatchObject({ shown: true });
+    expect(performs(fake)).toEqual([fake.farAppId("a1")]);
   });
 
   test("every app says no (Remote Control off): refused, and hidden until an app that may say yes attaches", async () => {
@@ -133,7 +159,7 @@ describe("Show in Rex with no app on this computer", () => {
     rex.watch(new Map([["ses_2", placeOf(ids)]]));
     await rex.settled();
     expect(rex.offersShow()).toBe(true);
-    expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
+    expect(await rex.show(placeOf(ids))).toMatchObject({ shown: true });
   });
 });
 
@@ -154,7 +180,7 @@ describe("Show in Rex on a Mac, by where the click came from", () => {
     const ids = fake.addSession("billing-svc", "Claude Code");
     await read(rex, new Map([["ses_1", placeOf(ids)]]));
     expect(rex.offersShow("away")).toBe(true);
-    expect(await rex.show(placeOf(ids), "away")).toEqual({ shown: true });
+    expect(await rex.show(placeOf(ids), "away")).toEqual({ shown: true, by: ["far-a1"] });
     expect(performs(fake)).toEqual([fake.farAppId("a1")]);
     expect(raised).toEqual([]);
   });
@@ -180,13 +206,17 @@ describe("a linked machine's Rex showed a pane", () => {
   const ok = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const FAR = "/api/inbox/m/ibx_01K0000000000000000000000M/rex/show";
 
-  test("this computer's own Rex app comes to the front, by its process id; a headless Rex here is not asked at all", async () => {
+  test("this computer's own Rex app comes to the front only when it is one of the apps that went there (by the name it gives itself); a headless Rex here is not asked at all", async () => {
     const mac = setup({ remote: true, appPid: 4242 });
-    await mac.rex.raise();
+    // Another device's app went there (the person's iPad): this Mac's stays where it is.
+    await mac.rex.raise(["ipad"]);
+    await mac.rex.raise([]);
+    expect(mac.raised).toEqual([]);
+    await mac.rex.raise(["ipad", "this-mac"]);
     expect(mac.raised).toEqual([4242]);
     expect(performs(mac.fake)).toEqual([]);
     const server = headless([{ id: "a1" }]);
-    await server.rex.raise();
+    await server.rex.raise(["far-a1"]);
     expect(server.raised).toEqual([]);
     expect(server.fake.calls).toEqual([]);
   });
@@ -199,15 +229,19 @@ describe("a linked machine's Rex showed a pane", () => {
 
   test("only for that machine's own yes to a Show: never a refusal, a failure or another forwarded write", async () => {
     let raises = 0;
-    const rex = { raise: async () => void raises++ };
-    const shown = await inboxRaiseAfterFarShow(FAR, ok({ shown: true }), rex);
+    const named: string[][] = [];
+    const rex = { raise: async (labels: readonly string[]) => void (raises++, named.push([...labels])) };
+    const shown = await inboxRaiseAfterFarShow(FAR, ok({ shown: true, by: ["this-mac", 7] }), rex);
     expect(raises).toBe(1);
+    expect(named).toEqual([["this-mac"]]);
     // The answer goes to the window as that machine gave it.
-    expect(await shown.json()).toEqual({ shown: true });
+    expect(await shown.json()).toEqual({ shown: true, by: ["this-mac", 7] });
+    // A yes that names no app (an older Inbox there): nothing here moves.
+    await inboxRaiseAfterFarShow(FAR, ok({ shown: true }), rex);
     await inboxRaiseAfterFarShow(FAR, ok({ shown: false, refused: true }), rex);
     await inboxRaiseAfterFarShow(FAR, ok({ error: "offline" }, 503), rex);
-    await inboxRaiseAfterFarShow("/api/inbox/m/ibx_01K0000000000000000000000M/launch/lch_1/stop", ok({ shown: true }), rex);
-    await inboxRaiseAfterFarShow("/api/inbox/rex/show", ok({ shown: true }), rex);
+    await inboxRaiseAfterFarShow("/api/inbox/m/ibx_01K0000000000000000000000M/launch/lch_1/stop", ok({ shown: true, by: ["this-mac"] }), rex);
+    await inboxRaiseAfterFarShow("/api/inbox/rex/show", ok({ shown: true, by: ["this-mac"] }), rex);
     expect(raises).toBe(1);
   });
 });

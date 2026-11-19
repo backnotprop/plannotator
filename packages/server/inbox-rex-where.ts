@@ -53,8 +53,8 @@ export function inboxRexServerSocket(value: string | undefined): string | null {
 /**
  * Where this computer's Rex server may listen, the likeliest first: the server the environment names (`REX_SERVER`),
  * then Rex's own runtime folder (`REX_RUNTIME_DIR`), then where a personal server lives on this system. On macOS the
- * app's server is last, so a Mac with none of those set looks only where it always did. None on Windows (a named
- * pipe, which this client does not speak).
+ * app's server comes first, before either: a Mac whose app runs is read exactly as before, whatever is set. None on
+ * Windows (a named pipe, which this client does not speak).
  */
 export function inboxRexSockets(platform: string, homeDir: string, env: Readonly<Record<string, string | undefined>>, uid: number | null): InboxRexSocket[] {
   if (platform === "win32") return [];
@@ -62,14 +62,14 @@ export function inboxRexSockets(platform: string, homeDir: string, env: Readonly
   const add = (path: string | null, named?: true) => {
     if (path && !out.some((known) => known.path === path)) out.push(named ? { path, named } : { path });
   };
-  add(inboxRexServerSocket(env[INBOX_REX_SERVER_ENV]) ?? inboxRexServerSocket(env.REX_SERVER), true);
   const dir = (value: string | undefined) => (value && value.startsWith("/") ? value : null);
   const runtime = dir(env.REX_RUNTIME_DIR);
+  // A Mac: the app's own server first, whatever the environment names (an Inbox started from a Rex tab keeps that
+  // tab's `REX_SERVER` for its whole life), so a Mac whose app runs is read exactly as before.
+  if (platform === "darwin") add(join(homeDir, "Library", "Application Support", "rex", SOCKET_NAME));
+  add(inboxRexServerSocket(env[INBOX_REX_SERVER_ENV]) ?? inboxRexServerSocket(env.REX_SERVER), true);
   if (runtime) add(join(runtime, SOCKET_NAME));
-  if (platform === "darwin") {
-    add(join(homeDir, "Library", "Application Support", "rex", SOCKET_NAME));
-    return out;
-  }
+  if (platform === "darwin") return out;
   const xdgRuntime = dir(env.XDG_RUNTIME_DIR);
   if (xdgRuntime) add(join(xdgRuntime, "rex", SOCKET_NAME));
   // An Inbox started without a login session's env (a service, a hook) still finds the usual folder.

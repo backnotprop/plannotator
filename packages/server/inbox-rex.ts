@@ -219,9 +219,11 @@ export function inboxRaiseApp(pid: number, platform: NodeJS.Platform = process.p
 /**
  * What a start in Rex did. `sent`: the tab was asked for and no answer came (a timeout, a dropped connection), so it
  * may exist: the agent must not start elsewhere as well. `refused`: Rex answered the ask with an error, so it made
- * nothing (an option this Rex does not take, Remote Control off): the agent starts in the background.
+ * nothing (an option this Rex does not take, Remote Control off): the agent starts in the background. `shared`: the
+ * Rex server here is another account's (named by `REX_SERVER`), and nothing was asked of it: an agent started there
+ * would run as that account, with this person's folder, paths and thread name.
  */
-export type InboxRexOpened = { opened: true; session: string; window: string; block: string | null; line: string } | { opened: false; sent: boolean; refused?: true };
+export type InboxRexOpened = { opened: true; session: string; window: string; block: string | null; line: string } | { opened: false; sent: boolean; refused?: true; shared?: true };
 
 export type InboxRex = ReturnType<typeof createInboxRex>;
 
@@ -250,6 +252,14 @@ export function createInboxRex(options: InboxRexOptions) {
   const sockets: readonly InboxRexSocket[] = typeof options.socketPath === "string" ? [{ path: options.socketPath }] : (options.socketPath ?? []);
   // A place the person named (`REX_SERVER`, such as a shared server's socket) may be another account's; one found by convention is this user's own.
   const socketPath = () => sockets.find((socket) => inboxRexSocketOk(socket.path, socket.named ? null : uid))?.path ?? null;
+  /**
+   * The socket in use is this user's own (its owner, not who named it). Only there are agents started, and only
+   * there is a tailnet login taken for this person's: another account's server (a shared one) is read, never more.
+   */
+  const socketOwn = () => {
+    const path = socketPath();
+    return path !== null && inboxRexSocketOk(path, uid);
+  };
 
   /** No asking before this (a Rex that did not answer in time). */
   let quietUntil = 0;
@@ -259,7 +269,7 @@ export function createInboxRex(options: InboxRexOptions) {
    * Who a Show would ask, as the last read said (`showKey`): `here` for a click in this computer's own window, `away`
    * for one in another computer's; and whether Rex's server answered at all.
    */
-  let seen: { here: string | null; away: string | null; answered: boolean; at: number } = { here: null, away: null, answered: false, at: 0 };
+  let seen: { here: string | null; away: string | null; answered: boolean; own: boolean; at: number } = { here: null, away: null, answered: false, own: false, at: 0 };
   /**
    * The apps that last refused (or failed or timed out on) a Show, and when: Show in Rex is hidden for them for
    * `showRefused`, or until they go and come back or do a Show again. A new tab or a closed pane
@@ -417,11 +427,12 @@ export function createInboxRex(options: InboxRexOptions) {
    * `principal.pid`) when Rex says it. `local`: a Mac app attached over this computer's own socket as this user;
    * never on a headless Rex, where no app is this computer's.
    */
-  type RexApp = { id: string; pid: number | null; local: boolean };
+  type RexApp = { id: string; pid: number | null; local: boolean; mine: boolean; label: string };
   const appsOf = async (rex: RexConnection): Promise<RexApp[]> => {
     const answer = await rex.call("client.list", { kinds: ["app"] });
     const clients = (Array.isArray(answer.clients) ? answer.clients : []) as Record<string, unknown>[];
     const out: RexApp[] = [];
+    const own = socketOwn();
     for (const c of clients) {
       const info = (c.info ?? {}) as Record<string, unknown>;
       const principal = (c.principal ?? {}) as Record<string, unknown>;
@@ -429,7 +440,12 @@ export function createInboxRex(options: InboxRexOptions) {
       if (typeof c.client_id !== "string" || info.kind !== "app" || !(state === undefined || state === "connected")) continue;
       const local = !headless && info.platform === "macos" && principal.kind === "peer" && principal.transport === "unix" && (uid === null || principal.uid === uid);
       const pid = principal.pid;
-      out.push({ id: c.client_id, pid: typeof pid === "number" && Number.isInteger(pid) && pid > 1 ? pid : null, local });
+      // Whose app it is, as Rex says (`principal`): this account's on this computer (a `peer` with this uid: the Mac's
+      // own, or one that came in by ssh as this account). A tailnet login is this person's only on a server that is
+      // this user's own, which lets in only its owner unless they opened it wider; on another account's server it
+      // may be anyone's. An app that is not this person's is never asked anything.
+      const mine = principal.kind === "peer" ? uid === null || principal.uid === uid : principal.kind === "tailscale" && own;
+      out.push({ id: c.client_id, pid: typeof pid === "number" && Number.isInteger(pid) && pid > 1 ? pid : null, local, mine, label: cleanName(info.label) });
     }
     return out;
   };
@@ -440,15 +456,16 @@ export function createInboxRex(options: InboxRexOptions) {
   };
   /**
    * The apps a Show asks. A click in this computer's own window (`here`) on a Mac: this computer's own app, alone.
-   * Otherwise (a headless Rex, or a click in another computer's window, `away`): every app attached from elsewhere,
-   * since the person's own is one of them and the server cannot say which.
+   * Otherwise (a headless Rex, or a click in another computer's window, `away`): this person's apps attached from
+   * elsewhere (`mine`), each of them, since Rex does not say which is in front of the person. Never another
+   * person's (a colleague's on a shared server, or one let in over the tailnet).
    */
   const showApps = (apps: readonly RexApp[], reach: InboxRexReach): RexApp[] => {
     if (reach === "here" && !headless) {
       const here = appHereOf(apps);
       return here ? [here] : [];
     }
-    return apps.filter((app) => !app.local);
+    return apps.filter((app) => !app.local && app.mine);
   };
   /** One name for the apps a Show asks (what a refusal is kept under); null: none. */
   const showKey = (apps: readonly RexApp[]): string | null => (apps.length === 0 ? null : apps.map((app) => app.id).sort().join(","));
@@ -511,14 +528,14 @@ export function createInboxRex(options: InboxRexOptions) {
         }
       }
       if ((seen.here !== null || seen.away !== null || (headless && seen.answered)) && at - seen.at > INBOX_REX_MARK_STALE_MS) {
-        seen = { here: null, away: null, answered: false, at };
+        seen = { here: null, away: null, answered: false, own: false, at };
         moved = true;
       }
     } else if (!found) {
       // No answer (no Rex): nothing confirmed stands, and an app that may be gone is not acted on.
       if (seen.here !== null || seen.away !== null || (headless && seen.answered) || confirmed.size > 0) moved = true;
       confirmed.clear();
-      seen = { here: null, away: null, answered: false, at };
+      seen = { here: null, away: null, answered: false, own: false, at };
     } else {
       const lines = new Map(found.rows.map((r, i) => [r.session, { place: r.place, status: found.statuses[i] ?? null, line: inboxRexLine(found.sessionNames.get(r.place.session) ?? "", found.windowNames.get(r.window) ?? "") }]));
       for (const session of hints.keys()) {
@@ -535,7 +552,7 @@ export function createInboxRex(options: InboxRexOptions) {
         }
       }
       if (found.here !== seen.here || found.away !== seen.away || (headless && !seen.answered)) moved = true;
-      seen = { here: found.here, away: found.away, answered: true, at };
+      seen = { here: found.here, away: found.away, answered: true, own: socketOwn(), at };
       // Rex answered with no app, or another one (it went and came back): a Show it refused may be offered again.
       for (const refused of [...refusedShow.keys()]) if (refused !== found.here && refused !== found.away) refusedShow.delete(refused);
     }
@@ -560,6 +577,8 @@ export function createInboxRex(options: InboxRexOptions) {
     const project = cleanName(request.project).slice(0, 128) || "Plannotator";
     const tab = cleanName(request.tab).slice(0, 128);
     let sent = false;
+    // Another account's Rex server: nothing is asked of it (an agent there would run as that account).
+    if (socketPath() !== null && !socketOwn()) return { opened: false, sent: false, shared: true };
     const result = await act(openTimeout, async (rex): Promise<InboxRexOpened> => {
       // On a Mac, Rex is here while its app is; a headless Rex needs none: the session and its tab are the server's.
       if (!headless && !(await within(openTimeout, appOf(rex)))) return { opened: false, sent: false };
@@ -635,8 +654,8 @@ export function createInboxRex(options: InboxRexOptions) {
   // The last read's answer stands until the next read replaces it (a list read after a quiet spell starts that read:
   // a time limit here would drop the line for that one read).
   const appHere = () => seen.here;
-  /** Rex is here: on a Mac its app is attached; a headless Rex's server answered. */
-  const rexHere = () => (headless ? seen.answered : seen.here !== null);
+  /** Rex is here, for starting agents: on a Mac its app is attached; a headless Rex's server answered and is this user's own. */
+  const rexHere = () => (headless ? seen.answered && seen.own : seen.here !== null);
 
   return {
     /**
@@ -778,12 +797,12 @@ export function createInboxRex(options: InboxRexOptions) {
      * or the app is gone. In the session, the pane itself gets the focus (best effort). `reach`: where the window the
      * click came from is (`showApps` says which apps are asked); only this computer's own app is brought to the front.
      */
-    async show(place: InboxPlace, reach: InboxRexReach = "here"): Promise<{ shown: boolean; refused?: true }> {
+    async show(place: InboxPlace, reach: InboxRexReach = "here"): Promise<{ shown: boolean; refused?: true; by?: string[] }> {
       const outcome = await act(showTimeout, async (rex) => {
         const window = await within(showTimeout, windowOf(rex, place));
         const apps = window ? showApps(await within(showTimeout, appsOf(rex)), reach) : [];
         const appKey = showKey(apps);
-        if (!window || !appKey) return { shown: false, app: null as string | null };
+        if (!window || !appKey) return { shown: false, app: null as string | null, by: [] as string[] };
         // Each app asked answers for itself (one of several may have Remote Control off, or not know the action).
         const went = await Promise.all(
           apps.map((app) =>
@@ -793,7 +812,7 @@ export function createInboxRex(options: InboxRexOptions) {
             ),
           ),
         );
-        if (!went.some(Boolean)) return { shown: false, app: appKey };
+        if (!went.some(Boolean)) return { shown: false, app: appKey, by: [] as string[] };
         // Rex's app went to the session but stays behind the person's browser: bring it to the front (Rex has no
         // action that only shows it; its toggle would hide it when it is in front already). Only this computer's own.
         const here = apps.length === 1 && apps[0]!.local ? apps[0]! : null;
@@ -805,22 +824,26 @@ export function createInboxRex(options: InboxRexOptions) {
         } catch {
           // Shown all the same.
         }
-        return { shown: true, app: appKey };
+        // The labels of the apps that went there (each app's own name for itself): a linked machine's Inbox brings its
+        // own Rex app to the front only when that app is one of them (`raise`).
+        return { shown: true, app: appKey, by: [...new Set(apps.filter((app, i) => went[i] && !app.local && app.label).map((app) => app.label))].slice(0, 8) };
       });
       if (outcome?.app) jumped(outcome.app, outcome.shown);
-      return outcome?.shown ? { shown: true } : outcome?.app ? { shown: false, refused: true } : { shown: false };
+      return outcome?.shown ? { shown: true, ...(outcome.by.length ? { by: outcome.by } : {}) } : outcome?.app ? { shown: false, refused: true } : { shown: false };
     },
 
     /**
      * Bring this computer's own Rex app to the front (a Mac's, attached over this computer's socket): after a linked
-     * machine's Rex said it showed a pane (inbox-rex-far.ts), since the app that went there is most likely this one.
+     * machine's Rex said apps named `labels` went to a pane (inbox-rex-far.ts), and only when this computer's own app
+     * is one of them by the name it gives itself (its `info.label`, the same on every server it attaches to). Another
+     * device's app went there (the person's iPad): this Mac's stays where it is.
      * Nothing where no app is this computer's (a headless Rex is not asked at all), or when Rex does not say its pid.
      */
-    async raise(): Promise<void> {
-      if (headless) return;
+    async raise(labels: readonly string[]): Promise<void> {
+      if (headless || labels.length === 0) return;
       await act(showTimeout, async (rex) => {
         const here = appHereOf(await within(showTimeout, appsOf(rex)));
-        if (here?.pid != null) raiseApp(here.pid);
+        if (here?.pid != null && here.label && labels.includes(here.label)) raiseApp(here.pid);
       });
     },
 

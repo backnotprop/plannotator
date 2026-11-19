@@ -5896,6 +5896,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        // From a linked machine: only for a press in a window there (its Inbox marks it), never an agent's bare call.
+        const rexDoor = fromDeviceDoor.get(req);
+        if (rexDoor && !rexDoor.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
         const session = typeof body.session === "string" ? body.session : "";
         const place = session ? rexHints([session]).get(session) : undefined;
         if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);

@@ -62,6 +62,10 @@ export interface FakeRexFarApp {
   actions?: string[];
   /** Its connection dropped without closing (`connection_state: lost`). */
   lost?: boolean;
+  /** By ssh: the account it came in as (default the app connection's uid). Another uid is another person's app. */
+  uid?: number;
+  /** The name the app gives itself (`info.label`). Default `far-<id>`. */
+  label?: string;
 }
 
 export interface FakeRexOptions {
@@ -187,10 +191,10 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
             clients: [
               ...farApps.map((far) => ({
                 client_id: farClient(far.id),
-                info: { kind: "app", platform: far.platform ?? "macos", name: "Rex.app", version: "0.1.0", label: `far-${far.id}` },
+                info: { kind: "app", platform: far.platform ?? "macos", name: "Rex.app", version: "0.1.0", label: far.label ?? `far-${far.id}` },
                 principal:
                   far.transport === "ssh"
-                    ? { kind: "peer", transport: "unix", display: `uid ${appUid}`, uid: appUid, gid: 20, pid: 4000 }
+                    ? { kind: "peer", transport: "unix", display: `uid ${far.uid ?? appUid}`, uid: far.uid ?? appUid, gid: 20, pid: 4000 }
                     : { kind: "tailscale", transport: "tailscale", display: "someone@example.com", user_id: "u1", login_name: "someone@example.com", node: `far-${far.id}` },
                 connected_at: "2026-11-18T08:00:00Z",
                 connection_state: far.lost ? "lost" : "connected",

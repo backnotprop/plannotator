@@ -61,6 +61,17 @@ export function inboxListingRunsSession(listing: string, session: string): boole
   return listingNamesSession(listing, session);
 }
 
+/**
+ * A command line up to its `--name` argument. Every command the Inbox builds names its session before the thread's
+ * name (`--session-id <id> --name <thread name> …`, `--resume <id>`), and `ps` gives one flat line, so what follows
+ * `--name` may be the person's own words: a thread named "--resume <another session's id>" must never read as that
+ * session's process.
+ */
+export function inboxCommandBeforeName(command: string): string {
+  const at = command.search(/(?:^|\s)'?--name'?(?:\s|$)/);
+  return at < 0 ? command : command.slice(0, at);
+}
+
 /** The rows of `listing` (`pid ppid command`) whose command line names `session`, by pid: its parent and command. */
 function sessionRows(listing: string, session: string): Map<number, { ppid: number; command: string }> {
   const found = new Map<number, { ppid: number; command: string }>();
@@ -71,7 +82,7 @@ function sessionRows(listing: string, session: string): Map<number, { ppid: numb
   const names = new RegExp(`(?:--session-id|--session|--resume)\\s+'?${id}(?![0-9A-Za-z_-])`, "i");
   for (const line of listing.split("\n")) {
     const row = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (row && names.test(row[3]!)) found.set(Number(row[1]), { ppid: Number(row[2]), command: row[3]! });
+    if (row && names.test(inboxCommandBeforeName(row[3]!))) found.set(Number(row[1]), { ppid: Number(row[2]), command: row[3]! });
   }
   return found;
 }

@@ -206,6 +206,12 @@ describe("Pi's launch host, against the fake pi", () => {
     // A reply to it once it ended: the same session.
     const again = await host.rexCommand!({ ...launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: env, resume: true });
     expect(again.ok && again.command).toContain(made.session);
+    // Started again, it keeps the name it has (the person may have renamed it in Pi).
+    expect(again.ok && again.command).not.toContain("--name");
+    // A Pi whose thread is named like another session's flag is never taken for that session's process.
+    const other = "99999999-2222-4333-8444-555555555555";
+    expect(piSessionProcesses(`  700     1 pi --mode rpc --session-id ${made.session} --name --session-id ${other}\n`, other)).toEqual([]);
+    expect(piSessionProcesses(`  700     1 pi --mode rpc --session-id ${made.session} --name --session-id ${other}\n`, made.session).map((p) => p.pid)).toEqual([700]);
   });
 
   test("Start in Rex: a Pi in its tab lists as `pi` alone, so the claim its extension wrote says which session it runs", async () => {

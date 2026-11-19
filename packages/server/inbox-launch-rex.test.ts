@@ -173,6 +173,21 @@ describe("Start in Rex", () => {
     expect(await launch.runOf(root.thread_id)).toMatchObject({ state: "starting", rex: { line: null, unavailable: true } });
   });
 
+  test("why Rex was not used is kept with the launch, so the line says the true thing: a Rex server that is not running (no app to open there), or one that is another account's", async () => {
+    const server = setup({ headless: true, answer: async () => ({ opened: false, sent: false }) });
+    const first = await server.send();
+    expect(first.root.launch).toMatchObject({ session_ref: "f2", rex: { unavailable: true, why: "server" } });
+    expect(await server.launch.runOf(first.root.thread_id)).toMatchObject({ state: "starting", rex: { unavailable: true, why: "server" } });
+    const shared = setup({ headless: true, answer: async () => ({ opened: false, sent: false, shared: true }) });
+    const second = await shared.send();
+    // It started in the background, once.
+    expect(shared.fake.calls).toEqual(["rexCommand new", "start Tidy"]);
+    expect(second.root.launch).toMatchObject({ rex: { unavailable: true, why: "shared" } });
+    // A Mac's line is as it was: no reason kept.
+    const mac = setup({ answer: async () => ({ opened: false, sent: false }) });
+    expect((await mac.send()).root.launch!.rex).toEqual({ unavailable: true });
+  });
+
   test("Rex said no to the tab (an error answer: it made nothing): the agent starts in the background, and the line says so", async () => {
     const { fake, send, launch } = setup({ answer: async () => ({ opened: false, sent: false, refused: true }) });
     const { root } = await send();
@@ -573,7 +588,7 @@ describe("Settings → Agents: Start new agents in", () => {
   test("a Rex with no app on its computer (a server used from elsewhere): the tailnet's Settings read says whether it is here too, so the row shows where the person is; a linked machine's or a phone's read never asks", async () => {
     const { launch, asked } = setup({ startIn: "inbox", headless: true });
     const read = (via: string, door?: { platform: string; window: boolean }) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via, door);
-    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
+    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch).toMatchObject({ rex_here: true, rex_headless: true });
     expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
     expect(asked.attached).toBe(2);
     expect(((await (await read("tailnet", { platform: "ios", window: false }))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
