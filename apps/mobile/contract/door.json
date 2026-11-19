@@ -345,6 +345,24 @@
       "relay": true
     },
     {
+      "name": "POST projects/:id/tags",
+      "method": "POST",
+      "path": "projects/{project}/tags",
+      "params": [
+        "project"
+      ],
+      "call": "postProjectTags",
+      "window": "/api/inbox/projects/{project}/tags",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "hold",
+      "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST tag-colours",
       "method": "POST",
       "path": "tag-colours",
