@@ -10,7 +10,7 @@ import { imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { useClearRows } from '../imageClear';
-import { PHONE_QUERY, useTouchPhone } from '../phone';
+import { PHONE_QUERY, usePhone, useTouchPhone } from '../phone';
 import { Tip } from './Tip';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
@@ -214,9 +214,11 @@ export function ImageAttachmentView({
   }, [natural, failed]);
 
   // A panorama fitted to the pane would be a sliver: Fit keeps a readable height (read from the left); a tall screenshot fits its width (read from the top).
+  // On a phone a panorama fits whole: its height there would crop most of it off the right, and a pinch reads it closer.
+  const phone = usePhone();
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
-  const fitAxis: FitAxis = wide ? 'height' : tall ? 'width' : 'contain';
+  const fitAxis: FitAxis = wide && !phone ? 'height' : tall ? 'width' : 'contain';
   // A touch phone draws on the picture full screen, zoomable, opening on the part the viewer showed.
   const touchPhone = useTouchPhone();
   const [drawFrom, setDrawFrom] = useState<NaturalBox | null>(null);
@@ -262,7 +264,7 @@ export function ImageAttachmentView({
 
   // A horizontal swipe on the image at Fit: more than 60 px across, less than 40 px up or down (a panorama pans instead).
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const swipes = onSwipe !== undefined && mode === 'fit' && !wide;
+  const swipes = onSwipe !== undefined && mode === 'fit' && !(wide && !phone);
 
   // A selected comment that carries a drawing shows the drawing over the image.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
