@@ -33,7 +33,7 @@ Use the CLI only when you have no such tool, or for what the tool does not do: `
 | Browse past plan decisions | `plannotator archive` |
 | Export or share a Guided Review | `plannotator guide export` / `plannotator guide share` |
 | Reopen or list live sessions | `plannotator sessions` |
-| Ask the person something they can answer later, without blocking | The `plannotator_inbox` tool when you have it, else the Inbox's MCP server (`plannotator inbox mcp`) |
+| Ask the person something they can answer later, without blocking | The `plannotator_inbox` tool when you have it, else the Inbox's MCP server (`plannotator inbox mcp`), once the person turned the Inbox on |
 | Have work run on its own on a schedule, reporting in the Inbox (a routine) | `plannotator routine --help` |
 
 ## Session model
@@ -185,14 +185,16 @@ plannotator inbox status [--json] | stop | restart
 
 The Plannotator Inbox is one local window per machine where you leave the person messages, `:::question` blocks they answer with a click, files to annotate and guided reviews. Nothing blocks: you send, then keep working or end your turn.
 
+The Inbox is off until the person turns it on, by running `plannotator inbox` in their own terminal. While it is off you have no `plannotator_inbox` tool and Inbox commands answer "The Plannotator Inbox is off on this computer": ask in the chat instead, and never turn it on yourself.
+
 - Use it for a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary with its pictures in place, `![alt](path)` in the body where you write about each, and the files to look at in `attachments`), or when they ask. One thread per work stream, unless the person says otherwise. A decision you sent to the Inbox stays there: when the person writes in the chat, say there what waits (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask. Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
 - When the person picks between looks (designs, variants, today's screen against a redesign), write about the options inside the question, not above it: each option is a picture choice, `- [ ] A · Label — ![alt](path) what it means`, its own picture inside it and what you would say about it as its description; a choice with nothing to show (both, none yet) stays plain text. When another agent designs the options for you, ask it for, per option: a label, one screenshot, one HTML file that shows only that option, what it means, pros and cons; when it returns a report, send its options as one question as above, not the report.
 - If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. When send_message says the person's reply arrives in this session by itself, end your turn instead of waiting; otherwise go on with your work and read the thread later with read_thread.
 - For many Inbox calls in a row (a tidy above all), `plannotator inbox call` runs any action from a script and prints its result as JSON; `plannotator inbox --help` says how.
 - To put a thread's decisions on its pull request, run `plannotator inbox export-decisions --thread <id> --pr <ref>`: updated in place when run again.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
-- Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
-- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
+- Never run bare `plannotator inbox`, `plannotator inbox on` or `off` yourself: only the person turns the Inbox on or off. Once it is on, calls start a stopped Inbox in the background. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
+- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address. While it is off, tell them to run `plannotator inbox` themselves.
 
 ## plannotator t3
 

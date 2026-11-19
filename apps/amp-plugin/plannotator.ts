@@ -181,7 +181,8 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
     },
     async (ctx) => {
       // Starts a stopped Inbox in the background, opens it and prints its URL; returns at once.
-      const result = await runPlannotator(amp, ctx, ["inbox", "--open"]);
+      // The person typed /plannotator-inbox: this run turns the Inbox on (PLANNOTATOR_INBOX_SLASH_COMMAND, inbox-on-contract.ts).
+      const result = await runPlannotator(amp, ctx, ["inbox", "--open"], { env: { PLANNOTATOR_INBOX_SLASH_COMMAND: "1" } });
       await ctx.ui.notify(inboxOpenedMessage(result));
     },
   );
@@ -490,7 +491,7 @@ async function runPlannotator(
   amp: PluginAPI,
   ctx: CommandContext,
   args: string[],
-  options: { stdin?: string; runtime?: PlannotatorRuntime } = {},
+  options: { stdin?: string; runtime?: PlannotatorRuntime; env?: Record<string, string> } = {},
 ): Promise<RunResult> {
   const cwd = await resolveCwd(ctx);
   const runtime = options.runtime ?? await getPlannotatorRuntime();
@@ -498,7 +499,7 @@ async function runPlannotator(
     ? join(tmpdir(), `plannotator-amp-${process.pid}-${Date.now()}-${randomUUID()}.jsonl`)
     : null;
   const command = [...runtime.command, ...args];
-  const env = buildEnv(buildPlannotatorEnv(cwd, readyFile));
+  const env = buildEnv({ ...buildPlannotatorEnv(cwd, readyFile), ...options.env });
 
   let proc: Bun.Subprocess<"ignore" | "pipe", "pipe", "pipe">;
   try {

@@ -29,7 +29,8 @@ const GUIDE = [
 ].join("\n");
 
 // The CLI waits up to 20 s for an Inbox it starts; never wait much longer.
-const result = runPlannotator(["inbox", "--open"], { timeout: 30_000 });
+// The person typed /plannotator-inbox: this run turns the Inbox on (PLANNOTATOR_INBOX_SLASH_COMMAND, inbox-on-contract.ts).
+const result = runPlannotator(["inbox", "--open"], { timeout: 30_000, env: { PLANNOTATOR_INBOX_SLASH_COMMAND: "1" } });
 
 if (result.error || result.status !== 0) {
   exitWithFailure(result, "plannotator inbox --open");

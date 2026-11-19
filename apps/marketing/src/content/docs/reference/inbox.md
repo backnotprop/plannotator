@@ -18,7 +18,11 @@ The Inbox ships in the `plannotator` binary. Install Plannotator as described in
 plannotator inbox
 ```
 
-This starts the Inbox and opens it in your browser. If it is already running, the command opens the running one. Other forms:
+This starts the Inbox and opens it in your browser. If it is already running, the command opens the running one.
+
+Installing Plannotator does not turn the Inbox on. Running `plannotator inbox` yourself (or typing `/plannotator-inbox` in your agent) is what turns it on for this computer. Until then agents get no inbox tool and nothing starts the Inbox. To turn it off again, use **Turn the Inbox off** in the Inbox's Settings → General, the Plannotator Inbox switch in plan review's Settings, or `plannotator inbox off`. Turning it off stops the Inbox and removes the notes Plannotator added to your agents' instructions, except notes you edited.
+
+Other forms:
 
 | Command | What it does |
 |---------|--------------|
@@ -209,7 +213,7 @@ Before any agent has written, the Inbox window shows one next step for this comp
 
 ### Claude Code
 
-With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code, also before you ever ran the Inbox: the first time Claude uses it, it starts the Inbox in the background. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing; **Send now** puts it into the turn Claude is in instead. The thread then shows "Delivered to Claude Code".
+With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code once you turned the Inbox on by running `plannotator inbox` yourself; until then Claude gets no inbox tool and nothing starts the Inbox. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing; **Send now** puts it into the turn Claude is in instead. The thread then shows "Delivered to Claude Code".
 
 In `claude -p` and other SDK runs the mod adds the tool too (Plannotator 0.28.65 or newer), but nothing wakes the run: the agent reads your reply later with `read_thread`. The chat panel of Claude Code's VS Code extension and Claude threads in T3 Code get the tool and the wake. On an older Plannotator, use the MCP server in `claude -p` (see [Other agents](#other-agents)).
 

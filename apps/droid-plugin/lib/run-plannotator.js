@@ -45,6 +45,7 @@ function runPlannotator(args, options = {}) {
     ...process.env,
     PLANNOTATOR_CWD: process.cwd(),
     PLANNOTATOR_ORIGIN: "droid",
+    ...(options.env || {}),
   };
 
   const timeout = options.timeout;
