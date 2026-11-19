@@ -18,7 +18,7 @@ import { CaptureUpdateAction, Excalidraw, MainMenu, WelcomeScreen, convertToExca
 import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import excalidrawCss from '@excalidraw/excalidraw/index.css?inline';
-import { authorWords, type CanvasLogEntry } from '@plannotator/shared/inbox/canvas/changes';
+import { authorWords } from '@plannotator/shared/inbox/canvas/changes';
 import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
 import { boxOf, boxesOverlap, unionBox, type Box, type CanvasElement, type CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
 import boardCss from './canvas.css?inline';
@@ -59,9 +59,9 @@ const sig = (el: { version?: number; versionNonce?: number; isDeleted?: boolean 
  * not measured again here: the drawing fonts may not be in yet, and text measured with a stand-in face is cut off
  * when the real one draws it (the server sizes an agent's text generously instead, apply.ts).
  */
-function restored(elements: readonly CanvasElement[]): ExcalidrawElement[] {
+function restored(elements: readonly CanvasElement[], context: readonly { id: string }[] = []): ExcalidrawElement[] {
   const out = restoreElements(asExcalidraw(elements), null, { refreshDimensions: false, repairBindings: true }) as ExcalidrawElement[];
-  const byId = new Map(out.map((e) => [e.id, e]));
+  const byId = new Map<string, ExcalidrawElement>([...(context as ExcalidrawElement[]), ...out].map((e) => [e.id, e]));
   return out.map((el) => {
     // A label an agent placed was sized by guess on the server: now that it is measured, centre it again.
     if (el.type !== 'text' || !el.containerId || !(el.customData as { by?: string } | undefined)?.by) return el;
@@ -173,15 +173,7 @@ export async function runCanvasJob(job: CanvasJob): Promise<void> {
   }
 }
 
-function changeWords(entries: CanvasLogEntry[]): { who: string; text: string } | null {
-  const mine = entries.filter((e) => e.by.kind === 'agent');
-  if (mine.length === 0) return null;
-  const who = authorWords(mine[mine.length - 1]!.by);
-  const count = { added: 0, changed: 0, removed: 0 };
-  for (const entry of mine) for (const change of entry.changes) count[change.op]++;
-  const parts = [count.added ? `added ${count.added}` : '', count.changed ? `changed ${count.changed}` : '', count.removed ? `removed ${count.removed}` : ''].filter(Boolean);
-  return { who, text: parts.join(', ') || 'changed the canvas' };
-}
+const NUMBER = new Intl.NumberFormat('en-US');
 
 export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords, onSend }: CanvasBoardProps) {
   useLayoutEffect(withStyles, []);
@@ -194,7 +186,11 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   const [empty, setEmpty] = useState(true);
   const [words, setWords] = useState('');
   const [state, setState] = useState<{ text: string; bad?: boolean } | null>(null);
-  const [note, setNote] = useState<{ who: string; text: string; ids: string[]; rev: number } | null>(null);
+  const [note, setNote] = useState<{ who: string; added: number; changed: number; removed: number; ids: string[]; rev: number } | null>(null);
+  /** The selection the person was writing about was removed by someone else. */
+  const [lost, setLost] = useState(false);
+  const pickedSig = useRef('');
+  const pickedBefore = useRef(0);
   /** Sent, and no change from the agent yet: the canvas says it waits for one. */
   const [waiting, setWaiting] = useState(false);
   // The reply box's words arrive: the bar takes them while it is still empty.
@@ -208,7 +204,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   }, [words]);
   useEffect(() => {
     if (!waiting) return;
-    const timer = setTimeout(() => setWaiting(false), 10 * 60_000);
+    const timer = setTimeout(() => setWaiting(false), 3 * 60_000);
     return () => clearTimeout(timer);
   }, [waiting]);
   const [flashes, setFlashes] = useState<{ key: string; box: Box }[]>([]);
@@ -219,6 +215,13 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   const synced = useRef(new Map<string, string>());
   const sentFiles = useRef(new Set<string>());
   const fetching = useRef(new Set<string>());
+  /** Something of the person's is not in the Inbox yet (a save pending, in flight, or failed). */
+  const unsaved = useRef(false);
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const threadGone = useRef(false);
+  const [gone, setGone] = useState(false);
+  /** When the person last touched the canvas: an agent's change never moves the view under their hands. */
+  const lastInput = useRef(0);
   const lastVersion = useRef('');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pictureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -228,25 +231,25 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   const live = useRef(true);
 
   /** Take a scene from the Inbox into the editor, keeping what the person changed since the last save. */
-  const take = useCallback((scene: CanvasScene): void => {
+  const take = useCallback((scene: CanvasScene): Set<string> => {
+    const taken = new Set<string>();
     const editor = api.current;
-    if (!editor) return;
+    if (!editor) return taken;
     const local = editor.getSceneElementsIncludingDeleted();
     const mine = new Map(local.map((e) => [e.id, e]));
     const editing = editor.getAppState().editingTextElement?.id ?? null;
-    const merged: CanvasElement[] = [];
-    const taken = new Set<string>();
+    const order: { id: string; remote: CanvasElement | null }[] = [];
     const seen = new Set<string>();
     for (const remote of scene.elements) {
       seen.add(remote.id);
       const here = mine.get(remote.id);
       const dirty = !!here && synced.current.get(here.id) !== sig(here);
       const theirs = !here || (!dirty && here.id !== editing && sig(here) !== sig(remote) && (remote.version ?? 0) >= here.version) || (remote.version ?? 0) > here.version;
-      merged.push(theirs ? remote : (here as unknown as CanvasElement));
+      order.push({ id: remote.id, remote: theirs ? remote : null });
       if (theirs) taken.add(remote.id);
       synced.current.set(remote.id, sig(remote));
     }
-    for (const here of local) if (!seen.has(here.id)) merged.push(here as unknown as CanvasElement);
+    for (const here of local) if (!seen.has(here.id)) order.push({ id: here.id, remote: null });
     const files = Object.values(scene.files as Record<string, BinaryFileData>).filter((file) => file && !sentFiles.current.has(file.id));
     for (const file of files) sentFiles.current.add(file.id);
     if (files.length > 0) editor.addFiles(files);
@@ -265,12 +268,43 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         .catch(() => {})
         .finally(() => fetching.current.delete(id));
     }
-    const next = restored(merged);
+    // Nothing of theirs to take: the editor is left exactly as it is.
+    if (taken.size === 0) return taken;
+    // What is not taken is handed back as the very same objects the editor holds (a stroke being drawn, a text being
+    // typed go on untouched); only what is taken is made new.
+    const fresh = new Map(restored(order.filter((o) => o.remote).map((o) => o.remote!), local).map((e) => [e.id, e]));
+    const next = order.map((o) => fresh.get(o.id) ?? mine.get(o.id)).filter((e): e is ExcalidrawElement => !!e);
     lastVersion.current = '';
     editor.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
     // What the editor re-stamped while taking it in is the Inbox's change still, not the person's.
     for (const el of editor.getSceneElementsIncludingDeleted()) if (taken.has(el.id)) synced.current.set(el.id, sig(el));
+    return taken;
   }, [threadId]);
+
+  /**
+   * While a pointer is down (a stroke, a drag) nothing from the Inbox touches the editor: the newest scene waits and
+   * is taken when the pointer lifts.
+   */
+  const waitingScene = useRef<{ scene: CanvasScene; then?: (taken: Set<string>) => void } | null>(null);
+  const takeWhenFree = useCallback(
+    (scene: CanvasScene, then?: (taken: Set<string>) => void) => {
+      if (pointerDown.current) {
+        const before = waitingScene.current?.then;
+        waitingScene.current = { scene, then: before && then ? (taken) => (before(taken), then(taken)) : then ?? before };
+        return;
+      }
+      const taken = take(scene);
+      then?.(taken);
+    },
+    [take],
+  );
+  const pointerLifted = useCallback(() => {
+    const held = waitingScene.current;
+    if (!held) return;
+    waitingScene.current = null;
+    const taken = take(held.scene);
+    held.then?.(taken);
+  }, [take]);
 
   const sceneNow = (): CanvasScene | null => {
     const editor = api.current;
@@ -316,13 +350,27 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         for (const id of Object.keys(scene.files)) sentFiles.current.add(id);
         for (const id of gone) synced.current.delete(id);
         for (const [id, value] of sent) synced.current.set(id, value);
-        if (answer.scene) take(answer.scene);
+        if (answer.scene) takeWhenFree(answer.scene);
         rev.current = answer.rev;
+        unsaved.current = again.current;
         if (live.current) setState((now) => (now?.bad ? null : now));
         storePicture();
       })
-      .catch(() => {
-        if (live.current) setState({ text: 'Not saved yet. It will try again as you draw.', bad: true });
+      .catch((error: unknown) => {
+        // The thread is gone (deleted in another window): there is nowhere to save to, and trying again will not help.
+        const gone = (error as { status?: number } | null)?.status === 404;
+        threadGone.current = gone;
+        if (live.current) {
+          setState({ text: gone ? 'Thread deleted' : 'Not saved', bad: true });
+          if (gone) setGone(true);
+        }
+        // Tried again by itself: a few seconds on, and at once when the network is back.
+        if (!gone && live.current && !retry.current) {
+          retry.current = setTimeout(() => {
+            retry.current = null;
+            void save();
+          }, 4000);
+        }
       })
       .finally(() => {
         saving.current = null;
@@ -338,6 +386,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   }, [threadId, take, storePicture]);
 
   const saveSoon = useCallback(() => {
+    unsaved.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
@@ -383,30 +432,35 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     openBoards.set(threadId, () => ({ elements: api.current?.getSceneElements() ?? [], files: api.current?.getFiles() ?? {} }));
     const leaving = () => {
       const scene = sceneNow();
-      if (scene && saveTimer.current) // Uncompressed: compressing waits, and a closing page's request must start at once. Only a scene under the
+      if (scene && unsaved.current && !threadGone.current) // Uncompressed: compressing waits, and a closing page's request must start at once. Only a scene under the
       // browser's 64 KB limit for such a request gets out this way; a larger one relies on the save made as the tab was put away.
       void canvasApi.save(threadId, scene, rev.current, { keepalive: true, plain: true }).catch(() => {});
     };
     // A tab put away saves at once (while the page can still wait for the answer); a page going away sends what is left.
     const hidden = () => {
-      if (document.visibilityState === 'hidden' && saveTimer.current) {
-        clearTimeout(saveTimer.current);
+      if (document.visibilityState === 'hidden' && unsaved.current && !threadGone.current) {
+        if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = null;
         const scene = sceneNow();
         if (scene) void canvasApi.save(threadId, scene, rev.current, { keepalive: true }).then((answer) => (rev.current = Math.max(rev.current, answer.rev))).catch(() => {});
       }
     };
+    const online = () => {
+      if (unsaved.current && !threadGone.current) void save();
+    };
     document.addEventListener('visibilitychange', hidden);
     window.addEventListener('pagehide', leaving);
+    window.addEventListener('online', online);
     return () => {
       document.removeEventListener('visibilitychange', hidden);
       window.removeEventListener('pagehide', leaving);
+      window.removeEventListener('online', online);
       openBoards.delete(threadId);
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = null;
-        void save();
-      }
+      if (retry.current) clearTimeout(retry.current);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      // Closing the canvas saves whatever is not saved, a save that failed earlier included.
+      if (unsaved.current && !threadGone.current) void save();
       if (pictureTimer.current) clearTimeout(pictureTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -419,7 +473,8 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const target = event.target instanceof Element ? event.target : null;
-      const here = !target || target === document.body || target === document.documentElement || !target.isConnected || !!root.current?.contains(target) || !!target.closest('.excalidraw');
+      // Anywhere in the canvas's layer (its header too: focus starts on its Thread button), or nowhere in particular.
+      const here = !target || target === document.body || target === document.documentElement || !target.isConnected || !!root.current?.contains(target) || !!target.closest('.excalidraw, [data-canvas-layer]');
       if (here) event.preventDefault();
     };
     window.addEventListener('keydown', onKey, true);
@@ -427,7 +482,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   }, []);
 
   /** Show the person what changed: a wash over each changed thing, and the view brought to them when they are out of sight. */
-  const reveal = useCallback((ids: string[], scroll: boolean) => {
+  const reveal = useCallback((ids: string[], scroll: boolean | 'ask') => {
     const editor = api.current;
     const host = stage.current;
     if (!editor || !host || ids.length === 0) return;
@@ -459,49 +514,124 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       const b = sceneCoordsToViewportCoords({ sceneX: box.x + box.w, sceneY: box.y + box.h }, view);
       return a.x >= rect.left && a.y >= rect.top + 56 && b.x <= rect.right && b.y <= rect.bottom - 56;
     });
-    if (scroll && !inView) {
-      editor.scrollToContent(changed, { fitToViewport: true, viewportZoomFactor: 0.75, maxZoom: 1, animate: true, duration: 350 });
-      setTimeout(show, 420);
+    const still = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const around = unionBox(asCanvas(changed).map(boxOf));
+    if (scroll === 'ask') {
+      // The person pressed Show: everything that changed, in view.
+      editor.scrollToContent(changed, { fitToViewport: true, viewportZoomFactor: 0.75, maxZoom: 1, animate: !still, duration: 350 });
+      setTimeout(show, still ? 0 : 420);
+    } else if (scroll && !inView && around.w * view.zoom.value <= rect.width * 0.9 && around.h * view.zoom.value <= rect.height * 0.8) {
+      // By itself the view only slides, at the person's own zoom, and only to something that fits in it. Anything
+      // larger or farther waits for Show: an agent's change never zooms the person out.
+      editor.scrollToContent(changed, { fitToViewport: false, animate: !still, duration: 350 });
+      setTimeout(show, still ? 0 : 420);
     } else show();
   }, []);
 
-  // An agent's change, or another window's save: take it in.
+  // An agent's change, or another window's save: take it in. One read at a time, however many frames a burst holds.
   useEffect(() => {
-    const onFrame = (frame: CanvasFrame) => {
-      if (frame.thread_id !== threadId || frame.window === CANVAS_WINDOW || frame.rev <= rev.current) return;
+    let reading = false;
+    let more = false;
+    const refresh = () => {
+      if (reading) {
+        more = true;
+        return;
+      }
+      reading = true;
       const since = rev.current;
       void canvasApi
         .read(threadId, since, undefined, true)
         .then((read) => {
           canvasLooked(threadId);
           if (!live.current || read.rev <= rev.current) return;
-          take(read.scene);
           rev.current = read.rev;
-          setEmpty(!read.scene.elements.some((e) => !e.isDeleted));
-          const said = changeWords(read.changes);
-          if (!said) return;
-          const ids = read.changes.filter((e) => e.by.kind === 'agent').flatMap((e) => e.changes.filter((c) => c.op !== 'removed').flatMap((c) => c.elements));
-          setWaiting(false);
-          setNote({ ...said, ids, rev: Math.max(...read.changes.filter((e) => e.by.kind === 'agent').map((e) => e.rev)) });
-          // Mid-stroke the view stays where the person has it; the note's Show brings them there.
-          reveal(ids, !pointerDown.current);
-          storePicture();
+          takeWhenFree(read.scene, (taken) => {
+            setEmpty(!read.scene.elements.some((e) => !e.isDeleted));
+            const agents = read.changes.filter((e) => e.by.kind === 'agent');
+            if (agents.length === 0) return;
+            // Only what this window took counts: a thing the person was dragging stays theirs and is not called changed.
+            const count = { added: 0, changed: 0, removed: 0 };
+            const ids: string[] = [];
+            const now = new Map((api.current?.getSceneElementsIncludingDeleted() ?? []).map((e) => [e.id, e]));
+            for (const entry of agents) {
+              for (const change of entry.changes) {
+                const mine = change.elements.filter((id) => taken.has(id));
+                if (mine.length === 0) continue;
+                count[change.op]++;
+                if (change.op !== 'removed') ids.push(...mine.filter((id) => !now.get(id)?.isDeleted));
+              }
+            }
+            // The selection the person was writing about is gone: the bar must not fall back to the whole canvas.
+            const selectedNow = api.current?.getAppState().selectedElementIds ?? {};
+            if (pickedBefore.current > 0 && !Object.keys(selectedNow).some((id) => now.get(id) && !now.get(id)!.isDeleted)) setLost(true);
+            setWaiting(false);
+            if (count.added + count.changed + count.removed === 0) return;
+            const who = authorWords(agents[agents.length - 1]!.by);
+            // The pill adds up until it is dismissed; Undo is for the last change, Show for all of them.
+            setNote((before) => ({
+              who,
+              added: (before?.added ?? 0) + count.added,
+              changed: (before?.changed ?? 0) + count.changed,
+              removed: (before?.removed ?? 0) + count.removed,
+              ids: [...new Set([...(before?.ids ?? []), ...ids])].slice(-400),
+              rev: Math.max(...agents.map((e) => e.rev)),
+            }));
+            // The view moves by itself only when the person's hands are off the canvas for a few seconds.
+            reveal(ids, Date.now() - lastInput.current > 3000 && !pointerDown.current);
+            storePicture();
+          });
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          reading = false;
+          if (more) {
+            more = false;
+            refresh();
+          }
+        });
+    };
+    const onFrame = (frame: CanvasFrame) => {
+      if (frame.thread_id !== threadId || frame.window === CANVAS_WINDOW) return;
+      // An agent tried and the Inbox refused it: nothing landed, and the canvas stops saying one is on its way.
+      if (frame.refused) {
+        setWaiting(false);
+        setState({ text: `${frame.by ?? 'Agent'}: no change` });
+        return;
+      }
+      if (frame.rev <= rev.current) return;
+      refresh();
     };
     return subscribeCanvasFrames(onFrame);
-  }, [threadId, take, reveal, storePicture]);
+  }, [threadId, takeWhenFree, reveal, storePicture]);
 
   const onChange = useCallback(
     (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
-      const count = elements.reduce((n, e) => n + (!e.isDeleted && appState.selectedElementIds[e.id] ? 1 : 0), 0);
-      setSelected(count);
+      const picked = elements.filter((e) => !e.isDeleted && appState.selectedElementIds[e.id]);
+      // Things, as a person counts them (a box and its label are one), read again only when the selection changes.
+      const pickedKey = picked.length === 0 ? '' : `${picked.length}:${picked[0]!.id}:${picked[picked.length - 1]!.id}`;
+      if (pickedKey !== pickedSig.current) {
+        pickedSig.current = pickedKey;
+        const count = picked.length === 0 ? 0 : picked.length > 3000 ? picked.length : thingsOf({ type: 'excalidraw', version: 2, source: '', elements: asCanvas(picked), appState: {}, files: {} }).length;
+        pickedBefore.current = count;
+        setSelected(count);
+        if (count > 0) setLost(false);
+      }
       // Where the view is, for a browser test to find a thing on screen: x = (sceneX + scrollX) * zoom, from the stage's corner.
       stage.current?.setAttribute('data-view', `${Math.round(appState.scrollX)},${Math.round(appState.scrollY)},${appState.zoom.value}`);
       const version = `${getSceneVersion(elements)}:${elements.length}:${appState.viewBackgroundColor}:${Object.keys(files).length}`;
       if (version === lastVersion.current) return;
       lastVersion.current = version;
-      setEmpty(!elements.some((e) => !e.isDeleted));
+      // A file that is not a picture (a renamed .png): Excalidraw leaves a grey box. It is taken out and said.
+      const broken = elements.filter((e) => !e.isDeleted && e.type === 'image' && (e as { status?: string }).status === 'error');
+      if (broken.length > 0) {
+        const ids = new Set(broken.map((e) => e.id));
+        setState({ text: 'Not a picture', bad: true });
+        setTimeout(() => api.current?.updateScene({ elements: api.current.getSceneElementsIncludingDeleted().map((e) => (ids.has(e.id) ? { ...e, isDeleted: true, version: e.version + 1 } : e)), captureUpdate: CaptureUpdateAction.NEVER }), 0);
+      }
+      // Nothing to send: no element, or only a speck (a stray tap of the pen).
+      const shown = asCanvas(elements.filter((e) => !e.isDeleted));
+      const all = unionBox(shown.map(boxOf));
+      setEmpty(shown.length === 0 || (shown.every((e) => e.type === 'freedraw') && all.w < 4 && all.h < 4));
       // The scene as the Inbox has it (just read, or just taken from it): nothing of the person's to save.
       if (elements.length === synced.current.size && elements.every((e) => synced.current.get(e.id) === sig(e)) && Object.keys(files).every((id) => sentFiles.current.has(id))) return;
       saveSoon();
@@ -514,21 +644,17 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     try {
       await flush();
       const answer = await canvasApi.undo(threadId, change);
-      take(answer.scene);
+      takeWhenFree(answer.scene);
       rev.current = answer.rev;
       setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
       setNote(null);
       const kept = answer.kept ?? [];
       setState({
-        text: answer.already
-          ? 'That change was already undone.'
-          : kept.length > 0
-            ? `Undone, except what you changed since: ${kept.slice(0, 3).join(', ')}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}.`
-            : `Undone. ${agent ?? 'The agent'} is told on its next look.`,
+        text: answer.already ? 'Already undone' : kept.length > 0 ? `Undone, kept: ${kept.slice(0, 2).join(', ')}${kept.length > 2 ? ` +${kept.length - 2}` : ''}` : 'Undone',
       });
       storePicture();
     } catch {
-      setState({ text: 'That change can no longer be undone.', bad: true });
+      setState({ text: "Can't undo", bad: true });
     }
   };
 
@@ -620,7 +746,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       setNote(null);
       setWaiting(true);
     } catch {
-      setState({ text: 'That did not send. Try again.', bad: true });
+      setState({ text: 'Not sent', bad: true });
     } finally {
       setBusy(false);
     }
@@ -630,7 +756,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     return (
       <div className="ibc-root">
         <div className="ibc-wait" role="status">
-          The canvas could not be read. Close it and open it again.
+          Canvas not loaded
         </div>
       </div>
     );
@@ -645,18 +771,32 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       <div
         className="ibc-stage"
         ref={stage}
+        onKeyDownCapture={() => {
+          lastInput.current = Date.now();
+        }}
+        onWheelCapture={() => {
+          lastInput.current = Date.now();
+        }}
         onPointerDownCapture={(event) => {
           pointerDown.current = true;
+          lastInput.current = Date.now();
           if (event.button === 0 && event.target instanceof HTMLCanvasElement) overFrame(event.clientX, event.clientY);
         }}
         onPointerUpCapture={() => {
           pointerDown.current = false;
-          // After Excalidraw has finished the press.
-          setTimeout(releaseFrames, 0);
+          lastInput.current = Date.now();
+          // After Excalidraw has finished the press: the frame is put back, and what arrived meanwhile is taken.
+          setTimeout(() => {
+            releaseFrames();
+            pointerLifted();
+          }, 0);
         }}
         onPointerCancelCapture={() => {
           pointerDown.current = false;
-          setTimeout(releaseFrames, 0);
+          setTimeout(() => {
+            releaseFrames();
+            pointerLifted();
+          }, 0);
         }}
       >
         {!initial ? (
@@ -666,6 +806,13 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
             <Excalidraw
               excalidrawAPI={(next) => {
                 api.current = next;
+                // The one face this build does not ship (Xiaolai, 12 MB of Chinese and Japanese handwriting) is taken off the
+                // page's font list, so those characters draw in the system's face and nothing asks for a file that is not there.
+                const dropUnshipped = () => {
+                  for (const face of [...document.fonts]) if (face.family.replace(/["']/g, '') === 'Xiaolai') document.fonts.delete(face);
+                };
+                dropUnshipped();
+                setTimeout(dropUnshipped, 600);
                 // The whole drawing in view, never larger than life.
                 setTimeout(() => next.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.85, maxZoom: 1, animate: false }), 0);
                 try {
@@ -694,7 +841,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
                 <WelcomeScreen.Hints.ToolbarHint />
                 <WelcomeScreen.Hints.MenuHint />
                 <WelcomeScreen.Center>
-                  <WelcomeScreen.Center.Heading>Sketch it, then send it with your reply. Or select a part and say what should change.</WelcomeScreen.Center.Heading>
+                  <WelcomeScreen.Center.Heading>Sketch, then Send. Or select a part.</WelcomeScreen.Center.Heading>
                 </WelcomeScreen.Center>
               </WelcomeScreen>
             </Excalidraw>
@@ -704,24 +851,25 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
           <span key={flash.key} className="ibc-flash" aria-hidden="true" style={{ left: flash.box.x, top: flash.box.y, width: flash.box.w, height: flash.box.h }} />
         ))}
         {waiting && !note && (
-          <div className="ibc-note ibc-waiting" role="status" data-canvas-waiting="">
+          <div className="ibc-note ibc-waiting" role="status" data-canvas-waiting="" aria-label={`Sent to ${agent ?? 'the agent'}`}>
             <span className="ibc-dots" aria-hidden="true">
               <i />
               <i />
               <i />
             </span>
-            <span className="ibc-note-text">
-              Sent to <b>{agent ?? 'the agent'}</b>. Its change lands here.
-            </span>
+            <b className="ibc-who" title={agent ?? undefined}>
+              {agent ?? 'Sent'}
+            </b>
           </div>
         )}
         {note && (
           <div className="ibc-note" role="status" data-canvas-note="">
-            <span className="ibc-note-text">
-              <b>{note.who}</b> {note.text}
-            </span>
+            <b className="ibc-who" title={note.who}>
+              {note.who}
+            </b>
+            <span className="ibc-counts">{[note.added ? `added ${NUMBER.format(note.added)}` : '', note.changed ? `changed ${NUMBER.format(note.changed)}` : '', note.removed ? `removed ${NUMBER.format(note.removed)}` : ''].filter(Boolean).join(', ')}</span>
             {note.ids.length > 0 && (
-              <button type="button" onClick={() => reveal(note.ids, true)}>
+              <button type="button" onClick={() => reveal(note.ids, 'ask')}>
                 Show
               </button>
             )}
@@ -737,24 +885,34 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         )}
       </div>
       <form className="ibc-bar" onSubmit={send} data-canvas-bar="">
-        <span className="ibc-what" data-on={selected > 0 ? '' : undefined} data-canvas-what="">
-          {selected > 0 ? `${selected} selected` : 'Whole canvas'}
+        <span className="ibc-what" data-on={selected > 0 ? '' : undefined} data-lost={lost && selected === 0 ? '' : undefined} data-canvas-what="" aria-live="polite">
+          {selected > 0 ? `${NUMBER.format(selected)} selected` : lost ? 'Selection removed' : 'Whole canvas'}
         </span>
-        <input
+        <textarea
           className="ibc-words"
-          type="text"
+          rows={1}
           value={words}
-          onChange={(event) => setWords(event.target.value)}
-          placeholder={selected > 0 ? 'What should change here?' : 'Add a note (optional)'}
-          aria-label={selected > 0 ? 'What should change in the selection' : 'Words to send with the canvas'}
-          enterKeyHint="send"
+          maxLength={20000}
+          onChange={(event) => {
+            setWords(event.target.value);
+            if (!event.target.value) setLost(false);
+          }}
+          ref={(el) => {
+            // As tall as its words, up to a few lines.
+            if (!el) return;
+            el.style.height = 'auto';
+            el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+          }}
+          placeholder={selected > 0 ? 'What should change?' : 'Note (optional)'}
+          aria-label={selected > 0 ? 'What should change in the selection' : 'Note to send with the canvas'}
         />
         {state && (
-          <span className="ibc-state" role="status" data-bad={state.bad ? '' : undefined}>
+          <span className="ibc-state" role="status" data-bad={state.bad ? '' : undefined} title={state.text}>
             {state.text}
           </span>
         )}
-        <button type="submit" className="ibc-send" disabled={busy || empty || !initial} data-canvas-send="">
+        {/* A request written about a selection that was then removed is not sent about the whole canvas instead. */}
+        <button type="submit" className="ibc-send" disabled={busy || empty || !initial || gone || (lost && selected === 0 && words.trim() !== '')} data-canvas-send="">
           {selected > 0 ? 'Send selection' : 'Send sketch'}
         </button>
       </form>

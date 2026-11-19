@@ -56,3 +56,24 @@
 @media (prefers-reduced-motion: reduce) { .ibc-dots i { animation: none; opacity: 0.7; } }
 /* The layer is the whole window: no pane corner to follow. */
 .ibc-root { border-radius: 0; }
+
+/* Break pass. The pill and the chip: a long agent name gives way (its full text is its title); the counts never do. */
+.ibc-note { touch-action: none; top: auto; bottom: 22px; }
+.ibc-who { min-width: 0; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ibc-counts { flex: none; white-space: nowrap; }
+.ibc-note button { flex: none; }
+.ibc-bar { touch-action: none; align-items: flex-end; }
+.ibc-what, .ibc-state, .ibc-send { margin-bottom: 0; align-self: center; }
+.ibc-what[data-lost] { background: color-mix(in oklab, var(--destructive, #c0392b) 14%, transparent); color: var(--destructive, #c0392b); }
+textarea.ibc-words { height: auto; min-height: 36px; max-height: 132px; padding: 8px 12px; line-height: 20px; resize: none; overflow-y: auto; display: block; }
+.ibc-state { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 767px) {
+  /* The words get the row; what goes and the state sit above them. */
+  .ibc-bar { flex-wrap: wrap; }
+  .ibc-what:not([data-on]):not([data-lost]) { display: none; }
+  .ibc-what, .ibc-state { order: -1; display: inline-flex; }
+  textarea.ibc-words { flex: 1 1 60%; min-height: 44px; padding: 11px 12px; font-size: 16px; }
+  /* Under Excalidraw's own toolbar, over the canvas; its buttons are finger-sized. */
+  .ibc-note { top: 64px; bottom: auto; padding: 4px 6px 4px 12px; }
+  .ibc-note button { min-width: 44px; min-height: 44px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; }
+}

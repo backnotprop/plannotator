@@ -16,6 +16,8 @@ export interface CanvasFrame {
   by: string | null;
   /** The window whose save this was (it does not read its own save back). */
   window?: string | null;
+  /** An agent's change was refused: nothing landed (the revision is as it was). */
+  refused?: boolean;
   elements: string[];
 }
 

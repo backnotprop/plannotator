@@ -116,7 +116,7 @@ const WINDOW: CSSProperties = {
   overflow: 'hidden',
 };
 const HEAD: CSSProperties = { touchAction: 'none', flex: 'none', display: 'flex', alignItems: 'center', gap: 6, height: 48, padding: '0 10px 0 6px', boxShadow: '0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent)' };
-const BACK: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 34, padding: '0 10px 0 6px', border: 0, borderRadius: 9, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 14, fontWeight: 550, cursor: 'pointer', flex: 'none' };
+const BACK: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 40, minWidth: 44, padding: '0 10px 0 6px', border: 0, borderRadius: 9, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 14, fontWeight: 550, cursor: 'pointer', flex: 'none' };
 const TITLE: CSSProperties = { flex: 1, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted-foreground)' };
 
 /** The canvas, over the whole window. */

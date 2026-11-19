@@ -59,6 +59,12 @@ export function excalidrawLocal(root: string): Plugin {
         if (next.includes('AGFzbQ') || !next.includes('.indexOf("wasm-off")')) throw new Error(`excalidraw-local: ${id} still asks for its WebAssembly (the package changed; update build/excalidraw-local.ts)`);
         return { code: next, map: null };
       }
+      // A pasted picture is scaled down to 1440 px on its long side, which turns a tall screenshot into a 64 px
+      // ribbon. The long side may be 8192 px here (the file size cap, 4 MiB, still applies).
+      if (/@excalidraw[\\/+]excalidraw/.test(id) && /=1440,(\w+)=4\*1024\*1024/.test(code)) {
+        code = code.replace(/=1440,(\w+)=4\*1024\*1024/, '=8192,$1=4*1024*1024');
+        if (!code.includes('https://esm.sh/')) return { code, map: null };
+      }
       if (!/@excalidraw[\\/+]excalidraw/.test(id) || !code.includes('https://esm.sh/')) return null;
       const next = code.replace(/`https:\/\/esm\.sh\/\$\{[^`]*`[^`]*`[^`]*`/, `(location.origin+${JSON.stringify(LOCAL)})`);
       if (next === code || next.includes('esm.sh')) throw new Error('excalidraw-local: the CDN fallback was not replaced (the package changed; update build/excalidraw-local.ts)');

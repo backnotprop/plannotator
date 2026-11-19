@@ -680,11 +680,14 @@ export function createInboxCanvas(options: {
             const session = input.agent_session?.trim();
             const viewer: CanvasAuthor = {
               kind: "agent",
-              name: inboxAgentName({ kind: "agent", host: input.agent_host?.trim() || null, name: inboxStoredAgentName(input.agent_name) }),
+              // One line, a sane length: this name is drawn on the person's canvas.
+              name: inboxAgentName({ kind: "agent", host: input.agent_host?.trim() || null, name: inboxStoredAgentName(input.agent_name) }).replace(/\s+/g, " ").slice(0, 60),
               ...(session ? { key: session } : {}),
             };
             if (input.do !== undefined) {
               const result = await apply(threadId, viewer, input.base, input.do);
+              // The window that waits for this agent's change is told when one was refused instead.
+              if (!result.ok) emit("canvas", { thread_id: threadId, rev: result.rev, by: viewer.name || "An agent", refused: true, elements: [] });
               // A refusal is an error to the caller (a script's exit code, a tool's red result): nothing changed.
               if (!result.ok) return fail("canvas_unchanged", result.text);
               return okComplete(result.text, { thread_id: threadId, rev: result.rev, changed: true });
