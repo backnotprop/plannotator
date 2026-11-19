@@ -242,7 +242,7 @@ import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inbox
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
-import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
+import { codexQueueMessage, createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
 import { t3SettingsStatus } from "./inbox-t3-settings";
 import { createInboxVoice } from "./inbox-voice";
@@ -911,6 +911,8 @@ const ERROR_STATUS: Record<string, number> = {
   launch_not_found: 404,
   // Stop of a session that runs in Rex: Rex owns it.
   launch_in_rex: 409,
+  // Stop, Open or Try again of an agent that runs in T3 Code: T3 Code owns it.
+  launch_in_t3: 409,
   launch_off: 404,
   open_unavailable: 409,
   // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.
@@ -5168,6 +5170,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The permission hook runs this Plannotator.
     selfCommand,
     hosts: options.launchHosts,
+    // T3 Code's `t3 thread start` takes the first message: the same words the T3 wake sends a T3 thread
+    // (`codexQueueMessage` of the bridge command), launched lines and all.
+    firstTurn: (root) => codexQueueMessage(replyCommand(root, false, root.to?.session ?? null)),
   });
   launchReady = true;
   // Routines (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.

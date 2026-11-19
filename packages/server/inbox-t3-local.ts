@@ -131,6 +131,24 @@ export function t3LauncherOf(environment: AgentEnvironment): string {
   return join(t3HomeOf(environment), "bin", environment.platform === "win32" ? "t3.cmd" : "t3");
 }
 
+/** The `t3` command to run for this environment: the desktop app's launcher in T3's home, else a `t3` on PATH; null when neither is there. */
+export function t3CommandOf(environment: AgentEnvironment): string | null {
+  const desktop = t3LauncherOf(environment);
+  if (existsSync(desktop)) return desktop;
+  return environment.which("t3");
+}
+
+/** The env a `t3` call gets: only T3_ENV_KEYS from `environment`, and T3's home. Never an agent's, a session's or a token's name. */
+export function t3ChildEnv(environment: AgentEnvironment): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of T3_ENV_KEYS) {
+    const value = environment.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  env.T3CODE_HOME = t3HomeOf(environment);
+  return env;
+}
+
 /** The T3 server of this home as its runtime file says (serverRuntimeState.ts): its start, when the process it names is alive. */
 export function t3ServerOf(t3Home: string): { startedAt: number } | null {
   const path = join(t3Home, "userdata", "server-runtime.json");
@@ -232,10 +250,10 @@ export function createT3Local(options: {
   const home = () => t3HomeOf(environment);
   // A test run reads agent files only in a scratch home (never the person's real ~/.t3).
   const allowed = () => agentHomeAllowed(environment);
+  // In a test run, only a `t3` in a temp folder too (never one a real T3CODE_HOME or PATH names), as the T3 launch host's.
   const launcher = (): string | null => {
-    const desktop = t3LauncherOf(environment);
-    if (existsSync(desktop)) return desktop;
-    return environment.which("t3");
+    const command = t3CommandOf(environment);
+    return command && agentHomeAllowed({ homeDir: command, env: environment.env }) ? command : null;
   };
   const installed = () => environment.platform !== "win32" && allowed() && launcher() !== null;
   const server = () => (installed() ? t3ServerOf(home()) : null);
@@ -244,15 +262,7 @@ export function createT3Local(options: {
     const up = server();
     return up !== null && Date.now() - up.startedAt >= (options.settleMs ?? INBOX_T3_SETTLE_MS);
   };
-  const childEnv = (): Record<string, string> => {
-    const env: Record<string, string> = {};
-    for (const key of T3_ENV_KEYS) {
-      const value = environment.env[key];
-      if (value !== undefined) env[key] = value;
-    }
-    env.T3CODE_HOME = home();
-    return env;
-  };
+  const childEnv = (): Record<string, string> => t3ChildEnv(environment);
 
   /** What waits for T3 to run, and for it to stop: one probe looks for both. */
   const waiting = new Set<() => void>();
