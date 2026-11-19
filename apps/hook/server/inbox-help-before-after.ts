@@ -6,7 +6,7 @@
  *
  * Each form is a whole `:::question` block that core's parser reads as its
  * "Card:" line says (`inbox-help-before-after.test.ts` parses every one).
- * Words are DRAFT, the owner's to approve.
+ * Words approved by the owner, 2026-11-18.
  */
 
 /** The topic's word, after `plannotator inbox --help`. */

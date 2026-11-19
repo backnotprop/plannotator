@@ -462,8 +462,10 @@ function GroupView({ question, index, group, heading, ownWhere, keep, host, plac
   const before = textOf(group.before);
   const refText = textOf(referenceAfter(question, index));
   const pictures = group.before?.kind === 'image' || group.after?.kind === 'image';
-  const rows = diffQuestionChange(before, refText ?? before);
-  const afterRows = group.after?.kind === 'text' ? diffQuestionChange(before ?? group.after.text, group.after.text) : null;
+  // Memoised on the words: a diff that ran out of time is not cached, so it must not run again on every render.
+  const rows = React.useMemo(() => diffQuestionChange(before, refText ?? before), [before, refText]);
+  const afterText = group.after?.kind === 'text' ? group.after.text : null;
+  const afterRows = React.useMemo(() => (afterText !== null ? diffQuestionChange(before ?? afterText, afterText) : null), [before, afterText]);
   const isNew = group.before?.kind === 'none';
   const pureAdd = before !== null && group.after?.kind === 'text' && rows.every((r) => r.type === 'same' || r.type === 'add');
   const showNow = !pictures && !keep && !pureAdd && group.before !== undefined && group.before.kind !== 'none';
@@ -564,7 +566,11 @@ export function QuestionChangeGroups({ question, host, place, source }: {
 function ChoicePlace({ where, place, groupBefore }: { where?: string; place: QuestionChangeGroup; groupBefore: string | null }) {
   const own = textOf(place.before);
   const after = place.after;
-  const rows = after?.kind === 'text' ? diffQuestionChange(own ?? groupBefore ?? after.text, after.text) : null;
+  const afterText = after?.kind === 'text' ? after.text : null;
+  const rows = React.useMemo(
+    () => (afterText !== null ? diffQuestionChange(own ?? groupBefore ?? afterText, afterText) : null),
+    [own, groupBefore, afterText],
+  );
   const mode: SideMode = own !== null ? 'near' : groupBefore !== null ? 'changed' : 'all';
   const cap = useLineCap(rows ? [own !== null ? sideCount(rows, 'before', 'near') : 0, sideCount(rows, 'after', mode)] : []);
   if (!after || after.kind === 'image' || place.before?.kind === 'image') return null;
@@ -604,7 +610,7 @@ function ChoicePlace({ where, place, groupBefore }: { where?: string; place: Que
 
 /** One place of today's words on the choice that keeps them (Versions): in full, up to the line cap. */
 function KeepPlace({ where, before }: { where?: string; before: string | null }) {
-  const rows = diffQuestionChange(before, before);
+  const rows = React.useMemo(() => diffQuestionChange(before, before), [before]);
   const cap = useLineCap([sideCount(rows, 'before', 'all')]);
   return (
     <span className="qc-place">
@@ -684,6 +690,7 @@ export function QuestionChoiceChange({ question, choice, index, host, spokenId, 
   const words = wordsPlacesOf(question, choice);
   const pictures = picturePlacesOf(choice);
   const keeps = questionChoicePlaces(choice).length === 0 && questionKeepChoice(question) === index;
+  const said = React.useMemo(() => questionChoiceChangeSpoken(question, choice, index), [question, choice, index]);
   if (words.length === 0 && pictures.length === 0 && !keeps) return null;
   const groups = question.change?.groups ?? [];
   const cls = [layout === 'tile' ? 'qc-tile' : 'qc-choice', keeps ? 'qc-keep' : '', readOnly ? 'qc-readonly' : ''].filter(Boolean).join(' ');
@@ -714,7 +721,7 @@ export function QuestionChoiceChange({ question, choice, index, host, spokenId, 
           {groups.map((group, k) => <KeepPlace key={k} where={groups.length > 1 ? group.where : undefined} before={textOf(group.before)} />)}
         </div>
       )}
-      <p id={spokenId} className="qc-sr">{questionChoiceChangeSpoken(question, choice, index)}</p>
+      <p id={spokenId} className="qc-sr">{said}</p>
     </div>
   );
 }
