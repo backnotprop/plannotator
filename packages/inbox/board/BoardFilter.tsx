@@ -4,7 +4,6 @@ import { INBOX_NO_INITIATIVE, type InboxInitiative } from '@plannotator/core/inb
 import type { ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import { useRememberBoardFilter } from './boardFilterMemory';
 
 /** The list-filter glyph (lucide's list-filter, drawn with the window's icon stroke; the icon set has none). */
 function FilterGlyph({ size }: { size: number }) {
@@ -60,8 +59,6 @@ export function BoardFilter(props: BoardFilterProps) {
   const set = initiative !== null || project !== null;
   const showProjects = props.projects.length > 1 || project !== null;
   const picked = [initiativeName, projectName].filter(Boolean).join(', ');
-  // What the Board shows is what it opens with next time (boardFilterMemory.ts).
-  useRememberBoardFilter(project, initiative);
   return (
     <span className="ib-bflt" data-set={set ? '' : undefined} data-board-filter="">
       {props.tokens && <BoardFilterTokens {...props} focusAfterClear={() => trigger.current} />}

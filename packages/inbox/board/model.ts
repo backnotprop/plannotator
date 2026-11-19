@@ -39,8 +39,6 @@ import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
 import { projectNames } from '../search/model';
 import { cardInTag, projectTagMap } from '../projectTags';
 import type { ProjectFolder } from '../api';
-
-export { rememberedBoardFilter } from './boardFilterMemory';
 /** The projects as the list gives them, for their tags (projectTags.ts). */
 type TaggedProjects = readonly Pick<ProjectFolder, 'id' | 'tags'>[];
 

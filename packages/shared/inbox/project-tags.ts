@@ -94,8 +94,11 @@ export interface ProjectTagsStore {
 export interface InboxProjectTags {
   /** A project's live tags (its group's), oldest pick first. */
   tagsOf(projectId: string): string[];
-  /** Every project the person sees that carries a live tag, by its id. */
-  all(): Map<string, string[]>;
+  /**
+   * One read of every project's live tags (the list's projects): null when no project is tagged, so the list does
+   * no work for them; else `tagsOf` with the live tags read once.
+   */
+  reader(): ((projectId: string) => string[]) | null;
   /** Put the project in a live tag (`on`) or take it out. Answers its tags. */
   set(projectId: unknown, tagId: unknown, on: boolean): string[];
   /** The same by the tag's name (a linked machine's window names a tag so): made when none is and `on`. */
@@ -147,17 +150,11 @@ export function createInboxProjectTags(store: ProjectTagsStore): InboxProjectTag
   };
 
   return {
-    tagsOf: (projectId) => tagsWith(store.canonicalProjectId(projectId), live()),
-    all: () => {
+    tagsOf: (projectId) => (sets.size === 0 ? [] : tagsWith(store.canonicalProjectId(projectId), live())),
+    reader: () => {
+      if (sets.size === 0) return null;
       const alive = live();
-      const out = new Map<string, string[]>();
-      if (sets.size === 0) return out;
-      const heads = new Set([...sets.keys()].map((id) => (store.project(id) ? store.canonicalProjectId(id) : null)).filter((id): id is string => id !== null));
-      for (const id of heads) {
-        const tags = tagsWith(id, alive);
-        if (tags.length > 0) out.set(id, tags);
-      }
-      return out;
+      return (projectId) => tagsWith(store.canonicalProjectId(projectId), alive);
     },
     set,
     setNamed: (projectId, name, on) => {

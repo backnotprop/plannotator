@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, inboxTagShownHex, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagColours, type InboxTagLook } from '@plannotator/core/inbox-types';
-import { inboxApi } from './api';
+import { InboxHeldError, inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
 import { setSidebarSectionOpen } from './sidebarSections';
@@ -13,6 +13,7 @@ import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
 import { eachRow, tagsToast } from './bulkWrites';
 import { useProjectTags } from './useProjectTags';
+import { tagWrites } from './tagWrites';
 import type { ProjectFolder } from './api';
 
 const NO_PROJECTS: readonly ProjectFolder[] = [];
@@ -68,6 +69,15 @@ export type { ListTagColours };
 
 export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, openRow, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours, projects = NO_PROJECTS }: TagsInputs) {
 const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
+  // A tick stays drawn while its write is in flight or held for a linked machine that is away (tagWrites.ts).
+  const [tagWritesHere] = useState(tagWrites);
+  useEffect(() => {
+    const done = tagWritesHere.landed((threadId) => {
+      const row = windowRows.find((r) => r.thread_id === threadId);
+      return row ? (row.tags ?? []) : undefined;
+    });
+    if (done.length > 0) setTagPatches((current) => new Map([...current].filter(([id]) => !done.includes(id))));
+  }, [windowRows, tagWritesHere]);
   const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
   // Project tags (projectTags.ts): the filters read a row's own tags and its project's; the project's ⋯ sets them.
   const { filterTagsOfRow, projectTagsHost } = useProjectTags({ projects, machines, tagsOfRow, showError, showToast, dismissToast, refreshList });
@@ -81,11 +91,17 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? (openRow?.thread_id === threadId ? openRow.tags : undefined) ?? [];
     const next = on ? (before.includes(tag.id) ? before : [...before, tag.id]) : before.filter((id) => id !== tag.id);
     if (tag.id) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
-    const unpatch = () => setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
+    const turn = tagWritesHere.start(threadId);
+    // Only the latest write on the thread takes its tick back (two quick ticks never flicker).
+    const unpatch = () => {
+      if (tagWritesHere.latest(threadId, turn)) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
+    };
     try {
       await inboxApi.setThreadTag(threadId, tagWrite(tag, machineOf(threadId), machines.self), on);
     } catch (cause) {
-      unpatch();
+      // Held for a machine that is away: the tick stays, pending, until the list says it (the clock toast says it waits).
+      if (cause instanceof InboxHeldError && tag.id) tagWritesHere.hold(threadId, turn, next);
+      else unpatch();
       showError(cause);
       return;
     }

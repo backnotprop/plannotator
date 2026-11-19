@@ -2,7 +2,8 @@
  * Project tags (project-tags.ts): the tags the person put on a project, which only the filters read.
  *
  * The failures this guards: a tag that does not hold across a restart, a deleted tag still read (or lost for its
- * Undo), a combined project losing the tags it brought, untick leaving a combined member's tag behind, a tag by name
+ * Undo), a combined project losing the tags it brought, untick leaving a combined member's tag behind, a split that
+ * moves a group's tag onto the member, the list doing work while no project is tagged, a tag by name
  * that makes a second tag of the same name, a write to an unknown project or tag, and a newer version's file read or
  * written over.
  */
@@ -35,18 +36,23 @@ function world() {
   return { dir, store, tags: createInboxProjectTags(store), billing, site, work, personal, reopen };
 }
 
-test("a project carries tags, holds them across a restart, and every tagged project is listed", () => {
+test("a project carries tags, holds them across a restart, and the list reads every tagged project", () => {
   const { tags, billing, site, work, personal, reopen } = world();
-  expect(tags.all().size).toBe(0);
+  // No project tagged: the list's read does no work for them.
+  expect(tags.reader()).toBeNull();
   expect(tags.set(billing.id, work.id, true)).toEqual([work.id]);
   expect(tags.set(site.id, personal.id, true)).toEqual([personal.id]);
   // Ticked again: nothing changes.
   expect(tags.set(billing.id, work.id, true)).toEqual([work.id]);
   const again = reopen();
   expect(again.tagsOf(billing.id)).toEqual([work.id]);
-  expect([...again.all()].sort()).toEqual([[billing.id, [work.id]], [site.id, [personal.id]]].sort());
+  const read = again.reader()!;
+  expect([read(billing.id), read(site.id)]).toEqual([[work.id], [personal.id]]);
   expect(again.set(billing.id, work.id, false)).toEqual([]);
-  expect(reopen().all().size).toBe(1);
+  expect(reopen().reader()!(billing.id)).toEqual([]);
+  expect(reopen().reader()!(site.id)).toEqual([personal.id]);
+  expect(again.set(site.id, personal.id, false)).toEqual([]);
+  expect(reopen().reader()).toBeNull();
 });
 
 test("a change tells its listeners; one that changes nothing does not", () => {
@@ -64,7 +70,7 @@ test("a deleted tag is not read, and its Undo brings its projects back", () => {
   tags.set(billing.id, work.id, true);
   store.deleteInitiative(work.id);
   expect(tags.tagsOf(billing.id)).toEqual([]);
-  expect(tags.all().size).toBe(0);
+  expect(tags.reader()!(billing.id)).toEqual([]);
   expect(() => tags.set(billing.id, work.id, true)).toThrow();
   store.restoreInitiative(work.id);
   expect(tags.tagsOf(billing.id)).toEqual([work.id]);
@@ -76,11 +82,23 @@ test("a combined project keeps the tags it brought, and untick takes them off th
   tags.set(billing.id, work.id, true);
   store.combineProject(site.id, billing.id);
   expect(tags.tagsOf(billing.id)).toEqual([work.id, personal.id]);
-  expect([...tags.all()]).toEqual([[billing.id, [work.id, personal.id]]]);
+  // A member reads as its head, as the list's rows and cards carry the head's id.
+  expect(tags.reader()!(site.id)).toEqual([work.id, personal.id]);
   expect(tags.set(billing.id, personal.id, false)).toEqual([work.id]);
   // Split again, the member does not get back a tag the person took off the group.
   store.combineProject(site.id, null);
   expect(tags.tagsOf(site.id)).toEqual([]);
+});
+
+test("split after combine: a tag ticked on the group stays on the head; the member's own tags come back to it", () => {
+  const { store, tags, billing, site, work, personal } = world();
+  tags.set(site.id, personal.id, true);
+  store.combineProject(site.id, billing.id);
+  // Ticked on the combined project: stored on the head only (the guide's "Project tags", storage).
+  tags.set(site.id, work.id, true);
+  store.combineProject(site.id, null);
+  expect(tags.tagsOf(billing.id)).toEqual([work.id]);
+  expect(tags.tagsOf(site.id)).toEqual([personal.id]);
 });
 
 test("by name: the live tag of that name (case ignored), made once when none is", () => {

@@ -2,15 +2,17 @@
  * The projects' tags in the window (projectTags.ts): what the project's ⋯ → Add tag ticks, unticks and makes, drawn at
  * once and written to the machine whose project it is, with the thread tag's toast and Undo ("Tagged Work", "Removed
  * from Work"). A linked machine's project is tagged there by the tag's name, once that machine takes project tags
- * (mark `project-tags`); an older one's project offers no Add tag.
+ * (mark `project-tags`); an older one's project offers no Add tag. A tick stays drawn while its write is in flight, or
+ * held for a linked machine that is away (tagWrites.ts).
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxInitiative, InboxListRow } from '@plannotator/core/inbox-types';
-import { post, type ProjectFolder } from './api';
+import { InboxHeldError, post, type ProjectFolder } from './api';
 import { inboxUrl } from './inboxUrl';
 import type { MachinesModel } from './machines';
 import { projectTagMap, withProjectTags, type ProjectTagMap } from './projectTags';
 import { tagWrite, type ListTag, type ProjectTagsHost, type RowTags } from './threadTags';
+import { tagWrites } from './tagWrites';
 import type { InboxToastModel } from './components/Toast';
 
 interface Inputs {
@@ -31,6 +33,7 @@ function farOf(project: ProjectFolder | undefined, self: string | null): string 
 
 export function useProjectTags({ projects, machines, tagsOfRow, showError, showToast, dismissToast, refreshList }: Inputs) {
   const [patches, setPatches] = useState<ProjectTagMap>(() => new Map());
+  const [writes] = useState(tagWrites);
   const map = useMemo(() => projectTagMap(projects, patches), [projects, patches]);
   /** A row's tags for the filters: its own and its project's. */
   const filterTagsOfRow = useMemo(() => withProjectTags<InboxListRow>(tagsOfRow, map), [tagsOfRow, map]);
@@ -46,16 +49,24 @@ export function useProjectTags({ projects, machines, tagsOfRow, showError, showT
     const far = farOf(project, machines.self);
     const before = map.get(projectId) ?? [];
     const id = 'id' in tag ? tag.id : '';
-    if (id) patch(projectId, on ? [...before.filter((t) => t !== id), id] : before.filter((t) => t !== id));
+    const drawn = on ? [...before.filter((t) => t !== id), id] : before.filter((t) => t !== id);
+    if (id) patch(projectId, drawn);
+    const turn = writes.start(projectId);
+    // Only the latest write on the project takes its tick back (two quick ticks never flicker).
+    const unpatch = () => {
+      if (writes.latest(projectId, turn)) patch(projectId, undefined);
+    };
     const body = 'id' in tag ? tagWrite(tag, far, machines.self) : { name: tag.name };
     try {
       await post<{ tags: string[] }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/tags`, undefined, far), { ...body, on });
     } catch (cause) {
-      patch(projectId, undefined);
+      // Held for a machine that is away: the tick stays, pending, until the list says it (the clock toast says it waits).
+      if (cause instanceof InboxHeldError && id) writes.hold(projectId, turn, drawn);
+      else unpatch();
       showError(cause);
       return;
     }
-    await refreshList(false).finally(() => patch(projectId, undefined));
+    await refreshList(false).finally(unpatch);
     if (!undo) {
       dismissToast();
       return;
@@ -68,6 +79,11 @@ export function useProjectTags({ projects, machines, tagsOfRow, showError, showT
       onUndo: () => void setRef.current(projectId, tag, !on, false),
     });
   };
+  // A held tick goes once the list reads the project with the same tags.
+  useEffect(() => {
+    const done = writes.landed((projectId) => projects.find((p) => p.id === projectId)?.tags ?? []);
+    if (done.length > 0) setPatches((current) => new Map([...current].filter(([id]) => !done.includes(id))));
+  }, [projects, writes]);
   const setRef = useRef(set);
   setRef.current = set;
   const can = useCallback(

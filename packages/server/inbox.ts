@@ -1896,6 +1896,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const projectFolders = (rows?: readonly InboxListRow[]) => {
     const byThread = snoozesById();
     const counted = rows ?? store.listRows().map((row) => withSnooze(row, byThread));
+    // The tags the person put on projects (project-tags.ts): null, and no work, while no project is tagged.
+    const tagsOf = projectTags.reader();
     return store.listProjects().map((project) => {
       const mine = counted.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
@@ -1908,8 +1910,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
       // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
       const repo = repos.peek(project.root);
-      // The tags the person put on it (project-tags.ts), additive and only when there are any.
-      const tags = projectTags.tagsOf(project.id);
+      // Its tags, additive and only when there are any.
+      const tags = tagsOf?.(project.id) ?? [];
       return { ...project, ...(tags.length > 0 ? { tags } : {}), ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
