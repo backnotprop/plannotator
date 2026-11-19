@@ -1,5 +1,6 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
+import { ChevronDown } from 'lucide-react';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { REVIEW_PANEL_TYPES } from '../dock/reviewPanelTypes';
@@ -8,7 +9,7 @@ import { SemanticDiffRows, lineSelectionForChange } from '../dock/panels/semanti
 import { semanticNoteCount, semanticNoteParts, type SemanticFileState } from '../semDiff/semanticFileState';
 
 const CLOSE_DELAY_MS = 140;
-const BADGE = 'flex-none w-16 h-6 inline-flex items-center justify-center gap-1 rounded font-mono text-[11px] leading-none text-muted-foreground';
+const BADGE = 'flex-none w-[4.25rem] h-6 inline-flex items-center justify-center gap-1 rounded font-mono text-[11px] leading-none text-muted-foreground';
 const NARROW_HIDDEN = '@max-[479px]/file-header:hidden';
 const REACH = 'relative before:absolute before:inset-x-0 before:-inset-y-2';
 const REACH_COARSE = 'relative [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-2';
@@ -90,6 +91,7 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
       >
         <span className={`font-semibold tracking-[0.02em] ${TIGHT_WORD}`}>sem</span>
         <span className={`${COUNT} ${on ? 'bg-primary/15 text-primary' : 'text-primary/80 ring-1 ring-inset ring-primary/40'}`}>{count}</span>
+        <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-none text-muted-foreground ${TIGHT_WORD}`} />
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner align="end" sideOffset={6} className="z-[100]">
