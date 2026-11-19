@@ -1910,3 +1910,11 @@
     outline-offset: 2px;
   }
 }
+
+/* An HTML item that is not drawn as itself (a view zoomed out with many of them in it): its words in a quiet
+   box. Never a blank, and not the dashed box of something that failed to load. */
+.pcv-html .pcv-missing {
+  border-style: solid;
+  border-color: var(--pcv-line);
+  background: color-mix(in oklab, var(--pcv-card) 70%, transparent);
+}

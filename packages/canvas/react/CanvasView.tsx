@@ -52,6 +52,18 @@ const isHeading = (size: string | undefined): boolean => size === 'title' || siz
  * objects), which is worth paying on a board so large that it cannot pan otherwise, and not below.
  */
 const FLAT_ABOVE = 4000;
+/**
+ * How many HTML items a view draws as themselves below full detail. An item runs no script, so its frame is a
+ * still picture of itself, and a view with few of them keeps every frame at every zoom. But each frame is a
+ * document of its own, and many in view cost frames when the whole board moves. Measured, headed, panning 2,000
+ * objects at 12% with the board's HTML items in view: none drawn 118 fps; 12 drawn 80 fps with 3 of 322 frames
+ * slow (inside the 60 fps budget, barely); 42 drawn 71 fps with 45 of 286 slow (outside it). Giving each frame
+ * a layer of its own made it worse (61 fps). So up to this many are drawn, and a view holding more shows each
+ * item's words (`alt`) in its box until it is zoomed in. All or none, so a board never shows a mix.
+ */
+export const HTML_FRAMES_MAX = 8;
+/** Whether a view at this detail, holding this many HTML items, draws them as themselves. */
+export const htmlFramesKept = (lod: Lod, items: number): boolean => lod === 'full' || items <= HTML_FRAMES_MAX;
 /** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
 const CROWDED = 500;
 
@@ -287,6 +299,11 @@ export function CanvasView({
     }
   }
 
+  // HTML items stay drawn at low detail unless the view holds too many of them at once (`HTML_FRAMES_MAX`).
+  let frames = 0;
+  if (lod !== 'full') for (const id of mounted) if (doc.objects[id]?.type === 'html' && ++frames > HTML_FRAMES_MAX) break;
+  const framesKept = htmlFramesKept(lod, frames);
+
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
   const lines: { arrow: ArrowObject; points: Point[]; d?: string }[] = [];
@@ -336,7 +353,7 @@ export function CanvasView({
           object={object}
           selected={selection.has(id)}
           editing={editingId === id}
-          rich={object.type !== 'html' || lod === 'full'}
+          rich={object.type !== 'html' || lod === 'full' || framesKept}
           resolveImageSrc={resolveImageSrc}
           onEditEnd={onEditEnd}
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}

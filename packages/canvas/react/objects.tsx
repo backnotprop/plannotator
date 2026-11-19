@@ -4,9 +4,9 @@
  * object re-renders one of these, however many are mounted.
  */
 import { Check, CircleHelp, File, FileCode, FileText, Film, Globe, Image as ImageIcon, ThumbsUp } from 'lucide-react';
-import React, { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasColor } from '../model/color';
-import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
+import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, type HtmlItemFace, checkHtmlItemFaces, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
 import { referenceCard } from '../model/reference';
 import { seedOf, seeded } from '../view/rough';
 import { Face, usePerson } from './people';
@@ -241,8 +241,20 @@ function spriteStyle(object: SpriteObject, resolveImageSrc?: (src: string) => st
   };
 }
 
+const HtmlItemFacesContext = createContext<readonly HtmlItemFace[]>([]);
+
+/**
+ * Lend the host's own type to every HTML item under this (`HtmlItemFace` in `model/html-item.ts`): each face
+ * as a `data:` URL. The list is checked here, once; what does not pass is left out.
+ */
+export function HtmlItemFacesProvider({ faces, children }: { faces: readonly HtmlItemFace[]; children: React.ReactNode }) {
+  const checked = useMemo(() => checkHtmlItemFaces(faces), [faces]);
+  return <HtmlItemFacesContext.Provider value={checked}>{children}</HtmlItemFacesContext.Provider>;
+}
+
 /** The only way custom HTML is ever drawn. See `model/html-item.ts`. */
 function HtmlFrame({ object }: { object: HtmlObject }) {
+  const faces = useContext(HtmlItemFacesContext);
   const probe = useRef<HTMLSpanElement>(null);
   const [scheme, setScheme] = useState<'light' | 'dark' | null | undefined>(undefined);
   // The item is told the theme it sits in, and told again when it changes.
@@ -260,7 +272,7 @@ function HtmlFrame({ object }: { object: HtmlObject }) {
   return (
     <>
       <span ref={probe} hidden />
-      {scheme !== undefined ? <iframe title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme)} {...HTML_ITEM_FRAME_ATTRS} /> : null}
+      {scheme !== undefined ? <iframe title={object.alt ?? ''} sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme, faces)} {...HTML_ITEM_FRAME_ATTRS} /> : null}
     </>
   );
 }
@@ -573,7 +585,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
     case 'html':
       return (
         <div className="pcv-obj pcv-html" {...common} {...(tabIndex === undefined && object.alt ? { role: 'img', 'aria-label': object.alt } : {})} style={style}>
-          {rich ? <HtmlFrame object={object} /> : <div className="pcv-missing" />}
+          {rich ? <HtmlFrame object={object} /> : <div className="pcv-missing">{object.alt}</div>}
         </div>
       );
   }

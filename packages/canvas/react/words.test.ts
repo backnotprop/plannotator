@@ -3,6 +3,7 @@ import { createDocument } from '../model/document';
 import { CanvasStore } from '../events/store';
 import type { CanvasObject } from '../model/types';
 import { FIGURE_MIN, figureBox, fitName } from '../snapshot/SnapshotFigure';
+import { HTML_FRAMES_MAX, htmlFramesKept } from './CanvasView';
 import { edgesBeyond, nearestBeyond } from './EdgeMarkers';
 import { ARROW_LABEL_MAX, shortLabel } from './objects';
 import { faceColor } from './people';
@@ -109,5 +110,19 @@ describe('the colour of a person\'s mark', () => {
     ]) {
       expect(faceColor({ color })).toBeUndefined();
     }
+  });
+});
+
+describe('HTML items when the board is zoomed out', () => {
+  test('a view with a few of them draws them at every detail; only one crowded with them falls back to their words', () => {
+    for (const lod of ['full', 'plain', 'far'] as const) {
+      expect(htmlFramesKept(lod, 0)).toBe(true);
+      expect(htmlFramesKept(lod, 1)).toBe(true);
+      expect(htmlFramesKept(lod, HTML_FRAMES_MAX)).toBe(true);
+    }
+    expect(htmlFramesKept('plain', HTML_FRAMES_MAX + 1)).toBe(false);
+    expect(htmlFramesKept('far', 500)).toBe(false);
+    // Close up, every item is itself however many there are.
+    expect(htmlFramesKept('full', 500)).toBe(true);
   });
 });
