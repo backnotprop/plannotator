@@ -241,3 +241,27 @@ describe('an arrow from an object back to itself', () => {
     expect(hitTest(doc, indexFor(store), { x: g.via![1].x, y: g.via![0].y - 10 }, 6, routesFor(store))).toBe('loop');
   });
 });
+
+describe('a change whose field name is a name on every object', () => {
+  test('__proto__, constructor and prototype set nothing in the reducer, with or without the check, and the canvas loads', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [arrow('link', 'a', 'b')] });
+    const doc = store.getDocument();
+    for (const name of ['__proto__', 'constructor', 'prototype']) {
+      // Parsed from text, the way a peer's change arrives: the name is a field of its own.
+      const set = JSON.parse(`{"${name}":{"group":"link","from":{"object":"link"}}}`) as Record<string, unknown>;
+      for (const check of [true, false]) {
+        const applied = applyEvents(doc, [{ type: 'object-set', id: 'a', set }], { check });
+        expect(applied.applied).toEqual([]);
+        expect(applied.doc).toBe(doc);
+      }
+      // Beside an honest field, only the honest field lands.
+      const mixed = applyEvents(doc, [{ type: 'object-set', id: 'a', set: { ...set, text: 'kept' } }], { check: true });
+      const changed = mixed.doc.objects.a as unknown as Record<string, unknown>;
+      expect(changed.text).toBe('kept');
+      expect(changed.group).toBeUndefined();
+      expect(Object.getPrototypeOf(changed)).toBe(Object.prototype);
+      expect(parseDocument(JSON.parse(serializeDocument(mixed.doc))).ok).toBe(true);
+    }
+  });
+});
