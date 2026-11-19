@@ -26,13 +26,24 @@ export class SpacesError extends Error {
 
 /**
  * "This space now belongs to someone else": the one place that reads it off an answer. Only an answer that says so
- * counts: a claim that lost (`409`), or a write that is not allowed (`403`) to a space this computer made and never
- * kept. No credential asked for (`401`), not found (`404`) and anything else are not that. The service has not
- * settled one code for it yet; when it does, it is written here.
+ * counts: a claim that lost (`409 claim_conflict`), or a page save or file upload that is not allowed (`403`) to a
+ * space this computer made and never kept (a comment is still taken there). Everything else is not that:
+ * `401 login_required` (no account where one is asked: an owner made it private, or the space is gone),
+ * `404 workspace_not_found` (not available to this person) and any other answer.
  */
 export function spaceKeptByAnother(error: unknown, call: "write" | "claim"): boolean {
   if (!(error instanceof SpacesError)) return false;
-  return call === "claim" ? error.status === 409 : error.status === 403;
+  return call === "claim" ? error.status === 409 && error.code === "claim_conflict" : error.status === 403;
+}
+
+/**
+ * The space is no longer there for this caller, without saying whose it is: with no account `401 login_required`
+ * (a space that expired or was removed, or one made private), signed in `404 workspace_not_found`. Trying again
+ * cannot help; sharing as a new space can.
+ */
+export function spaceNotAvailable(error: unknown, signedIn: boolean): boolean {
+  if (!(error instanceof SpacesError)) return false;
+  return signedIn ? error.status === 404 && error.code === "workspace_not_found" : error.status === 401;
 }
 
 /** How long a call may take before it counts as not answered: a minute, and longer for many bytes. */

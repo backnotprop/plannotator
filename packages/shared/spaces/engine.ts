@@ -15,7 +15,9 @@
  *   another (412), that page is marked `stopped` and left alone, and the rest goes on.
  * - It tells when the space is no longer open to it. A write the space says is not allowed, to a space made here and
  *   never kept, means someone else kept it (`spaceKeptByAnother` in client.ts, the one place that reads it):
- *   `refused`, and nothing more is sent. Any other "no" (no credential, not found, gone) is a run that did not finish.
+ *   `refused`, and nothing more is sent. Any other "no" is a run that did not finish; where the space is simply not
+ *   there for this caller (`spaceNotAvailable`) the record says so (`job.gone`), so "Share as new" can be offered.
+ *   A space is never made again by itself.
  * - The space is the person's own only when the space says so: `kept` is read from the create's answer, and a
  *   signed-in create that comes back with no owner (its first answer was lost before the sign-in) is claimed.
  * - The approval goes last, and only into a space that is the person's own. A space that does not take it is not
@@ -35,7 +37,7 @@ import {
   type SpaceShareRecord,
   type SpaceShareStep,
 } from "@plannotator/core/space-share";
-import { spaceKeptByAnother, SpacesError, type SpacesClient, type SpacesSpace } from "./client";
+import { spaceKeptByAnother, spaceNotAvailable, SpacesError, type SpacesClient, type SpacesSpace } from "./client";
 
 export interface SpaceShareSource {
   local: LocalSpace;
@@ -374,7 +376,14 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         return { end: "refused" };
       }
       if (error.status === 413 && error.code === "quota_exceeded" && !client.signedIn) return end("over_limit");
-      // Anything else, a space that is gone (410) included: the run did not finish. A sign-in the space refused is forgotten.
+      // The space is not there for this caller any more (expired, removed, or made private): the run did not finish,
+      // and it is never made again by itself. No sign-in is started or suggested for a call made without one.
+      if (record.created && spaceNotAvailable(error, client.signedIn) && !(client.signedIn && error.status === 401)) {
+        record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended: "failed", gone: true };
+        keep();
+        return { end: "failed", error };
+      }
+      // Anything else: the run did not finish. A sign-in the space refused is forgotten.
       return end("failed", { error, signedOut: error.status === 401 && client.signedIn });
     }
     if (record.refused) {

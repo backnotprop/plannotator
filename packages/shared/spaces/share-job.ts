@@ -173,6 +173,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       who: signedIn ? (credential.name ?? (record?.kept ? record.owner : null)) : null,
       keep: live.keep,
       busy: live.claiming !== null,
+      gone: phase === "failed" && record?.job?.gone === true,
       mode: record?.mode ?? "all",
       versions: Math.max(0, ...source.local.documents.map((d) => d.versions.length)),
       changes: phase === "shared" && !signedOut ? plan.changes : 0,
@@ -357,7 +358,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       if (record.created) await clientOf(record.host).deleteSpace(record.space_id);
     } catch (error) {
       // Already gone there is gone here too.
-      if (!(error instanceof SpacesError && (error.status === 404 || error.status === 410))) return { ok: false, status: status(id) };
+      if (!(error instanceof SpacesError && error.status === 404 && error.code === "workspace_not_found")) return { ok: false, status: status(id) };
     }
     dropSpaceShareRecord(options.dataDir, id);
     options.changed?.(id);

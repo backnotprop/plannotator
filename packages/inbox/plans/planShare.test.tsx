@@ -91,6 +91,7 @@ const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; inf
   ['over the limit', status({ phase: 'over_limit', progress: { done: 3, total: 9 } }), 'main', ['sign-in'], {}],
   ['did not finish', status({ phase: 'failed', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['nothing went up', status({ phase: 'failed', progress: { done: 0, total: 9 } }), 'main', ['try-again'], {}],
+  ['the space is no longer there', status({ phase: 'failed', gone: true, progress: { done: 3, total: 9 }, link: LINK, shared_once: true }), 'main', ['copy', 'open', 'share-new', 'try-again'], {}],
   ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], {}],
   ['details', shared(), 'details', [], {}],

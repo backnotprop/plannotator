@@ -260,20 +260,50 @@ describe("Update", () => {
     expect(s.spaces.calls.length).toBe(before);
   });
 
-  for (const [status, code] of [[401, "login_required"], [404, "workspace_not_found"], [404, "not_found"], [410, "gone"]] as const) {
-    test(`a "no" that does not say whose the space is (${status} ${code}) is a run that did not finish: never "someone else kept it", never a new space`, async () => {
+  test("kept by someone else with its link still open: a comment alone still goes up; the next page save is what says it is theirs", async () => {
+    const s = setup();
+    await s.run();
+    s.spaces.keptBy(s.record.space_id, "Someone Else");
+    const head = s.world.store.versions(s.world.plan, s.world.main)[3]!;
+    s.world.store.saveComment(s.world.plan, { document_id: s.world.main, document_version: head.version, annotation: { id: "open-2", text: "And Team?" }, at: new Date().toISOString() });
+    const run = () => runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
+    expect((await run()).end).toBe("done");
+    expect(spaceOf(s.spaces, s.record).comments).toHaveLength(2);
+    expect(s.record.refused).toBe(false);
+  });
+
+  const gone: [string, (s: ReturnType<typeof setup>) => void, boolean][] = [
+    ["the space expired or was removed (no account: 401 login_required)", (s) => s.spaces.remove(s.record.space_id), true],
+    ["someone kept it and made it private (no account: 401 login_required)", (s) => s.spaces.keptBy(s.record.space_id, "Someone Else", true), true],
+    ["a route the service does not have (404 not_found)", (s) => s.spaces.failNext(/^PUT .*\/documents\//, 404, "not_found"), false],
+    ["the service failing (502)", (s) => s.spaces.failNext(/^PUT .*\/documents\//, 502, "bad_gateway"), false],
+  ];
+  for (const [name, arrange, isGone] of gone) {
+    test(`${name}: a run that did not finish, never "someone else kept it", never a new space by itself`, async () => {
       const s = setup();
       await s.run();
+      const link = s.record.share_url;
       s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
-      s.spaces.failNext(/^PUT .*\/documents\//, status, code);
+      arrange(s);
       const result = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
-      expect(result.end).toBe("failed");
-      expect(s.record.refused).toBe(false);
-      expect(s.record.job!.ended).toBe("failed");
+      expect([result.end, result.signedOut ?? false, s.record.refused]).toEqual(["failed", false, false]);
+      expect(s.record.job).toMatchObject({ ended: "failed" });
+      // Only where the space is not there for this caller is "Share as new" the way on.
+      expect(s.record.job!.gone === true).toBe(isGone);
       expect(s.spaces.spaces.size).toBe(1);
-      expect(s.record.share_url).toBe(spaceOf(s.spaces, s.record).share_url);
+      expect(s.record.share_url).toBe(link);
     });
   }
+
+  test("signed in, and the space is gone (404 workspace_not_found): did not finish, the sign-in is kept", async () => {
+    const s = setup({ token: true, seed: { extras: false } });
+    await s.run();
+    s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    s.spaces.remove(s.record.space_id);
+    const result = await s.run();
+    expect([result.end, result.signedOut ?? false, s.record.job!.gone]).toEqual(["failed", false, true]);
+    expect(s.spaces.spaces.size).toBe(1);
+  });
 
   test("a file whose name the space does not take goes up under another name, once", async () => {
     const s = setup({ seed: { extras: false, versions: 1, approve: false } });

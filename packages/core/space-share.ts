@@ -171,7 +171,7 @@ export interface SpaceShareRecord {
   shared_at: string | null;
   updated_at: string;
   /** A run not finished: how many steps it has done, and how it ended (null while it runs, or the Inbox died in it). */
-  job: { done: number; total: number; ended: "failed" | "stopped" | "over_limit" | null } | null;
+  job: { done: number; total: number; ended: "failed" | "stopped" | "over_limit" | null; /** The space was not there for this caller: only a new space can go on. */ gone?: boolean } | null;
 }
 
 export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; at: string }): SpaceShareRecord {
@@ -515,6 +515,8 @@ export interface SpaceShareStatus {
   stopped_pages: { title: string; url?: string | null }[];
   /** The claim is going: Keep waits for it. */
   busy?: boolean;
+  /** The run ended because the space is no longer there for this caller: "Share as new" is offered beside Try again. */
+  gone?: boolean;
   details: Record<SpaceShareMode, SpaceShareDetails>;
 }
 

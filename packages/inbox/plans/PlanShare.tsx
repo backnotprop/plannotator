@@ -540,6 +540,12 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
           </Msg>
           {link && <LinkRow link={link} primary={false} />}
           <Foot>
+            {/* The space is no longer there for this computer: the way on is a new one. */}
+            {status.gone && (
+              <Btn onClick={() => actions.share({ mode: status.mode, fresh: true })} name="share-new">
+                {SHARE_WORDS.shareAsNew}
+              </Btn>
+            )}
             <Btn kind="pri" onClick={() => actions.share({})} name="try-again">
               {SHARE_WORDS.tryAgain}
             </Btn>

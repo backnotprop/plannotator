@@ -15,7 +15,11 @@
  *   with `If-Match` answers `412 version_conflict` (`details.current_version`) when the page moved.
  * - `PUT …/assets/<path>` creates or replaces; the same bytes change nothing; a page's extension is refused (422).
  * - A comment's `Idempotency-Key` makes a second post the first comment. Replies go to `…/replies`.
- * - `POST …/claim` gives an ownerless space to the signed-in caller; after it, anyone else's write is refused.
+ * - `POST …/claim` gives an ownerless space to the signed-in caller (its own again: the same answer; another's:
+ *   `409 claim_conflict`). A kept space keeps its link: a holder with no account still reads and comments (`201`),
+ *   but a page save or a file upload is `403 forbidden`. Made private, every call with no account is
+ *   `401 login_required`. A space that expired or was removed is never `410`: with no account `401 login_required`,
+ *   signed in `404 workspace_not_found`.
  * - Limits: a page 1,572,864 bytes (HTML 16,000,000), a file and an ownerless space's files 100 MiB (both can be set
  *   small for a test), a comment 8 KiB; without a credential a number of writes a minute, then `429` with
  *   `Retry-After`.
@@ -93,8 +97,6 @@ export interface FakeSpacesOptions {
   fileMax?: number;
   /** The approval call: `refuse` (as a tool's token is today) or `accept`. */
   approvals?: "refuse" | "accept";
-  /** The status a write gets once someone else kept the space (the real code is not settled; default 403). */
-  refusal?: 401 | 403 | 404;
   /** `/cli/login` sends the browser straight back with a code (default), or shows a page with an Allow link. */
   login?: "auto" | "page";
 }
@@ -235,9 +237,9 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     }
 
     const space = parts[1] === "workspaces" && parts[2] ? spaces.get(parts[2]) : undefined;
-    // A space that is not there: without a credential a read is asked to sign in, as the service answers.
-    if (!space) return !user && method === "GET" ? fail(401, "login_required") : fail(404, "workspace_not_found");
-    if (space.deleted) return fail(410, "workspace_deleted");
+    // A space that is not there, or was removed (never a 410): with no account every read and write is asked to
+    // sign in; signed in, it is not found.
+    if (!space || space.deleted) return user ? fail(404, "workspace_not_found") : fail(401, "login_required");
     const rest = parts.slice(3);
     if (rest[0] === "claim" && rest.length === 1 && method === "POST") {
       if (!user) return fail(401, "login_required");
@@ -246,11 +248,11 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       space.owner = user;
       return json(200, spaceWire(space, user));
     }
+    // Someone else's space. Made private: no account is asked to sign in, another account does not find it. Kept
+    // with its link still open: holders of the link read and comment, and a page save or a file upload is not allowed.
     const outsider = space.owner !== null && space.owner !== user;
-    if (outsider) {
-      const status = settings.refusal ?? 403;
-      return fail(status, status === 404 ? "workspace_not_found" : status === 403 ? "forbidden" : "login_required");
-    }
+    if (outsider && space.visibility === "private") return user ? fail(404, "workspace_not_found") : fail(401, "login_required");
+    if (outsider && method !== "GET" && !(rest[0] === "documents" && rest[2] === "annotations")) return fail(403, "forbidden");
 
     if (rest.length === 0 && method === "GET") return json(200, spaceWire(space, user));
     if (rest.length === 0 && method === "DELETE") {
@@ -296,7 +298,9 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!body || typeof body.body !== "string" || !body.anchor || typeof body.anchor !== "object") return fail(422, "validation_error", { fields: ["anchor"] });
       if (new TextEncoder().encode(body.body).length > 8 * 1024 || JSON.stringify(body.anchor).length > 16 * 1024) return fail(422, "validation_error", { fields: ["body"] });
       const again = usable ? space.comments.find((c) => c.key === usable) : undefined;
-      if (again) return again.document_id === doc.id ? json(200, { id: again.id, document_id: doc.id }) : fail(409, "idempotency_key_conflict");
+      // The same key on another target is refused; a reply's key shares the space's keys.
+      if (usable && space.comments.some((c) => c.replies.some((r) => r.key === usable))) return fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });
+      if (again) return again.document_id === doc.id ? json(200, { id: again.id, document_id: doc.id }) : fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });
       const comment: FakeComment = { id: newId("anno"), document_id: doc.id, key: usable, body: body.body, anchor: body.anchor, document_version: typeof body.document_version === "string" ? body.document_version : null, by: user, replies: [] };
       space.comments.push(comment);
       return json(201, { id: comment.id, document_id: doc.id, author: null, author_standing: user ? "member" : "anonymous" });
@@ -306,9 +310,12 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!comment) return fail(404, "annotation_not_found");
       const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
       if (!body || typeof body.body !== "string") return fail(422, "validation_error", { fields: ["body"] });
-      const key = request.headers.get("idempotency-key")?.trim() || null;
+      const sent = request.headers.get("idempotency-key")?.trim() || null;
+      // A key over 200 characters is ignored, not refused.
+      const key = sent && sent.length <= 200 ? sent : null;
       const again = key ? comment.replies.find((r) => r.key === key) : undefined;
       if (again) return json(200, { id: again.id, annotation_id: comment.id });
+      if (key && (space.comments.some((c) => c.key === key) || space.comments.some((c) => c !== comment && c.replies.some((r) => r.key === key)))) return fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });
       const reply = { id: newId("reply"), key, body: body.body, by: user };
       comment.replies.push(reply);
       return json(201, { id: reply.id, annotation_id: comment.id });
@@ -361,10 +368,17 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     failNext(match: RegExp | ((call: { method: string; path: string }) => boolean), status: number, code: string, input: { times?: number; details?: Record<string, unknown>; after?: boolean } = {}) {
       faults.push({ match: typeof match === "function" ? match : (call) => match.test(`${call.method} ${call.path}`), status, code, times: input.times ?? 1, details: input.details, after: input.after });
     },
-    /** Someone else signs in and keeps the space. */
-    keptBy(id: string, name: string) {
+    /** Someone else signs in and keeps the space; `makePrivate`: and then closes its link. */
+    keptBy(id: string, name: string, makePrivate = false) {
       const space = spaces.get(id);
-      if (space) space.owner = name;
+      if (!space) return;
+      space.owner = name;
+      if (makePrivate) space.visibility = "private";
+    },
+    /** The space expires or is removed. */
+    remove(id: string) {
+      const space = spaces.get(id);
+      if (space) space.deleted = true;
     },
     /** A page is edited in the space by someone there. */
     editPage(id: string, docPath: string, body: string) {

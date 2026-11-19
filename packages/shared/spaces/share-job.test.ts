@@ -132,6 +132,38 @@ describe("the status", () => {
   });
 });
 
+describe("a space that is no longer there", () => {
+  test("removed there, then Update with no account: it did not finish, no sign-in is started, and Share as new makes a new space", async () => {
+    const s = setup();
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    const first = s.record().space_id;
+    s.spaces.remove(first);
+    s.world.store.addVersion(id, s.world.main, { bytes: enc("# v5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "failed", gone: true, keep: null, signed_in: false });
+    expect(s.opened).toEqual([]);
+    expect(s.spaces.spaces.size).toBe(1);
+    s.jobs.share(id, { fresh: true });
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", gone: false });
+    expect(s.record().space_id).not.toBe(first);
+  });
+
+  test("a claim on a space that is not available (404) is not someone else's keep", async () => {
+    const s = setup();
+    s.jobs.share(s.world.plan, {});
+    await s.settle();
+    s.spaces.remove(s.record().space_id);
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    await s.jobs.keep(s.world.plan);
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: false });
+    expect(s.record().refused).toBe(false);
+  });
+});
+
 describe("Keep this space", () => {
   test("signs in through the browser, keeps the token in a 0600 file, claims the space, then sends the approval", async () => {
     const s = setup({ spaces: { approvals: "accept" } });
