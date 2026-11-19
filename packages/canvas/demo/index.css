@@ -76,6 +76,9 @@ body {
   min-height: 0;
   border-left: 1px solid var(--border);
 }
+.demo-body[data-layout='canvas'] .demo-canvas {
+  border-left: 0;
+}
 .demo-canvas[data-handoff] > * {
   visibility: hidden;
 }

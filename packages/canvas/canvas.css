@@ -1184,8 +1184,8 @@
   position: absolute;
   left: 0;
   bottom: calc(100% + 8px);
-  /* Never wider on screen than its frame, however much it has grown: the title is cut with an ellipsis. */
-  max-width: calc(100% / var(--pcv-chip, 1));
+  /* Never wider on screen than its frame, however much it has grown (the view's own rule sets both). */
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1193,8 +1193,7 @@
   padding: 5px 12px 5px 10px;
   border-radius: 999px;
   background: var(--pcv-card);
-  /* Grows as the board is zoomed out, from its own corner, so it never leaves its frame's left edge. */
-  transform: scale(var(--pcv-chip, 1));
+  /* Grows as the board is zoomed out (a rule each view writes for itself), from its own corner. */
   transform-origin: 0 100%;
 }
 .pcv-frame-chip::before {

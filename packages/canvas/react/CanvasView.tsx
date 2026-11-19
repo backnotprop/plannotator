@@ -28,7 +28,7 @@
  * - Objects are placed with `transform`, so moving one is not a layout.
  * - Far out, the stylesheet draws less of each object (`data-lod`).
  */
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import { boundsOf, isBoundEnd, resolveArrow } from '../model/document';
 import type { Point, Rect } from '../model/geometry';
@@ -42,6 +42,12 @@ import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
 import { ArrowView, FlatView, ObjectView, objectLabel } from './objects';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
+/**
+ * Past this many mounted objects, far out, each object is one flat element instead of its full markup. Only
+ * that far: swapping markup as the zoom crosses a detail level costs a long frame (measured: 83 ms at 2,000
+ * objects), which is worth paying on a board so large that it cannot pan otherwise, and not below.
+ */
+const FLAT_ABOVE = 4000;
 /** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
 const CROWDED = 500;
 
@@ -142,6 +148,8 @@ export function CanvasView({
   const overlay = useRef<HTMLDivElement | null>(null);
   const zoomRef = useRef<number | null>(null);
   const chipRef = useRef(0);
+  const chipStyle = useRef<HTMLStyleElement | null>(null);
+  const viewId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const overscanRef = useRef(overscan);
   const size = useRef<Size>({ w: 0, h: 0 });
   const [window_, setWindow] = useState<Rect | null>(null);
@@ -176,12 +184,14 @@ export function CanvasView({
         zoomRef.current = c.z;
         overlay.current?.style.setProperty('--pcv-z', String(c.z));
       }
-      // Frame titles grow as the board shrinks, so they can still be read. One value, in steps, set on the
-      // board only when it changes step: it is inherited, and writing it every frame would restyle everything.
+      // Frame titles grow as the board shrinks, so they can still be read. The size is a rule in this view's
+      // own small stylesheet, rewritten only when it changes step. Not a custom property on the board: that
+      // is inherited by every object, and each change of step restyled all of them (measured as long frames
+      // while zooming a 2,000-object board).
       const chip = Math.round(Math.max(1, Math.min(3.3, 0.9 / c.z)) * 8) / 8;
-      if (chip !== chipRef.current) {
+      if (chip !== chipRef.current && chipStyle.current) {
         chipRef.current = chip;
-        worldEl.style.setProperty('--pcv-chip', String(chip));
+        chipStyle.current.textContent = `[data-pcv-view="${viewId}"] .pcv-frame-chip{transform:scale(${chip});max-width:${(100 / chip).toFixed(2)}%}`;
       }
       const nextLod = lodForZoom(c.z);
       if (nextLod !== lodRef.current) {
@@ -253,7 +263,7 @@ export function CanvasView({
         const g = resolveArrow(doc, object);
         if (g) lines.push({ arrow: object, points: [g.from, g.to] });
       }
-    } else if (object.type !== 'group' && lod === 'far' && editingId !== id && tabStop !== id) {
+    } else if (object.type !== 'group' && lod === 'far' && mounted.length > FLAT_ABOVE && editingId !== id && tabStop !== id) {
       // Far out on a crowded board: a flat patch each. Bare text has nothing to show at this size.
       if (object.type !== 'text') placed.push(<FlatView key={id} object={object} />);
       if (selection.size === 1 && selection.has(id)) {
@@ -314,7 +324,8 @@ export function CanvasView({
   }
 
   return (
-    <div {...rootProps} ref={setRoot} className={rootProps?.className ? `pcv pcv-root ${rootProps.className}` : 'pcv pcv-root'} data-lod={lod} data-crowded={mounted.length > CROWDED ? '' : undefined}>
+    <div {...rootProps} ref={setRoot} className={rootProps?.className ? `pcv pcv-root ${rootProps.className}` : 'pcv pcv-root'} data-pcv-view={viewId} data-lod={lod} data-crowded={mounted.length > CROWDED ? '' : undefined}>
+      <style ref={chipStyle} />
       {lead}
       <div ref={world} className="pcv-world">
         {placed}

@@ -106,6 +106,9 @@ export class Router {
   private readonly listeners = new Set<() => void>();
   private version = 0;
   private pending = 0;
+  /** Routes asked for that could not be done in their frame. */
+  private readonly wanted = new Set<ObjectId>();
+  private told = 0;
 
   constructor(
     private doc: CanvasDocument,
@@ -190,6 +193,8 @@ export class Router {
   apply(doc: CanvasDocument, before: CanvasDocument, events: readonly CanvasEvent[]): void {
     this.doc = doc;
     const moved: Rect[] = [];
+    // What only changed place, and by how much: a connector whose two ends went the same way goes with them.
+    const shifts = new Map<ObjectId, Point>();
     for (const event of events) {
       const id = event.type === 'object-added' ? event.object.id : event.type === 'object-set' || event.type === 'object-removed' ? event.id : null;
       if (!id) continue;
@@ -211,9 +216,32 @@ export class Router {
       if (event.type === 'object-set' && !('x' in event.set) && !('y' in event.set) && !('w' in event.set) && !('h' in event.set) && !('shape' in event.set)) continue;
       if (was && isPlaced(was)) moved.push(was);
       if (now && isPlaced(now)) moved.push(now);
+      if (event.type === 'object-set' && was && now && isPlaced(was) && isPlaced(now) && !('w' in event.set) && !('h' in event.set) && !('shape' in event.set)) {
+        shifts.set(id, { x: now.x - was.x, y: now.y - was.y });
+      }
       this.touch(id);
     }
     this.sweep(moved);
+    // A connector both of whose ends moved by the same amount keeps its shape, moved along with them, instead
+    // of being worked out again: dragging a group does not re-route the lines inside it. (What now stands in
+    // its way is looked at the next time something near it changes.)
+    if (shifts.size > 1) {
+      for (const [arrow, route] of this.routes) {
+        if (!this.stale.has(arrow)) continue;
+        const ends = this.ends.get(arrow);
+        const object = doc.objects[arrow];
+        if (!ends || ends.length !== 2 || object?.type !== 'arrow') continue;
+        const a = shifts.get(ends[0]);
+        const b = shifts.get(ends[1]);
+        if (!a || !b || a.x !== b.x || a.y !== b.y) continue;
+        this.routes.set(arrow, {
+          ...route,
+          points: route.points.map((p) => ({ x: p.x + a.x, y: p.y + a.y })),
+          bounds: { x: route.bounds.x + a.x, y: route.bounds.y + a.y, w: route.bounds.w, h: route.bounds.h },
+        });
+        this.stale.delete(arrow);
+      }
+    }
     this.version += 1;
   }
 
@@ -315,7 +343,8 @@ export class Router {
     if (arrow?.type !== 'arrow') return null;
     if (deadline !== undefined && performance.now() > deadline) {
       // Out of time for this frame. It keeps its last shape, or is a straight line if it has never had one
-      // (null: the caller draws the plain line), and is worked out in the next frame.
+      // (null: the caller draws the plain line), and is worked out between frames.
+      this.wanted.add(arrowId);
       this.later();
       return known ?? null;
     }
@@ -326,15 +355,36 @@ export class Router {
     return route;
   }
 
+  /**
+   * Work through the routes that were asked for and could not be done in time, a few milliseconds a frame,
+   * between frames. Views are told to draw again when all of them are done, or every so often while a great
+   * many are still to do: drawing again is itself work, and doing it every frame for a few more lines each
+   * time would cost more than the routing.
+   */
   private later(): void {
     if (this.pending || typeof requestAnimationFrame === 'undefined') return;
-    this.pending = requestAnimationFrame(() => {
+    const step = () => {
       this.pending = 0;
-      this.version += 1;
-      for (const listener of [...this.listeners]) listener();
-    });
+      const until = performance.now() + ROUTE_BUDGET_MS;
+      for (const id of this.wanted) {
+        if (performance.now() > until) break;
+        this.wanted.delete(id);
+        if (this.stale.has(id)) this.get(id);
+      }
+      const now = performance.now();
+      if (this.wanted.size === 0 || now - this.told > TELL_EVERY_MS) {
+        this.told = now;
+        this.version += 1;
+        for (const listener of [...this.listeners]) listener();
+      }
+      if (this.wanted.size) this.pending = requestAnimationFrame(step);
+    };
+    this.pending = requestAnimationFrame(step);
   }
 }
+
+/** While many routes are still being worked out, views are told to draw again this often. */
+const TELL_EVERY_MS = 120;
 
 const ROUTERS = new WeakMap<CanvasStore, Router>();
 

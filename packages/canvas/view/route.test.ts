@@ -122,6 +122,20 @@ describe('routes kept current', () => {
     expect(routes.counts.stale).toBeLessThanOrEqual(6);
   });
 
+  test('a connector whose two ends are dragged together moves with them and is not worked out again', () => {
+    const store = board();
+    const routes = routesFor(store);
+    const before = routes.get('a40')!;
+    routes.get('a41');
+    store.dispatch({ type: 'move', ids: ['b40', 'b41'], dx: 25, dy: 40 });
+    // The line between the two that moved is already where it should be; its neighbours, with one end left behind, wait.
+    const after = routes.get('a40', -1)!;
+    expect(after.points).toEqual(before.points.map((p) => ({ x: p.x + 25, y: p.y + 40 })));
+    expect(routes.counts.stale).toBeGreaterThanOrEqual(1);
+    // The next line along has one end that moved and one that did not: it is worked out afresh, from the moved box.
+    expect(routes.get('a41')!.points[0]).toEqual({ x: before.points[0].x + 260 + 25, y: before.points[0].y + 40 });
+  });
+
   test('an object dropped onto a line makes that line go round it, and taking it away lets it straighten', () => {
     const store = board();
     const routes = routesFor(store);
