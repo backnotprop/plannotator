@@ -155,6 +155,7 @@ import { PLAN_TOOL } from './plan'
 import { pickShell, useShell, type ModShell } from './shell'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerAtRun, isEarlyRunRefusal, isServedAtRun, RUN_EVENT, RUN_MATCHER } from './early-run'
+import { ASK_QUESTION_TOOL } from './terminal-prompts'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
@@ -1223,53 +1224,67 @@ export function register(on: On) {
     return result
   })
 
+  // What waits on the person where the session runs (terminal-prompts.ts), for the Inbox's Agents list, read only
+  // from hooks the mod has anyway and never changing an answer (no wildcard, no hook on another tool's permission):
+  // an AskUserQuestion call is a question until its `tool.call` settles (the dialog is inside it); a Bash call whose
+  // `tool.check` (the Bash-matched hook below) said `ask` is a permission until it runs (`tool.run`, the run hook
+  // below, 2.1.326+) or settles. No other tool's permission prompt is seen, so none is told.
+  // The body stays inline: Claude Code's check of this module follows `$` only into functions at the top of the file.
   on('tool.call', async ($: Engine, e: any, next: Next) => {
-    // Claude's `plannotator` tool: answered here, with the same detached
-    // launch the slash commands use. No other hook or core runs for it,
-    // unless Claude Code's guard holds the launch until the call is allowed:
-    // then it goes on to the session's permission check and opens at tool.run.
-    if (allowed && toolName && e.tool === toolName) {
-      const answer = await answerModTool($, e)
-      return heldUntilAllowed($, e, answer) ? next(e) : answer
-    }
-    // `plannotator_inbox`: the Inbox tool the call names, through the Inbox's
-    // /mcp, with this session's working folder and id filled in (inbox.ts).
-    if (allowed && inboxToolName && e.tool === inboxToolName) {
-      const instance = await currentMod($)
-      if (!instance?.inbox) return { deny: 'The Plannotator Inbox is not connected in this session; use the plannotator inbox mcp server instead.' }
-      const answer = await instance.inbox.callTool(toolArgsOf(e), String(await $.session.cwd()))
-      return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
-    }
-    // Claude running `plannotator annotate|review|last` in Bash on the main
-    // loop: the same launch and result as the tool (take-over.ts); anything
-    // the tool cannot represent, and every subagent's command, runs as written.
-    if (allowed?.reviews && e.tool === SHELL_TOOL) {
-      // A worktree move in this turn moved the project: the command's `plannotator inbox call` / `card` follow it
-      // (written only on a change).
-      const current = mod
-      if (current && !current.isDisposed) await withinMs($, SESSION_PROJECT_EXPORT_MS, () => current.exportSessionProject())
-      const input = shellTakeOver(e.command, !!e.agentId)
-      if (!input) return next(e)
-      const instance = await currentMod($)
-      if (!instance) return next(e)
-      const answer = await answerShellCall(instance, input)
-      // Held by Claude Code's guard until allowed: the session checks the command, tool.run opens it (it never runs).
-      return heldUntilAllowed($, e, answer) ? next(e) : answer
-    }
-    // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
-    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) {
-      if (allowed?.debugPath && e.tool === PLAN_TOOL) hostOf($, allowed.debugPath).debug(`ExitPlanMode (${e.agentId ? 'subagent' : 'main'}): passed on (${planPassReason(allowed)})`)
-      return next(e)
-    }
-    const instance = await currentMod($)
-    if (!instance) return next(e)
-    const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
-    if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`ExitPlanMode (main): ${'deny' in answer ? "the mod's review (denied while it waits)" : 'an approved plan; passed on'}`)
-    if ('deny' in answer) return { deny: answer.deny }
+    const callId = typeof e?.tool_use_id === 'string' && e.tool_use_id ? e.tool_use_id : null
+    const candidate = allowed && callId && (e.tool === ASK_QUESTION_TOOL || e.tool === SHELL_TOOL) ? mod : null
+    const watching = candidate && !candidate.isDisposed ? candidate : null
+    if (watching && callId && e.tool === ASK_QUESTION_TOOL) await watching.onQuestionAsked(callId, typeof e.agentId === 'string' ? e.agentId : undefined).catch(() => undefined)
     try {
-      return await next(e)
+      // Claude's `plannotator` tool: answered here, with the same detached
+      // launch the slash commands use. No other hook or core runs for it,
+      // unless Claude Code's guard holds the launch until the call is allowed:
+      // then it goes on to the session's permission check and opens at tool.run.
+      if (allowed && toolName && e.tool === toolName) {
+        const answer = await answerModTool($, e)
+        return heldUntilAllowed($, e, answer) ? await next(e) : answer
+      }
+      // `plannotator_inbox`: the Inbox tool the call names, through the Inbox's
+      // /mcp, with this session's working folder and id filled in (inbox.ts).
+      if (allowed && inboxToolName && e.tool === inboxToolName) {
+        const instance = await currentMod($)
+        if (!instance?.inbox) return { deny: 'The Plannotator Inbox is not connected in this session; use the plannotator inbox mcp server instead.' }
+        const answer = await instance.inbox.callTool(toolArgsOf(e), String(await $.session.cwd()))
+        return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
+      }
+      // Claude running `plannotator annotate|review|last` in Bash on the main
+      // loop: the same launch and result as the tool (take-over.ts); anything
+      // the tool cannot represent, and every subagent's command, runs as written.
+      if (allowed?.reviews && e.tool === SHELL_TOOL) {
+        // A worktree move in this turn moved the project: the command's `plannotator inbox call` / `card` follow it
+        // (written only on a change).
+        const current = mod
+        if (current && !current.isDisposed) await withinMs($, SESSION_PROJECT_EXPORT_MS, () => current.exportSessionProject())
+        const input = shellTakeOver(e.command, !!e.agentId)
+        if (!input) return await next(e)
+        const instance = await currentMod($)
+        if (!instance) return await next(e)
+        const answer = await answerShellCall(instance, input)
+        // Held by Claude Code's guard until allowed: the session checks the command, tool.run opens it (it never runs).
+        return heldUntilAllowed($, e, answer) ? await next(e) : answer
+      }
+      // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
+      if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) {
+        if (allowed?.debugPath && e.tool === PLAN_TOOL) hostOf($, allowed.debugPath).debug(`ExitPlanMode (${e.agentId ? 'subagent' : 'main'}): passed on (${planPassReason(allowed)})`)
+        return await next(e)
+      }
+      const instance = await currentMod($)
+      if (!instance) return await next(e)
+      const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
+      if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`ExitPlanMode (main): ${'deny' in answer ? "the mod's review (denied while it waits)" : 'an approved plan; passed on'}`)
+      if ('deny' in answer) return { deny: answer.deny }
+      try {
+        return await next(e)
+      } finally {
+        await instance.onPlanCallSettled(e.tool_use_id)
+      }
     } finally {
-      await instance.onPlanCallSettled(e.tool_use_id)
+      if (watching && callId) watching.onToolSettled(callId)
     }
   })
 
@@ -1291,6 +1306,8 @@ export function register(on: On) {
   // for it (HELD_AT_RUN_TEXT), not the guard's advice to serve at tool.run.
   on('tool.*', RUN_MATCHER, async ($: Engine, e: any, next: Next) => {
     if (next?.event !== RUN_EVENT) return next(e)
+    // A Bash call runs: its permission prompt, if one was up, is over (and tool.run is seen in this process).
+    if (allowed && mod && !mod.isDisposed && typeof e.tool_use_id === 'string' && e.tool_use_id) mod.onToolRan(e.tool_use_id)
     if (allowed && toolName && e.tool === toolName) return answerAtRun(await answerModTool($, e))
     if (allowed?.reviews && e.tool === SHELL_TOOL) {
       const input = shellTakeOver(e.command, !!e.agentId)
@@ -1333,12 +1350,28 @@ export function register(on: On) {
     const verdict = await next(e)
     if (!allowed || typeof e.tool_use_id !== 'string') return verdict
     removalAsks.note(removalAskKey(e.agentId, e.input), verdict)
+    // A permission prompt for this Bash call (terminal-prompts.ts): the verdict is read, never changed.
+    const watching = mod
+    if (verdict?.decision === 'ask' && watching && !watching.isDisposed && !answeredByUs(e)) await watching.onToolAsked(e.tool_use_id, typeof e.agentId === 'string' ? e.agentId : undefined).catch(() => undefined)
     if (allowed.debugPath && verdict?.decision === 'ask' && isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'))) {
       const by = ['rule', 'hook', 'setting', 'plugin'].filter((key) => verdict[key]).map((key) => `${key} ${verdict[key]}`)
       hostOf($, allowed.debugPath).debug(`Bash ask (${e.agentId ? 'subagent' : 'main'}): ${String(verdict.reason ?? '').slice(0, 80)}${by.length ? ` [${by.join(', ')}]` : ''}`)
     }
     return verdict
   })
+
+  // A call one of our own hooks answers, however long that takes, is not a prompt in the terminal: ExitPlanMode (the
+  // plan review opens in the browser, through the mod or the classic hook), the mod's own tools, and a Bash command the
+  // mod takes over. Never noted as a permission prompt.
+  function answeredByUs(e: any): boolean {
+    const tool = typeof e?.tool === 'string' ? e.tool : ''
+    if (tool === PLAN_TOOL || (toolName && tool === toolName) || (inboxToolName && tool === inboxToolName)) return true
+    if (tool === SHELL_TOOL) {
+      const command = typeof e?.input?.command === 'string' ? e.input.command : typeof e?.command === 'string' ? e.command : ''
+      return !!command && !!shellTakeOver(command, !!e.agentId)
+    }
+    return false
+  }
 
   on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
@@ -1473,6 +1506,8 @@ export function register(on: On) {
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
     if (!e.agentId) await plainReminderAgain($)
     const instance = allowed ? mod : null
+    // A model request of this loop: whatever it waited on in the terminal was answered (terminal-prompts.ts).
+    if (instance && !instance.isDisposed) instance.onLoopStep(typeof e.agentId === 'string' ? e.agentId : undefined)
     // A main-loop model request is going out: a reply Send now put into the turn is in it (inbox.ts).
     if (instance && !instance.isDisposed && !e.agentId && typeof e.turnId === 'string') instance.onMainStep(e.turnId)
     if (!instance || !instance.turns.ownsTurn(e.turnId)) return yield* next(e)

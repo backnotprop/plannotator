@@ -1423,12 +1423,14 @@ public struct InboxAgent: Codable, Hashable, Sendable {
   public var place: InboxAgentPlace?
   public var rexStatus: InboxAgentRexStatus?
   public var rexMark: InboxRexMark?
+  public var statusMark: InboxAgentMark?
+  public var turnsUnknown: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["id", "session", "continues", "launch", "host", "label", "title", "first_thread", "project", "state", "waiting", "live", "started_at", "last_seen_at", "place", "rex_status", "rex_mark"]
+  static let knownKeys: Set<String> = ["id", "session", "continues", "launch", "host", "label", "title", "first_thread", "project", "state", "waiting", "live", "started_at", "last_seen_at", "place", "rex_status", "rex_mark", "status_mark", "turns_unknown"]
 
-  public init(id: String, session: String, continues: [String]? = nil, launch: InboxAgentLaunch? = nil, host: String? = nil, label: String? = nil, title: String? = nil, firstThread: InboxAgentFirstThread? = nil, project: InboxAgentProject? = nil, state: InboxAgentState, waiting: Double, live: Bool, startedAt: String? = nil, lastSeenAt: String? = nil, place: InboxAgentPlace? = nil, rexStatus: InboxAgentRexStatus? = nil, rexMark: InboxRexMark? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, session: String, continues: [String]? = nil, launch: InboxAgentLaunch? = nil, host: String? = nil, label: String? = nil, title: String? = nil, firstThread: InboxAgentFirstThread? = nil, project: InboxAgentProject? = nil, state: InboxAgentState, waiting: Double, live: Bool, startedAt: String? = nil, lastSeenAt: String? = nil, place: InboxAgentPlace? = nil, rexStatus: InboxAgentRexStatus? = nil, rexMark: InboxRexMark? = nil, statusMark: InboxAgentMark? = nil, turnsUnknown: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.session = session
     self.continues = continues
@@ -1446,6 +1448,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     self.place = place
     self.rexStatus = rexStatus
     self.rexMark = rexMark
+    self.statusMark = statusMark
+    self.turnsUnknown = turnsUnknown
     self.unknownFields = unknownFields
   }
 
@@ -1468,6 +1472,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     self.place = try c.decodeIfPresent(InboxAgentPlace.self, forKey: WireKey("place"))
     self.rexStatus = try c.decodeIfPresent(InboxAgentRexStatus.self, forKey: WireKey("rex_status"))
     self.rexMark = try c.decodeIfPresent(InboxRexMark.self, forKey: WireKey("rex_mark"))
+    self.statusMark = try c.decodeIfPresent(InboxAgentMark.self, forKey: WireKey("status_mark"))
+    self.turnsUnknown = try c.decodeIfPresent(Bool.self, forKey: WireKey("turns_unknown"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -1490,6 +1496,8 @@ public struct InboxAgent: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.place, forKey: WireKey("place"))
     try c.encodeIfPresent(self.rexStatus, forKey: WireKey("rex_status"))
     try c.encodeIfPresent(self.rexMark, forKey: WireKey("rex_mark"))
+    try c.encodeIfPresent(self.statusMark, forKey: WireKey("status_mark"))
+    try c.encodeIfPresent(self.turnsUnknown, forKey: WireKey("turns_unknown"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -1680,6 +1688,124 @@ public enum InboxAgentLaunchRun: Codable, Hashable, Sendable, RawRepresentable {
     case .waitingAnswer: return "waiting_answer"
     case .waitingTerminal: return "waiting_terminal"
     case .working: return "working"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+/// From `packages/core/inbox-types.ts`.
+public struct InboxAgentMark: Codable, Hashable, Sendable {
+  public var state: InboxAgentMarkState
+  public var kind: InboxAgentMarkKind?
+  public var whereValue: InboxAgentMarkWhere?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["state", "kind", "where"]
+
+  public init(state: InboxAgentMarkState, kind: InboxAgentMarkKind? = nil, whereValue: InboxAgentMarkWhere? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.state = state
+    self.kind = kind
+    self.whereValue = whereValue
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.state = try c.decode(InboxAgentMarkState.self, forKey: WireKey("state"))
+    self.kind = try c.decodeIfPresent(InboxAgentMarkKind.self, forKey: WireKey("kind"))
+    self.whereValue = try c.decodeIfPresent(InboxAgentMarkWhere.self, forKey: WireKey("where"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.state, forKey: WireKey("state"))
+    try c.encodeIfPresent(self.kind, forKey: WireKey("kind"))
+    try c.encodeIfPresent(self.whereValue, forKey: WireKey("where"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public enum InboxAgentMarkKind: Codable, Hashable, Sendable, RawRepresentable {
+  case permission
+  case question
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxAgentMarkKind] = [.permission, .question]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "permission": self = .permission
+    case "question": self = .question
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .permission: return "permission"
+    case .question: return "question"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public enum InboxAgentMarkState: Codable, Hashable, Sendable, RawRepresentable {
+  case blocked
+  case working
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxAgentMarkState] = [.blocked, .working]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "blocked": self = .blocked
+    case "working": self = .working
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .blocked: return "blocked"
+    case .working: return "working"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+}
+
+public enum InboxAgentMarkWhere: Codable, Hashable, Sendable, RawRepresentable {
+  case inbox
+  case terminal
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxAgentMarkWhere] = [.inbox, .terminal]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "inbox": self = .inbox
+    case "terminal": self = .terminal
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .inbox: return "inbox"
+    case .terminal: return "terminal"
     case .unknown(let value): return value
     }
   }
@@ -1885,12 +2011,13 @@ public struct InboxAgentsGroup: Codable, Hashable, Sendable {
   public var faces: [String: InboxAgentFaceEntry]?
   public var facesRev: Int64?
   public var faceTiles: Bool?
+  public var statusMarks: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["machine", "agents", "total", "ended_today", "faces", "faces_rev", "face_tiles"]
+  static let knownKeys: Set<String> = ["machine", "agents", "total", "ended_today", "faces", "faces_rev", "face_tiles", "status_marks"]
 
-  public init(machine: String? = nil, agents: [InboxAgent], total: Int64, endedToday: Double, faces: [String: InboxAgentFaceEntry]? = nil, facesRev: Int64? = nil, faceTiles: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(machine: String? = nil, agents: [InboxAgent], total: Int64, endedToday: Double, faces: [String: InboxAgentFaceEntry]? = nil, facesRev: Int64? = nil, faceTiles: Bool? = nil, statusMarks: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.machine = machine
     self.agents = agents
     self.total = total
@@ -1898,6 +2025,7 @@ public struct InboxAgentsGroup: Codable, Hashable, Sendable {
     self.faces = faces
     self.facesRev = facesRev
     self.faceTiles = faceTiles
+    self.statusMarks = statusMarks
     self.unknownFields = unknownFields
   }
 
@@ -1910,6 +2038,7 @@ public struct InboxAgentsGroup: Codable, Hashable, Sendable {
     self.faces = try c.decodeIfPresent([String: InboxAgentFaceEntry].self, forKey: WireKey("faces"))
     self.facesRev = try c.decodeIfPresent(Int64.self, forKey: WireKey("faces_rev"))
     self.faceTiles = try c.decodeIfPresent(Bool.self, forKey: WireKey("face_tiles"))
+    self.statusMarks = try c.decodeIfPresent(Bool.self, forKey: WireKey("status_marks"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -1922,6 +2051,7 @@ public struct InboxAgentsGroup: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.faces, forKey: WireKey("faces"))
     try c.encodeIfPresent(self.facesRev, forKey: WireKey("faces_rev"))
     try c.encodeIfPresent(self.faceTiles, forKey: WireKey("face_tiles"))
+    try c.encodeIfPresent(self.statusMarks, forKey: WireKey("status_marks"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

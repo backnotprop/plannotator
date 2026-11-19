@@ -206,7 +206,7 @@ export function PhoneToSheet({
                 highlighted={i >= 0 && i === hl}
                 // An asleep machine's agents can't take a message now: shown, as the sidebar shows them, not picked.
                 disabled={asleep}
-                end={check || (parts ? <span className="ib-cp-stend" data-compose-state="">{asleep ? 'asleep' : busyWord(target)}</span> : null)}
+                end={check || (parts && (asleep || busyWord(target)) ? <span className="ib-cp-stend" data-compose-state="">{asleep ? 'asleep' : busyWord(target)}</span> : null)}
                 ariaLabel={`${agent}${target.label ? `, ${target.label},` : ''} in ${target.project.name}${time ? `, started ${time}` : ''}`}
                 attrs={{ 'data-compose-session': target.session, 'data-compose-project': target.project.name, 'data-compose-session-machine': item.machine.key, 'data-session-label': target.label ? '' : undefined }}
                 onClick={() => pick(item)}

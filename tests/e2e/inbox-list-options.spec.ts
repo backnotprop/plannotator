@@ -299,7 +299,23 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
     const highlighted = () => page.locator('[data-tidy-menu-popup] [data-highlighted]').getAttribute('data-list-look');
-    for (let i = 0; i < 8 && (await highlighted()) !== 'compact'; i++) await page.keyboard.press('ArrowDown');
+    // The arrows walk every item, however many come before the one sought (no count of presses to keep in step).
+    const items = await page.locator('[data-tidy-menu-popup] [role^="menuitem"]').count();
+    const arrowTo = async (target: string) => {
+      const reached = page.locator(`[data-tidy-menu-popup] [data-highlighted]${target}`);
+      for (let i = 0; i <= items && (await reached.count()) === 0; i++) await page.keyboard.press('ArrowDown');
+      await expect(reached).toHaveCount(1);
+    };
+    // "Show agent status", its own item after the view: reached by the arrows, Space turns it on, Enter off again.
+    const agentStatus = page.locator('[data-tidy-menu-popup] [data-agent-status-option]');
+    await arrowTo('[data-agent-status-option]');
+    await expect(agentStatus).toHaveAttribute('aria-checked', 'false');
+    await page.keyboard.press(' ');
+    await expect(agentStatus).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Enter');
+    await expect(agentStatus).toHaveAttribute('aria-checked', 'false');
+    await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
+    await arrowTo('[data-list-look="compact"]');
     expect(await highlighted()).toBe('compact');
     await page.keyboard.press(' ');
     await expect(option(page, 'compact')).toHaveAttribute('aria-checked', 'true');
@@ -324,6 +340,8 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await expect(trigger).toBeFocused();
   } finally {
     await context.close();
+    // The agent status switch is this Inbox's setting: off again for the next test, whatever this one reached.
+    await post('/api/inbox/settings', { agent_status: { on: false } });
   }
 });
 

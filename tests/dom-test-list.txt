@@ -779,6 +779,7 @@ packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
+packages/inbox/agents/agentStatusMark.test.tsx
 packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx

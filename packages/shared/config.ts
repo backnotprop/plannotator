@@ -561,6 +561,13 @@ export interface PlannotatorConfig {
    */
   inboxBro?: boolean;
   /**
+   * Agent status (owner, 2026-11-18; off by default): the status mark on every agent's icon in the Inbox (working,
+   * waiting on you in the Inbox or in the agent; no idle mark). Off or unset: only agents in a Rex pane
+   * carry one, as before. Written by Settings → General → Appearance and the list's ⋮ menu
+   * (`POST /api/inbox/settings` `{ agent_status: { on } }`), read on every list.
+   */
+  inboxAgentStatus?: boolean;
+  /**
    * Floating reply drafts (approval "inbox-reply-floaters"; the owner, 2026-11-08: off by default). On: a reply draft
    * set aside or left behind floats in the Inbox's bottom right corner. Off or unset: it stays in Drafts. Written by
    * Settings → Capabilities → Experimental (`POST /api/inbox/settings` `{ float_drafts: { on } }`), read on every request.
