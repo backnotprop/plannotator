@@ -348,3 +348,19 @@ test.skipIf(!hasDom)('a sound or a video the body shows is a native player in pl
   expect(video.getAttribute('preload')).toBe('metadata');
   expect(video.hasAttribute('autoplay')).toBe(false);
 });
+
+test.skipIf(!hasDom)('a raw <img> naming a sound or a video draws the player in place; one that fails to load is the chip', async () => {
+  await render(['<p>The run: <img src="rec/clip.mp4" alt="Clip"> and <img src="notes/hi.wav" alt="Voice"> end there.</p>'].join('\n'), [], []);
+  const url = (path: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(path)}`;
+  expect(host!.querySelectorAll('img')).toHaveLength(0);
+  const video = host!.querySelector<HTMLVideoElement>('video[data-inline-media]')!;
+  expect([video.getAttribute('src'), video.getAttribute('aria-label'), video.hasAttribute('controls'), video.hasAttribute('playsinline'), video.hasAttribute('autoplay')]).toEqual([url('rec/clip.mp4'), 'Clip', true, true, false]);
+  const audio = host!.querySelector<HTMLAudioElement>('audio[data-inline-media]')!;
+  expect([audio.getAttribute('src'), audio.getAttribute('aria-label'), audio.getAttribute('preload')]).toEqual([url('notes/hi.wav'), 'Voice', 'metadata']);
+  await act(async () => {
+    video.dispatchEvent(new Event('error'));
+  });
+  expect(host!.querySelector('[data-image-unavailable]')!.textContent).toBe('Clip');
+  expect(video.hidden).toBe(true);
+  expect(host!.textContent).toContain('end there.');
+});

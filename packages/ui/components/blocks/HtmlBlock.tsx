@@ -8,6 +8,7 @@ import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
+import { htmlBlockPlayer, wireHtmlBlockPlayers } from "./htmlBlockMedia";
 
 interface HtmlBlockProps {
   block: Block;
@@ -80,6 +81,10 @@ function resolveHostMedia(
     const resolved = resolveImage(src);
     if (resolved?.kind === 'unavailable') {
       img.replaceWith(unavailableMedia(doc, alt, resolved.title));
+      return;
+    }
+    if (resolved?.kind === 'src' && resolved.media) {
+      img.replaceWith(htmlBlockPlayer(doc, resolved.src, img.getAttribute('alt') ?? '', src, resolved.media));
       return;
     }
     if (resolved?.kind === 'src') {
@@ -275,8 +280,10 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     }
     const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink);
     const stopColors = paintAuthorColors(ref.current);
+    const stopPlayers = wireHtmlBlockPlayers(ref.current);
     return () => {
       cleanup();
+      stopPlayers();
       stopColors();
     };
   }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink, preserveVideos, responsiveImages]);
