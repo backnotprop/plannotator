@@ -207,7 +207,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, type InboxMcpContext } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
@@ -1820,6 +1820,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     broOn: () => broOn(),
     // Code review: submit_guide's `review` field is listed and served only while the person has it on.
     codeReviewOn: () => codeReviewOn(),
+    // The person's own Inbox rules and reminder reach MCP sessions too, read on every connection.
+    inboxReminder: () => resolveInboxMcpReminder(loadConfig()),
     // Branch reviews: send_message's `branch` field is listed and served only while the person has it on.
     branches: branchService.mcp,
     walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
@@ -1833,6 +1835,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
+  // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps.
+  const mcpForInitialize = (client: InboxMcpClient) =>
+    createMcpHandler(() => createInboxMcpServer({ ...mcpContext, mcpClient: client }), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
 
   const health = (): InboxHealth => ({
     ok: true,
@@ -5721,6 +5726,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           headers.delete("content-length");
           return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
         }
+        const client = inboxMcpInitializeClient(body);
+        if (client !== undefined) return mcpForInitialize(client).fetch(req);
       }
       return mcp.fetch(req);
     }
@@ -8084,6 +8091,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       payload: eventPayload,
       apply: devices.asDevice,
       phones: phonesOn,
+      // The push's badge and `time_sensitive` (push version 2): the rows as the window places them, a session on a prompt in Stopped on you.
+      rows: () => store.listRows().map(launch.rowDecorator()),
       agents: {
         apply: (deviceId, request, commandId) => agentDoor.asAgent(deviceId, request, commandId),
         signalsFor: (line) => agentSignalsFor(line),
