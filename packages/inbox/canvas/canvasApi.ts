@@ -85,7 +85,7 @@ export const canvasApi = {
     return apiGet<CanvasRead>(`${path(threadId)}${query ? `?${query}` : ''}`, signal);
   },
   /** Take back one change an agent made (its revision): the answer is the canvas after. */
-  undo: (threadId: string, rev: number) => apiPost<{ rev: number; scene: CanvasScene }>(`${path(threadId)}/undo`, { rev, window: CANVAS_WINDOW }),
+  undo: (threadId: string, rev: number) => apiPost<{ rev: number; scene: CanvasScene; kept?: string[]; already?: boolean }>(`${path(threadId)}/undo`, { rev, window: CANVAS_WINDOW }),
   marks: () => apiGet<{ canvases: CanvasMark[] }>('/api/inbox/canvases'),
   /** `have`: the revision this window last took. The answer carries the merged scene when the Inbox held changes this window did not. */
   save: (threadId: string, scene: CanvasScene, have: number, options: { gone?: string[]; keepalive?: boolean; plain?: boolean } = {}) =>

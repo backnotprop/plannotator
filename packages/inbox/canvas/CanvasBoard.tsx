@@ -518,7 +518,14 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       rev.current = answer.rev;
       setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
       setNote(null);
-      setState({ text: `Undone. ${agent ?? 'The agent'} is told on its next look.` });
+      const kept = answer.kept ?? [];
+      setState({
+        text: answer.already
+          ? 'That change was already undone.'
+          : kept.length > 0
+            ? `Undone, except what you changed since: ${kept.slice(0, 3).join(', ')}${kept.length > 3 ? ` and ${kept.length - 3} more` : ''}.`
+            : `Undone. ${agent ?? 'The agent'} is told on its next look.`,
+      });
       storePicture();
     } catch {
       setState({ text: 'That change can no longer be undone.', bad: true });

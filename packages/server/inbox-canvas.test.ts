@@ -4,13 +4,15 @@
  * stand-in store in a temp folder; no Inbox is started.
  */
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CanvasAuthor } from "@plannotator/shared/inbox/canvas/changes";
 import { mergeSave } from "@plannotator/shared/inbox/canvas/changes";
-import type { CanvasElement } from "@plannotator/shared/inbox/canvas/scene";
-import { commitCanvas, readCanvasScene } from "@plannotator/shared/inbox/canvas/store";
+import { emptyScene, type CanvasElement } from "@plannotator/shared/inbox/canvas/scene";
+import { thingsOf } from "@plannotator/shared/inbox/canvas/reading";
+import { CANVAS_GONE_KEEP_MS, commitCanvas, readCanvasLog, readCanvasScene, readCanvasTold, sweepGoneCanvases, writeAgentPicture } from "@plannotator/shared/inbox/canvas/store";
 import { createInboxCanvas } from "./inbox-canvas";
 
 const THREAD = "msg_T1";
@@ -146,9 +148,22 @@ describe("what the agent was shown", () => {
     const picked = readCanvasScene(t.dir, THREAD).elements.filter((e) => e.type === "text" && e.text === "Ledger v2").map((e) => e.containerId as string);
     const sketch = t.canvas.replySketch(THREAD, { kind: "selection", elements: picked, pictures: {} })!;
     expect(sketch.reading).toContain("Ledger v2");
+    // Building the reply shows nothing: a reply that is never stored must not clear anyone's way.
+    expect((await t.canvas.apply(THREAD, agent("a"), sketch.rev, [{ set: "Ledger v2", text: "too early" }])).ok).toBe(false);
+    const again = t.canvas.replySketch(THREAD, { kind: "selection", elements: picked, pictures: {} })!;
+    // Stored, and sent to session a: shown to a, to nobody else.
+    t.canvas.replyShown(THREAD, again, "a");
+    expect((await t.canvas.apply(THREAD, agent("other"), again.rev, [{ set: "Ledger v2", text: "Ledger (other agent)" }])).ok).toBe(false);
     // The reply showed only what it listed: a session that read nothing else may change the picked box, not the other.
-    expect((await t.canvas.apply(THREAD, agent("fresh"), sketch.rev, [{ set: "Mailer v2", text: "Mailer (agent)" }])).ok).toBe(false);
-    expect((await t.canvas.apply(THREAD, agent("a"), sketch.rev, [{ set: "Ledger v2", text: "Ledger v2, behind the queue" }])).ok).toBe(true);
+    expect((await t.canvas.apply(THREAD, agent("fresh"), again.rev, [{ set: "Mailer v2", text: "Mailer (agent)" }])).ok).toBe(false);
+    // The refusal above showed session a the box as it is, so its change lands now either way; a session shown only by the reply:
+    const b = setup();
+    await board(b, ["Ledger"]);
+    b.person("Ledger", "Ledger v2");
+    const ids = readCanvasScene(b.dir, THREAD).elements.filter((e) => e.type === "text").map((e) => e.containerId as string);
+    const told = b.canvas.replySketch(THREAD, { kind: "selection", elements: ids, pictures: {} })!;
+    b.canvas.replyShown(THREAD, told, "a");
+    expect((await b.canvas.apply(THREAD, agent("a"), told.rev, [{ set: "Ledger v2", text: "Ledger v2, behind the queue" }])).ok).toBe(true);
   });
 });
 
@@ -187,5 +202,155 @@ describe("pictures", () => {
     const scene = readCanvasScene(t.dir, THREAD);
     expect(scene.elements.find((e) => e.id === "photo001")?.isDeleted).toBe(false);
     expect(scene.files.f1aa).toEqual(file);
+  });
+});
+
+describe("what the second review broke", () => {
+  test("a session named like something every object has, or like the old everyone mark, is no session", async () => {
+    const t = setup();
+    await board(t, ["Ledger"]);
+    for (const key of ["__proto__", "constructor", "*"]) t.canvas.read(THREAD, agent(key));
+    expect(Object.keys({}).length).toBe(0);
+    expect(({} as Record<string, unknown>).length).toBeUndefined();
+    const rev = t.person("Ledger", "Ledger v2");
+    // Shown to "*" or "__proto__" is shown to nobody.
+    expect((await t.canvas.apply(THREAD, agent("a"), rev, [{ set: "Ledger v2", text: "Ledger (agent)" }])).ok).toBe(false);
+    expect(Object.keys(readCanvasTold(t.dir, THREAD)).sort()).toEqual(["a", "setup"]);
+  });
+
+  test("the check does not depend on how long the log is: 801 saves later the person's words are still protected", async () => {
+    const t = setup();
+    await board(t, ["Ledger", "Mailer"]);
+    const ledger = /box (\S+) "Ledger"/.exec(t.canvas.read(THREAD, agent("a")))![1]!;
+    t.person("Ledger", "Ledger, as the person wants it");
+    let rev = 0;
+    let words = "Mailer";
+    for (let i = 0; i <= 800; i++) {
+      rev = t.person(words, `Mailer ${i}`);
+      words = `Mailer ${i}`;
+    }
+    expect(readCanvasLog(t.dir, THREAD).some((e) => e.changes.some((c) => c.line.includes("Ledger, as the person wants it")))).toBe(false);
+    const result = await t.canvas.apply(THREAD, agent("a"), rev, [{ set: ledger, text: "Ledger (agent)" }]);
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("Ledger, as the person wants it");
+    expect(t.words()).toContain("Ledger, as the person wants it");
+  }, 60_000);
+
+  test("one save that changes more things than a log entry holds leaves every one of them protected", async () => {
+    const t = setup();
+    const labels = Array.from({ length: 320 }, (_, i) => `B${i}`);
+    await board(t, labels.slice(0, 160));
+    const more = await t.canvas.apply(THREAD, agent("setup"), 1, labels.slice(160).map((text, i) => ({ add: "box", text, at: [i * 300, 300] })));
+    expect(more.ok).toBe(true);
+    // The agent is shown all 320 (two pages of the reading and the rest).
+    let page = t.canvas.read(THREAD, agent("a"));
+    for (let guard = 0; guard < 10 && /after_thing":"([^"]+)"/.test(page); guard++) page = t.canvas.read(THREAD, agent("a"), { after: /after_thing":"([^"]+)"/.exec(page)![1]! });
+    const scene = readCanvasScene(t.dir, THREAD);
+    for (const el of scene.elements) if (el.type === "rectangle") Object.assign(el, { y: el.y + 500, version: (el.version ?? 1) + 1, versionNonce: 5 });
+    const rev = commitCanvas(t.dir, THREAD, scene, { kind: "person" }, new Date()).rev;
+    for (const label of ["B5", "B319"]) {
+      const result = await t.canvas.apply(THREAD, agent("a"), rev, [{ set: label, text: `${label} (agent)` }]);
+      expect({ label, ok: result.ok }).toEqual({ label, ok: false });
+    }
+  }, 60_000);
+
+  test("more clashes than a refusal lists: the call it gives shows exactly the rest, and then the change lands", async () => {
+    const t = setup();
+    const labels = Array.from({ length: 45 }, (_, i) => `C${i}`);
+    await board(t, labels);
+    const rev = t.revOf(t.canvas.read(THREAD, agent("setup")));
+    const change = labels.map((label) => ({ set: label, color: "red" }));
+    const first = await t.canvas.apply(THREAD, agent("a"), rev, change);
+    expect(first.ok).toBe(false);
+    const rest = JSON.parse(/See exactly those first: canvas (\{.*\})/.exec(first.text)![1]!) as { things: string[] };
+    expect(rest.things.length).toBe(15);
+    t.canvas.read(THREAD, agent("a"), { things: rest.things });
+    expect((await t.canvas.apply(THREAD, agent("a"), rev, change)).ok).toBe(true);
+  });
+
+  test("a refusal over another agent's change says so, and does not send the agent to the person", async () => {
+    const t = setup();
+    await board(t, ["Ledger"]);
+    t.canvas.read(THREAD, agent("a"));
+    const rev = t.revOf(t.canvas.read(THREAD, { kind: "agent", name: "Codex", key: "b" }));
+    await t.canvas.apply(THREAD, { kind: "agent", name: "Codex", key: "b" }, rev, [{ set: "Ledger", text: "Ledger (Codex)" }]);
+    const result = await t.canvas.apply(THREAD, agent("a"), rev + 1, [{ set: "Ledger (Codex)", text: "Ledger (a)" }]);
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("Codex");
+    expect(result.text).not.toContain("ask them first");
+  });
+});
+
+describe("undo of an agent's change", () => {
+  const post = (t: ReturnType<typeof setup>, path: string, body: unknown) =>
+    t.canvas.route(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path).then(async (r) => (await r!.json()) as { rev: number; kept?: string[]; already?: boolean });
+
+  test("what the person did after the change wins; a second press does nothing; an old change takes nothing of the person's with it", async () => {
+    const t = setup();
+    const first = await t.canvas.apply(THREAD, agent("a"), 0, [{ add: "box", text: "Ledger" }, { add: "box", text: "Mailer", at: [400, 0] }]);
+    // The person builds on it.
+    const scene = readCanvasScene(t.dir, THREAD);
+    const mine: CanvasElement = { id: "personBox1", type: "rectangle", x: 0, y: 400, width: 100, height: 60, version: 1, versionNonce: 1 };
+    commitCanvas(t.dir, THREAD, { ...scene, elements: [...scene.elements, mine] }, { kind: "person" }, new Date());
+    const second = await t.canvas.apply(THREAD, agent("a"), first.rev + 1, [{ set: "Ledger", color: "red" }, { set: "Mailer", color: "red" }]);
+    expect(second.ok).toBe(true);
+    // After the agent's recolour the person moves Ledger and deletes Mailer.
+    const now = readCanvasScene(t.dir, THREAD);
+    for (const el of now.elements) {
+      if (el.type === "rectangle" && el.strokeColor === "#e03131" && el.x === 0) Object.assign(el, { x: 900, version: (el.version ?? 1) + 1 });
+      else if (el.x === 400 || (el.type === "text" && el.text === "Mailer")) Object.assign(el, { isDeleted: true, version: (el.version ?? 1) + 1 });
+    }
+    commitCanvas(t.dir, THREAD, now, { kind: "person" }, new Date());
+    const path = `/api/inbox/threads/${THREAD}/canvas/undo`;
+    const undone = await post(t, path, { rev: second.rev });
+    const after = readCanvasScene(t.dir, THREAD);
+    const ledger = after.elements.find((e) => e.type === "rectangle" && !e.isDeleted && e.id !== "personBox1")!;
+    expect(ledger.x).toBe(900);
+    expect(after.elements.filter((e) => e.type === "text" && !e.isDeleted).map((e) => e.text)).toEqual(["Ledger"]);
+    expect(undone.kept?.join(" ")).toContain("Ledger");
+    // Again: nothing.
+    const again = await post(t, path, { rev: second.rev });
+    expect(again.already).toBe(true);
+    expect(again.rev).toBe(undone.rev);
+    // The agent's first change, long ago: its untouched things could go, the person's box stays.
+    await post(t, path, { rev: first.rev });
+    expect(readCanvasScene(t.dir, THREAD).elements.some((e) => e.id === "personBox1" && !e.isDeleted)).toBe(true);
+    expect(existsSync(join(t.dir, "canvas", THREAD, "undo", `${second.rev}.json`))).toBe(false);
+  });
+
+  test("a compressed save that unpacks past the cap is refused, not held in memory", async () => {
+    const t = setup();
+    const bomb = gzipSync(Buffer.alloc(80 * 1024 * 1024, 32));
+    const path = `/api/inbox/threads/${THREAD}/canvas`;
+    const res = await t.canvas.route(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json", "content-encoding": "gzip" }, body: bomb }), path);
+    expect(res!.status).toBe(413);
+  });
+});
+
+describe("pictures and sketches for agents", () => {
+  test("a picture path handed out stays good while newer pictures are written", () => {
+    const t = setup();
+    commitCanvas(t.dir, THREAD, { ...emptyScene(), elements: [{ id: "a", type: "rectangle", x: 0, y: 0, width: 10, height: 10 }] }, { kind: "person" }, new Date());
+    const first = writeAgentPicture(t.dir, THREAD, "first", new Uint8Array([1, 2, 3]));
+    for (let i = 0; i < 40; i++) writeAgentPicture(t.dir, THREAD, `later-${i}`, new Uint8Array([1, 2, 3]));
+    expect(existsSync(first)).toBe(true);
+  });
+
+  test("a sketch keeps its id when a stroke is added to it", () => {
+    const stroke = (id: string, x: number): CanvasElement => ({ id, type: "freedraw", x, y: 0, width: 0, height: 0, points: [[0, 0], [10, 10]], version: 1, versionNonce: 1 });
+    const one = thingsOf({ ...emptyScene(), elements: [stroke("m1111111", 0)] });
+    // The added stroke's id sorts before the first one's.
+    const two = thingsOf({ ...emptyScene(), elements: [stroke("m1111111", 0), stroke("a0000000", 12)] });
+    expect(two).toHaveLength(1);
+    expect(two[0]!.id).toBe(one[0]!.id);
+  });
+
+  test("the canvas of a thread deleted long ago is removed; a recent one is kept", () => {
+    const t = setup();
+    const gone = join(t.dir, "canvas", ".gone");
+    mkdirSync(join(gone, `msg_OLD-${Date.now() - CANVAS_GONE_KEEP_MS - 1000}`), { recursive: true });
+    mkdirSync(join(gone, `msg_NEW-${Date.now()}`), { recursive: true });
+    expect(sweepGoneCanvases(t.dir, Date.now())).toBe(1);
+    expect(readdirSync(gone)).toHaveLength(1);
   });
 });

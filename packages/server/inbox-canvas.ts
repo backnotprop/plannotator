@@ -21,19 +21,22 @@
  */
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
+import { gunzipSync } from "node:zlib";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxAgentName, type InboxReplySketch } from "@plannotator/core/inbox-types";
 import { applyOps, mermaidTexts, RefError, resolveThing } from "@plannotator/shared/inbox/canvas/apply";
 import { mergeSave, sameAuthor, sinceLines, type CanvasAuthor } from "@plannotator/shared/inbox/canvas/changes";
-import { countWords, lineOf, readThings, thingsOf } from "@plannotator/shared/inbox/canvas/reading";
-import { asScene, unionBox, type Box, type CanvasElement } from "@plannotator/shared/inbox/canvas/scene";
+import { countWords, lineOf, readThings, thingsOf, type Thing } from "@plannotator/shared/inbox/canvas/reading";
+import { asScene, lookOf, unionBox, type Box, type CanvasElement, type CanvasScene } from "@plannotator/shared/inbox/canvas/scene";
 import {
   canvasThreads,
   commitCanvas,
+  isCanvasSession,
   markCanvasTold,
   readCanvasFile,
   readCanvasTold,
-  TOLD_EVERYONE,
+  removeCanvasUndo,
+  sweepGoneCanvases,
   noteCanvasSeen,
   readCanvasUndo,
   retireCanvas,
@@ -101,7 +104,9 @@ export interface InboxCanvas {
   /** What a reply sent from the canvas carries for the agent (`body.sketch` of the reply route), checked and worded here. */
   replySketch(threadId: string, raw: unknown): InboxReplySketch | undefined;
   /** For tests and the route: the tool's three jobs. */
-  read(threadId: string, viewer: CanvasAuthor, options?: { in?: string; after?: string }): string;
+  read(threadId: string, viewer: CanvasAuthor, options?: { in?: string; after?: string; things?: string[] }): string;
+  /** The reply that carried `sketch` is stored and went to `session`: what it lists is shown to that session. */
+  replyShown(threadId: string, sketch: InboxReplySketch, session: string): void;
   apply(threadId: string, viewer: CanvasAuthor, base: unknown, ops: unknown): Promise<{ ok: boolean; text: string; rev: number }>;
 }
 
@@ -124,7 +129,9 @@ export function createInboxCanvas(options: {
   // A deleted thread's canvas goes with it (moved aside, store.ts `retireCanvas`).
   store.onDeletion(() => {
     for (const id of canvasThreads(dir)) if (!store.message(id)) retireCanvas(dir, id, now());
+    sweepGoneCanvases(dir, now());
   });
+  sweepGoneCanvases(dir, now());
 
   const threadOf = (id: string): string => {
     const root = store.message(id.trim())?.thread_id;
@@ -154,7 +161,28 @@ export function createInboxCanvas(options: {
   };
 
   /** An agent session's own key; none for a call that names no session (nothing is remembered for it, and it shares nothing). */
-  const sessionOf = (viewer: CanvasAuthor): string | undefined => viewer.key || undefined;
+  const sessionOf = (viewer: CanvasAuthor): string | undefined => (isCanvasSession(viewer.key) ? viewer.key : undefined);
+  /** The look each of these elements has in a scene (scene.ts `lookOf`): what "shown" records. */
+  const looksIn = (scene: CanvasScene, ids: Iterable<string>): [string, string][] => {
+    const by = new Map(scene.elements.map((e) => [e.id, e]));
+    const out: [string, string][] = [];
+    for (const id of ids) {
+      const el = by.get(id);
+      if (el) out.push([id, lookOf(el)]);
+    }
+    return out;
+  };
+  /** A list of others' changes was printed: the things in it whose line is still their line now are shown, as they are now. */
+  const showListed = (threadId: string, key: string, scene: CanvasScene, things: Thing[], listed: Map<string, { change: { line: string } }>) => {
+    const thingOf = new Map<string, Thing>();
+    for (const t of things) for (const id of t.elementIds) thingOf.set(id, t);
+    const ids: string[] = [];
+    for (const [id, hit] of listed) {
+      const thing = thingOf.get(id);
+      if (thing && lineOf(thing, scene, things) === hit.change.line) ids.push(id);
+    }
+    markCanvasTold(dir, threadId, key, looksIn(scene, ids));
+  };
   const readCall = (threadId: string, more: Record<string, unknown> = {}) => `canvas ${JSON.stringify({ thread_id: threadId, ...more })}`;
 
   const undoneLines = (revs: number[]) => revs.map((n) => `The person undid your change (rev ${n}): what it changed is as it was before, and what it added is gone.`);
@@ -164,7 +192,7 @@ export function createInboxCanvas(options: {
    * thing listed is marked as shown to the session; the list's point (`seen`) moves only as far as the list reached.
    * A call with no session has no memory: it opens with nothing and is told nothing.
    */
-  const opening = (threadId: string, viewer: CanvasAuthor, rev: number): string[] => {
+  const opening = (threadId: string, viewer: CanvasAuthor, rev: number, scene: CanvasScene, things: Thing[]): string[] => {
     const key = sessionOf(viewer);
     if (!key) return [];
     const last = readCanvasMeta(dir, threadId).seen[key];
@@ -174,10 +202,7 @@ export function createInboxCanvas(options: {
     }
     const told = sinceLines(readCanvasLog(dir, threadId), last, viewer);
     noteCanvasSeen(dir, threadId, key, told.cut ? told.through : rev);
-    // Shown is shown at the revision of the change listed, no later.
-    const byRev = new Map<number, string[]>();
-    for (const [id, hit] of told.byElement) byRev.set(hit.rev, [...(byRev.get(hit.rev) ?? []), id]);
-    for (const [at, ids] of byRev) markCanvasTold(dir, threadId, key, ids, at);
+    showListed(threadId, key, scene, things, told.byElement);
     if (told.lines.length === 0 && told.undone.length === 0) return [`Nothing others did changed it since you last looked (rev ${last}); your own changes made it rev ${rev}.`];
     return [
       ...undoneLines(told.undone),
@@ -198,13 +223,19 @@ export function createInboxCanvas(options: {
       if (thing.kind !== "frame") throw new InboxError("validation_error", `in: ${thing.id} is a ${thing.kind}, not a frame.`, { field: "in" });
       frame = thing.id;
     }
-    const head = opening(threadId, viewer, meta.rev);
+    const head = opening(threadId, viewer, meta.rev, scene, things);
     if (things.length === 0) {
       return [...head, `Canvas of thread ${threadId}, rev ${meta.rev}: empty. Add to it with "do" and "base": ${meta.rev}, or wait for the person to draw.`].join("\n");
     }
-    const reading = readThings(scene, things, { frame, after: readOptions.after });
+    // `things`: exactly these, by id (a refusal names the ones it could not list this way).
+    let only: Set<string> | undefined;
+    if (readOptions.things) {
+      const known = new Set(things.map((t) => t.id));
+      only = new Set(readOptions.things.filter((id) => known.has(id)));
+    }
+    const reading = readThings(scene, things, { frame, after: readOptions.after, only, ...(only ? { limit: 400 } : {}) });
     const key = sessionOf(viewer);
-    if (key) markCanvasTold(dir, threadId, key, reading.shown.flatMap((t) => t.elementIds), meta.rev);
+    if (key) markCanvasTold(dir, threadId, key, looksIn(scene, reading.shown.flatMap((t) => t.elementIds)));
     const size = `${Math.round(reading.box.w)}x${Math.round(reading.box.h)}`;
     const lines = [...head, `Canvas of thread ${threadId}, rev ${meta.rev}, ${frame ? `frame ${frame}` : countWords(things)}, ${size}:`];
     if (reading.afterMissing) lines.push(`(Nothing is called ${JSON.stringify(readOptions.after)} any more, so this reading starts from the top.)`);
@@ -277,7 +308,7 @@ export function createInboxCanvas(options: {
   };
 
   const ANSWER_LINES = 40;
-  const CLASH_LINES = 12;
+  const CLASH_LINES = 30;
 
   const apply: InboxCanvas["apply"] = async (threadId, viewer, base, ops) => {
     const rev = readCanvasMeta(dir, threadId).rev;
@@ -321,7 +352,7 @@ export function createInboxCanvas(options: {
     const result = applyOps(scene, ops, { by: viewer.name || "agent", now: now(), mermaid });
     if (!result.ok) {
       // An error opens with what changed too: the answer the agent acts on next must not hide news.
-      const head = opening(threadId, viewer, now0);
+      const head = opening(threadId, viewer, now0, scene, thingsOf(scene));
       const news = head.filter((line) => !line.startsWith("Nothing") && !line.startsWith("Your first look"));
       return refuse([...news, `Nothing changed (rev ${now0}). ${result.errors.length === 1 ? "One change cannot be made" : `${result.errors.length} changes cannot be made`}:`, ...result.errors.slice(0, 10).map((e) => `  ${e}`)].join("\n"), now0);
     }
@@ -329,8 +360,9 @@ export function createInboxCanvas(options: {
       // Thing by thing: a change may overwrite, move or remove a thing only as this session was last shown it. Shown
       // means an answer to this session (or the person's reply from the canvas) held the thing's line at or after the
       // last change anyone else made to it. Nothing else counts: not the base sent, not a reading that was cut.
-      const told = readCanvasTold(dir, threadId);
-      const shownAt = (id: string) => Math.max(told[key]?.[id] ?? -1, told[TOLD_EVERYONE]?.[id] ?? -1);
+      const told = readCanvasTold(dir, threadId)[key];
+      const byId = new Map(scene.elements.map((e) => [e.id, e]));
+      // The log only says who changed a thing, when it still reaches that far; whether it changed is read off the thing itself.
       const lastOther = new Map<string, { rev: number; by: CanvasAuthor; what: string }>();
       for (const entry of log) {
         if (sameAuthor(entry.by, viewer)) continue;
@@ -339,29 +371,39 @@ export function createInboxCanvas(options: {
         }
       }
       const things = thingsOf(scene);
-      const thingOf = new Map<string, (typeof things)[number]>();
+      const thingOf = new Map<string, Thing>();
       for (const t of things) for (const id of t.elementIds) thingOf.set(id, t);
-      const clashes = new Map<string, { line: string; ids: string[] }>();
+      const clashes = new Map<string, { line: string; ids: string[]; person: boolean; by: string }>();
       for (const id of result.direct) {
-        const at = shownAt(id);
-        const other = lastOther.get(id);
-        if (at >= 0 && (!other || other.rev <= at)) continue;
+        const el = byId.get(id);
+        if (el && told?.[id] === lookOf(el)) continue;
         const thing = thingOf.get(id);
         if (!thing || clashes.has(thing.id)) continue;
-        const who = other ? `${other.by.kind === "person" ? "the person" : other.by.name || "another agent"} ${other.what} (rev ${other.rev})` : "not shown to you yet";
-        clashes.set(thing.id, { line: `  ${who}: ${lineOf(thing, scene, things)}`, ids: thing.elementIds });
+        const other = lastOther.get(id);
+        const never = !thing.elementIds.some((e) => told?.[e] !== undefined);
+        const who = other
+          ? `${other.by.kind === "person" ? "the person" : other.by.name || "another agent"} ${other.what} (rev ${other.rev})`
+          : never
+            ? "not shown to you yet"
+            : "changed since you were shown it";
+        clashes.set(thing.id, { line: `  ${who}: ${lineOf(thing, scene, things)}`, ids: thing.elementIds, person: !other || other.by.kind === "person", by: other && other.by.kind !== "person" ? other.by.name || "another agent" : "" });
       }
       if (clashes.size > 0) {
-        const listed = [...clashes.values()].slice(0, CLASH_LINES);
-        // What this answer shows is now shown, as it is at this rev; what it leaves out is not.
-        markCanvasTold(dir, threadId, key, listed.flatMap((c) => c.ids), now0);
-        const more = clashes.size - listed.length;
+        const all = [...clashes.entries()];
+        const listed = all.slice(0, CLASH_LINES);
+        const rest = all.slice(CLASH_LINES).map(([thing]) => thing);
+        // What this answer shows is now shown, as it is; what it leaves out is not, and the call that shows exactly the rest is given.
+        markCanvasTold(dir, threadId, key, looksIn(scene, listed.flatMap(([, c]) => c.ids)));
+        const others = [...new Set(all.map(([, c]) => c.by).filter(Boolean))];
+        const ask = all.some(([, c]) => c.person)
+          ? "if it would undo what the person did, ask them first"
+          : `it would change what ${others.join(" and ") || "another agent"} did, so check that is wanted`;
         return refuse(
           [
             `Nothing changed. ${clashes.size === 1 ? "A thing you are changing is" : `${clashes.size} things you are changing are`} not as you were last shown ${clashes.size === 1 ? "it" : "them"}:`,
-            ...listed.map((c) => c.line),
-            ...(more > 0 ? [`  and ${more} more. See them all first: ${readCall(threadId)}`] : []),
-            `That stays as it is. If your change still makes sense with this in view, send it again with "base": ${now0}; if it would undo what the person did, ask them first.`,
+            ...listed.map(([, c]) => c.line),
+            ...(rest.length > 0 ? [`  and ${rest.length} more. See exactly those first: ${readCall(threadId, { things: rest })}`] : []),
+            `That stays as it is. If your change still makes sense with this in view, send it again with "base": ${now0}; ${ask}.`,
           ].join("\n"),
           now0,
         );
@@ -370,14 +412,23 @@ export function createInboxCanvas(options: {
     const heard = key ? sinceLines(log, readCanvasMeta(dir, threadId).seen[key] ?? (base as number), viewer) : null;
     const committed = commitCanvas(dir, threadId, result.scene, viewer, new Date(now()));
     // What this change replaced, so the person can take it back with one press (the window's Undo).
-    if (committed.entry) writeCanvasUndo(dir, threadId, { rev: committed.rev, before: scene.elements.filter((e) => result.touched.has(e.id)), added: [...result.added] });
+    if (committed.entry) {
+      writeCanvasUndo(dir, threadId, {
+        rev: committed.rev,
+        before: scene.elements.filter((e) => result.touched.has(e.id)),
+        added: [...result.added],
+        after: Object.fromEntries(looksIn(result.scene, [...result.touched, ...result.added])),
+      });
+    }
     if (key) {
-      // Its own change is what it now knows of those things; the others' changes this answer lists are shown too.
-      markCanvasTold(dir, threadId, key, [...result.added, ...result.direct], committed.rev);
+      // Its own change is what it now knows of the things it named and made. A thing that only followed along (an
+      // arrow rerouted, a frame that grew) stays known if it was known as it was before.
+      const before = readCanvasTold(dir, threadId)[key];
+      const was = new Map(scene.elements.map((e) => [e.id, e]));
+      const followed = [...result.touched].filter((id) => !result.direct.has(id) && was.has(id) && before?.[id] === lookOf(was.get(id)!));
+      markCanvasTold(dir, threadId, key, looksIn(result.scene, [...result.added, ...result.direct, ...followed]));
       if (heard) {
-        const byRev = new Map<number, string[]>();
-        for (const [id, hit] of heard.byElement) if (!result.direct.has(id)) byRev.set(hit.rev, [...(byRev.get(hit.rev) ?? []), id]);
-        for (const [at, ids] of byRev) markCanvasTold(dir, threadId, key, ids, at);
+        showListed(threadId, key, result.scene, thingsOf(result.scene), heard.byElement);
         noteCanvasSeen(dir, threadId, key, heard.cut ? heard.through : committed.rev);
       }
     }
@@ -412,7 +463,10 @@ export function createInboxCanvas(options: {
     return [box.x, box.y, box.w, box.h, scale].every((v) => Number.isFinite(v)) && box.w > 0 && box.h > 0 && scale > 0 ? { box, scale } : null;
   };
 
+  /** What a reply being built lists, until the reply is stored (a reply that fails leaves an entry; a few at most are kept). */
+  const replyLooks = new Map<string, [string, string][]>();
   const replySketch: InboxCanvas["replySketch"] = (threadId, raw) => {
+    for (const old of [...replyLooks.keys()].slice(0, Math.max(0, replyLooks.size - 20))) replyLooks.delete(old);
     if (!raw || typeof raw !== "object") return undefined;
     const input = raw as { kind?: unknown; elements?: unknown; pictures?: unknown };
     const scene = readCanvasScene(dir, threadId);
@@ -432,22 +486,31 @@ export function createInboxCanvas(options: {
       }
     }
     const reading = readThings(scene, things, { only, limit: 80 });
-    // The person's reply shows these things, as they are now, to whoever reads it: an agent asked to work on them
-    // changes them on its first try.
-    markCanvasTold(dir, threadId, TOLD_EVERYONE, reading.shown.flatMap((t) => t.elementIds), readCanvasMeta(dir, threadId).rev);
+    // What the reply lists, as it looks now: shown to the session the reply goes to, once the reply is stored (`replyShown`).
+    const looks = looksIn(scene, reading.shown.flatMap((t) => t.elementIds));
     const lines = reading.lines.map((line) => {
       const id = /^\s*sketch (\S+)/.exec(line)?.[1];
       const name = id ? pictures.get(id) : undefined;
       return name ? `${line} [picture: ${name}]` : line;
     });
     if (reading.cutAfter) lines.push(`${reading.total - reading.lines.length} more: canvas ${JSON.stringify({ thread_id: threadId, after_thing: reading.cutAfter })}`);
-    return { kind, rev: readCanvasMeta(dir, threadId).rev, things: [...only], reading: lines.join("\n") };
+    const sketch: InboxReplySketch = { kind, rev: readCanvasMeta(dir, threadId).rev, things: [...only], reading: lines.join("\n") };
+    replyLooks.set(`${threadId}\n${sketch.rev}\n${sketch.reading}`, looks);
+    return sketch;
+  };
+
+  const replyShown: InboxCanvas["replyShown"] = (threadId, sketch, session) => {
+    const at = `${threadId}\n${sketch.rev}\n${sketch.reading}`;
+    const looks = replyLooks.get(at);
+    replyLooks.delete(at);
+    if (looks && isCanvasSession(session)) markCanvasTold(dir, threadId, session, looks);
   };
 
   return {
     read,
     apply,
     replySketch,
+    replyShown,
     listen(send) {
       windows.add(send);
       return () => windows.delete(send);
@@ -501,15 +564,33 @@ export function createInboxCanvas(options: {
         const mismatch = options.sessionMismatch(body);
         if (mismatch) return mismatch;
         const undo = Number.isInteger(body.rev) ? readCanvasUndo(dir, threadId, body.rev as number) : null;
-        if (!undo) return json({ error: "That change can no longer be undone.", code: "validation_error" }, 422);
         const stored = readCanvasScene(dir, threadId, false);
+        // Taken back already (a second press, another window), or too old to take back: nothing happens, and it says so.
+        if (!undo) return json({ serverSession: options.serverSession, rev: readCanvasMeta(dir, threadId).rev, already: true, kept: [], scene: stored });
         const was = new Map(undo.before.map((e) => [e.id, e]));
         const added = new Set(undo.added);
+        const things = thingsOf(stored);
+        const nameOf = (id: string) => {
+          const thing = things.find((t) => t.elementIds.includes(id));
+          return thing ? `${thing.kind}${thing.words ? ` ${JSON.stringify(thing.words.slice(0, 40))}` : ""}` : null;
+        };
+        const kept = new Set<string>();
         const stamp = (e: CanvasElement, current: CanvasElement) => ({ ...e, version: (current.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: now() });
-        const elements = stored.elements.map((e) => (was.has(e.id) ? stamp(was.get(e.id)!, e) : added.has(e.id) && !e.isDeleted ? stamp({ ...e, isDeleted: true }, e) : e));
+        // Only what still looks as that change left it goes back. A thing the person moved, rewrote or deleted since
+        // is theirs now and stays as they have it; what the agent added goes only if nobody touched it.
+        const elements = stored.elements.map((e) => {
+          if (!was.has(e.id) && !added.has(e.id)) return e;
+          if (lookOf(e) !== undo.after[e.id]) {
+            const name = e.isDeleted ? null : nameOf(e.id);
+            if (name) kept.add(name);
+            return e;
+          }
+          return was.has(e.id) ? stamp(was.get(e.id)!, e) : e.isDeleted ? e : stamp({ ...e, isDeleted: true }, e);
+        });
         const committed = commitCanvas(dir, threadId, { ...stored, elements }, { kind: "person" }, new Date(now()), { undid: undo.rev });
+        removeCanvasUndo(dir, threadId, undo.rev);
         emit("canvas", { thread_id: threadId, rev: committed.rev, by: null, window: typeof body.window === "string" ? body.window : null, elements: [] });
-        return json({ serverSession: options.serverSession, rev: committed.rev, scene: readCanvasScene(dir, threadId, false) });
+        return json({ serverSession: options.serverSession, rev: committed.rev, kept: [...kept].slice(0, 8), scene: readCanvasScene(dir, threadId, false) });
       }
       if (match[2]) {
         // The window's drawing of the whole canvas, kept for an agent's `picture` when no window is open.
@@ -541,10 +622,11 @@ export function createInboxCanvas(options: {
       let body: Record<string, unknown>;
       if ((req.headers.get("content-encoding") ?? "").toLowerCase() === "gzip") {
         try {
-          const value = JSON.parse(new TextDecoder().decode(Bun.gunzipSync((await rawBody(req, SCENE_MAX_BYTES)) as Uint8Array<ArrayBuffer>))) as unknown;
+          // Capped as it expands: a small body that unpacks to gigabytes is refused before it is held in memory.
+          const value = JSON.parse(gunzipSync(await rawBody(req, SCENE_MAX_BYTES), { maxOutputLength: SCENE_MAX_BYTES }).toString("utf8")) as unknown;
           body = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
         } catch {
-          return json({ error: "body: expected a JSON object.", code: "validation_error" }, 422);
+          return json({ error: "body: expected a compressed JSON object no larger than a canvas may be.", code: "validation_error" }, 413);
         }
       } else body = await options.readBody(req);
       const mismatch = options.sessionMismatch(body);
@@ -579,6 +661,7 @@ export function createInboxCanvas(options: {
             .object({
               thread_id: z.string().describe("Thread or message id."),
               in: z.string().optional().describe("The canvas action: read only this frame (its id or title). With only thread_id the action answers the thread's canvas (the drawing the person sketches on) as text, one line per thing, and its rev."),
+              things: z.array(z.string()).optional().describe("Read exactly these things, by id (a refusal that could not list every thing gives this call)."),
               after_thing: z.string().optional().describe("Continue a long reading of the canvas after this thing id (a cut reading ends with the exact call)."),
               picture: z.union([z.boolean(), z.string(), z.array(z.string())]).optional().describe('true: a PNG of the whole canvas. A thing or a list of things: a PNG of that part. The answer gives the file path.'),
               base: z.number().int().optional().describe('With "do": the rev your last answer about this canvas gave (with no session: the current rev).'),
@@ -613,7 +696,7 @@ export function createInboxCanvas(options: {
                 const head = `Picture${drawn.only ? ` of ${drawn.named.slice(0, 8).join(", ")}` : " of the whole canvas"}: ${drawn.path}${drawn.note}`;
                 return okComplete(`${head}\n${text}`, { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: drawn.path });
               }
-              return okComplete(read(threadId, viewer, { in: input.in, after: input.after_thing }), { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev });
+              return okComplete(read(threadId, viewer, { in: input.in, after: input.after_thing, things: input.things }), { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev });
             } catch (error) {
               if (error instanceof RefError) throw new InboxError("validation_error", error.message);
               throw error;

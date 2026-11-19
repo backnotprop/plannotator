@@ -177,7 +177,8 @@ export function thingsOf(scene: CanvasScene): Thing[] {
     else clusters.set(root, [i]);
   });
   for (const members of clusters.values()) {
-    const ids = members.map((i) => strokes[i]!.id).sort();
+    // Named by its first stroke in drawing order, so a stroke added to it later does not rename it.
+    const ids = members.slice().sort((a, b) => a - b).map((i) => strokes[i]!.id);
     const colors = [...new Set(members.map((i) => colorWord(strokes[i]!.strokeColor)).filter(Boolean))];
     const thing: Thing = {
       id: `sk-${alias(ids[0]!)}`,

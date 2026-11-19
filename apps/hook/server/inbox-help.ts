@@ -187,10 +187,10 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   },
   // A thread's canvas (prototype): packages/server/inbox-canvas.ts.
   canvas: {
-    args: ["thread_id", "in", "after_thing", "picture", "base", "do"],
+    args: ["thread_id", "in", "things", "after_thing", "picture", "base", "do"],
     lines: [
       "`canvas`: A thread's canvas, a shared Excalidraw drawing the person sketches on and you read and change. With only `thread_id` it answers the canvas as text, one line per thing, each opening with an id, and the canvas's `rev`. Every answer opens with what others changed since your last look.",
-      "- `in`: read one frame (its id or title). `after_thing`: continue a long reading (a cut reading ends with the exact call).",
+      "- `in`: read one frame (its id or title). `things`: read exactly these things, by id (a refusal that could not list every thing gives this call). `after_thing`: continue a long reading (a cut reading ends with the exact call).",
       "- `picture`: `true` writes a PNG of the whole canvas and gives its path; a thing or a list of things gives that part only. Freehand strokes drawn near each other are one `sketch` thing, so a drawing is one picture.",
       "- `do` with `base` (the rev of your last answer; with no session, the current rev): changes, all or nothing. A change lands only on things an answer has shown you as they are now; otherwise nothing changes and the answer shows them, after which the same change goes through. Name a thing by the id at the start of its line, or by its words; a name that fits two things is refused with both. One verb per change:",
       "  - `{\"add\": \"box\", \"text\": \"…\", \"rightOf\": \"<thing>\"}`: `box`, `ellipse`, `diamond`, `note`, `text`, `frame` or `mermaid` (`text` is a mermaid flowchart or sequence diagram; an open Inbox window draws it as real shapes; other kinds are refused). Place with `near`, `rightOf`, `leftOf`, `above`, `below`, `in` (a frame) or `\"at\": [x, y]`; optional `\"size\": [width, height]` and `color` (black, gray, red, pink, violet, blue, teal, green, yellow, orange).",

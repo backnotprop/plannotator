@@ -7865,6 +7865,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               const sentUploads = uploads.filter((id): id is string => typeof id === "string");
               if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words, sentUploads)) for (const listener of draftListeners) listener(threadId);
             }
+            // Sent from the thread's canvas, and stored: the things the reply lists are now shown, as they were when it was
+            // written, to the session the reply went to (its addressee, else the session that wrote the message
+            // answered). Never before the store took the reply, never on a replay, never to anyone else.
+            if (!result.replayed && result.reply.sketch) {
+              const answered = store.message(messageId);
+              const session = result.reply.to?.session ?? (answered?.author.kind === "agent" ? answered.author.session : null);
+              if (session) canvas.replyShown(result.reply.thread_id, result.reply.sketch, session);
+            }
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
             if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);

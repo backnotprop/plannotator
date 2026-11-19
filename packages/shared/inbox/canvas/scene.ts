@@ -42,6 +42,41 @@ export interface CanvasScene {
   files: Record<string, unknown>;
 }
 
+/**
+ * What an element looks like to a reader, as one short string: where it is, its size, words, colours, what it is tied
+ * to, whether it is gone. Two states with the same look are the same to a person and to an agent; the editor's
+ * re-stamping (a version bump with nothing changed, a label's measured width) does not change it. This is what
+ * "shown" and "unchanged since" are judged by, never a revision count or a log.
+ */
+export function lookOf(el: CanvasElement): string {
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : 0);
+  // A label's own place and size follow its container and its measured text: not part of its look.
+  const bound = el.type === 'text' && !!el.containerId;
+  const points = el.points ?? [];
+  const last = points[points.length - 1];
+  const parts = [
+    el.type,
+    el.isDeleted ? 'x' : '',
+    bound ? '' : `${n(el.x)},${n(el.y)}`,
+    bound || el.type === 'text' ? '' : `${n(el.width)}x${n(el.height)}`,
+    typeof el.text === 'string' ? el.originalText ?? el.text : '',
+    typeof el.name === 'string' ? el.name : '',
+    el.strokeColor ?? '',
+    el.backgroundColor ?? '',
+    el.frameId ?? '',
+    el.containerId ?? '',
+    el.startBinding?.elementId ?? '',
+    el.endBinding?.elementId ?? '',
+    typeof el.fileId === 'string' ? el.fileId : '',
+    points.length ? `${points.length}:${n(last?.[0])},${n(last?.[1])}` : '',
+  ];
+  // FNV-1a, so the record stays small whatever the words are.
+  let h = 0x811c9dc5;
+  const text = parts.join('\u0001');
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
 export const CANVAS_SOURCE = 'https://plannotator.ai';
 
 export function emptyScene(): CanvasScene {

@@ -11,7 +11,7 @@
  * enter the event log (the window's stream, search, the phone relay). Written
  * whole (temp, then rename), owner-only, like a reply draft.
  */
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { diffScenes, type CanvasAuthor, type CanvasLogEntry } from './changes';
 import { asScene, emptyScene, type Box, type CanvasScene } from './scene';
@@ -20,8 +20,12 @@ export const INBOX_CANVAS_DIR = 'canvas';
 const THREAD_ID = /^[A-Za-z0-9_]{1,80}$/;
 /** The log keeps this many revisions; an agent that last looked before them is told to read again. */
 const LOG_KEEP = 400;
-/** The pictures cut for agents that are kept (`pictures/`). */
-export const AGENT_PICTURES_KEPT = 24;
+/** A picture cut for an agent is kept this long after it was written (`pictures/`), and the folder at most this large. */
+export const AGENT_PICTURE_LIFE_MS = 24 * 60 * 60 * 1000;
+export const AGENT_PICTURES_MAX_BYTES = 200 * 1024 * 1024;
+const UNDO_KEPT = 30;
+/** A deleted thread's canvas is kept aside this long (`canvas/.gone`), then removed. */
+export const CANVAS_GONE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface CanvasPictureMeta {
   rev: number;
@@ -202,13 +206,20 @@ export function writeAgentPicture(inboxDirPath: string, threadId: string, name: 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, `${name.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80)}.png`);
   writeWhole(file, png);
-  // The folder holds the newest few: a picture is asked for, read, and not needed again.
+  // A path an answer handed out stays good for as long as an agent may still open it: pictures go by age, never by
+  // how many came after. Beyond a total size the oldest go first, whatever their age.
   try {
+    const now = Date.now();
     const kept = readdirSync(dir)
       .filter((n) => n.endsWith('.png'))
-      .map((n) => ({ n, at: statSync(join(dir, n)).mtimeMs }))
-      .sort((a, b) => b.at - a.at);
-    for (const old of kept.slice(AGENT_PICTURES_KEPT)) if (join(dir, old.n) !== file) unlinkSync(join(dir, old.n));
+      .map((n) => ({ n, stat: statSync(join(dir, n)) }))
+      .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+    let bytes = 0;
+    for (const old of kept) {
+      bytes += old.stat.size;
+      if (join(dir, old.n) === file) continue;
+      if (now - old.stat.mtimeMs > AGENT_PICTURE_LIFE_MS || bytes > AGENT_PICTURES_MAX_BYTES) unlinkSync(join(dir, old.n));
+    }
   } catch {
     // Tidying is best effort.
   }
@@ -232,17 +243,35 @@ export interface CanvasUndo {
   rev: number;
   before: CanvasScene['elements'];
   added: string[];
+  /** The look (scene.ts `lookOf`) the change left each element with: only what still looks like that is taken back. */
+  after: Record<string, string>;
 }
 
 export function writeCanvasUndo(inboxDirPath: string, threadId: string, undo: CanvasUndo): void {
   const dir = join(canvasDirOf(inboxDirPath, threadId), 'undo');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeWhole(join(dir, `${undo.rev}.json`), `${JSON.stringify(undo)}\n`);
+  // The newest few changes can be taken back; older records go.
+  try {
+    const revs = readdirSync(dir).map((n) => Number(n.replace(/\.json$/, ''))).filter((n) => Number.isInteger(n)).sort((a, b) => b - a);
+    for (const old of revs.slice(UNDO_KEPT)) unlinkSync(join(dir, `${old}.json`));
+  } catch {
+    // Tidying is best effort.
+  }
+}
+
+/** A change that was taken back cannot be taken back again. */
+export function removeCanvasUndo(inboxDirPath: string, threadId: string, rev: number): void {
+  try {
+    unlinkSync(join(canvasDirOf(inboxDirPath, threadId), 'undo', `${rev}.json`));
+  } catch {
+    // Already gone.
+  }
 }
 
 export function readCanvasUndo(inboxDirPath: string, threadId: string, rev: number): CanvasUndo | null {
   const raw = readJson(join(canvasDirOf(inboxDirPath, threadId), 'undo', `${rev}.json`)) as CanvasUndo | null;
-  return raw && Array.isArray(raw.before) && Array.isArray(raw.added) ? raw : null;
+  return raw && Array.isArray(raw.before) && Array.isArray(raw.added) && raw.after && typeof raw.after === 'object' ? raw : null;
 }
 
 /** Every thread that has a canvas folder. */
@@ -270,37 +299,72 @@ export function retireCanvas(inboxDirPath: string, threadId: string, at: number)
 }
 
 /**
- * What each agent session has been shown, thing by thing: element id → the revision at which an answer to that
- * session held the thing's line. `*` is everyone: the things a reply the person sent from the canvas listed (their
- * "work on this" tells whoever reads it). An agent may change a thing only as it was last shown it; nothing else moves
- * this, so no error, cut list or copied revision can stand in for having been told.
+ * What each agent session has been shown, thing by thing: element id → the look (scene.ts `lookOf`) the element had
+ * when an answer to that session held the thing's line. An agent may change a thing only while it still looks as it
+ * was shown; nothing else moves this, so no error, cut list, copied revision or log that has been trimmed can stand in
+ * for having been told.
  */
-export type CanvasTold = Record<string, Record<string, number>>;
-export const TOLD_EVERYONE = '*';
+export type CanvasTold = Record<string, Record<string, string>>;
 const TOLD_SESSIONS = 32;
+
+/** A session key that may name a record: never a name every object already has, never the old everyone mark. */
+export function isCanvasSession(key: unknown): key is string {
+  return typeof key === 'string' && key.length > 0 && key.length <= 300 && !['__proto__', 'constructor', 'prototype', 'hasOwnProperty', 'toString', 'valueOf', '*'].includes(key);
+}
 
 export function readCanvasTold(inboxDirPath: string, threadId: string): CanvasTold {
   const raw = readJson(join(canvasDirOf(inboxDirPath, threadId), 'told.json'));
-  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as CanvasTold) : {};
+  // No prototype anywhere: a key is only ever a key.
+  const out: CanvasTold = Object.create(null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const session of Object.keys(raw)) {
+    const from = (raw as Record<string, unknown>)[session];
+    if (!isCanvasSession(session) || !from || typeof from !== 'object') continue;
+    const mine: Record<string, string> = Object.create(null);
+    for (const id of Object.keys(from)) {
+      const look = (from as Record<string, unknown>)[id];
+      if (typeof look === 'string') mine[id] = look;
+    }
+    out[session] = mine;
+  }
+  return out;
 }
 
-export function markCanvasTold(inboxDirPath: string, threadId: string, session: string, elementIds: Iterable<string>, rev: number): void {
+/** Record that an answer to `session` showed these elements with these looks. */
+export function markCanvasTold(inboxDirPath: string, threadId: string, session: string, looks: Iterable<[string, string]>): void {
   const dir = canvasDirOf(inboxDirPath, threadId);
-  if (!existsSync(dir)) return;
+  if (!isCanvasSession(session) || !existsSync(dir)) return;
   const all = readCanvasTold(inboxDirPath, threadId);
-  const mine = all[session] ?? {};
+  const mine: Record<string, string> = all[session] ?? Object.create(null);
   let changed = false;
-  for (const id of elementIds) {
-    if ((mine[id] ?? -1) < rev) {
-      mine[id] = rev;
+  for (const [id, look] of looks) {
+    if (mine[id] !== look) {
+      mine[id] = look;
       changed = true;
     }
   }
   if (!changed) return;
-  // The session just told moves to the end; the oldest sessions beyond the cap go (the reply's `*` always stays).
+  // The session just told moves to the end; the oldest sessions beyond the cap go.
   delete all[session];
   all[session] = mine;
-  const sessions = Object.keys(all).filter((k) => k !== TOLD_EVERYONE);
+  const sessions = Object.keys(all);
   for (const old of sessions.slice(0, Math.max(0, sessions.length - TOLD_SESSIONS))) delete all[old];
   writeWhole(join(dir, 'told.json'), `${JSON.stringify(all)}\n`);
+}
+
+/** Remove the canvases of threads deleted more than `CANVAS_GONE_KEEP_MS` ago. */
+export function sweepGoneCanvases(inboxDirPath: string, now: number): number {
+  const gone = join(inboxDirPath, INBOX_CANVAS_DIR, '.gone');
+  let removed = 0;
+  try {
+    for (const name of readdirSync(gone)) {
+      const at = Number(/-(\d+)$/.exec(name)?.[1]);
+      if (!Number.isFinite(at) || now - at <= CANVAS_GONE_KEEP_MS) continue;
+      rmSync(join(gone, name), { recursive: true, force: true });
+      removed++;
+    }
+  } catch {
+    // No such folder: nothing was ever deleted.
+  }
+  return removed;
 }
