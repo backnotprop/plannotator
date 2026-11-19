@@ -353,9 +353,9 @@ test('Mark read moves the thread to Quiet ("Read"); a new agent message brings i
   await expect(page.locator(`.ib-lbody [data-row="${threads.search}"] .ib-c .ib-cs`)).toHaveText('Read');
   await shot('06-list-read-in-quiet', ['light', 'dark']);
 
-  // The agent writes again: the thread waits behind "1 new", then is back on top.
+  // The agent writes again: the thread waits behind the line ("Codex asked in …"), then is back on top.
   await world.agents.codex.send({ project_path: world.project, reply_to: world.searchMessage, body: ['One more:', '', ':::question', 'Index the API reference too?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n') });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in billing');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^Codex (asked|replied) in “/);
   await page.locator('[data-inbox-notice]').click();
   await expect.poll(() => sectionOf(page, threads.search)).toBe('waiting');
 });

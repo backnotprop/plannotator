@@ -7,7 +7,7 @@
  *
  * An entry is `<kind>:<name>`:
  *   door:<route>       a route of the phone's door (door.ts, read live from the door)
- *   window:<path>      an Inbox endpoint, read from the server's code (window-routes.ts); `<prefix>/*`
+ *   window:<path>      an Inbox endpoint, read from the server's code (packages/server/inbox-window-routes.ts); `<prefix>/*`
  *                      a family a module splits itself; methods are not read
  *   frame:<name>       an event the Inbox's stream sends
  *   record:<kind>      a record kind (InboxRecordKind)
@@ -27,7 +27,7 @@
 import { INBOX_ACTION_DIRECTIVE } from '../../packages/core/inbox-actions';
 import { QUESTION_DIRECTIVE_KINDS } from '../../packages/core/question-block';
 import { doorEntries } from './door';
-import { windowEntries } from './window-routes';
+import { windowEntries } from '../../packages/server/inbox-window-routes';
 import { OUT, cli, jsonText, readRepoText, type Output } from './lib';
 import { FLOW_FILES } from './flows';
 import { buildSchema } from './schema';

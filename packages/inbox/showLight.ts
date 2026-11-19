@@ -61,8 +61,6 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
   /** `go` is scrolling the list: the count is held back until the scroll ends, so the pill does not flash on the way. */
   let going = false;
   let started = false;
-  /** `go` asked before the rows had slid into place (the pill's press that is also Show): it goes once they are measured. */
-  let goFirst: ListEdge | null = null;
   const publish = () => {
     if (!going) setUnseen([...waiting].map(([id, row]) => ({ id, edge: row.edge })));
   };
@@ -112,14 +110,10 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
     resize?.observe(body);
     redraw?.observe(body, { childList: true, subtree: true });
     measure();
-    if (goFirst) go(goFirst);
   }, after);
   const go = (edge: ListEdge) => {
-    if (!started) {
-      goFirst = edge;
-      going = true;
-      return;
-    }
+    // The pill shows only once the rows are measured (`unseen` is published from then), so there is nothing to go to before.
+    if (!started) return;
     // The nearest of the rows past that edge; focus follows the reader there.
     const rows = [...waiting.values()].filter((row) => row.edge === edge).map((row) => ({ el: row.el, top: row.el.getBoundingClientRect().top }));
     rows.sort((a, b) => (edge === 'bottom' ? a.top - b.top : b.top - a.top));

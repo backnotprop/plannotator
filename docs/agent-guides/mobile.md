@@ -1,6 +1,6 @@
 # The native app's contract kit
 
-The native iPhone app of the Plannotator Inbox lives in `apps/mobile/`. It is built from one source with the window: `apps/mobile/contract/`. That folder holds data only (JSON, Markdown, generated Swift). Generators in `scripts/mobile/` make it from the product's own TypeScript. Two Bun tests fail when the product changes and the contract does not: `tests/mobile-vectors.test.ts` (a generated file is stale) and `tests/mobile-parity.test.ts` (the window gained something the phone has no decision for).
+The native iPhone app of the Plannotator Inbox lives in `apps/mobile/`. It is built from one source with the window: `apps/mobile/contract/`. That folder holds data only (JSON, Markdown, generated Swift). Generators in `scripts/mobile/` make it from the product's own TypeScript. `bun scripts/mobile/check.ts` reports when the product changes and the contract does not (a generated file is stale, or the window gained something the phone has no decision for). Only the mobile-contract workflow runs it; no Bun test does, so an Inbox pull request never fails for a mobile reason (see CI).
 
 The Inbox is Bun-only. Nothing here has a Pi twin.
 
@@ -30,7 +30,7 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 | `tokens/tokens.json`, `generated/swift/Tokens.xcassets/` | `scripts/mobile/tokens.ts` | The default theme, `packages/ui/themes/plannotator.css`, dark and light: every color as its CSS, Display P3 and sRGB hex, the radius in points and the font names. The catalog has one color set per color, light with a dark appearance. The other themes come later. |
 | `words/words.json`, `generated/swift/Words.swift` | `scripts/mobile/words.ts` | The words the product exports as constants or pure functions: section names, agent names, Looks good, Action item, delivery lines and the failed-turn words. A word with a part (a name, a number) is made by calling the product's function with a marker, so `{name}` sits where the window prints the name. |
 
-| `parity/surface.json` | `scripts/mobile/surface.ts` | Everything the window and its server offer, as `<kind>:<name>` entries: door routes, the Inbox endpoints (paths, read from the server's code by `scripts/mobile/window-routes.ts`; `tests/inbox-api-table.test.ts` holds `server-and-storage.md`'s Inbox table to the same list), stream frames, record kinds, wire enum values, the keys the Settings write takes, capabilities, wire fields, message blocks, `:::` blocks, Settings sections and flow checks. The door, the endpoints and the wire types are read live from the product. |
+| `parity/surface.json` | `scripts/mobile/surface.ts` | Everything the window and its server offer, as `<kind>:<name>` entries: door routes, the Inbox endpoints (paths, read from the server's code by `packages/server/inbox-window-routes.ts`, which is Inbox code; `tests/inbox-api-table.test.ts` holds `server-and-storage.md`'s Inbox table to the same list), stream frames, record kinds, wire enum values, the keys the Settings write takes, capabilities, wire fields, message blocks, `:::` blocks, Settings sections and flow checks. The door, the endpoints and the wire types are read live from the product. |
 | `parity/ledger.json` | hand | One row per feature, with the phone's decision for it. See "The parity ledger". |
 | `flows/*.md` | hand | One file per flow: what the person sees and does, then numbered checks such as `[list-04]`. Each check is taken from the window's code and ends with where it comes from, `(path:line)`. Where the phone differs on purpose, the check says `phone differs:` and why. `flows/README.md` holds the rules every flow keeps. |
 
@@ -59,7 +59,7 @@ A fixture (`fixtures/<suite>.json`) is invented input. A vector (`vectors/<suite
 | `crypto` | `packages/core/fixtures/inbox-relay-vectors.json` (the existing relay vectors) | The push collapse id per thread. The keys stay in the relay file; the app derives the collapse key itself | `deriveRelayKeys` and the Inbox's HMAC step |
 | `questions` | `fixtures/questions.json`: questions and what the person does on each | The answer each act makes, and the pick body that saves it (`answer: null` takes a pick back) | `choiceAnswer`, `otherAnswer`, `textAnswer`, `skipAnswer`, `inboxPickBody` (`packages/core/inbox-answers.ts`) |
 | `skew` | `fixtures/skew.json`: health answers, two app clients, app headers | What the app makes of each health answer (`ok`, `inbox_needs_update`, `app_needs_update`) and which routes it then offers, directly and through the relay; how the door parses each `X-Plannotator-App` header | `readInboxDoorHealth`, `inboxDoorOffers`, `parseInboxAppHeader` (`packages/core/inbox-door-version.ts`) |
-| `stream` | `fixtures/stream.json`: bytes as the Inbox writes them, and cut points | The frames the window's reader takes | `parseEventStreamText` (`packages/inbox/sharedEvents.ts`), with its own generator, `scripts/mobile/vectors-stream.ts`, and its own test, `tests/mobile-stream-vectors.test.ts` |
+| `stream` | `fixtures/stream.json`: bytes as the Inbox writes them, and cut points | The frames the window's reader takes | `parseEventStreamText` (`packages/inbox/sharedEvents.ts`), with its own generator, `scripts/mobile/vectors-stream.ts`, run apart by `all.ts` and `check.ts` |
 
 Two of the suites that slice S1 needs have no generator yet:
 
@@ -78,7 +78,7 @@ To add a fixture:
 Every entry of `parity/surface.json` needs a row in `parity/ledger.json` that names it in `surface`. The surface is read from the product, never from the docs:
 
 - door routes, from the door itself;
-- window endpoints, from the server's code (`scripts/mobile/window-routes.ts`). These are paths without methods, and `<prefix>/*` is a family that a module splits itself;
+- window endpoints, from the server's code (`packages/server/inbox-window-routes.ts`; a new route module is added to its `ROUTE_FILES` in an Inbox pull request, and `tests/inbox-api-table.test.ts` says so). These are paths without methods, and `<prefix>/*` is a family that a module splits itself;
 - stream frames and record kinds;
 - the values of every wire enum (`enum:`) and every field of a wire type;
 - message blocks and `:::` directives;
@@ -96,12 +96,12 @@ A row has:
 - `decoded: true`: the app reads these entries through `Wire.swift`. That is a fact about reading. The mark says what the phone shows;
 - `ios.state`: `not-started`, `building`, `done` or `owed`.
 
-Rules the test enforces:
+Rules `bun scripts/mobile/check.ts` enforces on the real ledger (`tests/mobile-parity.test.ts` checks the same rules on fixed ledgers):
 
 - **One decision per entry.** `v1` and `rethink` agree. An entry that one row marks `v1` and another `later` or `never` fails. An `undecided` row beside a decided one does not count.
-- **A new entry forces a choice.** You can decide it, or run `bun scripts/mobile/parity.ts --defer`, which gives each new entry an `undecided` row dated today. The owner then decides it.
-- **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the test fails until `bun scripts/mobile/parity.ts --owed` marks the row `owed` with today's date.
-- **The clock** is a script, `bun scripts/mobile/parity-debts.ts`. An `undecided` row or an `owed` debt older than 14 days fails it. Only `.github/workflows/mobile-ledger.yml` runs it (ubuntu, seconds): nightly, by hand, on a push to main that changes the ledger, and on a pull request only when the clock itself changes. An Inbox pull request that records a new entry in the ledger starts neither it nor a macOS build. It is not a test file, so no `bun test` runs it: the Test workflow, main's full run and a release's checks never fail for a mobile debt. Red there holds back only the app's own release. `tests/mobile-parity-debts.test.ts` checks the rule on fixed dates, never the real ledger, and `scripts/ci-affected-map.test.ts` holds all of this.
+- **An Inbox author runs one command.** `bun scripts/mobile/all.ts` keeps the ledger in step: each new entry gets an `undecided` row dated today, an entry the window lost leaves its row, and a `done` feature the window changed becomes `owed`. A decided row whose every entry is gone (a rename) is left naming nothing: `all.ts` and `check.ts` list it, so an operator moves the decision to the new entry. Rows that never named an entry (a behavior with no entry of its own, the most rows) are not listed. The author never picks a mark. The owner's operators decide `undecided` rows within 14 days.
+- **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the same command marks the row `owed` with today's date.
+- **The clock** is a script, `bun scripts/mobile/parity-debts.ts`. An `undecided` row or an `owed` debt older than 14 days fails it. Only the `ledger` job of `.github/workflows/mobile-contract.yml` runs it (see CI). No `bun test` runs it, so the Test workflow, main's full run and a release's checks never fail for a mobile debt. Red there holds back only the app's own release. `tests/mobile-parity-debts.test.ts` checks the rule on fixed dates, never the real ledger, and `scripts/ci-affected-map.test.ts` holds all of this.
 
 The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names, then corrected by review. Rows whose `source` starts with `seed:` cover the entries no scope row names:
 
@@ -116,11 +116,11 @@ The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their mark
 
 When you fold such an entry into its feature's row, take it out of the seed row.
 
-`tests/mobile-parity.test.ts` reads the live surface, not the committed file. It fails with:
+`bun scripts/mobile/check.ts` compares the live surface with the committed ledger (see CI). `tests/mobile-parity.test.ts` checks the rules and the one command on fixed ledgers only, so an Inbox pull request never fails for a new entry. When the product gains an entry, check.ts's first line says what to do:
 
-> The window gained `<entry>`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink, or run `bun scripts/mobile/parity.ts --defer` to leave it undecided for the owner
+> main is ahead of the mobile contract: run `bun scripts/mobile/all.ts` in a mobile PR
 
-Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no longer has fails too. The test takes about half a second.
+and it lists the new entries. That command records them as `undecided`, dated today. Only the ledger's own rules (a mark, a why, two decisions for one entry) need a person to edit the ledger.
 
 `tests/inbox-api-table.test.ts` ties `docs/agent-guides/server-and-storage.md`'s Inbox API table to the same server-derived route list. An endpoint with no row there fails, whatever the phone decides.
 
@@ -139,43 +139,28 @@ Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no lo
 11. A capability that is not on the capability seam.
 12. The meaning of a mark: the test checks that each entry has one decision, not that the decision is right. The owner reviews the ledger.
 
-## When a test fails on your pull request
+## An Inbox pull request and the contract
 
-`tests/mobile-vectors.test.ts` runs every generator with its check. It runs in an ordinary unit lane, in about 0.7 s on a laptop.
+An Inbox pull request never fails for a mobile reason, and its author runs nothing for the app. What runs where:
 
-`scripts/ci-affected.ts` selects it when a file the generators import or name changes. That means:
-- the door (`packages/server/inbox-devices.ts` and what it imports);
-- the outbox's write kinds;
-- every file the schema reads (`SCHEMA_SOURCES`: `packages/core/inbox-types.ts`, `packages/core/inbox-wire-models.ts`, `packages/core/question-block.ts` and the core files they reach);
-- the window's error table in `packages/server/inbox.ts`;
-- the default theme, `packages/ui/themes/plannotator.css` (another theme file does not select it);
-- a module a word comes from (`scripts/mobile/words.ts` imports them);
-- what the parity surface reads: the server's route files, `packages/ui/types.ts` (blocks), `packages/inbox/settingsRoute.ts` (Settings sections) and the capability files;
-- what the vectors run: `packages/shared/inbox/list.ts`, `packages/inbox/tabCount.ts`, `packages/core/inbox-format.ts`, `packages/core/crypto.ts`, `packages/core/inbox-answers.ts`, `packages/core/inbox-door-version.ts`, the word modules;
-- the contract files themselves.
+- **The unit lanes** run only tests that an Inbox change cannot redden for a mobile reason. They check rules on fixed inputs and import no product code: `tests/mobile-vectors.test.ts` (the stale check works, colors), `tests/mobile-parity.test.ts` (the ledger's rules and the one command), `tests/mobile-parity-debts.test.ts` (the clock on fixed dates) and `tests/mobile-flows.test.ts` (each check's citation form, in the flow files only). A test may import only `scripts/mobile/lib.ts`, `tokens.ts`, `parity.ts`, `parity-debts.ts` and `flows.ts`, which import nothing but `node:` and each other, and may read no contract file.
+- **`bun scripts/mobile/check.ts`** makes every comparison of the live product with a committed contract file: each generator's output, the stream suite, the ledger against the live surface, and whether each flow check's cited file still exists. It also runs the generators' own rules on the live product (`scripts/mobile/rules.ts`): `door.json` is the door, a doc comment changes no generated byte, and each word template prints what the window prints for every value of its part. Those read tables only the mobile scripts keep, so an Inbox change can break them for a phone's reason. It is a script that no test imports. A generator that throws still gets the first line, then the generator and its message.
+- `scripts/ci-affected-map.test.ts` asserts that no test imports any other `scripts/mobile/` module, calls a generator or names a contract file; that no mobile test runs for a wire, window or shared UI change; that a pull request touching only the Inbox (a new route module included) starts no mobile job; and that no workflow but `mobile-*.yml` runs a `scripts/mobile/` command.
 
-A change to the window's components or `packages/inbox/api.ts`, or to the rest of the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
-
-`tests/mobile-stream-vectors.test.ts` imports the window's stream reader (`packages/inbox/sharedEvents.ts`), so a change to the window's client or anything it imports selects it. It is its own file for that reason, and it takes milliseconds. `scripts/mobile/all.ts` runs its generator in a child process, and no test imports `all.ts`, so the main contract test never reaches the stream reader. Of the window's own code, the main test reaches only the badge rule (`packages/inbox/tabCount.ts`), whose module also holds a React hook.
-
-`tests/mobile-flows.test.ts` checks that each flow check cites files that exist. The cited paths are only known at run time, so the picker runs it on every pull request, as a tree-scanning test. It takes about 70 ms. It checks the file, never the line, so a change that only moves lines never fails it. A pull request that moves or deletes a cited file must update the citation.
-
-If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
-
-1. Run `bun scripts/mobile/all.ts`.
-2. Read the diff of `apps/mobile/contract/`. A new route, field or code is something the phone must decide about.
-3. Commit the regenerated files in the same pull request.
+When main moves ahead of the contract (an Inbox pull request changed a wire type, a route, or a rule the vectors run), the `contract` run on main goes red. Its first line reads "main is ahead of the mobile contract: run `bun scripts/mobile/all.ts` in a mobile PR", followed by the new entries and stale files. The mobile operators run that command in a mobile pull request and decide the new `undecided` rows within 14 days. Until then the committed contract lags main. The app builds and tests against the committed files, so it stays green while it lags.
 
 ## CI
 
-- The contract files are data. The test picker reads them like any other data file. Only `.github/workflows/mobile-ios.yml` builds Swift, and only when `apps/mobile/ios/**` or `apps/mobile/contract/generated/swift/**` changes. It is never a required check.
-- `apps/mobile/ios/ci.sh` typechecks `Wire.swift` and `Words.swift` on that job.
-- A generator never lists a folder of the checkout. Every path it reads or writes is a literal in `scripts/mobile/lib.ts` or in the generator, so the picker can see it. If a generator lists a folder, every pull request runs the contract test.
+- The contract files are data. The test picker reads them like any other data file.
+- `.github/workflows/mobile-ios.yml` builds Swift, only when `apps/mobile/ios/**` or `apps/mobile/contract/generated/swift/**` changes. `apps/mobile/ios/ci.sh` typechecks `Wire.swift` and `Words.swift` there. The app's conformance tests will read the committed vectors, not live main.
+- `.github/workflows/mobile-contract.yml` (ubuntu, seconds) has two jobs, `contract` (check.ts) and `ledger` (the clock). It runs on a pull request that touches `apps/mobile/contract/**` or `scripts/mobile/**`, on every push to main, nightly and by hand. Both jobs run each time, so an `undecided` row or an `owed` debt past 14 days turns every mobile pull request and every push to main red in `ledger` until an operator decides it. An Inbox pull request touches neither path, so it never starts the workflow. On main its red X is its own workflow's ("Mobile contract"); a reader of main's state filters by workflow name, as the release skill does.
+- None of these is a required check.
+- A generator never lists a folder of the checkout. Every path it reads or writes is a literal in `scripts/mobile/lib.ts` or in the generator, so the picker can see it.
 
 ## What the first app slice (S1) must know
 
 - Use `Wire.swift` and its `Door` routes. Never hand-write a route.
-- `health.door` is not in the schema until brief F1 lands and its type joins `ROOTS`. After F1, match `health.door.routes` against `DoorRoute.name`.
+- Match `health.door.routes` against `DoorRoute.name`. `InboxDoorHealth` is in the schema.
 - Decode list rows one by one, so one bad row does not blank the list.
 - Seqs, cursors and revisions are `Int64`. Other numbers are `Double`.
 - The flows are checked against the window and cite it. In the list: left swipe is Archive only, the undo banner stays 7 s, the badge counts threads with unseen agent messages, and a picked card reads "Picked <time> · in your draft".

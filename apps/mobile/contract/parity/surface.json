@@ -990,6 +990,7 @@
       "InboxListRow.guide",
       "InboxListRow.guide_walkthrough",
       "InboxListRow.hide_pulls",
+      "InboxListRow.last_agent",
       "InboxListRow.last_agent_at",
       "InboxListRow.last_at",
       "InboxListRow.last_author",

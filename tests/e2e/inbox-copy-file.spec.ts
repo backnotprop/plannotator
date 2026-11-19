@@ -301,7 +301,7 @@ test('a changed file in full screen: the row starts below the changed note; the 
     await shot(page, 'changed');
     await pressAndRead(page, CHANGED, 'changed');
     // The version it sent: the clipboard gets that text.
-    await note.getByRole('button', { name: 'Open the version it sent' }).click();
+    await note.getByRole('button', { name: 'View sent version' }).click();
     await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-version', 'sent');
     await expect(copyButton(page)).toHaveText('Copy file');
     await pressAndRead(page, MANIFEST);

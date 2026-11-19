@@ -1,6 +1,6 @@
 /**
  * The held list's "N new" line stays ONE line (the owner, 2026-11-02: "1 new in appnotes ·
- * Users/ramos/workspaces/projects" wrapped onto two lines beside Show and "looks bugged out"). The
+ * Users/sam/work/projects" wrapped onto two lines beside Show and "looks bugged out"). The
  * count and Show never shrink and the project's name is the part that is cut with "…"; while it is
  * cut, the whole line is the tooltip. The page's real stylesheet is loaded, so the rules that keep it
  * on one line are the ones the window uses. happy-dom has no layout, so a test gives the project's
