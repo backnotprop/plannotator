@@ -33,7 +33,7 @@ export function spaceShareSource(store: PlanStore, id: string): SpaceShareSource
   const documents = read.documents
     .filter((doc) => !doc.archived_at)
     .map((doc) => {
-      const versions = read.versions.filter((v) => v.document_id === doc.id).map((v) => ({ version_number: v.version_number, version: v.version, size: v.size }));
+      const versions = read.versions.filter((v) => v.document_id === doc.id).map((v) => ({ version_number: v.version_number, version: v.version, size: v.size, imported: { author_label: v.author_label ?? null, agent_host: v.agent_host ?? null, agent_session: v.agent_session ?? null, agent_name: v.agent_name ?? null, at: v.committed_at } }));
       const head = versions[versions.length - 1];
       let extension: string | null = null;
       if (doc.kind === "data") extension = "csv";
@@ -98,7 +98,8 @@ interface Live {
 
 export interface SpaceShareJobs {
   status(id: string): SpaceShareStatus | null;
-  share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null;
+  /** Answers at once (the upload runs on); a promise only when a sign-in has to start first. */
+  share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null | Promise<SpaceShareStatus | null>;
   stop(id: string): SpaceShareStatus | null;
   keep(id: string): Promise<SpaceShareStatus | null>;
   keepCancel(id: string): SpaceShareStatus | null;
@@ -198,7 +199,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       });
   }
 
-  function share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null {
+  function share(id: string, input: { mode?: SpaceShareMode; fresh?: boolean }): SpaceShareStatus | null | Promise<SpaceShareStatus | null> {
     const source = spaceShareSource(options.store(), id);
     if (!source) return null;
     const live = liveOf(id);
@@ -214,10 +215,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       record.kept = true;
     }
     // The person's own space, and the sign-in is gone from this computer: sign in again, then go on.
-    if (record.kept && !credentialOf(record.host)) {
-      void keep(id);
-      return status(id);
-    }
+    if (record.kept && !credentialOf(record.host)) return keep(id);
     start(id, record);
     return status(id);
   }
@@ -229,8 +227,14 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
 
   /** Signed in: make the space the person's own (when it is up and not theirs yet), then send what is left. */
   async function claimAndGoOn(id: string): Promise<void> {
+    // A run going without the sign-in (waiting on a busy space, say) is stopped first: it goes on signed in.
+    const live = liveOf(id);
+    if (live.running) {
+      live.abort?.abort();
+      await live.running;
+    }
     const record = readSpaceShareRecord(options.dataDir, id);
-    if (!record || liveOf(id).running) return;
+    if (!record) return;
     if (record.created && !record.kept && !record.refused) {
       try {
         const space = await clientOf(record.host).claim(record.space_id);
@@ -372,7 +376,7 @@ export async function handleSpaceShareRoute(req: SpaceShareRouteRequest, jobs: S
       if (unknown) return bad(`unknown field ${unknown}`);
       if (body.mode !== undefined && body.mode !== "all" && body.mode !== "newest") return bad("mode is all or newest");
       if (body.fresh !== undefined && typeof body.fresh !== "boolean") return bad("fresh is true or false");
-      return answer(jobs.share(id, { mode: body.mode as SpaceShareMode | undefined, fresh: body.fresh === true }));
+      return answer(await jobs.share(id, { mode: body.mode as SpaceShareMode | undefined, fresh: body.fresh === true }));
     }
     case "stop":
       return answer(jobs.stop(id));

@@ -19,6 +19,9 @@
  * - Limits: a page 1,572,864 bytes (HTML 16,000,000), a file and an ownerless space's files 100 MiB (both can be set
  *   small for a test), a comment 8 KiB; without a credential a number of writes a minute, then `429` with
  *   `Retry-After`.
+ * - Answers have the service's shapes as seen on its test copy (2026-11-19): `{ workspace, document }` on the
+ *   create, every other record bare, a page's version also as a weak `ETag`; the approval is a `PUT`, and a tool's
+ *   token gets `403 approval_human_only`.
  * - `/cli/login` and `/cli/token`: the browser sign-in for a tool on this computer, with PKCE.
  */
 import { createHash, randomBytes } from "node:crypto";
@@ -229,7 +232,8 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     }
 
     const space = parts[1] === "workspaces" && parts[2] ? spaces.get(parts[2]) : undefined;
-    if (!space) return fail(404, "workspace_not_found");
+    // A space that is not there: without a credential a read is asked to sign in, as the service answers.
+    if (!space) return !user && method === "GET" ? fail(401, "login_required") : fail(404, "workspace_not_found");
     if (space.deleted) return fail(410, "workspace_deleted");
     const outsider = space.owner !== null && space.owner !== user;
     if (outsider) {
@@ -247,7 +251,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     if (rest[0] === "claim" && rest.length === 1 && method === "POST") {
       if (!user) return fail(401, "login_required");
       space.owner = user;
-      return json(200, { workspace: spaceWire(space) });
+      return json(200, spaceWire(space));
     }
 
     if (rest[0] === "documents" && rest.length === 1 && method === "POST") {
@@ -260,7 +264,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (space.documents.some((d) => d.doc_path === path) || space.assets.some((a) => a.path === path)) return fail(409, "path_conflict", { doc_path: path });
       const doc: FakeDoc = { id: newId("doc"), doc_path: path, kind, title: typeof body.title === "string" ? body.title : path, versions: [{ version: versionOf(text), body: text, by: user }] };
       space.documents.push(doc);
-      return json(201, { document: docWire(space, doc) }, { ETag: `"${doc.versions[0]!.version}"` });
+      return json(201, docWire(space, doc), { ETag: `W/"${doc.versions[0]!.version}"` });
     }
 
     const doc = rest[0] === "documents" && rest[1] ? space.documents.find((d) => d.id === rest[1]) : undefined;
@@ -278,7 +282,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       doc.versions.push({ version, body: text.replace(/^﻿/, ""), by: user });
       // A save clears the page's approvals.
       space.approvals = space.approvals.filter((a) => a.document_id !== doc.id);
-      return json(200, { document: docWire(space, doc) }, { ETag: `"${version}"` });
+      return json(200, docWire(space, doc), { ETag: `W/"${version}"` });
     }
 
     if (doc && rest[2] === "annotations" && rest.length === 3 && method === "POST") {
@@ -288,10 +292,10 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!body || typeof body.body !== "string" || !body.anchor || typeof body.anchor !== "object") return fail(422, "validation_error", { fields: ["anchor"] });
       if (new TextEncoder().encode(body.body).length > 8 * 1024 || JSON.stringify(body.anchor).length > 16 * 1024) return fail(422, "validation_error", { fields: ["body"] });
       const again = usable ? space.comments.find((c) => c.key === usable) : undefined;
-      if (again) return again.document_id === doc.id ? json(200, { annotation: { id: again.id } }) : fail(409, "idempotency_key_conflict");
+      if (again) return again.document_id === doc.id ? json(200, { id: again.id, document_id: doc.id }) : fail(409, "idempotency_key_conflict");
       const comment: FakeComment = { id: newId("anno"), document_id: doc.id, key: usable, body: body.body, anchor: body.anchor, document_version: typeof body.document_version === "string" ? body.document_version : null, by: user, replies: [] };
       space.comments.push(comment);
-      return json(201, { annotation: { id: comment.id } });
+      return json(201, { id: comment.id, document_id: doc.id, author: null, author_standing: user ? "member" : "anonymous" });
     }
     if (doc && rest[2] === "annotations" && rest[4] === "replies" && rest.length === 5 && method === "POST") {
       const comment = space.comments.find((c) => c.id === rest[3]);
@@ -300,15 +304,15 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!body || typeof body.body !== "string") return fail(422, "validation_error", { fields: ["body"] });
       const key = request.headers.get("idempotency-key")?.trim() || null;
       const again = key ? comment.replies.find((r) => r.key === key) : undefined;
-      if (again) return json(200, { reply: { id: again.id } });
+      if (again) return json(200, { id: again.id, annotation_id: comment.id });
       const reply = { id: newId("reply"), key, body: body.body, by: user };
       comment.replies.push(reply);
-      return json(201, { reply: { id: reply.id } });
+      return json(201, { id: reply.id, annotation_id: comment.id });
     }
-    if (doc && rest[2] === "approval" && rest.length === 3 && method === "POST") {
+    if (doc && rest[2] === "approval" && rest.length === 3 && method === "PUT") {
       if (!user) return fail(401, "login_required");
-      // As today: a tool's token may not approve.
-      if ((settings.approvals ?? "refuse") === "refuse") return fail(403, "forbidden");
+      // As today: a person only; a tool's token may not approve.
+      if ((settings.approvals ?? "refuse") === "refuse") return fail(403, "approval_human_only");
       const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
       const current = doc.versions[doc.versions.length - 1]!.version;
       if (body?.version !== current) return fail(409, "approval_version_moved");
@@ -325,7 +329,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (bytes.length > (settings.fileMax ?? 104_857_600)) return fail(413, "artifact_too_large", { max_bytes: settings.fileMax ?? 104_857_600 });
       const hash = createHash("sha256").update(bytes).digest("hex");
       const existing = space.assets.find((a) => a.path === path);
-      if (existing && existing.hashes[existing.hashes.length - 1] === hash) return json(200, { asset: { id: existing.id, path, content_hash: hash }, changed: false });
+      if (existing && existing.hashes[existing.hashes.length - 1] === hash) return json(200, { id: existing.id, path, content_hash: hash, changed: false });
       const quota = space.owner ? 1_073_741_824 : (settings.openQuota ?? 104_857_600);
       const used = space.assets.reduce((n, a) => n + a.size * a.hashes.length, 0);
       if (used + bytes.length > quota) return fail(413, "quota_exceeded", { usage_bytes: used, quota_bytes: quota });
@@ -333,7 +337,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       asset.hashes.push(hash);
       asset.size = bytes.length;
       if (!existing) space.assets.push(asset);
-      return json(existing ? 200 : 201, { asset: { id: asset.id, path, content_hash: hash }, changed: true });
+      return json(existing ? 200 : 201, { id: asset.id, path, content_hash: hash, changed: true });
     }
     return fail(404, "not_found");
   }

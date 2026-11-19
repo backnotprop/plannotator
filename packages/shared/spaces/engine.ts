@@ -24,6 +24,8 @@ import {
   planSpaceShare,
   SPACE_OPEN_FILES_MAX,
   spaceCommentAnchor,
+  spaceImportedFields,
+  spaceImportedOfComment,
   spacePageKindOfPath,
   type LocalSpace,
   type SpaceSharePlan,
@@ -130,6 +132,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     return bytes;
   };
   const localHash = (docId: string, n: number) => docOf(docId).versions.find((v) => v.version_number === n)?.version ?? "";
+  /** Where a version came from (its agent and its own time), as the call carries it: nothing yet (`spaceImportedFields`). */
+  const originOf = (docId: string, n: number) => spaceImportedFields(docOf(docId).versions.find((v) => v.version_number === n)?.imported ?? null);
   const adopt = (space: SpacesSpace | { share_url: string | null; owner_name: string | null }) => {
     record.created = true;
     record.share_url = space.share_url ?? record.share_url;
@@ -156,7 +160,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const path = doc ? paths[doc.id]! : null;
         const document = doc && bytes && path && isSpacePageKind(doc.kind) ? { path, kind: doc.kind, title: doc.title, body: textOf(bytes) } : null;
         try {
-          const made = await client.createSpace({ id: spaceId, name: record.name, document });
+          const made = await client.createSpace({ id: spaceId, name: record.name, document }, doc && seed.version ? originOf(doc.id, seed.version) : {});
           adopt(made.space);
           if (doc && bytes && path) {
             if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
@@ -182,7 +186,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const bytes = bytesOf(doc.id, step.version);
         const path = paths[doc.id]!;
         try {
-          const made = await client.addPage(spaceId, { doc_path: path, kind: doc.kind, title: doc.title, body: textOf(bytes) });
+          const made = await client.addPage(spaceId, { doc_path: path, kind: doc.kind, title: doc.title, body: textOf(bytes) }, originOf(doc.id, step.version));
           record.pages[doc.id] = { lane: "page", remote_id: made.id, doc_path: path, pushed: [{ local: step.version, remote: made.version, hash: localHash(doc.id, step.version) }], stopped: null };
         } catch (error) {
           if (!(error instanceof SpacesError) || error.code !== "path_conflict") throw error;
@@ -200,7 +204,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const bytes = bytesOf(doc.id, step.version);
         const pushed = (remote: string) => page.pushed.push({ local: step.version, remote, hash: localHash(doc.id, step.version) });
         try {
-          pushed((await client.savePage(spaceId, page.remote_id, bytes, doc.kind, last.remote)).version);
+          pushed((await client.savePage(spaceId, page.remote_id, bytes, doc.kind, last.remote, originOf(doc.id, step.version))).version);
         } catch (error) {
           if (!(error instanceof SpacesError)) throw error;
           if (error.code === "version_conflict") {
@@ -270,9 +274,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
           if (step.kind === "reply") {
             const parent = record.comments[step.parent];
             if (!parent || !("remote_id" in parent)) throw new StepLeft();
-            record.comments[comment.id] = { remote_id: (await client.addReply(spaceId, page.remote_id, parent.remote_id, { body: comment.body }, comment.id)).id, reply: true };
+            record.comments[comment.id] = { remote_id: (await client.addReply(spaceId, page.remote_id, parent.remote_id, { body: comment.body }, comment.id, spaceImportedFields(spaceImportedOfComment(comment)))).id, reply: true };
           } else {
-            record.comments[comment.id] = { remote_id: (await client.addComment(spaceId, page.remote_id, { anchor: spaceCommentAnchor(comment), body: comment.body, document_version: version }, comment.id)).id };
+            record.comments[comment.id] = { remote_id: (await client.addComment(spaceId, page.remote_id, { anchor: spaceCommentAnchor(comment), body: comment.body, document_version: version }, comment.id, spaceImportedFields(spaceImportedOfComment(comment)))).id };
           }
         } catch (error) {
           // A comment the space does not take as it is stays here; the rest goes on.
@@ -351,7 +355,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         tell();
         continue;
       }
-      const noEntry = error.status === 401 || error.status === 403 || (error.status === 404 && error.code !== "document_not_found" && error.code !== "asset_not_found");
+      // No way in: no credential where one is now asked for, not allowed, or a space this caller is no longer shown.
+      // (A plain `not_found` is a route the service does not have, never a refusal.)
+      const noEntry = error.status === 401 || error.status === 403 || (error.status === 404 && error.code === "workspace_not_found");
       if (noEntry && record.created && !record.kept) {
         record.refused = true;
         record.job = null;

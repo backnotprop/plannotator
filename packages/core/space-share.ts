@@ -193,6 +193,30 @@ export function isSpaceShareRecord(value: unknown): value is SpaceShareRecord {
   );
 }
 
+// ─────────────────────────────── Who wrote it, and when ───────────────────────────────
+
+/** Where a version or a comment came from here: its author's display name, the agent session, and its own time. */
+export interface SpaceImported {
+  author_label: string | null;
+  agent_host: string | null;
+  agent_session: string | null;
+  agent_name: string | null;
+  /** When it was written here (a version's `committed_at`, a comment's `created_at`). */
+  at: string;
+}
+
+/**
+ * The fields a call carries to say where a version or a comment came from. The engine hands every version and
+ * comment it sends through here. Today it adds nothing: the hosted side does not take them yet and their names are
+ * not final, and an unknown field is refused there. When it does, this is the one place to write them.
+ */
+export function spaceImportedFields(_origin: SpaceImported | null): Record<string, unknown> {
+  return {};
+}
+
+/** A comment's origin: the person's display name when one is kept, its agent fields, and when it was made. */
+export const spaceImportedOfComment = (comment: PlanComment): SpaceImported => ({ author_label: comment.author_label, agent_host: comment.agent_host, agent_session: comment.agent_session, agent_name: comment.agent_name, at: comment.created_at });
+
 // ─────────────────────────────── The space on this computer ───────────────────────────────
 
 export interface LocalSpaceDocument {
@@ -203,7 +227,7 @@ export interface LocalSpaceDocument {
   /** A picture or a table page: the extension its file gets (`png`, `svg`, `csv`). */
   file_extension: string | null;
   /** Oldest first. `version`: the git blob SHA of its bytes. */
-  versions: { version_number: number; version: string; size: number }[];
+  versions: { version_number: number; version: string; size: number; imported?: SpaceImported }[];
 }
 
 /** What a share reads of a plan: the pages kept (none archived), its files, comments and the person's approval. */

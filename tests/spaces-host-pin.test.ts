@@ -56,6 +56,8 @@ describe("no test reaches a Spaces host", () => {
     expect(files.length).toBeGreaterThan(100);
     const reaching: string[] = [];
     for (const file of files) {
+      // This file writes such addresses on purpose, for the scan's own test below.
+      if (file === "tests/spaces-host-pin.test.ts") continue;
       let text: string;
       try {
         text = readFileSync(join(root, file), "utf8");

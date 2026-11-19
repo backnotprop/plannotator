@@ -205,6 +205,22 @@ describe("Keep this space", () => {
   });
 });
 
+describe("Sign in while a run waits", () => {
+  test("a busy space, then Sign in: the waiting run is stopped and goes on signed in, as one space of the person's own", async () => {
+    const s = setup({ jobs: { sleep: (_ms, signal) => new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true })) } });
+    s.spaces.failNext(/^POST \/v1\/workspaces$/, 429, "rate_limited");
+    s.jobs.share(s.world.plan, { mode: "newest" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "sharing", link: null, progress: { done: 0 } });
+    expect(s.jobs.status(s.world.plan)!.waiting).toBeGreaterThan(0);
+    await s.jobs.keep(s.world.plan);
+    await s.settle();
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: true, signed_in: true });
+    expect(s.spaces.spaces.size).toBe(1);
+    expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Maya Chen");
+  });
+});
+
 describe("Stop sharing", () => {
   test("deletes a kept space and forgets the share; a space nobody kept is never deleted", async () => {
     const s = setup();

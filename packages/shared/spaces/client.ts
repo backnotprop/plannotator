@@ -4,8 +4,9 @@
  * `SpacesError` with code `offline`. The sign-in token, when there is one, goes in the Authorization header only.
  * A redirect is never followed (the header would go with it).
  *
- * Answers are read leniently: a record may come bare or under its name (`{ document: … }`), since only the fields a
- * share keeps are relied on (ids, versions, `share_url`).
+ * Answers are read leniently: a record may come bare (as the service answers a page, a file, a comment and a reply)
+ * or under its name (`{ workspace, document }` on the create), since only the fields a share keeps are relied on
+ * (ids, versions, `share_url`). A page's version also comes as a weak `ETag` (`W/"<sha>"`).
  */
 import type { SpacePageKind } from "@plannotator/core/space-share";
 
@@ -33,14 +34,15 @@ export interface SpacesSpace {
 export interface SpacesClient {
   readonly host: string;
   readonly signedIn: boolean;
-  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null }): Promise<{ space: SpacesSpace; document: { id: string; version: string } | null }>;
+  /** `imported` (here and below): the origin fields of what is sent (`spaceImportedFields`), merged into the call. */
+  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null }, imported?: Record<string, unknown>): Promise<{ space: SpacesSpace; document: { id: string; version: string } | null }>;
   getSpace(id: string): Promise<SpacesSpace>;
-  addPage(spaceId: string, body: { doc_path: string; kind: SpacePageKind; title: string; body: string }): Promise<{ id: string; version: string }>;
+  addPage(spaceId: string, body: { doc_path: string; kind: SpacePageKind; title: string; body: string }, imported?: Record<string, unknown>): Promise<{ id: string; version: string }>;
   /** Replace a page's text; `ifMatch` is the version the space is expected to hold (412 `version_conflict` otherwise). */
-  savePage(spaceId: string, docId: string, bytes: Uint8Array, kind: SpacePageKind, ifMatch: string): Promise<{ version: string }>;
+  savePage(spaceId: string, docId: string, bytes: Uint8Array, kind: SpacePageKind, ifMatch: string, imported?: Record<string, unknown>): Promise<{ version: string }>;
   putFile(spaceId: string, path: string, bytes: Uint8Array, contentType: string, title?: string | null): Promise<{ id: string | null; content_hash: string | null }>;
-  addComment(spaceId: string, docId: string, body: { anchor: unknown; body: string; document_version: string }, key: string): Promise<{ id: string }>;
-  addReply(spaceId: string, docId: string, annotationId: string, body: { body: string }, key: string): Promise<{ id: string }>;
+  addComment(spaceId: string, docId: string, body: { anchor: unknown; body: string; document_version: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
+  addReply(spaceId: string, docId: string, annotationId: string, body: { body: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
   claim(spaceId: string): Promise<SpacesSpace>;
   approve(spaceId: string, docId: string, version: string): Promise<void>;
   deleteSpace(spaceId: string): Promise<void>;
@@ -119,8 +121,8 @@ export function createSpacesClient(options: { host: string; token?: string | nul
   return {
     host: options.host,
     signedIn: token !== null,
-    async createSpace(input) {
-      const { body } = await call("POST", "/v1/workspaces", { json: input });
+    async createSpace(input, imported = {}) {
+      const { body } = await call("POST", "/v1/workspaces", { json: input.document ? { ...input, document: { ...input.document, ...imported } } : input });
       const space = spaceOf(under(body, "workspace"));
       const document = isObject(body) && isObject(body.document) ? body.document : null;
       return { space, document: document && text(document.id) && text(document.version) ? { id: document.id as string, version: document.version as string } : null };
@@ -128,12 +130,13 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     async getSpace(id) {
       return spaceOf(under((await call("GET", ws(id))).body, "workspace"));
     },
-    async addPage(spaceId, input) {
-      const { body, headers } = await call("POST", `${ws(spaceId)}/documents`, { json: input });
+    async addPage(spaceId, input, imported = {}) {
+      const { body, headers } = await call("POST", `${ws(spaceId)}/documents`, { json: { ...input, ...imported } });
       const document = under(body, "document");
       return { id: text(document.id) ?? "", version: versionOf(document, headers) };
     },
-    async savePage(spaceId, docId, bytes, kind, ifMatch) {
+    // A raw save has no JSON to carry origin fields in; how they ride on it is the hosted side's to settle.
+    async savePage(spaceId, docId, bytes, kind, ifMatch, _imported = {}) {
       const { body, headers } = await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}`, { bytes, headers: { "Content-Type": SPACE_PAGE_MEDIA_TYPE[kind], "If-Match": `"${ifMatch}"` } });
       return { version: versionOf(under(body, "document"), headers) };
     },
@@ -143,19 +146,19 @@ export function createSpacesClient(options: { host: string; token?: string | nul
       const asset = under(body, "asset");
       return { id: text(asset.id), content_hash: text(asset.content_hash) };
     },
-    async addComment(spaceId, docId, input, key) {
-      const { body } = await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/annotations`, { json: input, headers: { "Idempotency-Key": key } });
+    async addComment(spaceId, docId, input, key, imported = {}) {
+      const { body } = await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/annotations`, { json: { ...input, ...imported }, headers: { "Idempotency-Key": key } });
       return { id: text(under(body, "annotation").id) ?? "" };
     },
-    async addReply(spaceId, docId, annotationId, input, key) {
-      const { body } = await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/annotations/${segment(annotationId)}/replies`, { json: input, headers: { "Idempotency-Key": key } });
+    async addReply(spaceId, docId, annotationId, input, key, imported = {}) {
+      const { body } = await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/annotations/${segment(annotationId)}/replies`, { json: { ...input, ...imported }, headers: { "Idempotency-Key": key } });
       return { id: text(under(body, "reply").id) ?? "" };
     },
     async claim(spaceId) {
       return spaceOf(under((await call("POST", `${ws(spaceId)}/claim`, { json: {} })).body, "workspace"));
     },
     async approve(spaceId, docId, version) {
-      await call("POST", `${ws(spaceId)}/documents/${segment(docId)}/approval`, { json: { version } });
+      await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}/approval`, { json: { version } });
     },
     async deleteSpace(spaceId) {
       await call("DELETE", ws(spaceId));

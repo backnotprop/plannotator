@@ -276,7 +276,7 @@ describe("the approval", () => {
     const s = setup({ token: true, spaces: { approvals: "accept" } });
     expect((await s.run()).end).toBe("done");
     const all = writes(s.spaces);
-    expect(all[all.length - 1]).toBe("POST /v1/workspaces/ws/documents/doc/approval");
+    expect(all[all.length - 1]).toBe("PUT /v1/workspaces/ws/documents/doc/approval");
     expect(all.filter((w) => w.endsWith("/approval"))).toHaveLength(1);
     const space = spaceOf(s.spaces, s.record);
     expect(space.owner).toBe("Maya Chen");
