@@ -130,10 +130,30 @@ struct OfferedPairingSheet: View {
   @Environment(AppModel.self) private var model
 
   private var working: Bool { model.pairing == .working }
-  @State private var height: CGFloat = 260
+  @Environment(\.dynamicTypeSize) private var typeSize
 
+  /// Presented as the system presents a confirmation: a half-height sheet over the dimmed list, the words in its
+  /// middle and the two actions at its foot. Large words take the whole height; words that still do not fit scroll.
   var body: some View {
+    ViewThatFits(in: .vertical) {
+      content.frame(maxHeight: .infinity)
+      ScrollView { content }.scrollBounceBehavior(.basedOnSize)
+    }
+    .padding(.horizontal, 24)
+    .padding(.top, 28)
+    .padding(.bottom, 12)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium])
+    .presentationDragIndicator(.hidden)
+    // Solid, a step lighter than the list in the dark: nothing of the list shows through the words.
+    .presentationBackground(Token.card)
+    // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
+    .interactiveDismissDisabled(working)
+  }
+
+  private var content: some View {
     VStack(spacing: 18) {
+      Spacer(minLength: 0)
       VStack(spacing: 10) {
         Text(PhoneWords.pairAsk).font(.headline).foregroundStyle(Token.mutedForeground)
         // What the phone can vouch for: where the link leads.
@@ -151,6 +171,7 @@ struct OfferedPairingSheet: View {
         .multilineTextAlignment(.center)
         .foregroundStyle(Token.mutedForeground)
       }
+      Spacer(minLength: 0)
       if working {
         HStack(spacing: 10) {
           ProgressView()
@@ -173,17 +194,6 @@ struct OfferedPairingSheet: View {
         }
       }
     }
-    .padding(.horizontal, 24)
-    .padding(.top, 28)
-    .padding(.bottom, 12)
-    .frame(maxWidth: .infinity)
-    // The sheet is as tall as what it says, and grows with the progress or failure lines.
-    .fixedSize(horizontal: false, vertical: true)
-    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-    .presentationDetents([.height(max(height, 120))])
-    .presentationBackground(Token.background)
-    // While it pairs the sheet stays: the person sees it work, and sees why if it fails.
-    .interactiveDismissDisabled(working)
   }
 }
 

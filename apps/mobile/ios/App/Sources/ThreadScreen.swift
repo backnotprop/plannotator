@@ -42,6 +42,8 @@ struct ThreadScreen: View {
   @State private var position = ScrollPosition()
   /// Room added under the last message so the page can rest on a block's start even when the thread ends sooner.
   @State private var room: CGFloat = 0
+  /// The keyboard is up. Typing in a card, the foot's button steps aside so the card has the room.
+  @State private var keyboard = false
   @FocusState private var composing: Bool
 
   private var model: ThreadModel? { session.thread(id) }
@@ -138,13 +140,15 @@ struct ThreadScreen: View {
         Color.clear.frame(height: room)
       }
       .padding(.horizontal, 20)
-      // The content ends above the reply field's fade: the last card is never under it.
+      // The content ends above the reply field's fade, with air: the last card is never under it.
       .padding(.bottom, Self.clear)
       .coordinateSpace(.named(Self.content))
       .onPreferenceChange(CardFrames.self) { now in
         let before = cards
-        cards.merge(now) { $1 }
-        if now[CardFrames.part] == nil { cards[CardFrames.part] = nil }
+        // What is laid out now, whole: a line that closed (a reason field, a panel) leaves no frame behind.
+        var next = now
+        next[Self.landing] = cards[Self.landing]
+        cards = next
         // Only the card the person just touched follows its own growth (a pick's line, a note field, a reason):
         // a card that changes on its own (another device's answer, a refusal's line) never moves the page.
         if let key = scroll.fresh(within: 1.5), let old = before[key], let frame = now[key], frame.height > old.height + 1 { reveal(key, proxy) }
@@ -167,6 +171,13 @@ struct ThreadScreen: View {
     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
       if let key = scroll.fresh(within: 3) { reveal(key, proxy) }
     }
+    // The keyboard went (a mark made, a field left): the card the person was on rests whole again, its top
+    // under the title bar, never cut where the keyboard had pushed it.
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+      if let key = scroll.fresh(within: 4) { reveal(key, proxy) }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboard = true }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboard = false }
     .environment(scroll)
     // The person's own Send is followed to the end. A message that arrives while they read moves nothing.
     .onChange(of: shown.count) { _, _ in
@@ -192,7 +203,7 @@ struct ThreadScreen: View {
     .scrollDismissesKeyboard(.interactively)
     .refreshable { await session.refresh() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items) { card in
+      Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items, inCard: keyboard && !composing) { card in
         scroll.landed = true
         withAnimation { show(card, proxy) }
       } jump: {
@@ -217,9 +228,12 @@ struct ThreadScreen: View {
   /// down instead, with the card whole over the field.
   private func land(_ waiting: [(id: String, open: Bool)], _ proxy: ScrollViewProxy) {
     guard let start = cards[Self.landing], scroll.height > 0 else { return proxy.scrollTo(Self.landing, anchor: .top) }
+    // The card the page lands for is the first that still wants an answer; one already marked or picked in the
+    // draft only when nothing else waits.
+    let after = waiting.filter { cards[$0.id].map { $0.minY >= start.minY } ?? false }
     var y = start.minY
-    if let first = waiting.first(where: { cards[$0.id].map { $0.minY >= start.minY } ?? false }), let card = cards[first.id], card.maxY + Self.clear > start.minY + scroll.height {
-      y = rest(for: card)
+    if let first = after.first(where: \.open) ?? after.first, let card = cards[first.id] {
+      y = rest(for: card, prefer: start.minY)
     }
     settle(at: y, end: start.maxY + Self.clear)
   }
@@ -236,14 +250,71 @@ struct ThreadScreen: View {
     }
   }
 
-  /// Where the page's top rests so that `card` is whole over the reply field: on the start of a block (a
-  /// paragraph, a code block, a card), never through the middle of a line. A card taller than the page starts at
-  /// its own top.
-  private func rest(for card: CGRect) -> CGFloat {
+  /// Where the page's top rests so that `card` is whole between the title bar and the reply field, as near to
+  /// `prefer` as that allows (the nearest place that shows the most above it, when nothing is preferred). A card
+  /// taller than the page starts at its own top.
+  ///
+  /// The page's two edges never cut a line: the top rests on the start of a block or in the air between two, and
+  /// the bottom edge, where the reply field's fade begins, is kept off a line too whenever any resting place in
+  /// reach allows it. `within`, a card taller than the page, may have its top under the bar (the part the person
+  /// opened in it is what must show).
+  private func rest(for card: CGRect, prefer: CGFloat? = nil, within: CGRect? = nil) -> CGFloat {
     let own = card.minY - Self.margin
-    guard card.height + Self.margin + Self.clear <= scroll.height else { return own }
     let need = card.maxY + Self.clear - scroll.height
-    return cards.values.map { $0.minY - Self.margin }.filter { $0 >= need && $0 <= own }.min() ?? own
+    guard need <= own else { return own }
+    return snap(prefer ?? need, low: need, high: own, within: within)
+  }
+
+  /// The resting place between `low` and `high` nearest to `prefer` whose top cuts nothing (and whose bottom cuts
+  /// nothing, when one such is in reach).
+  private func snap(_ prefer: CGFloat, low: CGFloat, high: CGFloat, within: CGRect?) -> CGFloat {
+    let frames = cards.filter { $0.key != Self.landing && $0.key != CardFrames.part }
+    let lines = frames.filter { $0.key.hasPrefix("b/") }.map(\.value)
+    // At the top nothing may be cut, a card's edge included, but the tall card the person is at work in.
+    let walls = frames.filter { !$0.key.hasPrefix("e/") }.filter { within == nil || $0.value != within }
+    // A card that ends right at the edge counts as cut too: its last hairline would show under the bar.
+    // A line's box already holds its descent, so a line that ends at the edge is whole. A card that starts at the
+    // edge or just under it is cut too: the bar clips its corners. It keeps its air, or most of it.
+    func top(_ y: CGFloat) -> Bool {
+      !walls.contains { key, frame in
+        let line = key.hasPrefix("b/")
+        if frame.minY < y - 0.5 { return frame.maxY > y - (line ? -0.5 : 2) }
+        return !line && frame.minY < y + Self.margin - 3.5
+      }
+    }
+    // At the bottom, a line that reaches into the fade is cut, however little of it shows.
+    let edge = scroll.height
+    func bottom(_ y: CGFloat) -> Bool {
+      let fadeTop: CGFloat = y + edge
+      let fadeEnd: CGFloat = fadeTop + Composer.fade
+      return !lines.contains { line in line.minY < fadeEnd && line.maxY > fadeTop + 0.5 }
+    }
+    let clamped: CGFloat = min(max(prefer, low), high)
+    var places: [CGFloat] = [clamped, low, high]
+    // A card keeps its full air under the bar; a line may rest a little closer, or right at the edge when the line
+    // above it is hidden whole.
+    for (key, frame) in frames {
+      places.append(frame.minY - Self.margin)
+      places.append(frame.minY - Self.margin + 3)
+      places.append(frame.maxY + 4)
+      if key.hasPrefix("b/") {
+        places.append(frame.minY - 4)
+        places.append(frame.minY)
+      }
+    }
+    // Or where the bottom edge falls between two lines: one ends over the fade, the next starts past it.
+    for line in lines {
+      places.append(line.maxY + 1 - edge)
+      places.append(line.minY - Composer.fade - 1 - edge)
+    }
+    // The air over the fade may be given up for it, and the card's own empty foot may go into the fade: no line
+    // of it may (the bottom check holds them out).
+    let reach = low - Self.clear - Composer.fade
+    places = places.filter { y in y >= reach - 0.5 && y <= high + 0.5 && top(y) }
+    let inside = places.filter { $0 >= low - 0.5 }
+    let pool = [inside.filter(bottom), places.filter(bottom), inside, places].first { !$0.isEmpty } ?? []
+    // Nowhere clean in reach: the card's own top, which cuts nothing above it.
+    return pool.min { abs($0 - clamped) < abs($1 - clamped) } ?? high
   }
 
   /// Bring a card on screen.
@@ -252,14 +323,26 @@ struct ThreadScreen: View {
     if let tail = cards[Self.landing] { settle(at: rest(for: card), end: tail.maxY + Self.clear) } else { position.scrollTo(y: rest(for: card)) }
   }
 
-  /// The card the person is at work on, after it grew or the keyboard rose: if its end went under the reply
-  /// field, it is brought back over it. A card taller than the page is left where it is, unless the part the
-  /// person opened (a field with its buttons) says where it is: then that part is what stays in view.
+  /// The card the person is at work on, after it grew, the keyboard rose or went: it rests whole between the title
+  /// bar and the reply field, its top in view, moving the page as little as that takes. A card taller than the
+  /// page keeps the part the person opened (a field with its buttons) in view instead, and shows as much of
+  /// itself above that part as fits, from the start of a line.
   private func reveal(_ key: String, _ proxy: ScrollViewProxy) {
     guard let whole = cards[key], scroll.height > 0 else { return }
-    let card = cards[CardFrames.part].flatMap { $0.intersects(whole) ? $0 : nil } ?? whole
-    guard card.height + Self.margin + Self.clear <= scroll.height, card.maxY + Self.clear > scroll.bottom else { return }
-    withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(y: max(scroll.top, rest(for: card))) }
+    let fits = whole.height + Self.margin + Self.clear <= scroll.height
+    let part = cards[CardFrames.part].flatMap { $0.intersects(whole) ? $0 : nil }
+    let y: CGFloat
+    if fits {
+      y = rest(for: whole, prefer: scroll.top)
+    } else if let part {
+      y = rest(for: part, within: whole)
+    } else {
+      return
+    }
+    guard abs(y - scroll.top) > 0.5 else { return }
+    withAnimation(.easeOut(duration: 0.2)) {
+      if let tail = cards[Self.landing] { settle(at: y, end: tail.maxY + Self.clear) } else { position.scrollTo(y: y) }
+    }
   }
 
   private static let end = "end"
@@ -267,8 +350,9 @@ struct ThreadScreen: View {
   nonisolated private static let content = "content"
   /// The air kept between a card and the reply field (or the title bar).
   static let margin: CGFloat = 12
-  /// The room kept over the reply field: its fade, then air, so a card resting there keeps its edge and corners.
-  static let clear: CGFloat = 30
+  /// The air kept over the reply field's fade (the fade is part of the foot: the page's room ends where it
+  /// begins), so a card resting there keeps its edge and corners.
+  static let clear: CGFloat = 12
 }
 
 /// The names the thread scrolls to.
@@ -304,6 +388,34 @@ struct CardPlace: ViewModifier {
   }
 }
 
+/// The lines of a laid out paragraph, in the thread's content coordinates.
+enum TextLines {
+  static func frames(_ key: String, _ layouts: [Text.LayoutKey.AnchoredLayout], _ geometry: GeometryProxy) -> [String: CGRect] {
+    let place = geometry.frame(in: .named("content")).origin
+    var frames: [String: CGRect] = [:]
+    for (n, anchored) in layouts.enumerated() {
+      let origin = geometry[anchored.origin]
+      for (index, line) in anchored.layout.enumerated() {
+        let bounds = line.typographicBounds.rect
+        frames["b/\(key)/\(n)/\(index)"] = CGRect(x: place.x + origin.x + bounds.minX, y: place.y + origin.y + bounds.minY, width: bounds.width, height: bounds.height)
+      }
+    }
+    return frames
+  }
+}
+
+/// A line inside a card, named after the card it is in.
+private struct LineEdge: ViewModifier {
+  let name: String
+  @Environment(\.cardKey) private var cardKey
+
+  func body(content: Content) -> some View {
+    content.background {
+      GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: ["b/\(cardKey ?? "")/\(name)": geometry.frame(in: .named("content"))]) }
+    }
+  }
+}
+
 private struct CardKey: EnvironmentKey { static let defaultValue: String? = nil }
 extension EnvironmentValues {
   /// The name of the card a view is in, so its own actions can say the person is on it.
@@ -316,10 +428,23 @@ extension EnvironmentValues {
 extension View {
   func card(_ key: String) -> some View { modifier(CardPlace(key: key)) }
 
-  /// The start of a block of words: a place the page's top may rest on.
-  func blockEdge(_ key: String) -> some View {
-    background { GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: ["b/\(key)": geometry.frame(in: .named("content"))]) } }
+  /// The start of a block of words: a place the page's top may rest on. A block whose lines say where they are
+  /// (`textLines`) is no wall itself: the page's edge may rest between two of its lines.
+  func blockEdge(_ key: String, lined: Bool = false) -> some View {
+    background { GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: ["\(lined ? "e" : "b")/\(key)": geometry.frame(in: .named("content"))]) } }
   }
+
+  /// Each line of a paragraph, so the page's edges can rest between two lines of it and never through one.
+  func textLines(_ key: String) -> some View {
+    overlayPreferenceValue(Text.LayoutKey.self) { layouts in
+      GeometryReader { geometry in
+        Color.clear.preference(key: CardFrames.self, value: TextLines.frames(key, layouts, geometry))
+      }
+    }
+  }
+
+  /// A line (or a row, a field, a code box) inside a card: the page's edges never rest through it.
+  func lineEdge(_ name: String) -> some View { modifier(LineEdge(name: name)) }
 
   /// A field and its buttons, opened inside a card: when the keyboard rises it is this, whole, that stays over the
   /// reply field, even in a card taller than the page.
@@ -391,6 +516,8 @@ struct MessageView: View {
         case .actions(let first, let count):
           ActionChecklist(session: session, thread: thread.threadId, message: message.id, actions: Array(todos[first..<min(first + count, todos.count)]), agent: name, readOnly: !SendPlan.live(message, in: thread), drafts: drafts)
             .card(CardID.actions(message.id, first))
+        case .text:
+          MessageWords(block: block).textLines("\(message.id.rawValue)/\(index)").blockEdge("\(message.id.rawValue)/\(index)", lined: true)
         default:
           MessageWords(block: block).blockEdge("\(message.id.rawValue)/\(index)")
         }
@@ -445,9 +572,15 @@ struct Composer: View {
   var focused: FocusState<Bool>.Binding
   /// What still waits in the thread: the button at the foot says it, and a touch goes to the next one.
   let items: OpenItems
+  /// The person types in a card: the foot steps aside until the keyboard goes, all but its fade, so the card has
+  /// the room over the keyboard and one field only stands there, the one they type in.
+  var inCard = false
   /// Go to a card.
   let go: (String) -> Void
   let jump: () -> Void
+
+  /// The fade over the reply field, at the top of the foot: what scrolls under it fades into it.
+  static let fade: CGFloat = 14
 
   private var hasPicks: Bool { thread.messages.contains { ($0.questions ?? []).contains { $0.state == .picked } } }
   private var canSend: Bool {
@@ -463,79 +596,103 @@ struct Composer: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if session.reach == .away, session.standing == .ok {
-        // The thread says it too: what is done here waits on the phone.
-        Label(PhoneWords.away(session.computer.name), systemImage: "moon.fill")
-          .font(.footnote)
-          .foregroundStyle(Token.mutedForeground)
-          .padding(.horizontal, 6)
-      }
-      // Under the guard only the guard speaks: the refusal behind it names keys.
-      if let notice = session.notices[id], !guarded {
-        let said = PhoneWords.notice(notice, computer: session.computer.name, agent: thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) })
-        Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
-          .font(.footnote)
-          .foregroundStyle(Token.destructive)
-          .padding(.horizontal, 6)
-      }
-      if guarded, let stale = session.stale[id] {
-        // As wide as the cards above it.
-        StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go).padding(.horizontal, 8)
-      } else if items.shown {
-        // The window's own pill: what still wants an answer, and a touch goes to the next one.
-        Button(action: jump) {
-          HStack(spacing: 6) {
-            Image(systemName: "questionmark.circle")
-            // A number never parts from its noun when the words are large and wrap.
-            if let words = PhoneWords.openItems(items) { Text(words.replacing(#/(\d) /#) { "\($0.1)\u{00A0}" }).multilineTextAlignment(.leading) }
-            Image(systemName: "chevron.down").font(.caption.weight(.bold))
-          }
-          .font(.subheadline.weight(.medium))
-          .foregroundStyle(Token.foreground)
-          .padding(.horizontal, 14)
-          .frame(minHeight: 36)
-          .background(Token.muted, in: Capsule())
-          .frame(minHeight: 44)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(ChoiceStyle())
-        .accessibilityLabel(PhoneWords.openItems(items) ?? PhoneWords.allAnswered)
-      }
-      if session.standing == .appNeedsUpdate {
-        Label(PhoneWords.updateToAnswer, systemImage: "arrow.down.app")
-          .font(.subheadline)
-          .foregroundStyle(Token.mutedForeground)
-          .frame(maxWidth: .infinity, minHeight: 44)
-      } else if SendPlan.needsComputer(thread) {
-        Label(PhoneWords.replyOnComputer, systemImage: "desktopcomputer")
-          .font(.subheadline)
-          .foregroundStyle(Token.mutedForeground)
-          .frame(maxWidth: .infinity, minHeight: 44)
-      } else {
-        box
-      }
+      // Something to stand on even when empty: the fade and the solid ground under the keyboard stay.
+      if inCard { Color.clear.frame(maxWidth: .infinity, maxHeight: 0) } else { foot }
     }
     .padding(.horizontal, 12)
-    .padding(.top, 8)
-    .padding(.bottom, 8)
-    .background(Token.background)
-    // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge.
-    .overlay(alignment: .top) {
-      LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
-        .frame(height: 14)
-        .offset(y: -14)
-        .allowsHitTesting(false)
+    .padding(.vertical, inCard ? 0 : 8)
+    // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge. The fade
+    // is part of the foot, so the page's room ends where it begins and nothing rests under it.
+    .padding(.top, Self.fade)
+    .background {
+      VStack(spacing: 0) {
+        LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
+          .frame(height: Self.fade)
+        // Solid down to the screen's edge, under the keyboard too: nothing of the page shows below the field.
+        Token.background
+      }
+      .ignoresSafeArea(.all, edges: .bottom)
+      .allowsHitTesting(false)
+    }
+  }
+
+  @ViewBuilder private var foot: some View {
+    if session.reach == .away, session.standing == .ok {
+      // The thread says it too: what is done here waits on the phone.
+      Label(PhoneWords.away(session.computer.name), systemImage: "moon.fill")
+        .font(.footnote)
+        .foregroundStyle(Token.mutedForeground)
+        .padding(.horizontal, 6)
+    }
+    // Under the guard only the guard speaks: the refusal behind it names keys.
+    if let notice = session.notices[id], !guarded {
+      let said = PhoneWords.notice(notice, computer: session.computer.name, agent: thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) })
+      Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
+        .font(.footnote)
+        .foregroundStyle(Token.destructive)
+        .padding(.horizontal, 6)
+    }
+    if guarded, let stale = session.stale[id] {
+      // As wide as the cards above it.
+      StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go).padding(.horizontal, 8)
+    } else if items.shown {
+      // The window's own pill: what still wants an answer, and a touch goes to the next one.
+      Button(action: jump) {
+        HStack(spacing: 6) {
+          Image(systemName: "questionmark.circle")
+          // A number never parts from its noun when the words are large and wrap.
+          if let words = PhoneWords.openItems(items) { Text(words.replacing(#/(\d) /#) { "\($0.1)\u{00A0}" }).multilineTextAlignment(.leading) }
+          Image(systemName: "chevron.down").font(.caption.weight(.bold))
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(Token.foreground)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 36)
+        .background(Token.muted, in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(ChoiceStyle())
+      .accessibilityLabel(PhoneWords.openItems(items) ?? PhoneWords.allAnswered)
+    }
+    if session.standing == .appNeedsUpdate {
+      Label(PhoneWords.updateToAnswer, systemImage: "arrow.down.app")
+        .font(.subheadline)
+        .foregroundStyle(Token.mutedForeground)
+        .frame(maxWidth: .infinity, minHeight: 44)
+    } else if SendPlan.needsComputer(thread) {
+      Label(PhoneWords.replyOnComputer, systemImage: "desktopcomputer")
+        .font(.subheadline)
+        .foregroundStyle(Token.mutedForeground)
+        .frame(maxWidth: .infinity, minHeight: 44)
+    } else {
+      box
     }
   }
 
   private var box: some View {
     HStack(alignment: .bottom, spacing: 8) {
-      TextField(hint, text: $words, axis: .vertical)
+      TextField("", text: $words, axis: .vertical)
         .lineLimit(1...6)
         .font(.body)
         .focused(focused)
         .padding(.leading, 16)
         .padding(.vertical, 12)
+        // The hint whole, never cut: the long one when it fits on the line, else the short one.
+        .overlay(alignment: .topLeading) {
+          if words.isEmpty {
+            ViewThatFits(in: .horizontal) {
+              Text(hint).lineLimit(1)
+              Text(PhoneWords.reply).lineLimit(1)
+            }
+            .font(.body)
+            .foregroundStyle(Color(uiColor: .placeholderText))
+            .padding(.leading, 16)
+            .padding(.vertical, 12)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+          }
+        }
         .accessibilityLabel(hint)
       Button {
         // Words typed on a card and not saved yet are saved first: what is on screen is what is sent.

@@ -46,6 +46,7 @@ struct ActionChecklist: View {
           Chip(words: PhoneWords.holdsUp(holds), tone: .hold)
         }
       }
+      .lineEdge("head")
       .padding(.horizontal, 16)
       .padding(.top, 16)
       .padding(.bottom, 10)
@@ -65,6 +66,7 @@ struct ActionChecklist: View {
         Label(PhoneWords.watching(agent, watching), systemImage: "eye")
           .font(.footnote)
           .foregroundStyle(Token.mutedForeground)
+          .lineEdge("watching")
           .padding(16)
       }
     }
@@ -179,9 +181,10 @@ private struct ActionRow: View {
       }
       // The tick stands in the column of a question's radio.
       .padding(.leading, 9)
+      .lineEdge("row/\(action.key)")
       if let line = underLine {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-          Text(line).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+          Text(line).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("under/\(action.key)")
           if ActionMarks.timed(action), !readOnly {
             Button(PhoneWords.undo) { mark(nil) }.font(.footnote.weight(.semibold)).frame(minWidth: 44, minHeight: 44).disabled(busy)
           }
@@ -195,6 +198,7 @@ private struct ActionRow: View {
         Label(PhoneWords.markNotice(refusal, computer: session.computer.name), systemImage: "exclamationmark.circle")
           .font(.footnote)
           .foregroundStyle(Token.destructive)
+          .lineEdge("refusal/\(action.key)")
           .padding(.leading, 54)
           .padding(.trailing, 16)
           .padding(.bottom, 10)
@@ -279,9 +283,11 @@ private struct ActionRow: View {
         .fieldGround(radius: Token.radius)
         .toolbar { if focus == .note { keyboardDone } }
         .accessibilityLabel(PhoneWords.noteLabel(agent, cant: mine.cant))
+        .lineEdge("note/\(action.key)")
       Text(held ? PhoneWords.markWaits(cant: mine.cant, computer: session.computer.name) : PhoneWords.markInDraft(cant: mine.cant, seen: state == .seen, at: TimeWords().clock(mine.at)))
         .font(.footnote)
         .foregroundStyle(Token.mutedForeground)
+        .lineEdge("draft/\(action.key)")
     }
     .padding(.leading, 54)
     .padding(.trailing, 16)
@@ -299,16 +305,16 @@ private struct ActionRow: View {
     let facts = action.action
     return VStack(alignment: .leading, spacing: 10) {
       if let why = action.context, !why.isEmpty {
-        Text(MessageBody.attributed(why)).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+        Text(MessageBody.attributed(why)).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("why/\(action.key)")
       }
       if live, let stopped = action.stopped {
-        run(Text(PhoneWords.stopped).fontWeight(.semibold), Text(stopped.isEmpty ? "" : " \(stopped)")).font(.subheadline).foregroundStyle(Token.foreground)
+        run(Text(PhoneWords.stopped).fontWeight(.semibold), Text(stopped.isEmpty ? "" : " \(stopped)")).font(.subheadline).foregroundStyle(Token.foreground).lineEdge("stopped/\(action.key)")
       }
       if live, !action.holdsUp.isEmpty {
-        Text(PhoneWords.holdsUpWhat(action.holdsUp)).font(.subheadline).foregroundStyle(Token.foreground)
+        Text(PhoneWords.holdsUpWhat(action.holdsUp)).font(.subheadline).foregroundStyle(Token.foreground).lineEdge("holds/\(action.key)")
       }
       if live, let place = facts?.whereValue, !place.isEmpty, facts?.whereUrl == nil {
-        Label(place, systemImage: "folder").font(.subheadline).foregroundStyle(Token.mutedForeground)
+        Label(place, systemImage: "folder").font(.subheadline).foregroundStyle(Token.mutedForeground).lineEdge("where/\(action.key)")
       }
       if live, let link = facts?.whereUrl.flatMap(URL.init(string:)) {
         Link(destination: link) {
@@ -322,6 +328,7 @@ private struct ActionRow: View {
           .frame(minHeight: 44)
           .background(Token.muted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .lineEdge("link/\(action.key)")
       }
       if live, let run = facts?.run, !run.isEmpty {
         VStack(alignment: .leading, spacing: 0) {
@@ -341,12 +348,13 @@ private struct ActionRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+        .lineEdge("command/\(action.key)")
       }
       if let settled {
-        Text(settled).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+        Text(settled).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("settled/\(action.key)")
       }
       if live, !readOnly {
-        if composing { compose } else { answers }
+        if composing { compose } else { answers.lineEdge("answers/\(action.key)") }
       }
     }
     .padding(.leading, 54)
@@ -390,7 +398,7 @@ private struct ActionRow: View {
 
   private var compose: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(PhoneWords.whyCant(agent)).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+      Text(PhoneWords.whyCant(agent)).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("whyCant/\(action.key)")
       TextField("", text: $reason, axis: .vertical)
         .lineLimit(2...6)
         .font(.body)
@@ -400,6 +408,7 @@ private struct ActionRow: View {
         .frame(minHeight: 44)
         .fieldGround(radius: Token.radius)
         .accessibilityLabel(PhoneWords.whyCant(agent))
+        .lineEdge("reason/\(action.key)")
       HStack(spacing: 6) {
         let empty = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         Button {
@@ -424,6 +433,7 @@ private struct ActionRow: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(ChoiceStyle())
+      .lineEdge("reasonButtons/\(action.key)")
     }
     .cardPart()
   }

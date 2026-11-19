@@ -55,7 +55,7 @@ struct QuestionCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      header
+      header.lineEdge("head")
       if let refusal = session.refusal(message: message, key: question.key) {
         // A pick the computer did not take, in the app's own words, where the person reads first; it stays until
         // they act on this question. A clash with another device's answer never comes here: it settles quietly.
@@ -64,19 +64,21 @@ struct QuestionCard: View {
           .font(.footnote)
           .foregroundStyle(calm ? Token.mutedForeground : Token.destructive)
           .fixedSize(horizontal: false, vertical: true)
+          .lineEdge("refusal")
       }
       Text(question.prompt)
         .font(.title3.weight(.semibold))
         .foregroundStyle(Token.foreground)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityAddTraits(.isHeader)
+        .lineEdge("prompt")
       ForEach([question.context, question.stakes].compactMap { $0 }.filter { !$0.isEmpty }, id: \.self) { line in
-        Text(line).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+        Text(line).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("context/\(line)")
       }
       if !known {
         Label(PhoneWords.answerOnComputer, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(Token.mutedForeground)
       } else if !live {
-        settledAnswer
+        settledAnswer.lineEdge("settled")
       } else if question.kind == .text {
         textAnswer
       } else {
@@ -161,6 +163,7 @@ struct QuestionCard: View {
         ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
           apply(CardAnswers.tap(question, label: choice.label))
         }
+        .lineEdge("choice/\(index)")
       }
       if let suggestion = CardAnswers.suggestion(of: question) {
         // The agent's own answer that is none of its choices: a row of its own, as in the window.
@@ -174,14 +177,17 @@ struct QuestionCard: View {
           apply(CardAnswers.tapSuggestion(question, replaced: draft.replacedOther))
           if picked { draft.replacedOther = nil }
         }
+        .lineEdge("suggestion")
       }
       Divider().overlay(Token.border)
       ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: !(answer?.other ?? "").isEmpty && !CardAnswers.suggestionPicked(question), enabled: enabled, value: CardAnswers.suggestionPicked(question) ? nil : answer?.other) {
         draft.otherOpen = true
         focus = .other
       }
+      .lineEdge("other")
       if draft.otherOpen {
         field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
+          .lineEdge("otherField")
           .padding(.leading, 40)
           .padding(.bottom, 4)
       }
@@ -192,9 +198,9 @@ struct QuestionCard: View {
     VStack(alignment: .leading, spacing: 8) {
       // The agent's suggestion is said as one, never drawn as if it were already typed.
       if let suggested = question.suggestedText, !suggested.isEmpty {
-        Text("\(PhoneWords.recommended): \(suggested)").font(.subheadline).foregroundStyle(Token.mutedForeground)
+        Text("\(PhoneWords.recommended): \(suggested)").font(.subheadline).foregroundStyle(Token.mutedForeground).lineEdge("suggested")
       }
-      field(PhoneWords.answerHint, text: Bindable(draft).text, focus: .text)
+      field(PhoneWords.answerHint, text: Bindable(draft).text, focus: .text).lineEdge("textField")
     }
   }
 
@@ -245,7 +251,7 @@ struct QuestionCard: View {
     VStack(alignment: .leading, spacing: 6) {
       if draft.noteOpen {
         Text(PhoneWords.note).font(.footnote.weight(.semibold)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
-        field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note)
+        field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note).lineEdge("noteField")
       }
       if live {
         ViewThatFits(in: .horizontal) {
@@ -256,6 +262,7 @@ struct QuestionCard: View {
         .buttonStyle(.borderless)
         .frame(minHeight: 44)
         .disabled(!enabled)
+        .lineEdge("footer")
       }
     }
   }
@@ -298,7 +305,7 @@ struct QuestionCard: View {
       }
     }()
     if let line {
-      Text(line).font(.footnote).foregroundStyle(Token.mutedForeground)
+      Text(line).font(.footnote).foregroundStyle(Token.mutedForeground).lineEdge("status")
     }
   }
 }

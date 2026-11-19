@@ -76,9 +76,10 @@ struct PermissionCard: View {
       .padding(.horizontal, 16)
       .frame(minHeight: 44)
       .accessibilityElement(children: .combine)
+      .lineEdge("head")
       Divider().overlay(Token.border)
       VStack(alignment: .leading, spacing: 10) {
-        Text(Self.ticks(title)).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+        Text(Self.ticks(title)).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader).lineEdge("title")
         PermissionRequest(read: read, kind: PermissionPrompt.kind(question.prompt))
       }
       .padding(16)
@@ -145,6 +146,7 @@ struct PermissionCard: View {
         .frame(minHeight: 64, alignment: .top)
         .fieldGround(radius: 14)
         .accessibilityLabel(PhoneWords.whyYouDeny(shortAgent))
+        .lineEdge("reason")
       HStack(spacing: 8) {
         let empty = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         AnswerButton(words: PhoneWords.cancel, style: .ghost, hugs: true) {
@@ -156,6 +158,7 @@ struct PermissionCard: View {
         }
         .disabled(empty)
       }
+      .lineEdge("reasonButtons")
     }
     .cardPart()
   }
@@ -365,11 +368,11 @@ struct PermissionRequest: View {
           if read.unsandboxed {
             Label(PhoneWords.outsideSandbox, systemImage: "exclamationmark.triangle").font(.subheadline.weight(.semibold)).foregroundStyle(Token.destructive)
           }
-          CodeBlock(code: detail.onLine && kind == .file ? PermissionPrompt.relative(detail.text, to: read.folder) : detail.text, copies: false)
+          CodeBlock(code: detail.onLine && kind == .file ? PermissionPrompt.relative(detail.text, to: read.folder) : detail.text, copies: false).lineEdge("code")
           linksTo
           if kind == .bash {
             if let purpose = read.purpose {
-              Text((purpose.hasSuffix(".") ? String(purpose.dropLast()) : purpose) + ".").font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+              Text((purpose.hasSuffix(".") ? String(purpose.dropLast()) : purpose) + ".").font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("purpose")
             }
             if let folder = read.folder {
               // On its own line, so the path is never split after "~/"; a path longer than the line cuts in its middle.
@@ -377,6 +380,7 @@ struct PermissionRequest: View {
                 Text(PhoneWords.runsIn).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize()
                 Text(folder).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.middle)
               }
+              .lineEdge("folder")
             }
           }
         }
