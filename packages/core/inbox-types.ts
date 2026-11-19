@@ -1964,6 +1964,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * agent activity by it. Absent from an older Inbox.
    */
   last_agent_at?: string | null;
+  /**
+   * Who wrote the latest agent message, when more than one agent is in the thread (`participants`): the window's
+   * held line names the agent that wrote ("Codex replied in …"). Absent with one agent (that is the row's own agent)
+   * and from an older Inbox.
+   */
+  last_agent?: { host: string | null; name?: string | null };
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
   /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */

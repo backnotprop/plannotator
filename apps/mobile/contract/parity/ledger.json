@@ -7531,7 +7531,7 @@
     },
     {
       "id": "files-027",
-      "title": "Changed chip: \"Changed since sent · Open the version it sent\" / \"Showing the sent version\" / \"The file is gone; showing the sent copy\"",
+      "title": "Changed chip: \"Changed since sent · View sent version\" / \"Showing the sent version · View current file\" / \"The file is gone; showing the sent copy\"",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -19860,6 +19860,20 @@
       "title": "field:InboxMessageWire.launch_note",
       "surface": [
         "field:InboxMessageWire.launch_note"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxlistrow-last-agent",
+      "title": "field:InboxListRow.last_agent",
+      "surface": [
+        "field:InboxListRow.last_agent"
       ],
       "flows": [],
       "mobile": "undecided",
