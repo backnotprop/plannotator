@@ -3,7 +3,7 @@
  * they dragged. Pure: it returns what to ask for, and the caller sends the
  * `add-snapshot` command, which takes the capture.
  */
-import { isBoundEnd, objectBounds } from '../model/document';
+import { isBoundEnd, objectBounds, outermostGroup } from '../model/document';
 import { type Rect, rectContainsRect } from '../model/geometry';
 import { createId } from '../model/ids';
 import type { CanvasDocument, CanvasObject, FrameObject, ObjectId, SnapshotInput } from '../model/types';
@@ -42,21 +42,38 @@ function frameAround(doc: CanvasDocument, ids: readonly ObjectId[]): FrameObject
 
 /**
  * The name a new snapshot starts with. In order:
- * 1. a frame chosen by itself, or the one frame among what was chosen: its title;
- * 2. everything chosen sits inside one frame: that frame's title;
- * 3. one object chosen: its own words;
- * 4. otherwise no name. The figure then shows only how many items it holds,
- *    and the person names it in place if they want to.
- * Never the words of whichever object happens to come first.
+ * 1. one object chosen: its own words;
+ * 2. one frame among what was chosen, or everything chosen inside one
+ *    frame: that frame's title;
+ * 3. everything chosen in one group that has a label: the label;
+ * 4. a dragged region: the smallest frame that holds the region, else the
+ *    one frame wholly inside it;
+ * 5. otherwise no name. The figure then shows how many items it holds, and
+ *    the person names it in place (or the plan block's `title:` does).
+ * Never the words of whichever object happens to come first: a wrong name
+ * is worse than none.
  */
-export function defaultSnapshotTitle(doc: CanvasDocument, ids: readonly ObjectId[]): string {
+export function defaultSnapshotTitle(doc: CanvasDocument, ids: readonly ObjectId[], region?: Rect): string {
   const objects = ids.map((id) => doc.objects[id]).filter((object): object is CanvasObject => !!object && object.type !== 'arrow' && object.type !== 'group');
-  const frames = objects.filter((object) => object.type === 'frame');
-  if (frames.length === 1) return short(wordsOf(frames[0]));
-  const around = frames.length === 0 ? frameAround(doc, objects.map((object) => object.id)) : null;
-  if (around?.title) return short(around.title);
-  if (objects.length === 1) return short(wordsOf(objects[0]));
-  return '';
+  if (objects.length === 1 && !region) return short(wordsOf(objects[0]));
+  const frames = objects.filter((object): object is FrameObject => object.type === 'frame');
+  if (!region) {
+    if (frames.length === 1) return short(frames[0].title);
+    const around = frames.length === 0 ? frameAround(doc, objects.map((object) => object.id)) : null;
+    if (around?.title) return short(around.title);
+    const groups = new Set(objects.map((object) => (object.group ? outermostGroup(doc, object.id) : '')));
+    const group = groups.size === 1 ? doc.objects[[...groups][0]] : undefined;
+    if (group?.type === 'group' && group.label) return short(group.label);
+    return '';
+  }
+  let holding: FrameObject | null = null;
+  for (const object of Object.values(doc.objects)) {
+    if (object.type !== 'frame' || !rectContainsRect(object, region)) continue;
+    if (!holding || object.w * object.h < holding.w * holding.h) holding = object;
+  }
+  if (holding?.title) return short(holding.title);
+  const inside = frames.filter((frame) => rectContainsRect(region, frame));
+  return inside.length === 1 ? short(inside[0].title) : '';
 }
 
 /**
@@ -87,7 +104,7 @@ export function snapshotFromRegion(doc: CanvasDocument, index: DocumentIndex, ar
   const inside = objectsInRect(doc, index, area);
   return {
     id: createId('snap'),
-    title: title ?? defaultSnapshotTitle(doc, inside),
+    title: title ?? defaultSnapshotTitle(doc, inside, area),
     source: { kind: 'region', rect: { x: Math.round(area.x), y: Math.round(area.y), w: Math.round(area.w), h: Math.round(area.h) } },
   };
 }

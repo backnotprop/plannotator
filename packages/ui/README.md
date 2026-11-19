@@ -629,9 +629,9 @@ The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.m
 
 The one additive data-model change that rides with it: `Annotation.inReplyTo` (threaded replies; the panel indents them under the parent, the export nests them, share links drop them).
 
-### Host-drawn directive blocks (`components/blocks/directiveRenderer`; next ui)
+### Host-drawn directive blocks (`components/blocks/directiveRenderer`; unreleased, after ui 0.63.0)
 
-`configurePlannotatorUI({ directiveRenderer })` lets a host draw a `:::kind` directive container it owns. The renderer is asked for every directive block that is not a question and returns a node, or `undefined` to keep the callout. The node is drawn inside the block's own element (`data-block-id`, `data-block-type="directive"`, `data-directive-kind`, the source-line label), so the block stays one annotatable block. Default: none, and nothing changes. The first user is `@plannotator/canvas` (`:::canvas-snapshot`), from its demo only.
+`configurePlannotatorUI({ directiveRenderer })` lets a host draw a `:::kind` directive container it owns. The renderer is asked for every directive block that is not a question and returns a node, or `undefined` to keep the callout. The node is drawn inside the block's own element (`data-block-id`, `data-block-type="directive"`, `data-directive-kind`, the source-line label), so the block stays one annotatable block. The renderer returns an element and must not call hooks itself; if it throws, or its element throws while rendering, the block falls back to the callout. Default: none, and nothing changes. The first user is `@plannotator/canvas` (`:::canvas-snapshot`), from its demo only.
 
 ### Questions in documents (`:::question`; 0.48.0, core 0.25.8)
 

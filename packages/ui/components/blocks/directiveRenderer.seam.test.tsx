@@ -93,6 +93,46 @@ describe('DirectiveRenderer seam', () => {
     expect(host.textContent).toContain('Which one?');
   });
 
+  test.skipIf(!hasDom)('a question that cannot be parsed is the callout it always was, and is still not offered', async () => {
+    const seen: string[] = [];
+    setDirectiveRenderer((block) => {
+      seen.push(block.directiveKind ?? '');
+      return <span data-host-widget="" />;
+    });
+    // No prompt: not a question the parser can read.
+    const host = await render(':::question\n:::');
+    expect(seen).toEqual([]);
+    expect(host.querySelector('[data-host-widget]')).toBeNull();
+    expect(host.querySelector('[data-directive-kind="question"]')?.classList.contains('directive-question')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a renderer that throws, or whose node throws while rendering, leaves the callout and the rest of the document', async () => {
+    const quiet = console.error;
+    console.error = () => {};
+    try {
+      setDirectiveRenderer(() => {
+        throw new Error('host renderer broke');
+      });
+      let host = await render(`Before.\n\n${WIDGET}\n\nAfter.`);
+      expect(host.querySelector('.directive-widget')).not.toBeNull();
+      expect(host.textContent).toContain('After.');
+      act(() => root!.unmount());
+      root = null;
+      document.body.innerHTML = '';
+
+      const Broken = (): React.ReactElement => {
+        throw new Error('host node broke');
+      };
+      setDirectiveRenderer(() => <Broken />);
+      host = await render(`Before.\n\n${WIDGET}\n\nAfter.`);
+      expect(host.querySelector('.directive-widget')?.textContent).toContain('name: gauge');
+      expect(host.textContent).toContain('Before.');
+      expect(host.textContent).toContain('After.');
+    } finally {
+      console.error = quiet;
+    }
+  });
+
   test.skipIf(!hasDom)('configurePlannotatorUI({ directiveRenderer }) installs it', async () => {
     configurePlannotatorUI({ directiveRenderer: () => <span data-host-widget="" /> });
     const host = await render(WIDGET);

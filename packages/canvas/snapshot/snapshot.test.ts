@@ -232,28 +232,35 @@ describe('making a snapshot from what a person chose', () => {
     expect(store.dispatch({ type: 'add-snapshot', snapshot: input }).ok).toBe(true);
   });
 
-  test('its name comes from the frame, never from whichever object is first', () => {
+  test('its name follows one rule, and is never the words of whichever object is first', () => {
     const store = board();
+    store.dispatch({ type: 'add', objects: [{ id: 'far', type: 'box', x: 3000, y: 2000, w: 100, h: 40, text: 'Far' }] });
+    store.dispatch({ type: 'group', id: 'pair', ids: ['elsewhere', 'far'], label: 'Outliers' });
     const doc = store.getDocument();
-    // Several objects inside one frame: the frame's title.
-    expect(snapshotFromSelection(doc, ['a', 'b', 'c'])!.title).toBe('Architecture');
-    // One frame alone, or with its contents: the frame's title.
+    // One object: its own words, even inside a frame.
+    expect(snapshotFromSelection(doc, ['elsewhere'])!.title).toBe('Elsewhere');
+    expect(snapshotFromSelection(doc, ['c'])!.title).toBe('Why?');
+    // One frame alone or with its contents, or several objects inside one frame: the frame's title.
     expect(snapshotFromSelection(doc, ['frame'])).toMatchObject({ title: 'Architecture', source: { kind: 'frame', frame: 'frame' } });
     expect(snapshotFromSelection(doc, ['frame', 'a', 'b'])!.title).toBe('Architecture');
-    // One object outside any frame: its own words.
-    expect(snapshotFromSelection(doc, ['elsewhere'])!.title).toBe('Elsewhere');
-    // Several objects with no frame around them all: no name.
+    expect(snapshotFromSelection(doc, ['a', 'b', 'c'])!.title).toBe('Architecture');
+    // Everything in one labelled group: the label.
+    expect(snapshotFromSelection(doc, ['elsewhere', 'far'])!.title).toBe('Outliers');
+    // Otherwise none.
     expect(snapshotFromSelection(doc, ['a', 'elsewhere'])!.title).toBe('');
     expect(defaultSnapshotTitle(doc, ['a', 'elsewhere'])).toBe('');
     expect(snapshotFromSelection(doc, [])).toBeNull();
     expect(snapshotFromSelection(doc, ['ghost'])).toBeNull();
   });
 
-  test('a dragged region is the rectangle, rounded, named by the same rule', () => {
+  test('a dragged region is the rectangle, rounded, named after the frame around it or the one frame inside it', () => {
     const store = board();
-    const input = snapshotFromRegion(store.getDocument(), indexFor(store), { x: 20.4, y: 20.2, w: 200, h: 260 });
-    expect(input.source).toEqual({ kind: 'region', rect: { x: 20, y: 20, w: 200, h: 260 } });
-    expect(input.title).toBe('Architecture');
+    const index = indexFor(store);
+    const inside = snapshotFromRegion(store.getDocument(), index, { x: 20.4, y: 20.2, w: 200, h: 260 });
+    expect(inside.source).toEqual({ kind: 'region', rect: { x: 20, y: 20, w: 200, h: 260 } });
+    expect(inside.title).toBe('Architecture');
+    expect(snapshotFromRegion(store.getDocument(), index, { x: -50, y: -50, w: 800, h: 500 }).title).toBe('Architecture');
+    expect(snapshotFromRegion(store.getDocument(), index, { x: 300, y: 20, w: 1900, h: 2100 }).title).toBe('');
   });
 });
 

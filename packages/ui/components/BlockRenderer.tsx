@@ -10,7 +10,7 @@ import { BlockquoteBlock } from "./blocks/BlockquoteBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
 import { QuestionBlock, type QuestionBlockProps } from "./blocks/QuestionBlock";
-import { renderHostDirective } from "./blocks/directiveRenderer";
+import { HostDirectiveBoundary, renderHostDirective } from "./blocks/directiveRenderer";
 import { sourceLineAttrs } from "../utils/sourceLineAttrs";
 import {
   indexQuestionBlocks,
@@ -245,18 +245,8 @@ const BlockRendererBody: React.FC<{
             />
           );
         }
-      } else {
-        // A host that owns this kind draws it (`directiveRenderer` seam).
-        const hosted = renderHostDirective(block);
-        if (hosted !== null) {
-          return (
-            <div data-block-id={block.id} data-block-type="directive" data-directive-kind={kind} {...sourceLineAttrs(block)}>
-              {hosted}
-            </div>
-          );
-        }
       }
-      return (
+      const callout = (
         <Callout
           blockId={block.id}
           sourceBlock={block}
@@ -273,6 +263,17 @@ const BlockRendererBody: React.FC<{
           repoHost={repoHost}
           onNavigateAnchor={onNavigateAnchor}
         />
+      );
+      // A host that owns this kind draws it (`directiveRenderer` seam). Questions are never offered, not even
+      // one that could not be parsed. If the host's node throws, the block is the callout it would have been.
+      const hosted = isQuestionDirectiveKind(kind) ? null : renderHostDirective(block);
+      if (hosted === null) return callout;
+      return (
+        <HostDirectiveBoundary fallback={callout}>
+          <div data-block-id={block.id} data-block-type="directive" data-directive-kind={kind} {...sourceLineAttrs(block)}>
+            {hosted}
+          </div>
+        </HostDirectiveBoundary>
       );
     }
 
