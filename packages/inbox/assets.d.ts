@@ -25,3 +25,9 @@ declare module '*?worker&inline' {
   const WorkerFactory: new () => Worker;
   export default WorkerFactory;
 }
+
+/** A stylesheet as text (Vite's `?inline`): the canvas's, put in the page when its lazy chunk mounts (canvas/CanvasBoard.tsx). */
+declare module '*.css?inline' {
+  const css: string;
+  export default css;
+}

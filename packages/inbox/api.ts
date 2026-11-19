@@ -1469,6 +1469,8 @@ export const inboxApi = {
       annotation_ids?: string[];
       /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
       viewing?: ReplyViewing;
+      /** Sent from the thread's canvas (canvas/canvasApi.ts): the Inbox writes what the agent reads of the drawing. */
+      sketch?: { kind: 'sketch' | 'selection'; elements: string[]; pictures: Record<string, string> };
       /** Another live session takes the reply, or a new one starts for it (`launch`): the session that asked has ended. */
       to?: { host?: string; session: string } | { launch: { agent: string; project_id: string; model?: string; effort?: string } };
       /**

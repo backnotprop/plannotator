@@ -22,6 +22,7 @@ export const INBOX_TOOL_ACTIONS = [
   'resolve_message',
   'snooze_thread',
   'thread_pulls',
+  'canvas',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -509,6 +510,7 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
   search: 'Find messages by words, older ones too (read-only).',
   get_guide_brief: "How to write a guided review, with a worked submit_guide call.",
+  canvas: "Read or change a thread's canvas, the drawing the person sketches on.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
   steps: INBOX_STEPS_ACTION_LINE,
 }

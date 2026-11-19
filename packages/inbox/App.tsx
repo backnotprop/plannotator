@@ -283,6 +283,7 @@ import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/Thre
 import { setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
+import { onCanvasFrame, onCanvasJob } from './canvas/canvasApi';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
 import { useInboxShapes } from './shape/useInboxShapes';
@@ -1768,6 +1769,7 @@ function Inbox() {
         // "Over your tailnet" published by itself once Tailscale came back: Settings' row shows the address at once.
         onTailscale: (tailscale) => setSettings((current) => (current ? { ...current, tailscale } : current)),
         // Shape's boards changed (only sent while Shape is on).
+        onCanvas: (name, data) => (name === 'canvas' ? onCanvasFrame(data) : onCanvasJob(data)),
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
         },

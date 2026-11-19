@@ -256,7 +256,8 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   }
   if (!answer) return refused("inbox_no_answer", "Plannotator Inbox gave no answer.");
   if (answer.error) return refused("inbox_error", answer.error.message ?? "The Inbox refused the call.");
-  return printResult(answer.result as CallResult | undefined, out, err, deps.text === true);
+  // A canvas answer is its text (the reading, one line per thing); its structured part only repeats the rev.
+  return printResult(answer.result as CallResult | undefined, out, err, deps.text === true || parsed.action === "canvas");
 }
 
 type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };

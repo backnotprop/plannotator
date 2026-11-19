@@ -216,6 +216,7 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
+import { createInboxCanvas } from "./inbox-canvas";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
 import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
@@ -4230,6 +4231,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again. Windows only (additive; a window that predates it skips the frame).
         const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
         if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
+        // A thread's canvas changed, or the server asks a window to draw (inbox-canvas.ts). Windows only.
+        const stopCanvas = windowId ? canvas.listen((event, data) => send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) : null;
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -4312,6 +4315,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
+          stopCanvas?.();
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
           stopShowArchived();
@@ -5455,6 +5459,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * A thread's PRs in the window (approval "inbox-pr-binding", inbox-thread-pulls.ts): the read, and the person's
    * add and remove from the popover.
    */
+  const canvas = createInboxCanvas({
+    store,
+    serverSession,
+    json,
+    readBody,
+    sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
+  });
+  mcpContext.canvas = canvas;
   const threadPullsRoute = createThreadPullsRoute({
     store,
     states: threadPullStates,
@@ -7812,6 +7824,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 feedback: typeof body.feedback === "string" ? body.feedback : undefined,
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
+                // Sent from the thread's canvas: what they drew or picked, read from the stored scene (inbox-canvas.ts).
+                ...(body.sketch ? (() => { const thread = store.message(messageId)?.thread_id; const sketch = thread ? canvas.replySketch(thread, body.sketch) : undefined; return sketch ? { sketch } : {}; })() : {}),
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
                 ...(body.review_verdict !== undefined && body.review_verdict !== null
                   ? codeReviewOn()
@@ -7948,6 +7962,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (steps) return steps;
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
       // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
+      // A thread's canvas (prototype, inbox-canvas.ts): the window's read and save, and its answers to the server's drawing jobs.
+      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture)?$/.test(path) || path.startsWith("/api/inbox/canvas/jobs/")) {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const canvasAnswer = await canvas.route(req, path);
+        if (canvasAnswer) return canvasAnswer;
+      }
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);

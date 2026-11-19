@@ -1,3 +1,4 @@
+import type { CanvasReplySketch } from '../canvas/canvasApi';
 import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
@@ -211,7 +212,7 @@ import { MessageBody } from '../parts/MessageBody/MessageBody';
 export { AckPill, MessageBody };
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, board = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, board = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onReplyPartOutcome, sketchButton = null, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -477,6 +478,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   }, []);
   /** A board's Add to reply whose Undo is live (one at a time): `closing` as the box closes into a draft, `end` when it can no longer. */
   const partUndo = useRef<{ end: () => void; closing: () => void } | null>(null);
+  /** A reply part from the thread's canvas: what rides the Send that carries its files, and its own Send. */
+  const canvasSketch = useRef<{ sketch: CanvasReplySketch; keys: string[] } | null>(null);
+  const canvasSend = useRef<{ keys: string[] } | null>(null);
+  const [canvasSendTick, setCanvasSendTick] = useState(0);
   /** `discarded`: Discard closed it, so a file still uploading stops instead of joining the draft. */
   const closeBox = (discarded = false) => {
     // A board's Add to reply still undoable: it reads the box as it goes into the draft (its Undo works on that).
@@ -3321,6 +3326,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
           ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
+          // Sent from the thread's canvas, while one of its files is still in the box: what the agent reads of the canvas.
+          ...(last && canvasSketch.current && replyFiles.current().some((f) => canvasSketch.current!.keys.includes(f.key)) ? { sketch: canvasSketch.current.sketch } : {}),
           // The pasted files ride the reply that carries the words, as attachments.
           ...(files.length > 0 ? { uploads: files } : {}),
           // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
@@ -3362,6 +3369,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         setComposerSentAt(Date.now());
         announce(`Sent to ${replyToNames}.`);
       }
+      canvasSketch.current = null;
       finishSent(sentUploads, sendClears, sendThread);
       if (handedReply) {
         const reply = handedReply;
@@ -4371,6 +4379,22 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : undefined,
     [onSideWords, replyText],
   );
+  // The canvas's Send (canvas/CanvasBoard.tsx): once its files are in, the reply goes as if the person pressed Send.
+  // A reply that cannot go by itself (a file refused, a choice to make at Send) stays in the box, and the canvas gives way to it.
+  useEffect(() => {
+    const want = canvasSend.current;
+    if (!want || sending) return;
+    const mine = replyFiles.files.filter((f) => want.keys.includes(f.key));
+    if (mine.length < want.keys.length || mine.some((f) => f.state === 'uploading')) return;
+    canvasSend.current = null;
+    if (mine.some((f) => f.state === 'refused')) {
+      onReplyPartOutcome?.('held');
+      return;
+    }
+    void send().then(() => onReplyPartOutcome?.(replyFiles.current().some((f) => want.keys.includes(f.key)) ? 'held' : 'sent'));
+    // send reads this render's box.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyFiles.files, sending, canvasSendTick]);
   useEffect(() => {
     if (!replyPart || sending) return;
     onReplyPartTaken?.();
@@ -4385,6 +4409,24 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const taken = [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)];
     const file = replyPart.file ? withFreeName(replyPart.file, taken) : null;
     const keys = file ? replyFiles.add([file]) : [];
+    // From the thread's canvas: its pictures and scene file, what the agent reads of it, and Send pressed for the person.
+    const renamed = new Map<string, string>();
+    const canvasFiles = (replyPart.files ?? []).map((given) => {
+      const free = withFreeName(given, taken);
+      taken.push(free.name);
+      renamed.set(given.name, free.name);
+      return free;
+    });
+    const canvasKeys = canvasFiles.length > 0 ? replyFiles.add(canvasFiles) : [];
+    keys.push(...canvasKeys);
+    if (replyPart.sketch) {
+      const pictures = Object.fromEntries(Object.entries(replyPart.sketch.pictures).map(([thing, name]) => [thing, renamed.get(name) ?? name]));
+      canvasSketch.current = { sketch: { ...replyPart.sketch, pictures }, keys: canvasKeys };
+    }
+    if (replyPart.send) {
+      canvasSend.current = { keys: canvasKeys };
+      setCanvasSendTick((n) => n + 1);
+    }
     setError(null);
     partUndo.current?.end();
     let live = true;
@@ -4424,7 +4466,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       replyDraft.save(text, files);
       replyDraft.flush();
     };
-    onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
+    if (!replyPart.send) onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
     // openBox and changeReply read this render's draft and Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyPart, sending]);
@@ -5703,6 +5745,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     </button>
                   </Tip>
                 }
+                sketch={sketchButton}
                 mic={<VoiceMicButton voice={voice} phone={phone} />}
                 status={<VoiceStatusLine voice={voice} phone={phone} />}
                 files={

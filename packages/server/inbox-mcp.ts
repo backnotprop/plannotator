@@ -62,7 +62,7 @@ import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type Bra
 import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "canvas", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -341,6 +341,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * the states as stored, and nothing is read.
    */
   pulls?: InboxPullsMcpLive;
+  /** A thread's canvas (packages/server/inbox-canvas.ts). Absent: no `canvas` tool. */
+  canvas?: { register(server: McpServer): void };
   /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
   /**
@@ -1542,6 +1544,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
 
   // A thread's PRs (approval "inbox-pr-binding"): packages/server/inbox-mcp-pulls.ts. Always served.
   registerInboxThreadPullsTool(server, context);
+
+  // A thread's canvas (prototype): packages/server/inbox-canvas.ts.
+  context.canvas?.register(server);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

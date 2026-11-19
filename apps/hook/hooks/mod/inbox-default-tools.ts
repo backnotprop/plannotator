@@ -297,6 +297,78 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
     }
   },
   {
+    "name": "canvas",
+    "description": "A thread's canvas: a shared Excalidraw drawing the person sketches on, which you read and change. With only thread_id it answers the canvas as text, one line per thing, and its rev.\n\"picture\": true also writes a PNG of it and gives the path; \"picture\": \"<thing>\" (or a list) is that part only. \"in\": \"<frame>\" reads one frame.\n\"do\": [...] changes it, all or nothing; send \"base\": the rev of your last answer. Name a thing by the id at the start of its line, or by its words. Each change has one verb:\n{\"add\": \"box\", \"text\": \"...\", \"rightOf\": \"<thing>\"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is the diagram source). Place: near, rightOf, leftOf, above, below, in (a frame), or \"at\": [x, y]. Optional \"color\".\n{\"connect\": \"<thing>\", \"to\": \"<thing>\", \"label\": \"...\"}   {\"set\": \"<thing>\", \"text\": \"...\", \"color\": \"...\"}\n{\"move\": \"<thing>\", \"below\": \"<thing>\"}   {\"remove\": \"<thing>\"}   {\"frame\": [\"<thing>\", ...], \"title\": \"...\"}\n{\"replace\": \"<thing>\", \"with\": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.\nIf someone changed the same thing since your base, you are told what they did and nothing changes. The person sees your change on the canvas at once; nothing is sent to them.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "thread_id": {
+          "type": "string",
+          "description": "Thread or message id."
+        },
+        "in": {
+          "description": "Read only this frame (its id or title).",
+          "type": "string"
+        },
+        "after": {
+          "description": "Continue a long reading after this thing id (a cut reading ends with the exact call).",
+          "type": "string"
+        },
+        "picture": {
+          "description": "true: a PNG of the whole canvas. A thing or a list of things: a PNG of that part. The answer gives the file path.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "base": {
+          "description": "With \"do\": the rev your last answer about this canvas gave.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "do": {
+          "description": "Changes to the canvas, all or nothing; send \"base\" (the rev of your last answer) with them. Name a thing by the id at the start of its line, or by its words. One verb per change:\n{\"add\": \"box\", \"text\": \"...\", \"rightOf\": \"<thing>\"}  add: box, ellipse, diamond, note, text, frame, mermaid (text is the diagram source). Place: near, rightOf, leftOf, above, below, in (a frame), or \"at\": [x, y]. Optional \"color\".\n{\"connect\": \"<thing>\", \"to\": \"<thing>\", \"label\": \"...\"}   {\"set\": \"<thing>\", \"text\": \"...\", \"color\": \"...\"}\n{\"move\": \"<thing>\", \"below\": \"<thing>\"}   {\"remove\": \"<thing>\"}   {\"frame\": [\"<thing>\", ...], \"title\": \"...\"}\n{\"replace\": \"<thing>\", \"with\": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.\nIf someone changed the same thing since your base, you are told what they did and nothing changes.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "project_path": {
+          "type": "string"
+        },
+        "agent_session": {
+          "type": "string"
+        },
+        "agent_name": {
+          "type": "string"
+        },
+        "agent_host": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "submit_guide",
     "description": "Send the person a guided review of a code change. It lands in the Plannotator Inbox as a message with a \"Guided review\" card that opens in Plannotator's guide viewer. Pass `guide` (the shape get_guide_brief gives) and `patch` (the exact unified diff it describes), or `snapshot` (a complete Plannotator guide snapshot). Every file a section names must be in the patch, in one section only; a refusal names the file. Files you leave out show under \"Everything else\". `body` is your note above the card (default: the guide's intent). thread, reply_to, supersedes, done and idempotency_key work as in send_message, and the person's answer comes back the same way.\n\nExample: get_guide_brief's `example` is a call that works as it is.",
     "inputSchema": {

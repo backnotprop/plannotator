@@ -18,7 +18,9 @@
       "#guide-reader": ["../../packages/inbox/guide/reader-module.d.ts"],
       "#surface-guide-reader": ["../../packages/inbox/guide/surface-reader-module.d.ts"],
       "#search-palette": ["../../packages/inbox/search/SearchPalette.tsx"],
-      "#platform-post": ["../../packages/inbox/guide/platform-post-module.d.ts"]
+      "#platform-post": ["../../packages/inbox/guide/platform-post-module.d.ts"],
+      "#canvas-board": ["../../packages/inbox/canvas/CanvasBoard.tsx"],
+      "@plannotator/shared/inbox/canvas/*": ["../../packages/shared/inbox/canvas/*"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true

@@ -185,6 +185,20 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "`thread_pulls`: A thread's pull/merge requests. `thread_id`; `add` and `remove`, lists of `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab) or PR URLs (Bitbucket: the URL only). Neither lists them. You own your thread's list: add a PR when you open or take on one for this work (or pass `pulls` on send_message), and remove one when it stops being part of the work; merged ones stay. The person can add and remove too; read_thread shows who did, and your next reply in the thread says what they changed. From a shell: `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`.",
     ],
   },
+  // A thread's canvas (prototype): packages/server/inbox-canvas.ts.
+  canvas: {
+    args: ["thread_id", "in", "after", "picture", "base", "do"],
+    lines: [
+      "`canvas`: A thread's canvas, a shared Excalidraw drawing the person sketches on and you read and change. With only `thread_id` it answers the canvas as text, one line per thing, each opening with an id, and the canvas's `rev`. Every answer opens with what others changed since your last look.",
+      "- `in`: read one frame (its id or title). `after`: continue a long reading (a cut reading ends with the exact call).",
+      "- `picture`: `true` writes a PNG of the whole canvas and gives its path; a thing or a list of things gives that part only. Freehand strokes drawn near each other are one `sketch` thing, so a drawing is one picture.",
+      "- `do` with `base` (the rev of your last answer): changes, all or nothing. Name a thing by the id at the start of its line, or by its words; a name that fits two things is refused with both. One verb per change:",
+      "  - `{\"add\": \"box\", \"text\": \"…\", \"rightOf\": \"<thing>\"}`: `box`, `ellipse`, `diamond`, `note`, `text`, `frame` or `mermaid` (`text` is the diagram source; an open Inbox window draws it as real shapes). Place with `near`, `rightOf`, `leftOf`, `above`, `below`, `in` (a frame) or `\"at\": [x, y]`; optional `color`.",
+      "  - `{\"connect\": \"<thing>\", \"to\": \"<thing>\", \"label\": \"…\"}`, `{\"set\": \"<thing>\", \"text\": \"…\", \"color\": \"…\"}`, `{\"move\": \"<thing>\", \"below\": \"<thing>\"}`, `{\"remove\": \"<thing>\"}`, `{\"frame\": [\"<thing>\", …], \"title\": \"…\"}`.",
+      "  - `{\"replace\": \"<thing>\", \"with\": [add and connect changes]}`: a frame keeps its place and what it holds is replaced; a list of things is replaced where they were.",
+      "- If someone changed a thing you are changing since your `base`, nothing changes and the answer shows what they did. The person sees your change on the canvas at once; nothing is sent to them.",
+    ],
+  },
   get_guide_brief: {
     args: [],
     lines: [

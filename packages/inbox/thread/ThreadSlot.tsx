@@ -1,4 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { inboxAgentName } from '@plannotator/core/inbox-types';
+import { CanvasLayer, SketchButton } from '../canvas/CanvasParts';
+import { useInboxTheme } from '../theme';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -88,7 +91,29 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
   // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
-  const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
+  const shapeNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
+  // The thread's canvas (canvas/CanvasParts.tsx), in the same place: one view at a time. Not on a linked machine's
+  // thread yet (its scene lives in that machine's Inbox).
+  const canvasFor = thread && !machineOf(thread.thread_id) ? thread.thread_id : null;
+  const [canvasOpen, setCanvasOpen] = useState<string | null>(null);
+  const canvasOn = !!canvasFor && canvasOpen === canvasFor && !shapeNode;
+  const { shown: themeShown } = useInboxTheme();
+  const toggleCanvas = () => {
+    if (!canvasFor) return;
+    if (canvasOn) return setCanvasOpen(null);
+    // In the board's and the Artifacts view's place.
+    if (route.shape || route.artifacts) close({ ...route, shape: null, artifacts: false, links: false });
+    setCanvasOpen(canvasFor);
+  };
+  const canvasAgent = thread ? ([...thread.messages].reverse().find((m) => m.author.kind === 'agent')?.author ?? null) : null;
+  const boardNode = canvasOn && canvasFor ? (
+    <CanvasLayer
+      threadId={canvasFor}
+      dark={themeShown === 'dark'}
+      agent={canvasAgent ? inboxAgentName(canvasAgent) : null}
+      onSend={(reply) => host.setShapeReply({ words: reply.words, file: null, files: reply.files, sketch: reply.sketch, send: true, threadId: canvasFor })}
+    />
+  ) : shapeNode;
   return (
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
@@ -204,13 +229,22 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           draftSignal={host.draftSignals.of(thread.thread_id)}
           filesSignal={host.filesSignals.of(thread.thread_id)}
           onReplyOpened={() => host.setReplyFor(null)}
+          sketchButton={canvasFor ? <SketchButton where="reply" open={canvasOn} onToggle={toggleCanvas} size={phone ? 20 : 16} /> : null}
+          // The canvas's Send could not go by itself: the reply box, with what it holds, takes the canvas's place.
+          onReplyPartOutcome={(outcome) => outcome === 'held' && setCanvasOpen(null)}
           shapeButton={(() => {
+            const sketch = canvasFor ? <SketchButton where="header" open={canvasOn} onToggle={toggleCanvas} size={17} /> : null;
             const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
-            if (!board) return null;
+            if (!board) return sketch;
             const open = !!route.shape;
             // In the Artifacts view's place (one view at a time); opened by this press, its title takes the focus.
             const show = () => (go({ ...route, shape: board.id, artifacts: false, links: false }), focusBoardTitle(board.id));
-            return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
+            return (
+              <>
+                {sketch}
+                <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : (setCanvasOpen(null), show()))} />
+              </>
+            );
           })()}
           board={boardNode}
           onSide={host.ask.side}
@@ -231,7 +265,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             void host.refreshList(false);
             return true;
           }}
-          onClose={phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
+          onClose={phone && canvasOn ? () => setCanvasOpen(null) : phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
           file={route.file ?? null}
           namedFile={route.ref ?? null}
           onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}

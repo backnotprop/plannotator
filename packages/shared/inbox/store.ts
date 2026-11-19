@@ -64,6 +64,7 @@ import {
   type InboxLaunchClone,
   type InboxLaunchError,
   type InboxLaunchRecord,
+  type InboxReplySketch,
   type InboxReplyViewing,
   type InboxAuthor,
   type InboxDecision,
@@ -375,6 +376,8 @@ export interface InboxReplyInput {
    * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
    */
   viewing?: unknown;
+  /** From the thread's canvas (the server checks and words it: inbox-canvas.ts `replySketch`). */
+  sketch?: InboxReplySketch;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -5169,6 +5172,7 @@ export class InboxStore {
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
       ...(viewing ? { viewing } : {}),
+      ...(input.sketch ? { sketch: input.sketch } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
       ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),

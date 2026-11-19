@@ -80,6 +80,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-tailscale.ts',
   'packages/server/inbox-take-back.ts',
   'packages/server/inbox-thread-pulls.ts',
+  'packages/server/inbox-canvas.ts',
   'packages/server/inbox-thread-tags.ts',
   'packages/server/inbox-tidy.ts',
   'packages/server/inbox-tour.ts',

@@ -1,0 +1,47 @@
+/* A thread's canvas (packages/inbox/canvas/CanvasBoard.tsx). Loaded with the editor's chunk, never with the window. */
+.ibc-root { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--background); border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; overflow: hidden; }
+.ibc-stage { position: relative; flex: 1; min-height: 0; min-width: 0; }
+.ibc-stage > .excalidraw-host { position: absolute; inset: 0; }
+.ibc-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+
+/* The Inbox's own type inside Excalidraw's panels; its canvas keeps the hand-drawn faces. */
+.ibc-root .excalidraw, .excalidraw.excalidraw-modal-container { --ui-font: inherit; font-family: inherit; }
+.ibc-root .excalidraw .welcome-screen-center__heading { font-family: inherit; font-size: 1.05rem; max-width: 26em; line-height: 1.5; }
+
+/* What just changed: a soft wash over each changed thing, gone in a moment. */
+.ibc-flash { position: absolute; pointer-events: none; border-radius: 10px; background: color-mix(in oklab, var(--primary) 22%, transparent); box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 12%, transparent); animation: ibc-flash 2.4s ease-out forwards; z-index: 3; }
+@keyframes ibc-flash { 0% { opacity: 0; transform: scale(0.96); } 12% { opacity: 1; transform: scale(1); } 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ibc-flash { animation: ibc-flash-still 2.4s linear forwards; } }
+@keyframes ibc-flash-still { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Who changed what, over the canvas's top edge, under Excalidraw's toolbar. */
+.ibc-note { position: absolute; left: 50%; top: 68px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 24px)); padding: 7px 8px 7px 14px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 6px 24px rgb(0 0 0 / 0.16), 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); font-size: var(--ib-fs-13, 13px); line-height: 1.35; animation: ibc-note-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ibc-note-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ibc-note-text b { font-weight: 600; }
+.ibc-note button { all: unset; cursor: pointer; flex: none; padding: 3px 10px; border-radius: 999px; font-weight: 550; color: var(--primary); }
+.ibc-note button:hover { background: var(--muted); }
+.ibc-note button:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.ibc-note .ibc-note-x { color: var(--muted-foreground); padding: 3px 7px; }
+@keyframes ibc-note-in { from { opacity: 0; transform: translateX(-50%) translateY(-6px); } to { opacity: 1; transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .ibc-note { animation: none; } }
+
+/* The bar under the canvas: what goes to the agent, the words, Send. */
+.ibc-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--background); box-shadow: 0 -1px 0 color-mix(in oklab, var(--foreground) 9%, transparent); }
+.ibc-what { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 550; white-space: nowrap; }
+.ibc-what[data-on] { background: color-mix(in oklab, var(--primary) 14%, transparent); color: var(--primary); }
+.ibc-words { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; outline: 0; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.ibc-words::placeholder { color: var(--muted-foreground); }
+.ibc-words:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.ibc-send { flex: none; height: 36px; padding: 0 16px; border-radius: 10px; border: 0; cursor: pointer; background: var(--primary); color: var(--primary-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 600; white-space: nowrap; }
+.ibc-send:disabled { opacity: 0.45; cursor: default; }
+.ibc-send:focus-visible { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring); }
+.ibc-state { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); white-space: nowrap; }
+.ibc-state[data-bad] { color: var(--destructive, #c0392b); }
+
+@media (max-width: 767px) {
+  .ibc-bar { padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); gap: 8px; }
+  .ibc-what:not([data-on]), .ibc-state { display: none; }
+  .ibc-words { height: 44px; font-size: 16px; }
+  .ibc-send { height: 44px; padding: 0 14px; }
+  .ibc-note { top: 60px; }
+}

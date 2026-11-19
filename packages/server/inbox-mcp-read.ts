@@ -38,7 +38,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
-import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
+import { inboxSketchBlock, inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import { reviewAnchorBlock, reviewAnchorPlace } from "@plannotator/core/review-threads";
 
 /** Messages read_thread shows in full by default: the newest six. */
@@ -153,6 +153,8 @@ export interface AgentMessage {
   board_cards?: { id: string; title: string }[];
   /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
   viewing?: string;
+  /** `inboxSketchBlock`, on a reply sent from the thread's canvas. */
+  sketch?: string;
   review_comment?: string;
 }
 
@@ -203,6 +205,8 @@ export interface AgentMessageLine {
   tagged?: AgentTagged[];
   board_request?: true;
   viewing?: string;
+  /** `inboxSketchBlock`, on a reply sent from the thread's canvas. */
+  sketch?: string;
   review_comment?: string;
 }
 
@@ -483,6 +487,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
     ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
+    ...(inboxSketchBlock(message) ? { sketch: inboxSketchBlock(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentText(message) } : {}),
   };
 }
@@ -523,6 +528,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
+    ...(inboxSketchBlock(message) ? { sketch: inboxSketchBlock(message) } : {}),
     ...(message.review_anchor ? { review_comment: reviewCommentLine(message) } : {}),
   };
 }
@@ -731,6 +737,7 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (tagged) parts.push(tagged);
   parts.push(`"${line.words}" (${sizeText(line.bytes)})`);
   if (line.viewing) parts.push(line.viewing);
+  if (line.sketch) parts.push(line.sketch);
   if (line.review_comment) parts.push(line.review_comment);
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
@@ -765,6 +772,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   if (tagged) head.push(tagged);
   const lines = [`[${head.join(" · ")}]`, message.body.trimEnd()];
   if (message.viewing) lines.push(message.viewing);
+  if (message.sketch) lines.push(message.sketch);
   if (message.review_comment) lines.push(message.review_comment);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
   if (message.attachments?.length) {

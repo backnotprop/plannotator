@@ -52,6 +52,7 @@ import {
   THREAD_NAME_BIDI,
   THREAD_NAME_CONTROL,
   type InboxAttachment,
+  type InboxReplySketch,
   type InboxReplyViewing,
   type InboxUpload,
 } from "@plannotator/core/inbox-types";
@@ -111,6 +112,26 @@ export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }
 }
 
 /**
+ * What an agent reads for a reply sent from the thread's canvas (prototype): that it came from the canvas and at
+ * which revision, the things the person drew or picked, one line each as the `canvas` action reads them, and the
+ * call that changes them. The pictures are the reply's attachments. Empty when the reply has none.
+ */
+export function inboxSketchBlock(message: { thread_id?: string; sketch?: InboxReplySketch | null }): string {
+  const sketch = message.sketch;
+  // A record of another shape must not take the session's poll or read_thread down with it.
+  if (!sketch || typeof sketch.reading !== "string" || !Number.isInteger(sketch.rev) || !Array.isArray(sketch.things)) return "";
+  const count = sketch.things.length;
+  const head =
+    sketch.kind === "selection"
+      ? `(Sent from this thread's canvas, rev ${sketch.rev}. They selected ${count === 1 ? "one thing" : `${count} things`} on it and ask you to work on ${count === 1 ? "it" : "them"}; the attached picture shows only ${count === 1 ? "it" : "them"}.)`
+      : `(Sent from this thread's canvas, rev ${sketch.rev}: what they drew, as text. The attached pictures show it.)`;
+  const call = message.thread_id
+    ? `(To change it there: canvas {"thread_id": "${message.thread_id}", "base": ${sketch.rev}, "do": [...]}. Your change lands on their canvas in place.)`
+    : "";
+  return [head, sketch.reading.trimEnd(), call].filter(Boolean).join("\n");
+}
+
+/**
  * The words an agent reads for a person's message: its body, then `inboxViewingLine`,
  * then `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
  * the Board request (`inboxBoardRequestBlock`), or on an Ask from Decision data its
@@ -124,6 +145,7 @@ export function inboxBodyForAgent(message: {
   decision_ask?: true;
   rows_ask?: true;
   viewing?: InboxReplyViewing | null;
+  sketch?: InboxReplySketch | null;
   id?: string;
   review_anchor?: InboxReviewAnchor | null;
 }, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = [], within: InboxReviewAnchor | null = null): string {
@@ -134,7 +156,7 @@ export function inboxBodyForAgent(message: {
         ? reviewAnchorBlock({ id: message.id, review_anchor: message.review_anchor })
         : reviewFollowUpLine({ id: message.id }, within)
     : "";
-  const after = [review, inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
+  const after = [review, inboxViewingLine(message), inboxSketchBlock(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
