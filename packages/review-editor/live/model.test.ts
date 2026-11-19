@@ -95,6 +95,21 @@ describe('a thread posted to the forge', () => {
       fileLevelComments: [{ path: 'src/billing.ts', body: 'Split this file.' }],
     });
   });
+
+  test("a reply to an agent's open question is posted as the person's words, never the Inbox's sentence for the agent", async () => {
+    const { forgeCommentsOf } = await import('./model');
+    const stillOpen = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const anchor = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 4, lineEnd: 5, side: 'new' }, files);
+    const placed = placeThreads(
+      [
+        msg({ id: 'c', body: 'Two checks here?', review_anchor: anchor }),
+        msg({ id: 'a', reply_to: 'c', body: 'Keep both?', author: { kind: 'agent', host: 'pi', session: 's', name: null } as never, created_at: at(1) }),
+        msg({ id: 'p', reply_to: 'a', body: `Keep both.\n\n${stillOpen}`, created_at: at(2) }),
+      ],
+      files,
+    );
+    expect(forgeCommentsOf(placed).fileComments[0]?.body).toBe('Two checks here?\n\n**Pi:** Keep both?\n\n**You:** Keep both.');
+  });
 });
 
 describe('a review with many threads', () => {

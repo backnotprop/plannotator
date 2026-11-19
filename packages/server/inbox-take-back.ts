@@ -2,7 +2,7 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 import { splitInboxReplyBody } from "@plannotator/core/inbox-questions";
 import { withoutInboxReplyQuoteLead } from "@plannotator/core/inbox-reply-quote";
 import { inboxThreadMentionsTakenBack } from "@plannotator/core/inbox-thread-mention";
-import { inboxId, splitPullThreadDetails, type InboxDraft, type InboxMessage, type InboxReplyDraft, type InboxUpload } from "@plannotator/core/inbox-types";
+import { inboxId, type InboxDraft, type InboxMessage, type InboxReplyDraft, type InboxUpload } from "@plannotator/core/inbox-types";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -23,19 +23,21 @@ const replyWordsOf = (message: InboxMessage, quoted: boolean): string => {
 };
 
 /**
- * A thread's first message's words: without the skills block, and without the PR's details a PR page's Start a thread
- * added after them (`splitPullThreadDetails`). A New message draft cannot hold that PR tie (its `pulls` is Launch an
- * agent's hand-off, another ask), so the words come back alone, as a New message.
+ * A thread's first message without the skills block. A PR page's Start a thread keeps the PR's details after the
+ * words: the person's Send carried them, and sent again they make the thread that PR's own again (`linkInboxPulls`).
  */
-const rootWordsOf = (message: InboxMessage): string => {
-  const body = withoutInboxSkillsBlock(message.body);
-  return splitPullThreadDetails(body)?.words ?? body;
-};
+const rootWordsOf = (message: InboxMessage): string => withoutInboxSkillsBlock(message.body);
 
-const joined = (taken: string, kept: InboxReplyDraft | null) => (kept?.body.trim() ? `${taken}\n\n${kept.body}` : taken);
+/** The taken-back words and the box's kept draft both hold words: they go one blank line apart, the taken-back first. */
+const both = (taken: string, kept: InboxReplyDraft | null) => taken.trim() !== "" && !!kept?.body.trim();
+
+const joined = (taken: string, kept: InboxReplyDraft | null) => (both(taken, kept) ? `${taken}\n\n${kept!.body}` : taken.trim() !== "" ? taken : (kept?.body ?? taken));
+
+/** How far the kept draft's words moved in the joined text. */
+const shiftOf = (taken: string, kept: InboxReplyDraft | null) => (both(taken, kept) ? taken.length + 2 : 0);
 
 const filesOf = (taken: string, uploads: readonly InboxUpload[], kept: InboxReplyDraft | null) => {
-  const shift = kept?.body.trim() ? taken.length + 2 : 0;
+  const shift = shiftOf(taken, kept);
   return [
     ...uploads.map((upload) => ({ upload_id: upload.upload_id })),
     ...(kept?.files ?? []).map((file) => ({ upload_id: file.upload_id, ...(file.pasted ? { pasted: { ...file.pasted, at: file.pasted.at + shift } } : {}) })),
@@ -63,7 +65,7 @@ export function createInboxTakeBack(options: {
     // The words as the person wrote them: each thread mention its title again, kept as a mention (the list goes).
     // The quote comes back as the draft's quote when no draft is kept, so only then does its lead leave the words.
     const taken = inboxThreadMentionsTakenBack(replyWordsOf(message, !kept && !!message.quote));
-    const shift = kept?.body.trim() ? taken.body.length + 2 : 0;
+    const shift = shiftOf(taken.body, kept);
     return store.saveReplyDraft(message.thread_id, {
       base: kept?.updated_at ?? null,
       body: joined(taken.body, kept),
