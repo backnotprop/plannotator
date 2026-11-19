@@ -726,7 +726,7 @@ test('the viewer adds the version on screen: the version it sent stays the versi
   await tile(page, 'versions.png').click();
   const pane = page.locator('[data-attachment-pane]').first();
   await expect(pane).toHaveAttribute('data-version', 'current');
-  await pane.getByRole('button', { name: 'Open the version it sent' }).click();
+  await pane.getByRole('button', { name: 'View sent version' }).click();
   await expect(pane).toHaveAttribute('data-version', 'sent');
   const before = blobsOf(studio);
   await pane.locator('[data-reuse-surface="pane"], [data-reuse-surface="bar"]').first().click();
