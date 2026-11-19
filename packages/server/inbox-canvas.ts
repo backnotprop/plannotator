@@ -272,7 +272,11 @@ export function createInboxCanvas(options: {
       return { ok: false, rev: freshRev, text: [`Nothing changed (rev ${freshRev}). ${result.errors.length === 1 ? "One change cannot be made" : `${result.errors.length} changes cannot be made`}:`, ...result.errors.map((e) => `  ${e}`)].join("\n") };
     }
     const log = readCanvasLog(dir, threadId);
-    const since = sinceLines(log, base as number, viewer);
+    // Judged by what this agent was told, not only by the rev it sends: a rev copied from a message (the person's
+    // "work on this" names one) says nothing about what changed between the agent's last look and that rev.
+    const told = readCanvasMeta(dir, threadId).seen[viewerKey(viewer)];
+    const from = told === undefined ? (base as number) : Math.min(base as number, told);
+    const since = sinceLines(log, from, viewer);
     const clashes = new Map<string, string>();
     for (const id of result.touched) {
       const hit = since.byElement.get(id);
@@ -280,7 +284,7 @@ export function createInboxCanvas(options: {
     }
     // A base older than the log reaches: what changed since cannot be told, so read again.
     const oldest = log[0]?.rev ?? 1;
-    if ((base as number) < oldest - 1 && result.touched.size > 0) {
+    if (from < oldest - 1 && result.touched.size > 0) {
       noteCanvasSeen(dir, threadId, viewerKey(viewer), freshRev);
       return { ok: false, rev: freshRev, text: `Nothing changed. Your base (rev ${String(base)}) is older than this canvas's history reaches, so what changed since cannot be checked. Read it again and send your change with "base": ${freshRev}: canvas ${JSON.stringify({ thread_id: threadId })}` };
     }
@@ -290,7 +294,7 @@ export function createInboxCanvas(options: {
         ok: false,
         rev: freshRev,
         text: [
-          `Nothing changed. Since your base (rev ${String(base)}) ${clashes.size === 1 ? "a thing you are changing was" : `${clashes.size} things you are changing were`} changed by someone else:`,
+          `Nothing changed. Since ${from < (base as number) ? `you last looked (rev ${from})` : `your base (rev ${String(base)})`} ${clashes.size === 1 ? "a thing you are changing was" : `${clashes.size} things you are changing were`} changed by someone else:`,
           ...clashes.values(),
           `Their change stays. If yours still makes sense with theirs in view, send it again with "base": ${freshRev}; if it would undo what the person did, ask them first.`,
         ].join("\n"),
@@ -299,7 +303,7 @@ export function createInboxCanvas(options: {
     const committed = commitCanvas(dir, threadId, result.scene, viewer, new Date(now()));
     noteCanvasSeen(dir, threadId, viewerKey(viewer), committed.rev);
     emit("canvas", { thread_id: threadId, rev: committed.rev, by: viewer.name || "An agent", elements: [...result.added, ...result.touched] });
-    const others = since.lines.length > 0 ? [`Changed by others since your base (rev ${String(base)}), not touched by you:`, ...since.lines] : [];
+    const others = since.lines.length > 0 ? [`Changed by others since you last looked (rev ${from}), not touched by you:`, ...since.lines] : [];
     return {
       ok: true,
       rev: committed.rev,
