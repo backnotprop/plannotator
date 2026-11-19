@@ -286,6 +286,36 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     expect(latest!.hover).toBeNull();
   });
 
+  test('entering the card keeps its content when another symbol was pending on the way', async () => {
+    await mount();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(300); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover?.request.symbol).toBe('charge');
+
+    // The pointer rests on another symbol long enough to ask about it, then
+    // goes into the open card (enter first, the late token leave after).
+    const other = { ...REQUEST, symbol: 'refund' };
+    await act(async () => latest!.onTokenHoverEnter(other, token()));
+    await act(async () => { jest.advanceTimersByTime(300); });
+    expect(pending).toHaveLength(2);
+    await act(async () => latest!.onCardEnter());
+    await act(async () => latest!.onTokenHoverLeave());
+
+    expect(pending[1].signal?.aborted).toBe(true);
+    await settle(1, hoverResponse({ symbol: 'refund' }));
+    await act(async () => { jest.advanceTimersByTime(5000); });
+    expect(latest!.hover?.request.symbol).toBe('charge');
+
+    // Leaving the card and resting on the other symbol still opens its card.
+    await act(async () => latest!.onCardLeave());
+    await act(async () => latest!.onTokenHoverEnter(other, token()));
+    await act(async () => { jest.advanceTimersByTime(300); });
+    expect(pending).toHaveLength(3);
+    await settle(2, hoverResponse({ symbol: 'refund' }));
+    expect(latest!.hover?.request.symbol).toBe('refund');
+  });
+
   test('a missed card leave cannot keep later cards open', async () => {
     // A card can go away under the pointer (its answer replaced, a re-render)
     // with no card leave event. Reaching a token proves the pointer is out of

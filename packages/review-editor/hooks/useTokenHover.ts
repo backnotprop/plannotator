@@ -401,7 +401,18 @@ export function useTokenHover(
   const onCardEnter = useCallback(() => {
     pointerInCardRef.current = true;
     clearGrace();
-  }, [clearGrace]);
+    // Entering the card chooses it. The pointer may have rested on another
+    // symbol on the way here, long enough to start that symbol's request.
+    // Its token leave no longer closes anything, so without this its answer
+    // would land later and swap the card's content and position under the
+    // pointer.
+    clearDwell();
+    const openKey = openKeyRef.current;
+    if (inFlightKeyRef.current !== null && inFlightKeyRef.current !== openKey) {
+      abortInFlight();
+    }
+    activeKeyRef.current = openKey;
+  }, [abortInFlight, clearDwell, clearGrace]);
   const onCardLeave = useCallback(() => {
     pointerInCardRef.current = false;
     startGrace();
