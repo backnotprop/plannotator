@@ -7963,7 +7963,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
       // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
       // A thread's canvas (prototype, inbox-canvas.ts): the window's read and save, and its answers to the server's drawing jobs.
-      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture|\/undo|\/files\/[A-Za-z0-9_-]{1,100})?$/.test(path) || path === "/api/inbox/canvases" || path.startsWith("/api/inbox/canvas/jobs/")) {
+      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas(\/picture|\/undo)?$/.test(path) || /^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/canvas\/files\/[A-Za-z0-9_-]+$/.test(path) || path === "/api/inbox/canvases" || path.startsWith("/api/inbox/canvas/jobs/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }

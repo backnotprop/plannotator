@@ -480,7 +480,7 @@ export function createInboxCanvas(options: {
           .map(({ id, meta }) => ({ thread_id: id, rev: meta.rev, changed: meta.agent_rev > meta.person_seen }));
         return json({ serverSession: options.serverSession, canvases });
       }
-      const fileMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas\/files\/([A-Za-z0-9_-]{1,100})$/.exec(path);
+      const fileMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/canvas\/files\/([A-Za-z0-9_-]+)$/.exec(path);
       if (fileMatch) {
         // One picture's file, for a window that holds the element but not its bytes (an agent's change or an Undo brought it back).
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
