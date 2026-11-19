@@ -149,6 +149,46 @@ describe('a table that cannot be drawn is refused, with the reason', () => {
     expect(refused({ title: 7 })).toContain('title is too long');
   });
 
+  test('a chart has a size in all, well under what its limits one by one would let it reach', () => {
+    // Every cell at its longest: 500 rows of 12 would be 480,000 characters. The whole chart is held to 64,000.
+    const wide = (rows: number) => ({ fields: ['x', 'a', 'b'], rows: Array.from({ length: rows }, (_row, r) => [`${r}`.padEnd(CHART_LIMITS.cell, 'x'), 'y'.repeat(CHART_LIMITS.cell), r]), encode: { x: 'x', y: 'b' }, mark: 'line' });
+    expect(check(wide(300)).ok).toBe(true);
+    expect(refused(wide(500))).toContain(`at most ${CHART_LIMITS.characters} characters in all`);
+    // Numbers count as they are written.
+    const long = { fields: ['x', 'v'], rows: Array.from({ length: 500 }, (_row, r) => [r + 0.123456789012, 123456789.123456 + r]), encode: { x: 'x', y: 'v' }, mark: 'line' };
+    expect(check(long).ok).toBe(true);
+    expect(refused({ ...long, fields: ['x', 'v', 'w', 'u', 't', 's', 'r', 'q', 'p', 'o'], rows: long.rows.map((row) => [...row, ...row, ...row, ...row, ...row]) })).toContain('characters in all');
+  });
+
+  test('no word of a chart holds a control character or a mark that turns the text round', () => {
+    for (const bad of ['a\u0000b', 'a\u0001', 'two\nlines', 'tab\there', '\u007f', '\u0085', 'safe\u202egnp.exe', '\u2066x\u2069']) {
+      expect(refused({ rows: [[bad, 1, 1]] })).toContain('no control characters');
+      expect(refused({ title: bad })).toContain('control character');
+      expect(refused({ unit: bad.slice(0, 6) })).toContain('unit is at most');
+      expect(refused({ rules: [{ at: 1, label: bad }] })).toContain('control character');
+      expect(refused({ dash: [bad] })).toContain('dash is a list');
+    }
+    // Words in any script, and marks a script needs to join its letters, are words.
+    expect(check({ rows: [['週 الأسبوع ‍👩‍💻', 1, 1]], title: 'Ünïcödé — ok' }).ok).toBe(true);
+  });
+
+  test('a rule that would have nowhere to stand is refused with the reason, not kept and never drawn', () => {
+    // Names along the bottom: an upright rule stands at one of them.
+    expect(check({ rules: [{ at: 'W2', on: 'x' }] }).ok).toBe(true);
+    expect(refused({ rules: [{ at: 'W9', on: 'x' }] })).toContain('must be one of the names along the x axis ("W9" is not)');
+    // A number line along the bottom: at a number.
+    const numbered = { mark: 'line', fields: ['week', 'v'], rows: [[1, 5], [2, 4]], encode: { x: 'week', y: 'v' } };
+    expect(check({ ...numbered, rules: [{ at: 6, on: 'x' }] }).ok).toBe(true);
+    expect(refused({ ...numbered, rules: [{ at: 'W36', on: 'x' }] })).toContain('x axis is a number line');
+    const gantt = { mark: 'span', fields: ['lane', 'from', 'to'], rows: [['a', 1, 3]], encode: { x: 'from', x2: 'to', y: 'lane' } };
+    expect(check({ ...gantt, rules: [{ at: 2, on: 'x', label: 'today' }] }).ok).toBe(true);
+    expect(refused({ ...gantt, rules: [{ at: 'W36', on: 'x', label: 'today' }] })).toContain('x axis is a number line');
+    expect(refused({ mark: 'cell', encode: { x: 'week', y: 'plan', value: 'minutes' }, rules: [{ at: 'W2', on: 'x' }] })).toContain('a cell chart draws no rules');
+    expect(refused({ mark: 'cell', encode: { x: 'week', y: 'plan', value: 'minutes' }, rules: [{ at: 3 }] })).toContain('a cell chart draws no rules');
+    // A bar's x axis is always names, even when they are numbers.
+    expect(check({ mark: 'bar', fields: ['n', 'v'], rows: [[1, 5], [2, 4]], encode: { x: 'n', y: 'v' }, rules: [{ at: 2, on: 'x' }] }).ok).toBe(true);
+  });
+
   test('its colour is a colour from the closed grammar, like any object', () => {
     expect(check({ color: 'green' }).ok).toBe(true);
     expect(check({ color: { custom: '#c2410c' } }).ok).toBe(true);
