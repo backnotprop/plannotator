@@ -63,8 +63,9 @@ export function setEvent(before: CanvasObject, after: CanvasObject): Extract<Can
   const b = after as unknown as ObjectFields;
   const set: ObjectFields = {};
   const unset: string[] = [];
-  for (const key of Object.keys(b)) if (key !== 'id' && key !== 'type' && !same(a[key], b[key])) set[key] = b[key];
-  for (const key of Object.keys(a)) if (!(key in b)) unset.push(key);
+  // `by` is said once, when an object is added: no change names it, however the two objects came to differ in it.
+  for (const key of Object.keys(b)) if (key !== 'id' && key !== 'type' && key !== 'by' && !same(a[key], b[key])) set[key] = b[key];
+  for (const key of Object.keys(a)) if (key !== 'by' && !(key in b)) unset.push(key);
   if (Object.keys(set).length === 0 && unset.length === 0) return null;
   return { type: 'object-set', id: before.id, set, ...(unset.length ? { unset } : {}) };
 }
@@ -126,7 +127,8 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
         const touched: string[] = [];
         const take = (key: string, value: unknown, present: boolean) => {
           // Only a field an object can have, and never one that is a name on every object (`__proto__`).
-          if (key === 'id' || key === 'type' || !OBJECT_FIELDS.has(key)) return;
+          // Not `by` either: who added an object is said once, when it is added, and no change rewrites it.
+          if (key === 'id' || key === 'type' || key === 'by' || !OBJECT_FIELDS.has(key)) return;
           const had = Object.hasOwn(from, key);
           if (present ? had && same(from[key], value) : !had) return;
           if (had) back[key] = from[key];
@@ -153,6 +155,11 @@ export function applyEvents(doc: CanvasDocument, events: readonly CanvasEvent[],
           object = checked.value;
           // A field this object's type does not have was dropped by the check: nothing changed after all.
           if (same(before, object)) break;
+          // The check rebuilds what it reads. Whatever came out the same as it went in keeps the value the
+          // object already had, so a reader that skips unchanged fields by identity (a chart's rows, a
+          // box's lanes) still can after a peer's change, an undo or a replay that touched other fields.
+          const rebuilt = object as unknown as ObjectFields;
+          for (const key of Object.keys(rebuilt)) if (rebuilt[key] !== from[key] && typeof rebuilt[key] === 'object' && same(from[key], rebuilt[key])) rebuilt[key] = from[key];
         }
         if (unsound(now(), object, touched)) break;
         if (touched.includes('z')) {

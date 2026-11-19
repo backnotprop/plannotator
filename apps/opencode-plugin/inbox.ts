@@ -43,6 +43,7 @@ import {
   type InboxLoadedPluginReport,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId, isAskTurnActive } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
@@ -233,7 +234,8 @@ export function dropInboxDuplicates(messages: unknown[]): number {
 export async function findInboxConnection(): Promise<InboxAgentConnection | null> {
   if (!resolveInboxTool(loadConfig(), process.env, "opencode")) return null;
   const dataDir = getPlannotatorDataDir();
-  if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (turned-on.ts).
+  if (!existsSync(inboxRegistryFileOf(dataDir)) || !isInboxTurnedOn(dataDir)) return null;
   const tools = await discoverInboxTools(dataDir);
   return tools ? new InboxAgentConnection({ dataDir, host: OPENCODE_INBOX_HOST, agentName: OPENCODE_INBOX_AGENT_NAME, tools }) : null;
 }

@@ -31,6 +31,15 @@ public enum QuestionAnswers {
     }
   }
 
+  /// Two answers say the same thing to the agent: the same choices (in any order), the same words. No answer and
+  /// a taken-back one are the same too.
+  public static func same(_ one: QuestionAnswer?, _ other: QuestionAnswer?) -> Bool {
+    func words(_ value: String?) -> String { jsTrim(value ?? "") }
+    guard let one, let other else { return one == nil && other == nil }
+    return Set(one.selected) == Set(other.selected) && words(one.other) == words(other.other) && words(one.text) == words(other.text)
+      && words(one.note) == words(other.note) && (one.skipped ?? false) == (other.skipped ?? false)
+  }
+
   /// An answer to build on: the saved one, else empty.
   public static func base(_ question: InboxQuestion) -> QuestionAnswer {
     question.answer ?? QuestionAnswer(v: 1, key: question.key, kind: answerKind(question), prompt: capPrompt(question.prompt), selected: [])

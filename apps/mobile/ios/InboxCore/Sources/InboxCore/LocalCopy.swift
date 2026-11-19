@@ -79,7 +79,7 @@ public struct LocalCopy: Sendable {
 /// A write the person made that has no definite answer yet. Its key never changes: across retries, paths and
 /// restarts the door sees one intent.
 public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
-  public enum Kind: String, Codable, Sendable { case pick, reply, seen }
+  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action }
 
   /// The idempotency key.
   public var id: String
@@ -94,4 +94,10 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var madeAt: Date
   /// A reply's words, kept so a refusal can hand them back to the person.
   public var words: String?
+  /// How many times this pick was saved again over another place's answer (PickConflict).
+  public var tries: Int?
+  /// True once this write has waited for the computer: made while it was away, or sent and not answered.
+  public var waited: Bool?
+  /// A note typed under a marked action item: its refusal, when the item moved on meanwhile, is not the person's to act on.
+  public var quiet: Bool?
 }

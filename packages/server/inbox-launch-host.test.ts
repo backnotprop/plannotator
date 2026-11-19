@@ -130,7 +130,8 @@ describe("a thread note quoting an agent", () => {
     const note = { author: { host: "fake-agent", session: "s1", name: "Fake Agent" }, body: "It failed.", key: "note-1" };
     writeLaunchNote({ store, onChange: () => changed.push("changed") }, root, note, (line) => lines.push(line));
     const written = store.message(store.threadMessageIds(root.thread_id).at(-1)!)!;
-    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" } });
+    // Marked as the Inbox's own note, so the sound never rings for it (the window's notify.ts).
+    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" }, launch_note: true });
     expect(changed).toEqual(["changed"]);
 
     const broken = { sendMessage: () => { throw new Error("the disk is full"); }, threadMessageIds: () => [] } as unknown as InboxStore;

@@ -281,11 +281,66 @@ struct LaunchOptions {
         case "permission":
           await door.add(StandInData.permissionThread(now: Date()))
           await session.refresh()
+        case "long":
+          // A 300-message thread, to measure how a long thread opens and scrolls.
+          await door.add(StandInData.longThread(now: Date()))
+          await door.add(StandInData.longPermissionThread(now: Date()))
+          await session.refresh()
+        case "writes":
+          // Twenty seconds on, the long session's agent writes again and the long permission session asks a second
+          // command (a test types meanwhile).
+          Task {
+            try? await Task.sleep(for: .seconds(20))
+            await door.agentWrites(thread: StandInData.long, body: "While that waits: the other steps all passed.")
+            if var asked = await door.thread(StandInData.longPermission)?.messages.last?.questions?.first {
+              asked.key = "q_day_lint"
+              let labels = asked.choices.map(\.label)
+              await door.agentWrites(
+                thread: StandInData.longPermission,
+                body: "```\nbun run lint\n```\n\nPurpose: Check the style.\n\nin `~/work/api-server`\n\n:::question\n\(asked.prompt)\n\n" + labels.map { "- [ ] \($0)" }.joined(separator: "\n") + "\n:::",
+                questions: [asked])
+            }
+            await session.refresh()
+          }
         case "allowed":
           await session.open(StandInData.permission)
-          if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first, case .save(let answer) = CardAnswers.tap(question, label: "Allow once") {
-            session.hold(pick: answer, thread: StandInData.permission, message: asked.id, question: question)
-            await session.send(thread: StandInData.permission, words: "")
+          if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first {
+            await session.answerNow(thread: StandInData.permission, message: asked.id, question: question, answer: QuestionAnswer(v: 1, key: question.key, kind: .single, prompt: question.prompt, selected: [PermissionPrompt.allowOnce]))
+          }
+        case "back":
+          // The computer answers again, and another device picked while the phone was away.
+          await door.setOptions { $0.racesPicks = 1 }
+          await door.setOffline(false)
+          await session.refresh()
+        case "online":
+          await door.setOffline(false)
+          await session.refresh()
+        case "replaced":
+          // The agent replaces the question the phone's held pick and Send answer.
+          if let (asked, question) = retry() {
+            var newer = question
+            newer.key = "q_rollout2"
+            newer.prompt = "Roll out to 10% or 25% first?"
+            newer.choices = [InboxQuestionChoice(label: "10%", recommended: true, settled: false), InboxQuestionChoice(label: "25%", recommended: false, settled: false)]
+            newer.answer = nil
+            newer.state = .openValue
+            newer.revision = 0
+            await door.agentWrites(thread: StandInData.retry, body: "One more thing came up, so I asked this again.\n\n:::question\nRoll out to 10% or 25% first?\n\n- [ ] 10%\n- [ ] 25%\n:::", questions: [newer])
+            let written = await door.thread(StandInData.retry)?.messages.last?.id
+            await door.change(StandInData.retry) { thread in
+              guard let at = thread.messages.firstIndex(where: { $0.id == asked.id }), let written else { return }
+              thread.messages[at].questions?[0].state = .superseded
+              thread.messages[at].questions?[0].supersededBy = InboxSupersededBy(messageId: written, key: "q_rollout2")
+            }
+          }
+        case "outdated":
+          // The computer was updated past this app after the phone last read it: the copy stays readable.
+          await door.setOptions { $0.minAppContract = 99; $0.contract = 99 }
+          await session.refresh()
+        case "done":
+          await session.open(StandInData.onboarding)
+          if let asked = session.thread(StandInData.onboarding)?.thread.messages.first, let todo = ActionMarks.items(of: asked).first {
+            await session.mark(action: todo, thread: StandInData.onboarding, message: asked.id, ActionMarks.Mark(.done))
           }
         case "refused":
           if let (asked, question) = retry() {

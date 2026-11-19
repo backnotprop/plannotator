@@ -69,6 +69,15 @@ export function Minimap({ store, camera, viewSize, label }: { store: CanvasStore
           context.strokeStyle = line;
           context.lineWidth = 1;
           context.strokeRect(x + 0.5, y + 0.5, w, h);
+        } else if (object.type === 'ink') {
+          // A drawn line is a line here too, never a filled patch: a ring round a third of the board is not a block.
+          const step = Math.max(2, (Math.ceil(object.points.length / 48) >> 1) << 1 || 2);
+          context.strokeStyle = ink;
+          context.lineWidth = 1;
+          context.beginPath();
+          for (let i = 0; i + 1 < object.points.length; i += step) context.lineTo(x + object.points[i] * w, y + object.points[i + 1] * h);
+          context.lineTo(x + object.points[object.points.length - 2] * w, y + object.points[object.points.length - 1] * h);
+          context.stroke();
         } else {
           context.globalAlpha = object.type === 'text' ? 0.25 : 0.55;
           context.fillStyle = ink;

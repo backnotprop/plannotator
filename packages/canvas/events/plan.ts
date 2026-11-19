@@ -12,6 +12,7 @@ import { isValidId } from '../model/ids';
 import { keyBetween } from '../model/order-key';
 import {
   DEFAULT_SIZES,
+  TEXT_SIZE_PX,
   type Actor,
   type ArrowEnd,
   type CanvasDocument,
@@ -28,22 +29,28 @@ const done = (events: CanvasEvent[]): Checked<CanvasEvent[]> => ({ ok: true, val
 /** The smallest an object may be resized to, in world units. */
 export const MIN_OBJECT_SIZE = 16;
 
-const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
+/**
+ * What `edit` may change on each type. Every name here must also be in `OBJECT_FIELDS` (`model/codec.ts`),
+ * or the change it makes would be dropped when applied: `events/store.test.ts` holds the two lists together.
+ */
+export const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
   box: ['text', 'detail', 'link', 'style', 'shape', 'lanes'],
   note: ['text', 'link', 'style'],
-  text: ['text', 'size', 'link', 'style'],
+  text: ['text', 'size', 'face', 'link', 'style'],
   frame: ['title', 'link', 'style'],
   image: ['src', 'alt', 'link', 'style'],
   sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style'],
   html: ['html', 'alt', 'link', 'style'],
+  chart: ['mark', 'fields', 'rows', 'encode', 'stack', 'flip', 'dash', 'rules', 'title', 'unit', 'link'],
   reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style'],
   stamp: ['kind', 'count', 'link'],
+  ink: ['points', 'pen', 'link'],
   arrow: ['from', 'to', 'label', 'link', 'style', 'routing'],
   group: ['label', 'link'],
 };
 
 /** Fields an edit removes when given `null` or an empty string. */
-const OPTIONAL_FIELDS = new Set(['count', 'alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing']);
+const OPTIONAL_FIELDS = new Set(['face', 'pen', 'count', 'alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing', 'stack', 'flip', 'dash', 'rules', 'unit']);
 
 /** Add the event that turns `before` into `after`, when they differ. */
 function push(events: CanvasEvent[], before: CanvasObject, after: CanvasObject): void {
@@ -57,13 +64,54 @@ function changes(pairs: [CanvasObject, CanvasObject][]): CanvasEvent[] {
   return events;
 }
 
+/**
+ * How wide a letter of a heading is taken to be, as a share of its height. Set from the widest of the faces a
+ * heading can be in at its heaviest (bold capitals run wide), so the count errs wide: a heading must never
+ * arrive wrapped, because words that wrap hang below a box made for one line.
+ */
+function letterWidth(code: number): number {
+  if (code === 0x20) return 0.34;
+  if (code === 0x4d || code === 0x57 || code === 0x6d || code === 0x77 || code === 0x40) return 1.02; // M W m w @
+  if (code >= 0x41 && code <= 0x5a) return 0.8; // capitals
+  if (code >= 0x30 && code <= 0x39) return 0.7; // digits
+  if (code === 0x69 || code === 0x6c || code === 0x6a || code === 0x49 || (code >= 0x21 && code <= 0x2f) || (code >= 0x3a && code <= 0x3b)) return 0.42; // i l j I and punctuation
+  if (code <= 0x24f) return 0.66; // other Latin
+  return 1.08; // everything else, as wide as it is tall and a little more
+}
+
+/**
+ * The box for a heading (bare text in the `title` or `display` size) that came with no size: wide enough for
+ * its longest line and tall enough for all of them. An agent names the words; they should not arrive wrapped
+ * into a box made for small text. The width is an estimate (`letterWidth`): no font can be measured here.
+ */
+export function headingSize(text: unknown, size: 'title' | 'display', face?: unknown): { w: number; h: number } {
+  // In a mono face every letter is as wide as every other: a little over six-tenths of its height.
+  const width = face === 'mono' ? (code: number) => (code <= 0x24f ? 0.62 : 1.08) : letterWidth;
+  const px = TEXT_SIZE_PX[size];
+  const lines = (typeof text === 'string' ? text : '').split('\n').slice(0, 200);
+  let longest = 1;
+  for (const line of lines) {
+    let units = 0;
+    for (let i = 0; i < line.length && i < 2000; i++) units += width(line.charCodeAt(i));
+    if (units > longest) longest = units;
+  }
+  return { w: Math.min(LIMITS.size, Math.max(px * 2, Math.ceil(longest * px + px * 0.5))), h: Math.min(LIMITS.size, Math.ceil(lines.length * px * 1.2)) };
+}
+
 /** The same object with the default size for what it is, when it came with no width or no height. */
 function withDefaultSize(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
   const object = raw as Record<string, unknown>;
   if (object.w !== undefined && object.h !== undefined) return raw;
   const shaped = `${String(object.type)}:${String(object.shape)}`;
-  const size = Object.hasOwn(DEFAULT_SIZES, shaped) ? DEFAULT_SIZES[shaped] : Object.hasOwn(DEFAULT_SIZES, String(object.type)) ? DEFAULT_SIZES[String(object.type)] : undefined;
+  const size =
+    object.type === 'text' && (object.size === 'title' || object.size === 'display')
+      ? headingSize(object.text, object.size, object.face)
+      : Object.hasOwn(DEFAULT_SIZES, shaped)
+        ? DEFAULT_SIZES[shaped]
+        : Object.hasOwn(DEFAULT_SIZES, String(object.type))
+          ? DEFAULT_SIZES[String(object.type)]
+          : undefined;
   return size ? { ...object, w: object.w ?? size.w, h: object.h ?? size.h } : raw;
 }
 
@@ -94,9 +142,10 @@ function planAdd(doc: CanvasDocument, objects: readonly unknown[], actor: Actor)
     if (!checked.ok) return checked;
     const object = checked.value;
     if (doc.objects[object.id] || incoming.has(object.id)) return fail(`${object.id}: that id is already used`);
-    // Who added it is who is adding it, and it goes on top, whatever the object says.
+    // Who added it is who is adding it, and it goes on top, whatever the object says. Only the two fields
+    // an actor has: whatever else the host's own object for a person carries is not the document's.
     top = keyBetween(top, null);
-    incoming.set(object.id, { ...object, by: actor, z: top });
+    incoming.set(object.id, { ...object, by: { kind: actor.kind, id: actor.id }, z: top });
   }
   const known = (id: ObjectId) => incoming.get(id) ?? doc.objects[id];
   for (const object of incoming.values()) {
@@ -187,7 +236,7 @@ function planGroup(doc: CanvasDocument, groupId: ObjectId, ids: readonly ObjectI
   if (doc.objects[groupId]) return fail(`${groupId}: that id is already used`);
   const members = uniqueKnown(doc, ids).filter((id) => id !== groupId);
   if (members.length < 2) return fail('a group needs at least two objects');
-  const group = checkObject({ id: groupId, type: 'group', by: actor, z: keyBetween(topKey(doc), null), ...(label ? { label } : {}) });
+  const group = checkObject({ id: groupId, type: 'group', by: { kind: actor.kind, id: actor.id }, z: keyBetween(topKey(doc), null), ...(label ? { label } : {}) });
   if (!group.ok) return group;
   const events: CanvasEvent[] = [{ type: 'object-added', object: group.value }];
   for (const id of members) push(events, doc.objects[id], { ...doc.objects[id], group: groupId });

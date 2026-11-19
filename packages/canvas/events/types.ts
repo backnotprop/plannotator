@@ -27,7 +27,12 @@ import type {
   ArrowRouting,
   BoxShape,
   CanvasLink,
+  ChartCell,
+  ChartEncode,
+  ChartMark,
+  ChartRule,
   CanvasObject,
+  InkPen,
   ObjectId,
   ObjectStyle,
   ReferenceTarget,
@@ -36,6 +41,8 @@ import type {
   SnapshotInput,
   SnapshotSource,
   StampObject,
+  TextFace,
+  TextSize,
 } from '../model/types';
 
 /** The fields `edit` may change. Which apply depends on the object's type. */
@@ -52,7 +59,23 @@ export interface ObjectPatch {
   target?: ReferenceTarget;
   src?: string;
   html?: string;
-  size?: 'small' | 'medium' | 'large';
+  /** A chart's own fields: see `ChartObject`. `fields`, `rows` and `encode` must agree, so send together what changes together. */
+  mark?: ChartMark;
+  fields?: string[];
+  rows?: ChartCell[][];
+  encode?: ChartEncode;
+  stack?: true | null;
+  flip?: true | null;
+  dash?: string[] | null;
+  rules?: ChartRule[] | null;
+  unit?: string | null;
+  size?: TextSize;
+  /** `null` or `sans` puts the board's own face back. */
+  face?: TextFace | null;
+  /** A drawn line's points: see `InkObject`. */
+  points?: number[];
+  /** `null` or `marker` puts the usual pen back. */
+  pen?: InkPen | null;
   frames?: number;
   fps?: number;
   from?: ArrowEnd;

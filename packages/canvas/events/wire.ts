@@ -3,8 +3,9 @@
  * from a peer. Both are untrusted. `decodeCommand` checks a command's shape
  * (the planner then checks its meaning against the document);
  * `decodeEnvelope` checks every event, because a received envelope is
- * applied without planning. An envelope going out needs no encoder: it is
- * already plain JSON.
+ * applied without planning; `decodeDelivery` reads one as a sync backend
+ * hands it over, with the backend's count and the backend's word for who
+ * sent it. An envelope going out needs no encoder: it is already plain JSON.
  */
 import { OBJECT_FIELDS, checkObject, checkSnapshot, checkSnapshotInput, type Checked } from '../model/codec';
 import { isValidId } from '../model/ids';
@@ -110,12 +111,15 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
       const names = Object.keys(value.set);
       if (names.length > 32 || names.includes('id') || names.includes('type')) return fail('object-set may not set that');
       // Only names an object can have are carried on, each copied by name: `__proto__` and any other name
-      // that is not a field is dropped here and never reaches an object.
+      // that is not a field is dropped here and never reaches an object. `by` is dropped the same way: who
+      // added an object is said once, when it is added. Dropped, not refused: the rest of the change is
+      // honest, and an envelope refused whole is a change its own sender would never see confirmed.
+      const carried = (name: string) => name !== 'by' && OBJECT_FIELDS.has(name);
       const set: Record<string, unknown> = {};
-      for (const name of names) if (OBJECT_FIELDS.has(name)) set[name] = (value.set as Record<string, unknown>)[name];
+      for (const name of names) if (carried(name)) set[name] = (value.set as Record<string, unknown>)[name];
       const unset = value.unset;
       if (unset !== undefined && (!Array.isArray(unset) || unset.length > 32 || !unset.every((key) => typeof key === 'string' && key.length <= 32))) return fail('unset must be a list of field names');
-      const cleared = (unset as string[] | undefined)?.filter((key) => OBJECT_FIELDS.has(key));
+      const cleared = (unset as string[] | undefined)?.filter(carried);
       return { ok: true, value: { type: 'object-set', id: value.id, set, ...(cleared?.length ? { unset: cleared } : {}) } };
     }
     case 'object-removed':
@@ -137,20 +141,21 @@ function decodeEvent(value: unknown): Checked<CanvasEvent> {
   }
 }
 
-/** A peer's envelope, checked event by event. What `CanvasStore.receive` takes. */
-export function decodeEnvelope(input: unknown): Checked<Pick<Envelope, 'id' | 'actor' | 'events'> & Pick<Partial<Envelope>, 'gesture'>> {
-  let raw = input;
-  if (typeof input === 'string') {
-    try {
-      raw = JSON.parse(input);
-    } catch {
-      return fail('not JSON');
-    }
+type DecodedEnvelope = Pick<Envelope, 'id' | 'actor' | 'events'> & Pick<Partial<Envelope>, 'gesture'>;
+
+function parsed(input: unknown): unknown {
+  if (typeof input !== 'string') return input;
+  try {
+    return JSON.parse(input);
+  } catch {
+    return undefined;
   }
+}
+
+/** Everything of an envelope but who sent it. */
+function decodeBody(raw: unknown): Checked<Omit<DecodedEnvelope, 'actor'>> {
   if (!isRecord(raw)) return fail('an envelope must be a JSON object');
   if (typeof raw.id !== 'string' || !raw.id || raw.id.length > 128) return fail('an envelope needs an "id"');
-  const actor = decodeActor(raw.actor);
-  if (!actor) return fail('an envelope needs an "actor"');
   if (!Array.isArray(raw.events) || raw.events.length > 50_000) return fail('an envelope needs "events"');
   const events: CanvasEvent[] = [];
   for (const value of raw.events) {
@@ -159,5 +164,49 @@ export function decodeEnvelope(input: unknown): Checked<Pick<Envelope, 'id' | 'a
     events.push(event.value);
   }
   const gesture = typeof raw.gesture === 'string' && raw.gesture.length <= 128 ? raw.gesture : undefined;
-  return { ok: true, value: { id: raw.id, actor, events, ...(gesture ? { gesture } : {}) } };
+  return { ok: true, value: { id: raw.id, events, ...(gesture ? { gesture } : {}) } };
+}
+
+/**
+ * An envelope from somewhere that is believed about who sent it (a
+ * hand-over read back, a mirror of one's own store), checked event by event.
+ * What `CanvasStore.receive` takes. From a sync backend use `decodeDelivery`.
+ */
+export function decodeEnvelope(input: unknown): Checked<DecodedEnvelope> {
+  const raw = parsed(input);
+  if (raw === undefined) return fail('not JSON');
+  if (!isRecord(raw)) return fail('an envelope must be a JSON object');
+  const actor = decodeActor(raw.actor);
+  if (!actor) return fail('an envelope needs an "actor"');
+  const body = decodeBody(raw);
+  if (!body.ok) return body;
+  return { ok: true, value: { ...body.value, actor } };
+}
+
+/**
+ * One envelope as a sync backend hands it over: `{ stream, order, actor,
+ * envelope }` (see `SyncDelivery`). `stream`, `order` and `actor` are the
+ * backend's own words; the envelope inside is a peer's and is checked like
+ * any other, except that the actor it names for itself is never read.
+ *
+ * A delivery whose count can be read is a delivery, whatever else is wrong
+ * with it: the backend counted it, so every peer must count it too or the
+ * next one would look like a gap. When the envelope inside does not pass,
+ * or the backend's own stamp is not an actor (a kind this package does not
+ * know, an id too long), it comes back with `envelope: null` and `refused`,
+ * the reason: to be counted and otherwise ignored.
+ */
+export function decodeDelivery(input: unknown): Checked<{ stream: string; order: number; envelope: DecodedEnvelope | null; refused?: string }> {
+  const raw = parsed(input);
+  if (raw === undefined) return fail('not JSON');
+  if (!isRecord(raw)) return fail('a delivery must be a JSON object');
+  if (typeof raw.stream !== 'string' || !raw.stream || raw.stream.length > 128) return fail('a delivery needs "stream", the name of the backend\'s count');
+  if (typeof raw.order !== 'number' || !Number.isSafeInteger(raw.order) || raw.order < 1) return fail('a delivery needs "order", a whole number from 1');
+  const counted = { stream: raw.stream, order: raw.order };
+  const actor = decodeActor(raw.actor);
+  if (!actor) return { ok: true, value: { ...counted, envelope: null, refused: 'the backend\'s "actor" is not a person or an agent with an id of at most 128 characters' } };
+  const inner = parsed(raw.envelope);
+  const body = inner === undefined ? fail('not JSON') : decodeBody(inner);
+  if (!body.ok) return { ok: true, value: { ...counted, envelope: null, refused: body.error } };
+  return { ok: true, value: { ...counted, envelope: { ...body.value, actor } } };
 }

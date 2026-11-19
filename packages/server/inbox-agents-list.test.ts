@@ -508,11 +508,14 @@ describe("linked machines", () => {
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
   });
 
-  test("another machine's agent keeps where it lives in that machine's Rex, its pane's status and mark, but never Show in Rex (that machine's screen)", () => {
+  test("another machine's agent keeps where it lives in that machine's Rex, its pane's status and mark, and Show in Rex only as that machine offers it", () => {
     const sent = { id: "a", session: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y", show: true }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } };
     const [agent] = inboxPeerAgentsGroup([{ agents: [sent] }], "ibx_far")!.agents;
-    expect(agent).toMatchObject({ id: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y" }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } });
-    expect(agent!.place?.show).toBeUndefined();
+    expect(agent).toMatchObject({ id: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y", show: true }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } });
+    // It offered none (no Rex app attached to its Rex from elsewhere, or an older Inbox there): none here; nothing but `true` is an offer.
+    for (const place of [{ kind: "rex", line: "Rex · x / y" }, { kind: "rex", line: "Rex · x / y", show: "yes" }]) {
+      expect(inboxPeerAgentsGroup([{ agents: [{ ...sent, place }] }], "ibx_far")!.agents[0]!.place).toEqual({ kind: "rex", line: "Rex · x / y" });
+    }
     // A malformed one is dropped, as any field that does not parse.
     const [odd] = inboxPeerAgentsGroup([{ agents: [{ ...sent, place: { kind: "elsewhere", line: 3 }, rex_mark: { state: "dancing" } }] }], "ibx_far")!.agents;
     expect([odd!.place, odd!.rex_mark]).toEqual([undefined, undefined]);

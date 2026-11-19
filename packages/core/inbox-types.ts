@@ -24,6 +24,7 @@ import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
+import type { InboxPictureItPage } from "./picture-it-page";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -629,6 +630,7 @@ export interface InboxMessage {
    * it was sent (packages/server/inbox-live.ts). Absent otherwise.
    */
   live_sites?: InboxLiveSiteRef[];
+  picture_it?: InboxPictureItPage;
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -680,6 +682,12 @@ export interface InboxMessage {
    * the Inbox itself, never by an agent's call. Absent otherwise. Additive.
    */
   turn_error?: true;
+  /**
+   * One of the Inbox's own notes from a launched session in its thread (`writeLaunchNote`: a failed turn, a dialog
+   * answered Cancel, a session file gone), written only by the Inbox itself. The sound never rings for one, except a
+   * failed turn's (`turn_error`), which notifies. Absent otherwise. Additive.
+   */
+  launch_note?: true;
   /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
@@ -1210,6 +1218,12 @@ export interface InboxLaunchRecord {
 export interface InboxLaunchRex {
   line?: string;
   unavailable?: true;
+  /**
+   * With `unavailable`, why, where it is not "Rex's app isn't open here" (a Mac): `server`, Rex on that computer is a
+   * server with no app (Linux, FreeBSD) and it did not answer; `shared`, the Rex server there is another account's
+   * (a shared server named by `REX_SERVER`), where the Inbox reads but never starts an agent.
+   */
+  why?: "server" | "shared";
   refused?: true;
   session?: string;
   block?: string;
@@ -1316,7 +1330,7 @@ export interface InboxRun {
    * has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own
    * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
    */
-  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
+  rex?: { line: string | null; unavailable?: true; why?: "server" | "shared"; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -2308,17 +2322,32 @@ export function isInboxHealth(value: unknown): value is InboxHealth {
 }
 
 /**
- * The question sound (config.json `inboxSound`, through GET and POST
+ * The Inbox's sound (config.json `inboxSound`, through GET and POST
  * /api/inbox/settings): on unless turned off, one volume for every device.
  */
 export interface InboxSoundSettings {
   enabled: boolean;
   /** 10 to 100; the slider has no 0, because the switch is how the sound goes off. */
   volume: number;
+  /**
+   * What rings it (the owner, 2026-11-18): `messages`, any new message from an agent (the default, also for
+   * everyone who had the sound before and never chose); `asks`, only when an agent asks. Absent from an Inbox before it.
+   */
+  when?: InboxSoundWhen;
   /** The version the one-time "The Inbox can ring now" dialog was shown for (or a fresh install was marked with); null while never. */
   dialog_shown_for: string | null;
   /** The one-time dialog waits for a page on this computer to claim it (POST /api/inbox/sound/dialog). Absent from an Inbox before it. */
   dialog_due?: boolean;
+}
+
+/** What rings the sound: any new agent message, or only an agent asking. */
+export type InboxSoundWhen = "messages" | "asks";
+export const INBOX_SOUND_WHEN: readonly InboxSoundWhen[] = ["asks", "messages"];
+export const INBOX_SOUND_DEFAULT_WHEN: InboxSoundWhen = "messages";
+
+/** The choice as saved; anything else (nothing chosen yet, an unknown value) is the default. */
+export function inboxSoundWhen(value: unknown): InboxSoundWhen {
+  return value === "asks" || value === "messages" ? value : INBOX_SOUND_DEFAULT_WHEN;
 }
 
 export const INBOX_SOUND_DEFAULT_VOLUME = 60;
@@ -3550,9 +3579,10 @@ export interface InboxComposeSession {
 
 /**
  * Where an agent lives, as this computer's Rex last confirmed it (packages/server/inbox-rex.ts): one quiet line,
- * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered (the window asking is on
- * this computer, and Rex's app here confirmed a jump in this run and has not failed one since). Additive: absent from an older Inbox,
- * and for an agent whose place Rex does not confirm.
+ * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered to the window asking: a
+ * Rex app that can go to the pane for it is attached to that Rex (this computer's own app for this computer's own
+ * window; an app attached from another computer for the tailnet's or a linked machine's) and has not failed a Show
+ * since. Additive: absent from an older Inbox, and for an agent whose place Rex does not confirm.
  */
 export interface InboxAgentPlace {
   kind: "rex";
@@ -3563,7 +3593,7 @@ export interface InboxAgentPlace {
 /** The longest place line kept from another machine's list. */
 const INBOX_AGENT_PLACE_LINE_MAX = 200;
 
-/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed (never from another machine: its Rex is not here). */
+/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed and it is exactly `true`. */
 export function inboxAgentPlaceChecked(value: unknown, options: { show: boolean }): InboxAgentPlace | undefined {
   if (!value || typeof value !== "object") return undefined;
   const place = value as Record<string, unknown>;

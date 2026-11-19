@@ -9,6 +9,7 @@ import { bindingFault, groupCycle, idMap, isBoundEnd, orderOf, withOrderKeys } f
 import { isFiniteRect } from './geometry';
 import { isOrderKey } from './order-key';
 import { isPictureRef } from './assets';
+import { checkChart } from './chart';
 import { HTML_ITEM_MAX_LENGTH, isWebUrl } from './html-item';
 import { isValidId } from './ids';
 import {
@@ -16,10 +17,13 @@ import {
   ARTIFACT_KINDS,
   BOX_SHAPES,
   CANVAS_DOCUMENT_VERSION,
+  INK_PENS,
   STAMP_KINDS,
   STYLE_ENDS,
   STYLE_FILLS,
   STYLE_SIDES,
+  TEXT_FACES,
+  TEXT_SIZES,
   type Actor,
   type ArrowRouting,
   type BoxShape,
@@ -28,12 +32,14 @@ import {
   type CanvasDocument,
   type CanvasLink,
   type CanvasObject,
+  type InkObject,
   type ObjectStyle,
   type ReferenceTarget,
   type Snapshot,
   type SnapshotInput,
   type StampObject,
   type SnapshotSource,
+  type TextObject,
 } from './types';
 
 export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -56,17 +62,39 @@ export const LIMITS = {
   snapshots: 2_000,
   spriteFrames: 512,
   spriteFps: 60,
+  /**
+   * The most points one drawn line holds. A stroke of a hand is a few dozen once simplified
+   * (`strokeFromPoints`); this is room for a long scribble, and the bound on what one line costs to draw.
+   */
+  inkPoints: 1000,
 } as const;
+
+/** Every field name of every object type, as the types have them. */
+type FieldOf<T> = T extends unknown ? keyof T : never;
+type ObjectField = FieldOf<CanvasObject>;
+
+const FIELD_NAMES = [
+  'id', 'type', 'x', 'y', 'w', 'h', 'z', 'group', 'color', 'style', 'by', 'link',
+  'text', 'detail', 'shape', 'lanes', 'size', 'title', 'src', 'alt', 'frames', 'fps', 'html',
+  'target', 'description', 'site', 'image', 'icon', 'from', 'to', 'label', 'routing', 'kind', 'count',
+  'face', 'points', 'pen',
+  'mark', 'fields', 'rows', 'encode', 'stack', 'flip', 'dash', 'rules', 'unit',
+] as const satisfies readonly ObjectField[];
+
+/**
+ * A field added to an object type in `model/types.ts` and not listed above does not compile: this names the
+ * ones that are missing. A change to an object carries only listed names, so a field left out would be
+ * dropped from every peer's change and from undo.
+ */
+type MissingField = Exclude<ObjectField, (typeof FIELD_NAMES)[number]>;
+const EVERY_FIELD_IS_LISTED: [MissingField] extends [never] ? true : { missing: MissingField } = true;
+void EVERY_FIELD_IS_LISTED;
 
 /**
  * Every field name an object of any type may carry. A change to an object names its fields; a name that is
  * not here is not a field (and `__proto__`, `constructor` and `prototype` are not here).
  */
-export const OBJECT_FIELDS: ReadonlySet<string> = new Set([
-  'id', 'type', 'x', 'y', 'w', 'h', 'z', 'group', 'color', 'style', 'by', 'link',
-  'text', 'detail', 'shape', 'lanes', 'size', 'title', 'src', 'alt', 'frames', 'fps', 'html',
-  'target', 'description', 'site', 'image', 'icon', 'from', 'to', 'label', 'routing', 'kind', 'count',
-]);
+export const OBJECT_FIELDS: ReadonlySet<string> = new Set(FIELD_NAMES);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -115,6 +143,25 @@ function readEnd(value: unknown): ArrowEnd | null {
   if (!isRecord(value)) return null;
   if ('object' in value) return isValidId(value.object) ? { object: value.object } : null;
   return isCoordinate(value.x) && isCoordinate(value.y) ? { x: value.x, y: value.y } : null;
+}
+
+/**
+ * A drawn line's points, copied into a plain array of plain numbers, or null. The length is looked at before
+ * anything else, so the work is bounded whatever is handed in; each slot is read by index into a new list, so
+ * what comes out is plain numbers of its own (a hole reads as not a number and is refused; JSON cannot make one).
+ */
+function readInkPoints(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const length = value.length;
+  if (length < 4 || length % 2 !== 0 || length > LIMITS.inkPoints * 2) return null;
+  const out = new Array<number>(length);
+  for (let i = 0; i < length; i++) {
+    const v: unknown = value[i];
+    if (typeof v !== 'number' || !(v >= 0 && v <= 1)) return null;
+    // Minus nothing is nothing: it would be saved as 0 and then differ from itself.
+    out[i] = v === 0 ? 0 : v;
+  }
+  return out;
 }
 
 function readLink(value: unknown): CanvasLink | null {
@@ -216,9 +263,13 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       return { ok: true, value: { ...base, ...r, type, text: value.text } };
     case 'text': {
       if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
-      const size = value.size;
-      if (size !== undefined && size !== 'small' && size !== 'medium' && size !== 'large') return fail(`${id}: size must be small, medium or large`);
-      return { ok: true, value: { ...base, ...r, type, text: value.text, ...(size ? { size } : {}) } };
+      const { size, face } = value;
+      if (size !== undefined && !(TEXT_SIZES as readonly unknown[]).includes(size)) return fail(`${id}: size must be one of ${TEXT_SIZES.join(', ')}`);
+      if (face !== undefined && !(TEXT_FACES as readonly unknown[]).includes(face)) return fail(`${id}: face must be one of ${TEXT_FACES.join(', ')}`);
+      return {
+        ok: true,
+        value: { ...base, ...r, type, text: value.text, ...(size ? { size: size as TextObject['size'] } : {}), ...(face && face !== 'sans' ? { face: face as TextObject['face'] } : {}) },
+      };
     }
     case 'frame':
       if (!isText(value.title, LIMITS.title)) return fail(`${id}: title is missing or too long`);
@@ -240,11 +291,23 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       if (!isText(value.html, HTML_ITEM_MAX_LENGTH) || !value.html.trim()) return fail(`${id}: html is missing, empty or longer than ${HTML_ITEM_MAX_LENGTH} characters`);
       if (value.alt !== undefined && !isText(value.alt, LIMITS.title)) return fail(`${id}: alt is too long`);
       return { ok: true, value: { ...base, ...r, type, html: value.html, ...(value.alt ? { alt: value.alt as string } : {}) } };
+    case 'chart': {
+      const chart = checkChart(value, id);
+      if (!chart.ok) return chart;
+      return { ok: true, value: { ...base, ...r, type, ...chart.value } };
+    }
     case 'stamp': {
       if (!(STAMP_KINDS as readonly unknown[]).includes(value.kind)) return fail(`${id}: kind must be one of ${STAMP_KINDS.join(', ')}`);
       const count = value.count;
       if (count !== undefined && (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 999)) return fail(`${id}: count must be a whole number from 1 to 999`);
       return { ok: true, value: { ...base, ...r, type, kind: value.kind as StampObject['kind'], ...(count && count > 1 ? { count } : {}) } };
+    }
+    case 'ink': {
+      const points = readInkPoints(value.points);
+      if (!points) return fail(`${id}: points must be x then y for 2 to ${LIMITS.inkPoints} points, each a number from 0 to 1 across the object's box`);
+      const pen = value.pen;
+      if (pen !== undefined && !(INK_PENS as readonly unknown[]).includes(pen)) return fail(`${id}: pen must be one of ${INK_PENS.join(', ')}`);
+      return { ok: true, value: { ...base, ...r, type, points, ...(pen && pen !== 'marker' ? { pen: pen as InkObject['pen'] } : {}) } };
     }
     case 'reference': {
       const target = readTarget(value.target);

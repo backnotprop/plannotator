@@ -2490,6 +2490,14 @@
           "type": "boolean",
           "const": true
         },
+        "why": {
+          "type": "string",
+          "enum": [
+            "server",
+            "shared"
+          ],
+          "x-open": true
+        },
         "refused": {
           "type": "boolean",
           "const": true
@@ -3181,6 +3189,9 @@
             "$ref": "#/$defs/InboxLiveSiteRef"
           }
         },
+        "picture_it": {
+          "$ref": "#/$defs/InboxPictureItPage"
+        },
         "delivery": {
           "anyOf": [
             {
@@ -3304,6 +3315,10 @@
           ]
         },
         "turn_error": {
+          "type": "boolean",
+          "const": true
+        },
+        "launch_note": {
           "type": "boolean",
           "const": true
         },
@@ -3743,6 +3758,23 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxPictureItPage": {
+      "type": "object",
+      "properties": {
+        "attachment_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "title"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/picture-it-page.ts"
     },
     "InboxProject": {
       "type": "object",
@@ -5048,6 +5080,14 @@
             "unavailable": {
               "type": "boolean",
               "const": true
+            },
+            "why": {
+              "type": "string",
+              "enum": [
+                "server",
+                "shared"
+              ],
+              "x-open": true
             },
             "refused": {
               "type": "boolean",

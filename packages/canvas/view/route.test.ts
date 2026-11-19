@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { CanvasStore } from '../events/store';
-import { createDocument } from '../model/document';
+import { CURVE_BOW_MAX, createDocument, objectBounds } from '../model/document';
 import type { Point, Rect } from '../model/geometry';
 import type { CanvasObject } from '../model/types';
 import { type Anchor, CLEARANCE, routeEnters, routeOrthogonal } from './route';
 import { BOX_SHAPES } from '../model/types';
 import { flatten, hachure, roughStrokes, seedOf } from './rough';
-import { endAngles, findHops, pointAlong, routePath } from './route-path';
+import { curveRoute, distanceToRoute, endAngles, findHops, pointAlong, routePath } from './route-path';
+import { indexFor } from './document-index';
+import { hitTest } from './hit-test';
 import { shapeOutline } from './shape-outline';
 import { facingSide, portPoint, routesFor } from './routes';
 
@@ -243,5 +245,78 @@ describe('the sketch look', () => {
       expect(Math.abs(numbers[i] - 65) / 65 + Math.abs(numbers[i + 1] - 62) / 62).toBeLessThan(1.06);
     }
     expect(hachure([], 6, -41, 5)).toBe('');
+  });
+});
+
+describe('a curved connector', () => {
+  const a = { x: 0, y: 0 };
+  const b = { x: 400, y: 0 };
+
+  test('is one arc from end to end, the same every time, and its polyline is the curve the path draws', () => {
+    const curve = curveRoute(a, b);
+    expect(curve.points[0]).toEqual(a);
+    expect(curve.points[curve.points.length - 1]).toEqual(b);
+    expect(curve.d).toBe('M0 0Q200 -128 400 0');
+    expect(curveRoute(a, b)).toEqual(curve);
+    const middle = pointAlong(curve.points, 0.5);
+    expect(Math.round(middle.x)).toBe(200);
+    expect(Math.round(middle.y)).toBe(-64);
+  });
+
+  test('bows to the left of the way it runs, so a pair, one each way, part', () => {
+    expect(pointAlong(curveRoute(a, b).points, 0.5).y).toBeLessThan(0);
+    expect(pointAlong(curveRoute(b, a).points, 0.5).y).toBeGreaterThan(0);
+  });
+
+  test('a long one bows no further than a set amount, and each end leans into the curve', () => {
+    expect(Math.round(pointAlong(curveRoute(a, { x: 4000, y: 0 }).points, 0.5).y)).toBe(-CURVE_BOW_MAX);
+    const angles = endAngles(curveRoute(a, b).points);
+    // It arrives heading down and to the right, having come over the top.
+    expect(angles.end).toBeGreaterThan(0);
+    expect(angles.end).toBeLessThan(Math.PI / 2);
+  });
+
+  test('ends in one place, or at numbers that are not numbers, give a line and never a division by nothing', () => {
+    expect(curveRoute(a, a)).toEqual({ d: 'M0 0L0 0', points: [a, a] });
+    expect(curveRoute(a, { x: 0.5, y: 0 }).points.length).toBe(2);
+    expect(curveRoute(a, { x: Number.NaN, y: 0 }).points.length).toBe(2);
+  });
+
+  test('its box holds the whole of it, whichever way it runs, so it is mounted, captured and grabbed along the curve', () => {
+    for (const [fx, fy, tx, ty] of [[0, 0, 500, 0], [500, 0, 0, 0], [0, 0, 0, 500], [0, 0, 300, 300], [300, 40, -200, 600], [0, 0, 30, 2000], [0, 0, 3000, 100]]) {
+      const store = new CanvasStore(createDocument('board', 'Board'));
+      store.dispatch({ type: 'add', objects: [{ id: 'ab', type: 'arrow', from: { x: fx, y: fy }, to: { x: tx, y: ty }, routing: 'curve' }] });
+      const doc = store.getDocument();
+      const curve = curveRoute({ x: fx, y: fy }, { x: tx, y: ty });
+      const bounds = objectBounds(doc, 'ab')!;
+      for (const p of curve.points) {
+        expect(p.x).toBeGreaterThanOrEqual(bounds.x - 0.01);
+        expect(p.x).toBeLessThanOrEqual(bounds.x + bounds.w + 0.01);
+        expect(p.y).toBeGreaterThanOrEqual(bounds.y - 0.01);
+        expect(p.y).toBeLessThanOrEqual(bounds.y + bounds.h + 0.01);
+      }
+      // Grabbed where it is drawn; the straight line under a long one is open board.
+      const on = pointAlong(curve.points, 0.5);
+      expect(distanceToRoute(on, curve.points)).toBeLessThan(0.01);
+      expect(hitTest(doc, indexFor(store), on)).toBe('ab');
+      if (Math.hypot(tx - fx, ty - fy) >= 500) expect(hitTest(doc, indexFor(store), { x: (fx + tx) / 2, y: (fy + ty) / 2 })).toBeNull();
+    }
+  });
+
+  test('between two objects it runs from edge to edge, and a loop back to one object keeps its own shape', () => {
+    const store = new CanvasStore(createDocument('board', 'Board'));
+    store.dispatch({
+      type: 'add',
+      objects: [
+        { id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A' },
+        { id: 'b', type: 'box', x: 500, y: 0, w: 100, h: 40, text: 'B' },
+        { id: 'ab', type: 'arrow', from: { object: 'a' }, to: { object: 'b' }, routing: 'curve' },
+        { id: 'aa', type: 'arrow', from: { object: 'a' }, to: { object: 'a' }, routing: 'curve' },
+      ] as CanvasObject[],
+    });
+    const doc = store.getDocument();
+    expect(hitTest(doc, indexFor(store), pointAlong(curveRoute({ x: 100, y: 20 }, { x: 500, y: 20 }).points, 0.5))).toBe('ab');
+    // The loop is found where a loop is drawn: out to the right of the box.
+    expect(hitTest(doc, indexFor(store), { x: 126, y: 0 })).toBe('aa');
   });
 });

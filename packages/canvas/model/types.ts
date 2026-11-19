@@ -113,11 +113,33 @@ export interface NoteObject extends PlacedObject {
   text: string;
 }
 
+/**
+ * How large bare text is. Absent is `medium`. `title` and `display` are the
+ * words a board is read by from far off (a heading over one part, the name
+ * of the whole thing): they stay drawn when the board is zoomed so far out
+ * that all other words are hidden.
+ */
+export const TEXT_SIZES = ['small', 'medium', 'large', 'title', 'display'] as const;
+export type TextSize = (typeof TEXT_SIZES)[number];
+
+/** How tall the letters of each size are, in world units: the stylesheet, the still picture and the default box agree on these. */
+export const TEXT_SIZE_PX: Readonly<Record<TextSize, number>> = { small: 12.5, medium: 15, large: 22, title: 40, display: 84 };
+
+/**
+ * The face bare text is set in. Absent is `sans`, the board's own, and
+ * `sans` is never stored. No font is bundled: each is a list of faces a
+ * device is likely to have, ending in the generic family, so what is seen
+ * differs between devices.
+ */
+export const TEXT_FACES = ['sans', 'serif', 'mono', 'hand'] as const;
+export type TextFace = (typeof TEXT_FACES)[number];
+
 /** Bare text on the board. */
 export interface TextObject extends PlacedObject {
   type: 'text';
   text: string;
-  size?: 'small' | 'medium' | 'large';
+  size?: TextSize;
+  face?: Exclude<TextFace, 'sans'>;
 }
 
 /** A titled region. What lies inside it is decided by geometry, not stored. */
@@ -153,6 +175,62 @@ export interface HtmlObject extends PlacedObject {
   html: string;
   /** What it shows, in words. The frame takes no focus and is not read out, so this is all a screen reader gets. */
   alt?: string;
+}
+
+/** How a chart draws its rows. */
+export const CHART_MARKS = ['bar', 'line', 'area', 'dot', 'cell', 'span'] as const;
+export type ChartMark = (typeof CHART_MARKS)[number];
+
+/** One value in a chart's table: a number, or a short piece of text. */
+export type ChartCell = string | number;
+
+/**
+ * Which field of the table goes where. Every value is the name of one of the chart's `fields`.
+ * - `x`, `y`: along the bottom and up the side. `y` may be up to four fields, each drawn as its own series.
+ * - `series`: rows with the same value here are one series (one line, one colour).
+ * - `x2`: where a `span` ends. `value`: how strong a `cell` is. `size`: how large a `dot` is.
+ * - `facet`: one small chart for each value here, all on the same scales.
+ */
+export interface ChartEncode {
+  x: string;
+  y: string | string[];
+  series?: string;
+  x2?: string;
+  value?: string;
+  size?: string;
+  facet?: string;
+}
+
+/** A line across the chart at one value, with a word: "today", a limit, a target. `on: 'x'` stands it upright. */
+export interface ChartRule {
+  at: ChartCell;
+  label?: string;
+  on?: 'x';
+}
+
+/**
+ * A chart as data, not as a picture or markup: a small table and which field goes where. Whoever adds it
+ * sends the numbers; the canvas draws them (`view/chart.ts`) in its own look, in both themes, in a snapshot
+ * and in the still picture. Its colour is the object's colour, like anything else. Limits: `CHART_LIMITS` (`model/chart.ts`).
+ */
+export interface ChartObject extends PlacedObject {
+  type: 'chart';
+  mark: ChartMark;
+  /** The table's column names, in order. */
+  fields: string[];
+  /** The table's rows: each as long as `fields`. */
+  rows: ChartCell[][];
+  encode: ChartEncode;
+  /** Bars and areas: series on top of each other, not side by side. */
+  stack?: true;
+  /** Bars: running sideways, names down the left. */
+  flip?: true;
+  /** Lines: the series drawn dashed (a plan, a projection), by name. */
+  dash?: string[];
+  rules?: ChartRule[];
+  title?: string;
+  /** Written after values: "ms", "%". */
+  unit?: string;
 }
 
 /** What kind of thing an artifact is: decides its card's glyph and how it opens. */
@@ -203,6 +281,29 @@ export interface StampObject extends PlacedObject {
   count?: number;
 }
 
+/**
+ * What a line is drawn with. Absent is `marker`, and `marker` is never
+ * stored. A `highlighter` is broad and see-through, for going over words
+ * and pictures.
+ */
+export const INK_PENS = ['fine', 'marker', 'highlighter'] as const;
+export type InkPen = (typeof INK_PENS)[number];
+
+/**
+ * A line drawn by hand: a ring round something, an underline, an arrow with
+ * a bend in it, a rising curve. See `model/ink.ts`.
+ */
+export interface InkObject extends PlacedObject {
+  type: 'ink';
+  /**
+   * The line in the order drawn: x then y for each point, each from 0 to 1
+   * across the object's own box. Moving and resizing change the box, never
+   * these, so the ordinary commands and events carry a drawing.
+   */
+  points: number[];
+  pen?: Exclude<InkPen, 'marker'>;
+}
+
 /** An arrow's end: stuck to an object, or a free point. */
 export type ArrowEnd = { object: ObjectId } | Point;
 
@@ -228,8 +329,10 @@ export type CanvasObject =
   | ImageObject
   | SpriteObject
   | HtmlObject
+  | ChartObject
   | ReferenceObject
   | StampObject
+  | InkObject
   | ArrowObject
   | GroupObject;
 
@@ -244,8 +347,10 @@ export const PLACED_TYPES: ReadonlySet<CanvasObjectType> = new Set([
   'image',
   'sprite',
   'html',
+  'chart',
   'reference',
   'stamp',
+  'ink',
 ]);
 
 export const isPlaced = (object: CanvasObject): object is PlacedCanvasObject => PLACED_TYPES.has(object.type);
@@ -324,6 +429,8 @@ export const DEFAULT_SIZES: Readonly<Record<string, { w: number; h: number }>> =
   image: { w: 320, h: 200 },
   sprite: { w: 48, h: 48 },
   html: { w: 320, h: 120 },
+  chart: { w: 380, h: 240 },
   reference: { w: 252, h: 240 },
   stamp: { w: 34, h: 34 },
+  ink: { w: 160, h: 120 },
 };

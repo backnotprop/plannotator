@@ -3,8 +3,10 @@ import { createDocument } from '../model/document';
 import { CanvasStore } from '../events/store';
 import type { CanvasObject } from '../model/types';
 import { FIGURE_MIN, figureBox, fitName } from '../snapshot/SnapshotFigure';
+import { HTML_FRAMES_DROP, HTML_FRAMES_MAX, htmlFramesNext } from './CanvasView';
 import { edgesBeyond, nearestBeyond } from './EdgeMarkers';
 import { ARROW_LABEL_MAX, shortLabel } from './objects';
+import { faceColor } from './people';
 import { addReference, previewsPending } from './references';
 
 describe('words that do not fit', () => {
@@ -73,5 +75,53 @@ describe('a pasted link while its page is looked up', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(previewsPending.has(failing)).toBe(false);
     expect(store.getDocument().objects[failing]).toBeDefined();
+  });
+});
+
+describe('the colour of a person\'s mark', () => {
+  test('is the host\'s colour when it is a colour, and nothing at all otherwise', () => {
+    expect(faceColor({ color: '#B9A6FF' })).toBe('#B9A6FF');
+    expect(faceColor({ color: ' oklch(0.7 0.1 290) ' })).toBe('oklch(0.7 0.1 290)');
+    expect(faceColor({ color: 'rebeccapurple' })).toBe('rebeccapurple');
+    expect(faceColor({})).toBeUndefined();
+    expect(faceColor(null)).toBeUndefined();
+    // Anything that could load, run, read a variable or end the declaration is not a colour.
+    for (const color of [
+      'red; background: url(https://evil.example/x)',
+      'url(javascript:alert(1))',
+      'var(--background)',
+      'rgb(0 0 0); position: fixed',
+      'color-mix(in srgb, red, blue)',
+      'rgb(calc(1 * 2) 0 0)',
+      'transparent',
+      'currentcolor',
+      'inherit',
+      '',
+      '#12',
+      'expression(alert(1))',
+      '</style><script>',
+      `#${'f'.repeat(200)}`,
+      `rgb(${'1 '.repeat(200)})`,
+      0,
+      true,
+      ['#fff'],
+      { custom: '#fff' },
+      { toString: () => '#fff' },
+    ]) {
+      expect(faceColor({ color })).toBeUndefined();
+    }
+  });
+});
+
+describe('HTML items when the board is zoomed out', () => {
+  test('frames are dropped past ten on screen and come back at eight, so one item at the edge does not turn them all over', () => {
+    // Close up, every item is itself however many there are.
+    expect(htmlFramesNext(false, 'full', 500)).toBe(true);
+    // Walking the count up and down, as a pan across a board with items along it does.
+    let kept = true;
+    const seen: boolean[] = [];
+    for (const onScreen of [3, 8, 9, 10, 11, 10, 9, 10, 9, 8, 9, 10, 11]) seen.push((kept = htmlFramesNext(kept, 'plain', onScreen)));
+    expect(seen).toEqual([true, true, true, true, false, false, false, false, false, true, true, true, false]);
+    expect(HTML_FRAMES_MAX).toBeLessThan(HTML_FRAMES_DROP);
   });
 });
