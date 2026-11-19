@@ -1120,14 +1120,18 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               question.choices.map((choice, choiceIndex) => {
                 const checked = selected.includes(choice.label);
                 const hasChange = !!choiceChanges?.[choiceIndex];
+                // A choice with a change of its own: the row and its change take the tint (hover, picked) as one.
+                const tint = cx('rounded-[7px] transition-colors', !readOnly && 'hover:bg-muted/45', checked && 'bg-primary/12 hover:bg-primary/12');
                 const row = (
                   <label
                     key={choice.label}
-                    className={cx(
-                      'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
-                      readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
-                      checked && 'bg-primary/12 hover:bg-primary/12',
-                    )}
+                    className={hasChange
+                      ? cx('flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5', readOnly ? 'cursor-default' : 'cursor-pointer')
+                      : cx(
+                        'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
+                        readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
+                        checked && 'bg-primary/12 hover:bg-primary/12',
+                      )}
                     data-question-option=""
                     onPointerDown={onRowPointerDown}
                     onClickCapture={(event) => onRowClick(event, choice.label)}
@@ -1154,7 +1158,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 );
                 // A choice's own change (its version, its pictures, or today's words): under its row, outside its label.
                 return hasChange ? (
-                  <div key={choice.label} data-question-option-with-change="" onPointerDown={onRowPointerDown}>
+                  <div key={choice.label} className={tint} data-question-option-with-change="" data-question-option-checked={checked ? '' : undefined} onPointerDown={onRowPointerDown}>
                     {row}
                     {choiceChange(choiceIndex, 'row')}
                   </div>

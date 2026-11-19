@@ -27,7 +27,8 @@
  * together) is never diffed, and a diff that would take over
  * `QUESTION_CHANGE_MAX_EDITS` edits or 50 ms gives up; either way the lines
  * are shown unmarked. Results are kept per pair (a pick or a keystroke never
- * diffs again).
+ * diffs again), except a diff that ran out of time: a slow moment is not
+ * remembered as "unmarked" for good.
  *
  * Pure; never throws.
  */
@@ -39,8 +40,27 @@ export const QUESTION_CHANGE_WHOLE_LINE_SHARE = 0.4;
 /** Over this many characters (before and after together) the lines are shown unmarked, never diffed. */
 export const QUESTION_CHANGE_MAX_DIFF_CHARS = 20_000;
 /** A diff that would need more edits than this (or over 50 ms) gives up: the lines are shown unmarked. */
-export const QUESTION_CHANGE_MAX_EDITS = 2_000;
-const DIFF_LIMITS = { maxEditLength: QUESTION_CHANGE_MAX_EDITS, timeout: 50 } as const;
+export const QUESTION_CHANGE_MAX_EDITS = 500;
+const DIFF_TIMEOUT_MS = 50;
+const DIFF_LIMITS = { maxEditLength: QUESTION_CHANGE_MAX_EDITS, timeout: DIFF_TIMEOUT_MS } as const;
+
+/** The clock a diff's time is measured on (tests swap it in `setQuestionChangeDiffClock`). */
+let clock: () => number = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+/** Tests only: the clock diffs are timed with; returns the one it replaces. */
+export function setQuestionChangeDiffClock(next: () => number): () => number {
+  const previous = clock;
+  clock = next;
+  return previous;
+}
+/** Set while working out one pair when a diff gave up after running out of time. */
+let ranOutOfTime = false;
+/** A `diffArrays` result, noting a give-up that took the whole time allowed (not the edit cap, which always gives the same answer). */
+function timedDiff<T>(run: () => T | undefined): T | undefined {
+  const started = clock();
+  const result = run();
+  if (result === undefined && clock() - started >= DIFF_TIMEOUT_MS) ranOutOfTime = true;
+  return result;
+}
 
 /** Scripts written with no spaces between words: no word marks there. */
 const UNSPACED_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]/u;
@@ -170,7 +190,7 @@ const unmarked = (before: QuestionChangeLine, after: QuestionChangeLine): Extrac
  */
 function wordMarks(before: QuestionChangeLine, after: QuestionChangeLine): Extract<QuestionChangeRow, { type: 'mod' }> {
   if (UNSPACED_RE.test(before.raw) || UNSPACED_RE.test(after.raw)) return unmarked(before, after);
-  const changes = diffArrays(before.tokens, after.tokens, { comparator: sameToken, ...DIFF_LIMITS });
+  const changes = timedDiff(() => diffArrays(before.tokens, after.tokens, { comparator: sameToken, ...DIFF_LIMITS }));
   if (!changes) return unmarked(before, after);
   const changed = (k: number) => k >= 0 && k < changes.length && !!(changes[k].added || changes[k].removed);
   const beforeTokens: QuestionChangeMarkedToken[] = [];
@@ -217,7 +237,9 @@ export function diffQuestionChange(before: string | null | undefined, after: str
     rowsCache.set(key, known);
     return known;
   }
+  ranOutOfTime = false;
   const rows = computeRows(before, after);
+  if (ranOutOfTime) return rows;
   rowsCache.set(key, rows);
   if (rowsCache.size > ROWS_CACHE_SIZE) rowsCache.delete(rowsCache.keys().next().value!);
   return rows;
@@ -227,7 +249,7 @@ function computeRows(before: string | null | undefined, after: string | null | u
   const a = questionChangeLines(before);
   const b = questionChangeLines(after);
   const tooBig = (before?.length ?? 0) + (after?.length ?? 0) > QUESTION_CHANGE_MAX_DIFF_CHARS;
-  const changes = tooBig ? undefined : diffArrays(a, b, { comparator: (x, y) => x.raw === y.raw, ...DIFF_LIMITS });
+  const changes = tooBig ? undefined : timedDiff(() => diffArrays(a, b, { comparator: (x, y) => x.raw === y.raw, ...DIFF_LIMITS }));
   if (!changes) {
     // Too big to diff: every line shown as written, none marked (same lines still read as same).
     const rows: QuestionChangeRow[] = [];

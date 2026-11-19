@@ -1258,22 +1258,14 @@ export const parseQuestionBlock = (
   };
   // Each choice's description as the default parse builds it, piece by piece.
   const descParts: string[][] = [];
-  // The choice a line belongs to (its line, an indented line under it, or a
-  // change line right under those), for a change line written unindented.
-  const choiceOfLine = new Map<number, number>();
   let changeSource: { value: string; contextIndex: number } | undefined;
-  // The Before / After value still taking lines: `> ` quoted lines after a
-  // bare label, or plain lines right after a one-line text value.
+  // A bare `Before:` / `After:` still taking its `> ` quoted lines. A value
+  // written after the colon is that one line: the plain line under it is
+  // the agent's own words (commentary), never part of the value.
   let openValue: { event: TrackedChangeLine & { field: 'before' | 'after' }; owner: number; inDescription: boolean; lastLine: number } | null = null;
   const continuesValue = (i: number, text: string, inDescription: boolean, owner: number): boolean => {
     if (!openValue || openValue.lastLine !== i - 1 || openValue.inDescription !== inDescription || openValue.owner !== owner) return false;
-    const event = openValue.event;
-    if (event.quoted) return QUOTE_LINE_RE.test(text);
-    // A one-line text value goes on over the lines right under it, up to a
-    // blank line, another change line or the start of other markdown.
-    const first = event.lines[0]?.trim() ?? '';
-    return first !== '' && !readChangeLine(text) && !CONTEXT_LINE_RE.test(text) && !STARTS_OTHER_BLOCK_RE.test(text)
-      && !CHANGE_NONE_RE.test(first) && !SHOWS_IMAGE_RE.test(first) && !CHANGE_CAPTIONED_IMAGE_RE.test(first);
+    return openValue.event.quoted && QUOTE_LINE_RE.test(text);
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -1301,7 +1293,6 @@ export const parseQuestionBlock = (
       raws.push(raw);
       descParts.push(description ? [description] : []);
       lastChoice = choices.length - 1;
-      choiceOfLine.set(i, lastChoice);
       openBullet = null;
       continuationFence = null;
       recommendationOpen = false;
@@ -1435,11 +1426,10 @@ export const parseQuestionBlock = (
       // A choice's own `Where:` / `Before:` / `After:` (or a line of its
       // value): recorded, and still put in the description as the default
       // parse does; it leaves it only if the choice's place is drawn.
-      choiceOfLine.set(i, lastChoice);
       if (readChangeLines && !continuationFence) {
         const part = descParts[lastChoice]!.length;
         if (continuesValue(i, extra, true, lastChoice)) {
-          openValue!.event.lines.push(openValue!.event.quoted ? unquote(extra) : extra);
+          openValue!.event.lines.push(unquote(extra));
           openValue!.event.parts.push(part);
           openValue!.lastLine = i;
         } else {
@@ -1492,34 +1482,28 @@ export const parseQuestionBlock = (
     // Change lines at the block's indent: only where the default parse keeps
     // the line as a context line of its own (outside a code fence, not a
     // bullet). The line goes to the context as always; where it went is
-    // recorded. Right under a choice (its line or its own lines), a `Where:` /
-    // `Before:` / `After:` written unindented is that choice's.
+    // recorded. A choice's own lines are indented under it: one written at
+    // the block's indent, even right after a choice, is the question's.
     if (readChangeLines && !bullet && !fenceBefore && !bodyFence && atBlockIndent) {
       const at = contextLines.length;
-      const prevChoice = choiceOfLine.get(i - 1) ?? -1;
-      const owner = openValue && openValue.lastLine === i - 1 && !openValue.inDescription ? openValue.owner : prevChoice;
-      if (continuesValue(i, line.trim(), false, owner)) {
-        openValue!.event.lines.push(openValue!.event.quoted ? unquote(line) : line.trim());
+      if (continuesValue(i, line.trim(), false, -1)) {
+        openValue!.event.lines.push(unquote(line));
         openValue!.event.ctx.push(at);
         openValue!.lastLine = i;
-        if (owner !== -1) choiceOfLine.set(i, owner);
         pushContext(line.trimEnd());
         continue;
       }
       const changeLine = readChangeLine(line);
       if (changeLine) {
         const text = changeLine.value.trim();
-        const lineOwner = changeLine.field === 'source' ? -1 : prevChoice;
         if (changeLine.field === 'where' && text) {
-          trackChange(lineOwner, { field: 'where', value: text, ctx: [at], parts: [] });
-          if (lineOwner !== -1) choiceOfLine.set(i, lineOwner);
+          trackChange(-1, { field: 'where', value: text, ctx: [at], parts: [] });
         } else if (changeLine.field === 'source' && text && !changeSource) {
           changeSource = { value: text, contextIndex: at };
         } else if (changeLine.field === 'before' || changeLine.field === 'after') {
           const event = { field: changeLine.field, lines: text ? [text] : [], quoted: !text, ctx: [at], parts: [] };
-          trackChange(lineOwner, event);
-          openValue = { event, owner: lineOwner, inDescription: false, lastLine: i };
-          if (lineOwner !== -1) choiceOfLine.set(i, lineOwner);
+          trackChange(-1, event);
+          openValue = { event, owner: -1, inDescription: false, lastLine: i };
         }
         pushContext(line.trimEnd());
         continue;

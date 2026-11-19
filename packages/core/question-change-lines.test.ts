@@ -342,28 +342,43 @@ describe('change lines: what stays text', () => {
   });
 });
 
-describe('change lines: forgiving forms', () => {
-  test('a one-line value goes on over the lines right under it, to a blank line, another change line or other markdown', () => {
+describe('change lines: one line, or quoted lines; a choice\'s lines indented under it', () => {
+  test('a value written after its label is that one line: the plain line under it stays the agent\'s own words', () => {
     const q = read([
-      'Reword the paragraph?',
-      'Before: First line of the paragraph',
-      'second line of it.',
-      'After: First line, reworded,',
-      'and its second line.',
-      '',
-      'Context after a blank line.',
-      '- [ ] Yes',
-      '- [ ] No',
+      'Keep the systemd timers?',
+      'Before: we used cron.',
+      'After: we use systemd timers.',
+      'That cut missed runs to zero.',
+      '- [ ] Keep them',
+      '- [ ] Go back',
     ].join('\n'));
-    expect(q.change?.groups).toEqual([{
-      before: { kind: 'text', text: 'First line of the paragraph\nsecond line of it.' },
-      after: { kind: 'text', text: 'First line, reworded,\nand its second line.' },
-    }]);
-    expect(q.context).toBe('Context after a blank line.');
-    // Under a choice too; a heading or a list ends the value.
-    const choice = read(['Which?', '- [ ] A', '    After: One line', '    and the next', '- [ ] B', 'Before: x', '# Heading'].join('\n'));
-    expect(choice.choices[0].after).toEqual({ kind: 'text', text: 'One line\nand the next' });
-    expect(choice.choices[0].description).toBeUndefined();
+    expect(q.change?.groups).toEqual([{ before: { kind: 'text', text: 'we used cron.' }, after: { kind: 'text', text: 'we use systemd timers.' } }]);
+    expect(q.context).toBe('That cut missed runs to zero.');
+    // Under a choice too: the line under its After stays in its description.
+    const choice = read(['Which?', '- [ ] A', '    After: One line', '    and why I like it', '- [ ] B'].join('\n'));
+    expect(choice.choices[0].after).toEqual({ kind: 'text', text: 'One line' });
+    expect(choice.choices[0].description).toBe('and why I like it');
+  });
+
+  test('lines written at the block\'s indent right after the choices are the question\'s, never the last choice\'s', () => {
+    const body = [
+      'Rename the Settings heading?',
+      '- [ ] Rename it',
+      '- [ ] Leave it',
+      'Before: When an agent asks you',
+      'After: When an agent sends you something',
+    ].join('\n');
+    const q = read(body);
+    expect(q.change?.groups).toEqual([{ before: { kind: 'text', text: 'When an agent asks you' }, after: { kind: 'text', text: 'When an agent sends you something' } }]);
+    expect(q.choices.map((c) => [c.label, c.description, c.before, c.after])).toEqual([['Rename it', undefined, undefined, undefined], ['Leave it', undefined, undefined, undefined]]);
+    sameIdentity(q, plain(body));
+    // Old prose after the last choice stays prose, in the question's context.
+    const prose = ['Ship it now?', '- [ ] Yes', '- [ ] No', 'After: the freeze lifts we can revisit.'].join('\n');
+    const old = read(prose);
+    expect(old.change).toBeUndefined();
+    expect(old.choices.map((c) => [c.label, c.description, c.after])).toEqual([['Yes', undefined, undefined], ['No', undefined, undefined]]);
+    expect(old.context).toBe(plain(prose).context);
+    expect(old.context).toBe('After: the freeze lifts we can revisit.');
   });
 
   test('a picture written with a title loads: the title is not part of its address', () => {
@@ -382,20 +397,6 @@ describe('change lines: forgiving forms', () => {
     expect(q.change?.groups[0]?.after).toEqual({ kind: 'image', alt: 'After', src: 'shots/after.png', caption: 'One button fewer.' });
   });
 
-  test('an After written unindented right under a choice is that choice\'s', () => {
-    const body = [
-      'Which wording?',
-      '- [ ] Short',
-      'After: Saved.',
-      '- [ ] Long',
-      'After: Saved to your drafts.',
-      '- [ ] Leave it',
-    ].join('\n');
-    const q = read(body);
-    expect(q.choices.map((c) => c.after)).toEqual([{ kind: 'text', text: 'Saved.' }, { kind: 'text', text: 'Saved to your drafts.' }, undefined]);
-    expect(q.context).toBe('');
-    sameIdentity(q, plain(body));
-  });
 });
 
 describe('change lines: identity and older readers', () => {

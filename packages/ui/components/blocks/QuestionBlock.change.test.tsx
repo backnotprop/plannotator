@@ -212,9 +212,13 @@ describe('the Versions card', () => {
     const narrowInput = narrow.querySelector('input')!;
     expect(description(el, narrowInput)).toContain('After: Never comment on formatting unless guidance files say to. Flag missing tests only when');
     expect(description(el, leave.querySelector('input')!)).toBe('Now: Never comment on formatting unless guidance files say to. Never flag missing test coverage unless guidance files say to.');
-    // The words are the choice's: a click on them still picks it.
-    await act(async () => (version as HTMLElement).click());
+    // The words are the choice's: a click on them still picks it, and the row and its version take the picked tint as one.
+    await act(async () => (version.querySelector('[data-question-choice-words]') as HTMLElement).click());
     expect(answer()?.selected).toEqual(['Narrow it']);
+    const picked = changeRow(el, 'Narrow it');
+    expect(picked.className).toContain('bg-primary/12');
+    expect(picked.querySelector('label')!.className).not.toContain('bg-primary/12');
+    expect(changeRow(el, 'Leave it').className).not.toContain('bg-primary/12');
   });
 
   test.skipIf(!hasDom)('removed words are struck on a red tint in Now, added words marked in After; a mostly rewritten line is unmarked; each place under its own heading', async () => {
@@ -248,6 +252,10 @@ describe('the Versions card', () => {
     expect([...rows[1]!.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Open the picture: Now, Links in Dracula', 'Open the picture: After, Links in Dracula']);
     await act(async () => open[1]!.click());
     expect(opened[0]![0]).toContain('tags-after.png');
+    expect(answer()).toBeUndefined();
+    // A caption or the gap between the pictures never picks either.
+    await act(async () => (pictures.querySelector('figcaption') as HTMLElement).click());
+    await act(async () => (pictures.querySelector('.qc-pair') as HTMLElement).click());
     expect(answer()).toBeUndefined();
     await act(async () => (rows[0]!.querySelector('input') as HTMLInputElement).click());
     expect(answer()?.selected).toEqual(['Tags on dark themes']);
@@ -332,7 +340,7 @@ Recommended: A · Sync with team
     expect(text(tiles[2]!.querySelector('[data-question-choice-keeps] [aria-hidden="true"]'))).toBe('Button "Sync" · tooltip "Syncs your stuff."');
     const input = tiles[0]!.querySelector('input')!;
     expect(description(el, input)).toContain('After: Button "Sync with team"');
-    await act(async () => (version as HTMLElement).click());
+    await act(async () => (version.querySelector('[data-question-choice-words]') as HTMLElement).click());
     expect(answer()?.selected).toEqual(['A · Sync with team']);
   });
 });
@@ -377,6 +385,29 @@ ${list(20, -1)}
     expect(text(more)).toBe('Show less');
     // The screen reader hears every line either way.
     expect(srText(el.querySelector('[data-question-change-group]')!)).toContain('Rule 20.');
+  });
+
+  test.skipIf(!hasDom)('under a choice: a long version and the choice keeping today\'s words are capped too, and "Show more" is never hidden from the screen reader', async () => {
+    const el = await mount(<Harness markdown={`:::question
+Which rules?
+
+Before:
+${list(20, -1)}
+
+- [ ] Change one
+    After:
+${list(20, 3).split('\n').map((l) => `    ${l}`).join('\n')}
+- [ ] Leave them
+:::`} />);
+    const keep = changeRow(el, 'Leave them');
+    expect(keep.querySelectorAll('[data-question-choice-keeps] .qc-line')).toHaveLength(12);
+    const more = keep.querySelector<HTMLButtonElement>('[data-question-change-more]')!;
+    expect(more.closest('[aria-hidden="true"]')).toBeNull();
+    await act(async () => more.click());
+    expect(keep.querySelectorAll('[data-question-choice-keeps] .qc-line')).toHaveLength(20);
+    // Show more never picks the choice it sits under.
+    expect(answer()).toBeUndefined();
+    for (const button of el.querySelectorAll('[data-question-change-more]')) expect(button.closest('[aria-hidden="true"]')).toBeNull();
   });
 });
 

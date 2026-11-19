@@ -78,8 +78,10 @@ del.qc-del { color: inherit; text-decoration: line-through; text-decoration-thic
 .qc-more:hover { text-decoration: underline; text-underline-offset: 2px; }
 .qc-more:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* A choice's own version, under its row and lined up with its words (a host with a wider control sets the indent). */
-.qc-choice { display: block; margin-block: 0 4px; margin-inline: var(--qc-choice-indent, 34px) 9px; font-size: 13.5px; font-weight: 400; color: color-mix(in oklab, var(--foreground) 88%, transparent); cursor: pointer; }
-.qc-choice.qc-readonly { cursor: default; }
+.qc-choice { display: block; margin-inline: var(--qc-choice-indent, 34px) 9px; padding-block: 0 6px; font-size: 13.5px; font-weight: 400; color: color-mix(in oklab, var(--foreground) 88%, transparent); }
+/* The words pick the choice, as its row does; pictures, captions and the gaps between them do not. */
+[data-question-choice-words] { cursor: pointer; }
+.qc-readonly [data-question-choice-words] { cursor: default; }
 .qc-choice.qc-keep { color: color-mix(in oklab, var(--foreground) 64%, transparent); }
 .qc-place { display: block; }
 .qc-place + .qc-place { margin-top: 6px; }
@@ -88,9 +90,9 @@ del.qc-del { color: inherit; text-decoration: line-through; text-decoration-thic
 .qc-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: 560px; }
 @container qcard (min-width: 480px) { .qc-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .qc-pair.qc-pair-sm { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 400px; margin-block: 6px 4px; }
-.qc-pair.qc-one { grid-template-columns: minmax(0, 280px); }
+.qc-pair.qc-one { grid-template-columns: minmax(0, 1fr); max-width: 520px; }
 /* In a picture choice's tile: under its words, the tile's full width. */
-.qc-tile { display: block; padding: 0 10px 9px; font-size: 12.5px; line-height: 1.45; color: color-mix(in oklab, var(--foreground) 88%, transparent); }
+.qc-tile { display: block; padding-block: 0 9px; padding-inline: var(--qc-tile-indent, 33px) 10px; font-size: 12.5px; line-height: 1.45; color: color-mix(in oklab, var(--foreground) 88%, transparent); }
 .qc-tile .qc-grid { font-size: 12.5px; line-height: 1.45; column-gap: 8px; }
 .qc-tile .qc-k { font-size: 12px; }
 .qc-tile .qc-pair.qc-pair-sm { max-width: none; margin-block: 2px 0; }
@@ -567,18 +569,21 @@ function ChoicePlace({ where, place, groupBefore }: { where?: string; place: Que
   const cap = useLineCap(rows ? [own !== null ? sideCount(rows, 'before', 'near') : 0, sideCount(rows, 'after', mode)] : []);
   if (!after || after.kind === 'image' || place.before?.kind === 'image') return null;
   const head = where ? <span className="qc-cw" dir="auto">{where}</span> : null;
+  // The words are hidden from the screen reader (they reach it as the input's description); "Show more" is not.
   if (after.kind === 'none') {
-    return <span className="qc-place">{head}<span className="qc-quiet">Removed</span></span>;
+    return <span className="qc-place"><span aria-hidden="true">{head}<span className="qc-quiet">Removed</span></span></span>;
   }
   if (own !== null) {
     return (
       <span className="qc-place">
-        {head}
-        <span className="qc-grid">
-          <span className="qc-k">Now</span>
-          <span className="qc-v qc-now"><SideView rows={rows!} side="before" mode="near" marks limit={cap.limit} /></span>
-          <span className="qc-k">After</span>
-          <span className="qc-v"><SideView rows={rows!} side="after" mode="near" marks limit={cap.limit} /></span>
+        <span aria-hidden="true" style={{ display: 'block' }}>
+          {head}
+          <span className="qc-grid">
+            <span className="qc-k">Now</span>
+            <span className="qc-v qc-now"><SideView rows={rows!} side="before" mode="near" marks limit={cap.limit} /></span>
+            <span className="qc-k">After</span>
+            <span className="qc-v"><SideView rows={rows!} side="after" mode="near" marks limit={cap.limit} /></span>
+          </span>
         </span>
         {cap.toggle}
       </span>
@@ -586,9 +591,26 @@ function ChoicePlace({ where, place, groupBefore }: { where?: string; place: Que
   }
   return (
     <span className="qc-place">
-      {head}
-      <span className="qc-v" style={{ display: 'block' }}>
-        <SideView rows={rows!} side="after" mode={mode} marks={groupBefore !== null} limit={cap.limit} />
+      <span aria-hidden="true" style={{ display: 'block' }}>
+        {head}
+        <span className="qc-v" style={{ display: 'block' }}>
+          <SideView rows={rows!} side="after" mode={mode} marks={groupBefore !== null} limit={cap.limit} />
+        </span>
+      </span>
+      {cap.toggle}
+    </span>
+  );
+}
+
+/** One place of today's words on the choice that keeps them (Versions): in full, up to the line cap. */
+function KeepPlace({ where, before }: { where?: string; before: string | null }) {
+  const rows = diffQuestionChange(before, before);
+  const cap = useLineCap([sideCount(rows, 'before', 'all')]);
+  return (
+    <span className="qc-place">
+      <span aria-hidden="true" style={{ display: 'block' }}>
+        {where ? <span className="qc-cw" dir="auto">{where}</span> : null}
+        <SideView rows={rows} side="before" mode="all" marks={false} limit={cap.limit} />
       </span>
       {cap.toggle}
     </span>
@@ -656,7 +678,7 @@ export function QuestionChoiceChange({ question, choice, index, host, spokenId, 
   spokenId: string;
   layout?: 'row' | 'tile';
   readOnly?: boolean;
-  /** A click on the words (not a picture or a button): the host picks the choice, as a click on its row does. */
+  /** A click on the words (never a picture, a caption, a gap or a button): the host picks the choice, as a click on its row does. */
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const words = wordsPlacesOf(question, choice);
@@ -670,11 +692,10 @@ export function QuestionChoiceChange({ question, choice, index, host, spokenId, 
       className={cls}
       data-question-choice-change=""
       data-question-choice-keeps={keeps ? '' : undefined}
-      onClick={onClick}
     >
       <Style />
       {words.length > 0 && (
-        <div aria-hidden="true">
+        <div data-question-choice-words="" onClick={onClick}>
           {words.map(({ place, k, where, groupBefore }) => <ChoicePlace key={k} where={where} place={place} groupBefore={groupBefore} />)}
         </div>
       )}
@@ -689,13 +710,8 @@ export function QuestionChoiceChange({ question, choice, index, host, spokenId, 
         </div>
       )}
       {keeps && (
-        <div aria-hidden="true">
-          {groups.map((group, k) => (
-            <span key={k} className="qc-place">
-              {groups.length > 1 && group.where ? <span className="qc-cw" dir="auto">{group.where}</span> : null}
-              <SideView rows={diffQuestionChange(textOf(group.before), textOf(group.before))} side="before" mode="all" marks={false} />
-            </span>
-          ))}
+        <div data-question-choice-words="" onClick={onClick}>
+          {groups.map((group, k) => <KeepPlace key={k} where={groups.length > 1 ? group.where : undefined} before={textOf(group.before)} />)}
         </div>
       )}
       <p id={spokenId} className="qc-sr">{questionChoiceChangeSpoken(question, choice, index)}</p>

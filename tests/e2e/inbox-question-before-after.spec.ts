@@ -191,9 +191,13 @@ test('words: the Where first, Now and After marked, the kept choice carries toda
   await page.goto(`${world.url}#thread=${threadId}`);
 
   // The words under a choice pick it; Send; the agent reads the plain label.
-  await version.locator('[data-question-choice-change]').click();
+  await version.locator('[data-question-choice-words]').click();
   await expect(version.locator('input')).toBeChecked();
-  await card.getByRole('button', { name: /^Send/ }).click();
+  // The row and its version are tinted as one picked choice.
+  await expect(version).toHaveAttribute('data-question-option-checked', '');
+  await shot(page, 'words-picked', card);
+  // Send is in the pane's footer, not the card.
+  await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => sentSelection(claude, threadId)).toEqual(['Say what you are viewing']);
   expect(world.errors).toEqual([]);
 });

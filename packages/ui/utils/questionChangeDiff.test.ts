@@ -13,6 +13,7 @@ import {
   diffQuestionChange,
   questionChangeMarkedRuns,
   questionChangePlainText,
+  setQuestionChangeDiffClock,
   type QuestionChangeRow,
 } from './questionChangeDiff';
 
@@ -127,6 +128,25 @@ describe('writing systems and size', () => {
   test('the same pair is worked out once: a re-render (a pick, a keystroke) gets the same rows back', () => {
     const a = diffQuestionChange('One two three four', 'One two five four');
     expect(diffQuestionChange('One two three four', 'One two five four')).toBe(a);
+  });
+
+  test('a diff that ran out of time is not kept: the next render tries again', () => {
+    // Over the edit cap (every line differs), under the size cap: the diff gives up.
+    const pair = (n: number) => [Array.from({ length: 1400 }, (_, i) => `a${i}`).join('\n'), Array.from({ length: 1400 }, (_, i) => `b${i + n}`).join('\n')] as const;
+    let t = 0;
+    const previous = setQuestionChangeDiffClock(() => (t += 100));
+    try {
+      const [before, after] = pair(1);
+      const first = diffQuestionChange(before, after);
+      expect(first.every((r) => r.type === 'mod' && r.whole)).toBe(true);
+      expect(diffQuestionChange(before, after)).not.toBe(first);
+    } finally {
+      setQuestionChangeDiffClock(previous);
+    }
+    // Given up quickly (the edit cap, not the time): the same answer every time, so it is kept.
+    const [before, after] = pair(2);
+    const kept = diffQuestionChange(before, after);
+    expect(diffQuestionChange(before, after)).toBe(kept);
   });
 });
 
