@@ -50,7 +50,8 @@
     "./test-home-guard": "./test-home-guard.ts",
     "./inbox-codex-wake": "./inbox-codex-wake.ts",
     "./inbox-agent-notes": "./inbox-agent-notes.ts",
-    "./inbox-launch-env": "./inbox-launch-env.ts"
+    "./inbox-launch-env": "./inbox-launch-env.ts",
+    "./inbox-rex-where": "./inbox-rex-where.ts"
   },
   "files": [
     "*.ts",

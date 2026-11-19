@@ -2490,6 +2490,14 @@
           "type": "boolean",
           "const": true
         },
+        "why": {
+          "type": "string",
+          "enum": [
+            "server",
+            "shared"
+          ],
+          "x-open": true
+        },
         "refused": {
           "type": "boolean",
           "const": true
@@ -5052,6 +5060,14 @@
             "unavailable": {
               "type": "boolean",
               "const": true
+            },
+            "why": {
+              "type": "string",
+              "enum": [
+                "server",
+                "shared"
+              ],
+              "x-open": true
             },
             "refused": {
               "type": "boolean",
