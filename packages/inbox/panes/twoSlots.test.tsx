@@ -396,6 +396,34 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(calls).toEqual(['focus:p1', 'close:p1', 'close:main']);
   });
 
+  test("a key on a pane's ✕ beside another: focus, gone with it, lands on the subject of the pane the person is in; after a click it is left alone", async () => {
+    putThread(queries, B, heldOf(B, false));
+    // Everything drawn has a box here (focusFirst and focusLost read getClientRects).
+    stub(HTMLElement.prototype, 'getClientRects', { value(this: HTMLElement) { return this.isConnected ? [rect(0, 10)] : []; } });
+    const closeB = async (key: boolean) => {
+      let layout = pair('main');
+      drawPanes({ ...windowOf(layout), closePane: (id) => void (layout = L.close(layout, id)) }, hostFor(A, noop));
+      await wait(0);
+      const x = paneOf(B).querySelector<HTMLElement>('button[aria-label="Close the thread"]')!;
+      x.focus();
+      // A key (Enter on the ✕), or a mouse: lastInput.ts tells them apart.
+      if (key) act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+      else act(() => void window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+      act(() => void x.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: key ? 0 : 1 })));
+      drawPanes(windowOf(layout), hostFor(A, noop));
+      await wait(50);
+      expect(el!.querySelector(`section.ib-pane[data-thread-id="${B}"]`)).toBeNull();
+      return document.activeElement as HTMLElement | null;
+    };
+    const byKey = await closeB(true);
+    expect(byKey?.matches('h2.ib-subject')).toBe(true);
+    expect(byKey?.closest('section.ib-pane')?.getAttribute('data-thread-id')).toBe(A);
+    act(() => root!.unmount());
+    root = null;
+    const byClick = await closeB(false);
+    expect(byClick?.matches('h2.ib-subject') ?? false).toBe(false);
+  });
+
   test('the list hidden (full screen): its way back leads the top-left pane only; a stacked window draws the active pane alone', async () => {
     putThread(queries, B, heldOf(B, false));
     const fulls: boolean[] = [];

@@ -29,6 +29,8 @@ import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { chooseFavicon, useInboxFavicon } from '../faviconChoice';
+import { useSplitViewSwitch } from '../data/actions/settings';
+import { splitViewSetting } from '../panes/beside';
 import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
@@ -221,6 +223,31 @@ const THEME_CHOICES = [
 ] as const;
 
 /**
+ * Thread panes (config.json `inboxSplitView`, off by default; docs/agent-guides/inbox-window.md "Free layout"): several
+ * threads side by side beside the list. Saved here, every window turns them on or off at once (useSplitViewSwitch).
+ */
+function SplitViewRow({ saved }: { saved: boolean }) {
+  const { on, failed, toggle } = useSplitViewSwitch(saved);
+  return (
+    <div className="ib-prow" data-settings-split-view={on ? 'on' : 'off'}>
+      <span className="ib-txt">
+        <span className="ib-l" id="ib-split-view-label">
+          Threads side by side
+        </span>
+        <span className="ib-desc" aria-live="polite">
+          {failed
+            ? 'Not saved. Try again.'
+            : 'Open several threads at once: right-click a thread and choose Open to the side, or drag it next to the open one.'}
+        </span>
+      </span>
+      <span className="ib-ctl">
+        <Switch on={on} labelledBy="ib-split-view-label" onClick={toggle} />
+      </span>
+    </div>
+  );
+}
+
+/**
  * General (design of record `.product/approved/inbox-settings-tabs/`):
  * Appearance (light, dark, or match this computer; the text size; and the
  * palette for each half, Plannotator's one theme preference, so plan review
@@ -255,6 +282,8 @@ function GeneralSection({
   const textSize = useInboxTextSize();
   // Null from an Inbox that predates the setting: no row.
   const favicon = useInboxFavicon();
+  // Null from a settings model without it: no row.
+  const splitView = splitViewSetting(settings);
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
   const browser = browserName();
@@ -357,6 +386,7 @@ function GeneralSection({
               </button>
             </span>
           </div>
+          {splitView && <SplitViewRow saved={splitView.on} />}
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>

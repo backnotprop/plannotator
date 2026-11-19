@@ -1,6 +1,7 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import { inboxApi, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { inboxApi, post, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { inboxUrl } from '../../inboxUrl';
 import { scheduledApi } from '../../scheduled/client';
 
 export interface SettingsHost {
@@ -111,4 +112,27 @@ export function useSettingsSaves(
     await refreshList(true);
   };
   return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+}
+
+/**
+ * Settings → General → Appearance → thread panes (config.json `inboxSplitView`, off by default). The window's settings
+ * take the switch from `event: capabilities`, which the save sends to every window, this one included (capabilities.ts),
+ * so App holds no saver for it; until that frame lands the switch shows the person's choice. A save that fails puts the
+ * switch back and says so.
+ */
+export function useSplitViewSwitch(saved: boolean): { on: boolean; failed: boolean; toggle: () => void } {
+  const [asked, setAsked] = useState<boolean | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setAsked(null), [saved]);
+  const on = asked ?? saved;
+  const toggle = () => {
+    const next = !on;
+    setAsked(next);
+    setFailed(false);
+    post<{ split_view: { on: boolean } }>(inboxUrl('/settings'), { split_view: { on: next } }).catch(() => {
+      setAsked(null);
+      setFailed(true);
+    });
+  };
+  return { on, failed, toggle };
 }

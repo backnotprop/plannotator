@@ -65,6 +65,12 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
   /** The last draw was on the Inbox page with the layout in hand: an empty address there closes a pane, not restores. */
   const wasInbox = useRef(false);
   const restored = useRef<ReadonlySet<PaneId>>(NONE);
+  /**
+   * The address and page the layout last followed. A draw where neither changed follows nothing: closing a pane for an
+   * empty address is done once per close, so the draws before the next pane's thread reaches the address (each owes the
+   * same write) close no other pane, and the last one left is not dropped as a lone pane.
+   */
+  const followed = useRef<{ thread: string | null; onInbox: boolean } | null>(null);
   const [, drawn] = useState(0);
   let layout = L.EMPTY_LAYOUT;
   let owed: string | null | undefined;
@@ -74,7 +80,9 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
       restored.current = layout.root ? new Set(Object.keys(layout.threads)) : NONE;
     } else layout = held.current;
     if (ahead.current && (thread === ahead.current.to || thread !== ahead.current.from)) ahead.current = null;
-    if (!ahead.current) {
+    const moved = !followed.current || followed.current.thread !== thread || followed.current.onInbox !== onInbox;
+    followed.current = { thread, onInbox };
+    if (!ahead.current && moved) {
       if (thread !== null) layout = L.follow(layout, thread);
       else if (onInbox && wasInbox.current && layout.active) layout = L.close(layout, layout.active);
       else if (onInbox && L.paneCount(layout) < 2) layout = L.EMPTY_LAYOUT;

@@ -615,6 +615,7 @@ apps/vscode-extension/src/guides/webview/diagram-loader.test.ts
 packages/review-editor/components/AnnotationToolbar.askOnly.test.tsx
 packages/ui/components/Settings.notion.test.tsx
 packages/inbox/cookieHostSettings.test.tsx
+packages/inbox/splitViewSettings.test.tsx
 packages/ui/components/Settings.cookieHost.test.tsx
 packages/review-editor/components/FileTree.allFiles.test.tsx
 packages/review-editor/components/ReviewPanelHeader.test.tsx

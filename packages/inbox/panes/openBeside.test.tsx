@@ -8,12 +8,13 @@
  * where no third column fits not going below the active pane; a window with no room for another pane opening it
  * without saying which pane stepped aside, or its Undo not bringing that pane back; closing the second pane not
  * bringing that sidebar back, or opening a sidebar the person folded; closing either pane not coming back to today's
- * one pane; Escape (the address closed) closing both panes.
+ * one pane; Escape (the address closed) closing both panes, or, drawn again before the next pane's thread reached the
+ * address, every pane (the hands-on pass, 2026-11-19: one Escape closed a layout of five).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { act, useRef, useState } from 'react';
+import { act, StrictMode, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxToastModel } from '../components/Toast';
@@ -64,7 +65,7 @@ const TIGHT = LIST_MIN_WIDTH + 2 * L.PANE_MIN_WIDTH + SIDEBAR - 40;
  * The window: the address (`thread`), its panes, the list's menu over rows a to d, and a docked sidebar `SIDEBAR` px
  * wide that the person keeps open (`sidebarOpen`) or folded. The window is as wide as `window.innerWidth`.
  */
-function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = true) {
+function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = true, strict = false) {
   const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {}, toasts: [] as Omit<InboxToastModel, 'id'>[], dismissed: 0 };
   function Window() {
     const [thread, setThread] = useState<string | null>(start);
@@ -115,7 +116,8 @@ function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = t
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<Window />);
+    // StrictMode draws each render twice, as a window drawn again before an effect lands does.
+    root.render(strict ? <StrictMode><Window /></StrictMode> : <Window />);
   });
   return out;
 }
@@ -185,6 +187,23 @@ describe.skipIf(!hasDom)('Open to the side', () => {
     act(() => w.go(null));
     expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_b'], active: 0 });
     expect(w.thread).toBe('thr_b');
+  });
+
+  test('drawn again before the next pane\'s thread reaches the address, Escape still closes the active pane only', async () => {
+    setWidth(1920);
+    const w = draw(true, 'thr_a', true, true);
+    act(() => w.panes!.openBeside('thr_b'));
+    act(() => w.panes!.openBeside('thr_c'));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b', 'thr_c'], active: 2 });
+    act(() => w.go(null));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
+    expect(w.thread).toBe('thr_b');
+    act(() => w.go(null));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a'], active: 0 });
+    expect(w.thread).toBe('thr_a');
+    act(() => w.go(null));
+    expect(w.panes!.panes.panes.every((pane) => pane.thread === null)).toBe(true);
+    expect(w.thread).toBe(null);
   });
 
   test('with two panes open it is still offered: where no third column fits, the third opens below the active pane, and a fourth below that', async () => {

@@ -19854,6 +19854,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-setting-split-view",
+      "title": "setting:split_view",
+      "surface": [
+        "setting:split_view"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

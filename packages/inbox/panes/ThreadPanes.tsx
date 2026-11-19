@@ -10,7 +10,7 @@ import FreeLayout from './FreeLayout';
 import * as L from './layoutModel';
 import { drawnTree, fits, hiddenForRoom, neighbor } from './layoutRoom';
 import { measureRoom, paneRects, usePaneDrop } from './paneDrop';
-import { liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
+import { landAfterPaneClose, liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
 import { createPaneKeeper, PaneDock, PaneKeeperContext } from './paneKeeper';
 import { PaneMenuContext, type PaneMenu } from './PaneMenu';
 import type { WindowPanes } from './useRoutePanes';
@@ -173,7 +173,10 @@ function PaneSlot({ paneId }: { paneId: L.PaneId }) {
     () => ({
       moves: () => paneMoves(windowPanes, paneId),
       move: (edge) => moveBeside(windowPanes, paneId, edge),
-      close: () => windowPanes.closePane(paneId),
+      close: () => {
+        windowPanes.closePane(paneId);
+        landAfterPaneClose();
+      },
     }),
     [windowPanes, paneId],
   );
