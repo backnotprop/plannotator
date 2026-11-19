@@ -2049,6 +2049,15 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-sframe .ib-card .ib-connect { margin: 0; }
 .ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
 .ib-vslider:disabled { opacity: 0.45; }
+/* Settings → Play a sound: what rings it, under the label (the owner's two choices). The label's column is the
+   container: where it is too narrow for the two in a line (about 360 px: a phone, or a desktop window with the
+   sidebar out), one under another, each the column's full width (as Rows' agents). */
+.ib-prow[data-settings-sound] .ib-txt { container: ib-sound-row / inline-size; }
+.ib-prow .ib-sound-when { align-self: flex-start; max-width: 100%; margin: 6px 0 3px; }
+@container ib-sound-row (max-width: 379px) {
+  .ib-prow .ib-sound-when { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; align-self: stretch; }
+  .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; }
+}
 .pn-inbox .ib-sw:disabled { opacity: 0.45; }
 /* Settings → Archived: the archived rows drawn as the section's card rows. */
 .ib-card .ib-arcrow { padding: 10px 16px; border-bottom: 1px solid var(--ib-hair); }
@@ -3440,7 +3449,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-ptool-l { display: none; }
 }
 
-/* The question sound (.product/approved/inbox-sound/): the one-time dialog, the Settings row, the hints (its "Sound off." uses the window's one toast, below). */
+/* The Inbox's sound (.product/approved/inbox-sound/): the one-time dialog, the Settings row, the hints (its "Sound off." uses the window's one toast, below). */
 .ib-dlg-head { display: flex; align-items: center; gap: 12px; }
 .ib-dlg-head h2 { flex: 1; min-width: 0; }
 .pn-inbox .ib-dlg-head .ib-btn svg.ib-ic, .pn-inbox .ib-btn.ib-icon svg.ib-ic { width: 14px; height: 14px; }
@@ -3814,6 +3823,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-control] { width: 20px; height: 20px; margin-top: 0; }
   :is(.ib-body, .ib-docscroll) [data-question-tile] [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
+  /* A choice's own version under its row lines up with its words past the 20 px control (9 + 20 + 10). */
+  :is(.ib-body, .ib-docscroll) .question-block { --qc-choice-indent: 39px; --ib-qtile-text: 42px; }
   :is(.ib-body, .ib-docscroll) [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-key] input[type="text"] { min-height: 40px; }
   /* The Other field (a textarea that grows with its lines): one line is 40 px with its words in the middle, as the
@@ -5582,6 +5593,10 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .question-block [data-question-tiles] > [data-question-tile] { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; }
 .pn-inbox .question-block [data-question-tiles] > [data-question-tile] > label { grid-row: 1 / span 2; display: grid; grid-template-rows: subgrid; row-gap: 0; }
 .pn-inbox .question-block [data-question-tile-caption] { grid-row: 2; align-self: start; padding: 10px 12px 12px; gap: 10px; }
+/* A choice's own version (change lines) under a tile's words: a third row, so the versions line up across tiles too. */
+.pn-inbox .question-block [data-question-tiles]:has(> [data-question-tile] > [data-question-choice-change]) > [data-question-tile] { grid-row: span 3; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile] > [data-question-choice-change] { grid-row: 3; align-self: start; padding-block: 0 12px; padding-inline: var(--ib-qtile-text, 37px) 12px; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile]:has(> [data-question-choice-change]) [data-question-tile-caption] { padding-bottom: 6px; }
 .pn-inbox .question-block [data-question-tile] [data-question-part="choice"] { max-width: 68ch; }
 /* The picture's box is its own shape from the recorded size (16:10 when none was recorded), never past its natural width
    (a small icon is not blown up; an SVG has no recorded size and fills the box), at most 440 px tall, on a quiet ground.
@@ -5649,6 +5664,12 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] { --ib-qpic-w: 100%; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] > label { flex-direction: column; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] [data-question-tile-picture] { flex-basis: auto; border-inline-end: 0; border-bottom-width: 1px; }
+  /* A choice's own version stays in the words' column, under its words (never under the picture, where it would read as its caption). */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) { display: grid; grid-template-columns: var(--ib-qpic-w) minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > label { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-picture] { grid-column: 1; grid-row: 1 / -1; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-caption] { grid-column: 2; grid-row: 1; padding-bottom: 6px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > [data-question-choice-change] { grid-column: 2; grid-row: 2; padding-inline-start: 41px; }
 }
 @container ib-pics (min-width: 560px) and (max-width: 899.98px) {
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) { grid-template-columns: minmax(0, 1fr); gap: 10px; --ib-qpic-w: min(62%, 760px); --ib-qpic-max: 460px; }
@@ -5663,8 +5684,18 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] > label { flex-direction: column; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] [data-question-tile-picture] { flex-basis: auto; border-inline-end: 0; border-bottom-width: 1px; }
   .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-no-picture] > label::before { content: none; }
+  /* A choice's own version stays in the words' column, under its words (never under the picture, where it would read as its caption). */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) { display: grid; grid-template-columns: var(--ib-qpic-w) minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > label { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-picture] { grid-column: 1; grid-row: 1 / -1; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) [data-question-tile-caption] { grid-column: 2; grid-row: 1; padding-bottom: 6px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-shape="pano"]):not([data-question-tile-no-picture]):has(> [data-question-choice-change]) > [data-question-choice-change] { grid-column: 2; grid-row: 2; padding-inline-start: 41px; }
 }
 .pn-inbox .question-block label[data-question-option]:has(input:checked) { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
+/* A choice with its own version (change lines) under its row: the row and the version tint as one choice. */
+.pn-inbox .question-block [data-question-option-with-change] > label[data-question-option], .pn-inbox .question-block [data-question-option-with-change] > label[data-question-option]:hover, .pn-inbox .question-block [data-question-option-with-change] > label[data-question-option]:has(input:checked) { background: transparent; }
+@media (hover: hover) { .pn-inbox .question-block [data-question-option-with-change]:hover { background: var(--ib-qc-opt-hover-s, color-mix(in oklab, var(--muted) 45%, transparent)); } }
+.pn-inbox .question-block [data-question-option-with-change]:has(input:checked), .pn-inbox .question-block [data-question-option-with-change]:has(input:checked):hover { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
 .pn-inbox .question-block [data-question-part="choice"] > span:first-child { font-weight: var(--ib-qc-choice-w-s, 550); }
 /* The Recommended tag only (ui's Tag carries data-question-tag): an image or inline code in a choice keeps its
    own radius. */
