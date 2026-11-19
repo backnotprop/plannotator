@@ -92,13 +92,16 @@ export function turnedOnCases(binary: string): void {
           try {
             await expect.poll(() => ran(dataDir), { timeout: 60_000 }).toBe(true);
           } finally {
+            // Wait for it to be gone: a start beside an Inbox still shutting down is a different case.
+            const gone = new Promise<void>((done) => (served.exitCode !== null || served.signalCode !== null ? done() : served.once('exit', () => done())));
             served.kill('SIGTERM');
+            await Promise.race([gone, new Promise((done) => setTimeout(done, 30_000))]);
           }
         }
         expect([way, markIn(dataDir)]).toEqual([way, expect.objectContaining({ on: true, by: 'command' })]);
         // Turned on, Plannotator's own start works as before.
         const again = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
-        expect([way, again.status, again.stdout.trim()]).toEqual([way, 0, expect.stringMatching(URL_LINE)]);
+        expect([way, again.status, again.stdout.trim(), again.status === 0 ? '' : again.stderr]).toEqual([way, 0, expect.stringMatching(URL_LINE), '']);
       } finally {
         await removeInboxScratch(root);
       }
