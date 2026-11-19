@@ -4,7 +4,8 @@ import InboxWire
 /// Why a call to the door did not give its answer.
 public enum DoorFailure: Error, Sendable {
   /// No answer at all: the computer is off, asleep or on another network.
-  case unreachable(String)
+  /// `mayHaveArrived` is false only when the connection was never made, so the request cannot have been taken.
+  case unreachable(String, mayHaveArrived: Bool = true)
   /// The door answered with a refusal. Act on `code`; `error.error` holds the Inbox's own words.
   case refused(status: Int, error: DoorError)
   /// `426 app_needs_update`: this app is older than the Inbox serves.
@@ -22,6 +23,9 @@ public enum DoorFailure: Error, Sendable {
   /// A definite answer: the write was applied or refused, so its idempotency key is spent.
   public var isDefinite: Bool {
     switch self {
+    // The product's own outbox rule (`classifyAnswer`, packages/server/inbox-outbox.ts:116-126): a 401 is final
+    // only when it says the device is revoked or its token is not known; any other 401 is tried again.
+    case .refused(401, let error): return error.code == "device_revoked" || error.code == "device_token_invalid"
     case .refused(let status, _): return status < 500 && status != 408 && status != 429
     case .appNeedsUpdate, .notOffered: return true
     // A 4xx that is not the Inbox's JSON (a proxy's page): still a refusal, never retried for ever.
@@ -29,6 +33,12 @@ public enum DoorFailure: Error, Sendable {
     case .unreadable(let status): return (400..<500).contains(status) && status != 408 && status != 429
     case .unreachable: return false
     }
+  }
+
+  /// Whether a request that failed this way can have reached the door: not when no connection was ever made.
+  static func mayHaveArrived(_ error: Error) -> Bool {
+    guard let code = (error as? URLError)?.code else { return true }
+    return ![.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff, .secureConnectionFailed, .serverCertificateUntrusted].contains(code)
   }
 
   static func from(status: Int, headers: [String: String], body: Data) -> DoorFailure {
@@ -81,7 +91,7 @@ public struct DoorClient: Sendable {
     } catch let failure as DoorFailure {
       throw failure
     } catch {
-      throw DoorFailure.unreachable((error as NSError).localizedDescription)
+      throw DoorFailure.unreachable((error as NSError).localizedDescription, mayHaveArrived: DoorFailure.mayHaveArrived(error))
     }
     guard (200..<300).contains(answer.status) else { throw DoorFailure.from(status: answer.status, headers: answer.headers, body: answer.body) }
     return answer
@@ -183,7 +193,7 @@ public struct DoorClient: Sendable {
       headers: [AppIdentity.headerName: app.headerValue, "Accept": "application/json", "Content-Type": "application/json"].merging(token.map { ["Authorization": "Bearer \($0)"] } ?? [:]) { $1 },
       body: body)
     let answer: DoorAnswerBytes
-    do { answer = try await transport.send(call) } catch let failure as DoorFailure { throw failure } catch { throw DoorFailure.unreachable((error as NSError).localizedDescription) }
+    do { answer = try await transport.send(call) } catch let failure as DoorFailure { throw failure } catch { throw DoorFailure.unreachable((error as NSError).localizedDescription, mayHaveArrived: DoorFailure.mayHaveArrived(error)) }
     guard (200..<300).contains(answer.status) else { throw DoorFailure.from(status: answer.status, headers: answer.headers, body: answer.body) }
     return answer
   }

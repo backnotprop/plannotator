@@ -8,18 +8,18 @@ final class ConformanceTests: XCTestCase {
   // proves: answer-03, answer-04, answer-05, answer-06
   func testQuestionsSuiteBuildsTheWindowsAnswersAndPickBodies() throws {
     let vectors = try Contract.json("vectors/questions.json")
-    let questions = try Contract.json("fixtures/questions.json")["questions"]!.decoded([InboxQuestion].self)
-    let cases = vectors["cases"]!.items
+    let questions = try Contract.json("fixtures/questions.json").at("questions").decoded([InboxQuestion].self)
+    let cases = try vectors.at("cases").items
     XCTAssertFalse(cases.isEmpty)
     for item in cases {
-      let act = item["act"]!
+      let act = try item.at("act")
       let question = try XCTUnwrap(questions.first { $0.key == act["question"]?.text })
       let note = act["note"]?.text ?? ""
       let answer: QuestionAnswer?
       switch act["act"]?.text {
-      case "choice": answer = QuestionAnswers.choice(question, selected: act["selected"]!.strings, note: note)
-      case "other": answer = QuestionAnswers.other(question, other: act["other"]!.text!, note: note)
-      case "text": answer = QuestionAnswers.text(question, text: act["text"]!.text!, note: note)
+      case "choice": answer = QuestionAnswers.choice(question, selected: try act.at("selected").strings, note: note)
+      case "other": answer = QuestionAnswers.other(question, other: try act.at("other").str(), note: note)
+      case "text": answer = QuestionAnswers.text(question, text: try act.at("text").str(), note: note)
       case "skip": answer = QuestionAnswers.skip(question, note: note)
       case "clear": answer = nil
       default: XCTFail("an act this runner does not know: \(act)"); continue
@@ -38,18 +38,18 @@ final class ConformanceTests: XCTestCase {
     if case .object(let named)? = vectors["clients"] {
       for (name, facts) in named {
         clients[name] = DoorClientFacts(
-          contract: facts["contract"]!.whole!, minInboxContract: facts["min_inbox_contract"]!.whole!, routesBeforeDoor: facts["routes_before_door"]!.strings,
+          contract: try facts.at("contract").int(), minInboxContract: try facts.at("min_inbox_contract").int(), routesBeforeDoor: try facts.at("routes_before_door").strings,
           notByRelayBeforeDoor: facts["not_by_relay_before_door"]?.strings ?? [])
       }
     }
-    let cases = vectors["health"]!.items
+    let cases = try vectors.at("health").items
     XCTAssertFalse(cases.isEmpty)
     for item in cases {
       let note = item["note"]?.text ?? ""
       // A case may give the answer as text, to keep a number JSON's own tools would round.
       let health = try item["health_text"]?.text.map { try JSONDecoder().decode(JSONValue.self, from: Data($0.utf8)) } ?? XCTUnwrap(item["health"])
-      let skew = DoorSkew.read(health: health, client: try XCTUnwrap(clients[item["client"]!.text!]))
-      let expected = item["skew"]!
+      let skew = DoorSkew.read(health: health, client: try XCTUnwrap(clients[try item.at("client").str()]))
+      let expected = try item.at("skew")
       switch skew {
       case .ok(let contract, let routes, let notByRelay, let grants):
         XCTAssertEqual(expected["state"]?.text, "ok", note)
@@ -67,17 +67,17 @@ final class ConformanceTests: XCTestCase {
         XCTAssertEqual(floor, expected["min_app_contract"]?.whole, note)
       }
       for offer in item["offers"]?.items ?? [] {
-        let route = offer["route"]!.text!
+        let route = try offer.at("route").str()
         XCTAssertEqual(skew.offers(route, path: .direct), offer["direct"]?.flag, "\(note): \(route) direct")
         XCTAssertEqual(skew.offers(route, path: .relay), offer["relay"]?.flag, "\(note): \(route) by relay")
       }
     }
-    let headers = vectors["headers"]!.items
+    let headers = try vectors.at("headers").items
     XCTAssertFalse(headers.isEmpty)
     for item in headers {
       let parsed = AppIdentity.parse(item["header"]?.text)
       if case .null? = item["app"] {
-        XCTAssertNil(parsed, "\(item["header"]!) is not in the form")
+        XCTAssertNil(parsed, "\(String(describing: item["header"])) is not in the form")
       } else {
         XCTAssertEqual(parsed?.platform, item["app"]?["platform"]?.text)
         XCTAssertEqual(parsed?.version, item["app"]?["app_version"]?.text)
@@ -89,21 +89,26 @@ final class ConformanceTests: XCTestCase {
 
   func testTimeSuiteWordsTimesAsTheWindowDoes() throws {
     let vectors = try Contract.json("vectors/time.json")
-    let words = TimeWords(locale: Locale(identifier: "en_US"), timeZone: try XCTUnwrap(TimeZone(identifier: vectors["time_zone"]!.text!)))
-    let now = try XCTUnwrap(TimeWords.date(vectors["now"]!.text!))
-    let cases = vectors["cases"]!.items
-    XCTAssertFalse(cases.isEmpty)
-    for item in cases {
-      let iso = item["iso"]!.text!
-      XCTAssertEqual(TimeWords.normalise(words.short(iso, now: now)), item["shortTime"]?.text, "shortTime \(iso)")
-      XCTAssertEqual(TimeWords.normalise(words.when(iso, now: now)), item["whenTime"]?.text, "whenTime \(iso)")
+    let now = try XCTUnwrap(TimeWords.date(try vectors.at("now").str()))
+    let zones = try vectors.at("zones").items
+    XCTAssertFalse(zones.isEmpty)
+    for zone in zones {
+      let name = try zone.at("time_zone").str()
+      let words = TimeWords(locale: Locale(identifier: "en_US"), timeZone: try XCTUnwrap(TimeZone(identifier: name), name))
+      let cases = try zone.at("cases").items
+      XCTAssertFalse(cases.isEmpty, name)
+      for item in cases {
+        let iso = try item.at("iso").str()
+        XCTAssertEqual(TimeWords.normalise(words.short(iso, now: now)), item["shortTime"]?.text, "shortTime \(iso) in \(name)")
+        XCTAssertEqual(TimeWords.normalise(words.when(iso, now: now)), item["whenTime"]?.text, "whenTime \(iso) in \(name)")
+      }
     }
   }
 
   func testStreamSuiteReadsTheSameFramesHoweverTheBytesAreCut() throws {
     let vectors = try Contract.json("vectors/stream.json")
-    let bytes = Data(vectors["text"]!.text!.utf8)
-    let expected = vectors["frames"]!.items
+    let bytes = Data(try vectors.at("text").str().utf8)
+    let expected = try vectors.at("frames").items
     // The window drops a frame whose name it does not know; the app's reader hands every frame on and the session
     // acts on the names it knows.
     let known = Set(expected.compactMap { $0["name"]?.text })
@@ -117,10 +122,10 @@ final class ConformanceTests: XCTestCase {
       }
       return out.filter { known.contains($0.event) }
     }
-    for cuts in [[], vectors["cuts"]!.items.compactMap(\.whole), Array(1..<bytes.count)] {
+    for cuts in [[], try vectors.at("cuts").items.compactMap(\.whole), Array(1..<bytes.count)] {
       let read = frames(cuts: cuts)
-      XCTAssertEqual(read.map(\.event), expected.map { $0["name"]!.text! })
-      XCTAssertEqual(read.map(\.data), expected.map { $0["data"]!.text! })
+      XCTAssertEqual(read.map(\.event), try expected.map { try $0.at("name").str() })
+      XCTAssertEqual(read.map(\.data), try expected.map { try $0.at("data").str() })
       XCTAssertEqual(read.map(\.id), expected.map { $0["id"]?.text })
     }
   }

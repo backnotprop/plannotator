@@ -44,6 +44,10 @@ extension JSONValue {
     return nil
   }
   var strings: [String] { items.compactMap(\.text) }
+  /// A field a vector must have: missing, it fails the one test that asked, never the whole run.
+  func at(_ key: String, file: StaticString = #filePath, line: UInt = #line) throws -> JSONValue { try XCTUnwrap(self[key], "the vector has no \"\(key)\"", file: file, line: line) }
+  func str(file: StaticString = #filePath, line: UInt = #line) throws -> String { try XCTUnwrap(text, "not a string", file: file, line: line) }
+  func int(file: StaticString = #filePath, line: UInt = #line) throws -> Int { try XCTUnwrap(whole, "not a number", file: file, line: line) }
   func decoded<T: Decodable>(_ type: T.Type) throws -> T { try JSONDecoder().decode(type, from: JSONEncoder().encode(self)) }
   static func of<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
   /// The same value with one field of an object left out.

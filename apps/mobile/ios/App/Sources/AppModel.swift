@@ -151,7 +151,12 @@ final class AppModel {
         } catch let failure as DoorFailure {
           switch failure {
           case .unreachable, .unreadable:
-            if attempt < tries {
+            // Again only when the request cannot have arrived (no connection was made, as while iOS asks for
+            // Local Network). A request that may have been taken is never sent twice: a pairing secret is
+            // redeemed once, and a second try would be told the code is no longer open.
+            var neverArrived = false
+            if case .unreachable(_, let mayHaveArrived) = failure { neverArrived = !mayHaveArrived }
+            if attempt < tries, neverArrived {
               try? await Task.sleep(for: .seconds(2))
               continue attempts
             }
@@ -272,6 +277,9 @@ struct LaunchOptions {
           await session.send(thread: StandInData.retry, words: "Go ahead when it is back.")
         case "away":
           await door.setOffline(true)
+          await session.refresh()
+        case "permission":
+          await door.add(StandInData.permissionThread(now: Date()))
           await session.refresh()
         case "refused":
           if let (asked, question) = retry() {

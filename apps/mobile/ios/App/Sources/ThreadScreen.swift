@@ -140,7 +140,7 @@ struct MessageView: View {
       .accessibilityAddTraits(.isHeader)
       MessageBodyView(text: message.body, hasCards: !(message.questions ?? []).isEmpty || !(message.actions ?? []).isEmpty)
       ForEach(questions, id: \.key) { question in
-        QuestionCard(session: session, thread: thread, message: message.id, question: question, sentAt: question.sentReplyId.flatMap(replyTime), drafts: drafts)
+        QuestionCard(session: session, thread: thread, message: message.id, question: question, sentAt: question.sentReplyId.flatMap(replyTime), permission: SendPlan.isPermissionPrompt(message), drafts: drafts)
       }
       // Action items are shown; marking one Done or Can't do it is on the computer in this slice.
       ForEach(actions, id: \.key) { action in

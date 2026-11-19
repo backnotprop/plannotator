@@ -20,6 +20,14 @@ public enum SendPlan {
   /// `INBOX_PERMISSION_SESSION_PREFIX` (packages/core/inbox-permission.ts:23): a permission prompt's own session.
   static let permissionSessionPrefix = "perm:"
 
+  /// `INBOX_PERMISSION_FULL` (packages/core/inbox-permission.ts:393). The Inbox takes it only with the window's own
+  /// confirmation (`confirm_full`), which the phone does not give: the choice is shown, and answered on the computer.
+  public static let permissionFull = "Allow and switch to Full permissions"
+
+  public static func isPermissionPrompt(_ message: InboxMessageWire) -> Bool {
+    message.author.kind == .agent && (message.author.session ?? "").hasPrefix(permissionSessionPrefix)
+  }
+
   static func group(of message: InboxMessageWire) -> String {
     if let session = message.author.session, !session.isEmpty { return "session:\(message.author.host ?? "")\u{0}\(session)" }
     return "message:\(message.id.rawValue)"

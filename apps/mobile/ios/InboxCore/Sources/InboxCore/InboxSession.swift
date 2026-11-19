@@ -144,6 +144,8 @@ public final class InboxSession {
             race.addTask {
               do { return .answered(index, try await candidate.health()) } catch let failure as DoorFailure {
                 if case .unreachable = failure { return .silent }
+                // Not a definite answer about this phone: the computer is treated as away, and asked again.
+                if !failure.isDefinite { return .silent }
                 return .refused(failure)
               } catch { return .silent }
             }
@@ -196,7 +198,9 @@ public final class InboxSession {
   private func note(_ failure: DoorFailure) {
     switch failure {
     case .appNeedsUpdate: standing = .appNeedsUpdate
-    case .refused where [.deviceRevoked, .deviceTokenInvalid, .deviceTokenMissing].contains(failure.code):
+    // Only a door that says the device is revoked, or that it does not know the token, has removed this phone.
+    // A 401 with another code (a token something in between stripped) is tried again and erases nothing.
+    case .refused where [.deviceRevoked, .deviceTokenInvalid].contains(failure.code):
       // The computer removed this phone: nothing of that computer stays here.
       standing = .removed
       stopListening()

@@ -507,12 +507,57 @@ final class DoorTests: XCTestCase {
     await session.open(StandInData.retry)
     XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
     let (asked, question) = try retryThread(session)
+    // The pick reaches the computer, and its answer is held on the way back: a write still on its way.
+    await door.holdPickAnswers()
     session.hold(pick: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""), thread: StandInData.retry, message: asked.id, question: question)
-    async let write: Void = session.deliverHeld(thread: StandInData.retry)
-    async let removal: Void = session.removeThisPhone()
-    _ = await (write, removal)
-    await session.open(StandInData.retry)
+    let write = Task { await session.deliverHeld(thread: StandInData.retry) }
+    for _ in 0..<200 {
+      if await door.posts("/picks").count == 1 { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    let arrived = await door.posts("/picks").count
+    XCTAssertEqual(arrived, 1)
+    await session.removeThisPhone()
     XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    // Now the answer comes back, after the removal: it must write nothing of that computer.
+    await door.release()
+    await write.value
+    XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "a late answer brought the erased copy back")
+    XCTAssertTrue(session.held.isEmpty)
+  }
+
+  func testA401ThatDoesNotSayThePhoneWasRemovedIsTriedAgainAndErasesNothing() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-core-tests-\(UUID().uuidString)", isDirectory: true)
+    let door = StandInDoor()
+    let issued = await door.issueToken()
+    let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
+    let session = InboxSession(computer: computer, app: testApp, copy: LocalCopy(folder: folder)) { _ in [StandInTransport(door: door)] }
+    await session.start()
+    await session.open(StandInData.docs)
+    // Something between the phone and the computer strips the token: the door answers 401 device_token_missing.
+    await door.setOptions { $0.stripsToken = true }
+    await session.send(thread: StandInData.docs, words: "Thanks, merge it.")
+    XCTAssertEqual(session.standing, .ok, "not a removal")
+    XCTAssertEqual(session.held.map(\.kind), [.reply], "the Send waits, with its key")
+    XCTAssertNotNil(session.list)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path), "the copy is kept")
+    await session.refresh()
+    XCTAssertEqual(session.standing, .ok)
+    await door.setOptions { $0.stripsToken = false }
+    await session.refresh()
+    XCTAssertTrue(session.held.isEmpty)
+    let stored = await door.thread(StandInData.docs)
+    XCTAssertEqual(stored?.messages.last?.body, "Thanks, merge it.")
+    session.stop()
+    LocalCopy(folder: folder).erase()
+  }
+
+  func testOnlyAConnectionThatWasNeverMadeMayBeTriedAgainWhenPairing() {
+    // A pairing secret is redeemed once: the request is sent again only when it cannot have arrived.
+    XCTAssertFalse(DoorFailure.mayHaveArrived(URLError(.cannotConnectToHost)))
+    XCTAssertFalse(DoorFailure.mayHaveArrived(URLError(.notConnectedToInternet)))
+    XCTAssertTrue(DoorFailure.mayHaveArrived(URLError(.timedOut)))
+    XCTAssertTrue(DoorFailure.mayHaveArrived(URLError(.networkConnectionLost)))
   }
 
   func testATooManyRequestsAnswerIsTriedAgainNotGivenBack() async throws {

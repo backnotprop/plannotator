@@ -22,6 +22,8 @@ public actor StandInDoor {
     public var version = "0.29.3"
     /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
     public var proxyRefusesReplies: Int?
+    /// True: the Authorization header never reaches the door, as when something in between strips it.
+    public var stripsToken = false
     public init() {}
   }
 
@@ -51,6 +53,27 @@ public actor StandInDoor {
   }
 
   public func setOffline(_ value: Bool) { offline = value }
+
+  /// Hold the answer to every pick (the pick itself is applied) until `release()`: a write still on its way.
+  public func holdPickAnswers() { holding = true }
+  public func release() {
+    holding = false
+    for waiter in waiters { waiter.resume() }
+    waiters = []
+  }
+  func held(_ call: DoorCall) async {
+    guard holding, call.method == .post, call.path.hasSuffix("/picks") else { return }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+  private var holding = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  /// One more thread on the computer.
+  public func add(_ thread: InboxThread) {
+    threads.insert(thread, at: 0)
+    seq = max(seq, thread.messages.compactMap(\.seq).max() ?? 0)
+    unread.insert(thread.threadId)
+  }
   public func setOptions(_ change: @Sendable (inout Options) -> Void) { change(&options) }
   public func clearCalls() { calls = [] }
   public func thread(_ id: ThreadID) -> InboxThread? { threads.first { $0.threadId == id } }
@@ -91,7 +114,7 @@ public actor StandInDoor {
     let route = "\(call.method.rawValue) \(call.path)"
     if route == "POST pair" { return pair(call) }
 
-    guard let bearer = headers["authorization"], bearer.hasPrefix("Bearer ") else { return refuse(401, "device_token_missing", "No device token.") }
+    guard !options.stripsToken, let bearer = headers["authorization"], bearer.hasPrefix("Bearer ") else { return refuse(401, "device_token_missing", "No device token.") }
     guard let device = tokens[String(bearer.dropFirst(7))] else { return refuse(401, "device_token_invalid", "That device token is not known.") }
     if revoked.contains(device), route != "POST revoke" { return refuse(401, "device_revoked", "This device was removed.") }
     if let app = AppIdentity.parse(headers[AppIdentity.headerName.lowercased()]), app.contract < options.minAppContract, call.path != "health", call.path != "revoke" {
@@ -380,7 +403,11 @@ public actor StandInDoor {
 public struct StandInTransport: DoorTransport {
   public let door: StandInDoor
   public init(door: StandInDoor) { self.door = door }
-  public func send(_ call: DoorCall) async throws -> DoorAnswerBytes { try await door.handle(call) }
+  public func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
+    let answer = try await door.handle(call)
+    await door.held(call)
+    return answer
+  }
 }
 
 extension JSONValue {

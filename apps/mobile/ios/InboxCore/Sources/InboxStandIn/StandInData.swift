@@ -191,6 +191,19 @@ public enum StandInData {
     return [billingThread, checkoutThread, retryThread, docsThread, uploadThread, bumpsThread, onboardingThread]
   }
 
+  public static let permission = ThreadID("msg_STANDIN0000000000000008")
+
+  /// A started agent's permission prompt, as the Inbox writes one (its own `perm:` session).
+  public static func permissionThread(now: Date) -> InboxThread {
+    let ask = MessageID(permission.rawValue)
+    let choices = ["Allow once", "Deny", "Allow and switch to Auto mode", SendPlan.permissionFull].map { choice($0) }
+    let message = InboxMessageWire(
+      questions: [question("q_perm", .single, "Claude Code wants to run a command", context: "bun run db:migrate --env staging", choices: choices, stopped: permission.rawValue, message: ask)],
+      seq: 900, id: ask, projectId: ProjectID("prj_api-server"), threadId: permission, author: agent("claude-code", "perm:ses_api"), body: "Claude Code is waiting for your answer before it runs a command.",
+      createdAt: iso(now.addingTimeInterval(-60)))
+    return InboxThread(threadId: permission, project: project("api-server"), threadName: "Migrate billing tables: permission", messages: [message])
+  }
+
   // MARK: The stand-in's own, simple reading of a thread as a row
 
   static func words(of answer: QuestionAnswer) -> String {

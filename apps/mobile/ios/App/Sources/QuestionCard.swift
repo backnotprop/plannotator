@@ -34,6 +34,8 @@ struct QuestionCard: View {
   let question: InboxQuestion
   /// When the reply that sent this answer was written.
   var sentAt: String?
+  /// A started agent's permission prompt: Full permissions is answered on the computer.
+  var permission = false
   let drafts: ThreadDrafts
 
   @State private var draft = CardDraft()
@@ -144,8 +146,13 @@ struct QuestionCard: View {
     VStack(spacing: 0) {
       ForEach(Array(question.choices.enumerated()), id: \.element.label) { index, choice in
         if index > 0 { Divider().overlay(Token.border) }
-        ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
-          apply(CardAnswers.tap(question, label: choice.label))
+        if permission, choice.label == SendPlan.permissionFull {
+          // The Inbox takes this one only with its own window's confirmation: shown, never offered to tap.
+          ChoiceRow(label: choice.label, detail: PhoneWords.answerOnComputer, recommended: false, multi: false, selected: picked.contains(choice.label), enabled: false, onComputer: true) {}
+        } else {
+          ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
+            apply(CardAnswers.tap(question, label: choice.label))
+          }
         }
       }
       if let suggestion = CardAnswers.suggestion(of: question) {
@@ -252,7 +259,7 @@ struct QuestionCard: View {
       focus = draft.noteOpen ? .note : nil
     }
     Spacer(minLength: 8)
-    if CardAnswers.offersAccept(question) {
+    if CardAnswers.offersAccept(question), !(permission && question.choices.contains { $0.recommended && $0.label == SendPlan.permissionFull }) {
       Button(PhoneWords.acceptRecommended) {
         draft.replacedOther = nil
         apply(CardAnswers.acceptRecommended(question))
@@ -338,9 +345,12 @@ struct ChoiceRow: View {
   let enabled: Bool
   /// What VoiceOver reads as the row's value (the words typed under "Other…").
   var value: String?
+  /// A choice the phone shows and does not take.
+  var onComputer = false
   let action: () -> Void
 
   private var symbol: String {
+    if onComputer { return "desktopcomputer" }
     if multi { return selected ? "checkmark.square.fill" : "square" }
     return selected ? "checkmark.circle.fill" : "circle"
   }
@@ -349,7 +359,7 @@ struct ChoiceRow: View {
     Button(action: action) {
       HStack(alignment: .firstTextBaseline, spacing: 12) {
         Image(systemName: symbol)
-          .font(.title2)
+          .font(onComputer ? .body : .title2)
           .foregroundStyle(selected ? Token.primary : Token.mutedForeground)
           .frame(minWidth: 28)
           .accessibilityHidden(true)
@@ -384,7 +394,7 @@ struct ChoiceRow: View {
   }
 
   private var labelText: some View {
-    Text(label).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).multilineTextAlignment(.leading)
+    Text(label).font(.body.weight(.semibold)).foregroundStyle(onComputer ? Token.mutedForeground : Token.foreground).multilineTextAlignment(.leading)
   }
 
   @ViewBuilder private var badge: some View {
