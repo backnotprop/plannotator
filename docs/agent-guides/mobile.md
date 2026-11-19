@@ -56,14 +56,14 @@ A fixture (`fixtures/<suite>.json`) is invented input. A vector (`vectors/<suite
 | `list` | `fixtures/list.json`: list rows' facts | Each row's section and bold, every section's thread order, the badge count and label | `inboxSectionOf`, `inboxRowUnread`, `inboxListSections` (`packages/shared/inbox/list.ts`), `inboxTabCount`, `tabBadgeLabel` (`packages/inbox/tabCount.ts`) |
 | `words` | none | Each word template filled with sample parts; the counting words | The word functions in `packages/core` |
 | `time` | `fixtures/time.json`: moments, a "now" and three time zones | Per zone: `shortTime`, `whenTime`, `dayWords`, `dateTime`, `clockTime`, `fullTime`; and `normalise`: the rule and examples for iOS's U+202F before AM and PM | `packages/core/inbox-format.ts`, run in its own process with `TZ` set (`scripts/mobile/vectors-time.ts`), because the formatters read the zone when they load |
-| `crypto` | `packages/core/fixtures/inbox-relay-vectors.json` (the existing relay vectors) | The push collapse id per thread. The keys stay in the relay file; the app derives the collapse key itself | `deriveRelayKeys` and the Inbox's HMAC step |
+| `crypto` | `packages/core/fixtures/inbox-relay-vectors.json` (the existing relay vectors) | The push collapse id per thread. The keys stay in the relay file; the app derives the collapse key itself | `deriveRelayKeys` and `inboxPushCollapseId` (`packages/core/inbox-push.ts`) |
 | `questions` | `fixtures/questions.json`: questions and what the person does on each | The answer each act makes, and the pick body that saves it (`answer: null` takes a pick back) | `choiceAnswer`, `otherAnswer`, `textAnswer`, `skipAnswer`, `inboxPickBody` (`packages/core/inbox-answers.ts`) |
 | `skew` | `fixtures/skew.json`: health answers, two app clients, app headers | What the app makes of each health answer (`ok`, `inbox_needs_update`, `app_needs_update`) and which routes it then offers, directly and through the relay; how the door parses each `X-Plannotator-App` header | `readInboxDoorHealth`, `inboxDoorOffers`, `parseInboxAppHeader` (`packages/core/inbox-door-version.ts`) |
+| `push` | none: F6a's own `packages/core/fixtures/inbox-relay-push-v2-vectors.json` | `vectors/push.json` names that file and its pushes. The file holds each push's plaintext, sealed envelope, size and collapse id under the all-zero pairing; it is never copied | `packages/core/inbox-push-vectors.ts`. `bun scripts/mobile/all.ts` rewrites the file when the push rules no longer give its plaintexts, sizes or collapse ids |
 | `stream` | `fixtures/stream.json`: bytes as the Inbox writes them, and cut points | The frames the window's reader takes | `parseEventStreamText` (`packages/inbox/sharedEvents.ts`), with its own generator, `scripts/mobile/vectors-stream.ts`, and its own test, `tests/mobile-stream-vectors.test.ts` |
 
-Two of the suites that slice S1 needs have no generator yet:
+One suite that slice S1 needs has no generator yet:
 
-- `push`: brief F6a's own push vectors (`packages/core/fixtures/inbox-relay-push-v2-vectors.json`) will be referenced from here, not made twice, once F6a is on main. The collapse id then comes from its `inboxPushCollapseId`.
 - `decode`: real list and thread answers. Brief F4 defines the device view these come from.
 
 To add a fixture:
@@ -181,7 +181,7 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - The flows are checked against the window and cite it. In the list: left swipe is Archive only, the undo banner stays 7 s, the badge counts threads with unseen agent messages, and a picked card reads "Picked <time> · in your draft".
 - About 33 v1 features use door routes that a phone token cannot reach today (`grant: machine`: the Board, pulls, launch, open-in and more), and `window-door-gap` lists v1 features with no door route at all. S1 should use only `grant: phone` routes.
 - Time words: the vectors print U+0020 before AM and PM, and iOS's en_US format prints U+202F. Normalise both sides as `vectors/time.json` `normalise.rule` says, and test in each of the fixture's zones: UTC, Asia/Kolkata (+05:30) and America/Los_Angeles (−08:00 in November, −07:00 in summer). Format in the zone the test gives, never in UTC.
-- The suites `push` and `decode` do not exist yet (see Fixtures and vectors).
+- The `decode` suite does not exist yet (see Fixtures and vectors). Push: read `vectors/push.json`, then the file it names.
 - Skew: a `contract` or `min_app_contract` that is not a whole number from 0 to 2^53 − 1 makes the whole `door` unreadable, so the app treats it as an Inbox from before the handshake. `vectors/skew.json` holds the cases, including a number above 2^53 that `Int64` could hold.
 - Only the words in `words.json` (about 30) are generated. Any other window word needs a product constant first, in its own pull request.
 - `tokens.json` names the fonts Inter and Geist Mono. Bundling them in the app needs their OFL notices.
