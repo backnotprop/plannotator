@@ -95,7 +95,7 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
-import { assertInboxOn, inboxOffCommand, inboxOnStatus, inboxOnStatusLines, inboxRunMayStart, isOurLoginItem } from "./inbox-on-command";
+import { assertInboxOn, inboxOffCommand, inboxOnStatus, inboxOnStatusLines, inboxRunMayStart, takeLoginItemMarker } from "./inbox-on-command";
 import { settleInboxOn } from "@plannotator/server/inbox-on-settle";
 import { INBOX_OFF_AGENT_LINE, isInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { loadEmbeddedSemDiff } from "./sem-diff";
@@ -801,6 +801,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   // first Inbox and a person's run never does; so it counts as detached too.
   const detached = process.env[DETACHED_ENV] === "1" || process.env[LOCK_HELD_ENV] === "1";
   delete process.env[DETACHED_ENV];
+  // The start at login, read once; its markers go too, so nothing this Inbox starts inherits them.
+  const loginItem = takeLoginItemMarker(process.env);
   // PLANNOTATOR_INBOX_CONNECT=0 in this shell skips it, also on an Inbox an agent started.
   const connect = !detached && !inboxConnectDisabled(process.env);
 
@@ -914,7 +916,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   }
 
   // Running plannotator inbox turns the Inbox on; Plannotator's own starts while it is off start and open nothing.
-  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background, loginItem: isOurLoginItem(process.env) });
+  const mayStart = inboxRunMayStart(dataDir, process.env, { detached, background, loginItem });
   if (!mayStart.ok) {
     process.stderr.write(`${mayStart.line}\n`);
     process.exit(1);

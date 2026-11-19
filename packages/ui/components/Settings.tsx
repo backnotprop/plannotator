@@ -313,17 +313,15 @@ function cookieHostSettingState(setting: CookieHostSetting): string {
   return setting.on ? 'on' : 'off';
 }
 
-function ToggleSwitch({ checked, onChange, label, description, disabled = false, dimSwitchOnly = false }: {
+function ToggleSwitch({ checked, onChange, label, description, disabled = false }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   description?: React.ReactNode;
   disabled?: boolean;
-  /** Disabled, the row's words stay full strength and only the switch dims (a state, not an unavailable row). */
-  dimSwitchOnly?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 ${disabled && !dimSwitchOnly ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center justify-between gap-4 ${disabled ? 'opacity-50' : ''}`}>
       <div>
         <div className="text-sm font-medium">{label}</div>
         {description && <div className="text-xs text-muted-foreground">{description}</div>}
@@ -335,7 +333,7 @@ function ToggleSwitch({ checked, onChange, label, description, disabled = false,
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-11 w-11 shrink-0 items-center disabled:cursor-not-allowed ${disabled && dimSwitchOnly ? 'opacity-50' : ''}`}
+        className={`relative inline-flex h-11 w-11 shrink-0 items-center disabled:cursor-not-allowed`}
       >
         <span
           aria-hidden="true"
@@ -403,8 +401,8 @@ function AgentToolSettingRow({ setting, onChange }: {
 
 /**
  * The Plannotator Inbox on this computer (utils/inboxOnSetting.ts): shown only
- * to someone who turned it on. Off stops it and removes Plannotator's untouched
- * notes in agents' instruction files; on again is the person's own click.
+ * to someone who had it on when the page loaded. Off stops it and removes Plannotator's untouched
+ * notes in agents' instruction files; on writes the record again (agents get it from their next session).
  */
 function InboxOnSettingRow({ on, onChange }: {
   readonly on: boolean;
@@ -431,15 +429,13 @@ function InboxOnSettingRow({ on, onChange }: {
       <ToggleSwitch
         checked={on}
         onChange={(next) => void change(next)}
-        // Off here is final for this page: plannotator inbox turns it on (no page request can prove a click).
-        disabled={saving || !on}
-        dimSwitchOnly={!on}
+        disabled={saving}
         label="Plannotator Inbox"
         description={
           on ? (
-            <>On for this computer: agents can leave you messages and questions in it. Turn it off and they stop: nothing starts it again until you run <code className="font-mono">plannotator inbox</code>.</>
+            <>On for this computer: agents can leave you messages and questions in it.</>
           ) : (
-            <>Off for this computer: agents do not get it, and nothing starts it until you run <code className="font-mono">plannotator inbox</code>.</>
+            <>Off for this computer: agents do not get it. Turn it on here, or run <code className="font-mono">plannotator inbox</code>.</>
           )
         }
       />

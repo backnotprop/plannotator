@@ -962,14 +962,14 @@ test('the Update button follows health ("ready"), and pressing it brings the new
 
 // The Inbox is off until plannotator inbox is run (packages/shared/inbox/inbox-on.ts). Every other proof here runs
 // with it on (an undecided scratch data dir counts as on for a test); this one runs the compiled binary with the
-// real rule (PLANNOTATOR_TEST_INBOX_ON=0) on a fresh computer, as an agent's shell would.
-test('Inbox off (a fresh computer, an agent\'s shell): no background start, no tools, the one line', async () => {
+// real rule (PLANNOTATOR_TEST_INBOX_ON=0) on a fresh computer: Plannotator's own start and an agent's MCP calls.
+test('Inbox off (a fresh computer): no background start, no tools, the one line', async () => {
   const root = inboxScratch('plannotator-inbox-off-e2e-');
   try {
     const dataDir = join(root, 'data');
     const home = join(root, 'home');
     mkdirSync(home, { recursive: true });
-    const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_INBOX_ON: '0', CLAUDECODE: '1' };
+    const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_INBOX_ON: '0' };
     const line = 'The Plannotator Inbox is off on this computer: ask the person in the chat instead. Only the person can turn the Inbox on; do not try to turn it on yourself.';
     for (const args of [['inbox', '--background']]) {
       const run = spawnSync(builtBinary, args, { env, encoding: 'utf8', timeout: 30_000 });
@@ -996,5 +996,104 @@ test('Inbox off (a fresh computer, an agent\'s shell): no background start, no t
     expect(existsSync(join(dataDir, 'state.json')) && readFileSync(join(dataDir, 'state.json'), 'utf8').includes('"inboxOn"')).toBe(false);
   } finally {
     await removeInboxScratch(root);
+  }
+});
+
+/**
+ * The same real rule, against the compiled binary, for the ways on and off. PLANNOTATOR_TEST_INBOX_ON=0 gives the
+ * real rule; PLANNOTATOR_TEST_SANDBOX only keeps the login item's systemctl/launchctl calls off this machine.
+ */
+function realRuleEnv(root: string, extra: Record<string, string> = {}): Record<string, string> {
+  const home = join(root, 'home');
+  mkdirSync(home, { recursive: true });
+  return { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1', PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_INBOX_ON: '0', PLANNOTATOR_TEST_SANDBOX: root, ...extra };
+}
+const recordIn = (dataDir: string) => {
+  try {
+    return (JSON.parse(readFileSync(join(dataDir, 'state.json'), 'utf8')) as { inboxOn?: { on: boolean; by: string } }).inboxOn ?? null;
+  } catch {
+    return null;
+  }
+};
+
+// The headless setup step (SSH, no browser, no terminal on stdin): one command, returns at once, the Inbox on.
+test('Inbox on over SSH with no terminal: plannotator inbox --open turns it on, starts it detached and prints the URL', async () => {
+  const root = inboxScratch('plannotator-inbox-open-ssh-e2e-');
+  try {
+    const env = realRuleEnv(root, { SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22' });
+    const started = Date.now();
+    const run = spawnSync(builtBinary, ['inbox', '--open'], { env, encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    expect(run.status).toBe(0);
+    expect(Date.now() - started).toBeLessThan(45_000);
+    expect(run.stdout.trim()).toMatch(/^http:\/\/(?:localhost|127\.0\.0\.1):\d+\/?$/);
+    expect(recordIn(env.PLANNOTATOR_DATA_DIR)).toMatchObject({ on: true, by: 'command' });
+    expect(existsSync(join(env.PLANNOTATOR_DATA_DIR, 'inbox', 'inbox.json'))).toBe(true);
+  } finally {
+    await removeInboxScratch(root);
+  }
+});
+
+// --no-open turns it on; after off, the routines' start at login (its marker) and a background start are refused.
+test('Inbox on and off: --no-open turns it on; after off the start at login and --background are refused', async () => {
+  const root = inboxScratch('plannotator-inbox-ways-e2e-');
+  try {
+    const env = realRuleEnv(root);
+    const dataDir = env.PLANNOTATOR_DATA_DIR;
+    const { spawn } = await import('node:child_process');
+    const served = spawn(builtBinary, ['inbox', '--no-open'], { env, stdio: 'ignore' });
+    try {
+      await expect.poll(() => existsSync(join(dataDir, 'inbox', 'inbox.json')), { timeout: 60_000 }).toBe(true);
+      expect(recordIn(dataDir)).toMatchObject({ on: true, by: 'command' });
+      const off = spawnSync(builtBinary, ['inbox', 'off'], { env, encoding: 'utf8', timeout: 60_000 });
+      expect(off.status).toBe(0);
+      expect(off.stdout).toContain('The Plannotator Inbox is off on this computer');
+    } finally {
+      served.kill('SIGTERM');
+    }
+    expect(recordIn(dataDir)).toMatchObject({ on: false, by: 'off' });
+    for (const [args, extra] of [[['inbox', '--no-open'], { PLANNOTATOR_INBOX_LOGIN_ITEM: '1' }], [['inbox', '--background'], {}]] as const) {
+      const run = spawnSync(builtBinary, [...args], { env: { ...env, ...extra }, encoding: 'utf8', timeout: 30_000 });
+      expect([args.join(' '), run.status]).toEqual([args.join(' '), 1]);
+      expect(run.stderr).toContain('The Plannotator Inbox is off on this computer');
+    }
+    expect(recordIn(dataDir)).toMatchObject({ on: false, by: 'off' });
+  } finally {
+    await removeInboxScratch(root);
+  }
+});
+
+// An install from before the rule, decided once by the compiled binary: only agents ever started it, off (and an old
+// start at login goes); the person wrote in it, on.
+test('Inbox from before the rule: agents only is off and its old start at login goes; the person\'s use keeps it on', async () => {
+  const line = (record: Record<string, unknown>, seq: number) => JSON.stringify({ v: 1, seq, at: '2026-11-01T00:00:00.000Z', kind: 'message', id: record.id, record });
+  for (const [name, author, expected] of [['agents only', { kind: 'agent', agent: 'codex' }, { on: false, by: 'update-agent-only' }], ['the person wrote', { kind: 'person' }, { on: true, by: 'update-used' }]] as const) {
+    const root = inboxScratch('plannotator-inbox-migrate-e2e-');
+    try {
+      const env = realRuleEnv(root);
+      const dataDir = env.PLANNOTATOR_DATA_DIR;
+      mkdirSync(join(dataDir, 'inbox', 'projects', 'p1'), { recursive: true });
+      writeFileSync(join(dataDir, 'inbox', 'inbox.json'), '{}');
+      writeFileSync(join(dataDir, 'inbox', 'projects', 'p1', 'messages.jsonl'), line({ id: 'm1', author, body: 'Ship it?' }, 1) + '\n');
+      // A start at login written by 0.29 (no marker), where this platform keeps one.
+      const loginItem = process.platform === 'linux'
+        ? join(env.HOME, '.config', 'systemd', 'user', 'plannotator-inbox.service')
+        : process.platform === 'darwin' ? join(env.HOME, 'Library', 'LaunchAgents', 'ai.plannotator.inbox.plist') : null;
+      if (loginItem) {
+        mkdirSync(join(loginItem, '..'), { recursive: true });
+        writeFileSync(loginItem, process.platform === 'linux'
+          ? `[Service]\nExecStart="${builtBinary}" "inbox" "--no-open"\nEnvironment="PLANNOTATOR_DATA_DIR=${dataDir}"\n`
+          : `<plist version="1.0">\n<dict>\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>PLANNOTATOR_DATA_DIR</key><string>${dataDir}</string>\n  </dict>\n</dict>\n</plist>\n`);
+      }
+      const run = spawnSync(builtBinary, ['inbox', 'migrate'], { env, encoding: 'utf8', timeout: 30_000 });
+      expect([name, run.status, run.stdout.trim()]).toEqual([name, 0, expected.on ? 'on' : 'off']);
+      expect(recordIn(dataDir)).toMatchObject(expected);
+      if (loginItem) {
+        if (expected.on) expect(readFileSync(loginItem, 'utf8')).toContain('PLANNOTATOR_INBOX_LOGIN_ITEM');
+        else expect(existsSync(loginItem)).toBe(false);
+      }
+      expect(existsSync(join(dataDir, 'inbox', 'inbox.json')) && readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')).toBe('{}');
+    } finally {
+      await removeInboxScratch(root);
+    }
   }
 });

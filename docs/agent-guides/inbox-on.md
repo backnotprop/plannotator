@@ -10,7 +10,7 @@ The record is `state.json` → `inboxOn` in the data dir: `{ on, at, by, notes? 
 - It is per computer: state.json, never config.json, which may roam with dotfiles.
 - `inboxOn` is in `MACHINE_STATE_KEYS`. It is written by `updateMachineState` (config.ts): state.json only, under config.json's lock, as a compare-and-set, and never needing config.json, so a hand-broken config.json does not block it.
 - The record is read only from state.json.
-- `inbox-on-decided` beside state.json is rewritten with a copy of every record written, and never removed (only `plannotator uninstall --purge` removes it, with state.json). When state.json is lost later (deleted, or set aside as corrupt), the copy comes back as it was, so an off stays off and an on stays on. A mark with no readable copy (written by an earlier build) reads the store again: the person's use keeps it on, else off, both `record-lost`, and no notes are removed.
+- `inbox-on-decided` beside state.json is rewritten with a copy of every record written, under config.json's lock right after state.json (one that cannot be written is removed, never left stale), and never removed otherwise (only `plannotator uninstall --purge` removes it, with state.json). When state.json is lost later (deleted, or set aside as corrupt), the copy comes back as it was, so an off stays off and an on stays on. A mark with no readable copy (written by an earlier build) reads the store again: the person's use keeps it on, else off, both `record-lost`, and no notes are removed.
 - The shape and the pure reader are `inboxOnRecord` / `inboxOnFromState` in `packages/shared/inbox/inbox-on-contract.ts`. The Claude Code mod has a byte-for-byte copy in `apps/hook/hooks/mod/inbox-on-contract.ts`, and `inbox-on-contract.test.ts` keeps the two equal.
 
 The one gate is **`isInboxOn(dataDir?, env?)`** in `@plannotator/shared/inbox/inbox-on`. Every gate calls it:
@@ -23,6 +23,7 @@ The writers are `turnInboxOn(by)`, `recordInboxOff()` and `writeInboxOnRecord()`
 
 `by` says what last set the record:
 - `command`: a run of `plannotator inbox` (`/plannotator-inbox` runs it).
+- `settings`: the Settings switch.
 - `off`: Turn the Inbox off.
 - `update-used`, `update-ran`, `update-agent-only`, `update-slow`: the one-time decision for an install from before the rule (below).
 - `record-lost`: see the decided mark above.
@@ -33,13 +34,13 @@ The writers are `turnInboxOn(by)`, `recordInboxOff()` and `writeInboxOnRecord()`
 
 - **A run of `plannotator inbox`**: bare, `--no-open` or `--open`, whoever runs it (`inboxRunMayStart` in `apps/hook/server/inbox-on-command.ts`). `/plannotator-inbox` on every host just runs `plannotator inbox --open`. A record that cannot be written is said plainly (`INBOX_ON_NOT_SAVED`) and nothing starts.
 - **Opening the window and pairing a phone** need a running Inbox, and an Inbox runs only while the record is on, so they need no write of their own.
-- **No page turns it on.** `POST /api/config { inboxOn: true }` answers 403 ("The Inbox turns on only with plannotator inbox."): nothing an HTTP request carries proves a click. The Settings row turns it off only; once off, its switch is disabled.
+- **The Settings switch** in plan review, code review and annotate (`POST /api/config { inboxOn: true }`, `turnInboxOn("settings")`, both runtimes). No guard, by the owner's ruling: anything that can reach the local server can already run `plannotator inbox`. The row is a plain on/off switch; it shows only to someone who had the Inbox on when the page loaded (`serverConfig.inboxOn`).
 
 ### What never turns it on
 
 None of these sets the record, and while it is off none of them starts the Inbox:
 - `--background`, a detached start (`PLANNOTATOR_INBOX_DETACHED` or an inherited start lock: an agent call's background start, the window's Restart, the linked-machine update restart), and `plannotator inbox restart`;
-- the routines' start at login: it runs `plannotator inbox --no-open` with `PLANNOTATOR_INBOX_LOGIN_ITEM=1` (or, written before that variable, as launchd's job `ai.plannotator.inbox`), and `isOurLoginItem` makes it Plannotator's own start. An older systemd unit with neither marker counts as a run of `plannotator inbox`; Turn off removes the unit, so it can only run while the Inbox was on;
+- the routines' start at login: it runs `plannotator inbox --no-open` with `PLANNOTATOR_INBOX_LOGIN_ITEM=1`, and `isOurLoginItem` makes it Plannotator's own start. One written before that variable (0.29) is still known: launchd's job `ai.plannotator.inbox` (`XPC_SERVICE_NAME`), or the main process of the systemd unit `plannotator-inbox.service` (its cgroup, and `SYSTEMD_EXEC_PID` or systemd as its parent; a process the Inbox starts shares the cgroup but is neither). `settleInboxOn` also gives such an item the marker while the Inbox is on (with a `daemon-reload`) and removes it while it is off. The run reads the markers once and drops them from its environment (`takeLoginItemMarker`), so nothing the Inbox starts inherits them;
 - a hook, the MCP shim, a tool call, a send or read subcommand, an installer, an update;
 - `inbox.json` or any other file existing.
 
@@ -108,7 +109,7 @@ An install from before the rule has no record. `isInboxOn` decides it once (`dec
   Gap: a person who ran it only with `PLANNOTATOR_INBOX_CONNECT=0` and never used the window reads as C. An agent whose bare `plannotator inbox` wrote `agents.json` reads as B ("keep on" when in doubt).
 - **C, only agents started it: off,** with `notes: 'remove'`.
   - The CLI (`settleInboxOn` at every `plannotator inbox` command, and `plannotator inbox migrate`) removes Plannotator's untouched notes in the same run, never an edited one, once, and removes the routines' start at login (it would start the Inbox again at the next login).
-  - The mod runs `plannotator inbox migrate` once when it finds no record and `inbox/inbox.json` or the decided mark exists; after that the record decides, so no later session start runs it.
+  - The mod reads the decided mark's copy itself when state.json has no record (so a `plannotator` older than the rule cannot answer on for it); with no copy, it runs `plannotator inbox migrate` once when `inbox/inbox.json` or the mark exists; after that the record decides, so no later session start runs it.
 - **D, never ran: off.** Nothing is written: the first record there is the person's own act.
 
 ### Version skew

@@ -7,8 +7,9 @@
  * A record decides. Without one:
  *  - no Inbox ever ran here (no `inbox/inbox.json`) and no record was ever
  *    written here (no decided mark): off, nothing run or written;
- *  - a lost state.json (the decided mark is there): the same one-time run
- *    brings the record back from the mark;
+ *  - a lost state.json with a copy in the decided mark: the copy decides (also
+ *    under a `plannotator` older than the rule, which knows no mark); a mark
+ *    with no copy goes to the same one-time run, which reads the store again;
  *  - an install from before the rule: the mod asks the CLI once
  *    (`plannotator inbox migrate`, which reads the Inbox's store within a
  *    bounded time, writes the record and prints on or off). After that the
@@ -35,14 +36,27 @@ export function isPreRuleCliAnswer(text: string): boolean {
   return /unknown inbox option:?\s*migrate/i.test(text)
 }
 
+/** The copy of the last record the decided mark keeps (packages/shared/inbox/inbox-on.ts), or null. */
+export function recordInMark(text: string | null): ReturnType<typeof inboxOnRecord> {
+  if (!text) return null
+  try {
+    return inboxOnRecord(JSON.stringify({ inboxOn: JSON.parse(text) }))
+  } catch {
+    return null
+  }
+}
+
 /** Whether the person turned the Inbox on here, decided at the process's first session.start. */
 export async function inboxOnAtStart(host: Host, dataDir: string, configText: string | null): Promise<boolean> {
   const readState = () => host.readFile(inboxStatePathOf(dataDir)).catch(() => null)
   const record = inboxOnRecord(await readState())
   if (record) return record.on
   // No record, no Inbox ever ran here and no record was ever written: off, with nothing run and nothing written.
+  const markText = await host.readFile(`${dataDir}/${INBOX_ON_DECIDED_FILE}`).catch(() => null)
+  const copy = recordInMark(markText)
+  if (copy) return copy.on
   const ran = await host.exists(`${dataDir}/inbox/inbox.json`).catch(() => false)
-  if (!ran && !(await host.exists(`${dataDir}/${INBOX_ON_DECIDED_FILE}`).catch(() => false))) return false
+  if (!ran && markText === null) return false
   // An install from before the rule, or a lost record: the CLI decides it once (or restores it) and writes the record.
   const run = await host
     .run(['plannotator', 'inbox', 'migrate'], { env: { PLANNOTATOR_DATA_DIR: dataDir }, timeoutMs: INBOX_MIGRATE_TIMEOUT_MS })

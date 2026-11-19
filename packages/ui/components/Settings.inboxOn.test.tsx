@@ -65,7 +65,8 @@ describe('serverConfig inboxOn', () => {
       return new Response(JSON.stringify({ ok: true, inboxOnLine: 'Turn it back on any time with plannotator inbox.' }), { status: 200 });
     }) as unknown as typeof fetch;
     expect(await saveInboxOnSetting(false, ok)).toBe('Turn it back on any time with plannotator inbox.');
-    expect(sent).toEqual([{ inboxOn: false }]);
+    await saveInboxOnSetting(true, ok);
+    expect(sent).toEqual([{ inboxOn: false }, { inboxOn: true }]);
     const failing = (async () => new Response(JSON.stringify({ error: 'state.json could not be written.' }), { status: 500 })) as unknown as typeof fetch;
     await expect(saveInboxOnSetting(false, failing)).rejects.toThrow('state.json could not be written.');
   });
@@ -89,22 +90,24 @@ describe('Settings Plannotator Inbox row', () => {
       await act(async () => toggle()?.click());
       expect(saved).toEqual([false]);
       expect(document.querySelector(ROW)?.getAttribute('data-inbox-on-setting')).toBe('off');
-      // Off says how it comes back, with the command as code; the words stay full strength (only the switch dims).
+      // Off says how it comes back, with the command as code, and reads as an ordinary off switch (nothing dimmed).
       const row = document.querySelector(ROW);
-      expect(row?.textContent).toContain('nothing starts it until you run plannotator inbox.');
+      expect(row?.textContent).toContain('Turn it on here, or run plannotator inbox.');
       expect(row?.querySelector('code')?.textContent).toBe('plannotator inbox');
-      expect(row?.querySelector('.opacity-50')).toBe(toggle());
+      expect(row?.querySelector('.opacity-50')).toBeNull();
+      expect(toggle()?.disabled).toBe(false);
     });
   }
 
-  // An agent's curl looks like this page's request, so a page never turns the Inbox on: once off, the switch is inert.
-  test.skipIf(!hasDom)('once off, the switch cannot turn it back on from the page', async () => {
+  // T4 (the owner's "no guardrails"): a plain on/off switch; on again saves true.
+  test.skipIf(!hasDom)('off, then on again: the switch turns the Inbox back on', async () => {
     const saved: boolean[] = [];
     await mount({ mode: 'plan', initial: true, save: async (on) => (saved.push(on), on ? undefined : 'Turn it back on any time with plannotator inbox.') });
     await act(async () => toggle()?.click());
     await act(async () => toggle()?.click());
-    expect(saved).toEqual([false]);
-    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    expect(saved).toEqual([false, true]);
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    expect(document.querySelector(ROW)?.textContent).toContain('On for this computer: agents can leave you messages and questions in it.');
   });
 
   test.skipIf(!hasDom)('no row for someone who never turned the Inbox on', async () => {

@@ -11,7 +11,7 @@ import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agen
 import { readInboxOnRecord, turnInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { addInboxNote, INBOX_NOTE_BLOCK } from "./inbox-agent-notes";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
-import { INBOX_TURN_ON_AGAIN, inboxOffReport, settleInboxOn, turnInboxOff } from "./inbox-on-settle";
+import { INBOX_TURN_ON_AGAIN, inboxOffReport, inboxOnConfigResponse, settleInboxOn, turnInboxOff } from "./inbox-on-settle";
 
 /** The real rule: no test knob, no sandbox marker. */
 const REAL: Record<string, string | undefined> = {};
@@ -83,6 +83,36 @@ describe("turn the Inbox off", () => {
     const off = await turnInboxOff(dataDir, { environment: e });
     expect(existsSync(unit)).toBe(false);
     expect(inboxOffReport(off)).toContain("Removed the Inbox's start at login; it comes back with routines when you turn the Inbox on.");
+  });
+
+  // T1: a unit 0.29 wrote has no marker; its login run would count as a run of plannotator inbox.
+  const OLD_UNIT = ["[Service]", 'ExecStart="/usr/local/bin/plannotator" "inbox" "--no-open"', 'Environment="PLANNOTATOR_DATA_DIR=/x"', ""].join("\n");
+  const oldUnit = () => {
+    const unit = join(fake.home, ".config", "systemd", "user", "plannotator-inbox.service");
+    mkdirSync(join(unit, ".."), { recursive: true });
+    writeFileSync(unit, OLD_UNIT);
+    return unit;
+  };
+  test("a unit written before the marker: marked once while the Inbox is on", async () => {
+    turnInboxOn("command", dataDir);
+    const unit = oldUnit();
+    expect(await settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(true);
+    expect(readFileSync(unit, "utf8")).toContain('Environment="PLANNOTATOR_INBOX_LOGIN_ITEM=1"');
+  });
+
+  test("a unit written before the marker: removed while the Inbox is off", async () => {
+    turnInboxOn("command", dataDir);
+    await turnInboxOff(dataDir, { environment: e });
+    const unit = oldUnit();
+    expect(await settleInboxOn(dataDir, { environment: e, env: REAL })).toBe(false);
+    expect(existsSync(unit)).toBe(false);
+  });
+
+  // T4: the Settings switch turns the Inbox on (no 403), recorded as settings.
+  test("the Settings write: on records settings", async () => {
+    const answer = await inboxOnConfigResponse(true);
+    expect(answer.status).toBe(200);
+    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: true, by: "settings" });
   });
 
   // R1: a start at login that cannot be removed is said, never swallowed.

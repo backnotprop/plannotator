@@ -1597,7 +1597,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
  * `update` asked for (true when nothing needed writing) and the value it holds. Used for the Inbox's on/off record
  * (inbox/inbox-on.ts), where a person's on or off must never be overwritten by a write that read an older value.
  */
-export function updateMachineState(key: MachineStateKey, update: (current: unknown) => unknown): { ok: boolean; value: unknown } {
+export function updateMachineState(key: MachineStateKey, update: (current: unknown) => unknown, afterWrite?: (value: unknown) => void): { ok: boolean; value: unknown } {
   let lockPath: string | null = null;
   let locked = false;
   try {
@@ -1612,6 +1612,8 @@ export function updateMachineState(key: MachineStateKey, update: (current: unkno
     const next = update(current);
     if (next === undefined) return { ok: true, value: current };
     const ok = writeState({ ...read.state, [key]: next }, read);
+    // Still under the lock: a file kept in step with this key is written in the same order as state.json.
+    if (ok) afterWrite?.(next);
     return { ok, value: ok ? next : current };
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write state.json: ${e}\n`);

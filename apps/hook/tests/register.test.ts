@@ -724,25 +724,22 @@ describe('register', () => {
     })
   }
 
-  // E1: a lost state.json with no inbox/inbox.json left: the decided mark sends the mod to the CLI, which restores the record.
-  test('a lost record (the decided mark, no inbox.json): the CLI restores it once and the mod follows it', async ($: any, on: any) => {
-    const files = new Map<string, string>([['/home/me/.plannotator', ''], ['/home/me/.plannotator/inbox-on-decided', '{"on":true,"at":"2026-11-18T00:00:00.000Z","by":"command"}\n']])
-    const migrations: string[][] = []
-    const w = world(on, {
-      inbox: 'undecided',
-      files,
-      fetch: inbox(TOOLS, []),
-      run: (argv, files) => {
-        if (argv.join(' ') !== 'plannotator inbox migrate') return undefined
-        migrations.push(argv)
-        files.set(STATE, stateWith(true, 'command'))
-        return { exitCode: 0, stdout: 'on\n', stderr: '' }
-      },
+  // E1: a lost state.json: the decided mark's copy decides, read by the mod itself (also under a plannotator older
+  // than the rule, which knows no mark and would answer on).
+  for (const on of [true, false]) {
+    test(`a lost record with a copy in the decided mark: the copy decides, nothing runs (${on ? 'on' : 'off'})`, async ($: any, harness: any) => {
+      const files = new Map<string, string>([['/home/me/.plannotator', ''], ['/home/me/.plannotator/inbox/inbox.json', REGISTRY], ['/home/me/.plannotator/inbox-on-decided', JSON.stringify({ on, at: '2026-11-18T00:00:00.000Z', by: on ? 'command' : 'off' }) + '\n']])
+      const w = world(harness, {
+        inbox: 'undecided',
+        files,
+        fetch: inbox(TOOLS, []),
+        run: (argv) => (argv.join(' ') === 'plannotator inbox migrate' ? { exitCode: 1, stdout: '', stderr: 'Unknown inbox option: migrate\n' } : undefined),
+      })
+      await $.session.start(SESSION)
+      expect(w.runs.filter((argv) => argv.join(' ') === 'plannotator inbox migrate')).toEqual([])
+      expect(w.tools.map((t) => t.name).includes('plannotator_inbox')).toBe(on)
     })
-    await $.session.start(SESSION)
-    expect(migrations).toHaveLength(1)
-    expect(w.tools.map((t) => t.name)).toContain('plannotator_inbox')
-  })
+  }
 
   // M2: a plannotator older than the rule starts the Inbox for anyone and keeps no rule; the plugin updating first must not drop the tool.
   test('a plannotator older than the rule (Unknown inbox option: migrate): today\'s behaviour, the tool where an Inbox ran, nothing written', async ($: any, on: any) => {

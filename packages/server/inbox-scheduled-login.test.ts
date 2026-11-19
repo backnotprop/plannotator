@@ -5,10 +5,10 @@
  * unavailable otherwise with nothing left behind; Windows has none.
  */
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxLoginItem } from "./inbox-scheduled-login";
+import { inboxLoginItem, withLoginItemMarker } from "./inbox-scheduled-login";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -57,6 +57,29 @@ test("Linux: a user unit only where systemctl --user answers", async () => {
   await item.remove();
   expect(w.ran.at(-1)).toBe("systemctl --user disable plannotator-inbox.service");
   expect(existsSync(item.path!)).toBe(false);
+});
+
+// T1: what 0.29 wrote has no marker; its run must still be known as the start at login.
+const OLD_UNIT = ["[Unit]", "Description=Plannotator Inbox", "", "[Service]", 'ExecStart="/usr/local/bin/plannotator" "inbox" "--no-open"', 'Environment="PLANNOTATOR_DATA_DIR=/home/me/.plannotator"', "", "[Install]", "WantedBy=default.target", ""].join("\n");
+
+test("a unit written before the marker gets it once (with a daemon-reload); a marked one is left alone", async () => {
+  const w = world();
+  const item = inboxLoginItem({ platform: "linux", home: w.home, argv: [], dataDir: w.dataDir, run: w.run });
+  mkdirSync(join(item.path!, ".."), { recursive: true });
+  writeFileSync(item.path!, OLD_UNIT);
+  expect(await item.mark()).toBe(true);
+  const unit = readFileSync(item.path!, "utf8");
+  expect(unit).toContain('ExecStart="/usr/local/bin/plannotator" "inbox" "--no-open"\nEnvironment="PLANNOTATOR_INBOX_LOGIN_ITEM=1"\n');
+  expect(unit).toContain('Environment="PLANNOTATOR_DATA_DIR=/home/me/.plannotator"');
+  expect(w.ran).toEqual(["systemctl --user daemon-reload"]);
+  expect(await item.mark()).toBe(false);
+  expect(readFileSync(item.path!, "utf8")).toBe(unit);
+});
+
+test("a plist written before the marker gets it inside its EnvironmentVariables", () => {
+  const plist = ["<plist version=\"1.0\">", "<dict>", "  <key>EnvironmentVariables</key>", "  <dict>", "    <key>PLANNOTATOR_DATA_DIR</key><string>/d</string>", "  </dict>", "</dict>", "</plist>", ""].join("\n");
+  expect(withLoginItemMarker(plist)).toContain("  <dict>\n    <key>PLANNOTATOR_INBOX_LOGIN_ITEM</key><string>1</string>\n    <key>PLANNOTATOR_DATA_DIR</key>");
+  expect(withLoginItemMarker(withLoginItemMarker(plist)!)).toBeNull();
 });
 
 test("Windows: none", async () => {

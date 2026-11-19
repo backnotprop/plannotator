@@ -10,20 +10,57 @@
  * routines' start at login. While it is off they start nothing.
  */
 
+import { readFileSync } from "node:fs";
 import { INBOX_OFF_AGENT_LINE, isInboxOn, readInboxOnRecord, turnInboxOn } from "@plannotator/shared/inbox/inbox-on";
 import { INBOX_ON_NOT_SAVED } from "@plannotator/shared/inbox/inbox-on-config";
-import { inboxOffReport, turnInboxOff } from "@plannotator/server/inbox-on-settle";
+import { INBOX_LOGIN_LABEL, inboxOffReport, turnInboxOff } from "@plannotator/server/inbox-on-settle";
 
 type Env = Readonly<Record<string, string | undefined>>;
+
+/** What identifies this process to its launcher: its pid, its cgroup (Linux) and its parent's name. */
+export interface OwnProcess {
+  pid: number;
+  cgroup: string | null;
+  parentName: string | null;
+}
+
+function ownProcess(): OwnProcess {
+  const read = (path: string) => {
+    try {
+      return readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  if (process.platform !== "linux") return { pid: process.pid, cgroup: null, parentName: null };
+  return { pid: process.pid, cgroup: read("/proc/self/cgroup"), parentName: read(`/proc/${process.ppid}/comm`)?.trim() ?? null };
+}
 
 /**
  * Whether this process is the routines' start at login: inbox-scheduled-login.ts
  * sets PLANNOTATOR_INBOX_LOGIN_ITEM; a login item written before it is launchd's
- * job `ai.plannotator.inbox`. Our launcher naming itself, so its run never turns
- * the Inbox on.
+ * job `ai.plannotator.inbox`, or the main process of the systemd user unit
+ * `plannotator-inbox.service` (its cgroup, and systemd's own pid variable or
+ * systemd as its parent: a process the Inbox starts shares the cgroup but is
+ * neither). Our launcher naming itself, so its run never turns the Inbox on.
  */
-export function isOurLoginItem(env: Env): boolean {
-  return !!env.PLANNOTATOR_INBOX_LOGIN_ITEM?.trim() || env.XPC_SERVICE_NAME === "ai.plannotator.inbox";
+export function isOurLoginItem(env: Env, self: OwnProcess = ownProcess()): boolean {
+  if (env.PLANNOTATOR_INBOX_LOGIN_ITEM?.trim() || env.XPC_SERVICE_NAME === INBOX_LOGIN_LABEL) return true;
+  if (!self.cgroup || !/\/plannotator-inbox\.service$/m.test(self.cgroup)) return false;
+  return env.SYSTEMD_EXEC_PID ? Number(env.SYSTEMD_EXEC_PID) === self.pid : self.parentName === "systemd";
+}
+
+/**
+ * Read once whether this run is the start at login, then drop its markers from
+ * this process's environment, so nothing the Inbox starts (an agent session, a
+ * terminal, a routine: childEnv passes process.env on) inherits them and has a
+ * person's own `plannotator inbox` there refused.
+ */
+export function takeLoginItemMarker(env: Record<string, string | undefined>, self?: OwnProcess): boolean {
+  const ours = isOurLoginItem(env, self);
+  delete env.PLANNOTATOR_INBOX_LOGIN_ITEM;
+  if (env.XPC_SERVICE_NAME === INBOX_LOGIN_LABEL) delete env.XPC_SERVICE_NAME;
+  return ours;
 }
 
 /** A start refused because the Inbox is off: its message is the one line to print or answer. */
@@ -69,6 +106,7 @@ export async function inboxOffCommand(dataDir: string, write: (line: string) => 
 /** Why the Inbox is on or off, for `plannotator inbox status` (the record's `by`). */
 const INBOX_ON_WHY: Record<string, string> = {
   command: "turned on by plannotator inbox",
+  settings: "turned on in Settings",
   off: "turned off",
   "update-used": "kept on when Plannotator updated: the Inbox window had been used here",
   "update-ran": "kept on when Plannotator updated: plannotator inbox had been run here",

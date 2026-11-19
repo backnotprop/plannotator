@@ -20,7 +20,7 @@
  * and a person who used the Inbox keeps it on (`record-lost`).
  */
 
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -143,6 +143,26 @@ export function decideExistingInstall(dataDir: string = getPlannotatorDataDir(),
   return result;
 }
 
+/**
+ * Write the mark with a copy of the record. One that cannot be written is
+ * removed (a stale copy would bring an old on or off back); with no mark, a
+ * lost record reads the store again.
+ */
+function writeDecidedMark(dataDir: string, record: unknown): void {
+  const mark = join(dataDir, INBOX_ON_DECIDED_FILE);
+  const temp = `${mark}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    renameSync(temp, mark);
+  } catch {
+    try {
+      rmSync(mark, { force: true });
+    } catch {
+      // Nothing more to do: state.json still holds the record.
+    }
+  }
+}
+
 /** The copy of the last record the decided mark keeps, or null (a mark from before it kept one, or unreadable). */
 function recordInMark(mark: string): InboxOnRecord | null {
   const text = readText(mark);
@@ -182,23 +202,17 @@ export function writeInboxOnRecord(dataDir: string, record: InboxOnRecord, optio
   if (realOr(dataDir) !== realOr(getPlannotatorDataDir())) return { ok: false, record: null };
   const read = (value: unknown) => inboxOnRecord(JSON.stringify({ [INBOX_ON_KEY]: value }));
   const same = (x: InboxOnRecord | null, y: InboxOnRecord) => !!x && x.on === y.on && x.at === y.at && x.by === y.by;
-  const written = updateMachineState(INBOX_ON_KEY, (current) => {
-    if (options.ifAbsent && read(current)) return undefined;
-    if (options.ifCurrent && !same(read(current), options.ifCurrent)) return undefined;
-    return record;
-  });
-  const now = read(written.value);
-  if (written.ok && now) {
-    const mark = join(dataDir, INBOX_ON_DECIDED_FILE);
-    const temp = `${mark}.${process.pid}.tmp`;
-    try {
-      writeFileSync(temp, `${JSON.stringify(now)}\n`, { mode: 0o600 });
-      renameSync(temp, mark);
-    } catch {
-      // The mark only brings a lost record back; an old copy, or none, reads the store again.
-    }
-  }
-  return { ok: written.ok, record: now };
+  const written = updateMachineState(
+    INBOX_ON_KEY,
+    (current) => {
+      if (options.ifAbsent && read(current)) return undefined;
+      if (options.ifCurrent && !same(read(current), options.ifCurrent)) return undefined;
+      return record;
+    },
+    // Under config.json's lock, right after state.json: two writers leave the mark in the same order as the record.
+    (value) => writeDecidedMark(dataDir, value),
+  );
+  return { ok: written.ok, record: read(written.value) };
 }
 
 /**

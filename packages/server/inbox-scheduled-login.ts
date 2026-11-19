@@ -8,7 +8,7 @@
  * so. Windows: none (routines are not offered there). Tests pass their own `home` and `run`.
  */
 import { execFile } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 export const INBOX_LOGIN_LABEL = "ai.plannotator.inbox";
@@ -32,6 +32,8 @@ export type InboxLoginItem = {
   path: string | null;
   add(): Promise<"added" | "unavailable">;
   remove(): Promise<void>;
+  /** Add the marker to one written before it (withLoginItemMarker); whether the file changed. */
+  mark(): Promise<boolean>;
 };
 
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -81,6 +83,31 @@ export function inboxLoginUnit(o: { argv: readonly string[]; dataDir: string }):
   ].join("\n");
 }
 
+/**
+ * A login item's text with the marker added, or null when it already has it (or has no place for it). For one
+ * written before the marker (0.29's unit and plist), so its run is known as the start at login.
+ */
+export function withLoginItemMarker(text: string): string | null {
+  if (text.includes(INBOX_LOGIN_ITEM_ENV)) return null;
+  const lines = text.split("\n");
+  if (text.includes("[Service]")) {
+    const exec = lines.findIndex((line) => line.startsWith("ExecStart="));
+    const at = exec >= 0 ? exec : lines.indexOf("[Service]");
+    if (at < 0) return null;
+    lines.splice(at + 1, 0, `Environment=${unitArg(`${INBOX_LOGIN_ITEM_ENV}=1`)}`);
+    return lines.join("\n");
+  }
+  const env = lines.findIndex((line) => line.trim() === "<key>EnvironmentVariables</key>");
+  if (env >= 0 && lines[env + 1]?.trim() === "<dict>") {
+    lines.splice(env + 2, 0, `    <key>${INBOX_LOGIN_ITEM_ENV}</key><string>1</string>`);
+    return lines.join("\n");
+  }
+  const end = lines.lastIndexOf("</dict>");
+  if (end < 0) return null;
+  lines.splice(end, 0, "  <key>EnvironmentVariables</key>", "  <dict>", `    <key>${INBOX_LOGIN_ITEM_ENV}</key><string>1</string>`, "  </dict>");
+  return lines.join("\n");
+}
+
 const writeAtomic = (path: string, text: string) => {
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, text, { mode: 0o644 });
@@ -101,6 +128,12 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
       // Only the file: launchd reads it at login, and an unload would end this Inbox if the login started it.
       async remove() {
         rmSync(path, { force: true });
+      },
+      async mark() {
+        const marked = existsSync(path) ? withLoginItemMarker(readFileSync(path, "utf8")) : null;
+        if (marked === null) return false;
+        writeAtomic(path, marked);
+        return true;
       },
     };
   }
@@ -125,7 +158,15 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
         await o.run(["systemctl", "--user", "disable", INBOX_LOGIN_UNIT]).catch(() => undefined);
         rmSync(path, { force: true });
       },
+      // systemd reads the changed file at the next login, or now after a daemon-reload.
+      async mark() {
+        const marked = existsSync(path) ? withLoginItemMarker(readFileSync(path, "utf8")) : null;
+        if (marked === null) return false;
+        writeAtomic(path, marked);
+        await o.run(["systemctl", "--user", "daemon-reload"]).catch(() => undefined);
+        return true;
+      },
     };
   }
-  return { path: null, add: async () => "unavailable", remove: async () => {} };
+  return { path: null, add: async () => "unavailable", remove: async () => {}, mark: async () => false };
 }

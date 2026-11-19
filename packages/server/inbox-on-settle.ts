@@ -22,18 +22,21 @@
  * one line in `inbox/inbox.log` (`ev: "inbox_on"`).
  */
 
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
-import { isInboxOn, readInboxOnRecord, recordInboxOff, writeInboxOnRecord, type InboxOnRecord } from "@plannotator/shared/inbox/inbox-on";
+import { isInboxOn, readInboxOnRecord, recordInboxOff, turnInboxOn, writeInboxOnRecord, type InboxOnRecord } from "@plannotator/shared/inbox/inbox-on";
 import { stopInbox, type InboxStopResult } from "@plannotator/shared/inbox/registry";
 import { INBOX_OFF_NOT_SAVED, INBOX_TURN_ON_AGAIN, inboxOnConfigWrite } from "@plannotator/shared/inbox/inbox-on-config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { createAgentEnvironment, type AgentEnvironment } from "./inbox-agents";
 import { removeUntouchedInboxNote } from "./inbox-agent-notes";
-import { inboxLoginItem } from "./inbox-scheduled-login";
+import { INBOX_LOGIN_ITEM_ENV, inboxLoginItem } from "./inbox-scheduled-login";
+
+/** launchd's label for the start at login (the CLI's run-kind check reads it). */
+export { INBOX_LOGIN_LABEL } from "./inbox-scheduled-login";
 
 export { INBOX_TURN_ON_AGAIN };
 
@@ -102,10 +105,12 @@ export async function settleInboxOn(dataDir: string, options: { environment?: Ag
   // isInboxOn decides an undecided install (and writes the record), the one rule for it.
   const on = isInboxOn(dataDir, options.env ?? process.env);
   const record = readInboxOnRecord(dataDir);
+  const e = options.environment ?? createAgentEnvironment();
+  // A start at login written before its marker (0.29): marked while on, removed while off, so it never turns the Inbox on.
+  await settleOldLoginItem(dataDir, e, record?.on ?? on);
   if (!record) return on;
   if (!before) logInboxOn(dataDir, { decided: record.by, on: record.on });
   if (record.on || record.notes !== "remove") return record.on;
-  const e = options.environment ?? createAgentEnvironment();
   const cleared = removeUntouchedInboxNotes(dataDir, e);
   // Decided off: the routines' start at login would bring the Inbox back at the next login.
   const login = await removeLoginItem(dataDir, e);
@@ -114,6 +119,31 @@ export async function settleInboxOn(dataDir: string, options: { environment?: Ag
   writeInboxOnRecord(dataDir, next, { ifCurrent: record });
   logInboxOn(dataDir, { settled: record.by, ...loginLine(login), ...notesLine(cleared) });
   return false;
+}
+
+function loginItemOf(dataDir: string, e: AgentEnvironment) {
+  return inboxLoginItem({
+    platform: e.platform,
+    home: e.homeDir,
+    argv: [],
+    dataDir,
+    run: underTest() ? async () => ({ code: 0 }) : async (argv) => ({ code: (await e.run(argv, { timeoutMs: 10_000 })).exitCode }),
+  });
+}
+
+/** A login item without the marker: given it while the Inbox is on, removed while it is off. Never throws. */
+async function settleOldLoginItem(dataDir: string, e: AgentEnvironment, on: boolean): Promise<void> {
+  try {
+    const login = loginItemOf(dataDir, e);
+    if (!login.path || !existsSync(login.path) || readFileSync(login.path, "utf8").includes(INBOX_LOGIN_ITEM_ENV)) return;
+    if (on) {
+      if (await login.mark()) logInboxOn(dataDir, { login_item_marked: login.path });
+      return;
+    }
+    logInboxOn(dataDir, { settled: "old_login_item", ...loginLine(await removeLoginItem(dataDir, e)) });
+  } catch {
+    // Read again at the next command; the run itself is still known by its launcher (isOurLoginItem).
+  }
 }
 
 function withoutNotes(record: InboxOnRecord): InboxOnRecord {
@@ -149,13 +179,7 @@ export interface LoginItemRemoval {
 async function removeLoginItem(dataDir: string, e: AgentEnvironment): Promise<LoginItemRemoval | null> {
   let path: string | null = null;
   try {
-    const login = inboxLoginItem({
-      platform: e.platform,
-      home: e.homeDir,
-      argv: [],
-      dataDir,
-      run: underTest() ? async () => ({ code: 0 }) : async (argv) => ({ code: (await e.run(argv, { timeoutMs: 10_000 })).exitCode }),
-    });
+    const login = loginItemOf(dataDir, e);
     path = login.path ?? null;
     if (!path || !existsSync(path)) return null;
     await login.remove();
@@ -207,5 +231,5 @@ export function inboxOffReport(off: InboxTurnedOff): string[] {
 
 /** The Bun servers' answer to Settings' `{ inboxOn }` (packages/shared/inbox/inbox-on-config.ts). */
 export function inboxOnConfigResponse(on: boolean): Promise<Response> {
-  return inboxOnConfigWrite(on, async () => (await turnInboxOff(getPlannotatorDataDir())).recorded).then(({ status, body }) => Response.json(body, { status }));
+  return inboxOnConfigWrite(on, async () => (await turnInboxOff(getPlannotatorDataDir())).recorded, () => turnInboxOn("settings", getPlannotatorDataDir())).then(({ status, body }) => Response.json(body, { status }));
 }

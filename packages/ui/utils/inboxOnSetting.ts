@@ -3,9 +3,9 @@
  * whether the person turned the Inbox on on this computer
  * (packages/shared/inbox/inbox-on.ts), as the server reports it in
  * `serverConfig.inboxOn` (getServerConfig), and the POST /api/config write
- * `{ inboxOn: false }` that turns it off (the Inbox stops, Plannotator's
- * untouched notes go). No page turns it on: the server refuses `true` (an
- * agent's curl looks like the page), so once off the row's switch is inert.
+ * `{ inboxOn }` that turns it off (the Inbox stops, Plannotator's untouched
+ * notes go) or on again (the record says on; agents get it from their next
+ * session).
  *
  * The server sends `inboxOn: true` only while the Inbox is on, so the row
  * shows only to someone who turned the Inbox on; a server that predates it,

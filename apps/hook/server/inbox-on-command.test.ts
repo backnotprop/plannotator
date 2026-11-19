@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { INBOX_OFF_AGENT_LINE, readInboxOnRecord, recordInboxOff, writeInboxOnRecord } from "@plannotator/shared/inbox/inbox-on";
 import { INBOX_ON_NOT_SAVED } from "@plannotator/shared/inbox/inbox-on-config";
-import { assertInboxOn, InboxOffError, inboxOnStatusLines, inboxRunMayStart, isOurLoginItem } from "./inbox-on-command";
+import { assertInboxOn, InboxOffError, inboxOnStatusLines, inboxRunMayStart, isOurLoginItem, takeLoginItemMarker } from "./inbox-on-command";
 import { runInboxMcpShim } from "./inbox-mcp-shim";
 
 /** The real rule: no test knob, no sandbox marker. */
@@ -56,11 +56,37 @@ describe("what turns the Inbox on", () => {
     expect(readInboxOnRecord(dataDir)).toBeNull();
   });
 
+  const NOT_A_UNIT = { pid: 4242, cgroup: "0::/user.slice/user-1000.slice/session-2.scope\n", parentName: "zsh" };
   test("the start at login names itself: its own variable, or launchd's label for one written before", () => {
-    expect(isOurLoginItem({ PLANNOTATOR_INBOX_LOGIN_ITEM: "1" })).toBe(true);
-    expect(isOurLoginItem({ XPC_SERVICE_NAME: "ai.plannotator.inbox" })).toBe(true);
-    expect(isOurLoginItem({ XPC_SERVICE_NAME: "application.com.apple.Terminal.1" })).toBe(false);
-    expect(isOurLoginItem({})).toBe(false);
+    expect(isOurLoginItem({ PLANNOTATOR_INBOX_LOGIN_ITEM: "1" }, NOT_A_UNIT)).toBe(true);
+    expect(isOurLoginItem({ XPC_SERVICE_NAME: "ai.plannotator.inbox" }, NOT_A_UNIT)).toBe(true);
+    expect(isOurLoginItem({ XPC_SERVICE_NAME: "application.com.apple.Terminal.1" }, NOT_A_UNIT)).toBe(false);
+    expect(isOurLoginItem({}, NOT_A_UNIT)).toBe(false);
+  });
+
+  // T1: a systemd unit written before the marker (0.29) runs plannotator inbox --no-open with no variable of ours.
+  test("a systemd unit written before the marker: its own main process is the start at login; what the Inbox starts is not", () => {
+    const unit = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/plannotator-inbox.service\n";
+    expect(isOurLoginItem({ SYSTEMD_EXEC_PID: "4242" }, { pid: 4242, cgroup: unit, parentName: "systemd" })).toBe(true);
+    expect(isOurLoginItem({}, { pid: 4242, cgroup: `1:name=systemd:/user.slice/user@1000.service/plannotator-inbox.service\n`, parentName: "systemd" })).toBe(true);
+    // An agent session or terminal the Inbox started: same cgroup, not the unit's main process.
+    expect(isOurLoginItem({ SYSTEMD_EXEC_PID: "4242" }, { pid: 5151, cgroup: unit, parentName: "plannotator" })).toBe(false);
+    expect(isOurLoginItem({}, { pid: 5151, cgroup: unit, parentName: "plannotator" })).toBe(false);
+    recordInboxOff(dataDir);
+    const loginItem = isOurLoginItem({ SYSTEMD_EXEC_PID: "4242" }, { pid: 4242, cgroup: unit, parentName: "systemd" });
+    expect(inboxRunMayStart(dataDir, ENV, { ...RUN, loginItem })).toEqual({ ok: false, line: INBOX_OFF_AGENT_LINE });
+    expect(readInboxOnRecord(dataDir)).toMatchObject({ on: false, by: "off" });
+  });
+
+  // T2: nothing the login-started Inbox starts inherits the markers, so a person's plannotator inbox there turns it on.
+  test("the markers are read once and dropped from the Inbox's environment", () => {
+    const env: Record<string, string | undefined> = { PLANNOTATOR_INBOX_LOGIN_ITEM: "1", XPC_SERVICE_NAME: "ai.plannotator.inbox", PATH: "/bin" };
+    expect(takeLoginItemMarker(env, NOT_A_UNIT)).toBe(true);
+    expect(env).toEqual({ PATH: "/bin" });
+    expect(isOurLoginItem(env, NOT_A_UNIT)).toBe(false);
+    const other: Record<string, string | undefined> = { XPC_SERVICE_NAME: "application.com.apple.Terminal.1" };
+    expect(takeLoginItemMarker(other, NOT_A_UNIT)).toBe(false);
+    expect(other).toEqual({ XPC_SERVICE_NAME: "application.com.apple.Terminal.1" });
   });
 
   test("when state.json cannot be written: the plain line, nothing starts", () => {

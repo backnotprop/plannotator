@@ -16,7 +16,8 @@ export const INBOX_ON_FILE = 'state.json'
 
 /**
  * What last set the record. `command`: a run of `plannotator inbox` (or
- * `/plannotator-inbox`, which runs it). `off`: Turn the Inbox off. The one-time decision for an install from before the rule:
+ * `/plannotator-inbox`, which runs it). `settings`: the Settings switch in
+ * plan review, code review or annotate. `off`: Turn the Inbox off. The one-time decision for an install from before the rule:
  * `update-used` (the person used the window), `update-ran` (the person ran
  * `plannotator inbox`), `update-agent-only` (only agents ever started it),
  * `update-never-ran`, `update-slow` (the store took too long to read: kept
@@ -28,6 +29,7 @@ export const INBOX_ON_FILE = 'state.json'
  */
 export type InboxOnBy =
   | 'command'
+  | 'settings'
   | 'off'
   | 'update-used'
   | 'update-ran'

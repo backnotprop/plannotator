@@ -121,6 +121,19 @@ describe("the record", () => {
     expect(isInboxOn(dataDir, REAL)).toBe(true);
   });
 
+  // LOW: a mark that cannot be written is removed, never left with an old copy (which would bring an old on back).
+  test("a mark write that fails removes the mark: a later loss reads the store, not a stale on", () => {
+    expect(turnInboxOn("command", dataDir, NOW)).toBe(true);
+    const mark = join(dataDir, "inbox-on-decided");
+    expect(JSON.parse(readFileSync(mark, "utf8"))).toMatchObject({ on: true });
+    mkdirSync(`${mark}.${process.pid}.tmp`);
+    expect(recordInboxOff(dataDir, NOW)).toBe(true);
+    expect(existsSync(mark)).toBe(false);
+    rmSync(`${mark}.${process.pid}.tmp`, { recursive: true });
+    rmSync(join(dataDir, "state.json"));
+    expect(isInboxOn(dataDir, REAL)).toBe(false);
+  });
+
   test("a lost record with no copy in the mark reads the store again: the person's use keeps it on, else off", () => {
     write(join(dataDir, "inbox-on-decided"), `${NOW.toISOString()}\n`);
     write(inbox("inbox.json"), "{}");
@@ -276,16 +289,17 @@ describe("personWroteIt matches core's notes and action reports", () => {
 
 // Settings' Plannotator Inbox row, on every server (POST /api/config { inboxOn }).
 describe("the Settings write", () => {
-  // An agent's curl to the local server looks like the page's request: a page never turns the Inbox on.
-  test("on is refused and writes nothing; off answers how to turn it back on, or the error when it did not save", async () => {
-    const { inboxOnConfigWrite, INBOX_TURN_ON_AGAIN, INBOX_OFF_NOT_SAVED, INBOX_ON_NOT_HERE } = await import("./inbox-on-config");
-    expect(await inboxOnConfigWrite(true, async () => true)).toEqual({ status: 403, body: { error: INBOX_ON_NOT_HERE } });
-    expect(readInboxOnRecord(dataDir)).toBeNull();
-    turnInboxOn("command", dataDir, NOW);
+  // T4: the switch turns it on too (by: settings); off answers how to turn it back on, or the error when it did not save.
+  test("on writes the record (settings); off answers how to turn it back on, or the error when it did not save", async () => {
+    const { inboxOnConfigWrite, INBOX_TURN_ON_AGAIN, INBOX_OFF_NOT_SAVED, INBOX_ON_NOT_SAVED } = await import("./inbox-on-config");
+    const on = () => turnInboxOn("settings", dataDir, NOW);
+    expect(await inboxOnConfigWrite(true, async () => true, on)).toEqual({ status: 200, body: { ok: true } });
+    expect(readInboxOnRecord(dataDir)).toEqual({ on: true, at: NOW.toISOString(), by: "settings" });
     let offAsked = 0;
-    expect(await inboxOnConfigWrite(false, async () => (offAsked++, recordInboxOff(dataDir, NOW)))).toEqual({ status: 200, body: { ok: true, inboxOnLine: INBOX_TURN_ON_AGAIN } });
+    expect(await inboxOnConfigWrite(false, async () => (offAsked++, recordInboxOff(dataDir, NOW)), on)).toEqual({ status: 200, body: { ok: true, inboxOnLine: INBOX_TURN_ON_AGAIN } });
     expect(offAsked).toBe(1);
     expect(isInboxOn(dataDir, REAL)).toBe(false);
-    expect(await inboxOnConfigWrite(false, async () => false)).toEqual({ status: 500, body: { error: INBOX_OFF_NOT_SAVED } });
+    expect(await inboxOnConfigWrite(false, async () => false, on)).toEqual({ status: 500, body: { error: INBOX_OFF_NOT_SAVED } });
+    expect(await inboxOnConfigWrite(true, async () => true, () => false)).toEqual({ status: 500, body: { error: INBOX_ON_NOT_SAVED } });
   });
 });
