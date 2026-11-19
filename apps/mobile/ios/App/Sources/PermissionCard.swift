@@ -52,8 +52,7 @@ struct PermissionCard: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-      .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.border.opacity(0.7)))
+      .cardSurface()
       .onAppear {
         shown = Date()
         if let kept = drafts?.reasons[reasonKey] {
@@ -90,18 +89,18 @@ struct PermissionCard: View {
         }
         Spacer(minLength: 0)
       }
-      .padding(.horizontal, 16)
-      .frame(minHeight: 44)
+      .padding(.horizontal, Space.card)
+      .frame(minHeight: Space.touch)
       .accessibilityElement(children: .combine)
       .lineEdge("head")
-      Divider().overlay(Token.border)
+      Hairline()
       VStack(alignment: .leading, spacing: 10) {
-        Text(Self.ticks(title)).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader).lineEdge("title")
+        Text(Self.ticks(title)).font(TextRole.prompt).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader).lineEdge("title")
         PermissionRequest(read: read, kind: PermissionPrompt.kind(question.prompt))
       }
-      .padding(16)
-      Divider().overlay(Token.border)
-      VStack(alignment: .leading, spacing: 8) {
+      .padding(Space.card)
+      Hairline()
+      VStack(alignment: .leading, spacing: Space.close) {
         switch mode {
         case .reason: denyReason(question)
         case .confirmFull: confirmFull(question)
@@ -143,7 +142,7 @@ struct PermissionCard: View {
           Label(PhoneWords.answerNotSent, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(Token.destructive)
         }
       }
-      .padding(16)
+      .padding(Space.card)
       .disabled(!can)
     }
     .accessibilityElement(children: .contain)
@@ -161,7 +160,7 @@ struct PermissionCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(minHeight: 64, alignment: .top)
-        .fieldGround(radius: 14)
+        .fieldGround()
         .accessibilityLabel(PhoneWords.whyYouDeny(shortAgent))
         .lineEdge("reason")
       HStack(spacing: 8) {
@@ -275,7 +274,7 @@ struct PermissionCard: View {
         .frame(minHeight: 44)
         .contentShape(Rectangle())
       }
-      .buttonStyle(ChoiceStyle())
+      .buttonStyle(PressStyle())
       .accessibilityElement(children: .combine)
       if opened {
         Divider().overlay(Token.border)
@@ -323,23 +322,15 @@ private struct AnswerButton: View {
 
   var body: some View {
     Button(action: action) {
+      // Words alone that can be touched are the accent colour everywhere in the app; a plain answer stands off its
+      // card by a tint of its words' own colour, in the dark as in the light.
       Text(PermissionCard.ticks(words, onPrimary: style == .filled))
-        .font(.body.weight(style == .ghost ? .medium : .semibold))
-        // Words alone that can be touched are the accent colour everywhere in the app.
-        .foregroundStyle(style == .filled ? Token.primaryForeground : style == .off ? Token.mutedForeground : style == .ghost ? Token.primary : Token.foreground)
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: hugs ? nil : .infinity, minHeight: 48)
-        .frame(minWidth: hugs ? 72 : nil)
-        // A tint of the words' own colour, so the button stands off its card in the dark as in the light.
-        .background(style == .filled ? Token.primary : style == .ghost ? Color.clear : Token.foreground.opacity(style == .off ? 0.05 : 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // A hairline too, so a plain answer stands off its card in the dark.
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Token.foreground.opacity(style == .plain ? 0.22 : 0)))
-        .contentShape(Rectangle())
+        .frame(minWidth: hugs ? 40 : nil)
+        .actionGround(style == .filled ? .filled : style == .plain ? .neutral : style == .ghost ? .bare : .off, wide: !hugs)
     }
-    .buttonStyle(ChoiceStyle())
+    .buttonStyle(PressStyle())
   }
 }
 
@@ -357,7 +348,7 @@ private struct LinkButton: View {
         .frame(minWidth: 44, minHeight: 44)
         .contentShape(Rectangle())
     }
-    .buttonStyle(ChoiceStyle())
+    .buttonStyle(PressStyle())
   }
 }
 
@@ -495,7 +486,7 @@ struct PermissionRequest: View {
           .padding(.horizontal, 14)
           .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
           .contentShape(Rectangle())
-          .buttonStyle(ChoiceStyle())
+          .buttonStyle(PressStyle())
       }
     }
     .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))

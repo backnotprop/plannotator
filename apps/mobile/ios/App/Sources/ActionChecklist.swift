@@ -33,15 +33,16 @@ struct ActionChecklist: View {
     let watching = waited.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
     let holds = live.reduce(0) { $0 + $1.holdsUp.count }
     VStack(alignment: .leading, spacing: 0) {
-      HStack(alignment: .firstTextBaseline, spacing: 10) {
-        Image(systemName: "checklist").font(.subheadline.weight(.semibold)).foregroundStyle(Token.primary).accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 2) {
+      HStack(alignment: .firstTextBaseline, spacing: Space.step) {
+        // In the column of the ticks under it.
+        Image(systemName: "checklist").font(.system(size: side * 0.68, weight: .semibold)).foregroundStyle(Token.mutedForeground).frame(width: side).accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: Space.hair) {
           Text(progress.total == 0 ? PhoneWords.actionsReplaced(progress.replaced) : PhoneWords.thingsOnlyYou(progress.total))
-            .font(.body.weight(.semibold))
+            .font(TextRole.action)
             .foregroundStyle(Token.foreground)
             .accessibilityAddTraits(.isHeader)
           if progress.total > 0 {
-            Text(PhoneWords.doneOf(progress.done, progress.total, replaced: progress.replaced)).font(.subheadline).foregroundStyle(Token.mutedForeground)
+            Text(PhoneWords.doneOf(progress.done, progress.total, replaced: progress.replaced)).font(TextRole.secondary).monospacedDigit().foregroundStyle(Token.mutedForeground)
           }
         }
         Spacer(minLength: 8)
@@ -52,11 +53,11 @@ struct ActionChecklist: View {
         }
       }
       .lineEdge("head")
-      .padding(.horizontal, 16)
-      .padding(.top, 16)
-      .padding(.bottom, 10)
+      .padding(.horizontal, Space.card)
+      .padding(.top, Space.card)
+      .padding(.bottom, Space.step)
       ForEach(actions, id: \.key) { action in
-        Divider().overlay(Token.border).padding(.horizontal, 16)
+        Hairline().padding(.horizontal, Space.card)
         ActionRow(session: session, thread: thread, message: message, action: action, agent: agent, readOnly: readOnly || !session.canMarkActions(), open: open == action.key, drafts: drafts) {
           chosen = true
           openKey = open == action.key ? nil : action.key
@@ -67,45 +68,21 @@ struct ActionChecklist: View {
         }
       }
       if !watching.isEmpty {
-        Divider().overlay(Token.border).padding(.horizontal, 16)
+        Hairline().padding(.horizontal, Space.card)
         Label(PhoneWords.watching(agent, watching), systemImage: "eye")
-          .font(.footnote)
+          .font(TextRole.meta)
           .foregroundStyle(Token.mutedForeground)
           .lineEdge("watching")
-          .padding(16)
+          .padding(Space.card)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Token.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Token.border.opacity(0.6)))
+    .cardSurface()
     .accessibilityElement(children: .contain)
   }
-}
 
-/// A small word on a tinted ground: Done, Can't do it, Stopped, Holds up 2.
-struct Chip: View {
-  enum Tone { case ok, stop, hold, quiet }
-  let words: String
-  let tone: Tone
-
-  private var ink: Color {
-    switch tone {
-    case .ok: return Token.success
-    case .stop: return Token.destructive
-    case .hold: return Token.warning
-    case .quiet: return Token.mutedForeground
-    }
-  }
-
-  var body: some View {
-    Text(words)
-      .font(.footnote.weight(.semibold))
-      .foregroundStyle(ink)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(tone == .quiet ? Token.muted : ink.opacity(0.14), in: Capsule())
-      .fixedSize()
-  }
+  @ScaledMetric(relativeTo: .body) private var mark: CGFloat = 22
+  private var side: CGFloat { min(mark, 32) }
 }
 
 struct ActionRow: View {
@@ -130,6 +107,12 @@ struct ActionRow: View {
   @Environment(ScrollBox.self) private var scroll: ScrollBox?
   @Environment(\.cardKey) private var cardKey
   private func touch() { if let cardKey { scroll?.act(cardKey) } }
+  /// The tick is a choice's mark: the same size, in the same column, its words in the column of a choice's words.
+  @ScaledMetric(relativeTo: .body) private var mark: CGFloat = 22
+  private var side: CGFloat { min(mark, 32) }
+  private var column: CGFloat { Space.card + side + Space.step }
+  /// A line of the task's words at this text size.
+  @ScaledMetric(relativeTo: .body) private var line: CGFloat = 22
 
   private var state: ActionMarks.State { ActionMarks.state(action) }
   private var result: InboxActionResult? { action.actionResult }
@@ -165,29 +148,30 @@ struct ActionRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      HStack(alignment: .top, spacing: 4) {
-        tick
+      HStack(alignment: .top, spacing: Space.step - (Space.touch - side) / 2) {
+        // On the task's first line at any text size.
+        tick.padding(.top, max(0, (line - 22) / 2))
         Button(action: toggle) {
           HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(MessageBody.attributed(Self.task(action.prompt)))
-              .font(.body.weight(.semibold))
+              .font(TextRole.label)
               .foregroundStyle(Token.foreground)
               .multilineTextAlignment(.leading)
               .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
+            Spacer(minLength: Space.tight)
             if let chip { chip }
             Image(systemName: open ? "chevron.down" : "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
           }
           .padding(.vertical, 11)
-          .padding(.trailing, 16)
-          .frame(minHeight: 44)
+          .padding(.trailing, Space.card)
+          .frame(minHeight: Space.touch)
           .contentShape(Rectangle())
         }
-        .buttonStyle(ChoiceStyle())
+        .buttonStyle(PressStyle(gives: false))
         .accessibilityAddTraits(.isButton)
       }
-      // The tick stands in the column of a question's radio.
-      .padding(.leading, 9)
+      // The tick stands in the column of a question's mark.
+      .padding(.leading, Space.card - (Space.touch - side) / 2)
       .lineEdge("row/\(action.key)")
       if let line = underLine {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -196,8 +180,8 @@ struct ActionRow: View {
             Button(PhoneWords.undo) { mark(nil) }.font(.footnote.weight(.semibold)).frame(minWidth: 44, minHeight: 44).disabled(busy)
           }
         }
-        .padding(.leading, 54)
-        .padding(.trailing, 16)
+        .padding(.leading, column)
+        .padding(.trailing, Space.card)
         .padding(.bottom, 8)
       }
       if inDraft, let mine { draftNote(mine) }
@@ -206,8 +190,8 @@ struct ActionRow: View {
           .font(.footnote)
           .foregroundStyle(Token.destructive)
           .lineEdge("refusal/\(action.key)")
-          .padding(.leading, 54)
-          .padding(.trailing, 16)
+          .padding(.leading, column)
+          .padding(.trailing, Space.card)
           .padding(.bottom, 10)
       }
       if open { panel }
@@ -248,13 +232,13 @@ struct ActionRow: View {
       if pending { mark(nil) } else { mark(ActionMarks.Mark(.done)) }
     } label: {
       ZStack {
-        Circle().strokeBorder(doneLike ? Token.success : cantLike ? Token.destructive : Token.mutedForeground, lineWidth: 1.6)
+        Circle().strokeBorder(doneLike ? Token.success : cantLike ? Token.destructive : Token.mutedForeground.opacity(0.75), lineWidth: 1.5)
         if doneLike { Circle().fill(Token.success) }
-        if doneLike { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(Token.card) }
-        if cantLike { Image(systemName: "xmark").font(.caption.weight(.bold)).foregroundStyle(Token.destructive) }
+        if doneLike { Image(systemName: "checkmark").font(.system(size: side * 0.5, weight: .bold)).foregroundStyle(Token.card) }
+        if cantLike { Image(systemName: "xmark").font(.system(size: side * 0.46, weight: .bold)).foregroundStyle(Token.destructive) }
       }
-      .frame(width: 24, height: 24)
-      .frame(width: 44, height: 44)
+      .frame(width: side, height: side)
+      .frame(width: Space.touch, height: Space.touch)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -305,8 +289,8 @@ struct ActionRow: View {
         .foregroundStyle(Token.mutedForeground)
         .lineEdge("draft/\(action.key)")
     }
-    .padding(.leading, 54)
-    .padding(.trailing, 16)
+    .padding(.leading, column)
+    .padding(.trailing, Space.card)
     .padding(.bottom, 12)
   }
 
@@ -341,8 +325,8 @@ struct ActionRow: View {
           }
           .foregroundStyle(Token.foreground)
           .padding(.horizontal, 14)
-          .frame(minHeight: 44)
-          .background(Token.muted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+          .frame(minHeight: Space.touch)
+          .background(Token.foreground.opacity(0.09), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         }
         .lineEdge("link/\(action.key)")
       }
@@ -363,7 +347,7 @@ struct ActionRow: View {
             .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+        .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
         .lineEdge("command/\(action.key)")
       }
       if let settled {
@@ -373,41 +357,35 @@ struct ActionRow: View {
         if composing { compose } else { answers.lineEdge("answers/\(action.key)") }
       }
     }
-    .padding(.leading, 54)
-    .padding(.trailing, 16)
+    .padding(.leading, column)
+    .padding(.trailing, Space.card)
     .padding(.bottom, 14)
   }
 
   private var answers: some View {
     // Side by side; one under the other when the words are too large to fit whole.
     ViewThatFits(in: .horizontal) {
-      HStack(spacing: 18) { answerButtons }
-      VStack(alignment: .leading, spacing: 4) { answerButtons }
+      HStack(spacing: Space.close) { answerButtons(whole: true) }
+      // Under each other, the words may wrap: at the largest sizes they are wider than the card.
+      VStack(alignment: .leading, spacing: Space.tight) { answerButtons(whole: false) }
     }
-    .buttonStyle(ChoiceStyle())
+    .buttonStyle(PressStyle())
     .disabled(busy)
   }
 
-  @ViewBuilder private var answerButtons: some View {
+  @ViewBuilder private func answerButtons(whole: Bool) -> some View {
     Group {
       Button {
         mark(ActionMarks.Mark(.done))
       } label: {
-        Label(PhoneWords.done, systemImage: "checkmark")
-          .font(.body.weight(.semibold))
-          .foregroundStyle(Token.primaryForeground)
-          .fixedSize()
-          .padding(.horizontal, 18)
-          .padding(.vertical, 9)
-          .frame(minHeight: 44)
-          .background(Token.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        Label(PhoneWords.done, systemImage: "checkmark").fixedSize(horizontal: whole, vertical: true).actionGround(.filled, wide: false, height: Space.touch)
       }
       Button {
         touch()
         composing = true
         focus = .reason
       } label: {
-        Text(PhoneWords.cantDoItMore).font(.body.weight(.medium)).foregroundStyle(Token.primary).fixedSize().frame(minHeight: 44).contentShape(Rectangle())
+        Text(PhoneWords.cantDoItMore).multilineTextAlignment(.leading).fixedSize(horizontal: whole, vertical: true).actionGround(.bare, wide: false, height: Space.touch).padding(.leading, whole ? 0 : -Space.step)
       }
     }
   }
@@ -430,25 +408,17 @@ struct ActionRow: View {
         Button {
           mark(ActionMarks.Mark(.cant, note: reason))
         } label: {
-          Text(PhoneWords.cantDoIt)
-            .font(.body.weight(.semibold))
-            .foregroundStyle(empty ? Token.mutedForeground : Token.primaryForeground)
-            .padding(.horizontal, 18)
-            .frame(minHeight: 44)
-            .background(empty ? Token.muted : Token.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+          Text(PhoneWords.cantDoIt).actionGround(empty ? .off : .filled, wide: false, height: Space.touch)
         }
         .disabled(busy || empty)
-        Button(PhoneWords.cancel) {
+        Button {
           composing = false
           focus = nil
+        } label: {
+          Text(PhoneWords.cancel).actionGround(.bare, wide: false, height: Space.touch)
         }
-        .font(.body.weight(.medium))
-        .foregroundStyle(Token.primary)
-        .padding(.horizontal, 12)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
       }
-      .buttonStyle(ChoiceStyle())
+      .buttonStyle(PressStyle())
       .lineEdge("reasonButtons/\(action.key)")
     }
     .cardPart()

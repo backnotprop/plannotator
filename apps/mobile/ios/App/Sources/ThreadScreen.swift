@@ -49,6 +49,9 @@ struct ThreadScreen: View {
   @Environment(\.dynamicTypeSize) private var typeSize
   private var fade: CGFloat { Composer.fade(typeSize) }
   @FocusState private var composing: Bool
+  @State private var pageWidth: CGFloat = 0
+  /// The bar's way back with the air on both its sides.
+  private static let backRoom: CGFloat = 72
 
   private var model: ThreadModel? { session.thread(id) }
   private var title: String {
@@ -76,8 +79,23 @@ struct ThreadScreen: View {
     }
     .background(Token.background.ignoresSafeArea())
     .navigationTitle(title)
-    .navigationSubtitle(subtitle)
     .navigationBarTitleDisplayMode(.inline)
+    // The title starts beside the way back, as the window's does: one line the size of a message's name, and who
+    // and where under it a step quieter. The bar's own title would set both centred and as heavy as a heading.
+    // The bar centres what it is given, so the title is given the whole room between the way back and its mirror
+    // on the right, and starts at that room's left edge whatever its length.
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
+    .toolbar {
+      ToolbarItem(placement: .principal) {
+        VStack(alignment: .leading, spacing: 1) {
+          Text(title).font(TextRole.name).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.tail)
+          if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail) }
+        }
+        .frame(width: max(0, pageWidth - 2 * Self.backRoom), alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+      }
+    }
     .task { await session.open(id) }
   }
 
@@ -149,7 +167,7 @@ struct ThreadScreen: View {
         Color.clear.containerRelativeFrame(.vertical) { length, _ in max(0, length - tail) }
         Color.clear.frame(height: room)
       }
-      .padding(.horizontal, 20)
+      .padding(.horizontal, Space.page)
       // The content ends above the reply field's fade, with air: the last card is never under it.
       .padding(.bottom, Self.clear)
       .coordinateSpace(.named(Self.content))
@@ -445,7 +463,7 @@ struct ThreadScreen: View {
   /// begins), so a card resting there keeps its edge and corners.
   static let clear: CGFloat = 12
   /// A card's rounded corner: the part of its top or foot an edge never runs through.
-  static let corner: CGFloat = 22
+  static let corner: CGFloat = Radius.card
   /// The least air a card's edge keeps over the reply field's fade when it shows.
   static let air: CGFloat = 6
 }
@@ -594,14 +612,16 @@ struct MessageView: View {
     let questions = Self.questions(of: message)
     let todos = ActionMarks.items(of: message)
     let blocks = MessageBody.blocks(message.body, questions: questions.count, actions: todos.count)
-    return VStack(alignment: .leading, spacing: 12) {
-      HStack(alignment: .center, spacing: 10) {
-        if message.author.kind == .agent { AgentMark(author: message.author, size: 28) }
-        Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(Token.foreground)
+    return VStack(alignment: .leading, spacing: Space.step) {
+      // Who, then to whom, then when at the line's end: the name is the one strong word.
+      HStack(alignment: .center, spacing: Space.close) {
+        if message.author.kind == .agent { AgentMark(author: message.author, size: 24) }
+        Text(name).font(TextRole.name).foregroundStyle(Token.foreground)
         if message.author.kind == .person, let to = Self.addressee(of: message, in: thread) {
-          Text(PhoneWords.to(to)).font(.subheadline).foregroundStyle(Token.mutedForeground).lineLimit(1)
+          Text(PhoneWords.to(to)).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).lineLimit(1)
         }
-        Text(TimeWords().when(message.createdAt)).font(.subheadline).monospacedDigit().foregroundStyle(Token.mutedForeground)
+        Spacer(minLength: Space.close)
+        Text(TimeWords().when(message.createdAt)).font(TextRole.meta).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(1)
       }
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
@@ -626,7 +646,7 @@ struct MessageView: View {
         }
       }
       if showsDelivery, let line = deliveryLine {
-        Text(line).font(.footnote).foregroundStyle(Token.mutedForeground)
+        Text(line).font(TextRole.meta).foregroundStyle(Token.mutedForeground)
       }
     }
   }
@@ -662,168 +682,6 @@ struct HeldReply: View {
       Text(words).font(.body).foregroundStyle(Token.foreground.opacity(0.75)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
       Label(PhoneWords.willSendWhenBack(computer), systemImage: "clock").font(.footnote).foregroundStyle(Token.mutedForeground)
     }
-  }
-}
-
-/// The composer: the words, and Send. Send posts every saved pick in the thread with whatever words are here.
-struct Composer: View {
-  let session: InboxSession
-  let id: ThreadID
-  let thread: InboxThread
-  @Binding var words: String
-  let drafts: ThreadDrafts
-  var focused: FocusState<Bool>.Binding
-  /// What still waits in the thread: the button at the foot says it, and a touch goes to the next one.
-  let items: OpenItems
-  /// The person types in a card: the foot steps aside until the keyboard goes, all but its fade, so the card has
-  /// the room over the keyboard and one field only stands there, the one they type in.
-  var inCard = false
-  /// Go to a card.
-  let go: (String) -> Void
-  let jump: () -> Void
-
-  /// The fade over the reply field, at the top of the foot: what scrolls under it fades into it. It grows with the
-  /// text (14 points at the default size, up to 24), so a line cut at the foot fades out rather than being sliced.
-  static func fade(_ size: DynamicTypeSize) -> CGFloat {
-    let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(size))
-    return min(24, UIFontMetrics(forTextStyle: .body).scaledValue(for: 14, compatibleWith: traits).rounded())
-  }
-  private var fade: CGFloat { Self.fade(typeSize) }
-
-  private var hasPicks: Bool { thread.messages.contains { ($0.questions ?? []).contains { $0.state == .picked } } }
-  private var canSend: Bool {
-    // While a Send waits, its picks are already on their way: only new words make another Send.
-    if session.hasHeldReply(id), words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
-    if guarded { return false }
-    return session.canSend(thread: id, words: words) && !session.sending.contains(id)
-  }
-  @Environment(\.dynamicTypeSize) private var typeSize
-  private var hint: String { hasPicks ? PhoneWords.noteOrSend : PhoneWords.reply }
-  /// The stale guard is up: it stands in place of the reply's own actions, as in the window.
-  private var guarded: Bool { session.stopped.contains(id) && !(session.stale[id] ?? []).isEmpty }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      // Something to stand on even when empty: the fade and the solid ground under the keyboard stay.
-      if inCard { Color.clear.frame(maxWidth: .infinity, maxHeight: 0) } else { foot }
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, inCard ? 0 : 8)
-    // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge. The fade
-    // is part of the foot, so the page's room ends where it begins and nothing rests under it.
-    .padding(.top, fade)
-    .background {
-      VStack(spacing: 0) {
-        LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
-          .frame(height: fade)
-        // Solid down to the screen's edge, under the keyboard too: nothing of the page shows below the field.
-        Token.background
-      }
-      .ignoresSafeArea(.all, edges: .bottom)
-      .allowsHitTesting(false)
-    }
-  }
-
-  @ViewBuilder private var foot: some View {
-    if session.reach == .away, session.standing == .ok {
-      // The thread says it too: what is done here waits on the phone.
-      Label(PhoneWords.away(session.computer.name), systemImage: "moon.fill")
-        .font(.footnote)
-        .foregroundStyle(Token.mutedForeground)
-        // In line with the page's words and icons above it (the page's margin is 20, the foot's 12).
-        .padding(.horizontal, 8)
-    }
-    // Under the guard only the guard speaks: the refusal behind it names keys.
-    if let notice = session.notices[id], !guarded {
-      let said = PhoneWords.notice(notice, computer: session.computer.name, agent: thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) })
-      Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
-        .font(.footnote)
-        .foregroundStyle(Token.destructive)
-        .padding(.horizontal, 8)
-    }
-    if guarded, let stale = session.stale[id] {
-      // As wide as the cards above it.
-      StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go).padding(.horizontal, 8)
-    } else if items.shown {
-      // The window's own pill: what still wants an answer, and a touch goes to the next one.
-      Button(action: jump) {
-        HStack(spacing: 6) {
-          Image(systemName: "questionmark.circle")
-          // A number never parts from its noun when the words are large and wrap.
-          if let words = PhoneWords.openItems(items) { Text(words.replacing(#/(\d) /#) { "\($0.1)\u{00A0}" }).multilineTextAlignment(.leading) }
-          Image(systemName: "chevron.down").font(.caption.weight(.bold))
-        }
-        .font(.subheadline.weight(.medium))
-        .foregroundStyle(Token.foreground)
-        .padding(.horizontal, 14)
-        .frame(minHeight: 36)
-        .background(Token.muted, in: Capsule())
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(ChoiceStyle())
-      .accessibilityLabel(PhoneWords.openItems(items) ?? PhoneWords.allAnswered)
-    }
-    if session.standing == .appNeedsUpdate {
-      Label(PhoneWords.updateToAnswer, systemImage: "arrow.down.app")
-        .font(.subheadline)
-        .foregroundStyle(Token.mutedForeground)
-        .frame(maxWidth: .infinity, minHeight: 44)
-    } else if SendPlan.needsComputer(thread) {
-      Label(PhoneWords.replyOnComputer, systemImage: "desktopcomputer")
-        .font(.subheadline)
-        .foregroundStyle(Token.mutedForeground)
-        .frame(maxWidth: .infinity, minHeight: 44)
-    } else {
-      box
-    }
-  }
-
-  private var box: some View {
-    HStack(alignment: .bottom, spacing: 8) {
-      TextField("", text: $words, axis: .vertical)
-        .lineLimit(1...6)
-        .font(.body)
-        .focused(focused)
-        .padding(.leading, 16)
-        .padding(.vertical, 12)
-        // The hint whole, never cut: the long one when it fits on the line, else the short one.
-        .overlay(alignment: .topLeading) {
-          if words.isEmpty {
-            ViewThatFits(in: .horizontal) {
-              Text(hint).lineLimit(1)
-              Text(PhoneWords.reply).lineLimit(1)
-            }
-            .font(.body)
-            .foregroundStyle(Color(uiColor: .placeholderText))
-            .padding(.leading, 16)
-            .padding(.vertical, 12)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-          }
-        }
-        .accessibilityLabel(hint)
-      Button {
-        // Words typed on a card and not saved yet are saved first: what is on screen is what is sent.
-        drafts.saveAll()
-        let text = words
-        words = ""
-        Task {
-          // A Send that could not be made at all gives the words straight back.
-          if !(await session.send(thread: id, words: text)), words.isEmpty { words = text }
-        }
-      } label: {
-        Image(systemName: "arrow.up")
-          .font(.body.weight(.bold))
-          .foregroundStyle(canSend ? Token.primaryForeground : Token.mutedForeground)
-          .frame(width: 44, height: 44)
-          .background(canSend ? Token.primary : Token.muted, in: Circle())
-      }
-      .disabled(!canSend)
-      .accessibilityLabel(PhoneWords.send)
-      .padding(4)
-    }
-    .glassEffect(.regular, in: .rect(cornerRadius: 26))
   }
 }
 
@@ -884,25 +742,19 @@ struct StaleGuard: View {
             words = ""
             Task { if !(await session.send(thread: id, words: text, pastGuard: true)), words.isEmpty { words = text } }
           }
-          .font(.body.weight(.semibold))
-          .foregroundStyle(Token.foreground)
-          .frame(maxWidth: .infinity, minHeight: 48)
-          .background(Token.foreground.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+          .actionGround(.neutral)
         }
-        Button(PhoneWords.guardKeepEditing) { session.clearStale(id) }
-          .font(.body.weight(.medium))
-          .foregroundStyle(Token.primary)
-          .frame(maxWidth: .infinity, minHeight: 44)
-          .contentShape(Rectangle())
+        Button(PhoneWords.guardKeepEditing) { session.clearStale(id) }.actionGround(.bare, height: Space.touch)
       }
-      .buttonStyle(ChoiceStyle())
+      .buttonStyle(PressStyle())
     }
     .padding([.top, .horizontal], 14)
     // Keep editing's touch area already holds air under its words: the words end as far from the edge as the
     // heading starts.
     .padding(.bottom, 4)
-    .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.warning.opacity(0.5)))
+    .background(Token.card, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+    // Amber: this holds the Send up until the person chooses.
+    .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Role.hold.ink.opacity(0.5)))
     .accessibilityElement(children: .contain)
   }
 }

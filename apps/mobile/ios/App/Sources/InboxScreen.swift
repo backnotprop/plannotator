@@ -62,7 +62,7 @@ struct InboxScreen: View {
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 4, leading: Self.edge, bottom: 4, trailing: Self.edge))
         }
-        ForEach(sections, id: \.id) { section in
+        ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
           Section {
             ForEach(section.threads, id: \.threadId) { row in
               ZStack {
@@ -77,14 +77,19 @@ struct InboxScreen: View {
           } header: {
             // The header and its count read as one line: the product's own name, then how many, quieter.
             // A section this app does not know keeps the computer's label.
-            run(Text(Words.sections[section.id.rawValue] ?? section.label).fontWeight(.semibold).foregroundStyle(Token.foreground),
-              Text("  \(section.threads.count)").monospacedDigit().foregroundStyle(Token.mutedForeground))
-              .font(.subheadline)
-              .textCase(nil)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .listRowInsets(EdgeInsets(top: 12, leading: Self.edge, bottom: 4, trailing: Self.edge))
-              .accessibilityLabel("\(Words.sections[section.id.rawValue] ?? section.label), \(section.threads.count)")
-              .accessibilityAddTraits(.isHeader)
+            // A hairline parts a section from the one over it; the name sits close to its own rows, far from the
+            // rows above, so the list reads as groups and not as one run of lines.
+            VStack(alignment: .leading, spacing: Space.step) {
+              if index > 0 { Hairline() }
+              run(Text(Words.sections[section.id.rawValue] ?? section.label).fontWeight(.semibold).foregroundStyle(Token.foreground),
+                Text("  \(section.threads.count)").monospacedDigit().foregroundStyle(Token.mutedForeground))
+                .font(TextRole.meta)
+                .textCase(nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("\(Words.sections[section.id.rawValue] ?? section.label), \(section.threads.count)")
+                .accessibilityAddTraits(.isHeader)
+            }
+            .listRowInsets(EdgeInsets(top: index > 0 ? Space.close : Space.tight, leading: Self.edge, bottom: 0, trailing: Self.edge))
           }
           .listSectionSeparator(.hidden)
         }
@@ -102,7 +107,7 @@ struct InboxScreen: View {
   }
 
   /// The page's one left and right edge: the title, the headers and the rows all start on it.
-  static let edge: CGFloat = 16
+  static let edge: CGFloat = Space.card
 
   private var awayNeeds: [String] {
     session.computer.addresses.map {
@@ -194,7 +199,7 @@ struct AwayNotice: View {
       Spacer(minLength: 0)
     }
     .padding(12)
-    .background(Token.muted, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .background(Token.muted, in: RoundedRectangle(cornerRadius: Radius.well, style: .continuous))
     .accessibilityElement(children: .combine)
   }
 }
@@ -219,7 +224,7 @@ struct UpdateNotice: View {
       WideButton(words: PhoneWords.update, action: update)
     }
     .padding(12)
-    .background(Token.muted, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .background(Token.muted, in: RoundedRectangle(cornerRadius: Radius.well, style: .continuous))
   }
 }
 
@@ -230,14 +235,9 @@ struct WideButton: View {
 
   var body: some View {
     Button(action: action) {
-      Text(words)
-        .font(.body.weight(.semibold))
-        .foregroundStyle(Token.primaryForeground)
-        .frame(maxWidth: .infinity, minHeight: 50)
-        .background(Token.primary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .contentShape(Rectangle())
+      Text(words).actionGround(.filled, height: 50)
     }
-    .buttonStyle(ChoiceStyle())
+    .buttonStyle(PressStyle())
   }
 }
 
@@ -270,17 +270,24 @@ struct ThreadRow: View {
   }
 
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      AgentMark(author: row.author)
-      VStack(alignment: .leading, spacing: 2) {
+    HStack(alignment: .top, spacing: Space.step) {
+      AgentMark(author: row.author, size: 32).padding(.top, Space.hair)
+      VStack(alignment: .leading, spacing: Space.hair) {
         if large {
           // At the largest sizes the title keeps the whole line; the time and the count share the next one.
           titleText
           leadText
-          HStack(alignment: .firstTextBaseline, spacing: 8) {
-            timeText
-            Spacer(minLength: 4)
-            counts
+          // One line when both fit whole; else the count under the time. Neither is ever cut.
+          ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.close) {
+              timeText.fixedSize()
+              Spacer(minLength: Space.tight)
+              counts
+            }
+            VStack(alignment: .leading, spacing: Space.tight) {
+              timeText
+              counts
+            }
           }
         } else {
           HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -299,7 +306,7 @@ struct ThreadRow: View {
         }
         // The same number of lines in every row, so the list scans.
         Text(row.latestPreview ?? " ")
-          .font(.subheadline)
+          .font(TextRole.secondary)
           .foregroundStyle(row.unread ? Token.foreground : Token.mutedForeground)
           .lineLimit(large ? 3 : 1)
           .truncationMode(.tail)
@@ -315,18 +322,19 @@ struct ThreadRow: View {
 
   private var titleText: some View {
     Text(title)
-      .font(.headline.weight(row.unread ? .semibold : .regular))
+      .font(.body.weight(row.unread ? .semibold : .regular))
       .foregroundStyle(Token.foreground)
       .lineLimit(large ? 2 : 1)
       .truncationMode(.tail)
   }
 
   private var timeText: some View {
-    Text(time).font(.subheadline).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(1)
+    // New since the person looked: the time takes the accent, as the window's row has it.
+    Text(time).font(row.unread ? TextRole.metaStrong : TextRole.meta).monospacedDigit().foregroundStyle(row.unread ? Token.primary : Token.mutedForeground).lineLimit(1)
   }
 
   private var leadText: some View {
-    Text(lead).font(.subheadline).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail)
+    Text(lead).font(TextRole.meta).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail)
   }
 
   /// What waits, compact, as the window's row has it (packages/inbox/components/RowBadge.tsx): the action box

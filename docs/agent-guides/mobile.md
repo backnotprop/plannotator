@@ -157,6 +157,19 @@ When main moves ahead of the contract (an Inbox pull request changed a wire type
 - None of these is a required check.
 - A generator never lists a folder of the checkout. Every path it reads or writes is a literal in `scripts/mobile/lib.ts` or in the generator, so the picker can see it.
 
+## The app's look
+
+The native app is the same product as the window, made native: not a web view and not a generic iOS form. Its look lives in one file, `apps/mobile/ios/App/Sources/Look.swift`, and every screen is built from it. A new screen takes its numbers from there and adds none of its own.
+
+- `Space` is the spacing scale and `Radius` the corners. A shape inside a card sits 4 points in from its edge and has a radius 4 less, so the two keep one centre.
+- `TextRole` is the type roles. All are system text styles, so each follows the person's text size. A card has one heavy line, its prompt; everything else steps down in size and weight.
+- `Role` is what a colour says: the accent is what the person can do or has done, amber is work held up, red is an agent stopped, green is a thing finished. Colour is never decoration.
+- `cardSurface()` is the one card. `ChoiceRow` and `PickMark` are a choice and its mark, `CardNotice` a line about what happened to a pick, `Chip` and `RoleLine` the small marks, `actionGround()` a button, `PressStyle` how a thing answers a touch, `Hairline` the line that parts two things.
+- A hairline parts things. A ground (a well) is kept for what the person chose.
+- The thread's foot is one piece (`ThreadFoot.swift`): what still waits is a line across the top of the reply field, and Send keeps the field's own centre.
+- Motion carries meaning only: a pick settles, Send takes the accent when there is something to send. Both fade instead when Reduce Motion is on.
+- The foot's line about what waits grows with the text to a limit, as a bar does; cards and messages grow all the way.
+
 ## What the first app slice (S1) must know
 
 - Use `Wire.swift` and its `Door` routes. Never hand-write a route.

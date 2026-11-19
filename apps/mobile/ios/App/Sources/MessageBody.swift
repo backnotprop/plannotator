@@ -108,8 +108,10 @@ struct MessageWords: View {
   var body: some View {
     switch block {
     case .text(let text):
+      // A little more air between lines than the system's own: these are sentences to read, not labels.
       Text(MessageBody.attributed(text))
-        .font(.body)
+        .font(TextRole.body)
+        .lineSpacing(3)
         .foregroundStyle(Token.foreground)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,7 +124,7 @@ struct MessageWords: View {
       CodeBlock(code: code)
     case .elsewhere:
       Label(PhoneWords.moreOnComputer, systemImage: "desktopcomputer")
-        .font(.subheadline)
+        .font(TextRole.secondary)
         .foregroundStyle(Token.mutedForeground)
     case .question, .actions:
       EmptyView()
@@ -145,7 +147,8 @@ struct CodeBlock: View {
 
   private var words: some View {
     Text(code)
-      .font(.system(copies ? .callout : .footnote, design: .monospaced))
+      .font(TextRole.code(copies ? .callout : .footnote))
+      .lineSpacing(2)
       .foregroundStyle(Token.foreground)
       .textSelection(.enabled)
   }
@@ -184,7 +187,7 @@ struct CodeBlock: View {
       }
     }
     .frame(minHeight: copies ? 44 : 0)
-    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
     // Over a drawing that scrolls sideways, Copy is a chip of its own in the band above the drawing.
     .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied, ground: CodeLayout.keeps(code)) } }
   }
