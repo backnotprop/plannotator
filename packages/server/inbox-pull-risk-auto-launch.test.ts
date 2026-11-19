@@ -105,11 +105,10 @@ test("an automatic start keeps the person's remembered model and effort, and its
   expect(root.launch?.agent).toBe(FAKE);
 });
 
-test("with full permissions on it is not started by itself: no thread, no agent", async () => {
+test("with full permissions on it still starts by itself", async () => {
   const w = setup(true);
-  await expect(w.start(w.job)).rejects.toThrow("Full permissions are on in Settings → Agents, so it is not started on its own.");
-  expect(w.store.listRows({ projectId: w.project.id })).toHaveLength(0);
-  expect(w.fake.calls.filter((call) => call.startsWith("start"))).toEqual([]);
+  const { thread_id } = await w.start(w.job);
+  expect(w.store.message(thread_id)!.launch?.full_permissions).toBe(true);
 });
 
 test("an automatic run is done once its thread has what was asked for after it started, or its agent ended", async () => {

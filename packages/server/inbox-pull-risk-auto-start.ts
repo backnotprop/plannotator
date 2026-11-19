@@ -49,10 +49,6 @@ export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAu
     if (!agent) throw new InboxError("agent_unavailable", "No agent can be started here.");
     const { handed, name, body } = pullRiskAutoBody(job, deps.skillsBlock);
     const prepared = await deps.launch.prepare({ agent, project_id: projectId }, { name, body, resolveProject: deps.resolveProject, background: true, keepLastChoice: true });
-    if (prepared.launch.full_permissions) {
-      deps.launch.abandon(prepared.launch, prepared.project);
-      throw new InboxError("full_permissions", "Full permissions are on in Settings → Agents, so it is not started on its own.");
-    }
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
       result = deps.store.startPersonThread({ project_id: prepared.project.id, body, to: prepared.to, idempotency_key: `pull-risk-auto:${job.key}`, thread_name: name, thread_name_auto: true, thread_name_numbered: true, launch: prepared.launch });
