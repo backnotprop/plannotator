@@ -99,17 +99,26 @@ export function changedElements(prev: CanvasScene, next: CanvasScene): Set<strin
   return out;
 }
 
-export function whatChanged(a: ThingFacts, b: ThingFacts): string {
+/** What changed between two states of a thing, as verbs: "moved", "resized", "renamed", "recoloured", "reconnected", "rerouted", "drew on", "partly erased", "moved into <frame>", "taken out of its frame". `detail`: with from and to ("moved from 10,20 to 300,40", "renamed "Pick a plan" → "Choose a plan""). */
+export function whatChanged(a: ThingFacts, b: ThingFacts, detail = false): string {
   const parts: string[] = [];
   const moved = Math.abs(a.box[0] - b.box[0]) > 1 || Math.abs(a.box[1] - b.box[1]) > 1;
   const resized = Math.abs(a.box[2] - b.box[2]) > 1 || Math.abs(a.box[3] - b.box[3]) > 1;
-  if (a.kind === 'sketch' && a.strokes !== b.strokes) parts.push(`${(b.strokes ?? 0) > (a.strokes ?? 0) ? 'drawn on' : 'partly erased'}`);
-  else if (resized) parts.push(moved && (a.kind === 'arrow' || a.kind === 'line') ? 'rerouted' : 'resized');
-  else if (moved) parts.push('moved');
-  if (a.words !== b.words) parts.push('new words');
-  if (a.stroke !== b.stroke || a.fill !== b.fill) parts.push('new colour');
-  if (a.from !== b.from || a.to !== b.to) parts.push('new ends');
-  if (a.frame !== b.frame) parts.push(b.frame ? `now in ${b.frame}` : 'out of its frame');
+  const cut = (words: string) => JSON.stringify(Array.from(words).length > 80 ? `${Array.from(words).slice(0, 79).join('')}…` : words);
+  const connector = a.kind === 'arrow' || a.kind === 'line';
+  if (a.kind === 'sketch' && a.strokes !== b.strokes) parts.push(`${(b.strokes ?? 0) > (a.strokes ?? 0) ? 'drew on' : 'partly erased'}`);
+  else if (resized && moved && connector) parts.push('rerouted');
+  else {
+    if (moved) parts.push(detail && !connector ? `moved from ${a.box[0]},${a.box[1]} to ${b.box[0]},${b.box[1]}` : 'moved');
+    if (resized) parts.push(detail ? `resized from ${a.box[2]}x${a.box[3]} to ${b.box[2]}x${b.box[3]}` : 'resized');
+  }
+  if (a.words !== b.words) parts.push(!detail ? 'renamed' : !a.words ? `labelled ${cut(b.words)}` : !b.words ? `cleared the words ${cut(a.words)}` : `renamed ${cut(a.words)} → ${cut(b.words)}`);
+  if (a.stroke !== b.stroke || a.fill !== b.fill) {
+    const look = (f: ThingFacts) => [f.stroke, f.fill && f.fill !== f.stroke ? `filled ${f.fill}` : ''].filter(Boolean).join(', ') || 'no colour';
+    parts.push(detail ? `recoloured from ${look(a)} to ${look(b)}` : 'recoloured');
+  }
+  if (a.from !== b.from || a.to !== b.to) parts.push(detail ? `reconnected, was ${a.from || '(open)'} -> ${a.to || '(open)'}` : 'reconnected');
+  if (a.frame !== b.frame) parts.push(b.frame ? `moved into ${b.frame}` : 'taken out of its frame');
   return parts.join(', ');
 }
 
@@ -178,11 +187,12 @@ export function sinceLines(
   rev: number,
   me: CanvasAuthor | null,
   max = 30,
-): { lines: string[]; elements: Set<string>; byElement: Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>; through: number; cut: boolean; undone: CanvasLogEntry[] } {
+): { lines: string[]; elements: Set<string>; byElement: Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>; through: number; cut: boolean; undone: CanvasLogEntry[]; saves: string } {
   // Per thing and author: the first change since the agent looked and the last. What is told is the one change between them.
   const last = new Map<string, { by: CanvasAuthor; first: CanvasChange; change: CanvasChange; rev: number; parts: string[] }>();
   const byElement = new Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>();
   const undone: CanvasLogEntry[] = [];
+  const savesBy = new Map<string, number>();
   let through = rev;
   let cut = false;
   for (const entry of log) {
@@ -198,6 +208,7 @@ export function sinceLines(
       continue;
     }
     through = entry.rev;
+    savesBy.set(authorWords(entry.by), (savesBy.get(authorWords(entry.by)) ?? 0) + 1);
     // The person took back a change of this agent's: said in its own line (the server words it).
     if (entry.undid !== undefined && me) {
       const made = log.find((e) => e.rev === entry.undid);
@@ -225,7 +236,7 @@ export function sinceLines(
     else if (item.first.op === 'removed') ops = 'removed and brought back';
     else if (item.first.was && item.change.now) {
       // One drag saved three times is one move; a colour changed and changed back is no change.
-      ops = whatChanged(item.first.was, item.change.now);
+      ops = whatChanged(item.first.was, item.change.now, true);
       if (!ops) {
         if (JSON.stringify(item.first.was) === JSON.stringify(item.change.now)) continue;
         ops = 'edited';
@@ -234,7 +245,9 @@ export function sinceLines(
     said.push({ added: born, line: `  ${authorWords(item.by)} ${ops}: ${item.change.line}` });
   }
   const lines = [...said.filter((x) => !x.added), ...said.filter((x) => x.added)].map((x) => x.line);
-  return { lines, elements, byElement, through, cut, undone };
+  // Every save is one revision, so the number jumps: "3 changes by the person" says why.
+  const saves = [...savesBy].map(([who, n]) => `${n} change${n === 1 ? '' : 's'} by ${who}`).join(', ');
+  return { lines, elements, byElement, through, cut, undone, saves };
 }
 
 /** The line an agent's answer opens with when the person took back one of its changes: exactly what went back and what they kept. */

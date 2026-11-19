@@ -294,8 +294,8 @@ describe("what the recheck found (round 4)", () => {
     const since = sinceLines(readCanvasLog(dir, thread), 1, { kind: "agent", name: "Agent", key: "a" });
     const queue = since.lines.filter((l) => l.includes('"queue"'));
     expect(queue).toHaveLength(1);
-    expect(queue[0]).toMatch(/the person moved: ellipse/);
-    expect(queue[0]).not.toContain("new colour");
+    expect(queue[0]).toMatch(/the person moved from \d+,\d+ to \d+,\d+: ellipse/);
+    expect(queue[0]).not.toContain("recoloured");
   });
 
   test("N6: the Undo's line says what went back and what the person kept, by name", () => {
@@ -382,5 +382,149 @@ describe("what the recheck found (round 4)", () => {
     expect(zalgo!.fontFamily).toBe(2);
     // Composed letters need no stacking: they keep the hand-drawn face.
     expect(viet!.fontFamily).toBe(5);
+  });
+});
+
+describe("what six fresh agents tripped on (round 5)", () => {
+  const rect = (id: string, type: string, x: number, y: number, width: number, height: number, words: string, frameId: string | null = "frame001"): CanvasElement[] => [
+    { id, type, x, y, width, height, frameId, version: 1, versionNonce: 1, boundElements: [{ id: `${id}-t`, type: "text" }] },
+    { id: `${id}-t`, type: "text", x: x + 10, y: y + 10, width: width - 20, height: 25, text: words, originalText: words, containerId: id, frameId, version: 1, versionNonce: 1 },
+  ];
+  const arrow = (id: string, from: CanvasElement, to: CanvasElement): CanvasElement => {
+    const a = [from.x + from.width / 2, from.y + from.height / 2];
+    const b = [to.x + to.width / 2, to.y + to.height / 2];
+    return { id, type: "arrow", x: a[0]!, y: a[1]!, width: Math.abs(b[0]! - a[0]!), height: Math.abs(b[1]! - a[1]!), points: [[0, 0], [b[0]! - a[0]!, b[1]! - a[1]!]], startBinding: { elementId: from.id }, endBinding: { elementId: to.id }, version: 1, versionNonce: 1 };
+  };
+  /** The clean room's checkout board (equipment/boards/checkout), as its reading gives it. */
+  function checkout(): CanvasScene {
+    const p95 = rect("p95note1", "rectangle", 637, -180, 303, 120, "p95 640 ms. The fraud call is 28% of it.");
+    const fraud = rect("fraud001", "diamond", 679, 30, 336, 120, "Fraud check");
+    const web = rect("webcheck", "rectangle", 24, 40, 190, 64, "Web checkout");
+    const orders = rect("ordersap", "rectangle", 364, 40, 165, 64, "Orders API");
+    const vendor = rect("riskvend", "rectangle", 1110, 58, 178, 64, "Risk vendor");
+    const queue = rect("payqueue", "ellipse", 319, 330, 284, 85, "payments queue");
+    const ledger = rect("ledgerwr", "rectangle", 1110, 330, 203, 64, "Ledger writer");
+    const mailer = rect("receiptm", "rectangle", 1110, 480, 215, 64, "Receipt mailer");
+    const frame: CanvasElement = { id: "frame001", type: "frame", x: -8, y: -220, width: 1365, height: 796, name: "Checkout path today", version: 1, versionNonce: 1 };
+    return {
+      ...emptyScene(),
+      elements: [...p95, ...fraud, ...web, ...orders, ...vendor, ...queue, ...ledger, ...mailer, frame, arrow("arr00001", web[0]!, orders[0]!), arrow("arr00002", orders[0]!, queue[0]!), arrow("arr00003", orders[0]!, fraud[0]!), arrow("arr00004", fraud[0]!, vendor[0]!), arrow("arr00005", queue[0]!, ledger[0]!), arrow("arr00006", ledger[0]!, mailer[0]!)],
+    };
+  }
+  const gap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => Math.hypot(Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w)), Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h)));
+
+  test("1: a note placed by a thing lands beside it: nearer than anything else, on nothing, whichever placement word is used", () => {
+    for (const place of ["below", "near", "next to", "beside", "rightOf", "above", "leftOf"]) {
+      const scene = checkout();
+      const made = applyOps(scene, [{ add: "note", text: "Must run after the order is accepted.", [place]: "Fraud check" }], agent);
+      expect(made.errors).toEqual([]);
+      const things = thingsOf(made.scene);
+      const fraud = things.find((t) => t.words === "Fraud check")!;
+      const note = things.find((t) => t.words.startsWith("Must run"))!;
+      const others = things.filter((t) => t !== fraud && t !== note && t.kind !== "frame" && t.kind !== "arrow");
+      const nearest = Math.min(...others.map((t) => gap(t.box, fraud.box)));
+      // Below it there is room: the note is the nearest thing to it. To its right, left and above there is none
+      // beside it (the vendor, the orders box and the p95 note stand there): then an arrow ties the note to it.
+      const beside = Math.round(gap(note.box, fraud.box)) <= nearest;
+      if (["below", "near", "next to", "beside"].includes(place)) expect({ place, beside }).toEqual({ place, beside: true });
+      else expect({ place, tied: beside || things.some((t) => t.kind === "arrow" && t.from?.id === note.id && t.to?.id === fraud.id) }).toEqual({ place, tied: true });
+      expect({ place, on: others.filter((t) => boxesOverlap(t.box, note.box)).map((t) => t.words) }).toEqual({ place, on: [] });
+      // On no arrow's line either.
+      for (const el of made.scene.elements.filter((e) => e.type === "arrow" && scene.elements.some((o) => o.id === e.id))) {
+        const [x1, y1] = [el.x, el.y];
+        const [x2, y2] = [el.x + el.points![1]![0]!, el.y + el.points![1]![1]!];
+        const hit = Array.from({ length: 101 }, (_, i) => [x1 + ((x2 - x1) * i) / 100, y1 + ((y2 - y1) * i) / 100]).some(([x, y]) => x! > note.box.x && x! < note.box.x + note.box.w && y! > note.box.y && y! < note.box.y + note.box.h);
+        expect({ place, arrow: el.id, hit }).toEqual({ place, arrow: el.id, hit: false });
+      }
+      // It stays in the fraud check's frame.
+      expect(note.frame).toBe(fraud.frame);
+    }
+  });
+
+  test("1: with no room beside the thing, the answer names what is in the way and an arrow ties the new thing to it", () => {
+    // A box walled in on its right for a long way.
+    const ops: Record<string, unknown>[] = [{ add: "box", text: "Hub", at: [0, 0] }];
+    for (let i = 0; i < 6; i++) ops.push({ add: "box", text: `Wall ${i}`, at: [180 + i * 150, -200], size: [140, 460] });
+    const scene = applyOps(emptyScene(), ops, agent).scene;
+    const made = applyOps(scene, [{ add: "note", text: "Far note", rightOf: "Hub" }], agent);
+    expect(made.ok).toBe(true);
+    expect(made.done[0]).toContain('"Wall 0"');
+    expect(made.done[0]).toContain("in the way");
+    expect(made.done[0]).toMatch(/an arrow ties it to \S+/);
+    const things = thingsOf(made.scene);
+    const hub = things.find((t) => t.words === "Hub")!;
+    const note = things.find((t) => t.words === "Far note")!;
+    expect(things.some((t) => t.kind === "arrow" && t.from?.id === note.id && t.to?.id === hub.id)).toBe(true);
+  });
+
+  test("2, 8: a note is answered as a note, and a frame filled in the same call says what it holds at the end", () => {
+    const made = applyOps(emptyScene(), [{ add: "frame", text: "Retries" }, { add: "note", text: "Three times", in: "Retries" }, { add: "box", text: "Worker", in: "Retries" }], agent);
+    expect(made.done[0]).toContain("holds 2");
+    expect(made.done[1]).toMatch(/^added note \S+ "Three times"/);
+    expect(made.done[2]).toMatch(/^added box /);
+  });
+
+  const circle = (cx: number, cy: number, r: number, n = 24): number[][] => Array.from({ length: n + 1 }, (_, i) => [cx + Math.cos((i / n) * Math.PI * 2) * r, cy + Math.sin((i / n) * Math.PI * 2) * r]);
+  const free = (id: string, pts: number[][]): CanvasElement => {
+    const x = pts[0]![0]!;
+    const y = pts[0]![1]!;
+    return stroke(id, x, y, pts.map((p) => [p[0]! - x, p[1]! - y]));
+  };
+  const readingOf = (elements: CanvasElement[]) => {
+    const scene: CanvasScene = { ...emptyScene(), elements };
+    return readThings(scene, thingsOf(scene)).lines.join("\n");
+  };
+
+  test("3: a face with a crown is read as one, as a guess, before its strokes", () => {
+    const crown = [[-80, -96], [-96, -196], [-48, -140], [0, -214], [48, -140], [96, -196], [80, -96], [-80, -96]];
+    const dense: number[][] = [];
+    for (let i = 1; i < crown.length; i++) for (let k = 0; k < 8; k++) dense.push([crown[i - 1]![0]! + ((crown[i]![0]! - crown[i - 1]![0]!) * k) / 8, crown[i - 1]![1]! + ((crown[i]![1]! - crown[i - 1]![1]!) * k) / 8]);
+    dense.push(crown[0]!);
+    const face = [
+      free("head0001", circle(0, 0, 110, 48)),
+      free("eyeL0001", circle(-40, -30, 9, 14)),
+      free("eyeR0001", circle(40, -30, 9, 14)),
+      free("smile001", Array.from({ length: 21 }, (_, i) => [Math.cos(Math.PI * (0.2 + (0.6 * i) / 20)) * 60, Math.sin(Math.PI * (0.2 + (0.6 * i) / 20)) * 60])),
+      free("crown001", dense),
+      free("jewel001", circle(-96, -206, 7, 12)),
+      free("jewel002", circle(0, -224, 7, 12)),
+      free("jewel003", circle(96, -206, 7, 12)),
+    ];
+    const line = readingOf(face);
+    expect(line).toContain("looks like a smiling face with a crown-like zigzag on top (a guess from 8 strokes; see the picture). 8 freehand strokes");
+    // The same strokes, the same words; without the crown it is a face, and a loop alone is nothing in particular.
+    expect(readingOf(face)).toBe(line);
+    expect(readingOf(face.slice(0, 4))).toContain("looks like a smiling face (a guess from 4 strokes");
+    expect(readingOf(face.slice(0, 1))).not.toContain("looks like");
+  });
+
+  test("3: a check mark, a cross, an arrow, an underline and a circle around a thing are named; a scribble is not", () => {
+    expect(readingOf([free("check001", [[0, 0], [5, 8], [10, 16], [15, 24], [20, 30], [30, 14], [40, -4], [50, -22], [60, -40], [70, -58]])])).toContain("looks like a check mark");
+    expect(readingOf([free("crossA01", [[0, 0], [50, 50], [100, 100]]), free("crossB01", [[100, 0], [50, 50], [0, 100]])])).toContain("looks like a cross (an X)");
+    expect(readingOf([free("shaft001", [[0, 0], [100, 0], [200, 0]]), free("headA001", [[180, -20], [200, 0]]), free("headB001", [[180, 20], [200, 0]])])).toContain("looks like an arrow pointing right");
+    const box: CanvasElement = { id: "boxUnder", type: "rectangle", x: 0, y: 0, width: 200, height: 60, version: 1, versionNonce: 1 };
+    expect(readingOf([box, free("under001", [[10, 75], [100, 76], [190, 75]])])).toContain("looks like an underline under boxUnder");
+    expect(readingOf([box, free("ring0001", circle(100, 30, 150, 40))])).toContain("looks like a circle around boxUnder");
+    expect(readingOf([free("scrib001", [[0, 0], [30, 40], [10, 60], [50, 20], [20, 5], [60, 60], [5, 30], [45, 45]])])).not.toContain("looks like");
+  });
+
+  test("6: a change is told with what it was and what it is: renamed old → new, moved from → to; a removal names the thing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "canvas-told-"));
+    const thread = "msg_told";
+    let scene = applyOps(emptyScene(), [{ add: "box", text: "Pick a plan", at: [0, 0] }, { add: "box", text: "Invite team", at: [300, 0] }, { add: "box", text: "Legacy SSO", at: [600, 0] }], agent).scene;
+    commitCanvas(dir, thread, scene, { kind: "agent", name: "Agent", key: "a" }, new Date(1));
+    const save = (change: (e: CanvasElement) => Partial<CanvasElement> | null) => {
+      scene = { ...scene, elements: scene.elements.map((e) => { const c = change(e); return c ? { ...e, ...c, version: (e.version ?? 1) + 1, versionNonce: (e.versionNonce ?? 1) + 1 } : e; }) };
+      commitCanvas(dir, thread, scene, { kind: "person" }, new Date(2));
+    };
+    save((e) => (e.type === "text" && e.originalText === "Pick a plan" ? { text: "Choose a plan (trial can skip)", originalText: "Choose a plan (trial can skip)" } : null));
+    save((e) => (e.x >= 300 && e.x < 600 ? { y: e.y + 200 } : null));
+    save((e) => (e.x >= 600 ? { isDeleted: true } : null));
+    const since = sinceLines(readCanvasLog(dir, thread), 1, { kind: "agent", name: "Agent", key: "a" });
+    expect(since.lines.find((l) => l.includes("Choose a plan"))).toContain('the person renamed "Pick a plan" → "Choose a plan (trial can skip)": box');
+    expect(since.lines.find((l) => l.includes("Invite team"))).toContain("the person moved from 300,0 to 300,200: box");
+    expect(since.lines.find((l) => l.includes("Legacy SSO"))).toMatch(/the person removed: box \S+ "Legacy SSO"/);
+    expect(since.saves).toBe("3 changes by the person");
+    expect(since.lines.join("\n")).not.toMatch(/the person new /);
   });
 });

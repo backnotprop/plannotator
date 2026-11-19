@@ -55,7 +55,7 @@ import { decodePng, encodePng } from "./inbox-icon-trim";
 import { fail, guarded, okComplete } from "./inbox-mcp-result";
 
 const CANVAS_VERBS = [
-  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram; an open Inbox window draws it, so it is refused while none is open). Place: near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "size": [width, height] and "color": black, gray, red, pink, violet, blue, teal, green, yellow, orange.',
+  '{"add": "box", "text": "...", "rightOf": "<thing>"}  kinds: box, ellipse, diamond, note, text, frame, mermaid (text is a flowchart or sequence diagram; an open Inbox window draws it, so it is refused while none is open). Place (add and move): near, rightOf, leftOf, above, below, in (a frame), or "at": [x, y]. Optional "size": [width, height] and "color": black, gray, red, pink, violet, blue, teal, green, yellow, orange.',
   '{"connect": "<thing>", "to": "<thing>", "label": "..."} (or {"from": "<thing>", "to": "<thing>"}; the arrow points at "to")   {"set": "<thing>", "text": "...", "color": "..."}',
   '{"move": "<thing>", "below": "<thing>"}   {"remove": "<thing>"}   {"frame": ["<thing>", ...], "title": "..."}',
   '{"replace": "<thing>", "with": [add and connect changes]}  a frame: what it holds is replaced; a list of things: they are.',
@@ -207,7 +207,7 @@ export function createInboxCanvas(options: {
     if (told.lines.length === 0 && told.undone.length === 0) return [`Nothing others did changed it since you last looked (rev ${last}); your own changes made it rev ${rev}.`];
     return [
       ...undoneLines(told.undone),
-      `Changed since you last looked (rev ${last}):`,
+      `Changed since you last looked (rev ${last}; now rev ${told.cut ? told.through : rev}${told.saves ? `: ${told.saves}` : ""}):`,
       ...told.lines,
       ...(told.cut ? [`  More changed after rev ${told.through}. For the rest: ${readCall(threadId)}`] : []),
     ];
@@ -374,6 +374,9 @@ export function createInboxCanvas(options: {
       // An error opens with what changed too: the answer the agent acts on next must not hide news.
       const head = opening(threadId, viewer, now0, scene, thingsOf(scene));
       const news = head.filter((line) => !line.startsWith("Nothing") && !line.startsWith("Your first look"));
+      // A name that fits nothing any more (the person renamed the thing) is answered with the nearest things as they
+      // are now: those lines have shown them, so the next call, by id, lands.
+      if (key && result.listed && result.listed.size > 0 && result.errors.length <= 10) markCanvasTold(dir, threadId, key, looksIn(scene, result.listed));
       return refuse([...news, `Nothing changed (rev ${now0}). ${result.errors.length === 1 ? "One change cannot be made" : `${result.errors.length} changes cannot be made`}:`, ...result.errors.slice(0, 10).map((e) => `  ${e}`)].join("\n"), now0);
     }
     if (key) {
@@ -507,14 +510,37 @@ export function createInboxCanvas(options: {
       }
     }
     const reading = readThings(scene, things, { only, limit: 80 });
-    // What the reply lists, as it looks now: shown to the session the reply goes to, once the reply is stored (`replyShown`).
-    const looks = looksIn(scene, reading.shown.flatMap((t) => t.elementIds));
     const lines = reading.lines.map((line) => {
       const id = /^\s*sketch (\S+)/.exec(line)?.[1];
       const name = id ? pictures.get(id) : undefined;
       return name ? `${line} [picture: ${name}]` : line;
     });
     if (reading.cutAfter) lines.push(`${reading.total - reading.lines.length} more: canvas ${JSON.stringify({ thread_id: threadId, after_thing: reading.cutAfter })}`);
+    // A selection: also what its things are joined to, one step out (the arrows that touch them and the things at
+    // those arrows' other ends). "Move this behind the queue" names a thing that was not picked; listed here, it is
+    // shown too, and the first change lands without a read.
+    const shown = [...reading.shown];
+    if (kind === "selection") {
+      const byId = new Map(things.map((t) => [t.id, t]));
+      const joined = new Map<string, Thing>();
+      for (const arrow of things) {
+        if (arrow.kind !== "arrow" && arrow.kind !== "line") continue;
+        const ends = [arrow.from?.id, arrow.to?.id].filter((id): id is string => !!id);
+        if (!only.has(arrow.id) && !ends.some((id) => only.has(id))) continue;
+        for (const id of [arrow.id, ...ends]) {
+          const thing = byId.get(id);
+          if (thing && !only.has(id)) joined.set(id, thing);
+        }
+      }
+      const extra = [...joined.values()].slice(0, 40);
+      if (extra.length > 0) {
+        lines.push("Connected, not selected:");
+        for (const thing of extra) lines.push(`  ${lineOf(thing, scene, things)}`);
+        shown.push(...extra);
+      }
+    }
+    // What the reply lists, as it looks now: shown to the session the reply goes to, once the reply is stored (`replyShown`).
+    const looks = looksIn(scene, shown.flatMap((t) => t.elementIds));
     const sketch: InboxReplySketch = { kind, rev: readCanvasMeta(dir, threadId).rev, things: [...only], reading: lines.join("\n") };
     replyLooks.set(`${threadId}\n${sketch.rev}\n${sketch.reading}`, looks);
     return sketch;

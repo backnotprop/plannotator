@@ -32,6 +32,8 @@ export interface ApplyResult {
   touched: Set<string>;
   /** Elements this call added. */
   added: Set<string>;
+  /** A call that was refused: the elements of the things its errors list, as they are now (shown to the caller by that answer). */
+  listed?: Set<string>;
   /**
    * The elements of the things a change named to overwrite, move, remove, replace or frame. These are what the agent
    * must have been shown; what only followed along (an arrow rerouted, a frame that grew) is in `touched` alone.
@@ -53,7 +55,14 @@ const CHAR = 12.5;
 /** A frame's title is one line over its corner: this many characters at most. */
 export const FRAME_TITLE_MAX = 120;
 
-export class RefError extends Error {}
+/** A change that cannot be made. `things`: the things its message lists, as they are now (an answer that prints a thing's line has shown it). */
+export class RefError extends Error {
+  things: Thing[];
+  constructor(message: string, things: Thing[] = []) {
+    super(message);
+    this.things = things;
+  }
+}
 
 const EMOJI = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\u{fe0f}\u{e0020}-\u{e007f}]/u;
 /** Scripts whose letters join, where a joiner or a non-joiner between two letters changes how they are drawn (Persian, Hindi, Sinhala and the like). */
@@ -122,7 +131,7 @@ export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, 
   // A thing's whole words come first, before anything that could read the name as an id.
   const same = things.filter((t) => t.words && plain(t.words) === lower);
   if (same.length === 1) return same[0]!;
-  if (same.length > 1) throw new RefError(`${JSON.stringify(name)} is the words of ${same.length} things; name one by its id:\n${list(same)}`);
+  if (same.length > 1) throw new RefError(`${JSON.stringify(name)} is the words of ${same.length} things; name one by its id:\n${list(same)}`, same.slice(0, 6));
   // An id is the whole id, as the reading prints it (or the element's own full id). Never the start of one.
   const byId = things.filter((t) => t.id === name || t.elementIds.includes(name));
   if (byId.length === 1) return byId[0]!;
@@ -149,12 +158,12 @@ export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, 
     return thing;
   }
   if (loose.length >= 1 && options.exact) {
-    throw new RefError(`${JSON.stringify(name)} is neither an id nor a thing's whole words, and a change that overwrites or removes takes only those. ${loose.length === 1 ? 'It looks like this one; name it by its id' : 'Name one by its id'}:\n${list(loose)}`);
+    throw new RefError(`${JSON.stringify(name)} is neither an id nor a thing's whole words, and a change that overwrites or removes takes only those. ${loose.length === 1 ? 'It looks like this one; name it by its id' : 'Name one by its id'}:\n${list(loose)}`, loose.slice(0, 6));
   }
-  if (loose.length > 1) throw new RefError(`${JSON.stringify(name)} fits ${loose.length} things; name one by its id:\n${list(loose)}`);
+  if (loose.length > 1) throw new RefError(`${JSON.stringify(name)} fits ${loose.length} things; name one by its id:\n${list(loose)}`, loose.slice(0, 6));
   const words = lower.split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !FILLER.has(w));
   const close = things.filter((t) => words.some((w) => plain(t.words).includes(w)));
-  throw new RefError(`nothing on the canvas is called ${JSON.stringify(name)}${close.length ? `; closest:\n${list(close)}` : ' (read the canvas to see what is there)'}`);
+  throw new RefError(`nothing on the canvas is called ${JSON.stringify(name)}${close.length ? `; closest, as they are now:\n${list(close)}` : ' (read the canvas to see what is there)'}`, close.slice(0, 6));
 }
 
 interface Work {
@@ -428,6 +437,50 @@ function growFrame(work: Work, frame: CanvasElement, box: Box): void {
 interface Spot {
   box: Box;
   frame?: CanvasElement;
+  /** No free spot beside the thing it was to stand by: an arrow from the new thing to this one says they belong together. */
+  tie?: Thing;
+}
+
+/** Beside a thing: this far from its edge. Anything within `BESIDE_MAX` still reads as standing by it. */
+const BESIDE = 40;
+const BESIDE_MAX = 120;
+
+/** Other ways an agent writes a place ("next to", "beside", "under"): each is one of the six. */
+const PLACE_WORDS: Record<string, Place> = {
+  nextto: 'near', beside: 'near', besides: 'near', by: 'near', nearto: 'near', closeto: 'near',
+  rightof: 'rightOf', right: 'rightOf', totherightof: 'rightOf',
+  leftof: 'leftOf', left: 'leftOf', totheleftof: 'leftOf',
+  under: 'below', beneath: 'below', underneath: 'below',
+  over: 'above', ontopof: 'above',
+  inside: 'in', within: 'in', into: 'in',
+};
+
+function withPlaces(op: CanvasOp): CanvasOp {
+  if (!op || typeof op !== 'object' || Array.isArray(op)) return op;
+  let out = op;
+  for (const key of Object.keys(op)) {
+    const place = PLACE_WORDS[key.toLowerCase().replace(/[^a-z]/g, '')];
+    if (!place || key === place || (PLACES as readonly string[]).includes(key)) continue;
+    if (out === op) out = { ...op };
+    delete out[key];
+    if (out[place] === undefined) out[place] = op[key];
+  }
+  return out;
+}
+
+/** What stands on a spot, by name: the things there and the connectors that run through it. */
+function blockersOf(work: Work, box: Box, ignore: Set<string>): string[] {
+  const out: string[] = [];
+  for (const t of thingsNow(work)) {
+    if (t.kind === 'frame' || t.elementIds.some((id) => ignore.has(id))) continue;
+    const hit =
+      t.kind === 'arrow' || t.kind === 'line'
+        ? connectorLines(work, new Set(work.scene.elements.filter((e) => !t.elementIds.includes(e.id)).map((e) => e.id))).some((line) => crosses(line, box))
+        : boxesOverlap(t.box, box, 12);
+    if (hit) out.push(`${t.kind} ${t.id}${t.words ? ` ${JSON.stringify(Array.from(t.words).slice(0, 30).join(''))}` : ''}`);
+    if (out.length === 3) break;
+  }
+  return out;
 }
 
 /** Where a new or moved thing of a size goes, from the op's placement words. Always a free spot. */
@@ -473,58 +526,49 @@ function findSpot(work: Work, op: CanvasOp, size: { w: number; h: number }, igno
     }
     return { box: { x: a.x + pad, y: top, w: size.w, h: size.h }, frame };
   }
-  const tries: Place[] = place === 'near' ? ['rightOf', 'below', 'leftOf', 'above'] : [place];
-  const at = (side: Place, step: number): Box => {
-    // Room for an arrow's label between things side by side; less between rows.
-    const d = (side === 'rightOf' || side === 'leftOf' ? GAP + 40 : GAP - 20) + step * 40;
+  // Beside the thing: a small gap from its edge, on the side asked for (near: any side). A spot that is taken gives
+  // way first by sliding along that side, while the two still face each other, and only then by stepping farther out.
+  const sides: Place[] = place === 'near' ? ['rightOf', 'below', 'leftOf', 'above'] : [place];
+  const sideWords: Record<string, string> = { rightOf: 'right of', leftOf: 'left of', above: 'above', below: 'below' };
+  const at = (side: Place, d: number, slide: number): Box => {
     switch (side) {
       case 'rightOf':
-        return { x: a.x + a.w + d, y: a.y + a.h / 2 - size.h / 2, w: size.w, h: size.h };
+        return { x: a.x + a.w + d, y: a.y + a.h / 2 - size.h / 2 + slide, w: size.w, h: size.h };
       case 'leftOf':
-        return { x: a.x - d - size.w, y: a.y + a.h / 2 - size.h / 2, w: size.w, h: size.h };
+        return { x: a.x - d - size.w, y: a.y + a.h / 2 - size.h / 2 + slide, w: size.w, h: size.h };
       case 'above':
-        return { x: a.x + a.w / 2 - size.w / 2, y: a.y - d - size.h, w: size.w, h: size.h };
+        return { x: a.x + a.w / 2 - size.w / 2 + slide, y: a.y - d - size.h, w: size.w, h: size.h };
       default:
-        return { x: a.x + a.w / 2 - size.w / 2, y: a.y + a.h + d, w: size.w, h: size.h };
+        return { x: a.x + a.w / 2 - size.w / 2 + slide, y: a.y + a.h + d, w: size.w, h: size.h };
     }
   };
-  if (place === 'near') {
-    for (let ring = 1; ring <= 12; ring++) {
-      const cells: [number, number][] = [];
-      if (ring === 1) cells.push([1, 0], [0, 1], [-1, 0], [0, -1]);
-      else for (let dy = -ring; dy <= ring; dy++) for (let dx = -ring; dx <= ring; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) cells.push([dx, dy]);
-      {
-        for (const [dx, dy] of cells) {
-          // The first ring is the four sides (right, below, left, above), as before; then the corners and outward.
-          const box = {
-            x: a.x + a.w / 2 - size.w / 2 + dx * (Math.max(a.w, size.w) / 2 + size.w / 2 + 50),
-            y: a.y + a.h / 2 - size.h / 2 + dy * (Math.max(a.h, size.h) / 2 + size.h / 2 + 50),
-            w: size.w,
-            h: size.h,
-          };
-          if (!isFree(box, taken, lines)) continue;
-          const home = anchor.frame ? things.find((t) => t.id === anchor.frame) : undefined;
-          const where = dx === 0 ? (dy < 0 ? 'above' : 'below') : dy === 0 ? (dx < 0 ? 'left of' : 'right of') : `${dy < 0 ? 'above' : 'below'} and ${dx < 0 ? 'left of' : 'right of'}`;
-          work.notes.push(`near put it ${where} ${anchor.id}; rightOf, leftOf, above or below picks a side`);
-          return { box, frame: home ? elementsOf(work, home)[0] : frameAt(work, box) };
+  const reach = (side: Place) => Math.max(0, (side === 'rightOf' || side === 'leftOf' ? a.h + size.h : a.w + size.w) / 2 - 20);
+  const home = anchor.frame ? things.find((t) => t.id === anchor.frame) : undefined;
+  const first = at(sides[0]!, BESIDE, 0);
+  // Inside the thing's own frame first; then anywhere (the frame grows to hold it).
+  for (const within of home ? [home.box, null] : [null]) {
+    for (let d = BESIDE; d <= BESIDE + 40 * 40; d += 40) {
+      // Farther out than beside is tried inside the frame only as far as the frame goes; the next pass has the rest.
+      for (let slide = 0; slide <= Math.max(...sides.map(reach)); slide += 30) {
+        for (const side of sides) {
+          if (slide > reach(side)) continue;
+          for (const sign of slide === 0 ? [1] : [1, -1]) {
+            const box = at(side, d, slide * sign);
+            if (within && !(box.x >= within.x + 12 && box.y >= within.y + 12 && box.x + box.w <= within.x + within.w - 12 && box.y + box.h <= within.y + within.h - 12)) continue;
+            if (!isFree(box, taken, lines)) continue;
+            const beside = d <= BESIDE_MAX;
+            const blocked = d > BESIDE || slide > 0 ? blockersOf(work, first, ignore) : [];
+            const why = blocked.length > 0 ? ` (${blocked.join(', ')} ${blocked.length === 1 ? 'is' : 'are'} in the way)` : '';
+            if (place === 'near') work.notes.push(`near put it ${sideWords[side]} ${anchor.id}${beside ? '' : `, ${Math.round(d)} away${why}`}; rightOf, leftOf, above or below picks a side`);
+            else if (!beside) work.notes.push(`${sideWords[side]} ${anchor.id} but ${Math.round(d)} away${why}`);
+            else if (slide > 0 || d > BESIDE) work.notes.push(`${sideWords[side]} ${anchor.id}, ${slide > 0 ? 'slid along it' : 'a little farther out'}${why}`);
+            return { box, frame: home ? elementsOf(work, home)[0] : frameAt(work, box), ...(beside ? {} : { tie: anchor }) };
+          }
         }
       }
     }
   }
-  for (let step = 0; step < 40; step++) {
-    for (const side of tries) {
-      const box = at(side, step);
-      if (isFree(box, taken, lines)) {
-        // Next to something in a frame stays in that frame (the frame grows to hold it).
-        const home = anchor.frame ? things.find((t) => t.id === anchor.frame) : undefined;
-        const sides: Record<string, string> = { rightOf: 'right of', leftOf: 'left of', above: 'above', below: 'below' };
-        if (place === 'near') work.notes.push(`near put it ${sides[side]} ${anchor.id}; rightOf, leftOf, above or below picks a side`);
-        else if (step > 0) work.notes.push(`${sides[side]} ${anchor.id}, further out to stay clear of what is there`);
-        return { box, frame: home ? elementsOf(work, home)[0] : frameAt(work, box) };
-      }
-    }
-  }
-  return { box: at(tries[0]!, 0) };
+  return { box: first, tie: anchor };
 }
 
 function settle(work: Work, els: CanvasElement[], spot: Spot): void {
@@ -670,7 +714,20 @@ function describe(work: Work, el: CanvasElement): string {
   return thing ? lineOf(thing, work.scene, things) : el.id;
 }
 
-function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box } {
+/** Not beside what it was to stand by: a plain arrow from the new thing to that one, so it still reads as belonging to it. */
+function tieTo(work: Work, el: CanvasElement, spot: Spot): void {
+  if (!spot.tie) return;
+  const target = thingsNow(work).find((t) => t.id === spot.tie!.id);
+  const mine = thingsNow(work).find((t) => t.elementIds.includes(el.id));
+  if (!target || !mine || target.kind === 'frame' || target.kind === 'arrow' || target.kind === 'line') return;
+  const notes = work.notes;
+  connect(work, { connect: mine.id, to: target.id });
+  work.notes = notes;
+  work.notes.push(`an arrow ties it to ${target.id}`);
+}
+
+function add(work: Work, given: CanvasOp, fallback?: Box): { line: string; box: Box } {
+  const op = withPlaces(given);
   const kind = op.add;
   if (typeof kind !== 'string' || !ADD_KINDS.includes(kind)) throw new RefError(`"add" is one of ${ADD_KINDS.join(', ')}`);
   const color = colors(op.color);
@@ -728,6 +785,7 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
     const column = lines.length > words.split('\n').length;
     const el = textElement(work, words, spot.box, { textAlign: 'left', verticalAlign: 'top', ...(column ? { autoResize: false } : {}), ...(color ? { strokeColor: color.stroke } : {}) });
     settle(work, [el], spot);
+    tieTo(work, el, spot);
     return { line: `added ${describe(work, el)}`, box: spot.box };
   }
   // Long words get a wider thing, so a long note is a block and not a strip.
@@ -751,7 +809,10 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
   const made = [el];
   if (words) made.push(label(work, el, words, centerOf(spot.box)));
   settle(work, made, spot);
-  return { line: `added ${describe(work, el)}`, box: spot.box };
+  tieTo(work, el, spot);
+  // The kind word the agent used: a note is a yellow box, and it asked for a note.
+  const line = describe(work, el);
+  return { line: `added ${kind === 'note' ? line.replace(/^box /, 'note ') : line}`, box: spot.box };
 }
 
 function sizeOf(op: CanvasOp, natural: { w: number; h: number }): { w: number; h: number } {
@@ -849,7 +910,8 @@ function set(work: Work, op: CanvasOp): string {
   return `set ${thing.id}: ${said.join(', ')}`;
 }
 
-function move(work: Work, op: CanvasOp): string {
+function move(work: Work, given: CanvasOp): string {
+  const op = withPlaces(given);
   const things = thingsNow(work);
   const thing = resolveThing(op.move, things, work.scene, { notes: work.notes });
   if (thing.kind === 'arrow' && (thing.from?.attached || thing.to?.attached)) throw new RefError(`${thing.id} is an arrow attached to things; move those and it follows`);
@@ -917,7 +979,8 @@ function replace(work: Work, op: CanvasOp): string[] {
   let y = region.y;
   let row = 0;
   const frameEl = frameThing ? elementsOf(work, frameThing)[0] : frameAt(work, region);
-  for (const item of items as CanvasOp[]) {
+  for (const raw of items as CanvasOp[]) {
+    const item = withPlaces(raw);
     if ('connect' in item) {
       lines.push(connect(work, item));
       continue;
@@ -998,6 +1061,7 @@ export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): A
   const work: Work = { scene: copy, ctx, touched: new Set(), added: new Set(), direct: new Set(), original: new Set(scene.elements.map((e) => e.id)), rand: ctx.random ?? Math.random, notes: [], things: null };
   const done: string[] = [];
   const errors: string[] = [];
+  const listed = new Set<string>();
   if (!Array.isArray(ops) || ops.length === 0) {
     return { ok: false, scene, done, errors: ['"do" is a list of changes, for example [{"add": "note", "text": "…", "near": "<thing>"}]'], touched: work.touched, added: work.added, direct: work.direct };
   }
@@ -1012,8 +1076,19 @@ export function applyOps(scene: CanvasScene, ops: unknown, ctx: ApplyContext): A
     } catch (error) {
       if (!(error instanceof RefError)) throw error;
       errors.push(`change ${i + 1}: ${error.message}`);
+      if (errors.length <= 10) for (const thing of error.things) for (const id of thing.elementIds) listed.add(id);
     }
   });
-  if (errors.length > 0) return { ok: false, scene, done: [], errors, touched: new Set(), added: new Set(), direct: new Set() };
+  if (errors.length > 0) return { ok: false, scene, done: [], errors, touched: new Set(), added: new Set(), direct: new Set(), listed };
+  // A frame added and then filled in the same call: its line says what it holds at the end, not the nothing it held when it was made.
+  if (done.some((line) => line.startsWith('added frame '))) {
+    const end = thingsOf(copy);
+    for (const [i, line] of done.entries()) {
+      const id = /^added frame (\S+) /.exec(line)?.[1];
+      const frame = id ? end.find((t) => t.id === id && t.kind === 'frame') : undefined;
+      // Its line as it is at the end (what it holds, the size it grew to); what the board decided stays after it.
+      if (frame) done[i] = `added ${lineOf(frame, copy, end)}${/( \[[^\]]*\])$/.exec(line)?.[1] ?? ''}`;
+    }
+  }
   return { ok: true, scene: copy, done, errors, touched: work.touched, added: work.added, direct: new Set([...work.direct].filter((id) => work.original.has(id))) };
 }

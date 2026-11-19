@@ -433,3 +433,61 @@ describe("what the recheck found (round 4)", () => {
     expect(again.ok).toBe(true);
   });
 });
+
+describe("what six fresh agents tripped on (round 5)", () => {
+  test("5: a selection reply lists what its things are joined to, marked as not selected, and that counts as shown: the first change lands", async () => {
+    const t = setup();
+    const made = await t.canvas.apply(THREAD, agent("setup"), 0, [
+      { add: "box", text: "Orders API", at: [0, 0] },
+      { add: "diamond", text: "Fraud check", at: [500, 0] },
+      { add: "ellipse", text: "payments queue", at: [0, 300] },
+      { add: "box", text: "Unrelated", at: [1200, 600] },
+      { connect: "Orders API", to: "Fraud check", label: "sync" },
+      { connect: "Orders API", to: "payments queue" },
+    ]);
+    expect(made.ok).toBe(true);
+    const scene = readCanvasScene(t.dir, THREAD);
+    const fraud = scene.elements.find((e) => e.type === "diamond")!;
+    const sketch = t.canvas.replySketch(THREAD, { kind: "selection", elements: [fraud.id], pictures: {} })!;
+    const [picked, joined] = sketch.reading.split("Connected, not selected:\n");
+    expect(picked).toContain('"Fraud check"');
+    expect(joined).toContain('"sync"');
+    expect(joined).toContain('"Orders API"');
+    // One step out, no farther: the queue hangs off Orders API, not off the selection.
+    expect(sketch.reading).not.toContain("payments queue");
+    expect(sketch.reading).not.toContain("Unrelated");
+    t.canvas.replyShown(THREAD, sketch, "a");
+    // The agent re-points the arrow it was shown as connected, with no read first.
+    const arrow = thingsOf(scene).find((x) => x.kind === "arrow" && x.words === "sync")!;
+    const first = await t.canvas.apply(THREAD, agent("a"), sketch.rev, [{ remove: arrow.id }, { set: "Orders API", color: "blue" }]);
+    expect(first.text).not.toContain("not as you were last shown");
+    expect(first.ok).toBe(true);
+    // What it was not shown is still protected.
+    expect((await t.canvas.apply(THREAD, agent("a"), first.rev, [{ set: "Unrelated", color: "red" }])).ok).toBe(false);
+  });
+
+  test("10: a name the person has since rewritten is refused with the thing as it is now, and that shows it: the next call lands", async () => {
+    const t = setup();
+    await board(t, ["J3 slips to the 14th.", "Beta"]);
+    t.canvas.read(THREAD, agent("a"));
+    // The agent's first read told it everything; then the person adds a sentence, and the agent was told of that too by a later answer.
+    t.person("J3 slips to the 14th.", "J3 slips to the 14th. QA needs two more days.");
+    const told = t.canvas.read(THREAD, agent("a"));
+    expect(told).toContain('renamed "J3 slips to the 14th." → "J3 slips to the 14th. QA needs two more days."');
+    // Then the person rewrites it again, and the agent, not having looked, names it by the words it last saw.
+    t.person("J3 slips to the 14th. QA needs two more days.", "J3 slips a week. QA needs two more days.");
+    const base = t.revOf(told);
+    const refused = await t.canvas.apply(THREAD, agent("a"), base, [{ set: "J3 slips to the 14th. QA needs two more days.", text: "J3 slips to next Friday." }]);
+    expect(refused.ok).toBe(false);
+    expect(refused.text).toContain("J3 slips a week. QA needs two more days.");
+    const id = /box (\S+) "J3 slips a week/.exec(refused.text)![1]!;
+    // Two calls, not three: the refusal showed the note as it is.
+    const next = await t.canvas.apply(THREAD, agent("a"), refused.rev, [{ set: id, text: "J3 slips to next Friday. QA needs two more days." }]);
+    expect(next.text).not.toContain("Nothing changed");
+    expect(next.ok).toBe(true);
+    // Only what a refusal lists is shown by it: a name that is close to nothing shows nothing.
+    const cold = await t.canvas.apply(THREAD, agent("cold"), next.rev, [{ set: "Zzz", color: "red" }]);
+    expect(cold.ok).toBe(false);
+    expect((await t.canvas.apply(THREAD, agent("cold"), next.rev, [{ set: "Beta", color: "red" }])).ok).toBe(false);
+  });
+});

@@ -125,9 +125,9 @@ export function inboxSketchBlock(message: { thread_id?: string; sketch?: InboxRe
     sketch.kind === "selection"
       ? `(Sent from this thread's canvas, rev ${sketch.rev}. They selected ${count === 1 ? "one thing" : `${count} things`} on it and ask you to work on ${count === 1 ? "it" : "them"}; the attached picture shows only ${count === 1 ? "it" : "them"}.)`
       : `(Sent from this thread's canvas, rev ${sketch.rev}: what they drew, as text. The attached pictures show it.)`;
-  const call = message.thread_id
-    ? `(To change it there: canvas {"thread_id": "${message.thread_id}", "base": ${sketch.rev}, "do": [...]}. Your change lands on their canvas in place.)`
-    : "";
+  // A selection is a request to work on it: the call is offered. A drawing is something to look at: the call is only how, if asked.
+  const how = `canvas {"thread_id": "${message.thread_id}", "base": ${sketch.rev}, "do": [...]}`;
+  const call = !message.thread_id ? "" : sketch.kind === "selection" ? `(To change it there: ${how}. Your change lands on their canvas in place.)` : `(Change it only if asked: ${how})`;
   return [head, sketch.reading.trimEnd(), call].filter(Boolean).join("\n");
 }
 

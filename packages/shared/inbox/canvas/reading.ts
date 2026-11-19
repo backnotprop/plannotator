@@ -368,6 +368,123 @@ function manyStrokesWords(strokes: CanvasElement[], box: Box): string {
   return `${made.join(', ')}, typically ${typical}; ${where}; the largest: ${largest.join('; ')}`;
 }
 
+/** A stroke's points on the canvas. */
+const pathOf = (el: CanvasElement): [number, number][] => (el.points ?? []).map((p) => [el.x + (Number(p[0]) || 0), el.y + (Number(p[1]) || 0)]);
+
+/** How many times a stroke turns back up or down: a zigzag has three or more, a check mark one. Small wobbles (under a fifth of its height) do not count. */
+function turnsOf(path: [number, number][]): { turns: number; first: number } {
+  if (path.length < 3) return { turns: 0, first: 0 };
+  const ys = path.map((p) => p[1]);
+  const slack = (Math.max(...ys) - Math.min(...ys)) * 0.2;
+  let turns = 0;
+  let first = 0;
+  let dir = 0;
+  let edge = ys[0]!;
+  let edgeAt = 0;
+  for (let i = 1; i < ys.length; i++) {
+    const y = ys[i]!;
+    if (dir >= 0 && y > edge) (edge = y), (edgeAt = i);
+    else if (dir <= 0 && y < edge) (edge = y), (edgeAt = i);
+    if (dir === 0 && Math.abs(y - ys[0]!) > slack) {
+      dir = y > ys[0]! ? 1 : -1;
+      edge = y;
+      edgeAt = i;
+    } else if (dir !== 0 && (edge - y) * dir > slack) {
+      turns++;
+      if (turns === 1) first = edgeAt / (ys.length - 1);
+      dir = -dir;
+      edge = y;
+      edgeAt = i;
+    }
+  }
+  return { turns, first };
+}
+
+const COMPOSITE_MAX = 40;
+
+/**
+ * What a small sketch looks like as a whole, when its strokes make one of a few common drawings: a face (a closed loop
+ * with two marks side by side in it, and what its mouth does), something on its head (a zigzag reads as a crown), an
+ * arrow, a check mark, a cross, an underline, a circle around another thing. A guess, said as one: rules over the
+ * strokes' shapes and places, the same answer for the same strokes, nothing for a sketch that fits none.
+ */
+function compositeOf(strokes: CanvasElement[], t: Thing, things: Thing[]): string {
+  if (strokes.length === 0 || strokes.length > COMPOSITE_MAX) return '';
+  const parts = strokes.map((el) => ({ el, box: boxOf(el), shape: strokeShape(el, t.box), path: pathOf(el) }));
+  const area = (b: Box) => Math.max(1, b.w) * Math.max(1, b.h);
+  const mid = (b: Box): [number, number] => [b.x + b.w / 2, b.y + b.h / 2];
+  const others = things.filter((o) => o !== t && o.kind !== 'frame' && o.kind !== 'arrow' && o.kind !== 'line' && o.kind !== 'sketch');
+  // A face: the largest closed loop that holds two small marks side by side in its upper part.
+  for (const head of parts.filter((p) => p.shape.kind === 'closed loop').sort((a, b) => area(b.box) - area(a.box))) {
+    const inside = parts.filter((p) => p !== head && boxContains(head.box, { x: mid(p.box)[0], y: mid(p.box)[1], w: 0, h: 0 }));
+    const marks = inside.filter((p) => area(p.box) < area(head.box) * 0.06 && mid(p.box)[1] < head.box.y + head.box.h * 0.65);
+    let eyes: [typeof head, typeof head] | undefined;
+    for (const a of marks) for (const b of marks) if (!eyes && a !== b && mid(a.box)[0] < mid(head.box)[0] && mid(b.box)[0] > mid(head.box)[0] && Math.abs(mid(a.box)[1] - mid(b.box)[1]) < head.box.h * 0.2) eyes = [a, b];
+    if (!eyes) continue;
+    const eyeY = (mid(eyes[0].box)[1] + mid(eyes[1].box)[1]) / 2;
+    const mouth = inside.find((p) => !eyes!.includes(p) && mid(p.box)[1] > eyeY + head.box.h * 0.1 && p.box.w > head.box.w * 0.2);
+    const mood = !mouth ? 'a face' : /like a smile/.test(mouth.shape.words) ? 'a smiling face' : /like an arch/.test(mouth.shape.words) ? 'a frowning face' : mouth.shape.kind === 'closed loop' ? 'a face with an open mouth' : 'a face with a straight mouth';
+    // What sits on the head: strokes above its middle that reach its top, or stand on it.
+    const top = parts.filter((p) => p !== head && !inside.includes(p) && p.box.y + p.box.h <= head.box.y + head.box.h * 0.3 && p.box.x < head.box.x + head.box.w && p.box.x + p.box.w > head.box.x);
+    const crown = top.find((p) => turnsOf(p.path).turns >= 3 && p.box.w > head.box.w * 0.3);
+    const hat = top.length === 0 ? '' : crown ? ' with a crown-like zigzag on top' : ` with ${top.length === 1 ? 'something' : `${top.length} strokes`} on top of it`;
+    return `${mood}${hat}`;
+  }
+  if (parts.length === 1) {
+    const only = parts[0]!;
+    // A loop drawn around other things.
+    if (only.shape.kind === 'closed loop') {
+      const held = others.filter((o) => boxContains({ x: only.box.x - 6, y: only.box.y - 6, w: only.box.w + 12, h: only.box.h + 12 }, o.box));
+      if (held.length > 0) return `a circle around ${held.slice(0, 3).map((o) => o.id).join(', ')}${held.length > 3 ? ` and ${held.length - 3} more` : ''}`;
+    }
+    // A line right under something.
+    if (only.shape.kind === 'flat line') {
+      const over = others.find((o) => only.box.y >= o.box.y + o.box.h - 6 && only.box.y - (o.box.y + o.box.h) < 30 && Math.min(only.box.x + only.box.w, o.box.x + o.box.w) - Math.max(only.box.x, o.box.x) > Math.min(only.box.w, o.box.w) * 0.5);
+      if (over) return `an underline under ${over.id}`;
+    }
+    // A check mark: down a little, then up a long way to the right.
+    const { turns, first } = turnsOf(only.path);
+    const a = only.path[0];
+    const z = only.path[only.path.length - 1];
+    if (turns === 1 && a && z && first > 0.1 && first < 0.55 && z[0] > a[0] && z[1] < a[1] - only.box.h * 0.2) return 'a check mark';
+  }
+  const straight = parts.filter((p) => / line$/.test(p.shape.kind) && p.path.length >= 2);
+  // A cross: two straight strokes through each other's middle.
+  if (parts.length === 2 && straight.length === 2) {
+    const [p, q] = straight as [typeof parts[number], typeof parts[number]];
+    const [x1, y1] = p.path[0]!;
+    const [x2, y2] = p.path[p.path.length - 1]!;
+    const [x3, y3] = q.path[0]!;
+    const [x4, y4] = q.path[q.path.length - 1]!;
+    const d = (x2 - x1) * (y4 - y3) - (y2 - y1) * (x4 - x3);
+    if (Math.abs(d) > 1e-6) {
+      const u = ((x3 - x1) * (y4 - y3) - (y3 - y1) * (x4 - x3)) / d;
+      const v = ((x3 - x1) * (y2 - y1) - (y3 - y1) * (x2 - x1)) / d;
+      if (u > 0.25 && u < 0.75 && v > 0.25 && v < 0.75) return p.shape.kind === 'slanted line' || q.shape.kind === 'slanted line' ? 'a cross (an X)' : 'a plus sign';
+    }
+  }
+  // An arrow: one long straight stroke and one or two short ones at one of its ends.
+  if (parts.length >= 2 && parts.length <= 3) {
+    const shaft = parts.slice().sort((a, b) => Math.hypot(b.box.w, b.box.h) - Math.hypot(a.box.w, a.box.h))[0]!;
+    const rest = parts.filter((p) => p !== shaft);
+    const length = Math.hypot(shaft.box.w, shaft.box.h);
+    const a = shaft.path[0];
+    const z = shaft.path[shaft.path.length - 1];
+    if (a && z && / line$/.test(shaft.shape.kind) && rest.every((p) => Math.hypot(p.box.w, p.box.h) < length * 0.5)) {
+      const near = (end: [number, number]) => rest.every((p) => boxGap({ x: end[0], y: end[1], w: 0, h: 0 }, p.box) < length * 0.15);
+      const tip = near(z) ? z : near(a) ? a : null;
+      if (tip) {
+        const tail = tip === z ? a : z;
+        const dx = tip[0] - tail[0];
+        const dy = tip[1] - tail[1];
+        const way = Math.abs(dx) > Math.abs(dy) * 2 ? (dx > 0 ? 'right' : 'left') : Math.abs(dy) > Math.abs(dx) * 2 ? (dy > 0 ? 'down' : 'up') : `${dy > 0 ? 'down' : 'up'} and ${dx > 0 ? 'right' : 'left'}`;
+        return `an arrow pointing ${way}`;
+      }
+    }
+  }
+  return '';
+}
+
 function sketchWords(t: Thing, scene: CanvasScene, things: Thing[]): string {
   const byId = new Map(scene.elements.map((e) => [e.id, e]));
   const strokes = t.elementIds.map((id) => byId.get(id)).filter((e): e is CanvasElement => !!e);
@@ -404,7 +521,10 @@ function sketchWords(t: Thing, scene: CanvasScene, things: Thing[]): string {
     }
   }
   if (best) on = ` next to ${best.id}`;
-  return `${t.strokes} freehand stroke${t.strokes === 1 ? '' : 's'}${on}: ${parts.join('; ')}`;
+  // What it looks like as a whole comes first, as the guess it is; the strokes follow.
+  const whole = compositeOf(strokes, t, things);
+  const guess = whole ? `looks like ${whole} (a guess from ${t.strokes} stroke${t.strokes === 1 ? '' : 's'}; see the picture). ` : '';
+  return `${guess}${t.strokes} freehand stroke${t.strokes === 1 ? '' : 's'}${on}: ${parts.join('; ')}`;
 }
 
 /** One line for a thing, without its indent. `full`: all of its words, however long (a read of named things). */
