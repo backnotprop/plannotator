@@ -121,6 +121,8 @@ describe("who changed what", () => {
     // The editor bumps a version without changing anything a reader sees.
     const stamped: CanvasScene = { ...moved, elements: moved.elements.map((e) => ({ ...e, version: (e.version ?? 1) + 1 })) };
     expect(commitCanvas(dir, thread, stamped, { kind: "person" }, new Date(3)).rev).toBe(2);
+    // Nor is the editor naming the default background on a scene that had none.
+    expect(commitCanvas(dir, thread, { ...stamped, appState: { viewBackgroundColor: "#ffffff" } }, { kind: "person" }, new Date(4)).rev).toBe(2);
     expect(readCanvasMeta(dir, thread).rev).toBe(2);
     expect(readCanvasScene(dir, thread).elements[0]!.version).toBe(stamped.elements[0]!.version);
     const since = sinceLines(readCanvasLog(dir, thread), 1, { kind: "agent", name: "Agent", key: "a" });

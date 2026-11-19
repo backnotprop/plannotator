@@ -117,7 +117,9 @@ export function commitCanvas(inboxDirPath: string, threadId: string, next: Canva
   const prev = readCanvasScene(inboxDirPath, threadId);
   const meta = readCanvasMeta(inboxDirPath, threadId);
   const changes = diffScenes(prev, next);
-  const background = prev.appState.viewBackgroundColor !== next.appState.viewBackgroundColor;
+  // A scene an agent started has no background yet; the editor's first save names the default one. Not a change.
+  const paper = (scene: CanvasScene) => scene.appState.viewBackgroundColor ?? '#ffffff';
+  const background = paper(prev) !== paper(next);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const text = `${JSON.stringify(next)}\n`;
   if (changes.length === 0 && !background) {
