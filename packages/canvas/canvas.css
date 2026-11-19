@@ -600,90 +600,121 @@
 
 /* ── The figure in a plan ──────────────────────────────────────────────── */
 
+/* Part of the document: no box around it, the page's own ground behind it,
+   the caption set like the plan's small text. */
 .pcv-figure {
   display: block;
-  margin: 1.25rem 0;
+  margin: 1.5rem 0 1.75rem;
   padding: 0;
+  max-width: 100%;
 }
 .pcv-figure-frame {
   position: relative;
-  border: 1px solid var(--pcv-line);
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
-  background: var(--pcv-stage);
-  transition: border-color 160ms var(--pcv-ease), box-shadow 160ms var(--pcv-ease), transform 160ms var(--pcv-ease);
+  transition: background-color 160ms var(--pcv-ease);
+}
+.pcv-figure .pcv-root {
+  background-color: transparent;
 }
 /* The button that opens the canvas covers the figure and has no look of its
-   own; the frame around it shows hover, press and focus. */
+   own; the figure shows hover and focus. */
 .pcv-figure-hit {
   all: unset;
   position: absolute;
   inset: 0;
   cursor: zoom-in;
+  border-radius: inherit;
   -webkit-tap-highlight-color: transparent;
 }
 @media (hover: hover) {
   .pcv-figure-frame:has(.pcv-figure-hit:hover) {
-    border-color: color-mix(in oklch, var(--pcv-accent) 55%, var(--pcv-line));
-    box-shadow: var(--pcv-shadow);
+    background-color: color-mix(in oklch, var(--pcv-ink) 4%, transparent);
   }
 }
-.pcv-figure-frame:has(.pcv-figure-hit:active) {
-  transform: scale(0.995);
-}
-.pcv-figure-frame:has(.pcv-figure-hit:focus-visible) {
-  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 4px var(--pcv-accent);
+.pcv-figure-hit:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--pcv-accent);
 }
 .pcv-figure-view {
   position: relative;
   width: 100%;
 }
-.pcv-figure-view > .pcv-root,
-.pcv-figure-view > img {
+.pcv-figure-view > .pcv-root {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-}
-.pcv-figure-view > img {
-  object-fit: contain;
-}
-.pcv-figure-view > .pcv-root {
   pointer-events: none;
 }
+.pcv-figure-still {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 10px;
+}
 .pcv-figure-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 96px;
-  padding: 16px;
-  box-sizing: border-box;
+  padding: 20px 0;
   color: var(--pcv-muted);
   font-size: 13px;
-  text-align: center;
 }
 .pcv-figure-caption {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 12px;
-  padding: 8px 2px 0;
+  gap: 2px 10px;
+  margin-top: 8px;
   color: var(--pcv-muted);
-  font-size: 12.5px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .pcv-figure-title {
-  min-width: 0;
+  min-width: 1ch;
+  max-width: 100%;
   color: var(--pcv-ink);
   font-weight: 500;
   overflow-wrap: anywhere;
+  outline: none;
+  border-radius: 3px;
 }
-.pcv-figure-note {
-  min-width: 0;
-  flex: 1;
+.pcv-figure-title[contenteditable] {
+  cursor: text;
 }
-.pcv-figure-hint {
-  flex: none;
-  margin-left: auto;
+.pcv-figure-title[contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--pcv-muted);
+  font-weight: 400;
+}
+.pcv-figure-title[contenteditable]:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px color-mix(in oklch, var(--pcv-accent) 60%, transparent);
+}
+.pcv-figure-action {
+  all: unset;
+  color: var(--pcv-accent);
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 3px;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .pcv-figure-action:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+.pcv-figure-action:focus-visible {
+  box-shadow: 0 0 0 2px var(--pcv-stage), 0 0 0 3.5px var(--pcv-accent);
+}
+@media (pointer: coarse) {
+  /* A finger-sized target without moving the words. */
+  .pcv-figure-action {
+    position: relative;
+  }
+  .pcv-figure-action::after {
+    content: '';
+    position: absolute;
+    inset: -12px -10px;
+  }
 }
 
 /* ── The opened canvas ─────────────────────────────────────────────────── */
@@ -697,6 +728,21 @@
   position: absolute;
   inset: 0;
   will-change: clip-path;
+}
+/* The capture the person clicked, drawn over the live canvas with the same
+   camera and faded out as the opening grows: when the canvas has moved on,
+   the old picture dissolves into the new one instead of being swapped. */
+.pcv-stage-ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+/* The edge of the opening: a soft shadow that falls on the plan around it. */
+.pcv-stage-rim {
+  position: absolute;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--pcv-ink) 10%, transparent), 0 18px 60px rgb(0 0 0 / 0.28);
 }
 .pcv-stage[data-fade] {
   transition: opacity 140ms linear;
@@ -752,18 +798,11 @@
   .pcv-figure-frame {
     transition: none;
   }
-  .pcv-btn:active:not(:disabled),
-  .pcv-figure-frame:has(.pcv-figure-hit:active) {
+  .pcv-btn:active:not(:disabled) {
     transform: none;
   }
 }
 
-.pcv-figure-still {
-  display: block;
-  width: 100%;
-  max-height: 420px;
-  object-fit: contain;
-}
 
 /* ── Reference cards: a web page, an artifact, a place in a plan ───────── */
 

@@ -18,6 +18,7 @@ import {
   type CanvasObject,
   type ReferenceTarget,
   type Snapshot,
+  type SnapshotInput,
   type SnapshotSource,
 } from './types';
 
@@ -185,7 +186,8 @@ function checkIdList(value: unknown, what: string): Checked<string[]> {
   return { ok: true, value: [...seen] };
 }
 
-export function checkSnapshot(value: unknown): Checked<Snapshot> {
+/** A snapshot as someone asks for it: an id, a title, a source. Anything else on it is ignored. */
+export function checkSnapshotInput(value: unknown): Checked<SnapshotInput> {
   if (!isRecord(value)) return fail('a snapshot must be a JSON object');
   if (!isValidId(value.id)) return fail('a snapshot needs a valid id');
   if (!isText(value.title, LIMITS.title)) return fail(`${value.id}: title is missing or too long`);
@@ -203,13 +205,32 @@ export function checkSnapshot(value: unknown): Checked<Snapshot> {
   } else if (source.kind === 'region') {
     const r = isRecord(source.rect) ? readRect(source.rect) : null;
     if (!r) return fail(`${value.id}: source.rect is not a rectangle`);
-    const ids = checkIdList(source.objects ?? [], `${value.id}: source.objects`);
-    if (!ids.ok) return ids;
-    checked = { kind: 'region', rect: r, objects: ids.value };
+    checked = { kind: 'region', rect: r };
   } else {
     return fail(`${value.id}: unknown source kind ${JSON.stringify(source.kind)}`);
   }
   return { ok: true, value: { id: value.id, title: value.title, source: checked } };
+}
+
+/** A stored snapshot: the input plus its capture, every captured object checked like any other. */
+export function checkSnapshot(value: unknown): Checked<Snapshot> {
+  const input = checkSnapshotInput(value);
+  if (!input.ok) return input;
+  const capture = (value as Record<string, unknown>).capture;
+  if (!isRecord(capture)) return fail(`${input.value.id}: capture is missing`);
+  const rect = isRecord(capture.rect) ? readRect(capture.rect) : null;
+  if (!rect) return fail(`${input.value.id}: capture.rect is not a rectangle`);
+  if (!Array.isArray(capture.objects) || capture.objects.length > LIMITS.objects) return fail(`${input.value.id}: capture.objects must be a list`);
+  const objects: CanvasObject[] = [];
+  const seen = new Set<string>();
+  for (const raw of capture.objects) {
+    const object = checkObject(raw);
+    if (!object.ok) return fail(`${input.value.id}: capture: ${object.error}`);
+    if (object.value.type === 'group' || seen.has(object.value.id)) return fail(`${input.value.id}: capture holds a group or the same object twice`);
+    seen.add(object.value.id);
+    objects.push(object.value);
+  }
+  return { ok: true, value: { ...input.value, capture: { rect, objects } } };
 }
 
 /**

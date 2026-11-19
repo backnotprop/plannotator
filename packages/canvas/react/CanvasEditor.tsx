@@ -126,15 +126,16 @@ export function CanvasEditor({ store, camera: givenCamera, onAddToPlan, resolveI
   const group = () => store.dispatch({ type: 'group', id: createId('group'), ids: selected });
   const ungroup = () => store.dispatch({ type: 'ungroup', ids: [...new Set(selected.map((id) => doc.objects[id]?.group).filter((id): id is string => !!id))] });
 
-  /** Add the snapshot to the canvas, then hand it to the host. One undo step takes it back out. */
+  /** Take the snapshot (the planner captures it), then hand it to the host. One undo step takes it back out. */
   const takeSnapshot = (drop: PlanDropTarget | null) => {
     const current = store.getDocument();
-    const snapshot = ui.region ? snapshotFromRegion(current, indexFor(store), ui.region) : snapshotFromSelection(current, ui.selection);
-    if (!snapshot) return;
-    const result = store.dispatch({ type: 'add-snapshot', snapshot });
-    if (!result.ok) return;
+    const input = ui.region ? snapshotFromRegion(current, indexFor(store), ui.region) : snapshotFromSelection(current, ui.selection);
+    if (!input) return;
+    const result = store.dispatch({ type: 'add-snapshot', snapshot: input });
+    const taken = store.getDocument().snapshots[input.id];
+    if (!result.ok || !taken) return;
     state.set({ region: null });
-    onAddToPlan?.(snapshot, drop);
+    onAddToPlan?.(taken, drop);
   };
 
   const addToPlan = onAddToPlan

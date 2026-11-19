@@ -1,16 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { CanvasStore } from '../events/store';
+import { decodeCommand, decodeEnvelope } from '../events/wire';
 import { createDocument } from '../model/document';
 import type { CanvasObject } from '../model/types';
 import { placeSelectionBar } from '../react/chrome';
 import { indexFor } from '../view/document-index';
 import { findSnapshotBlocks, insertSnapshotBlock, parseSnapshotBlock, serializeSnapshotBlock, serializeSnapshotBody } from './block';
-import { snapshotFromRegion, snapshotFromSelection } from './create';
+import { defaultSnapshotTitle, snapshotFromRegion, snapshotFromSelection } from './create';
 import { createSnapshotDirectiveRenderer } from './directive';
 import { snapshotToDataUrl, snapshotToSvg } from './picture';
 import { nearestGap } from './plan-drop';
-import { resolveSnapshot, sameResolution } from './resolve';
-import { frameAt, springAtRest, stepSpring } from './transition';
+import { behindSnapshots, resolveSnapshot } from './resolve';
+import { frameAt, ghostOpacity, recedeAt, springAtRest, stepSpring } from './transition';
 
 function board(): CanvasStore {
   const store = new CanvasStore(createDocument('board', 'Board'));
@@ -21,101 +22,230 @@ function board(): CanvasStore {
     { id: 'c', type: 'note', x: 40, y: 200, w: 100, h: 40, text: 'Why?' },
     { id: 'ab', type: 'arrow', from: { object: 'a' }, to: { object: 'b' } },
     { id: 'elsewhere', type: 'box', x: 2000, y: 2000, w: 100, h: 40, text: 'Elsewhere' },
+    { id: 'into', type: 'arrow', from: { object: 'elsewhere' }, to: { object: 'c' } },
   ];
   store.dispatch({ type: 'add', objects });
   store.dispatch({ type: 'add-snapshot', snapshot: { id: 'by-frame', title: 'Frame', source: { kind: 'frame', frame: 'frame' } } });
   store.dispatch({ type: 'add-snapshot', snapshot: { id: 'by-objects', title: 'Pair', source: { kind: 'objects', objects: ['a', 'b', 'ab'] } } });
-  store.dispatch({ type: 'add-snapshot', snapshot: { id: 'by-region', title: 'Corner', source: { kind: 'region', rect: { x: 0, y: 0, w: 200, h: 300 }, objects: ['a', 'c'] } } });
+  store.dispatch({ type: 'add-snapshot', snapshot: { id: 'by-region', title: 'Corner', source: { kind: 'region', rect: { x: 0, y: 0, w: 250, h: 300 } } } });
   return store;
 }
 
-const resolve = (store: CanvasStore, id: string) => resolveSnapshot(store.getDocument(), indexFor(store), id);
+const standing = (store: CanvasStore, id: string) => {
+  const resolved = resolveSnapshot(store.getDocument(), indexFor(store), id);
+  return resolved.found ? resolved.standing : resolved.problem;
+};
+const captured = (store: CanvasStore, id: string) => store.getDocument().snapshots[id].capture;
 
-describe('a snapshot is a live reference', () => {
-  test('a snapshot of chosen objects follows them when they move and draws only them', () => {
+describe('a snapshot is a capture taken at one moment', () => {
+  test('editing the canvas afterwards does not change what the snapshot holds', () => {
     const store = board();
-    const before = resolve(store, 'by-objects');
+    const before = captured(store, 'by-objects');
     store.dispatch({ type: 'move', ids: ['b'], dx: 300, dy: 0 });
-    const after = resolve(store, 'by-objects');
-    expect(before.status).toBe('live');
-    expect(after.rect!.w).toBe(before.rect!.w + 300);
-    expect([...after.only!].sort()).toEqual(['a', 'ab', 'b']);
-    expect(sameResolution(before, after)).toBe(false);
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Renamed' } });
+    store.dispatch({ type: 'delete', ids: ['ab'] });
+    expect(captured(store, 'by-objects')).toBe(before);
+    expect(before.objects.map((object) => object.id)).toEqual(['a', 'b', 'ab']);
+    expect(before.objects[0]).toMatchObject({ text: 'Orders <API>' });
+    expect(before.objects[1]).toMatchObject({ x: 400 });
   });
 
-  test('a frame snapshot follows its frame and shows whatever is in it', () => {
+  test('taking it costs no copies: the capture holds the very objects the canvas holds', () => {
     const store = board();
-    store.dispatch({ type: 'move', ids: ['frame'], dx: 1000, dy: 0 });
-    const resolved = resolve(store, 'by-frame');
-    expect(resolved.rect!.x).toBeGreaterThan(900);
-    expect(resolved.only).toBeNull();
+    const doc = store.getDocument();
+    expect(captured(store, 'by-objects').objects[0]).toBe(doc.objects.a);
+    expect(captured(store, 'by-frame').objects.find((object) => object.id === 'b')).toBe(doc.objects.b);
   });
 
-  test('a change elsewhere on the canvas leaves the answer the same, so the figure need not redraw', () => {
+  test('an arrow that leaves the capture has that end fixed where it was, so the capture draws alone', () => {
     const store = board();
-    const before = resolve(store, 'by-objects');
-    store.dispatch({ type: 'move', ids: ['elsewhere'], dx: 5, dy: 5 });
+    const into = captured(store, 'by-frame').objects.find((object) => object.id === 'into');
+    expect(into).toMatchObject({ type: 'arrow', to: { object: 'c' } });
+    expect(into && 'from' in into && 'x' in into.from).toBe(true);
+    // The frozen document resolves every arrow without the canvas.
+    const svg = snapshotToSvg(store.getDocument(), 'by-frame')!;
+    expect(svg.match(/<line /g)).toHaveLength(2);
+  });
+
+  test('the capture is taken by the planner; one sent from outside is ignored', () => {
+    const store = board();
+    const forged = { id: 'forged', title: '', source: { kind: 'objects', objects: ['a'] }, capture: { rect: { x: 0, y: 0, w: 5, h: 5 }, objects: [] } };
+    expect(store.dispatch({ type: 'add-snapshot', snapshot: forged as never }, { actor: { kind: 'agent', id: 'x' } }).ok).toBe(true);
+    expect(captured(store, 'forged').objects.map((object) => object.id)).toEqual(['a']);
+    expect(store.dispatch({ type: 'add-snapshot', snapshot: { id: 'empty', title: '', source: { kind: 'region', rect: { x: 9000, y: 9000, w: 50, h: 50 } } } }).ok).toBe(false);
+    expect(store.dispatch({ type: 'add-snapshot', snapshot: { id: 'ghost', title: '', source: { kind: 'frame', frame: 'a' } } }).ok).toBe(false);
+  });
+});
+
+describe('a snapshot knows when it is behind', () => {
+  test('fresh snapshots are current, and a change elsewhere leaves them so', () => {
+    const store = board();
+    store.dispatch({ type: 'move', ids: ['elsewhere'], dx: 0, dy: 500 });
     store.dispatch({ type: 'recolor', ids: ['elsewhere'], color: 'red' });
-    expect(sameResolution(before, resolve(store, 'by-objects'))).toBe(true);
+    expect(standing(store, 'by-objects')).toBe('current');
+    // The frame and the region both show an arrow coming from the moved object, so their picture did change.
+    expect(standing(store, 'by-frame')).toBe('behind');
+    expect(standing(store, 'by-region')).toBe('behind');
   });
 
-  test('it says so when some of its objects were deleted, and still draws the rest', () => {
+  test('a set of objects is behind when one of them changes or is deleted, and not when another object arrives', () => {
     const store = board();
-    store.dispatch({ type: 'delete', ids: ['b'] });
-    const resolved = resolve(store, 'by-objects');
-    expect(resolved).toMatchObject({ status: 'partial', problem: 'some-deleted', missing: 1, total: 3 });
-    // The arrow lost one end but is still here, so it is still drawn.
-    expect([...resolved.only!].sort()).toEqual(['a', 'ab']);
-  });
-
-  test('it says so when everything it showed is gone, and comes back when a delete is undone', () => {
-    const store = board();
-    store.dispatch({ type: 'delete', ids: ['a', 'b', 'ab'] });
-    expect(resolve(store, 'by-objects')).toMatchObject({ status: 'gone', problem: 'all-deleted', rect: null });
+    store.dispatch({ type: 'add', objects: [{ id: 'new', type: 'note', x: 220, y: 40, w: 50, h: 40, text: 'New' }] });
+    expect(standing(store, 'by-objects')).toBe('current');
+    store.dispatch({ type: 'recolor', ids: ['b'], color: 'green' });
+    expect(standing(store, 'by-objects')).toBe('behind');
     store.undo();
-    expect(resolve(store, 'by-objects').status).toBe('live');
+    expect(standing(store, 'by-objects')).toBe('current');
+    store.dispatch({ type: 'delete', ids: ['b'] });
+    expect(standing(store, 'by-objects')).toBe('behind');
+  });
+
+  test('a frame is behind when the frame changes or anything in its rectangle does, arrivals included', () => {
+    const store = board();
+    expect(standing(store, 'by-frame')).toBe('current');
+    store.dispatch({ type: 'add', objects: [{ id: 'new', type: 'note', x: 220, y: 40, w: 50, h: 40, text: 'New' }] });
+    expect(standing(store, 'by-frame')).toBe('behind');
+    store.undo();
+    store.dispatch({ type: 'edit', id: 'frame', patch: { title: 'Renamed' } });
+    expect(standing(store, 'by-frame')).toBe('behind');
+  });
+
+  test('a region is behind when what is in its rectangle changes, whoever it is', () => {
+    const store = board();
+    store.dispatch({ type: 'add', objects: [{ id: 'far', type: 'note', x: 5000, y: 0, w: 50, h: 40, text: 'Far' }] });
+    expect(standing(store, 'by-region')).toBe('current');
+    store.dispatch({ type: 'add', objects: [{ id: 'near', type: 'note', x: 150, y: 120, w: 50, h: 40, text: 'Near' }] });
+    expect(standing(store, 'by-region')).toBe('behind');
+    store.undo();
+    // An arrow crossing the edge is in the picture too: moving the box it points at, outside, changes it.
+    store.dispatch({ type: 'move', ids: ['b'], dx: 0, dy: 80 });
+    expect(standing(store, 'by-region')).toBe('behind');
+  });
+
+  test('changing something back makes it current again: behind means "would look different", not "was touched"', () => {
+    const store = board();
+    store.dispatch({ type: 'move', ids: ['a'], dx: 10, dy: 0 });
+    store.dispatch({ type: 'move', ids: ['a'], dx: -10, dy: 0 });
+    store.dispatch({ type: 'recolor', ids: ['a'], color: 'blue' });
+    store.dispatch({ type: 'recolor', ids: ['a'], color: null });
+    expect(standing(store, 'by-objects')).toBe('current');
+  });
+
+  test('when what it showed is gone it is detached: the capture stays, and it cannot be updated', () => {
+    const store = board();
+    const before = captured(store, 'by-objects');
+    store.dispatch({ type: 'delete', ids: ['a', 'b', 'ab'] });
+    expect(standing(store, 'by-objects')).toBe('detached');
+    expect(store.dispatch({ type: 'update-snapshot', id: 'by-objects' }).ok).toBe(false);
+    expect(captured(store, 'by-objects')).toBe(before);
     store.dispatch({ type: 'delete', ids: ['frame'] });
-    expect(resolve(store, 'by-frame')).toMatchObject({ status: 'gone', problem: 'frame-deleted' });
-  });
-
-  test('a region keeps its rectangle; it is gone only when what it held was deleted and nothing else is there', () => {
-    const store = board();
-    store.dispatch({ type: 'delete', ids: ['a'] });
-    expect(resolve(store, 'by-region')).toMatchObject({ status: 'partial', missing: 1, total: 2, rect: { x: 0, y: 0, w: 200, h: 300 } });
-    store.dispatch({ type: 'delete', ids: ['c', 'frame', 'ab'] });
-    expect(resolve(store, 'by-region').status).toBe('gone');
-    store.dispatch({ type: 'add', objects: [{ id: 'new', type: 'note', x: 20, y: 20, w: 50, h: 50, text: 'New' }] });
-    expect(resolve(store, 'by-region').status).toBe('partial');
-  });
-
-  test('a snapshot removed from the canvas, or a canvas that is not there, is reported, not thrown', () => {
-    const store = board();
+    expect(standing(store, 'by-frame')).toBe('detached');
     store.dispatch({ type: 'remove-snapshot', id: 'by-frame' });
-    expect(resolve(store, 'by-frame')).toMatchObject({ status: 'gone', problem: 'no-snapshot' });
-    expect(resolveSnapshot(null, null, 'by-frame')).toMatchObject({ status: 'gone', problem: 'no-canvas' });
+    expect(standing(store, 'by-frame')).toBe('no-snapshot');
+    expect(resolveSnapshot(null, null, 'x')).toEqual({ found: false, problem: 'no-canvas' });
+  });
+
+  test('the plan can ask which of its snapshots are behind', () => {
+    const store = board();
+    store.dispatch({ type: 'recolor', ids: ['a'], color: 'red' });
+    expect(behindSnapshots(store.getDocument(), indexFor(store), ['by-objects', 'by-objects', 'by-frame', 'by-region', 'nope']).sort()).toEqual(['by-frame', 'by-objects', 'by-region']);
+  });
+});
+
+describe('updating a snapshot', () => {
+  test('update takes the capture again, in place, and is one undo step', () => {
+    const store = board();
+    const old = captured(store, 'by-objects');
+    store.dispatch({ type: 'delete', ids: ['b'] }, { actor: { kind: 'agent', id: 'x' } });
+    store.dispatch({ type: 'edit', id: 'a', patch: { text: 'Renamed' } }, { actor: { kind: 'agent', id: 'x' } });
+    const result = store.dispatch({ type: 'update-snapshot', id: 'by-objects' });
+    expect(result.ok && result.envelope?.events.map((event) => event.type)).toEqual(['snapshot-put']);
+    expect(captured(store, 'by-objects').objects.map((object) => object.id)).toEqual(['a', 'ab']);
+    expect(captured(store, 'by-objects').objects[0]).toMatchObject({ text: 'Renamed' });
+    expect(standing(store, 'by-objects')).toBe('current');
+    expect(store.getDocument().snapshots['by-objects'].title).toBe('Pair');
+    store.undo();
+    expect(captured(store, 'by-objects')).toBe(old);
+    expect(standing(store, 'by-objects')).toBe('behind');
+    store.redo();
+    expect(standing(store, 'by-objects')).toBe('current');
+  });
+
+  test('updating a current snapshot does nothing and leaves no undo step', () => {
+    const store = board();
+    while (store.canUndo) store.undo();
+    const fresh = board();
+    const result = fresh.dispatch({ type: 'update-snapshot', id: 'by-frame' });
+    expect(result.ok && result.envelope).toBeNull();
+  });
+
+  test('an agent updates with the same command, and a peer receives the new capture', () => {
+    const store = board();
+    const mirror = new CanvasStore(createDocument('board', 'Board'));
+    for (const envelope of store.since(0) ?? []) mirror.receive(JSON.parse(JSON.stringify(envelope)));
+    store.onCommit((envelope) => {
+      const decoded = decodeEnvelope(JSON.stringify(envelope));
+      if (decoded.ok) mirror.receive(decoded.value);
+    });
+    store.dispatch({ type: 'move', ids: ['a'], dx: 0, dy: 20 });
+    const command = decodeCommand('{"type":"update-snapshot","id":"by-objects"}');
+    expect(command.ok && store.dispatch(command.value, { actor: { kind: 'agent', id: 'x' } }).ok).toBe(true);
+    expect(mirror.getDocument().snapshots['by-objects'].capture).toEqual(captured(store, 'by-objects'));
+    expect(standing(mirror, 'by-objects')).toBe('current');
+  });
+
+  test('renaming keeps the capture; a new source takes it again', () => {
+    const store = board();
+    const before = captured(store, 'by-objects');
+    store.dispatch({ type: 'edit-snapshot', id: 'by-objects', title: 'Orders to worker' });
+    expect(store.getDocument().snapshots['by-objects']).toMatchObject({ title: 'Orders to worker' });
+    expect(captured(store, 'by-objects')).toBe(before);
+    store.dispatch({ type: 'edit-snapshot', id: 'by-objects', source: { kind: 'objects', objects: ['c'] } });
+    expect(captured(store, 'by-objects').objects.map((object) => object.id)).toEqual(['c']);
+  });
+
+  test('fifty snapshots of an unchanged canvas share its objects instead of copying them', () => {
+    const store = board();
+    for (let i = 0; i < 50; i++) store.dispatch({ type: 'add-snapshot', snapshot: { id: `s${i}`, title: '', source: { kind: 'frame', frame: 'frame' } } });
+    const doc = store.getDocument();
+    const distinct = new Set(Object.values(doc.snapshots).flatMap((snapshot) => snapshot.capture.objects));
+    // Everything but an arrow with an end fixed in place is the canvas's own object, held once.
+    const shared = [...distinct].filter((object) => object.type !== 'arrow');
+    expect(shared).toHaveLength(4);
+    expect(shared.every((object) => doc.objects[object.id] === object)).toBe(true);
   });
 });
 
 describe('making a snapshot from what a person chose', () => {
   test('a selection takes along the arrows that run between the chosen objects', () => {
     const store = board();
-    const snapshot = snapshotFromSelection(store.getDocument(), ['b', 'a'])!;
-    expect(snapshot.source).toEqual({ kind: 'objects', objects: ['a', 'b', 'ab'] });
-    expect(snapshot.title).toBe('Orders <API>');
-    expect(store.dispatch({ type: 'add-snapshot', snapshot }).ok).toBe(true);
+    const input = snapshotFromSelection(store.getDocument(), ['b', 'a'])!;
+    expect(input.source).toEqual({ kind: 'objects', objects: ['a', 'b', 'ab'] });
+    expect(store.dispatch({ type: 'add-snapshot', snapshot: input }).ok).toBe(true);
   });
 
-  test('one frame alone becomes a frame snapshot; nothing chosen makes nothing', () => {
+  test('its name comes from the frame, never from whichever object is first', () => {
     const store = board();
-    expect(snapshotFromSelection(store.getDocument(), ['frame'])!.source).toEqual({ kind: 'frame', frame: 'frame' });
-    expect(snapshotFromSelection(store.getDocument(), [])).toBeNull();
-    expect(snapshotFromSelection(store.getDocument(), ['ghost'])).toBeNull();
+    const doc = store.getDocument();
+    // Several objects inside one frame: the frame's title.
+    expect(snapshotFromSelection(doc, ['a', 'b', 'c'])!.title).toBe('Architecture');
+    // One frame alone, or with its contents: the frame's title.
+    expect(snapshotFromSelection(doc, ['frame'])).toMatchObject({ title: 'Architecture', source: { kind: 'frame', frame: 'frame' } });
+    expect(snapshotFromSelection(doc, ['frame', 'a', 'b'])!.title).toBe('Architecture');
+    // One object outside any frame: its own words.
+    expect(snapshotFromSelection(doc, ['elsewhere'])!.title).toBe('Elsewhere');
+    // Several objects with no frame around them all: no name.
+    expect(snapshotFromSelection(doc, ['a', 'elsewhere'])!.title).toBe('');
+    expect(defaultSnapshotTitle(doc, ['a', 'elsewhere'])).toBe('');
+    expect(snapshotFromSelection(doc, [])).toBeNull();
+    expect(snapshotFromSelection(doc, ['ghost'])).toBeNull();
   });
 
-  test('a dragged region remembers what was inside it', () => {
+  test('a dragged region is the rectangle, rounded, named by the same rule', () => {
     const store = board();
-    const snapshot = snapshotFromRegion(store.getDocument(), indexFor(store), { x: 20.4, y: 20.2, w: 160, h: 260 });
-    expect(snapshot.source).toEqual({ kind: 'region', rect: { x: 20, y: 20, w: 160, h: 260 }, objects: ['a', 'c'] });
+    const input = snapshotFromRegion(store.getDocument(), indexFor(store), { x: 20.4, y: 20.2, w: 200, h: 260 });
+    expect(input.source).toEqual({ kind: 'region', rect: { x: 20, y: 20, w: 200, h: 260 } });
+    expect(input.title).toBe('Architecture');
   });
 });
 
@@ -176,30 +306,31 @@ describe('the still picture fallback', () => {
     const store = board();
     store.dispatch({ type: 'add', objects: [{ id: 'remote', type: 'image', x: 200, y: 200, w: 160, h: 60, src: 'https://example.test/a.png', alt: 'Remote picture' }] });
     store.dispatch({ type: 'recolor', ids: ['b'], color: { custom: '#c2410c' } });
-    const svg = snapshotToSvg(store.getDocument(), indexFor(store), 'by-frame')!;
+    store.dispatch({ type: 'update-snapshot', id: 'by-frame' });
+    const svg = snapshotToSvg(store.getDocument(), 'by-frame')!;
     expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
     expect(svg).toContain('Orders &lt;API&gt;');
     expect(svg).toContain('#c2410c');
     expect(svg).toContain('Remote picture');
     expect(svg).not.toMatch(/<script|example\.test|href="http|javascript:/i);
-    // Outside the frame, so not in the picture.
     expect(svg).not.toContain('Elsewhere');
   });
 
-  test('a snapshot of chosen objects pictures only those', () => {
+  test('it pictures the capture, not the canvas as it is now', () => {
     const store = board();
-    const svg = snapshotToSvg(store.getDocument(), indexFor(store), 'by-objects')!;
-    expect(svg).toContain('Worker');
-    expect(svg).not.toContain('Why?');
+    store.dispatch({ type: 'edit', id: 'b', patch: { text: 'Changed' } });
+    expect(snapshotToSvg(store.getDocument(), 'by-objects')).toContain('Worker');
+    store.dispatch({ type: 'update-snapshot', id: 'by-objects' });
+    expect(snapshotToSvg(store.getDocument(), 'by-objects')).toContain('Changed');
+    expect(snapshotToSvg(store.getDocument(), 'by-objects')).not.toContain('Why?');
   });
 
-  test('nothing to draw gives no picture; a data URL survives being a Markdown image address', () => {
+  test('no snapshot gives no picture; a data URL survives being a Markdown image address', () => {
     const store = board();
-    const url = snapshotToDataUrl(store.getDocument(), indexFor(store), 'by-frame')!;
+    const url = snapshotToDataUrl(store.getDocument(), 'by-frame')!;
     expect(url).not.toMatch(/[()\s]/);
     expect(parseSnapshotBlock(serializeSnapshotBody({ canvas: 'c', snapshot: 's', fallback: { src: url, alt: 'x' } }))?.fallback?.src).toBe(url);
-    store.dispatch({ type: 'delete', ids: ['frame'] });
-    expect(snapshotToSvg(store.getDocument(), indexFor(store), 'by-frame')).toBeNull();
+    expect(snapshotToSvg(store.getDocument(), 'nope')).toBeNull();
   });
 });
 
@@ -264,6 +395,18 @@ describe('the open transition', () => {
     let back = turned;
     for (let i = 0; i < 120; i++) back = stepSpring(back, 0, 1 / 60);
     expect(springAtRest(back, 0)).toBe(true);
+  });
+
+  test('the capture dissolves early and the plan stands back a little, both whole at the figure', () => {
+    expect(ghostOpacity(0)).toBe(1);
+    expect(ghostOpacity(0.2)).toBeGreaterThan(0.3);
+    expect(ghostOpacity(0.2)).toBeLessThan(1);
+    expect(ghostOpacity(0.5)).toBe(0);
+    expect(ghostOpacity(1)).toBe(0);
+    expect(recedeAt(0)).toEqual({ scale: 1, opacity: 1 });
+    expect(recedeAt(1).scale).toBeGreaterThan(0.95);
+    expect(recedeAt(1).scale).toBeLessThan(1);
+    expect(recedeAt(1).opacity).toBeGreaterThan(0.3);
   });
 
   test('a long frame does not blow it up', () => {

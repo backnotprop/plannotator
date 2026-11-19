@@ -6,3 +6,4 @@ export * from './html-item';
 export * from './ids';
 export * from './types';
 export * from './reference';
+export * from './capture';

@@ -1,52 +1,63 @@
 /**
- * The canvas, opened from a snapshot in a plan, and the motion between the
- * two. See `transition.ts` for what moves and why it is a spring.
+ * The portal: stepping from a snapshot in a plan into the canvas, and back
+ * out through the same opening. See `transition.ts` for the maths.
  *
- * The stage is mounted the moment a figure is clicked, already drawing the
- * snapshot's part of the world exactly over the figure, and takes its first
- * step before the browser paints: the first frame after the click has moved.
+ * The stage is mounted the moment a figure is clicked. It draws the live
+ * canvas clipped to the figure's box, with the camera placed so that the
+ * snapshot's rectangle sits exactly where the figure drew it, and takes its
+ * first step before the browser paints. Then one spring grows the opening
+ * to the whole window and carries the camera to the canvas's own view.
  *
- * Interruptible in both directions: pressing "Back to plan" while it is
- * still opening turns the same spring round, and a person who grabs the
- * board mid-flight takes the camera at once while the window finishes
- * opening around them.
+ * What makes it read as a doorway rather than a pop-up:
+ * - The plan is never unmounted or scrolled. It recedes a little behind the
+ *   opening (`recede`) and is exactly where it was when the person returns.
+ * - The opening has an edge: a soft shadow that falls on the plan.
+ * - A snapshot is a capture, and the canvas may have moved on since. So the
+ *   capture itself is drawn over the live canvas, on the same camera, and
+ *   dissolves as the opening grows: the person steps through the picture
+ *   they clicked into the canvas as it is now, with no swap. Going back, it
+ *   forms again, so the opening closes onto what the figure really shows.
+ * - While the snapshot is behind, the canvas offers "Update snapshot" beside
+ *   "Back to plan": update on the way out, or leave it.
  *
- * With reduced motion nothing travels: the canvas fades in, already in
- * place.
+ * Interruptible both ways: "Back to plan" mid-open turns the same spring
+ * round, and a person who grabs the board takes the camera at once while
+ * the opening finishes around them. With reduced motion nothing travels:
+ * the canvas fades in, already in place.
  */
-import { ArrowLeft } from 'lucide-react';
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { CanvasStore } from '../events/store';
 import { boundsOf } from '../model/document';
 import type { Rect } from '../model/geometry';
-import type { Snapshot } from '../model/types';
+import type { SnapshotCapture } from '../model/types';
 import { CanvasEditor, type CanvasEditorProps } from '../react/CanvasEditor';
+import { CanvasView } from '../react/CanvasView';
 import { CameraController, type Size, cameraPlacing, fitRect, viewportRect } from '../view/camera';
 import { indexFor } from '../view/document-index';
-import type { PlanDropTarget } from './plan-drop';
+import { frozenStore } from './frozen';
 import { type CanvasRegistry, useRegisteredCanvas } from './registry';
-import { resolveSnapshot } from './resolve';
+import { snapshotStanding } from './resolve';
 import { FIGURE_MAX_ZOOM, type SnapshotOpenRequest } from './SnapshotFigure';
 import { SNAPSHOT_STRINGS } from './strings';
-import { type Spring, type TransitionEnds, frameAt, insetToClipPath, springAtRest, stepSpring } from './transition';
+import { type Spring, type TransitionEnds, frameAt, ghostOpacity, insetToClipPath, recedeAt, springAtRest, stepSpring } from './transition';
 
-export interface CanvasStageProps {
+export interface CanvasStageProps extends Pick<CanvasEditorProps, 'onAddToPlan' | 'resolveImageSrc' | 'linkPreview' | 'resolvePaste' | 'onOpenReference'> {
   /** What to open. Null: nothing is open. */
   request: SnapshotOpenRequest | null;
   registry?: CanvasRegistry | null;
   /** The canvas has finished closing. The host clears `request`. */
   onClosed: () => void;
-  onAddToPlan?: (snapshot: Snapshot, drop: PlanDropTarget | null) => void;
-  resolveImageSrc?: (src: string) => string;
-  /** Passed to the editor: see `CanvasEditorProps`. */
-  linkPreview?: CanvasEditorProps['linkPreview'];
-  resolvePaste?: CanvasEditorProps['resolvePaste'];
-  onOpenReference?: CanvasEditorProps['onOpenReference'];
+  /**
+   * The element that holds the plan. It recedes a little while the canvas
+   * opens and comes back as it closes. Absent: the plan stays still.
+   */
+  recede?: () => HTMLElement | null;
 }
 
-/** The figure's corner radius, to start the clip from. */
-const FIGURE_RADIUS = 12;
+/** The figure's corner radius, to start the opening from. */
+const FIGURE_RADIUS = 10;
 const FADE_MS = 140;
 
 const prefersReducedMotion = (): boolean =>
@@ -64,19 +75,21 @@ export function openCamera(target: Rect, viewport: Size) {
   return fitRect(target, viewport, padding, 1.25);
 }
 
-export function CanvasStage({ request, registry, onClosed, ...editor }: CanvasStageProps) {
+export function CanvasStage({ request, registry, ...rest }: CanvasStageProps) {
   const store = useRegisteredCanvas(request?.canvas ?? '', registry);
   if (!request || !store || typeof document === 'undefined') return null;
-  return createPortal(
-    <OpenStage key={`${request.canvas}/${request.snapshot}`} request={request} store={store} onClosed={onClosed} {...editor} />,
-    document.body,
-  );
+  return createPortal(<OpenStage key={`${request.canvas}/${request.snapshot}`} request={request} store={store} {...rest} />, document.body);
 }
 
-function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotOpenRequest; store: CanvasStore } & Omit<CanvasStageProps, 'request' | 'registry'>) {
+function OpenStage({ request, store, onClosed, recede, ...editor }: { request: SnapshotOpenRequest; store: CanvasStore } & Omit<CanvasStageProps, 'request' | 'registry'>) {
   const camera = useMemo(() => new CameraController(), []);
+  const doc = useSyncExternalStore(store.subscribe, store.getDocument, store.getDocument);
+  const snapshot = doc.snapshots[request.snapshot];
+  const behind = useMemo(() => !!snapshot && snapshotStanding(doc, indexFor(store), snapshot) === 'behind', [doc, snapshot, store]);
   const stage = useRef<HTMLDivElement>(null);
   const clip = useRef<HTMLDivElement>(null);
+  const rim = useRef<HTMLDivElement>(null);
+  const ghostLayer = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   const spring = useRef<Spring>({ p: 0, v: 0 });
   const target = useRef(1);
@@ -84,20 +97,37 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
   const cameraDriven = useRef(true);
   const frame = useRef(0);
   const last = useRef(0);
+  const receding = useRef<HTMLElement | null>(null);
   const closed = useRef(onClosed);
   closed.current = onClosed;
   const [keepMounted, setKeepMounted] = useState<Rect | null>(null);
   // While it flies the view only shrinks onto its target, so nothing beyond
   // the view needs mounting. The usual margin comes back once it has landed.
   const [flying, setFlying] = useState(true);
+  // The capture to draw over the live canvas while the opening moves. Only
+  // when the two differ; when they are the same picture there is nothing to dissolve.
+  const [ghost, setGhost] = useState<SnapshotCapture | null>(() => {
+    const current = store.getDocument().snapshots[request.snapshot];
+    return current && snapshotStanding(store.getDocument(), indexFor(store), current) !== 'current' ? current.capture : null;
+  });
 
-  const snapshotRect = useCallback((): Rect | null => {
-    const doc = store.getDocument();
-    return resolveSnapshot(doc, indexFor(store), request.snapshot).rect ?? boundsOf(doc, doc.order);
+  /** The world rectangle the opening looks at: the snapshot's own, or the whole board. */
+  const place = useCallback((): Rect | null => {
+    const current = store.getDocument();
+    return current.snapshots[request.snapshot]?.capture.rect ?? boundsOf(current, current.order);
   }, [store, request.snapshot]);
+
+  const settlePlan = useCallback(() => {
+    const el = receding.current;
+    if (!el) return;
+    el.style.transform = '';
+    el.style.transformOrigin = '';
+    el.style.opacity = '';
+  }, []);
 
   const finish = useCallback(() => {
     const el = stage.current;
+    settlePlan();
     if (target.current === 0) {
       request.returnFocus?.focus?.({ preventScroll: true });
       closed.current();
@@ -107,17 +137,32 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
       delete el.dataset.busy;
       el.style.removeProperty('--pcv-chrome');
     }
-    setFlying(false);
     if (clip.current) clip.current.style.clipPath = '';
-  }, [request]);
+    if (rim.current) rim.current.style.opacity = '0';
+    setGhost(null);
+    setFlying(false);
+  }, [request, settlePlan]);
 
   const apply = useCallback(
     (p: number) => {
       const current = ends.current;
       if (!current || !clip.current || !stage.current) return;
       const at = frameAt(current, p);
+      const { top, right, bottom, left, radius } = at.inset;
       clip.current.style.clipPath = insetToClipPath(at.inset);
       stage.current.style.setProperty('--pcv-chrome', String(at.chrome));
+      if (rim.current) {
+        rim.current.style.inset = `${top}px ${right}px ${bottom}px ${left}px`;
+        rim.current.style.borderRadius = `${radius}px`;
+        rim.current.style.opacity = String(Math.min(1, p * 6) * (1 - p));
+      }
+      if (ghostLayer.current) ghostLayer.current.style.opacity = String(ghostOpacity(p));
+      const plan = receding.current;
+      if (plan) {
+        const away = recedeAt(p);
+        plan.style.transform = `scale(${away.scale})`;
+        plan.style.opacity = String(away.opacity);
+      }
       if (cameraDriven.current) camera.set(at.camera);
     },
     [camera],
@@ -148,12 +193,24 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
     frame.current = requestAnimationFrame(tick);
   }, [tick]);
 
+  /** Let the plan recede about the centre of the opening, so the figure stays under it. */
+  const holdPlan = useCallback(
+    (from: Rect) => {
+      const el = recede?.() ?? null;
+      receding.current = el;
+      if (!el) return;
+      const box = el.getBoundingClientRect();
+      el.style.transformOrigin = `${from.x + from.w / 2 - box.left}px ${from.y + from.h / 2 - box.top}px`;
+    },
+    [recede],
+  );
+
   // Open. Runs before the first paint, so the stage never shows un-placed.
   useLayoutEffect(() => {
     const el = stage.current;
     if (!el) return;
     const viewport = { w: el.clientWidth, h: el.clientHeight };
-    const world = snapshotRect();
+    const world = place();
     const from = boxOf(request.origin);
     const end = world ? openCamera(world, viewport) : camera.get();
     const stopWheel = (event: WheelEvent) => event.preventDefault();
@@ -163,6 +220,8 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
     if (!world || !from || prefersReducedMotion()) {
       camera.set(end);
       spring.current = { p: 1, v: 0 };
+      setGhost(null);
+      setFlying(false);
       el.style.opacity = '0';
       el.dataset.fade = '';
       // Read the style back so the browser takes 0 as the start of the fade.
@@ -171,6 +230,7 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
     } else {
       ends.current = { from, viewport, startCamera: cameraPlacing(world, from, FIGURE_MAX_ZOOM), endCamera: end, radius: FIGURE_RADIUS };
       setKeepMounted(viewportRect(end, viewport));
+      holdPlan(from);
       el.dataset.busy = '';
       // One step now: the first painted frame has already left the figure.
       spring.current = stepSpring({ p: 0, v: 0 }, 1, 1 / 60);
@@ -182,6 +242,7 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
       el.removeEventListener('wheel', stopWheel);
       if (frame.current) cancelAnimationFrame(frame.current);
       frame.current = 0;
+      settlePlan();
     };
     // Opening happens once per mount; the stage is keyed by what it opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,10 +253,12 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
     if (!el || target.current === 0) return;
     target.current = 0;
     const viewport = { w: el.clientWidth, h: el.clientHeight };
-    const world = snapshotRect();
+    const world = place();
+    // The figure is measured where it rests, not where a receded plan shows it.
+    settlePlan();
     const from = boxOf(request.origin);
     if (!world || !from || prefersReducedMotion()) {
-      // Nowhere to fly back to (the figure left the page), or no motion wanted.
+      // Nowhere to go back through (the figure left the page), or no motion wanted.
       if (frame.current) cancelAnimationFrame(frame.current);
       frame.current = 0;
       el.dataset.fade = '';
@@ -203,22 +266,31 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
       setTimeout(finish, FADE_MS);
       return;
     }
+    holdPlan(from);
+    const current = store.getDocument();
+    const now = current.snapshots[request.snapshot];
+    // The opening closes onto what the figure shows: the capture, when the canvas differs from it.
+    setGhost(now && snapshotStanding(current, indexFor(store), now) !== 'current' ? now.capture : null);
     if (spring.current.p >= 0.98) {
-      // Fully open: fly from wherever the person left the camera.
+      // Fully open: go back from wherever the person left the camera.
       ends.current = { from, viewport, startCamera: cameraPlacing(world, from, FIGURE_MAX_ZOOM), endCamera: camera.get(), radius: FIGURE_RADIUS };
       cameraDriven.current = true;
     } else if (ends.current) {
       // Still opening: go back the way it came. If the person has taken the
-      // camera, it stays theirs and only the window closes.
+      // camera, it stays theirs and only the opening closes.
       ends.current = { ...ends.current, from };
     }
     run();
-  }, [camera, finish, request.origin, run, snapshotRect]);
+  }, [camera, finish, holdPlan, place, request, run, settlePlan, store]);
 
-  const title = store.getDocument().title;
+  // A ghost mounted for the way back starts at the opacity the motion is at.
+  useLayoutEffect(() => {
+    if (ghost && ghostLayer.current) ghostLayer.current.style.opacity = String(ghostOpacity(spring.current.p));
+  }, [ghost]);
 
   return (
-    <div ref={stage} className="pcv pcv-stage" role="dialog" aria-modal="true" aria-label={title || SNAPSHOT_STRINGS.open}>
+    <div ref={stage} className="pcv pcv-stage" role="dialog" aria-modal="true" aria-label={doc.title || SNAPSHOT_STRINGS.open}>
+      <div ref={rim} className="pcv-stage-rim" style={{ opacity: 0 }} />
       <div ref={clip} className="pcv-stage-clip">
         <CanvasEditor
           store={store}
@@ -235,8 +307,22 @@ function OpenStage({ request, store, onClosed, ...editor }: { request: SnapshotO
               <ArrowLeft />
               {SNAPSHOT_STRINGS.back}
             </button>
+            {behind ? (
+              <>
+                <span className="pcv-sep" aria-hidden="true" />
+                <button type="button" className="pcv-btn" onClick={() => store.dispatch({ type: 'update-snapshot', id: request.snapshot })}>
+                  <RefreshCw />
+                  {SNAPSHOT_STRINGS.updateSnapshot}
+                </button>
+              </>
+            ) : null}
           </div>
         </CanvasEditor>
+        {ghost ? (
+          <div ref={ghostLayer} className="pcv-stage-ghost" aria-hidden="true">
+            <CanvasView store={frozenStore(ghost)} camera={camera} />
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -17,13 +17,15 @@ body,
   margin: 0;
 }
 body {
-  background: var(--background);
+  /* What shows around the plan while it stands back behind an open canvas. */
+  background: color-mix(in oklch, var(--background) 82%, black);
   color: var(--foreground);
   font-family: var(--font-sans);
   overscroll-behavior: none;
 }
 
 .demo-shell {
+  background: var(--background);
   display: grid;
   grid-template-rows: auto 1fr;
   height: 100%;

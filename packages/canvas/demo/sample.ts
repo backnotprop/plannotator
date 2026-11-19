@@ -6,7 +6,7 @@
 import { CanvasStore } from '../events/store';
 import type { Command } from '../events/types';
 import { createDocument } from '../model/document';
-import type { CanvasObject, Snapshot } from '../model/types';
+import type { CanvasObject, SnapshotInput } from '../model/types';
 import { serializeSnapshotBlock } from '../snapshot/block';
 
 const AGENT = { kind: 'agent', id: 'demo-agent' } as const;
@@ -41,7 +41,7 @@ const arrow = (id: string, from: string, to: string, label?: string): CanvasObje
 
 export const SAMPLE_CANVAS_ID = 'parcel-alerts';
 
-export const SAMPLE_SNAPSHOTS: Snapshot[] = [
+export const SAMPLE_SNAPSHOTS: SnapshotInput[] = [
   { id: 'architecture', title: 'Architecture', source: { kind: 'frame', frame: 'f-arch' } },
   { id: 'queues', title: 'Two queues', source: { kind: 'objects', objects: ['orders', 'q-urgent', 'q-bulk', 'a-orders-urgent', 'a-orders-bulk', 'why-two'] } },
   { id: 'rollout', title: 'Rollout', source: { kind: 'frame', frame: 'f-rollout' } },
@@ -219,7 +219,7 @@ export function createLargeStore(count: number, snapshots = 0): CanvasStore {
     const row = Math.floor(random() * Math.max(1, rows - 3));
     const result = store.dispatch({
       type: 'add-snapshot',
-      snapshot: { id: `s${i}`, title: `Part ${i + 1}`, source: { kind: 'region', rect: { x: col * 230 - 20, y: row * 120 - 20, w: 230 * 4, h: 120 * 3 }, objects: [] } },
+      snapshot: { id: `s${i}`, title: `Part ${i + 1}`, source: { kind: 'region', rect: { x: col * 230 - 20, y: row * 120 - 20, w: 230 * 4, h: 120 * 3 } } },
     });
     if (!result.ok) throw new Error(result.error);
   }

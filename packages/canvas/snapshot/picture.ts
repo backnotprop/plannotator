@@ -7,13 +7,11 @@
  * `data:` URL, so the file never asks the network for anything.
  */
 import type { CanvasColor } from '../model/color';
+import { captureDocument } from '../model/capture';
 import { resolveArrow } from '../model/document';
 import type { CanvasDocument, CanvasObject, SnapshotId } from '../model/types';
 import { isPlaced } from '../model/types';
 import { referenceAddress } from '../model/reference';
-import { visibleIds } from '../view/cull';
-import type { DocumentIndex } from '../view/document-index';
-import { resolveSnapshot } from './resolve';
 
 interface Palette {
   stage: string;
@@ -137,22 +135,23 @@ export interface SnapshotPictureOptions {
   theme?: 'light' | 'dark';
 }
 
-/** The snapshot as SVG text, or null when there is nothing to draw. */
-export function snapshotToSvg(doc: CanvasDocument, index: DocumentIndex, id: SnapshotId, options: SnapshotPictureOptions = {}): string | null {
-  const resolved = resolveSnapshot(doc, index, id);
-  if (!resolved.rect) return null;
+/**
+ * The snapshot's capture as SVG text. Null when the canvas has no such
+ * snapshot. The same picture the figure shows, whatever the canvas holds now.
+ */
+export function snapshotToSvg(doc: CanvasDocument, id: SnapshotId, options: SnapshotPictureOptions = {}): string | null {
+  const snapshot = doc.snapshots[id];
+  if (!snapshot) return null;
   const palette = options.theme === 'dark' ? DARK : LIGHT;
-  const { x, y, w, h } = resolved.rect;
-  const ids = visibleIds(doc, index, resolved.rect).filter((object) => !resolved.only || resolved.only.has(object));
+  const { rect, objects } = snapshot.capture;
+  const { x, y, w, h } = rect;
+  const frozen = captureDocument(snapshot.capture);
   const placed: string[] = [];
   const arrows: string[] = [];
-  for (const object of ids) {
-    const drawn = drawObject(doc, doc.objects[object], palette);
-    (doc.objects[object].type === 'arrow' ? arrows : placed).push(drawn);
-  }
+  for (const object of objects) (object.type === 'arrow' ? arrows : placed).push(drawObject(frozen, object, palette));
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(x)} ${n(y)} ${n(w)} ${n(h)}" width="${n(w)}" height="${n(h)}" font-family="Inter, system-ui, sans-serif" role="img">` +
-    `<title>${esc(resolved.title)}</title>` +
+    `<title>${esc(snapshot.title)}</title>` +
     `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" fill="${palette.stage}"/>` +
     placed.join('') +
     arrows.join('') +
@@ -161,8 +160,8 @@ export function snapshotToSvg(doc: CanvasDocument, index: DocumentIndex, id: Sna
 }
 
 /** The same picture as a `data:` URL, ready for an `<img>` or a Markdown image. */
-export function snapshotToDataUrl(doc: CanvasDocument, index: DocumentIndex, id: SnapshotId, options: SnapshotPictureOptions = {}): string | null {
-  const svg = snapshotToSvg(doc, index, id, options);
+export function snapshotToDataUrl(doc: CanvasDocument, id: SnapshotId, options: SnapshotPictureOptions = {}): string | null {
+  const svg = snapshotToSvg(doc, id, options);
   // Parentheses are legal in a URL but end a Markdown image's address.
   return svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}` : null;
 }

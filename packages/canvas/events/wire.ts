@@ -6,7 +6,7 @@
  * applied without planning. An envelope going out needs no encoder: it is
  * already plain JSON.
  */
-import { checkObject, checkSnapshot, type Checked } from '../model/codec';
+import { checkObject, checkSnapshot, checkSnapshotInput, type Checked } from '../model/codec';
 import { isValidId } from '../model/ids';
 import type { Actor } from '../model/types';
 import type { CanvasEvent, Command, Envelope } from './types';
@@ -72,7 +72,7 @@ export function decodeCommand(input: unknown): Checked<Command> {
       if (typeof c.title !== 'string') return fail('retitle needs "title"');
       return { ok: true, value: { type: 'retitle', title: c.title } };
     case 'add-snapshot': {
-      const snapshot = checkSnapshot(c.snapshot);
+      const snapshot = checkSnapshotInput(c.snapshot);
       if (!snapshot.ok) return snapshot;
       return { ok: true, value: { type: 'add-snapshot', snapshot: snapshot.value } };
     }
@@ -81,15 +81,16 @@ export function decodeCommand(input: unknown): Checked<Command> {
       if (c.title !== undefined && typeof c.title !== 'string') return fail('title must be text');
       let source;
       if (c.source !== undefined) {
-        const probe = checkSnapshot({ id: 'probe', title: '', source: c.source });
+        const probe = checkSnapshotInput({ id: 'probe', title: '', source: c.source });
         if (!probe.ok) return fail(probe.error.replace(/^probe: /, ''));
         source = probe.value.source;
       }
       return { ok: true, value: { type: 'edit-snapshot', id: c.id, ...(c.title !== undefined ? { title: c.title } : {}), ...(source ? { source } : {}) } };
     }
     case 'remove-snapshot':
-      if (typeof c.id !== 'string') return fail('remove-snapshot needs "id"');
-      return { ok: true, value: { type: 'remove-snapshot', id: c.id } };
+    case 'update-snapshot':
+      if (typeof c.id !== 'string') return fail(`${c.type} needs "id"`);
+      return { ok: true, value: { type: c.type, id: c.id } };
     default:
       return fail(`unknown command ${JSON.stringify(c.type)}`);
   }

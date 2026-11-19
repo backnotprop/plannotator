@@ -181,7 +181,7 @@ try {
   const passMs = Math.round((planInfo.height / 2400) * 2 * 1000);
   await scrollPass(passMs);
   const base = await memory(cdp);
-  frameRow('Plan with 50 snapshots: scroll', await scrollPass(passMs), interval);
+  frameRow('Plan with 50 materialized snapshots: scroll', await scrollPass(passMs), interval);
   let peakLive = 0;
   for (let i = 0; i < 9; i++) {
     await scrollPass(Math.round(passMs / 2));
@@ -193,9 +193,18 @@ try {
   row('Plan with 50 snapshots: DOM nodes after the same passes', `grow at most ${BUDGET.nodeGrowthShare * 100}%`, `${base.nodes} to ${after.nodes}`, after.nodes <= base.nodes * (1 + BUDGET.nodeGrowthShare));
   row('Plan with 50 snapshots: figures drawing at once', 'only those near the screen', `${planInfo.live} of ${planInfo.figures} at rest`, planInfo.live < planInfo.figures / 2);
 
-  // ── Opening a snapshot ──────────────────────────────────────────────────
-  const opens: { toFrame: number; moved: boolean; slow: number; frames: number }[] = [];
-  for (let i = 0; i < 5; i++) {
+  // ── Opening a snapshot, and coming back ─────────────────────────────────
+  interface Opened { toFrame: number; moved: boolean; slow: number; frames: number; ghost: boolean; scrollMoved: number; figureMoved: number }
+  const openAndBack = async (i: number): Promise<Opened> => {
+    const figure = page.locator('.pcv-figure-hit').nth(i);
+    await figure.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const where = () =>
+      page.evaluate((n) => {
+        const box = document.querySelectorAll('.pcv-figure-view')[n as number].getBoundingClientRect();
+        return { scroll: document.querySelector<HTMLElement>('.demo-plan')!.scrollTop, x: box.left, y: box.top, w: box.width, h: box.height };
+      }, i);
+    const before = await where();
     await page.evaluate(() => {
       const w = window as unknown as { __open: unknown };
       w.__open = null;
@@ -204,12 +213,12 @@ try {
         (event) => {
           const t0 = event.timeStamp;
           const times: number[] = [];
-          let first: { at: number; moved: boolean } | null = null;
+          let first: { at: number; moved: boolean; ghost: boolean } | null = null;
           const tick = (t: number) => {
             times.push(t);
             const stage = document.querySelector<HTMLElement>('.pcv-stage');
-            if (!first) first = { at: t - t0, moved: stage?.dataset.motion === 'started' && !!stage.querySelector<HTMLElement>('.pcv-stage-clip')?.style.clipPath };
-            if (stage && stage.dataset.busy === undefined && times.length > 3) w.__open = { toFrame: first.at, moved: first.moved, times };
+            if (!first) first = { at: t - t0, moved: stage?.dataset.motion === 'started' && !!stage.querySelector<HTMLElement>('.pcv-stage-clip')?.style.clipPath, ghost: !!stage?.querySelector('.pcv-stage-ghost') };
+            if (stage && stage.dataset.busy === undefined && times.length > 3) w.__open = { toFrame: first.at, moved: first.moved, ghost: first.ghost, times };
             else if (times.length < 300) requestAnimationFrame(tick);
           };
           requestAnimationFrame(tick);
@@ -217,28 +226,74 @@ try {
         { capture: true, once: true },
       );
     });
-    const figure = page.locator('.pcv-figure-hit').nth(i);
-    await figure.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(250);
     await figure.click();
     await page.waitForFunction(() => (window as unknown as { __open: unknown }).__open !== null, undefined, { timeout: 5000 });
-    const opened = (await page.evaluate(() => (window as unknown as { __open: unknown }).__open)) as { toFrame: number; moved: boolean; times: number[] };
-    const s = stats(opened.times, Math.max(interval, 1000 / 60));
-    opens.push({ toFrame: Math.round(opened.toFrame * 100) / 100, moved: opened.moved, slow: s.slow, frames: s.frames });
+    const opened = (await page.evaluate(() => (window as unknown as { __open: unknown }).__open)) as { toFrame: number; moved: boolean; ghost: boolean; times: number[] };
+    // Coming back is measured too: the same frames, the other way.
+    const closing = page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const times: number[] = [];
+          const tick = (t: number) => {
+            times.push(t);
+            if (!document.querySelector('.pcv-stage') || times.length > 300) resolve(times);
+            else requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }),
+    );
     await page.getByRole('button', { name: 'Back to plan' }).click();
+    const back = await closing;
     await page.waitForSelector('.pcv-stage', { state: 'detached' });
-  }
-  results.open = opens;
-  const worstOpen = Math.max(...opens.map((o) => o.toFrame));
-  row(
-    'Opening a snapshot: click to the first frame that has moved',
-    `within ${BUDGET.openFrames} frames at 60 fps (${(SIXTY * BUDGET.openFrames).toFixed(1)} ms), and that frame has moved`,
-    `${opens.map((o) => o.toFrame).join(', ')} ms over 5 opens; moved in the first frame: ${opens.every((o) => o.moved) ? 'every time' : 'NOT every time'}`,
-    worstOpen <= SIXTY * BUDGET.openFrames && opens.every((o) => o.moved),
-  );
-  const openSlow = opens.reduce((sum, o) => sum + o.slow, 0);
-  const openFrames = opens.reduce((sum, o) => sum + o.frames, 0);
-  row('Opening a snapshot: frames during the motion', 'at most 1% slow', `${openSlow} of ${openFrames} frames slow`, openSlow / Math.max(1, openFrames) <= BUDGET.slowFrameShare);
+    const after = await where();
+    const s = stats([...opened.times], Math.max(interval, 1000 / 60));
+    const sBack = stats(back, Math.max(interval, 1000 / 60));
+    return {
+      toFrame: Math.round(opened.toFrame * 100) / 100,
+      moved: opened.moved,
+      ghost: opened.ghost,
+      slow: s.slow + sBack.slow,
+      frames: s.frames + sBack.frames,
+      scrollMoved: Math.abs(after.scroll - before.scroll),
+      figureMoved: Math.max(Math.abs(after.x - before.x), Math.abs(after.y - before.y), Math.abs(after.w - before.w), Math.abs(after.h - before.h)),
+    };
+  };
+  const openRows = (label: string, opens: Opened[]) => {
+    results[label] = opens;
+    row(
+      `${label}: click to the first frame that has moved`,
+      `within ${BUDGET.openFrames} frames at 60 fps (${(SIXTY * BUDGET.openFrames).toFixed(1)} ms), and that frame has moved`,
+      `${opens.map((o) => o.toFrame).join(', ')} ms over ${opens.length} opens; moved in the first frame: ${opens.every((o) => o.moved) ? 'every time' : 'NOT every time'}`,
+      Math.max(...opens.map((o) => o.toFrame)) <= SIXTY * BUDGET.openFrames && opens.every((o) => o.moved),
+    );
+    const slow = opens.reduce((sum, o) => sum + o.slow, 0);
+    const frames = opens.reduce((sum, o) => sum + o.frames, 0);
+    row(`${label}: frames during the motion in and back`, 'at most 1% slow', `${slow} of ${frames} frames slow`, slow / Math.max(1, frames) <= BUDGET.slowFrameShare);
+    row(
+      `${label}: back at the same place`,
+      'the plan has not scrolled and the figure has not moved (within 0.5 px)',
+      `scroll moved ${Math.max(...opens.map((o) => o.scrollMoved))} px, figure moved ${Math.max(...opens.map((o) => o.figureMoved)).toFixed(2)} px`,
+      opens.every((o) => o.scrollMoved < 0.5 && o.figureMoved < 0.5),
+    );
+  };
+  const current: Opened[] = [];
+  for (let i = 0; i < 5; i++) current.push(await openAndBack(i));
+  openRows('Opening a snapshot', current);
+
+  // Now the canvas moves on: every box shifts and a third are recoloured, so every snapshot is behind.
+  await page.evaluate(() => {
+    const { store } = (window as unknown as { __canvas: { store: { dispatch(c: unknown): unknown; getDocument(): { order: string[] } } } }).__canvas;
+    const boxes = store.getDocument().order.filter((id) => id.startsWith('b'));
+    store.dispatch({ type: 'move', ids: boxes, dx: 14, dy: 9 });
+    store.dispatch({ type: 'recolor', ids: boxes.filter((_, i) => i % 3 === 0), color: 'red' });
+  });
+  await page.waitForTimeout(300);
+  const behindOpens: Opened[] = [];
+  for (let i = 5; i < 10; i++) behindOpens.push(await openAndBack(i));
+  openRows('Opening a snapshot that is behind', behindOpens);
+  row('Opening a snapshot that is behind: the capture dissolves into the canvas', 'drawn over the live canvas from the first frame', behindOpens.every((o) => o.ghost) ? 'every time' : 'NOT every time', behindOpens.every((o) => o.ghost) && current.every((o) => !o.ghost));
+  const behindScroll = await scrollPass(passMs);
+  frameRow('Plan with 50 snapshots, all behind: scroll', behindScroll, interval);
 
   // ── A canvas with 2,000 objects ─────────────────────────────────────────
   await open(page, `${server.url}/?bench=canvas&n=2000`);

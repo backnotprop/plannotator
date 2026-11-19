@@ -1,113 +1,47 @@
 /**
- * What a snapshot shows right now. A snapshot is a reference into a document
- * that keeps changing, so every reader asks here, and the answer says
- * plainly when the thing it pointed at is no longer all there.
+ * What a snapshot shows, and whether it is behind.
+ *
+ * A snapshot always shows its capture: the picture taken when it was made or
+ * last updated. `resolveSnapshot` adds how that picture stands against the
+ * canvas now:
+ * - `current`: taking it again would give the same picture;
+ * - `behind`: the canvas has changed where it looked, and it can be updated;
+ * - `detached`: what it looked at is no longer on the canvas. The capture is
+ *   all that is left of it, so it stays as it is and cannot be updated.
  */
-import { boundsOf, objectBounds } from '../model/document';
-import { type Rect, expandRect } from '../model/geometry';
-import type { CanvasDocument, ObjectId, SnapshotId } from '../model/types';
+import { type RectQuery, captureOf, capturesEqual } from '../model/capture';
+import type { CanvasDocument, Snapshot, SnapshotCapture, SnapshotId } from '../model/types';
 import type { DocumentIndex } from '../view/document-index';
-import { FRAME_TITLE_HEIGHT } from '../view/hit-test';
 
-/** World units of air around a chosen set of objects. */
-export const SNAPSHOT_PADDING = 24;
+export type SnapshotStanding = 'current' | 'behind' | 'detached';
 
-export type SnapshotProblem =
-  /** There is no canvas document to read. */
-  | 'no-canvas'
-  /** The canvas has no snapshot with this id (it was removed). */
-  | 'no-snapshot'
-  /** The frame it showed was deleted. */
-  | 'frame-deleted'
-  /** Every object it showed was deleted. */
-  | 'all-deleted'
-  /** Some of the objects it showed were deleted. The rest are drawn. */
-  | 'some-deleted';
+export type ResolvedSnapshot =
+  /** There is no canvas document to read, or it holds no snapshot with this id. */
+  | { found: false; problem: 'no-canvas' | 'no-snapshot' }
+  | { found: true; snapshot: Snapshot; capture: SnapshotCapture; standing: SnapshotStanding };
 
-export interface ResolvedSnapshot {
-  /**
-   * - `live`: all there.
-   * - `partial`: drawn, with some of its objects gone (`missing` of `total`).
-   * - `gone`: nothing to draw.
-   */
-  status: 'live' | 'partial' | 'gone';
-  problem?: SnapshotProblem;
-  /** The world rect to show. Null when gone. */
-  rect: Rect | null;
-  /** Draw only these objects, or everything in `rect` when null. */
-  only: ReadonlySet<ObjectId> | null;
-  title: string;
-  missing: number;
-  total: number;
+const queryOf = (index: DocumentIndex | null | undefined): RectQuery | undefined => (index ? (area) => index.spatial.query(area) : undefined);
+
+/** How a snapshot's capture stands against the canvas now. Costs one look at what it covers. */
+export function snapshotStanding(doc: CanvasDocument, index: DocumentIndex | null | undefined, snapshot: Snapshot): SnapshotStanding {
+  const now = captureOf(doc, snapshot.source, queryOf(index));
+  if (!now) return 'detached';
+  return capturesEqual(now, snapshot.capture) ? 'current' : 'behind';
 }
-
-const gone = (problem: SnapshotProblem, title = '', total = 0): ResolvedSnapshot => ({
-  status: 'gone',
-  problem,
-  rect: null,
-  only: null,
-  title,
-  missing: total,
-  total,
-});
 
 export function resolveSnapshot(doc: CanvasDocument | null | undefined, index: DocumentIndex | null | undefined, id: SnapshotId): ResolvedSnapshot {
-  if (!doc) return gone('no-canvas');
+  if (!doc) return { found: false, problem: 'no-canvas' };
   const snapshot = doc.snapshots[id];
-  if (!snapshot) return gone('no-snapshot');
-  const { source, title } = snapshot;
-
-  if (source.kind === 'frame') {
-    const frame = doc.objects[source.frame];
-    if (!frame || frame.type !== 'frame') return gone('frame-deleted', title, 1);
-    const rect = expandRect({ x: frame.x, y: frame.y - FRAME_TITLE_HEIGHT, w: frame.w, h: frame.h + FRAME_TITLE_HEIGHT }, SNAPSHOT_PADDING / 2);
-    return { status: 'live', rect, only: null, title, missing: 0, total: 1 };
-  }
-
-  const total = source.objects.length;
-  const alive = source.objects.filter((object) => doc.objects[object]);
-  const missing = total - alive.length;
-
-  if (source.kind === 'objects') {
-    const bounds = boundsOf(doc, alive);
-    if (!bounds) return gone('all-deleted', title, total);
-    return {
-      status: missing ? 'partial' : 'live',
-      ...(missing ? { problem: 'some-deleted' as const } : {}),
-      rect: expandRect(bounds, SNAPSHOT_PADDING),
-      only: new Set(alive.filter((object) => objectBounds(doc, object))),
-      title,
-      missing,
-      total,
-    };
-  }
-
-  // A region keeps its rectangle whatever happens inside it. It is gone only
-  // when what it was made around was all deleted and nothing else is there.
-  if (total > 0 && missing === total) {
-    const anything = index ? index.spatial.query(source.rect).length > 0 : false;
-    if (!anything) return gone('all-deleted', title, total);
-  }
-  return {
-    status: missing ? 'partial' : 'live',
-    ...(missing ? { problem: 'some-deleted' as const } : {}),
-    rect: source.rect,
-    only: null,
-    title,
-    missing,
-    total,
-  };
+  if (!snapshot) return { found: false, problem: 'no-snapshot' };
+  return { found: true, snapshot, capture: snapshot.capture, standing: snapshotStanding(doc, index, snapshot) };
 }
 
-/** Whether two answers would draw the same figure. Lets a figure skip a redraw. */
-export function sameResolution(a: ResolvedSnapshot, b: ResolvedSnapshot): boolean {
-  if (a.status !== b.status || a.problem !== b.problem || a.title !== b.title || a.missing !== b.missing || a.total !== b.total) return false;
-  if (!a.rect !== !b.rect) return false;
-  if (a.rect && b.rect && (a.rect.x !== b.rect.x || a.rect.y !== b.rect.y || a.rect.w !== b.rect.w || a.rect.h !== b.rect.h)) return false;
-  if (!a.only !== !b.only) return false;
-  if (a.only && b.only) {
-    if (a.only.size !== b.only.size) return false;
-    for (const id of a.only) if (!b.only.has(id)) return false;
+/** Of these snapshots, the ones that are behind: what "update all" would update. */
+export function behindSnapshots(doc: CanvasDocument, index: DocumentIndex | null | undefined, ids: Iterable<SnapshotId>): SnapshotId[] {
+  const out: SnapshotId[] = [];
+  for (const id of new Set(ids)) {
+    const snapshot = doc.snapshots[id];
+    if (snapshot && snapshotStanding(doc, index, snapshot) === 'behind') out.push(id);
   }
-  return true;
+  return out;
 }

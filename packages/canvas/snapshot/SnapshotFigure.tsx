@@ -1,28 +1,30 @@
 /**
- * A snapshot in a plan: a live, read-only window onto part of a canvas.
+ * A snapshot in a plan: the picture it captured, drawn as part of the
+ * document.
  *
- * It is the same renderer as the editor (`CanvasView`), with a camera fixed
- * on the snapshot's rectangle, so it is current by construction: when the
- * canvas changes, the figure is already showing the change.
+ * It draws the snapshot's capture, not the canvas, so editing the canvas
+ * does not change it. When the canvas has changed where the snapshot looked,
+ * the caption says so in a few quiet words with one action, Update, which
+ * takes the capture again (one undo step on the canvas).
  *
- * A plan may hold many. What keeps that cheap:
- * - every figure of a canvas shares that canvas's one store and one index;
- * - a figure draws only while it is near the screen (an
- *   IntersectionObserver with a margin). Far away it is an empty box of the
- *   right size, so the page does not jump and memory does not grow with the
- *   number of figures;
- * - a change to the canvas re-renders only the objects that changed, in
- *   only the figures that are drawing.
+ * It is the ordinary renderer (`CanvasView`) over a small frozen store, so
+ * it is real text and vector shapes: sharp at any zoom, themed with the
+ * page, readable by a screen reader.
+ *
+ * A plan may hold many. A figure draws only while it is near the screen (an
+ * IntersectionObserver with a margin); far away it is an empty box of the
+ * right size. Whether it is behind is worked out only while it draws.
  */
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
-import type { CanvasDocument } from '../model/types';
+import type { CanvasDocument, SnapshotCapture } from '../model/types';
 import { CanvasView } from '../react/CanvasView';
 import { CameraController, type Size, fitRect } from '../view/camera';
 import { indexFor } from '../view/document-index';
 import type { SnapshotFallbackImage } from './block';
+import { frozenStore } from './frozen';
 import { type CanvasRegistry, useRegisteredCanvas } from './registry';
-import { type ResolvedSnapshot, resolveSnapshot, sameResolution } from './resolve';
+import { type SnapshotStanding, snapshotStanding } from './resolve';
 import { SNAPSHOT_STRINGS } from './strings';
 
 /** How far outside the screen a figure starts drawing, in CSS pixels. */
@@ -35,7 +37,7 @@ export const FIGURE_MAX_HEIGHT = 420;
 export interface SnapshotOpenRequest {
   canvas: string;
   snapshot: string;
-  /** The figure's own box: the open transition starts from it. */
+  /** The figure's own box: the open transition starts from it and returns to it. */
   origin: HTMLElement;
   /** Where focus goes back to when the canvas closes. */
   returnFocus?: HTMLElement | null;
@@ -44,7 +46,7 @@ export interface SnapshotOpenRequest {
 export interface SnapshotFigureProps {
   canvas: string;
   snapshot: string;
-  /** A caption from the plan. Absent: the snapshot's own title. */
+  /** A caption written in the plan. It wins over the snapshot's own name and is not renamed from here. */
   title?: string;
   /** The still picture to show when the canvas cannot be reached. */
   fallback?: SnapshotFallbackImage;
@@ -55,51 +57,20 @@ export interface SnapshotFigureProps {
   resolveImageSrc?: (src: string) => string;
 }
 
-function problemText(resolved: ResolvedSnapshot): string | null {
-  switch (resolved.problem) {
-    case 'some-deleted':
-      return SNAPSHOT_STRINGS.someDeleted(resolved.missing, resolved.total);
-    case 'all-deleted':
-      return SNAPSHOT_STRINGS.allDeleted;
-    case 'frame-deleted':
-      return SNAPSHOT_STRINGS.frameDeleted;
-    case 'no-snapshot':
-      return SNAPSHOT_STRINGS.noSnapshot;
-    case 'no-canvas':
-      return SNAPSHOT_STRINGS.noCanvas;
-    default:
-      return null;
-  }
-}
-
 const NO_SUBSCRIBE = () => () => {};
 const NO_DOC = (): CanvasDocument | null => null;
 
-/** The snapshot's current answer, with a stable identity while nothing about it changed. */
-function useResolved(store: CanvasStore | undefined, snapshot: string): ResolvedSnapshot {
-  const doc = useSyncExternalStore(store ? store.subscribe : NO_SUBSCRIBE, store ? store.getDocument : NO_DOC, store ? store.getDocument : NO_DOC);
-  const last = useRef<ResolvedSnapshot | null>(null);
-  return useMemo(() => {
-    const next = resolveSnapshot(doc, store ? indexFor(store) : null, snapshot);
-    if (last.current && sameResolution(last.current, next)) return last.current;
-    last.current = next;
-    return next;
-  }, [doc, store, snapshot]);
-}
-
-function LiveView({ store, resolved, resolveImageSrc }: { store: CanvasStore; resolved: ResolvedSnapshot; resolveImageSrc?: (src: string) => string }) {
+function Picture({ capture, resolveImageSrc }: { capture: SnapshotCapture; resolveImageSrc?: (src: string) => string }) {
   const camera = useMemo(() => new CameraController(), []);
   const size = useRef<Size>({ w: 0, h: 0 });
-  const rect = resolved.rect;
   const refit = () => {
-    if (rect && size.current.w > 0) camera.set(fitRect(rect, size.current, 0, FIGURE_MAX_ZOOM));
+    if (size.current.w > 0) camera.set(fitRect(capture.rect, size.current, 0, FIGURE_MAX_ZOOM));
   };
   useEffect(refit);
   return (
     <CanvasView
-      store={store}
+      store={frozenStore(capture)}
       camera={camera}
-      only={resolved.only}
       resolveImageSrc={resolveImageSrc}
       onSize={(next) => {
         size.current = next;
@@ -110,9 +81,41 @@ function LiveView({ store, resolved, resolveImageSrc }: { store: CanvasStore; re
   );
 }
 
-export function SnapshotFigure({ canvas, snapshot, title, fallback, registry, onOpen, resolveImageSrc }: SnapshotFigureProps) {
+/** The snapshot's name, typed in place. Leaving the field saves it. */
+function Name({ store, snapshot, title, placeholder }: { store: CanvasStore; snapshot: string; title: string; placeholder: string }) {
+  return (
+    <span
+      className="pcv-figure-title"
+      role="textbox"
+      aria-label={SNAPSHOT_STRINGS.name}
+      data-placeholder={placeholder}
+      contentEditable="plaintext-only"
+      suppressContentEditableWarning
+      spellCheck={false}
+      onKeyDown={(event) => {
+        // Enter ends the name (it is one line), unless an IME is using it to choose a candidate.
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+      onBlur={(event) => {
+        const next = event.currentTarget.innerText.replace(/\s+/g, ' ').trim().slice(0, 300);
+        if (next !== title) store.dispatch({ type: 'edit-snapshot', id: snapshot, title: next });
+        // An emptied field must be truly empty for the placeholder to show.
+        if (!next) event.currentTarget.textContent = '';
+      }}
+    >
+      {title}
+    </span>
+  );
+}
+
+export function SnapshotFigure({ canvas, snapshot: id, title, fallback, registry, onOpen, resolveImageSrc }: SnapshotFigureProps) {
   const store = useRegisteredCanvas(canvas, registry);
-  const resolved = useResolved(store, snapshot);
+  const doc = useSyncExternalStore(store ? store.subscribe : NO_SUBSCRIBE, store ? store.getDocument : NO_DOC, store ? store.getDocument : NO_DOC);
+  const snapshot = doc?.snapshots[id];
+  const capture = snapshot?.capture;
   const view = useRef<HTMLDivElement>(null);
   const hit = useRef<HTMLButtonElement>(null);
   const [near, setNear] = useState(false);
@@ -126,52 +129,74 @@ export function SnapshotFigure({ canvas, snapshot, title, fallback, registry, on
     const observer = new IntersectionObserver(([entry]) => setNear(entry.isIntersecting), { rootMargin: `${FIGURE_NEAR_MARGIN}px 0px` });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [resolved.rect !== null, !!store]);
+  }, [!!capture]);
 
-  const caption = title ?? resolved.title;
-  const note = problemText(resolved);
+  // Only a figure that is drawing asks whether it is behind.
+  const standing: SnapshotStanding = useMemo(
+    () => (near && store && doc && snapshot ? snapshotStanding(doc, indexFor(store), snapshot) : 'current'),
+    [near, store, doc, snapshot],
+  );
+
   const still = !store && fallback ? fallback : null;
-  const canOpen = !!onOpen && !!store && !!resolved.rect;
+  const canOpen = !!onOpen && !!store && !!capture;
+  const name = title ?? snapshot?.title ?? '';
 
-  // The figure is exactly the shape of what it shows, never larger than
-  // life and never taller than the cap, so nothing outside the snapshot's
-  // rectangle shows at its sides.
-  const width = store && resolved.rect ? Math.ceil(Math.min(resolved.rect.w * FIGURE_MAX_ZOOM, (FIGURE_MAX_HEIGHT * resolved.rect.w) / resolved.rect.h)) : null;
-
-  let body: React.ReactNode;
-  if (store && resolved.rect) {
-    body = (
-      <div ref={view} className="pcv-figure-view" style={{ aspectRatio: `${resolved.rect.w} / ${resolved.rect.h}` }}>
-        {near ? <LiveView store={store} resolved={resolved} resolveImageSrc={resolveImageSrc} /> : null}
-      </div>
+  if (!capture || !store) {
+    return (
+      <figure className="pcv pcv-figure" data-standing="missing" data-canvas={canvas} data-snapshot={id}>
+        {still ? (
+          <img className="pcv-figure-still" src={resolveImageSrc ? resolveImageSrc(still.src) : still.src} alt={still.alt} loading="lazy" decoding="async" />
+        ) : (
+          <div className="pcv-figure-empty">{store ? SNAPSHOT_STRINGS.noSnapshot : SNAPSHOT_STRINGS.noCanvas}</div>
+        )}
+        {title ? (
+          <figcaption className="pcv-figure-caption">
+            <span className="pcv-figure-title">{title}</span>
+          </figcaption>
+        ) : null}
+      </figure>
     );
-  } else if (still) {
-    body = <img className="pcv-figure-still" src={resolveImageSrc ? resolveImageSrc(still.src) : still.src} alt={still.alt} loading="lazy" decoding="async" />;
-  } else {
-    body = <div className="pcv-figure-empty">{note}</div>;
   }
 
+  // The figure is exactly the shape of what it shows, never larger than
+  // life and never taller than the cap.
+  const { rect } = capture;
+  const width = Math.ceil(Math.min(rect.w * FIGURE_MAX_ZOOM, (FIGURE_MAX_HEIGHT * rect.w) / rect.h));
+  const count = SNAPSHOT_STRINGS.items(capture.objects.length);
+
   return (
-    <figure className="pcv pcv-figure" style={width ? { width: `min(100%, ${width}px)` } : undefined} data-status={store ? resolved.status : 'still'} data-canvas={canvas} data-snapshot={snapshot}>
+    <figure className="pcv pcv-figure" style={{ width: `min(100%, ${width}px)` }} data-standing={standing} data-canvas={canvas} data-snapshot={id}>
       <div className="pcv-figure-frame">
-        {body}
+        <div ref={view} className="pcv-figure-view" style={{ aspectRatio: `${rect.w} / ${rect.h}` }}>
+          {near ? <Picture capture={capture} resolveImageSrc={resolveImageSrc} /> : null}
+        </div>
         {canOpen ? (
           <button
             ref={hit}
             type="button"
             className="pcv-figure-hit"
-            aria-label={caption ? SNAPSHOT_STRINGS.openNamed(caption) : SNAPSHOT_STRINGS.open}
-            onClick={() => view.current && onOpen?.({ canvas, snapshot, origin: view.current, returnFocus: hit.current })}
+            aria-label={name ? SNAPSHOT_STRINGS.openNamed(name) : SNAPSHOT_STRINGS.open}
+            onClick={() => view.current && onOpen?.({ canvas, snapshot: id, origin: view.current, returnFocus: hit.current })}
           />
         ) : null}
       </div>
-      {caption || (note && body && resolved.rect) || canOpen ? (
-        <figcaption className="pcv-figure-caption">
-          {caption ? <span className="pcv-figure-title">{caption}</span> : null}
-          {note && (resolved.rect || still) ? <span className="pcv-figure-note">{note}</span> : null}
-          {canOpen ? <span className="pcv-figure-hint">{SNAPSHOT_STRINGS.open}</span> : null}
-        </figcaption>
-      ) : null}
+      <figcaption className="pcv-figure-caption">
+        {title !== undefined ? (
+          <span className="pcv-figure-title">{title}</span>
+        ) : (
+          <Name key={snapshot.title} store={store} snapshot={id} title={snapshot.title} placeholder={count} />
+        )}
+        {standing === 'behind' ? (
+          <>
+            <span className="pcv-figure-note">{SNAPSHOT_STRINGS.behind}</span>
+            <button type="button" className="pcv-figure-action" onClick={() => store.dispatch({ type: 'update-snapshot', id })}>
+              {SNAPSHOT_STRINGS.update}
+            </button>
+          </>
+        ) : standing === 'detached' ? (
+          <span className="pcv-figure-note">{SNAPSHOT_STRINGS.detached}</span>
+        ) : null}
+      </figcaption>
     </figure>
   );
 }

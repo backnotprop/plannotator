@@ -2,6 +2,7 @@
  * What is under a point, and what is inside a rectangle. Both ask the
  * spatial index first, so neither looks at the whole canvas.
  */
+import { FRAME_TITLE_HEIGHT } from '../model/capture';
 import { resolveArrow } from '../model/document';
 import {
   type Point,
@@ -16,8 +17,6 @@ import type { DocumentIndex } from './document-index';
 
 /** How far inside a frame's edge still grabs the frame, in world units at zoom 1. */
 export const FRAME_GRAB_BAND = 10;
-/** The strip above a frame that holds its title, in world units at zoom 1. */
-export const FRAME_TITLE_HEIGHT = 24;
 
 function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: number): boolean {
   if (object.type === 'arrow') {

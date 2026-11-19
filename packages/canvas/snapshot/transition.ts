@@ -93,3 +93,21 @@ export function frameAt(ends: TransitionEnds, p: number): TransitionFrame {
 
 export const insetToClipPath = (inset: TransitionFrame['inset']): string =>
   `inset(${inset.top}px ${inset.right}px ${inset.bottom}px ${inset.left}px round ${inset.radius}px)`;
+
+/** Over how much of the motion the capture dissolves into the live canvas. */
+export const GHOST_SPAN = 0.45;
+
+/**
+ * How visible the capture is over the live canvas: whole at the figure, gone
+ * before the opening is half grown, eased so it neither snaps nor lingers.
+ */
+export function ghostOpacity(p: number): number {
+  const t = Math.max(0, Math.min(1, p / GHOST_SPAN));
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/** How far the plan stands back behind the opening: a little smaller, a little dimmer. */
+export function recedeAt(p: number): { scale: number; opacity: number } {
+  const t = Math.max(0, Math.min(1, p));
+  return { scale: 1 - 0.035 * t, opacity: 1 - 0.55 * t };
+}

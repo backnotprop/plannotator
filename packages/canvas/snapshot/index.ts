@@ -2,6 +2,7 @@ export * from './block';
 export * from './CanvasStage';
 export * from './create';
 export * from './directive';
+export * from './frozen';
 export * from './picture';
 export * from './plan-drop';
 export * from './registry';

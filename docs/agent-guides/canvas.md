@@ -1,6 +1,6 @@
 ## The canvas (`packages/canvas`)
 
-Plannotator's own canvas: boxes, notes, text, arrows, frames, groups, pictures, sprites, custom HTML and reference cards on a plain board, with **snapshots** that embed live in a plan. It is a package with **no product surface yet**: nothing in the apps imports it. Its only consumer is its own development demo (`bun run --cwd packages/canvas demo`, port 3017). This is separate from Shape (the agent's living board in `guides-and-shared-ui.md`).
+Plannotator's own canvas: boxes, notes, text, arrows, frames, groups, pictures, sprites, custom HTML and reference cards on a plain board, with **snapshots** (captures of part of the board) that embed in a plan. It is a package with **no product surface yet**: nothing in the apps imports it. Its only consumer is its own development demo (`bun run --cwd packages/canvas demo`, port 3017). This is separate from Shape (the agent's living board in `guides-and-shared-ui.md`).
 
 The owner's rules for it: any colour on any object, set by a person or an agent; no keyboard shortcuts; no dot grid (a plain ground); an agent hears about changes through a hand-over or comments sent in bulk, not live (the seam is `CanvasStore.since`; neither is built).
 
@@ -10,11 +10,11 @@ Each layer imports only the ones above it. Keep it that way: no React in `model/
 
 | Folder | What it owns |
 |---|---|
-| `model/` | The document: plain JSON, typed, versioned (`CANVAS_DOCUMENT_VERSION`, `MIGRATIONS`). `types.ts` (objects, `Snapshot`, `ReferenceTarget`), `codec.ts` (fail-closed `parseDocument` / `checkObject`; unknown fields are dropped), `document.ts` (bounds, arrow geometry, groups), `color.ts`, `html-item.ts` (the sandbox contract), `reference.ts`. |
+| `model/` | The document: plain JSON, typed, versioned (`CANVAS_DOCUMENT_VERSION`, `MIGRATIONS`). `types.ts` (objects, `Snapshot`, `ReferenceTarget`), `codec.ts` (fail-closed `parseDocument` / `checkObject`; unknown fields are dropped), `document.ts` (bounds, arrow geometry, groups), `capture.ts` (taking and comparing a snapshot's capture), `color.ts`, `html-item.ts` (the sandbox contract), `reference.ts`. |
 | `events/` | The only way a document changes. `plan.ts` turns a **command** into **events** after checking it; `reduce.ts` applies events and returns their inverse; `store.ts` (`CanvasStore`) commits an **envelope** and tells its listeners. `wire.ts` checks commands and envelopes that arrive as JSON. `sync.ts` is the collaboration seam. |
 | `view/` | Pure screen maths: `camera.ts`, `spatial-index.ts` (uniform grid), `document-index.ts` (the index kept current from the event stream, one per store), `cull.ts` (render window, level of detail), `hit-test.ts`. |
 | `react/` | `CanvasView` (the renderer, read-only) and `CanvasEditor` around it (`gestures.ts`, `editor-state.ts`, `chrome.tsx`, `references.ts`). |
-| `snapshot/` | Snapshots: `resolve.ts`, `create.ts`, `block.ts` (the Markdown block), `SnapshotFigure`, `CanvasStage` + `transition.ts` (the open motion), `picture.ts` (the still fallback), `plan-drop.ts`, `registry.tsx`, `directive.tsx`. |
+| `snapshot/` | Snapshots: `resolve.ts` (current, behind, detached), `create.ts`, `block.ts` (the Markdown block), `SnapshotFigure`, `frozen.ts`, `CanvasStage` + `transition.ts` (the portal), `picture.ts` (the still fallback), `plan-drop.ts`, `registry.tsx`, `directive.tsx`. |
 | `unfurl/` | Link previews: `parse.ts`, `fetch.ts`, `route.ts`. |
 
 ### Events
@@ -38,9 +38,14 @@ Styles are plain CSS in `canvas.css` under the `pcv-` prefix, so a host needs no
 
 ### Snapshots
 
-A snapshot (`Snapshot` in the canvas document) is a named, live, read-only window: a frame by id, a set of objects, or a rectangle that remembers what was in it. `resolveSnapshot` answers what it shows now and says so when its objects are gone (`partial` with a count, or `gone`).
+A snapshot is a **materialized view**: a capture of part of the canvas taken at one moment (the owner's direction: "like a materialized view … this one time snapshot … somebody should be able to update the materialization"). Editing the canvas afterwards does not change it.
 
-In a plan it is a directive block, which the existing parser already makes one block:
+- **What is stored.** `Snapshot` (`model/types.ts`) is `id`, `title`, `source` (a frame by id, a set of objects, or a rectangle) and `capture`: the rectangle and a frozen copy of the objects it showed, back to front. It lives in the canvas document, so a plan's block stays two ids and one snapshot can appear any number of times.
+- **Who takes it.** Only the planner, with `captureOf` (`model/capture.ts`): on `add-snapshot`, on `edit-snapshot` with a new source, and on `update-snapshot`. A capture sent with a command is ignored, so a person and an agent make and update snapshots the same way and neither can forge one. The new capture travels in the `snapshot-put` event, so undo, redo and a peer all get it.
+- **What it costs.** The document never mutates an object, so a capture holds the canvas's own objects, not copies, until one of them is edited. Fifty snapshots of an unchanged canvas are fifty small arrays. An arrow with an end stuck to something outside the capture gets that end fixed in place (one small copy), and group membership is dropped, so a capture draws by itself. Not done: a shared table for large `data:` pictures, which are written once per capture when the document is saved.
+- **Behind.** `snapshotStanding` (`snapshot/resolve.ts`) captures the source again and compares (`capturesEqual`, by reference first). No clock or counter is kept, so it is right across peers and after an undo, and it means exactly "taking it again would look different": for a set of objects, one of them changed or was deleted; for a frame or a region, anything in the rectangle changed, arrived or left. Changing something back makes it `current` again. When the source is gone (the frame, or every chosen object) it is `detached`: the capture is all that is left, it stays, and `update-snapshot` is refused. Only a figure that is drawing asks; `behindSnapshots` answers for a whole plan ("update all": dispatch the updates with one `gesture` id for one undo step).
+
+In a plan it is a directive block, which the existing parser already makes one block (name approved by the owner):
 
 ```
 :::canvas-snapshot
@@ -51,11 +56,13 @@ title: Architecture
 :::
 ```
 
-`canvas` and `snapshot` are ids; `title` and the image line are optional. The image is the fallback: another Markdown viewer shows it, and `SnapshotFigure` shows it when the canvas is not in the `CanvasRegistry`. `snapshotToSvg` makes one (self-contained, no script, no outside address).
+`canvas` and `snapshot` are ids; `title` and the image line are optional. A `title` here is the plan's own caption and wins over the snapshot's name. The image is the fallback: another Markdown viewer shows it, and `SnapshotFigure` shows it when the canvas is not in the `CanvasRegistry`. `snapshotToSvg` makes one from the capture (self-contained, no script, no outside address).
 
 The plan renderer draws the block through the `directiveRenderer` seam of `@plannotator/ui` (`components/blocks/directiveRenderer.ts`; see `packages/ui/README.md`): `createSnapshotDirectiveRenderer` returns the function a host passes to `configurePlannotatorUI`. Neither package imports the other. No product host passes it yet.
 
-`SnapshotFigure` is `CanvasView` with a fixed camera. All figures of a canvas share its store and index, and a figure draws only while within 800 px of the screen. Clicking one mounts `CanvasStage`, which draws the canvas clipped to the figure's box with the camera placed so the picture does not move, then springs both to full size. The spring keeps its velocity when turned round, so closing mid-open is continuous; a person who grabs the board takes the camera at once. Reduced motion: a 140 ms fade, nothing travels.
+**The figure** (`SnapshotFigure`) is `CanvasView` over a small frozen store (`snapshot/frozen.ts`, the twelve most recent kept), so it is text and vector shapes, sharp at any zoom. It has no box of its own and sits on the page's ground, exactly the shape of what it shows and never larger than life. It draws only within 800 px of the screen. Its caption is the snapshot's name, typed in place (`edit-snapshot`); with no name it shows the item count. Behind, the caption adds "Changed on the canvas" and one action, "Update". Naming rule (`defaultSnapshotTitle`): the chosen frame's title; else the title of the one frame everything chosen sits inside; else a single object's own words; else none. Never the first object's words.
+
+**The portal** (`CanvasStage`, `transition.ts`). Clicking a figure mounts the stage, which draws the live canvas clipped to the figure's box with the camera placed so the snapshot's rectangle does not move, then one critically damped spring grows the opening and carries the camera. The plan is never unmounted or scrolled: it stands back a little (`recede`, a host element the stage scales and dims) and is where it was on return. When the snapshot is not current, its capture is drawn over the live canvas on the same camera and dissolves over the first 45% of the motion (`ghostOpacity`), so the person steps through the picture they clicked into the canvas as it is now; going back it forms again, so the opening closes onto what the figure shows. While behind, the open canvas offers "Update snapshot" beside "Back to plan". The spring keeps its velocity when turned round, so closing mid-open is continuous; a person who grabs the board takes the camera at once. Reduced motion: a 140 ms fade, nothing travels.
 
 ### Reference cards and link previews
 

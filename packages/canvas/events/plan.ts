@@ -4,9 +4,10 @@
  * goes through here whoever sent it, so a person's gesture and an agent's
  * request are held to the same checks.
  */
-import { checkObject, checkSnapshot, LIMITS, type Checked } from '../model/codec';
+import { captureOf, capturesEqual } from '../model/capture';
+import { checkObject, checkSnapshotInput, LIMITS, type Checked } from '../model/codec';
 import { parseColor } from '../model/color';
-import { groupMembers, isBoundEnd, objectBounds, resolveArrow } from '../model/document';
+import { groupMembers, isBoundEnd, resolveArrow } from '../model/document';
 import { isValidId } from '../model/ids';
 import {
   type Actor,
@@ -256,23 +257,39 @@ export function planCommand(doc: CanvasDocument, command: Command, actor: Actor)
       return done([{ type: 'title-set', title: command.title }]);
 
     case 'add-snapshot': {
-      const checked = checkSnapshot(command.snapshot);
+      const checked = checkSnapshotInput(command.snapshot);
       if (!checked.ok) return checked;
-      const snapshot = checked.value;
-      if (doc.snapshots[snapshot.id]) return fail(`${snapshot.id}: that snapshot id is already used`);
+      const input = checked.value;
+      if (doc.snapshots[input.id]) return fail(`${input.id}: that snapshot id is already used`);
       if (Object.keys(doc.snapshots).length >= LIMITS.snapshots) return fail(`a canvas holds at most ${LIMITS.snapshots} snapshots`);
-      const source = snapshot.source;
-      if (source.kind === 'frame' && doc.objects[source.frame]?.type !== 'frame') return fail(`${snapshot.id}: ${source.frame} is not a frame on this canvas`);
-      if (source.kind === 'objects' && !source.objects.some((id) => objectBounds(doc, id))) return fail(`${snapshot.id}: none of those objects is on this canvas`);
-      return done([{ type: 'snapshot-put', snapshot }]);
+      const capture = captureOf(doc, input.source);
+      if (!capture) return fail(`${input.id}: there is nothing there to capture`);
+      return done([{ type: 'snapshot-put', snapshot: { ...input, capture } }]);
     }
 
     case 'edit-snapshot': {
       const before = doc.snapshots[command.id];
       if (!before) return fail(`there is no snapshot ${command.id}`);
-      const checked = checkSnapshot({ id: before.id, title: command.title ?? before.title, source: command.source ?? before.source });
+      const checked = checkSnapshotInput({ id: before.id, title: command.title ?? before.title, source: command.source ?? before.source });
       if (!checked.ok) return checked;
-      return done([{ type: 'snapshot-put', snapshot: checked.value }]);
+      let capture = before.capture;
+      if (command.source) {
+        const taken = captureOf(doc, checked.value.source);
+        if (!taken) return fail(`${command.id}: there is nothing there to capture`);
+        capture = taken;
+      }
+      if (checked.value.title === before.title && capture === before.capture) return done([]);
+      return done([{ type: 'snapshot-put', snapshot: { ...checked.value, capture } }]);
+    }
+
+    case 'update-snapshot': {
+      const before = doc.snapshots[command.id];
+      if (!before) return fail(`there is no snapshot ${command.id}`);
+      const capture = captureOf(doc, before.source);
+      // What it showed is gone from the canvas: the capture is all that is left of it, so it is kept.
+      if (!capture) return fail(`${command.id}: what it showed is no longer on the canvas`);
+      if (capturesEqual(capture, before.capture)) return done([]);
+      return done([{ type: 'snapshot-put', snapshot: { ...before, capture } }]);
     }
 
     case 'remove-snapshot':

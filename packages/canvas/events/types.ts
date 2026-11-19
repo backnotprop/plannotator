@@ -26,6 +26,7 @@ import type {
   ReferenceTarget,
   Snapshot,
   SnapshotId,
+  SnapshotInput,
   SnapshotSource,
 } from '../model/types';
 
@@ -64,8 +65,12 @@ export type Command =
   | { type: 'ungroup'; ids: ObjectId[] }
   | { type: 'reorder'; ids: ObjectId[]; to: 'front' | 'back' }
   | { type: 'retitle'; title: string }
-  | { type: 'add-snapshot'; snapshot: Snapshot }
+  /** Takes the capture now. A capture sent with it is ignored. */
+  | { type: 'add-snapshot'; snapshot: SnapshotInput }
+  /** A new title, or a new source (which takes the capture again). */
   | { type: 'edit-snapshot'; id: SnapshotId; title?: string; source?: SnapshotSource }
+  /** Take the capture again from what the canvas holds now. */
+  | { type: 'update-snapshot'; id: SnapshotId }
   | { type: 'remove-snapshot'; id: SnapshotId };
 
 export type CommandType = Command['type'];

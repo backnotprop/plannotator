@@ -43,8 +43,6 @@ const NONE: ReadonlySet<ObjectId> = new Set();
 export interface CanvasViewProps {
   store: CanvasStore;
   camera: CameraController;
-  /** Draw only these objects (a snapshot of a chosen set). */
-  only?: ReadonlySet<ObjectId> | null;
   selection?: ReadonlySet<ObjectId>;
   editingId?: ObjectId | null;
   onEditEnd?: (id: ObjectId, text: string) => void;
@@ -74,7 +72,6 @@ function unionWindow(a: Rect, b: Rect | null | undefined): Rect {
 export function CanvasView({
   store,
   camera,
-  only = null,
   selection = NONE,
   editingId = null,
   onEditEnd,
@@ -173,9 +170,8 @@ export function CanvasView({
 
   const mounted = useMemo(() => {
     if (!window_) return [];
-    const ids = visibleIds(doc, index, unionWindow(window_, keepMounted));
-    return only ? ids.filter((id) => only.has(id)) : ids;
-  }, [doc, index, window_, keepMounted, only]);
+    return visibleIds(doc, index, unionWindow(window_, keepMounted));
+  }, [doc, index, window_, keepMounted]);
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];

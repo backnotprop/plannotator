@@ -188,25 +188,41 @@ export const isPlaced = (object: CanvasObject): object is PlacedCanvasObject => 
 
 /**
  * What a snapshot looks at. Three ways to say it:
- * - `frame`: one frame, by id. The view is the frame, wherever it goes.
- * - `objects`: a chosen set. The view follows them; only they are drawn.
- * - `region`: a fixed rectangle. Everything inside is drawn. `objects` lists
- *   what was inside when it was made, so the snapshot can say when they left.
+ * - `frame`: one frame, by id, and whatever is in its rectangle.
+ * - `objects`: a chosen set, and only those.
+ * - `region`: a fixed rectangle, and whatever is in it.
  */
 export type SnapshotSource =
   | { kind: 'frame'; frame: ObjectId }
   | { kind: 'objects'; objects: ObjectId[] }
-  | { kind: 'region'; rect: Rect; objects: ObjectId[] };
+  | { kind: 'region'; rect: Rect };
 
 /**
- * A named, live, read-only window onto part of the canvas. It lives in the
- * canvas document; a plan refers to it by canvas id and snapshot id, so one
- * snapshot can appear in any number of plans, any number of times.
+ * What a snapshot showed when it was taken: the rectangle and a frozen copy
+ * of the objects in it, back to front. See `model/capture.ts`.
  */
-export interface Snapshot {
+export interface SnapshotCapture {
+  rect: Rect;
+  objects: CanvasObject[];
+}
+
+/** What someone gives to make a snapshot. The capture is taken by the planner, never sent. */
+export interface SnapshotInput {
   id: SnapshotId;
   title: string;
   source: SnapshotSource;
+}
+
+/**
+ * A named capture of part of the canvas: a materialized view. It shows what
+ * was there when it was taken (`capture`) and does not change when the
+ * canvas does; `update-snapshot` takes it again. It lives in the canvas
+ * document; a plan refers to it by canvas id and snapshot id, so one
+ * snapshot can appear in any number of plans, any number of times, and the
+ * plan's text stays two ids.
+ */
+export interface Snapshot extends SnapshotInput {
+  capture: SnapshotCapture;
 }
 
 export interface CanvasDocument {

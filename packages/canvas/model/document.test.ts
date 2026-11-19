@@ -17,7 +17,14 @@ const doc: CanvasDocument = {
     lost: { id: 'lost', type: 'arrow', from: { object: 'a' }, to: { object: 'nowhere' } },
   },
   order: ['a', 'b', 'g', 'ab', 'lost'],
-  snapshots: { s: { id: 's', title: 'Both', source: { kind: 'objects', objects: ['a', 'b'] } } },
+  snapshots: {
+    s: {
+      id: 's',
+      title: 'Both',
+      source: { kind: 'objects', objects: ['a', 'b'] },
+      capture: { rect: { x: -24, y: -24, w: 448, h: 88 }, objects: [{ id: 'a', type: 'box', x: 0, y: 0, w: 100, h: 40, text: 'A as it was' }] },
+    },
+  },
 };
 
 describe('reading a document', () => {
@@ -55,6 +62,14 @@ describe('saving and loading', () => {
     expect(parseDocument({ ...doc, order: ['a', 'b', 'g', 'ab'] }).ok).toBe(false);
     expect(parseDocument({ ...doc, order: ['a', 'a', 'b', 'g', 'ab'] }).ok).toBe(false);
     expect(parseDocument({ ...doc, order: [...doc.order, 'ghost'] }).ok).toBe(false);
+  });
+
+  test('a snapshot keeps its capture through a save, and a capture is checked like any other objects', () => {
+    const loaded = parseDocument(serializeDocument(doc));
+    expect(loaded.ok && loaded.value.snapshots.s.capture.objects[0]).toMatchObject({ text: 'A as it was' });
+    const hostile = { ...doc.snapshots.s, capture: { rect: doc.snapshots.s.capture.rect, objects: [{ id: 'p', type: 'image', x: 0, y: 0, w: 9, h: 9, src: 'javascript:1', alt: '' }] } };
+    expect(parseDocument({ ...doc, snapshots: { s: hostile } }).ok).toBe(false);
+    expect(parseDocument({ ...doc, snapshots: { s: { id: 's', title: '', source: doc.snapshots.s.source } } }).ok).toBe(false);
   });
 
   test('a field this version does not know is not carried through', () => {

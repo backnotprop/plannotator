@@ -9,7 +9,7 @@
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import type { Block } from '@plannotator/ui/types';
 import { blockEndLine, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import type { CanvasStore } from '../events/store';
 import { createId } from '../model/ids';
@@ -21,6 +21,8 @@ import { findSnapshotBlocks, insertSnapshotBlock } from '../snapshot/block';
 import { CanvasStage } from '../snapshot/CanvasStage';
 import { createSnapshotDirectiveRenderer } from '../snapshot/directive';
 import { snapshotToDataUrl } from '../snapshot/picture';
+import { behindSnapshots } from '../snapshot/resolve';
+import { SNAPSHOT_STRINGS } from '../snapshot/strings';
 import type { PlanDropTarget } from '../snapshot/plan-drop';
 import { CanvasRegistry, CanvasRegistryProvider } from '../snapshot/registry';
 import type { SnapshotOpenRequest } from '../snapshot/SnapshotFigure';
@@ -89,6 +91,18 @@ function PlanAndCanvas() {
   const [arrived, setArrived] = useState<string | null>(null);
   const [layout, setLayout] = useState<'split' | 'plan'>(bench === 'plan' ? 'plan' : 'split');
   const plan = useRef<HTMLDivElement>(null);
+  const shell = useRef<HTMLDivElement>(null);
+  const doc = useSyncExternalStore(store.subscribe, store.getDocument, store.getDocument);
+  // "Update all in this plan": the plan's snapshots that are behind.
+  const behind = useMemo(
+    () => (bench ? [] : behindSnapshots(doc, indexFor(store), findSnapshotBlocks(markdown).map((found) => found.ref.snapshot))),
+    [doc, markdown, store],
+  );
+  /** One gesture, so one undo takes every update back. */
+  const updateAll = () => {
+    const gesture = createId('g');
+    for (const id of behind) store.dispatch({ type: 'update-snapshot', id }, { gesture });
+  };
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
   const blocksRef = useRef<Block[]>(blocks);
   blocksRef.current = blocks;
@@ -130,7 +144,7 @@ function PlanAndCanvas() {
       const opened = request?.origin.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
       const anchor = drop ? all.find((block) => block.id === drop.blockId) : (all.find((block) => block.id === opened) ?? blockInView());
       const afterLine = !anchor ? Number.MAX_SAFE_INTEGER : drop?.place === 'before' ? anchor.startLine - 1 : blockEndLine(anchor);
-      const fallback = snapshotToDataUrl(store.getDocument(), indexFor(store), snapshot.id);
+      const fallback = snapshotToDataUrl(store.getDocument(), snapshot.id);
       const next = insertSnapshotBlock(markdown, afterLine, {
         canvas: canvasId,
         snapshot: snapshot.id,
@@ -177,7 +191,7 @@ function PlanAndCanvas() {
 
   return (
     <CanvasRegistryProvider registry={registry}>
-      <div className="demo-shell pcv">
+      <div ref={shell} className="demo-shell pcv">
         <header className="demo-head">
           <h1>Canvas demo</h1>
           <button type="button" className="pcv-btn" aria-pressed={layout === 'split'} onClick={() => setLayout(layout === 'split' ? 'plan' : 'split')}>
@@ -190,6 +204,11 @@ function PlanAndCanvas() {
             Canvas unavailable
           </button>
           <span className="demo-spacer" />
+          {behind.length > 0 ? (
+            <button type="button" className="pcv-btn" data-update-all onClick={updateAll}>
+              {SNAPSHOT_STRINGS.updateAll(behind.length)}
+            </button>
+          ) : null}
           <span data-count>{findSnapshotBlocks(markdown).length} snapshots</span>
           <button type="button" className="pcv-btn" aria-pressed={dark} onClick={toggleTheme}>
             Dark
@@ -202,7 +221,7 @@ function PlanAndCanvas() {
           ) : null}
         </div>
       </div>
-      <CanvasStage request={request} registry={registry} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
+      <CanvasStage request={request} registry={registry} recede={() => shell.current} onClosed={() => setRequest(null)} onAddToPlan={addToPlan} linkPreview={linkPreview} resolvePaste={resolvePaste} onOpenReference={openReference} />
     </CanvasRegistryProvider>
   );
 }

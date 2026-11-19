@@ -16,8 +16,8 @@
  *              arrows) and the editor around it (`CanvasEditor`: gestures
  *              and bars).
  *
- * `snapshot/` sits on all four: a live, read-only window onto part of a
- * canvas that embeds in a plan (`SnapshotFigure`), the Markdown block that
+ * `snapshot/` sits on all four: a capture of part of a canvas (a
+ * materialized view) that embeds in a plan (`SnapshotFigure`), the Markdown block that
  * refers to it (`:::canvas-snapshot`), and the motion that opens the canvas
  * from it (`CanvasStage`).
  *
