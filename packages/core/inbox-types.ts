@@ -3257,9 +3257,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * characters): the entry as the tool builds it from the default tool list, with Pi's wrapper, 13,084 → 13,869 bytes
  * (+785), Board on the same +785. Tokens scaled at the entry's bytes per token (3.7), +212, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13869, tokens: 3729 };
+/*
+ * Showing a proposed change (INBOX_CHANGE_RULE on send_message's `body`, approval "before-after", 2026-11-18; no line
+ * in the description): +653 bytes, measured on the real Pi and OpenCode 2 requests in CI (13,869 → 14,522). Board on
+ * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
+ * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 15466, tokens: 4226 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3658,6 +3664,43 @@ export interface InboxAgent {
    * or missing: today's icon). This computer's own window only. Additive.
    */
   rex_mark?: InboxRexMark;
+  /**
+   * The status mark for any agent (owner, 2026-11-18, "steps 1 and 2 together"), from what this Inbox knows of it
+   * (packages/server/inbox-agent-mark.ts): it waits on the person in its terminal (its connection said so: `blocked`
+   * with `permission` or `question`, `where: "terminal"`), a thread of it waits on the person here (`blocked`,
+   * `where: "inbox"`), a turn runs (`working`), or it is at rest on a host that reports turns (`idle`). Never `done`,
+   * never from silence; none for an ended agent or a host that reports nothing about turns. Always sent; a window
+   * draws it only while the person's "Agent status" setting is on (`InboxAgentsGroup.status_marks`), and a fresh
+   * `rex_mark` wins over it. Additive.
+   */
+  status_mark?: InboxAgentMark;
+  /**
+   * Live, and its host reports nothing about its turns (Codex, Qwen Code, T3 Code, Antigravity, an MCP-only agent):
+   * neither working nor idle is known, so the window says neither. Absent otherwise. Additive.
+   */
+  turns_unknown?: true;
+}
+
+/**
+ * An agent's status mark from what the Inbox knows (`InboxAgent.status_mark`): the jelly marks' states it can claim.
+ * No idle (owner ruling, 2026-11-18): an agent at rest draws no mark.
+ */
+export interface InboxAgentMark {
+  state: "working" | "blocked";
+  /** For `blocked` in its terminal: a permission prompt or a question. */
+  kind?: "permission" | "question";
+  /** For `blocked`: where it waits on the person, here in the Inbox (a thread) or in its own terminal. */
+  where?: "inbox" | "terminal";
+}
+
+/** A status mark as another machine or Inbox sent it: null unless it is one this Inbox knows. */
+export function inboxAgentMarkChecked(value: unknown): InboxAgentMark | null {
+  const mark = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const state = mark?.state;
+  if (state !== "working" && state !== "blocked") return null;
+  if (state !== "blocked") return { state };
+  if (mark!.where === "terminal" && (mark!.kind === "permission" || mark!.kind === "question")) return { state, kind: mark!.kind, where: "terminal" };
+  return mark!.where === "inbox" ? { state, where: "inbox" } : null;
 }
 
 /** A Rex pane's status as a mark: OSC 7501's state, and for `blocked` its kind. */
@@ -3683,8 +3726,9 @@ export const INBOX_AGENTS_LISTED_MAX = 40;
  * `first_thread` that is not text is dropped, the rest of the agent kept.
  */
 export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boolean } = { show: false }): InboxAgent {
-  const { label, title, first_thread, place, rex_status, rex_mark, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const { label, title, first_thread, place, rex_status, rex_mark, status_mark, turns_unknown, ...rest } = agent as InboxAgent & Record<string, unknown>;
   const mark = inboxRexMarkChecked(rex_mark);
+  const statusMark = inboxAgentMarkChecked(status_mark);
   const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
   const where = inboxAgentPlaceChecked(place, options);
   const status = rex_status && typeof rex_status === "object" ? (rex_status as Record<string, unknown>) : null;
@@ -3695,6 +3739,8 @@ export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boole
     ...(where ? { place: where } : {}),
     ...(statusState ? { rex_status: { state: statusState, ...(statusKind ? { kind: statusKind } : {}) } } : {}),
     ...(mark ? { rex_mark: mark } : {}),
+    ...(statusMark ? { status_mark: statusMark } : {}),
+    ...(turns_unknown === true ? { turns_unknown: true as const } : {}),
     ...(typeof label === "string" ? { label } : {}),
     ...(typeof title === "string" ? { title } : {}),
     ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),
@@ -3726,6 +3772,11 @@ export interface InboxAgentsGroup {
    * an Inbox from before tiles: the window then draws and offers that machine's agents what it can keep (no tile).
    */
   face_tiles?: true;
+  /**
+   * The person's "Agent status" setting is on (config.json `inboxAgentStatus`; off by default): the windows draw every
+   * agent's `status_mark`. On this Inbox's own group only; absent when off, and from an older Inbox. Additive.
+   */
+  status_marks?: true;
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */

@@ -315,7 +315,8 @@ export function NewMessageComposer({
     <>
       <div className="ib-reply-l" data-new-message-to={target.session}>
         New message to {name} in {thread.project.name}{' '}
-        <span className="ib-mut">(live session, {target.busy ? 'working' : 'idle'})</span>
+        {/* A host that reports nothing about its turns (busy null) is never called idle. */}
+        <span className="ib-mut">(live session{target.busy === true ? ', working' : target.busy === false ? ', idle' : ''})</span>
       </div>
       <div className="ib-rbox">
         <InboxComposerField

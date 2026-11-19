@@ -328,6 +328,7 @@ packages/ui/components/blocks/QuestionContext.lines.test.tsx
 packages/ui/components/blocks/QuestionBlock.host.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
 packages/ui/components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx
+packages/ui/components/blocks/QuestionBlock.change.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
 packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
@@ -523,6 +524,8 @@ packages/editor/App.sessionTitle.test.tsx
 packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
+packages/ui/components/blocks/directiveRenderer.seam.test.tsx
+packages/canvas/snapshot/CanvasStage.dom.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
 packages/ui/components/blocks/AlertBlock.body.test.tsx
@@ -777,6 +780,7 @@ packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
 packages/inbox/agents/agentRexPlace.test.tsx
 packages/inbox/agents/rexMark.test.tsx
+packages/inbox/agents/agentStatusMark.test.tsx
 packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx

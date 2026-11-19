@@ -44,6 +44,7 @@ import { basename } from "node:path";
 import type { InboxFirstSeen } from "./inbox-first-seen";
 import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
 import type { InboxAgentSession } from "./inbox-sessions";
+import { withAgentStatusMark } from "./inbox-agent-mark";
 
 /** A launched session (inbox-launch.ts `agents`). */
 export interface InboxAgentLaunch {
@@ -252,7 +253,10 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
     const stay = new Set([...all].sort((a, b) => keepRank(a) - keepRank(b) || order(a, b)).slice(0, cap));
     return all.filter((agent) => stay.has(agent));
   })();
-  return { agents: kept, total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
+  // Each agent's status mark (inbox-agent-mark.ts), from what its session's connection says now.
+  const facts = new Map(evidence.sessions.map((entry) => [entry.session, { busy: entry.busy, blocked: entry.blocked ?? null }] as const));
+  const marked = kept.map((agent) => withAgentStatusMark(agent, facts.get(agent.session) ?? null));
+  return { agents: marked, total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
 }
 
 /** The merged view's agents: this Inbox's group first, named by its id, then each linked machine's (`machines.agents`). */
