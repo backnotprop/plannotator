@@ -25,7 +25,7 @@ export function noticeLines(notice: ListNotice | null, held: boolean, canLeave: 
 
 /**
  * One of the held list's lines (newsWords.ts): what came, then Show (or Show all). One line at every width (the owner,
- * 2026-11-02: "1 new in appnotes · Users/ramos/…" wrapped onto two). The lead ("Claude Code replied in", "2 replies")
+ * 2026-11-02: "1 new in appnotes · " and a long folder path wrapped onto two). The lead ("Claude Code replied in", "2 replies")
  * and the action never shrink; the thread's or project's name takes the rest and is cut with "…"; "from …" is left
  * off whole when there is no room for it (inbox.css: it wraps onto a second line the box clips). While anything is
  * cut, the whole sentence is the tooltip. The button's accessible name is its words, uncut (a clipped part is still read).

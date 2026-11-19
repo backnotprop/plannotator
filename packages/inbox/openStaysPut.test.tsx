@@ -330,7 +330,7 @@ test.skipIf(!hasDom)('Show lights exactly the rows it brought in, after they sli
   const reply = await agentSends('One more thing on this one.', moved);
   expect(reply).toBeTruthy();
   act(() => pokeStream!());
-  await until(() => el.querySelector('[data-inbox-notice]')?.textContent?.includes('2 new in') === true, 'the "2 new" notice');
+  await until(() => el.querySelector('[data-inbox-notice]')?.textContent?.startsWith('1 new thread, 1 reply') === true, 'the "1 new thread, 1 reply" notice');
   const lit = () => [...el.querySelectorAll('.ib-listcol [data-thread-id][data-lit]')].map((r) => r.getAttribute('data-thread-id')!).sort();
 
   // A close settles the person's own read and lights nothing.
@@ -821,7 +821,7 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
   const held = order(el);
   const notice = el.querySelector('[data-inbox-notice]')!.textContent;
-  expect(notice).toContain('1 new in');
+  expect(notice).toMatch(/^New from .+: “/);
   // Star thread from the header's ⋯ menu (Base UI opens on the pointer's press).
   const more = el.querySelector<HTMLElement>('[data-thread-more]')!;
   await act(async () => {
