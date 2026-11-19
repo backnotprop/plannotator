@@ -159,6 +159,7 @@ import {
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
 import { exitWhenParentGone } from "./orphan-plan-review";
+import { cliReviewAgentWatch, endReviewWhenAgentGone } from "./review-agent-watch";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 import { isInboxSessionId } from "@plannotator/core/inbox-types";
@@ -1830,7 +1831,12 @@ if (args[0] === "sessions") {
 
   // Start review server (even if empty - user can switch diff types in local mode)
   const liveSession = reviewLiveSessionOf(process.env);
+  // Who reads the decision, and whether they are gone (review-agent-watch.ts).
+  // A review the Inbox opened from a live thread answers into that thread:
+  // no agent to lose.
+  const agentWatch = liveSession ? null : cliReviewAgentWatch();
   const server = await startReviewServer({
+    agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
     liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
     liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,
@@ -1894,8 +1900,14 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
+  // A local review ends once its agent is gone, keeping its draft. A PR
+  // review stays: it can still post to GitHub/GitLab with no agent.
+  const stopAgentWatch = agentWatch && !isPRMode ? endReviewWhenAgentGone(agentWatch, server) : () => {};
+
   // Wait for user feedback
   const result = await server.waitForDecision();
+  // A decision was taken: it is delivered below, whatever the agent does now.
+  stopAgentWatch();
 
   // Give browser time to receive response and update UI
   await Bun.sleep(1500);
@@ -2908,7 +2920,10 @@ if (args[0] === "sessions") {
   });
   setServerReadyTarget(reviewTarget);
 
+  // The OpenCode plugin reads the decision off this process's stdout.
+  const agentWatch = cliReviewAgentWatch();
   const server = await startReviewServer({
+    agentPresence: agentWatch ? () => agentWatch.presence() : undefined,
     rawPatch,
     gitRef,
     error: diffError,
@@ -2963,7 +2978,10 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
+  const stopAgentWatch = agentWatch && !isPRMode ? endReviewWhenAgentGone(agentWatch, server) : () => {};
+
   const result = await server.waitForDecision();
+  stopAgentWatch();
   await Bun.sleep(1500);
   server.stop();
 

@@ -366,8 +366,10 @@ packages/editor/editableDocumentsHook.test.tsx
 packages/review-editor/components/InlineAnnotation.explain.test.tsx
 packages/review-editor/components/InlineAnnotation.suggestionLanguage.test.tsx
 packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
+packages/review-editor/components/ReviewEnded.dom.test.tsx
 packages/review-editor/App.panelView.test.tsx
 packages/review-editor/App.agentTool.test.tsx
+packages/review-editor/App.agentGone.test.tsx
 packages/review-editor/App.guideViewed.test.tsx
 packages/review-editor/App.semanticSwitch.test.tsx
 packages/review-editor/components/ReviewPanelToggle.test.tsx

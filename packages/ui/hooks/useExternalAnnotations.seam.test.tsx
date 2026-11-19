@@ -192,12 +192,15 @@ describe('session-closed event', () => {
       emit?.({ type: 'session-closed', by: 'agent', unsentAnnotations: 4 });
       // Plan mode / the agent session ended (Pi's plan review): not an agent close.
       emit?.({ type: 'session-closed', by: 'session', unsentAnnotations: 1 });
+      // A local code review whose agent is gone: the page keeps itself and says so.
+      emit?.({ type: 'session-closed', by: 'gone', unsentAnnotations: 2 });
       // An unknown closer reads as the agent, as before the field had variants.
       emit?.({ type: 'session-closed', by: 'later-kind', unsentAnnotations: 0 });
     });
     expect(closed).toEqual([
       { unsent: 4, by: 'agent' },
       { unsent: 1, by: 'session' },
+      { unsent: 2, by: 'gone' },
       { unsent: 0, by: 'agent' },
     ]);
     expect(resultRef.current?.externalAnnotations.map((a) => a.id)).toEqual(['x']);

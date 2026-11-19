@@ -124,10 +124,12 @@ interface UseExternalAnnotationsReturn<T> {
 export interface ExternalSessionClosed {
   unsentAnnotations: number;
   /**
-   * Who closed it: the agent (`POST /api/host/close`), or `"session"` when plan
-   * mode or the agent session itself ended. Anything else reads as `"agent"`.
+   * Who closed it: the agent (`POST /api/host/close`), `"session"` when plan
+   * mode or the agent session itself ended, or `"gone"` when a local code
+   * review's server is quitting because its agent is gone. Anything else
+   * reads as `"agent"`.
    */
-  by?: 'agent' | 'session';
+  by?: 'agent' | 'session' | 'gone';
 }
 
 export function useExternalAnnotations<T extends { id: string; source?: string }>(
@@ -198,7 +200,7 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
         case 'session-closed':
           onSessionClosedRef.current?.({
             unsentAnnotations: typeof parsed.unsentAnnotations === 'number' ? parsed.unsentAnnotations : 0,
-            by: parsed.by === 'session' ? 'session' : 'agent',
+            by: parsed.by === 'session' || parsed.by === 'gone' ? parsed.by : 'agent',
           });
           break;
       }

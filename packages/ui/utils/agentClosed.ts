@@ -49,7 +49,7 @@ export function sessionClosedSubtitle(unsentAnnotations: number): string {
 
 /** Title and subtitle for a closed review, by who closed it. */
 export function closedReviewCopy(
-  closed: { unsentAnnotations: number; by?: 'agent' | 'session' },
+  closed: { unsentAnnotations: number; by?: 'agent' | 'session' | 'gone' },
   surface: AgentClosedSurface = 'document',
 ): { title: string; subtitle: string } {
   if (closed.by === 'session') {
