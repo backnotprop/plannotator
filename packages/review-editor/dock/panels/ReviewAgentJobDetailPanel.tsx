@@ -483,7 +483,7 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
           </>
         )}
         {ann.reviewProfileLabel && (
-          <span className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent-text flex-shrink-0">
+          <span className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent-text/90 flex-shrink-0">
             {ann.reviewProfileLabel}
           </span>
         )}

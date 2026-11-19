@@ -720,9 +720,9 @@
     --sidebar-border: var(--border);
     --sidebar-ring: var(--ring);
     /* Accent used as text on the page (`text-accent-text`): the accent itself
-     * unless a theme sets a separate one, where its accent is a fill that text
-     * cannot also be drawn in at 4.5:1 (a pale hover fill, or an orange that
-     * carries dark text). */
+     * unless a theme sets a separate one, where its accent is a pale fill that
+     * text drawn in it would vanish against (Simple, Neutral, Quantum Rose
+     * light). */
     --accent-text: var(--accent);
     /* Comment-annotation color follows the theme's accent text unless the
      * theme overrides it (neutral themes whose accent is an illegible gray). */
@@ -743,14 +743,6 @@
     --float-shadow:
       0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent),
       0 16px 40px -10px color-mix(in oklch, var(--float-shadow-ink) 70%, transparent);
-  }
-
-  /* Placeholder text in every field: the theme's muted text, solid. Tailwind's
-   * preflight draws it at half the text colour, below 4.5:1 in most themes.
-   * A field that names its own placeholder colour keeps it. */
-  ::placeholder {
-    color: var(--muted-foreground);
-    opacity: 1;
   }
 
   html {

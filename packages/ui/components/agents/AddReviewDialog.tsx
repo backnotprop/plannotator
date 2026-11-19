@@ -81,7 +81,7 @@ export function AddReviewDialog({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter your skills"
-              className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground/90 outline-none placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground/90 outline-none placeholder:text-muted-foreground/40"
             />
           </div>
         </div>

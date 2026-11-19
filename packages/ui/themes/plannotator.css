@@ -13,11 +13,8 @@
   --muted-foreground: oklch(0.72 0.02 260);
   --accent: oklch(0.70 0.20 60);
   --accent-foreground: oklch(0.15 0.02 260);
-  --accent-text: oklch(0.70 0.20 60);
   --destructive: oklch(0.65 0.20 25);
-  /* Dark text on the red, as on every other fill here: white read at 3.4:1. Darkening the red instead would
-     take red text on the background (text-destructive) below 4.5:1. */
-  --destructive-foreground: oklch(0.15 0.02 260);
+  --destructive-foreground: oklch(0.98 0 0);
   --border: oklch(0.35 0.02 260);
   --input: oklch(0.26 0.02 260);
   --ring: oklch(0.75 0.18 280);
@@ -47,11 +44,8 @@
   --secondary-foreground: oklch(1 0 0);
   --muted: oklch(0.92 0.01 260);
   --muted-foreground: oklch(0.40 0.02 260);
-  /* The orange fill, a touch lighter so its dark text reads at 4.5:1; accent used as text is the same orange,
-     darker (4.5:1 on the background and on its own 10% tint, where the badges draw it). */
-  --accent: oklch(0.605 0.22 50);
+  --accent: oklch(0.60 0.22 50);
   --accent-foreground: oklch(0.18 0.02 260);
-  --accent-text: oklch(0.53 0.22 50);
   --destructive: oklch(0.50 0.25 25);
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.88 0.01 260);
@@ -59,7 +53,7 @@
   --ring: oklch(0.50 0.25 280);
   --success: oklch(0.45 0.20 150);
   --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.548 0.18 85);
+  --warning: oklch(0.55 0.18 85);
   --warning-foreground: oklch(0.18 0.02 260);
 
   --code-bg: oklch(0.92 0.01 260);

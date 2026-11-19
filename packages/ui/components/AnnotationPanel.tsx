@@ -1098,7 +1098,7 @@ const AnnotationEditComposer: React.FC<{
         aria-controls={menuOpen ? listboxId : undefined}
         aria-owns={menuOpen ? listboxId : undefined}
         aria-activedescendant={mentionActiveOptionId(listboxId, mention.menu)}
-        className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+        className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
         style={{ fieldSizing: 'content', minHeight: 44 } as React.CSSProperties}
       />
       <div className="mt-1.5 flex justify-end gap-1.5">
@@ -1509,7 +1509,7 @@ const CodeAnnotationCard: React.FC<{
             }}
             placeholder="Add your comment..."
             aria-label="Annotation comment"
-            className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+            className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
             style={{ fieldSizing: 'content', minHeight: 44 } as React.CSSProperties}
           />
           <div className="mt-1.5 flex justify-end gap-1.5">

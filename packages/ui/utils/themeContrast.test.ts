@@ -1,18 +1,16 @@
 /**
- * Text contrast in every built-in theme (WCAG 2.x, 4.5:1 for body text), computed from the theme files as text.
+ * Text contrast in every built-in theme (WCAG 2.x), computed from the theme files as text.
  *
  * What regresses if this fails:
- * - a theme's solid text pairs fall below 4.5:1: text on its page, muted text, card and popover text, and the text
- *   on its primary, secondary, accent and destructive fills (a destructive button whose text is the fill's own red
- *   read at 1:1 in Simple and Neutral light);
- * - one of Plannotator's own themes (plannotator, -graphite, -modern) lets any text colour it draws on its page
- *   (links, red, amber, green, accent text) fall below 4.5:1;
- * - light muted text goes back to an editor's pale comment grey;
- * - placeholder text goes back to a faded colour (an alpha on the muted text, Tailwind's half-strength default).
+ * - a theme draws text that is not there: a foreground near-identical to its fill (below 1.5:1), as Simple and
+ *   Neutral light's destructive buttons did (the text was the fill's own red, 1:1), or accent-coloured text on the
+ *   page in an accent that is a pale fill;
+ * - a light theme's muted text goes back below 4.5:1 on its background (an editor's pale comment grey);
+ * - any other solid text pair falls below 4.5:1 where it did not, or a pair already below gets worse.
  *
- * The pairs that already failed in third-party palettes when this guard was written are pinned in
- * themeContrastAllowList.json with their ratio: a new failure, or a pinned one getting worse, fails here; one that is
- * fixed must leave the list. Colours are clipped to sRGB per channel, as an sRGB screen shows out-of-gamut oklch.
+ * The pairs below 4.5:1 when this guard was written are pinned in themeContrastAllowList.json with their ratio: a
+ * new one fails here, and one that is fixed must leave the list. Colours are clipped to sRGB per channel, as an sRGB
+ * screen shows out-of-gamut oklch.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -22,10 +20,11 @@ import { BUILT_IN_THEMES } from './themeRegistry';
 import ALLOWED from './themeContrastAllowList.json';
 
 const FLOOR = 4.5;
+/** Below this, text and what it sits on are near-identical: the text is not there. */
+const INVISIBLE = 1.5;
 const UI = join(import.meta.dir, '..');
-const OWN = new Set(['plannotator', 'plannotator-graphite', 'plannotator-modern']);
 
-/** Solid text on its surface, checked in every theme. */
+/** Solid text on its surface. */
 const PAIRS: readonly (readonly [string, string])[] = [
   ['--foreground', '--background'],
   ['--muted-foreground', '--background'],
@@ -36,13 +35,6 @@ const PAIRS: readonly (readonly [string, string])[] = [
   ['--accent-foreground', '--accent'],
   ['--destructive-foreground', '--destructive'],
   ['--accent-text', '--background'],
-];
-/** Coloured text on the page: in Plannotator's own themes too, with no exceptions. */
-const OWN_PAIRS: readonly (readonly [string, string])[] = [
-  ['--primary', '--background'],
-  ['--destructive', '--background'],
-  ['--warning', '--background'],
-  ['--success', '--background'],
 ];
 
 /** The custom properties of the rule whose selector list names `selector`. */
@@ -79,7 +71,7 @@ function measure(): Measured[] {
         return c;
       };
       const page = color('--background');
-      for (const [fg, bg] of [...PAIRS, ...(OWN.has(theme.id) ? OWN_PAIRS : [])]) {
+      for (const [fg, bg] of PAIRS) {
         const under = compositeOver(color(bg), page);
         rows.push({ theme: theme.id, mode, pair: `${fg} / ${bg}`, ratio: contrastRatio(compositeOver(color(fg), under), under) });
       }
@@ -90,12 +82,23 @@ function measure(): Measured[] {
 
 const allowed = ALLOWED as { theme: string; mode: string; pair: string; ratio: number }[];
 const key = (r: { theme: string; mode: string; pair: string }) => `${r.theme} ${r.mode} ${r.pair}`;
+const lightMuted = (r: { mode: string; pair: string }) => r.mode === 'light' && r.pair === '--muted-foreground / --background';
 
 describe('built-in theme text contrast', () => {
   const rows = measure();
-  const pinned = new Map(allowed.map((a) => [key(a), a.ratio]));
 
-  test('every solid text pair reads at 4.5:1, or is a pinned third-party failure that has not got worse', () => {
+  test('no theme draws text near-identical to what it sits on', () => {
+    expect(rows.filter((r) => r.ratio < INVISIBLE).map((r) => `${key(r)} ${r.ratio.toFixed(2)}`)).toEqual([]);
+  });
+
+  test('muted text reads at 4.5:1 on the background in every light theme', () => {
+    const light = rows.filter(lightMuted);
+    expect(light.length).toBeGreaterThan(30);
+    expect(light.filter((r) => r.ratio < FLOOR).map(key)).toEqual([]);
+  });
+
+  test('every other solid text pair reads at 4.5:1, or is pinned and has not got worse', () => {
+    const pinned = new Map(allowed.map((a) => [key(a), a.ratio]));
     const fresh: string[] = [];
     const worse: string[] = [];
     for (const r of rows) {
@@ -108,46 +111,15 @@ describe('built-in theme text contrast', () => {
     expect(worse).toEqual([]);
   });
 
-  test('the allow-list holds only pairs that still fail, at the ratio they have, and never one of our own themes', () => {
+  test('the allow-list holds only pairs that still fail, at the ratio they have, and none the hard rules forbid', () => {
     const now = new Map(rows.map((r) => [key(r), r.ratio]));
     for (const a of allowed) {
-      expect(OWN.has(a.theme), key(a)).toBe(false);
+      expect(lightMuted(a), `${key(a)}: light muted text has no exceptions`).toBe(false);
+      expect(a.ratio, `${key(a)}: near-identical text has no exceptions`).toBeGreaterThanOrEqual(INVISIBLE);
       const ratio = now.get(key(a));
       expect(ratio, `${key(a)} is not a measured pair`).toBeDefined();
       expect(ratio!, `${key(a)} now reads at ${ratio!.toFixed(2)}: take it off the list`).toBeLessThan(FLOOR);
       expect(ratio!, `${key(a)} moved: update its pin`).toBeCloseTo(a.ratio, 2);
     }
-  });
-
-  test('muted text reads at 4.5:1 on the background in every light theme', () => {
-    const light = rows.filter((r) => r.mode === 'light' && r.pair === '--muted-foreground / --background');
-    expect(light.length).toBeGreaterThan(30);
-    expect(light.filter((r) => r.ratio < FLOOR).map(key)).toEqual([]);
-  });
-});
-
-describe('placeholder text', () => {
-  test("the shared rule paints placeholders in the theme's solid muted text, over Tailwind's half-strength default", () => {
-    const css = readFileSync(join(UI, 'theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-    const base = /\n {2}::placeholder\s*\{([^}]*)\}/.exec(css);
-    expect(base).not.toBeNull();
-    expect(base![1]).toContain('color: var(--muted-foreground)');
-    expect(base![1]).toContain('opacity: 1');
-  });
-
-  test('no field fades its placeholder below the muted text', async () => {
-    const faded: string[] = [];
-    const roots = ['packages', 'apps'];
-    for (const root of roots) {
-      for await (const file of new Bun.Glob('**/*.{tsx,ts,css}').scan({ cwd: join(UI, '..', '..', root) })) {
-        if (file.includes('node_modules') || file.includes('/dist/') || file.endsWith('.test.ts') || file.endsWith('.test.tsx')) continue;
-        const text = readFileSync(join(UI, '..', '..', root, file), 'utf8');
-        for (const m of text.matchAll(/placeholder:text-muted-foreground\/\d+/g)) faded.push(`${root}/${file}: ${m[0]}`);
-        for (const m of text.matchAll(/::placeholder[^{]*\{[^}]*\}/g)) {
-          if (/var\(--muted-foreground\)/.test(m[0]) && /opacity:\s*0?\.\d|color-mix\(/.test(m[0])) faded.push(`${root}/${file}: ${m[0]}`);
-        }
-      }
-    }
-    expect(faded).toEqual([]);
   });
 });

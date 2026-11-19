@@ -50,11 +50,8 @@
   --secondary-foreground: oklch(1 0 0);
   --muted: oklch(0.92 0.01 260);
   --muted-foreground: oklch(0.40 0.02 260);
-  /* The orange fill, a touch lighter so its dark text reads at 4.5:1; accent used as text is the same orange,
-     darker (4.5:1 on the background and on its own 10% tint, where the badges draw it). */
-  --accent: oklch(0.605 0.22 50);
+  --accent: oklch(0.60 0.22 50);
   --accent-foreground: oklch(0.18 0.02 260);
-  --accent-text: oklch(0.53 0.22 50);
   --destructive: oklch(0.50 0.25 25);
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.88 0.01 260);
@@ -62,7 +59,7 @@
   --ring: oklch(0.50 0.25 280);
   --success: oklch(0.45 0.20 150);
   --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.548 0.18 85);
+  --warning: oklch(0.55 0.18 85);
   --warning-foreground: oklch(0.18 0.02 260);
 
   --code-bg: oklch(0.92 0.01 260);

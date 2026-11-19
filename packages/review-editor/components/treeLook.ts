@@ -57,7 +57,7 @@ const unsafeCSS = `
     line-height: ${TREE_ROW_HEIGHT - 2}px;
     border-color: transparent;
     &::placeholder {
-      color: var(--muted-foreground);
+      color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
     }
     &:focus-visible, &[data-file-tree-search-input-fake-focus="true"] {
       outline: 1px solid color-mix(in oklab, var(--primary) 50%, transparent);
