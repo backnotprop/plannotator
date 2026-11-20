@@ -119,9 +119,11 @@ export function createRefCards(options: Partial<Parameters<typeof createSharedRe
  * from Linear (inbox-linear-cards.ts) under the Inbox's key (the one saved in its Settings → Accounts, else
  * `LINEAR_API_KEY`), read per fetch. A test's own `refRunner` gets no real Linear.
  */
-export function createSessionRefCards(refRunner?: RefRunner): ReturnType<typeof createRefCards> {
+export function createRefCardsWithLinear(refRunner?: RefRunner): ReturnType<typeof createRefCards> {
   const cards = createRefCards(refRunner ? { run: refRunner } : {});
-  return refRunner ? cards : withLinearCards(cards, createLinearCards({ apiKey: () => readLinearApiKey(getPlannotatorDataDir()) }));
+  if (refRunner) return cards;
+  const dataDir = getPlannotatorDataDir();
+  return withLinearCards(cards, createLinearCards({ apiKey: () => readLinearApiKey(dataDir) }));
 }
 
 /**

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { InboxLinearKeyState } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { linearApiKey } from "./inbox-linear-cards";
 
 export const LINEAR_KEY_FILE = join("inbox", "linear-key");
 
@@ -14,11 +15,9 @@ function savedLinearKey(dataDir: string): string | null {
   }
 }
 
-const envLinearKey = (env: Record<string, string | undefined>): string | null => env.LINEAR_API_KEY?.trim() || null;
-
 /** The key Linear is read with: the one saved in Settings → Accounts (under `dataDir`), else `LINEAR_API_KEY`. */
 export function readLinearApiKey(dataDir: string, env: Record<string, string | undefined> = process.env): string | null {
-  return savedLinearKey(dataDir) ?? envLinearKey(env);
+  return savedLinearKey(dataDir) ?? linearApiKey(env);
 }
 
 export interface LinearKey {
@@ -39,7 +38,7 @@ export function createLinearKey(options: {
   const keyPath = join(options.dataDir, LINEAR_KEY_FILE);
   const env = options.env ?? process.env;
   const savedKey = () => savedLinearKey(options.dataDir);
-  const envKey = () => envLinearKey(env);
+  const envKey = () => linearApiKey(env);
   const writeKey = (key: string) => {
     mkdirSync(join(options.dataDir, "inbox"), { recursive: true, mode: 0o700 });
     const temp = `${keyPath}.${process.pid}.tmp`;

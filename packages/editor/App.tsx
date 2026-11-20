@@ -669,7 +669,7 @@ const App: React.FC = () => {
   // Hover cards for issue, PR and MR links (ui RefHoverCard): the server reads them with this
   // computer's gh / glab (GET /api/ref, ref-cards.ts). Only when a Plannotator server serves
   // the page, never on a share link. A card shows only when the forge answered (`onlyWithData`).
-  // Linear issue links get one too, read with the Linear API key (ui linearLinkCards).
+  // On the Bun servers Linear issue links get one too, read with the Linear API key (ui linearLinkCards).
   // (The transport is installed further down, once `isSharedSession` exists.)
   const refCardRootRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState<Origin | null>(null);

@@ -7,7 +7,7 @@
  * (`{ serverSession, workspace, teams, key }`: which bare identifiers the window
  * links, and whether Linear took the key; one more hook in inbox.ts). The plan
  * and annotate servers put the same cards behind `GET /api/ref`
- * (`createSessionRefCards` in ref-cards.ts).
+ * (`createRefCardsWithLinear` in ref-cards.ts).
  *
  * The fetch: one read-only GraphQL `query` POSTed to api.linear.app with the
  * API key as is (never logged, never sent anywhere else), read per fetch. No
