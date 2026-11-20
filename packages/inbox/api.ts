@@ -7,7 +7,7 @@
 
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk, InboxPullRiskAuto } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxActionOutcome, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk, InboxPullRiskAuto } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -833,7 +833,7 @@ async function getWithin<T>(path: string, timeoutMs: number, outer?: AbortSignal
 }
 
 /** An action item mark as the window sends it; `quiet`: a note typed under the marked row. */
-type ActionMarkBody = { outcome: 'done' | 'cant'; note?: string | null; quiet?: boolean };
+type ActionMarkBody = { outcome: InboxActionOutcome; note?: string | null; quiet?: boolean };
 
 function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<string, unknown> {
   return {

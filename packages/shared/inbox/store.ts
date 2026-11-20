@@ -2447,25 +2447,28 @@ export class InboxStore {
     const draft = this.replyDrafts.get(threadId) ?? null;
     // Comments waiting for a Send: on attached files, the guided review, the messages (kept per thread).
     const comments = this.unsentAnnotations.get(threadId) ?? 0;
-    // Action items whose Done or Can't do it waits in the reply draft (approval "inbox-action-items-in-reply").
+    // Action items whose Done, Can't do it or Skip waits in the reply draft (approval "inbox-action-items-in-reply").
     let draftDone = 0;
     let draftCant = 0;
+    let draftSkipped = 0;
     for (const message of messages) {
       if (message.author.kind !== "agent") continue;
       for (const q of this.questionsOf(message.id)) {
         if (!inboxActionInDraft(q)) continue;
         // The agent saw it done: it counts done, whatever the person had marked (their reason still goes).
         if (q.action_result?.by === "person" && q.action_result.outcome === "cant") draftCant += 1;
+        else if (q.action_result?.by === "person" && q.action_result.outcome === "skip") draftSkipped += 1;
         else draftDone += 1;
       }
     }
-    const unsent = draft !== null || summary.questions.picked > 0 || comments > 0 || draftDone + draftCant > 0
+    const unsent = draft !== null || summary.questions.picked > 0 || comments > 0 || draftDone + draftCant + draftSkipped > 0
       ? {
           reply_at: draft?.updated_at ?? null,
           picks: summary.questions.picked,
           comments,
           ...(draftDone > 0 ? { done: draftDone } : {}),
           ...(draftCant > 0 ? { cant: draftCant } : {}),
+          ...(draftSkipped > 0 ? { skipped: draftSkipped } : {}),
         }
       : null;
     const statesOf = (message: InboxMessage) => askingStates?.get(message.id) ?? [];
@@ -4415,14 +4418,19 @@ export class InboxStore {
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
-    // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3).
+    // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
+    // the person already sent is kept the same way (nothing of it is left to send).
     for (const questionId of doneIds) {
       const record = this.questions.get(questionId)!;
-      const mine = record.action_result?.by === "person" && record.action_result.staged === true ? record.action_result : null;
+      const result = record.action_result?.by === "person" ? record.action_result : null;
+      const mine = result && (result.staged === true || result.outcome === "skip") ? result : null;
+      // A sent skip stays sent at its new revision: the person's reply keeps listing it, and a mark on it is still refused.
+      const wasSent = record.revision > 0 && record.sent_revision === record.revision;
       this.appendQuestion(
         {
           ...record,
           revision: record.revision + 1,
+          ...(wasSent ? { sent_revision: record.revision + 1 } : {}),
           action_result: {
             outcome: "done",
             note: null,
@@ -4578,9 +4586,11 @@ export class InboxStore {
       // Open, or the person's Done or Can't do it waiting in their draft: the agent's done settles that one, and the
       // person's note still goes with their Send (approval "inbox-action-items-in-reply", Q3). One the person marked
       // through the timed path (decision mode, the phone door), inside its Undo window, is theirs and goes as they said.
+      // One the person skipped and sent: the agent may still see it done (the person chose not to, the agent did it).
       const open = records.filter((r) => {
         const state = inboxQuestionState(r, resolved);
-        return state === "open" || (state === "picked" && r.action_result?.by === "person" && r.action_result.staged === true);
+        const mark = r.action_result?.by === "person" ? r.action_result : null;
+        return state === "open" || (state === "picked" && mark?.staged === true) || (state === "sent" && mark?.outcome === "skip");
       });
       if (open.length === 0) {
         const state = inboxQuestionState(records[0]!, resolved);

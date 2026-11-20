@@ -21158,6 +21158,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxactionresult-outcome-skip",
+      "title": "enum:InboxActionResult.outcome.skip",
+      "surface": [
+        "enum:InboxActionResult.outcome.skip"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxactionresult-person-outcome-skip",
+      "title": "enum:InboxActionResult.person.outcome.skip",
+      "surface": [
+        "enum:InboxActionResult.person.outcome.skip"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxrowunsent-skipped",
+      "title": "field:InboxRowUnsent.skipped",
+      "surface": [
+        "field:InboxRowUnsent.skipped"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
