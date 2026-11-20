@@ -22,6 +22,7 @@ import { checkSendPrototypes } from "./inbox-prototypes";
 import { prototypesNotFramedText } from "./inbox-web-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
+import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
@@ -230,6 +231,10 @@ export const SEND_BODY_DESCRIPTION = [
   INBOX_ACTION_GUIDE,
   "",
   INBOX_ACTION_EXAMPLE,
+  "",
+  // Run and Secret: a command the person runs with one press, a secret they save on their computer. Short here;
+  // the whole text and its examples are in `plannotator inbox --help` (INBOX_RUN_GUIDE).
+  INBOX_RUN_TOOL_TEXT,
   "",
   INBOX_REREAD_RULE,
 ].join("\n");

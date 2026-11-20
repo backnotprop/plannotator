@@ -69,6 +69,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-priority.ts',
   'packages/server/inbox-project-tags.ts',
   'packages/server/inbox-reply-drafts.ts',
+  'packages/server/inbox-run-routes.ts',
   'packages/server/inbox-scheduled-routes.ts',
   'packages/server/inbox-search.ts',
   'packages/server/inbox-sessions.ts',

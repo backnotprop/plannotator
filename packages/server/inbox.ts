@@ -277,7 +277,8 @@ import { withRexMark, withRexStatus } from "./inbox-rex-status";
 import { createInboxAgentStatusSetting } from "./inbox-agent-status-setting";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
-import { createLoginEnv } from "./inbox-launch-env";
+import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
+import { createInboxRunSetup } from "./inbox-run-setup";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
 import { createInboxTakeBack } from "./inbox-take-back";
@@ -1336,6 +1337,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * which writes no record: the windows' streams say `event: thread-pulls` and each reads those threads' PRs again.
    */
   const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
+  // A `:::run` card's state changed (a run started, ended or was stopped; a secret saved or removed: null, every card).
+  const runStateListeners = new Set<(messageIds: readonly string[] | null) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sound's settings were saved (config.json `inboxSound`): the windows' streams say `event: sound`, so a window in the background rings by the new choice at once. */
@@ -4241,6 +4244,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again. Windows only (additive; a window that predates it skips the frame).
         const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
         if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
+        // A run card's state changed here (any window's press, a phone's, a run ending): the cards showing it read
+        // again, so a window polls only while a command it shows is running. Windows only (additive).
+        const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
+        if (windowId) runStateListeners.add(onRunState);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -4323,6 +4330,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
+          runStateListeners.delete(onRunState);
           rowsListeners.delete(onRows);
           soundListeners.delete(onSound);
           stopShowArchived();
@@ -5052,6 +5060,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
   const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
+  // The person's login-shell env: a launch's, and a `:::run` command's (inbox-run-routes.ts).
+  const loginEnv = process.env.PLANNOTATOR_TEST_SANDBOX
+    ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
+    : createLoginEnv({
+        run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
+        env: () => process.env,
+        log: (line) => process.stderr.write(`${line}\n`),
+      });
   // Rex (superlogical.com/rex): where agents live and what their panes say, starting agents in Rex, Show in Rex. Only an existing server is ever reached.
   // Under test (bun test, or a sandboxed binary) no Rex is reached but one a test names: `options.rex`, or a sandbox's
   // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is. Any system Rex runs on (inbox-rex-where.ts):
@@ -5155,13 +5171,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(),
     platform: process.platform,
     // A sandboxed test Inbox finds agents only on the PATH its test names (PLANNOTATOR_TEST_LAUNCH_PATH: the fakes), never the person's.
-    loginEnv: process.env.PLANNOTATOR_TEST_SANDBOX
-      ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
-      : createLoginEnv({
-          run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
-          env: () => process.env,
-          log: (line) => process.stderr.write(`${line}\n`),
-        }),
+    loginEnv,
     ownEnv: launchOwnEnv,
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
     // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
@@ -5562,13 +5572,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
+  const openInLauncher = options.openInLauncher ?? systemOpenInLauncher();
   const openInRoute = createInboxOpenInRoute({
     store,
     serverSession,
     readBody,
     json,
     localOnly,
-    launcher: options.openInLauncher ?? systemOpenInLauncher(),
+    launcher: openInLauncher,
     home: options.openInHome,
     doorOf: (req) => fromDeviceDoor.get(req) ?? null,
     codeReviewOn,
@@ -5591,6 +5602,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const { wanted } = await pullProjects();
       if (!pulls.find(pull)) await findPulls([pull], wanted);
       return pulls.file(pull, path, wanted);
+    },
+  });
+
+  // Run and Secret (`:::run`, `:::secret`; inbox-run-setup.ts): the person's press runs a command here, as them; a
+  // secret's value goes to this computer's keychain (a sandboxed test Inbox: a file in its own folder, never a keychain).
+  const runRoutes = createInboxRunSetup({
+    store,
+    serverSession,
+    dataDir,
+    sandbox: !!process.env.PLANNOTATOR_TEST_SANDBOX,
+    readBody,
+    json,
+    readLoginEnv: process.platform === "win32" && !process.env.PLANNOTATOR_TEST_SANDBOX ? async () => launchPlainEnv(launchOwnEnv(), [], "win32") : loginEnv,
+    door: (req) => fromDeviceDoor.get(req),
+    computer: (viaDoor) => (viaDoor ? phones?.machineDoor.computerName() : null) ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
+    displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
+    openInLauncher,
+    changed: (messageIds) => {
+      for (const listener of runStateListeners) listener(messageIds);
     },
   });
 
@@ -8008,6 +8038,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
       const taggable = tagsRoute.route(req, path);
       if (taggable) return taggable;
+      // Run on a `:::run` block and Save on a `:::secret` block (inbox-run-routes.ts): the person's press only.
+      const ran = await runRoutes.route(req, path);
+      if (ran) return ran;
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
@@ -8350,6 +8383,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     rex.close();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
+    // Every `:::run` still running stops with the Inbox: no command outlives it.
+    runRoutes.stop();
     combine.close();
     codexWake.stop();
     qwenWake.stop();

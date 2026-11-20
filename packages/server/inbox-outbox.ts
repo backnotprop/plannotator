@@ -223,6 +223,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
+  // A run starts, stops or opens a terminal now, and a secret's value is never written to the outbox: sent now from a
+  // press in a window there, or not at all (inbox-run-routes.ts).
+  "POST messages/:id/run": "now",
+  "POST messages/:id/secret": "now",
   "POST threads/:id/delete": "set",
   "POST annotations": "set",
   "POST annotations/:id/remove": "set",
