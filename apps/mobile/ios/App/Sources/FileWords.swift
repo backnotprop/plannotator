@@ -65,14 +65,19 @@ struct SelectableWords: UIViewRepresentable {
     return CGSize(width: width, height: ceil(uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height))
   }
 
+  /// The accent as a ground under words: stronger on a dark page, where a faint one is lost.
+  static func tint(_ light: CGFloat, dark: CGFloat) -> UIColor {
+    UIColor { traits in UIColor(Token.primary).resolvedColor(with: traits).withAlphaComponent(traits.userInterfaceStyle == .dark ? dark : light) }
+  }
+
   /// The words with a tint under each commented part.
   static func tinted(_ words: NSAttributedString, _ ranges: [NSRange], writing: NSRange? = nil) -> NSAttributedString {
     guard !ranges.isEmpty || writing != nil else { return words }
     let out = NSMutableAttributedString(attributedString: words)
     for range in ranges where range.location >= 0 && NSMaxRange(range) <= out.length {
-      out.addAttribute(.backgroundColor, value: UIColor(Token.primary).withAlphaComponent(0.2), range: range)
+      out.addAttribute(.backgroundColor, value: Self.tint(0.2, dark: 0.36), range: range)
     }
-    if let writing, writing.location >= 0, NSMaxRange(writing) <= out.length { out.addAttribute(.backgroundColor, value: UIColor(Token.primary).withAlphaComponent(0.38), range: writing) }
+    if let writing, writing.location >= 0, NSMaxRange(writing) <= out.length { out.addAttribute(.backgroundColor, value: Self.tint(0.38, dark: 0.55), range: writing) }
     return out
   }
 

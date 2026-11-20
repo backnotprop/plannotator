@@ -461,7 +461,7 @@ struct CodeLinesView: View {
             .padding(.leading, Space.close)
             .padding(.trailing, Space.card)
             // The lines being commented on, and the ones already commented on: a ground, edge to edge.
-            .background(chosen ? Token.primary.opacity(0.22) : kept ? Token.primary.opacity(0.1) : Color.clear)
+            .background(chosen ? Color(uiColor: SelectableWords.tint(0.22, dark: 0.4)) : kept ? Color(uiColor: SelectableWords.tint(0.1, dark: 0.2)) : Color.clear)
             .contentShape(Rectangle())
             .onTapGesture { if takes { touched(row.line, comments: comments) } }
             .accessibilityElement(children: .combine)

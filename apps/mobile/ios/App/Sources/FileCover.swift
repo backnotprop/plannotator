@@ -153,6 +153,7 @@ struct FileCover: View {
       // cover, and keeps what it shows at rest clear of them.
       GeometryReader { geometry in
         let bars = geometry.safeAreaInsets
+        ScrollViewReader { pages in
         ScrollView(.horizontal) {
           LazyHStack(spacing: 0) {
             ForEach(items) { item in
@@ -166,6 +167,14 @@ struct FileCover: View {
         .ignoresSafeArea()
         // While a picture takes the finger, a drag draws: it never steps to the next file.
         .scrollDisabled(desk.marking)
+        // Back to a comment: its file comes on screen (said to the scroller itself: the cover may have been opened
+        // on that file a moment ago, before its pages were laid out), and its viewer shows where it is.
+        .onChange(of: desk.sought) { _, sought in
+          guard let file = sought?.comment.attachment else { return }
+          shown = file
+          pages.scrollTo(file, anchor: .leading)
+        }
+        }
       }
       // The comment field stands at the foot, over the keyboard when it is up; each page is told how much it covers.
       .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -245,10 +254,6 @@ struct FileCover: View {
       // step is the way to the comment whose words are being changed.
       if desk.editing?.attachment != now, desk.draft?.file != now { desk.cancel() }
       desk.marking = false
-    }
-    // Back to a comment: its file comes on screen, and its viewer shows where it is.
-    .onChange(of: desk.sought) { _, sought in
-      if let file = sought?.comment.attachment, file != at { withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeInOut(duration: 0.25)) { shown = file } }
     }
     .sheet(isPresented: $desk.listOpen) {
       CommentsSheet(session: session, thread: thread) { comment in

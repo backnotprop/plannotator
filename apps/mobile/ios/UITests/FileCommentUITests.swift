@@ -276,7 +276,13 @@ final class FileCommentUITests: XCTestCase {
     // A touch opens the comment's file, at the comment.
     onCode.tap()
     XCTAssertTrue(app.scrollViews["file-code"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "line/3").firstMatch.waitForExistence(timeout: 5))
+    let commented = app.descendants(matching: .any).matching(identifier: "line/3").firstMatch
+    XCTAssertTrue(commented.waitForExistence(timeout: 5))
+    usleep(900_000)
+    // The file under the title is the one on screen: the code, with the commented line in view.
+    let screen = app.windows.firstMatch.frame
+    XCTAssertTrue(screen.contains(CGPoint(x: commented.frame.midX, y: commented.frame.midY)), "the comment's file is the one on screen: \(commented.frame)")
+    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'const CAP_MS'")).firstMatch.isHittable)
     count(app, "3 comments")
     shot("18-code-opened-at-comment")
 
@@ -293,6 +299,7 @@ final class FileCommentUITests: XCTestCase {
     XCTAssertTrue(field.waitForExistence(timeout: 5))
     XCTAssertEqual(field.value as? String, "Say which client: the phone's or the desktop's.")
     XCTAssertEqual(app.staticTexts["comment-quote"].label, "client drops its socket")
+    XCTAssertTrue(words(app, "The client drops its socket").isHittable, "the plan is the file on screen")
     shot("20-document-edit-comment")
   }
 
