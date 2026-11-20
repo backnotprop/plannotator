@@ -173,18 +173,20 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           <div className="ib-riskd-make">
             <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
           </div>
-          {make && autoAgent && (
-            <span className="ib-riskd-with" data-pull-risk-auto-agent={autoAgent.auto_agent?.agent ?? ''}>
-              {autoAgent.auto_agent ? (
-                <>
-                  with <HostMark host={autoAgent.auto_agent.agent} /> {autoAgent.auto_agent.name}
-                </>
-              ) : (
-                (autoAgent.auto_agent_unavailable ?? 'No agent can be started here.')
-              )}
-            </span>
-          )}
-          <RiskInfo name="auto" label="What this makes" text={autoInfo(answer.auto?.level ?? 'high')} />
+          <span className="ib-riskd-tail">
+            {make && autoAgent && (
+              <span className="ib-riskd-with" data-pull-risk-auto-agent={autoAgent.auto_agent?.agent ?? ''}>
+                {autoAgent.auto_agent ? (
+                  <>
+                    with <HostMark host={autoAgent.auto_agent.agent} /> {autoAgent.auto_agent.name}
+                  </>
+                ) : (
+                  (autoAgent.auto_agent_unavailable ?? 'No agent can be started here.')
+                )}
+              </span>
+            )}
+            <RiskInfo name="auto" label="What this makes" text={autoInfo(answer.auto?.level ?? 'high')} />
+          </span>
         </div>
         {error && (
           <p className="ib-error" role="alert">

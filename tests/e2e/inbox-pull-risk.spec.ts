@@ -520,7 +520,7 @@ test('the automatic line: a pick names the agent it would start; Save starts not
       if (width === 320) expect((await dialog.locator('[data-pull-risk-rules-text]').boundingBox())!.height).toBeGreaterThanOrEqual(88);
     });
 
-    const tip = page.locator('[data-pn-tooltip]');
+    const tip = page.locator('[data-pn-tooltip][data-open]');
     await eachSheet('risk-dialog-info', async (width) => {
       const info = dialog.locator('[data-pull-risk-info="auto"]');
       if ((await info.getAttribute('aria-expanded')) !== 'true') await info.click();

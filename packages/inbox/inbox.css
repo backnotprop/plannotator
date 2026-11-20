@@ -10378,6 +10378,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-riskd-auto { align-items: center; gap: 6px 10px; padding-top: 14px; border-top: 1px solid var(--border); }
 .ib-riskd-make { flex: none; }
 .ib-riskd-make button > span:first-child { max-width: none; }
+.ib-riskd-tail { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-riskd-with { display: inline-flex; align-items: center; gap: 6px; }
 .ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -10388,7 +10389,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-riskd-pick .absolute { top: auto; bottom: 100%; width: 100%; min-width: 0; margin: 0 0 4px; }
   .ib-riskd-make .absolute { top: auto; bottom: 100%; margin: 0 0 4px; }
   .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
-  .pn-inbox .ib-riskd-i { width: 44px; height: 44px; margin: -10px -10px -10px -12px; }
+  .pn-inbox .ib-riskd-i { width: 44px; height: 44px; margin: -10px -14px; }
   .ib-riskd-say { margin-top: 0; }
   .ib-dlg .ib-riskd-say.ib-quietline { margin-top: 0; }
   .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(96px, 16dvh, 140px); margin-top: 6px; }
