@@ -221,6 +221,7 @@ packages/ui/shortcuts/runtime.guardCalls.test.tsx
 packages/inbox/rowSlotRenders.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
+packages/inbox/actionSkip.test.tsx
 packages/inbox/newMessagePicker.test.tsx
 packages/inbox/wordsOnlyTwoAsks.test.tsx
 packages/inbox/firstRunNotifications.test.tsx
@@ -850,6 +851,7 @@ packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
 packages/inbox/plans/spacesHome.test.tsx
+packages/inbox/plans/planShare.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
@@ -867,3 +869,4 @@ packages/inbox/compose/pictureItBox.test.tsx
 packages/inbox/projectTagMenu.test.tsx
 packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
+packages/inbox/runCardLive.test.tsx

@@ -383,6 +383,7 @@ function actionResultWords(q: InboxQuestion): string | null {
   // In the person's reply draft (approval "inbox-action-items-in-reply"), or inside the timed path's Undo window.
   const pending = q.state === "picked" ? (result.staged ? " (in the person's reply draft, not sent yet)" : " (not sent yet: the person can still undo it)") : "";
   if (result.outcome === "cant") return `can't do it: ${JSON.stringify(result.note ?? "")}${pending}`;
+  if (result.outcome === "skip") return `skipped by the person${pending}`;
   return `done${result.note ? `, note: ${JSON.stringify(result.note)}` : ""}${pending}`;
 }
 

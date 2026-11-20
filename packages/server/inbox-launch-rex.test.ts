@@ -638,15 +638,13 @@ describe("Settings → Agents: Start new agents in", () => {
     expect("rex_shared" in (await read(here.launch))).toBe(false);
   });
 
-  test("Rex is asked whether its app is here only for this computer's own Settings answer: never for the routines' clock or the tailnet", async () => {
+  test("Rex is asked whether its app is here only for Settings → Agents' own read: never for the routines' clock, New message's pick or a save", async () => {
     const { launch, asked } = setup({ startIn: "inbox" });
     // The routines' clock and the window's settings model: whether Launch is on, no Rex.
     expect(launch.enabled()).toBe(true);
     expect(launch.settingsState().enabled).toBe(true);
     expect("rex_here" in launch.settingsState()).toBe(false);
     const read = (via: string) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via);
-    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
-    expect(asked.attached).toBe(0);
     // New message's agent pick reads ahead: no Rex either.
     const ahead = await launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings?ahead=1", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "local");
     expect(((await ahead!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
@@ -662,6 +660,20 @@ describe("Settings → Agents: Start new agents in", () => {
     // Settings → Agents' own read on this computer: the one that asks.
     expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
     expect(asked.attached).toBe(1);
+  });
+
+  test("a Mac's Rex app attached: Settings → Agents' read over the tailnet says Rex is here too, so the row shows in a window on the tailnet address (this computer's or another's); the device door never asks", async () => {
+    const { launch, asked } = setup({ startIn: "inbox", attached: true });
+    const read = async (via: string, door?: { platform: string; window: boolean }) =>
+      ((await (await launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via, door))!.json()) as { launch: Record<string, unknown> }).launch;
+    expect((await read("tailnet")).rex_here).toBe(true);
+    expect(asked.attached).toBe(1);
+    expect((await read("local", { platform: "ios", window: false })).rex_here).toBeUndefined();
+    expect((await read("local", { platform: "machine", window: true })).rex_here).toBeUndefined();
+    expect(asked.attached).toBe(1);
+    const gone = setup({ startIn: "rex", attached: false });
+    const away = ((await (await gone.launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "tailnet"))!.json()) as { launch: Record<string, unknown> }).launch;
+    expect(away.rex_here).toBe(false);
   });
 
   test("saved to config.json, read back with which agents can start there (whether Rex is here stays the pane's own read); anything else is refused", async () => {

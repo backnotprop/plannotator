@@ -21,6 +21,7 @@ import {
 } from './inbox-agents';
 import { QUESTION_AUTHORING_GUIDE } from '../../../../packages/core/question-block';
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE } from '../../../../packages/core/inbox-actions';
+import { INBOX_RUN_EXAMPLE, INBOX_RUN_GUIDE, INBOX_SECRET_EXAMPLE } from '../../../../packages/core/inbox-run-guide';
 import {
   INBOX_ANSWERS_WAKE_LINE,
   INBOX_ASK_RECOGNISE_RULE,
@@ -231,6 +232,16 @@ export function buildLlmsInbox(): string {
     '',
     '```markdown',
     INBOX_ACTION_EXAMPLE.trimEnd(),
+    '```',
+    '',
+    '### Commands the person runs, and secrets',
+    '',
+    INBOX_RUN_GUIDE.trimEnd(),
+    '',
+    '```markdown',
+    INBOX_RUN_EXAMPLE.trimEnd(),
+    '',
+    INBOX_SECRET_EXAMPLE.trimEnd(),
     '```',
     '',
     '### What comes back, and when',

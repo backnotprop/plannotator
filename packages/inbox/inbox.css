@@ -6262,6 +6262,11 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-chk-row[data-action-state="cant"] .ib-chk-dot,
 .pn-inbox .ib-chk-row[data-action-state="pending"][data-action-outcome="cant"] .ib-chk-dot { border-color: var(--destructive); color: var(--destructive); }
 .pn-inbox .ib-chk-row:is([data-action-state="set-aside"], [data-action-state="archived"], [data-action-state="replaced"]) .ib-chk-dot { border-style: dashed; color: var(--muted-foreground); }
+/* Skipped (approval "action-item-skip"): the open questions list's skip arrow in a quiet, solid ring (the person chose it; set aside, closed and replaced stay dashed). */
+.pn-inbox .ib-chk-row[data-action-outcome="skip"] .ib-chk-dot { border-color: color-mix(in oklch, var(--muted-foreground) 55%, transparent); color: var(--muted-foreground); }
+.pn-inbox .ib-chk-row[data-action-outcome="skip"] .ib-chk-dot .ib-ic { stroke-width: 2.4; }
+/* Hovering a skipped dot (it takes the skip back) never turns it Done's green: this outranks the tick's hover rule. */
+@media (hover: hover) { .pn-inbox .ib-chk-row[data-action-outcome="skip"] button.ib-chk-tick:hover .ib-chk-dot { border-color: color-mix(in oklch, var(--muted-foreground) 55%, transparent); background: transparent; } }
 .pn-inbox .ib-chk-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 10px 6px 2px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
 .pn-inbox .ib-chk-do { flex: 1; min-width: 0; font-weight: 550; font-size: var(--ib-fs-14, 14px); line-height: 1.4; overflow-wrap: anywhere; }
 .pn-inbox .ib-chk-toggle > .ib-ic { width: 14px; height: 14px; flex: none; color: var(--muted-foreground); }
