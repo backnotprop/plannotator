@@ -18,7 +18,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
@@ -30,6 +30,7 @@ const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reve
 const idleClock = (hasDom ? await import('./idleClock') : {}) as typeof import('./idleClock');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 const { ListViewIntro, LIST_VIEW_INTRO_WORDS } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
+const { FOLD_LOOP_MS } = await import('./components/viewChoiceFolds');
 const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
 const { resetAgentFoldsForTests, AGENT_FOLDS_COOKIE } = await import('./agentsView/folds');
 const listView = await import('./listView');
@@ -564,5 +565,72 @@ describe.skipIf(!hasDom)('the view choice dialog', () => {
     expect(srcs.length).toBeGreaterThan(1);
     for (const src of srcs) expect(src).not.toContain('/icon-sets');
     expect(asked.filter((url) => url.includes('/icon-sets'))).toEqual([]);
+  });
+
+  describe('the Agents picture folds and opens its agents by itself', () => {
+    // Fake timers, the fold at once (no Web Animations), and the picture on screen (no IntersectionObserver here).
+    const g = globalThis as unknown as Record<string, unknown>;
+    let saved: { animate: unknown; observer: unknown; matchMedia: typeof window.matchMedia } | null = null;
+    beforeEach(() => {
+      saved = { animate: Element.prototype.animate, observer: g.IntersectionObserver, matchMedia: window.matchMedia };
+      (Element.prototype as unknown as Record<string, unknown>).animate = undefined;
+      g.IntersectionObserver = undefined;
+      jest.useFakeTimers();
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      (Element.prototype as unknown as Record<string, unknown>).animate = saved!.animate;
+      g.IntersectionObserver = saved!.observer;
+      window.matchMedia = saved!.matchMedia;
+    });
+    /** The agents that show their threads now (open), in order. */
+    const open = () => [...picture('agents').querySelectorAll('.ib-ag')].filter((group) => group.querySelector('[data-thread-id]')).map((group) => group.getAttribute('aria-label'));
+    const pass = (ms: number) => act(() => void jest.advanceTimersByTime(ms));
+
+    test('one agent at a time, Review then Tide, back open in the same order, again and again; never Ops, which waits on the person', () => {
+      draw();
+      expect(open()).toEqual(['Ops', 'Review', 'Tide']);
+      for (let round = 0; round < 2; round++) {
+        pass(FOLD_LOOP_MS.holdOpen);
+        expect(open()).toEqual(['Ops', 'Tide']);
+        // Folded as the view folds: its threads gone, its head with the count.
+        expect(picture('agents').querySelector('.ib-ag[aria-label="Review"] [data-agent-threads="2"]')).not.toBeNull();
+        pass(FOLD_LOOP_MS.between);
+        expect(open()).toEqual(['Ops']);
+        pass(FOLD_LOOP_MS.holdFolded);
+        expect(open()).toEqual(['Ops', 'Review']);
+        pass(FOLD_LOOP_MS.between);
+        expect(open()).toEqual(['Ops', 'Review', 'Tide']);
+      }
+    });
+
+    test("the person's agent folds are never read or written by the loop", () => {
+      const touched: string[] = [];
+      setStorageBackend({
+        getItem: (key) => (touched.push(key), stored.get(key) ?? null),
+        setItem: (key, value) => (touched.push(key), void stored.set(key, value)),
+        removeItem: (key) => (touched.push(key), void stored.delete(key)),
+      });
+      draw();
+      pass(FOLD_LOOP_MS.holdOpen + FOLD_LOOP_MS.between * 2 + FOLD_LOOP_MS.holdFolded);
+      expect(touched.filter((key) => key === AGENT_FOLDS_COOKIE)).toEqual([]);
+    });
+
+    test('under reduced motion nothing folds: every agent open, still', () => {
+      window.matchMedia = ((query: string) => ({ matches: query.includes('prefers-reduced-motion: reduce'), media: query, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, onchange: null, dispatchEvent: () => false })) as unknown as typeof window.matchMedia;
+      draw();
+      for (let t = 0; t < 20_000; t += 500) {
+        pass(500);
+        expect(open()).toEqual(['Ops', 'Review', 'Tide']);
+      }
+    });
+
+    test('closing the dialog leaves no timer behind', () => {
+      draw();
+      pass(FOLD_LOOP_MS.holdOpen);
+      expect(open()).toEqual(['Ops', 'Tide']);
+      clear();
+      expect(jest.getTimerCount()).toBe(0);
+    });
   });
 });

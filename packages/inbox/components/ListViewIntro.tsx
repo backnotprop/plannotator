@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { LIST_LOOK_DEFAULT, listLookClasses } from '../listLook';
 import type { ListView } from '../listView';
 import { RowMarksScope } from '../letterMarks';
@@ -8,6 +8,7 @@ import { LineRow } from '../agentsView/LineRow';
 import { lightScope, PreviewList } from './ListLookIntro';
 import { Modal } from './Updates';
 import { viewChoiceDemo, type ViewChoiceDemo } from './viewChoiceDemo';
+import { useFoldLoop } from './viewChoiceFolds';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 
 /** The dialog's words, as the owner approved them (two choices 2026-11-05; Agents added, layout C, 2026-11-20). */
@@ -52,12 +53,18 @@ export interface ListViewIntroProps {
 const noop = () => {};
 const LOOK = LIST_LOOK_DEFAULT;
 
-/** The Agents view in a picture: the real view, with the demo's agents (its world) and the real one-line rows. */
+/**
+ * The Agents view in a picture: the real view, with the demo's agents (its world) and the real one-line rows. Two of
+ * its agents fold and open by themselves in a calm loop (viewChoiceFolds.ts), to show that agents fold.
+ */
 function AgentsPicture({ demo }: { demo: ViewChoiceDemo }) {
+  const ref = useRef<HTMLElement>(null);
+  const folded = useFoldLoop(ref, demo.folding);
   return (
-    <section className={`ib-listcol ib-narrow ib-lo-list${listLookClasses(LOOK)}`} aria-hidden="true" data-list-intro-preview="">
+    <section ref={ref} className={`ib-listcol ib-narrow ib-lo-list${listLookClasses(LOOK)}`} aria-hidden="true" data-list-intro-preview="">
       <div className="ib-lbody">
         <AgentsList
+          folded={folded}
           sections={demo.sections}
           selectedThreadId={null}
           phone={false}

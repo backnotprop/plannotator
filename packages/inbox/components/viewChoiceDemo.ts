@@ -37,6 +37,8 @@ export interface ViewChoiceDemo {
   groups: readonly ListIntroGroup[];
   /** The Simple list picture, newest first. */
   flat: readonly FlatRow[];
+  /** The two agents the Agents picture folds and opens in turn (viewChoiceFolds.ts); never Ops, which waits on the person. */
+  folding: readonly [string, string];
 }
 
 /** The demo as of `now` (ms). */
@@ -109,5 +111,5 @@ export function viewChoiceDemo(now: number = Date.now()): ViewChoiceDemo {
     [TIDE, VIEW_CHOICE_BLASTOISE_FACE],
     [SEARCH, 'glass-pink'],
   ]);
-  return { world: { agents, faces }, sections, groups, flat: flatRows(sections, null, { epoch: 0, keep: null }).rows };
+  return { world: { agents, faces }, sections, groups, flat: flatRows(sections, null, { epoch: 0, keep: null }).rows, folding: [REVIEW, TIDE] };
 }
