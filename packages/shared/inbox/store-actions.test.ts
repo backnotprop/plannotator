@@ -19,6 +19,8 @@ import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import type { InboxAuthor, InboxQuestion } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
+import { splitThreadActions } from "../../inbox/actions";
+import { sentActionsOf } from "../../inbox/thread/sentActions";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -454,6 +456,11 @@ describe("Skip (the owner's variant A, 2026-11-19)", () => {
     const after = sent.store.sendMessage({ project_id: sent.project.id, author: AGENT, body: "Deployed it myself after all.", reply_to: reply.id, done: [sentRef] });
     expect(after.done).toEqual([sentRef]);
     expect(actionOf(sent.store, sent.asked.id)).toMatchObject({ state: "closed", action_result: { outcome: "done", by: "agent", person: { outcome: "skip", note: null } } });
+    // Still sent with the person's reply: their reply keeps its "You skipped 1 action item" list, and a mark is refused.
+    const messages = splitThreadActions(sent.store.thread(sent.asked.thread_id)!).messages;
+    expect(sentActionsOf(messages).get(reply.id)?.map((row) => row.outcome)).toEqual(["skip"]);
+    expect(() => sent.store.markAction(sent.asked.id, sent.action.key, { outcome: null, staged: true })).toThrow(expect.objectContaining({ code: "action_already_sent" }));
+    expect(() => sent.store.markAction(sent.asked.id, sent.action.key, { outcome: "done", staged: true })).toThrow(expect.objectContaining({ code: "action_already_sent" }));
     // Nothing of it waits on the person or goes to the agent again.
     expect(rowOf(sent.store, sent.asked.thread_id).unsent?.skipped ?? 0).toBe(0);
     expect(() => sent.store.sendReply(sent.asked.id, { idempotency_key: "k2", words: "", actions: [{ key: sent.action.key }] })).toThrow(expect.objectContaining({ code: "nothing_to_send" }));

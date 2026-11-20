@@ -4424,10 +4424,13 @@ export class InboxStore {
       const record = this.questions.get(questionId)!;
       const result = record.action_result?.by === "person" ? record.action_result : null;
       const mine = result && (result.staged === true || result.outcome === "skip") ? result : null;
+      // A sent skip stays sent at its new revision: the person's reply keeps listing it, and a mark on it is still refused.
+      const wasSent = record.revision > 0 && record.sent_revision === record.revision;
       this.appendQuestion(
         {
           ...record,
           revision: record.revision + 1,
+          ...(wasSent ? { sent_revision: record.revision + 1 } : {}),
           action_result: {
             outcome: "done",
             note: null,
