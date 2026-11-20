@@ -43,6 +43,9 @@ const VERDICTS: Record<string, string> = {
   'Change who can open settings': '{"risk":"high","why":"It changes the permission check on the settings route."}',
   'Charge the late fee twice': '{"risk":"high","why":"It charges the late fee in src/charges/fees.ts."}',
   'Refund to the card on file': '{"risk":"high","why":"It changes where refunds are charged back."}',
+  'Waive the card fee for teams': '{"risk":"high","why":"It changes the card fee for team plans."}',
+  'Move the invoice job': '{"risk":"high","why":"It moves the job that charges invoices."}',
+  'Retry the payouts': '{"risk":"high","why":"It retries payouts to cards."}',
 };
 /** About 9 MB: past the review page's 8 MB, and more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
 const BIG_LINES = 400_000;
@@ -75,6 +78,25 @@ function ghPull(number: number, title: string, fields: Record<string, unknown> =
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
     ...fields,
   };
+}
+
+const LISTED = () => [
+  ghPull(501, 'Retry failed charges on a new schedule'),
+  ghPull(502, 'Send a receipt after checkout'),
+  ghPull(503, 'Fix a typo in the README'),
+  ghPull(504, 'Upgrade the linter'),
+  ghPull(505, 'Split the settings page'),
+  ghPull(506, 'Change who can open settings', { baseRefName: 'b505' }),
+  ghPull(507, 'Regenerate the API client'),
+  ghPull(508, STILL_RANKING),
+  ghPull(509, 'Charge the late fee twice', { authorAssociation: 'MEMBER' }),
+  ghPull(510, 'Refund to the card on file', { authorAssociation: 'MEMBER' }),
+  ghPull(511, 'Waive the card fee for teams', { authorAssociation: 'MEMBER' }),
+];
+const LATER = () => [ghPull(498, 'Move the invoice job', { authorAssociation: 'MEMBER' }), ghPull(499, 'Retry the payouts', { authorAssociation: 'MEMBER' })];
+
+function writeGhPulls(extra: ReturnType<typeof ghPull>[] = []) {
+  writeFileSync(join(fakes, 'gh-pulls.json'), JSON.stringify({ data: { viewer: { login: 'dana' }, requested: { nodes: [...LISTED(), ...extra] }, authored: { nodes: [] }, merged: { nodes: [] } } }));
 }
 
 /** A fake gh: the list, each PR's patch, its head. */
@@ -221,30 +243,7 @@ test.beforeAll(async ({ browser }) => {
     writeFileSync(join(fakes, cli), '#!/bin/sh\nexit 1\n');
     chmodSync(join(fakes, cli), 0o755);
   }
-  writeFileSync(
-    join(fakes, 'gh-pulls.json'),
-    JSON.stringify({
-      data: {
-        viewer: { login: 'dana' },
-        requested: {
-          nodes: [
-            ghPull(501, 'Retry failed charges on a new schedule'),
-            ghPull(502, 'Send a receipt after checkout'),
-            ghPull(503, 'Fix a typo in the README'),
-            ghPull(504, 'Upgrade the linter'),
-            ghPull(505, 'Split the settings page'),
-            ghPull(506, 'Change who can open settings', { baseRefName: 'b505' }),
-            ghPull(507, 'Regenerate the API client'),
-            ghPull(508, STILL_RANKING),
-            ghPull(509, 'Charge the late fee twice', { authorAssociation: 'MEMBER' }),
-            ghPull(510, 'Refund to the card on file', { authorAssociation: 'MEMBER' }),
-          ],
-        },
-        authored: { nodes: [] },
-        merged: { nodes: [] },
-      },
-    }),
-  );
+  writeGhPulls();
   const project = scratchProject(join(root, 'src'), 'billing-svc');
   const git = (...args: string[]) => spawnSync('git', args, { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
   git('remote', 'add', 'origin', `https://github.com/${REPO}.git`);
@@ -405,7 +404,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
   // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect.poll(() => prompts().length).toBe(10);
+  await expect.poll(() => prompts().length).toBe(11);
   await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
@@ -426,7 +425,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await shots('rows-refused');
 
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
-  expect(judged).toHaveLength(10);
+  expect(judged).toHaveLength(11);
   // Nothing of a diff is ever in an agent's argv.
   expect(judged.every((l) => l.argv!.join(' ').length < 2_000)).toBe(true);
   expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --no-extensions --no-skills --no-context-files --provider anthropic --model claude-sonnet-5 --thinking low');
@@ -539,8 +538,8 @@ test('the automatic line: a pick names the agent it would start; Save starts not
 
     await dialog.locator('[data-pull-risk-save]').click();
     const ranked = dialog.locator('[data-pull-risk-ranked]');
-    await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '2');
-    await expect(ranked.getByRole('heading')).toHaveText('2 already rank High.');
+    await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '3');
+    await expect(ranked.getByRole('heading')).toHaveText('3 already rank High.');
     await eachSheet('risk-dialog-ranked', async (width) => {
       await sheetFits(dialog, width);
     });
@@ -558,17 +557,17 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     expect(launched()).toEqual([]);
     await openRules();
     await dialog.locator('[data-pull-risk-save]').click();
-    await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '2');
+    await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '3');
     await dialog.getByRole('button', { name: 'Make them now', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect.poll(async () => (await autoRuns())[keyOf(509)]?.state, { timeout: 30_000 }).toBe('started');
     const runs = await autoRuns();
-    expect(Object.keys(runs).sort()).toEqual([keyOf(509), keyOf(510)]);
-    expect(runs[keyOf(510)]!.state).toBe('queued');
+    expect(Object.keys(runs).sort()).toEqual([keyOf(509), keyOf(510), keyOf(511)]);
+    expect([runs[keyOf(510)]!.state, runs[keyOf(511)]!.state]).toEqual(['queued', 'queued']);
     await expect.poll(() => launched().length, { timeout: 30_000 }).toBe(1);
     const argv = launched()[0]!.argv!;
     expect(argv[argv.indexOf('--name') + 1]).toBe('Review #509: Charge the late fee twice');
-    expect(argv.join(' ')).not.toContain('#510');
+    expect(argv.join(' ')).not.toMatch(/#51[01]/);
 
     const saved = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string; provider: string | null; model: string | null };
     expect((await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: saved.rules, provider: saved.provider, model: saved.model, auto: null } })).status()).toBe(200);
@@ -693,4 +692,61 @@ test('empty rules turn it off again: the marks and the filter choices go, the ch
   await expect(row(501).locator('[data-pull-risk]')).toHaveCount(0);
   await page.locator('[data-pulls-risk-chip]').click();
   await expect(page.locator('[data-pulls-risk-option]')).toHaveCount(0);
+});
+
+test('set up with nothing ranked: no agent starts; once ranking lands the line at the top of Reviews asks; Not now keeps it away; Make them now starts what it counted', async () => {
+  await context.close();
+  await stopScratchInbox(dataDir);
+  const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
+  const was = (config.inboxPullRisk ?? {}) as Record<string, unknown>;
+  config.inboxPullRisk = { ...was, rules: RULES, provider: 'pi-sdk', auto: { level: 'high', make: 'guide' } };
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config));
+  for (const name of ['pull-risk.json', 'pull-risk-auto.json']) rmSync(join(dataDir, 'inbox', name), { force: true });
+  const launches = () => piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id')).length;
+  const launchedBefore = launches();
+  await start();
+  context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  page = await context.newPage();
+  expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
+  await expect
+    .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
+    .toContain('"agent":"pi"');
+  await openPulls();
+  const waitingLine = page.locator('[data-pull-risk-waiting]');
+  await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
+  await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High.');
+  expect(await autoRuns()).toEqual({});
+  expect(launches()).toBe(launchedBefore);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  for (const size of SHEETS) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(350);
+    await sheetFits(waitingLine, size.width);
+    await page.screenshot({ path: join(proofDir, `risk-line-${size.width}.png`) });
+  }
+  await page.setViewportSize(VIEWPORTS[1440]);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+
+  await waitingLine.getByRole('button', { name: 'Not now', exact: true }).click();
+  await expect(waitingLine).toHaveCount(0);
+  await openPulls();
+  await expect(row(510).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1_500);
+  await expect(waitingLine).toHaveCount(0);
+  expect(await autoRuns()).toEqual({});
+
+  writeGhPulls(LATER());
+  expect((await page.request.get(`${url}api/inbox/reviews?refresh=1`)).status()).toBe(200);
+  await openPulls();
+  await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
+  expect(await autoRuns()).toEqual({});
+  await waitingLine.getByRole('button', { name: 'Make them now', exact: true }).click();
+  await expect(waitingLine).toHaveCount(0);
+  await expect.poll(async () => (await autoRuns())[keyOf(498)]?.state, { timeout: 30_000 }).toBe('started');
+  const runs = await autoRuns();
+  expect(Object.keys(runs).sort()).toEqual([keyOf(498), keyOf(499)]);
+  expect(runs[keyOf(499)]!.state).toBe('queued');
+  await expect.poll(launches, { timeout: 30_000 }).toBe(launchedBefore + 1);
+  const argv = piLog().filter((l) => l.argv?.includes('--session-id')).at(-1)!.argv!;
+  expect(argv[argv.indexOf('--name') + 1]).toBe('Review #498: Move the invoice job');
 });

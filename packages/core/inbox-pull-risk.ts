@@ -77,6 +77,7 @@ export interface InboxPullRiskAnswer {
   auto_runs?: Record<string, InboxPullRiskAutoRun>;
   auto_would_start?: Record<InboxPullRiskAuto["level"], number>;
   auto_waiting?: string[];
+  auto_dismissed?: string[];
   auto_agent?: { agent: string; name: string } | null;
   auto_agent_unavailable?: string;
 }

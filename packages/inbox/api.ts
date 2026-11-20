@@ -1789,7 +1789,7 @@ export const inboxApi = {
   reviewsCached: (signal?: AbortSignal) => get<InboxReviewsAnswer | { cold: true }>(inboxUrl('/reviews?cached=1'), signal),
   /** PR risk ranking: the rules, the risk agent and the judgments of the listed PRs (inbox-pull-risk.ts). */
   pullRisk: (signal?: AbortSignal, withAutoAgent = false) => get<InboxPullRiskAnswer>(inboxUrl(withAutoAgent ? '/pulls/risk?auto_agent=1' : '/pulls/risk'), signal),
-  savePullRisk: (input: { rules: string; provider: string | null; model: string | null; branches?: boolean; auto?: InboxPullRiskAuto | null } | { make_now: true; keys: string[] }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
+  savePullRisk: (input: { rules: string; provider: string | null; model: string | null; branches?: boolean; auto?: InboxPullRiskAuto | null } | { make_now: true; keys: string[] } | { not_now: true; keys: string[] }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(pullUrl('/pulls/details', key), signal),
   pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(pullUrl('/pulls/media/sizes', key), signal),

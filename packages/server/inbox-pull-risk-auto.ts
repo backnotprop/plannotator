@@ -47,6 +47,8 @@ export interface PullRiskAuto {
   wouldStart(): Promise<Record<InboxPullRiskAuto["level"], number>>;
   waiting(): Promise<Record<InboxPullRiskAuto["level"], string[]>>;
   makeNow(keys?: readonly string[]): Promise<void>;
+  notNow(keys: readonly string[]): void;
+  dismissed(): ReadonlySet<string>;
   idle(): Promise<void>;
   stop(): void;
 }
@@ -65,15 +67,17 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
   const runs = new Map<string, InboxPullRiskAutoRun>();
   const fresh = new Set<string>();
   const seen = new Map<string, number>();
+  const dismissed = new Set<string>();
   if (existsSync(file)) {
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; runs?: Record<string, InboxPullRiskAutoRun>; fresh?: unknown; seen?: unknown };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; runs?: Record<string, InboxPullRiskAutoRun>; fresh?: unknown; seen?: unknown; dismissed?: unknown };
       if (parsed.v !== 1 || !parsed.runs || typeof parsed.runs !== "object") throw new Error("not a pull risk auto file");
       const knowsFresh = Array.isArray(parsed.fresh);
       for (const [key, run] of Object.entries(parsed.runs)) {
         if (run && typeof run.at === "string" && ((knowsFresh && run.state === "queued") || run.state === "started" || run.state === "failed")) runs.set(key, run);
       }
       if (Array.isArray(parsed.fresh)) for (const key of parsed.fresh) if (typeof key === "string") fresh.add(key);
+      if (Array.isArray(parsed.dismissed)) for (const key of parsed.dismissed) if (typeof key === "string") dismissed.add(key);
       if (parsed.seen && typeof parsed.seen === "object") for (const [repo, number] of Object.entries(parsed.seen)) if (typeof number === "number") seen.set(repo, number);
     } catch {
       try {
@@ -85,7 +89,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs), fresh: [...fresh], seen: Object.fromEntries(seen) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs), fresh: [...fresh], seen: Object.fromEntries(seen), dismissed: [...dismissed] })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {}
   };
@@ -117,9 +121,10 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     dropQueued(() => false);
     const failed = [...runs].filter(([, run]) => run.state === "failed");
     for (const [key] of failed) runs.delete(key);
-    if (failed.length === 0 && fresh.size === 0 && seen.size === 0) return;
+    if (failed.length === 0 && fresh.size === 0 && seen.size === 0 && dismissed.size === 0) return;
     fresh.clear();
     seen.clear();
+    dismissed.clear();
     save();
   };
   const repoOf = (pull: Pick<InboxPull, "host" | "repo">) => `${pull.host}/${pull.repo}`.toLowerCase();
@@ -313,6 +318,15 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       for (const group of chosen) for (const pull of group.pulls) fresh.add(pull.key);
       save();
       api.resume();
+    },
+    notNow(keys) {
+      if (stopped || !options.settings()) return;
+      const before = dismissed.size;
+      for (const key of keys) dismissed.add(key);
+      if (dismissed.size !== before) save();
+    },
+    dismissed() {
+      return dismissed;
     },
     async idle() {
       while (running || checks.size > 0) await Promise.all([running, ...checks]);

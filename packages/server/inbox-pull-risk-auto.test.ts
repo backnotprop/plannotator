@@ -608,3 +608,18 @@ test("Make them now makes only the PRs the count it answered came from", async (
   expect(numbers(w.started).sort()).toEqual([1, 3]);
   expect(await w.auto.waiting()).toEqual({ high: [pr(2).key, pr(4).key], medium: [pr(2).key, pr(4).key] });
 });
+
+test("Not now is kept across a restart and forgotten with the pick; a PR that starts waiting later is the only one left to ask about", async () => {
+  const w = world(null);
+  for (const n of [1, 2]) w.list(pr(n), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  w.auto.notNow((await w.auto.waiting()).high);
+  const again = world({ level: "high", make: "guide" }, w.dataDir);
+  for (const n of [1, 2, 3]) again.list(pr(n), "high");
+  const left = (await again.auto.waiting()).high.filter((key) => !again.auto.dismissed().has(key));
+  expect(left).toEqual([pr(3).key]);
+  again.set(null);
+  again.auto.resume();
+  expect(again.auto.dismissed().size).toBe(0);
+});

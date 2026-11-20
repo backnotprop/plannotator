@@ -688,6 +688,7 @@ packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/riskAlreadyRanked.test.tsx
+packages/inbox/pulls/riskWaitingLine.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx

@@ -7,7 +7,7 @@ import { HostMark } from '../icons';
 import { Modal } from '../components/Updates';
 import { riskFilterWords } from './risk';
 import { RiskInfo } from './RiskInfo';
-import { RiskAlreadyRanked, riskAlreadyRanked } from './RiskAlreadyRanked';
+import { dismissRanked, RiskAlreadyRanked, riskAlreadyRanked } from './RiskAlreadyRanked';
 
 const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user data.';
 const LOADING = [{ value: '', label: 'Loading models…' }];
@@ -100,7 +100,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   const level = riskFilterWords[answer.auto?.level ?? 'high'];
   if (asking) {
     return (
-      <Modal labelledBy={titleId} onClose={() => onSaved(asking)} testId="pull-risk-rules" className="ib-riskd" ownKeys>
+      <Modal labelledBy={titleId} onClose={() => void dismissRanked(asking.auto_waiting ?? []).then(onSaved, () => onSaved(asking))} testId="pull-risk-rules" className="ib-riskd" ownKeys>
         <RiskAlreadyRanked titleId={titleId} saved={asking} onDone={onSaved} />
       </Modal>
     );

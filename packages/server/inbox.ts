@@ -6132,6 +6132,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (!launch.enabled()) return json({ error: "Starting agents from the Inbox is off in Settings \u2192 Agents.", code: "launch_off" }, 409);
             const keys = (body as { keys?: unknown }).keys;
             await pullRiskAuto?.makeNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : undefined);
+          } else if (body && typeof body === "object" && (body as { not_now?: unknown }).not_now === true) {
+            const keys = (body as { keys?: unknown }).keys;
+            pullRiskAuto?.notNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
           } else {
             pullRisk.save(body);
             pullRiskAuto?.resume();
@@ -6139,7 +6142,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const answer = pullRisk.answer();
         const waiting = (await pullRiskAuto?.waiting()) ?? { high: [], medium: [] };
-        return json({ serverSession, ...answer, auto_would_start: { high: waiting.high.length, medium: waiting.medium.length }, auto_waiting: answer.auto ? waiting[answer.auto.level] : [], ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
+        return json({ serverSession, ...answer, auto_would_start: { high: waiting.high.length, medium: waiting.medium.length }, auto_waiting: answer.auto ? waiting[answer.auto.level] : [], auto_dismissed: answer.auto ? waiting[answer.auto.level].filter((key) => pullRiskAuto?.dismissed().has(key)) : [], ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.

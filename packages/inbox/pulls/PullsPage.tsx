@@ -75,6 +75,7 @@ import { RiskFilter } from './RiskFilter';
 import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { RiskRulesDialog } from './RiskRulesDialog';
 import { usePullRisk } from './usePullRisk';
+import { RiskWaitingLine } from './RiskWaitingLine';
 import { landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -256,6 +257,7 @@ export function PullsPage(given: PullsPageProps) {
         </Tip>
       </div>
       {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
+      {risk.answer && <RiskWaitingLine answer={risk.answer} onAnswer={risk.setAnswer} />}
       <ReviewsMenu
         className="ib-lbody"
         busy={state.loading && !model}
