@@ -8,6 +8,8 @@ struct ActionBook {
   var notices: [ThreadID: InboxSession.Notice] = [:]
   /// The one Undo on offer (a new one replaces it, as the window's one toast does).
   var undo: UndoOffer?
+  /// The one Undo of an act on several rows at once (BulkActs.swift): each row's own offer, taken back together.
+  var undoGroup: BulkUndo?
   /// Acts the computer took whose effect the last list read may not hold yet: still drawn over it.
   var landed: [Landed] = []
   var landSeq = 0
