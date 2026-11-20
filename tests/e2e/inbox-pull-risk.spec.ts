@@ -702,6 +702,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   await stopScratchInbox(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
   const was = (config.inboxPullRisk ?? {}) as Record<string, unknown>;
+  config.inboxCodeReview = true;
   config.inboxPullRisk = { ...was, rules: RULES, provider: 'pi-sdk', auto: { level: 'high', make: 'guide' } };
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config));
   for (const name of ['pull-risk.json', 'pull-risk-auto.json']) rmSync(join(dataDir, 'inbox', name), { force: true });
@@ -712,7 +713,6 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   await start();
   context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   page = await context.newPage();
-  expect((await page.request.post(`${url}api/inbox/settings`, { data: { code_review: { on: true } } })).status()).toBe(200);
   expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
   await expect
     .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
