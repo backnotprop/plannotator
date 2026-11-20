@@ -2,6 +2,7 @@ import React from "react";
 import type { Block } from "../types";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { ListItemBody } from "./ListItemBody";
+import { imageRowProps } from "./imageRow";
 import { CodeBlock } from "./blocks/CodeBlock";
 import { HtmlBlock } from "./blocks/HtmlBlock";
 import { Callout } from "./blocks/Callout";
@@ -265,10 +266,13 @@ const BlockRendererBody: React.FC<{
       );
     }
 
-    default:
+    default: {
+      // Images only: one row of equal height, or one image capped in height (imageRow.tsx).
+      const imageRow = imageRowProps(block.content);
       return (
         <p
-          className="relative mb-4 leading-relaxed text-foreground/90 text-[15px] [overflow-wrap:anywhere]"
+          className={`relative mb-4 leading-relaxed text-foreground/90 text-[15px] [overflow-wrap:anywhere]${imageRow.className ? ` ${imageRow.className}` : ''}`}
+          data-image-row={imageRow['data-image-row']}
           data-block-id={block.id}
           // Blank lines the person typed (parse option keepBlankLines): N lines in all. This margin collapses with the
           // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.
@@ -279,6 +283,7 @@ const BlockRendererBody: React.FC<{
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>
       );
+    }
   }
 };
 

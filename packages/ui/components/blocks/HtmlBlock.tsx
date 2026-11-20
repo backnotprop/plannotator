@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
-import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
+import { sanitizeBlockHtml, sanitizedHtmlDrawsNothing } from "../../utils/sanitizeHtml";
+import { DROPPED_HTML_BLOCK_TAGS, HTML_BLOCK_OPEN_RE } from "@plannotator/core/markdown-structure";
 import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
@@ -266,8 +267,17 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     () => sanitizeBlockHtml(block.content),
     [block.content],
   );
+  const drawsNothing = React.useMemo(() => sanitizedHtmlDrawsNothing(sanitized), [sanitized]);
+  // Opened by a tag the sanitizer drops (`<iframe>`, `<script>`): before these
+  // were HTML blocks the line printed as a paragraph of text, so the page has
+  // one `<p>` fewer than when such a comment was saved (see
+  // useAnnotationHighlighter's restore, which checks for this mark).
+  const opensDropped = React.useMemo(() => {
+    const tag = HTML_BLOCK_OPEN_RE.exec(block.content.trim())?.[1];
+    return tag !== undefined && DROPPED_HTML_BLOCK_TAGS.has(tag.toLowerCase());
+  }, [block.content]);
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current || drawsNothing) return;
     if (resolveImage) {
       // Decide every media URL on an inert template first (nothing loads
       // there), then insert the result.
@@ -288,13 +298,20 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
       stopPlayers();
       stopColors();
     };
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink, preserveVideos, responsiveImages]);
+  }, [sanitized, drawsNothing, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink, preserveVideos, responsiveImages]);
+  if (drawsNothing) {
+    // Nothing the sanitizer kept is drawn (an embed, a script, a form with no
+    // words): no gap in the page. The block keeps its id, so the document's
+    // block order is the same.
+    return <div hidden data-block-id={block.id} data-block-type="html" data-html-dropped="" {...sourceLineAttrs(block)} />;
+  }
   return (
     <div className="relative my-4" {...sourceLineAttrs(block)}>
       <div
         ref={ref}
         data-block-id={block.id}
         data-block-type="html"
+        data-html-dropped={opensDropped ? "" : undefined}
         className="html-block text-[15px] leading-relaxed text-foreground/90"
       />
     </div>

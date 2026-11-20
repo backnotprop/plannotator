@@ -3,6 +3,7 @@ import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePa
 import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
+import { matchInlineHtml } from '../utils/inlineHtmlTags';
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
@@ -733,6 +734,40 @@ export const InlineMarkdown: React.FC<{
       );
       parts.push(colored.color ? <AuthorColorText key={key++} color={colored.color}>{inner}</AuthorColorText> : <React.Fragment key={key++}>{inner}</React.Fragment>);
       remaining = remaining.slice(colored.length);
+      previousChar = ">";
+      continue;
+    }
+
+    // Raw HTML tags (utils/inlineHtmlTags): `<sub>` `<sup>` `<kbd>` `<mark>`
+    // draw as elements; a tag the sanitizer drops (`<iframe …>`, `<script>`)
+    // draws nothing, its words kept where they are prose. A bare `<iframe>`
+    // mention stays text. Never markup: React elements and text only.
+    const html = remaining[0] === '<' && !sourceLike ? matchInlineHtml(remaining) : null;
+    if (html) {
+      if (html.kind !== 'drop') {
+        const inner = (
+          <InlineMarkdown
+            text={html.inner}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            onNavigateAnchor={onNavigateAnchor}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onImageClick}
+            githubRepo={githubRepo}
+            repoHost={repoHost}
+            linkLabel={linkLabel}
+          />
+        );
+        parts.push(
+          html.kind === 'unwrap' ? <React.Fragment key={key++}>{inner}</React.Fragment>
+            : html.tag === 'kbd' ? <kbd key={key++} className="rounded border border-border bg-muted px-1 py-px font-mono text-[0.85em]">{inner}</kbd>
+              : html.tag === 'mark' ? <span key={key++} data-html-mark="" className="rounded-sm bg-warning/25 px-0.5 text-foreground">{inner}</span>
+                : html.tag === 'sub' ? <sub key={key++}>{inner}</sub>
+                  : <sup key={key++}>{inner}</sup>,
+        );
+      }
+      remaining = remaining.slice(html.length);
       previousChar = ">";
       continue;
     }
