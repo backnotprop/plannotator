@@ -76,7 +76,7 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
   const count = changes.length || noted;
   const changesText = `${count} semantic change${count === 1 ? '' : 's'}`;
   const kinds = found ? semanticNoteParts(found.summary).join(', ') : '';
-  const both = kinds !== '' && changes.length > noted;
+  const both = kinds !== '' && changes.length > 0 && changes.length !== noted;
   const text = !kinds ? changesText : on ? (both ? `${changesText}; ${kinds}` : kinds) : both ? `${changesText}; ${kinds} not shown in the diff` : `${kinds}, not shown in the diff`;
 
   return (
