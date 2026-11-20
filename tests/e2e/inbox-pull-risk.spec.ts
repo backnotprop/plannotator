@@ -18,7 +18,7 @@
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-risk: 1440 and 390, light and dark.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -226,12 +226,12 @@ test.beforeAll(async ({ browser }) => {
         viewer: { login: 'dana' },
         requested: {
           nodes: [
-            ghPull(501, 'Retry failed charges on a new schedule'),
+            ghPull(501, 'Retry failed charges on a new schedule', { authorAssociation: 'MEMBER' }),
             ghPull(502, 'Send a receipt after checkout'),
             ghPull(503, 'Fix a typo in the README'),
             ghPull(504, 'Upgrade the linter'),
-            ghPull(505, 'Split the settings page'),
-            ghPull(506, 'Change who can open settings', { baseRefName: 'b505' }),
+            ghPull(505, 'Split the settings page', { authorAssociation: 'MEMBER' }),
+            ghPull(506, 'Change who can open settings', { baseRefName: 'b505', authorAssociation: 'MEMBER' }),
             ghPull(507, 'Regenerate the API client'),
             ghPull(508, STILL_RANKING),
           ],
@@ -313,13 +313,13 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
     await agentList.getByRole('button').first().click();
     await agentList.getByRole('button', { name, exact: true }).click();
   };
-  await expect(dialog.getByRole('heading', { name: 'Set risk rules' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Risk rules' })).toBeVisible();
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toBeFocused();
   await expect(agentList).toHaveAttribute('data-pull-risk-agent', 'claude-agent-sdk');
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'sonnet');
   await expect(modelList.getByRole('button').first()).toContainText('Sonnet');
   await dialog.locator('[data-pull-risk-rules-text]').fill(RULES);
-  await expect(dialog.locator('[data-pull-risk-auto]')).toContainText('When one ranks High, make');
+  await expect(dialog.locator('[data-pull-risk-auto]')).toContainText('On High, make');
   await shots('dialog', [1440, 1280, 390, 320]);
   // A phone: the sheet takes the screen's width, the words only its inset, and every control a thumb's height.
   for (const width of [390, 320] as const) {
@@ -438,68 +438,134 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   expect(readFileSync(join(dataDir, 'inbox', 'pull-risk.json'), 'utf8')).not.toContain('Anything in billing');
 });
 
-test('the automatic run off, picking what to make names the agent it would start, read once, and the sheet still fits a phone', async () => {
+const SHEETS = [
+  { width: 1280, height: 800 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+] as const;
+
+async function sheetFits(dialog: Locator, width: number, extra: Locator[] = []): Promise<void> {
+  const phone = width < 768;
+  for (const control of [...(await dialog.locator('button:visible, textarea:visible').all()), ...extra]) {
+    await expect(control).toBeInViewport({ ratio: 1 });
+    await control.click({ trial: true });
+    if (phone && (await control.evaluate((el) => el.tagName === 'BUTTON' && !el.closest('.absolute')))) expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  const cut = await dialog.evaluate((el) =>
+    [el, ...el.querySelectorAll('*')]
+      .filter((node) => !node.closest('.ib-sr') && node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX !== 'visible')
+      .map((node) => `${node.tagName}.${node.className}: ${node.textContent}`),
+  );
+  expect(cut).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  const box = (await dialog.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(width);
+}
+
+async function eachSheet(name: string, check: (width: number) => Promise<void>): Promise<void> {
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  for (const size of SHEETS) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(350);
+    await check(size.width);
+    await page.screenshot({ path: join(proofDir, `${name}-${size.width}.png`) });
+  }
+  await page.setViewportSize(VIEWPORTS[1440]);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+}
+
+const autoRuns = async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { auto_runs?: Record<string, { state: string; reason?: string }> }).auto_runs ?? {};
+
+test('the automatic line: a pick names the agent it would start; Save starts nothing for PRs ranked before it, and asks; Not now keeps it so, Make them now runs the pass', async () => {
   mkdirSync(join(dataDir, 'agents-home', '.pi', 'agent'), { recursive: true });
   writeFileSync(join(dataDir, 'agents-home', '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
-  expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
-  await expect
-    .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
-    .toContain('"agent":"pi"');
   const reads: string[] = [];
-  page.on('request', (request) => {
+  const onRequest = (request: { url(): string }) => {
     if (request.url().includes('/api/inbox/pulls/risk?auto_agent=1')) reads.push(request.url());
-  });
-  await page.locator('[data-pulls-risk-chip]').click();
-  await page.locator('[data-pulls-risk-rules]').click();
+  };
   const dialog = page.locator('[data-dialog="pull-risk-rules"]');
   const auto = dialog.locator('[data-pull-risk-auto]');
   const withAgent = dialog.locator('[data-pull-risk-auto-agent]');
+  const openRules = async () => {
+    await page.locator('[data-pulls-risk-chip]').click();
+    await page.locator('[data-pulls-risk-rules]').click();
+    await expect(dialog).toBeVisible();
+  };
   const pickMake = async (name: string) => {
     await auto.getByRole('button').first().click();
     await auto.getByRole('button', { name, exact: true }).click();
   };
-  await expect(auto).toHaveAttribute('data-pull-risk-auto', '');
-  await expect(withAgent).toHaveCount(0);
-  expect(reads).toEqual([]);
-  await pickMake('a Picture page');
-  await expect(withAgent).toHaveAttribute('data-pull-risk-auto-agent', 'pi');
-  await expect(withAgent).toHaveText(/^with\s+Pi$/);
-  await pickMake('a guided review');
-  await expect(auto).toHaveAttribute('data-pull-risk-auto', 'guide');
-  await expect(withAgent).toHaveText(/^with\s+Pi$/);
-  expect(reads).toHaveLength(1);
-  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
-  for (const width of [1280, 390, 320] as const) {
-    const size = { width, height: width === 1280 ? 800 : VIEWPORTS[width].height };
-    await page.setViewportSize(size);
-    await page.waitForTimeout(350);
-    await page.screenshot({ path: join(proofDir, `dialog-with-agent-${width}.png`) });
-    await expect(withAgent).toBeVisible();
-    await expect(withAgent).toBeInViewport({ ratio: 1 });
-    for (const name of ['Cancel', 'Save']) {
-      const button = dialog.getByRole('button', { name, exact: true });
-      await expect(button).toBeInViewport({ ratio: 1 });
-      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(width === 1280 ? 0 : 44);
-      expect(await button.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-      await button.click({ trial: true });
+  try {
+    expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
+    await expect
+      .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
+      .toContain('"agent":"pi"');
+    page.on('request', onRequest);
+    await openRules();
+    await expect(auto).toHaveAttribute('data-pull-risk-auto', '');
+    await expect(withAgent).toHaveCount(0);
+    expect(reads).toEqual([]);
+    await pickMake('a Picture page');
+    await expect(withAgent).toHaveAttribute('data-pull-risk-auto-agent', 'pi');
+    await expect(withAgent).toHaveText(/^with\s+Pi$/);
+    await pickMake('a guided review');
+    await expect(auto).toHaveAttribute('data-pull-risk-auto', 'guide');
+    await expect(withAgent).toHaveText(/^with\s+Pi$/);
+    expect(reads).toHaveLength(1);
+    page.off('request', onRequest);
+
+    await eachSheet('risk-dialog-filled', async (width) => {
+      await expect(withAgent).toBeInViewport({ ratio: 1 });
+      await sheetFits(dialog, width);
+      if (width === 320) expect((await dialog.locator('[data-pull-risk-rules-text]').boundingBox())!.height).toBeGreaterThanOrEqual(88);
+    });
+
+    const tip = page.locator('[data-pn-tooltip]');
+    await eachSheet('risk-dialog-info', async (width) => {
+      const info = dialog.locator('[data-pull-risk-info="auto"]');
+      if ((await info.getAttribute('aria-expanded')) !== 'true') await info.click();
+      await expect(info).toHaveAttribute('aria-expanded', 'true');
+      await expect(tip).toContainText('after you save');
+      await expect(tip).toBeInViewport({ ratio: 1 });
+      await sheetFits(dialog, width, [info]);
+    });
+    await page.keyboard.press('Escape');
+    await expect(tip).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+
+    await dialog.locator('[data-pull-risk-save]').click();
+    const ranked = dialog.locator('[data-pull-risk-ranked]');
+    await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '2');
+    await expect(ranked.getByRole('heading')).toHaveText('2 already rank High.');
+    await eachSheet('risk-dialog-ranked', async (width) => {
+      await sheetFits(dialog, width);
+    });
+    expect(await autoRuns()).toEqual({});
+    await dialog.getByRole('button', { name: 'Not now', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    for (let i = 0; i < 3; i++) {
+      await openPulls();
+      await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
     }
-    const sideways = await dialog.evaluate((el) =>
-      [el, ...el.querySelectorAll('*')]
-        .filter((node) => node.scrollWidth > node.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(node).overflowX))
-        .map((node) => `${node.tagName}.${node.className}`),
-    );
-    expect(sideways).toEqual([]);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    expect((await dialog.boundingBox())!.x + (await dialog.boundingBox())!.width).toBeLessThanOrEqual(width);
+    await page.waitForTimeout(1_500);
+    expect(await autoRuns()).toEqual({});
+
+    expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
+    await openRules();
+    await dialog.locator('[data-pull-risk-save]').click();
+    await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '2');
+    await dialog.getByRole('button', { name: 'Make them now', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => Object.keys(await autoRuns()).sort(), { timeout: 15_000 }).toEqual([keyOf(501), keyOf(505), keyOf(506)]);
+    expect(Object.values(await autoRuns()).every((run) => run.state === 'failed' && /off in Settings/.test(run.reason ?? ''))).toBe(true);
+  } finally {
+    page.off('request', onRequest);
+    await page.setViewportSize(VIEWPORTS[1440]);
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+    const saved = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string; provider: string | null; model: string | null };
+    await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: saved.rules, provider: saved.provider, model: saved.model, auto: null } });
+    await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } });
   }
-  await page.setViewportSize(VIEWPORTS[1440]);
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-  await pickMake('nothing');
-  await expect(auto).toHaveAttribute('data-pull-risk-auto', '');
-  await expect(withAgent).toHaveCount(0);
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(dialog).toHaveCount(0);
-  expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
 });
 
 test('the filter: High, Medium and up, remembered; under High what it could not place is one quiet count that shows it', async () => {

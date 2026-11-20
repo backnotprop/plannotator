@@ -179,14 +179,14 @@ test("one agent running at a time: the next starts once the last one's thread ha
   expect(w.auto.runs()[pr(1).key]).toMatchObject({ done: true });
 });
 
-test("a pass queues at most three, highest risk and newest first; the rest are picked up by later passes", async () => {
+test("Make them now queues at most three, highest risk and newest first; the rest are picked up by later passes", async () => {
   const w = world({ level: "medium", make: "guide" });
   w.list(pr(1, { updated_at: "2026-11-18T01:00:00.000Z" }), "medium");
   w.list(pr(2, { updated_at: "2026-11-18T02:00:00.000Z" }), "high");
   w.list(pr(3, { updated_at: "2026-11-18T03:00:00.000Z" }), "medium");
   w.list(pr(4, { updated_at: "2026-11-18T04:00:00.000Z" }), "high");
   w.list(pr(5, { updated_at: "2026-11-18T05:00:00.000Z" }), "medium");
-  w.auto.resume();
+  await w.auto.makeNow();
   await w.auto.idle();
   expect(numbers(w.started)).toEqual([4, 2, 5]);
   w.auto.resume();
@@ -309,7 +309,7 @@ test("after a restart a waiting stack takes one place in the queue, not one per 
   again.agentsKeepWorking();
   again.working.add("thr_1");
   for (const pull of [pr(1), pr(10, { head: "feat/10" }), pr(11, { base: "feat/10", head: "feat/11" }), pr(12, { base: "feat/11", head: "feat/12" }), pr(20), pr(21), pr(22)]) again.list(pull, "high");
-  again.auto.resume();
+  await again.auto.makeNow();
   await again.auto.idle();
   const queued = Object.entries(again.auto.runs()).filter(([, run]) => run.state === "queued").map(([key]) => key);
   expect(queued.sort()).toEqual([pr(10).key, pr(11).key, pr(12).key, pr(20).key, pr(21).key].sort());
@@ -439,7 +439,7 @@ test("a stack is one run: a layer at the level starts one agent for the whole st
   });
 });
 
-test("turned on, or after a crash, it covers PRs judged before: each open one at the level without a review thread or a run", async () => {
+test("PRs ranked before the pick was saved start by no later pass, nor after a restart, only on Make them now; one ranked anew counts as new", async () => {
   const w = world(null);
   w.judged(pr(1), "high");
   w.judged(pr(2), "medium");
@@ -448,16 +448,46 @@ test("turned on, or after a crash, it covers PRs judged before: each open one at
   w.threads.add(pr(3).key);
   await w.auto.idle();
   w.set({ level: "high", make: "guide" });
+  for (let i = 0; i < 2; i++) {
+    w.auto.resume();
+    await w.auto.idle();
+  }
+  expect(w.started).toEqual([]);
   expect(await w.auto.wouldStart()).toEqual({ high: 1, medium: 2 });
-  w.auto.resume();
-  await w.auto.idle();
-  expect(numbers(w.started)).toEqual([1]);
-  expect(await w.auto.wouldStart()).toEqual({ high: 0, medium: 1 });
-  const again = world({ level: "medium", make: "guide" }, w.dataDir);
+  const again = world({ level: "high", make: "guide" }, w.dataDir);
   for (const n of [1, 2]) again.list(pr(n), n === 1 ? "high" : "medium");
   again.auto.resume();
   await again.auto.idle();
+  expect(again.started).toEqual([]);
+  again.judged(pr(2, { head_sha: "b".repeat(40) }), "high");
+  await again.auto.idle();
   expect(numbers(again.started)).toEqual([2]);
+  await again.auto.makeNow();
+  await again.auto.idle();
+  expect(numbers(again.started)).toEqual([2, 1]);
+  expect(await again.auto.wouldStart()).toEqual({ high: 0, medium: 0 });
+  await again.auto.makeNow();
+  again.auto.resume();
+  await again.auto.idle();
+  expect(numbers(again.started)).toEqual([2, 1]);
+});
+
+test("turned off and on again, a PR that ranked while it was on and never started waits for Make them now", async () => {
+  const w = world();
+  w.agentsKeepWorking();
+  for (const n of [1, 2, 3, 4, 5]) w.judged(pr(n), "high");
+  await w.auto.idle();
+  expect(numbers(w.started)).toEqual([1]);
+  w.set(null);
+  w.auto.resume();
+  w.set({ level: "high", make: "picture_it" });
+  w.working.clear();
+  for (let i = 0; i < 3; i++) {
+    w.auto.resume();
+    await w.auto.idle();
+  }
+  expect(numbers(w.started)).toEqual([1]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 4, medium: 4 });
 });
 
 test("the hand-off pastes the skills the window would: the person's own picture-it wins, and Shape and Chapter diagrams apply", () => {

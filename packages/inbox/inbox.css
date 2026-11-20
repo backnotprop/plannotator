@@ -10359,36 +10359,44 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 0; }
   .pn-inbox .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-btn { padding: 0 8px; }
 }
+.ib-riskd-say { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.ib-riskd-say > p { margin: 0; }
+.ib-dlg .ib-riskd-say.ib-quietline { margin-top: 8px; }
+.ib-riskd-say .ib-riskd-l { margin-top: 0; }
 .ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
-.ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
+.ib-riskd-info { display: inline-flex; flex: none; }
+.pn-inbox .ib-riskd-i { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-riskd-i:hover, .pn-inbox .ib-riskd-i[aria-expanded="true"] { color: var(--foreground); }
+.ib-riskd-t { display: block; width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
 .ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
 /* The model list opens over the dialog's edge: a dialog that scrolls would clip it. */
 .ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
 .ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.ib-riskd-auto { align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.ib-riskd-pick { flex: 1 1 auto; min-width: 0; }
+.ib-riskd-pick > div, .ib-riskd-pick button { width: 100%; }
+.ib-riskd-pick button > span:nth-child(2) { flex: 1; min-width: 0; max-width: none; text-align: left; }
+.ib-riskd-auto { align-items: center; gap: 6px 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.ib-riskd-make { flex: none; }
+.ib-riskd-make button > span:first-child { max-width: none; }
 .ib-riskd-with { display: inline-flex; align-items: center; gap: 6px; }
 .ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* A sheet at the bottom of the screen, as the feedback dialog (its rule is above): the list opens upward, inside it, and the sheet can still scroll. */
   .ib-riskd:has(.ib-riskd-row .absolute) { overflow-y: auto; }
-  .ib-riskd-row > div { width: 100%; }
-  .ib-riskd-row button { width: 100%; min-height: 44px; font-size: var(--ib-fs-14, 14px); }
-  .ib-riskd-row button > span:nth-child(2) { flex: 1; min-width: 0; max-width: none; text-align: left; }
+  .ib-riskd-pick button, .ib-riskd-make button { min-height: 44px; font-size: var(--ib-fs-14, 14px); }
   .ib-riskd-row input { font-size: var(--ib-fs-16-in, 16px); }
-  .ib-riskd-row .absolute { top: auto; bottom: 100%; width: 100%; min-width: 0; margin: 0 0 4px; }
+  .ib-riskd-pick .absolute { top: auto; bottom: 100%; width: 100%; min-width: 0; margin: 0 0 4px; }
+  .ib-riskd-make .absolute { top: auto; bottom: 100%; margin: 0 0 4px; }
   .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
-  /* A short phone keeps Save and Cancel on screen: the box gives up its height first. */
-  .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(72px, 13dvh, 140px); }
-  .ib-riskd-auto { margin-top: 10px; padding-top: 10px; row-gap: 2px; }
-  .ib-riskd-auto > div { width: auto; flex: 1 1 0; min-width: 0; }
-  .ib-riskd-with { flex-basis: 100%; line-height: 20px; }
+  .pn-inbox .ib-riskd-i { width: 44px; height: 44px; margin: -10px -10px -10px -12px; }
+  .ib-riskd-say { margin-top: 0; }
+  .ib-dlg .ib-riskd-say.ib-quietline { margin-top: 0; }
+  .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(96px, 16dvh, 140px); margin-top: 6px; }
+  .ib-riskd-auto { margin-top: 6px; padding-top: 10px; }
   .ib-riskd-acts { margin-top: 12px; }
 }
 @media (max-width: 767px) and (max-height: 600px) {
-  .ib-riskd-t { height: 56px; }
-  .ib-riskd:has(.ib-riskd-with) .ib-riskd-t { height: 40px; }
-  .ib-riskd:has(.ib-riskd-with) .ib-riskd-acts { margin-top: 6px; }
-  .ib-riskd .ib-riskd-acts { flex-direction: row; }
+  .ib-riskd .ib-riskd-acts { flex-direction: row; margin-top: 10px; }
   .ib-riskd .ib-riskd-acts .ib-btn { flex: 1; }
 }
 /* A long chain: the first two marks, "+N", the last two. */

@@ -6,6 +6,8 @@ import { inboxApi } from '../api';
 import { HostMark } from '../icons';
 import { Modal } from '../components/Updates';
 import { riskFilterWords } from './risk';
+import { RiskInfo } from './RiskInfo';
+import { RiskAlreadyRanked, riskAlreadyRanked } from './RiskAlreadyRanked';
 
 const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user data.';
 const LOADING = [{ value: '', label: 'Loading models…' }];
@@ -16,6 +18,9 @@ const AUTO_MAKES = [
   { value: 'picture_it', label: 'a Picture page' },
   { value: 'guide', label: 'a guided review' },
 ];
+const RULES_INFO = 'Every open pull request is ranked against these rules: not touched is Low, maybe is Medium, definitely is High.';
+const AGENT_INFO = 'This agent reads the diff of each pull request to rank it. Diffs go only to the provider you choose here. Sonnet, Luna or similar is plenty.';
+const autoInfo = (level: 'high' | 'medium') => `A pull request ranked ${level === 'high' ? 'High' : 'Medium or High'} after you save gets one, made by that agent on its own, one at a time. Ones ranked before are left alone.`;
 
 export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make: string): InboxPullRiskAuto | null | undefined {
   if (make === (saved?.make ?? '')) return undefined;
@@ -38,6 +43,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   const [list, setList] = useState<InboxPullRiskModels | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [asking, setAsking] = useState<InboxPullRiskAnswer | null>(null);
   // Branch reviews (present only while it is on): rank the branches agents report too. Off until the person ticks it.
   const [branches, setBranches] = useState(answer.branches === true);
   const [make, setMake] = useState<string>(answer.auto?.make ?? '');
@@ -79,7 +85,9 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
     setError(null);
     try {
       const auto = riskAutoToSave(answer.auto, make);
-      onSaved(await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}), ...(auto !== undefined ? { auto } : {}) }));
+      const next = await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}), ...(auto !== undefined ? { auto } : {}) });
+      if (make && riskAlreadyRanked(next) > 0) setAsking(next);
+      else onSaved(next);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The rules could not be saved.');
       setSaving(false);
@@ -89,6 +97,14 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   const readingModel = !!provider && !list && !model;
   // No pick to start on means the agent's own default is a choice, as in the guided review (Pi, OpenCode).
   const modelOptions = !list ? LOADING : [...(list.default_model ? [] : [AGENT_DEFAULT]), ...modelSelectOptions(list.models, model ?? undefined)];
+  const level = riskFilterWords[answer.auto?.level ?? 'high'];
+  if (asking) {
+    return (
+      <Modal labelledBy={titleId} onClose={() => onSaved(asking)} testId="pull-risk-rules" className="ib-riskd" ownKeys>
+        <RiskAlreadyRanked titleId={titleId} saved={asking} onDone={onSaved} />
+      </Modal>
+    );
+  }
   return (
     <Modal labelledBy={titleId} onClose={onClose} testId="pull-risk-rules" className="ib-riskd" ownKeys>
       <form
@@ -97,10 +113,13 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           void save();
         }}
       >
-        <h2 id={titleId}>Set risk rules</h2>
-        <label className="ib-sub ib-riskd-l" htmlFor={rulesId}>
-          What makes a pull request high risk for you? Every open one is ranked against this: not touched is low, maybe is medium, definitely is high.
-        </label>
+        <h2 id={titleId}>Risk rules</h2>
+        <div className="ib-riskd-say">
+          <label className="ib-sub ib-riskd-l" htmlFor={rulesId}>
+            What is high risk for you?
+          </label>
+          <RiskInfo name="rules" label="How ranking works" text={RULES_INFO} />
+        </div>
         <textarea ref={field} id={rulesId} className="ib-riskd-t" rows={5} placeholder={PLACEHOLDER} value={rules} onChange={(event) => setRules(event.target.value)} data-pull-risk-rules-text="" />
         {answer.agents.length === 0 ? (
           <p className="ib-quietline" data-pull-risk-no-agent="">
@@ -108,12 +127,12 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           </p>
         ) : (
           <>
-            <div className="ib-riskd-row">
-              <div data-pull-risk-agent={provider ?? ''}>
+            <div className="ib-riskd-row ib-riskd-picks">
+              <div className="ib-riskd-pick" data-pull-risk-agent={provider ?? ''}>
                 <InlinePicker
                   keysStayInList
                   plainGroupLabels
-                  label="Risk agent"
+                  label="Agent"
                   value={provider ?? ''}
                   options={answer.agents.map((agent) => ({ value: agent.id, label: agent.label }))}
                   onChange={(next) => {
@@ -123,14 +142,17 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
                   }}
                 />
               </div>
-              <div data-pull-risk-model={model ?? ''}>
+              <div className="ib-riskd-pick" data-pull-risk-model={model ?? ''}>
                 <InlinePicker keysStayInList plainGroupLabels label="Model" value={list ? (model ?? '') : ''} options={modelOptions} onChange={(next) => setModel(next || null)} />
               </div>
             </div>
-            <p className="ib-quietline">A cheap model is plenty: Sonnet, Luna or similar. Diffs go only to the provider you choose here.</p>
+            <div className="ib-riskd-say ib-quietline">
+              <p>Diffs go to this provider. A cheap model is enough.</p>
+              <RiskInfo name="agent" label="Where diffs go" text={AGENT_INFO} />
+            </div>
             {answer.last_failure && (
-              <p className="ib-quietline" data-pull-risk-failed="">
-                The last ranking didn&rsquo;t finish. {answer.last_failure}
+              <p className="ib-quietline ib-riskd-failed" data-pull-risk-failed="">
+                Last ranking failed: {answer.last_failure}
               </p>
             )}
           </>
@@ -147,8 +169,10 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           </>
         )}
         <div className="ib-riskd-row ib-riskd-auto" role="group" aria-labelledby={autoId} data-pull-risk-auto={make}>
-          <span id={autoId}>When one ranks {riskFilterWords[answer.auto?.level ?? 'high']}, make</span>
-          <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
+          <span id={autoId}>On {level}, make</span>
+          <div className="ib-riskd-make">
+            <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
+          </div>
           {make && autoAgent && (
             <span className="ib-riskd-with" data-pull-risk-auto-agent={autoAgent.auto_agent?.agent ?? ''}>
               {autoAgent.auto_agent ? (
@@ -160,6 +184,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
               )}
             </span>
           )}
+          <RiskInfo name="auto" label="What this makes" text={autoInfo(answer.auto?.level ?? 'high')} />
         </div>
         {error && (
           <p className="ib-error" role="alert">

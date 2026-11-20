@@ -44,6 +44,7 @@ export interface PullRiskAuto {
   runs(): Record<string, InboxPullRiskAutoRun>;
   resume(): void;
   wouldStart(): Promise<Record<InboxPullRiskAuto["level"], number>>;
+  makeNow(): Promise<void>;
   idle(): Promise<void>;
   stop(): void;
 }
@@ -60,13 +61,15 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
   const dir = inboxDir(options.dataDir);
   const file = join(dir, INBOX_PULL_RISK_AUTO_FILE);
   const runs = new Map<string, InboxPullRiskAutoRun>();
+  const fresh = new Set<string>();
   if (existsSync(file)) {
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; runs?: Record<string, InboxPullRiskAutoRun> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; runs?: Record<string, InboxPullRiskAutoRun>; fresh?: unknown };
       if (parsed.v !== 1 || !parsed.runs || typeof parsed.runs !== "object") throw new Error("not a pull risk auto file");
       for (const [key, run] of Object.entries(parsed.runs)) {
         if (run && typeof run.at === "string" && (run.state === "queued" || run.state === "started" || run.state === "failed")) runs.set(key, run);
       }
+      if (Array.isArray(parsed.fresh)) for (const key of parsed.fresh) if (typeof key === "string") fresh.add(key);
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -77,7 +80,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs), fresh: [...fresh] })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {}
   };
@@ -103,6 +106,12 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     const gone = [...runs].filter(([key, run]) => run.state === "queued" && !keep(key, run));
     for (const [key] of gone) runs.delete(key);
     if (gone.length > 0) save();
+  };
+
+  const forgetFresh = () => {
+    if (fresh.size === 0) return;
+    fresh.clear();
+    save();
   };
 
   const busy = (): boolean => {
@@ -134,7 +143,10 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     const keys = [...new Set([key, ...open.map((layer) => layer.key), ...[...runs].filter(([, one]) => one.state === "queued" && one.ranked === key).map(([one]) => one)])].filter((one) => one === key || runs.get(one)?.state === "queued");
     if (!auto || !found || !open.some((layer) => layer.key === key) || !level || !inboxPullRiskReaches(level, auto) || !pullRiskAutoMayStart(open) || (await anyThread(open))) {
       if (!stopped) {
-        for (const one of keys) runs.delete(one);
+        for (const one of keys) {
+          runs.delete(one);
+          fresh.delete(one);
+        }
         save();
       }
       return;
@@ -148,8 +160,14 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       const reason = (error instanceof Error && error.message ? error.message : "The agent could not start.").replace(/\s*Nothing was sent\.$/, "");
       kept = { at: run.at, level, made: auto.make, state: "failed", thread_id: null, reason, tries: (run.tries ?? 0) + 1, failed_at: iso() };
     }
-    for (const one of keys) runs.delete(one);
-    for (const one of new Set([key, ...open.map((layer) => layer.key)])) runs.set(one, kept);
+    for (const one of keys) {
+      runs.delete(one);
+      fresh.delete(one);
+    }
+    for (const one of new Set([key, ...open.map((layer) => layer.key)])) {
+      runs.set(one, kept);
+      fresh.delete(one);
+    }
     if (!stopped) save();
   };
 
@@ -157,6 +175,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     if (running || stopped) return;
     if (!auto) {
       dropQueued(() => false);
+      forgetFresh();
       return;
     }
     if (busy()) return;
@@ -193,11 +212,29 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     void check.finally(() => checks.delete(check));
   };
 
-  return {
+  const waitingBefore = async () => {
+    const found: { pull: InboxPull; level: InboxPullRiskLevel }[] = [];
+    if (!options.settings()) return found;
+    for (const pull of options.listed()) {
+      if (fresh.has(pull.key) || checking.has(pull.key)) continue;
+      const level = !runs.has(pull.key) && pullRiskAutoMayStart(openOf(pull.key)?.open ?? [pull]) ? options.levelOf(pull) : null;
+      if (!level || level === "low" || (await options.hasThread(pull).catch(() => true))) continue;
+      found.push({ pull, level });
+    }
+    return found;
+  };
+
+  const api: PullRiskAuto = {
     judged(pull, level) {
       if (stopped) return;
       const auto = options.settings();
-      if (auto && inboxPullRiskReaches(level, auto)) enqueue(pull, level, auto);
+      const reaches = !!auto && inboxPullRiskReaches(level, auto);
+      if (reaches !== fresh.has(pull.key)) {
+        if (reaches) fresh.add(pull.key);
+        else fresh.delete(pull.key);
+        save();
+      }
+      if (auto && reaches) enqueue(pull, level, auto);
     },
     runs() {
       return Object.fromEntries(runs);
@@ -208,9 +245,12 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       const listed = options.listed();
       const known = new Set(listed.map((pull) => pull.key));
       dropQueued((key, run) => !!auto && known.has(key) && known.has(run.ranked ?? key));
-      if (!auto) return;
+      if (!auto) {
+        forgetFresh();
+        return;
+      }
       const waiting = listed
-        .filter((pull) => pull.state === "open" && (!runs.has(pull.key) || retryable(runs.get(pull.key)!)))
+        .filter((pull) => pull.state === "open" && (runs.has(pull.key) ? retryable(runs.get(pull.key)!) : fresh.has(pull.key)))
         .map((pull) => ({ pull, level: options.levelOf(pull) }))
         .filter((one): one is { pull: InboxPull; level: InboxPullRiskLevel } => !!one.level && inboxPullRiskReaches(one.level, auto))
         .sort((a, b) => RANK[b.level] - RANK[a.level] || b.pull.updated_at.localeCompare(a.pull.updated_at));
@@ -219,14 +259,20 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     },
     async wouldStart() {
       const count = { high: 0, medium: 0 };
-      if (!options.settings()) return count;
-      for (const pull of options.listed()) {
-        const level = !runs.has(pull.key) && pullRiskAutoMayStart(openOf(pull.key)?.open ?? [pull]) ? options.levelOf(pull) : null;
-        if (!level || level === "low" || (await options.hasThread(pull).catch(() => true))) continue;
+      for (const { level } of await waitingBefore()) {
         count.medium++;
         if (level === "high") count.high++;
       }
       return count;
+    },
+    async makeNow() {
+      const auto = options.settings();
+      if (stopped || !auto) return;
+      const before = (await waitingBefore()).filter(({ level }) => inboxPullRiskReaches(level, auto));
+      if (before.length === 0) return;
+      for (const { pull } of before) fresh.add(pull.key);
+      save();
+      api.resume();
     },
     async idle() {
       while (running || checks.size > 0) await Promise.all([running, ...checks]);
@@ -235,4 +281,5 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       stopped = true;
     },
   };
+  return api;
 }

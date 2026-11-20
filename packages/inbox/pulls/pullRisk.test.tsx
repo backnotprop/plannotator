@@ -481,7 +481,7 @@ test.skipIf(!hasDom)('Save waits for a new agent\'s pick, so a save during the r
 
 test.skipIf(!hasDom)('the automatic line saves what to make only when changed, keeping a saved level and agent the dialog does not show; nothing clears it', async () => {
   spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
-  const saves: { auto?: unknown }[] = [];
+  const saves: Record<string, unknown>[] = [];
   spy('savePullRisk', async (input) => {
     saves.push(input);
     return JUDGED;
@@ -489,7 +489,7 @@ test.skipIf(!hasDom)('the automatic line saves what to make only when changed, k
   await mount(<RiskRulesDialog answer={{ ...JUDGED, auto: { level: 'medium', make: 'guide', agent: 'codex' }, auto_agent: { agent: 'codex', name: 'Codex' } }} onSaved={() => {}} onClose={() => {}} />);
   expect(document.querySelector('[data-pull-risk-auto] button')!.textContent).toContain('a guided review');
   expect(document.querySelector('[data-pull-risk-auto-agent]')!.textContent).toMatch(/^with\s+Codex$/);
-  expect(document.querySelector('[data-pull-risk-auto] span')!.textContent).toBe('When one ranks Medium and up, make');
+  expect(document.querySelector('[data-pull-risk-auto] span')!.textContent).toBe('On Medium and up, make');
   const submit = async () => {
     await act(async () => {
       document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

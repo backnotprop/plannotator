@@ -6111,8 +6111,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "POST") {
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          pullRisk.save(body);
-          pullRiskAuto?.resume();
+          if (body && typeof body === "object" && (body as { make_now?: unknown }).make_now === true) await pullRiskAuto?.makeNow();
+          else {
+            pullRisk.save(body);
+            pullRiskAuto?.resume();
+          }
         }
         const answer = pullRisk.answer();
         return json({ serverSession, ...answer, auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 }, ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
