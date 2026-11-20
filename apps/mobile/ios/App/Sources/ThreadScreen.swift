@@ -342,15 +342,13 @@ struct ThreadScreen: View {
     }
     .scrollDismissesKeyboard(.interactively)
     .refreshable { await session.refresh() }
-    // Where the thread stands, said over its messages: snoozed, read, back from a snooze.
+    // Where the thread stands, said under the title bar: snoozed, read, back from a snooze.
     .safeAreaInset(edge: .top, spacing: 0) {
-      if let row = session.row(id) {
-        ThreadLines(row: row, agent: agentName(thread), actions: actions)
-          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in stay() }
-      }
+      if let row = session.row(id) { ThreadLines(row: row, agent: agentName(thread), actions: actions) }
     }
-    // The foot changed its kind (the reply field, or an archived thread's line): the page stays where it rested.
-    .onChange(of: session.row(id).map(ListRules.archived)) { _, _ in stay() }
+    // A line comes or goes, or the foot changes its kind (the reply field, or an archived thread's line): the page
+    // stays where it rested. Said as the row changes, before the room does, so the move is known to be this view's.
+    .onChange(of: session.row(id).map { [$0.snoozed != nil, $0.readAt != nil, $0.snoozeBack != nil, ListRules.archived($0)] }) { _, _ in stay() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let row = session.row(id), ListRules.archived(row) {
         ArchivedFoot(row: row, agent: agentName(thread), actions: actions)
