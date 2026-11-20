@@ -83,7 +83,12 @@ function toolbarTop(): number {
 }
 
 test.skipIf(!hasDom)('Viewer: a selection across two paragraphs puts the toolbar under the second, not the first mark', async () => {
-  touchPhone();
+  // A finger's selection is not painted (its toolbar, TouchSelectionToolbar.test.tsx,
+  // sits under the unpainted selection), but a pinpoint tap on a touch screen
+  // still paints marks and opens this toolbar. So the marks are made here by a
+  // mouse release, with the screen turned into a touch one only once the Viewer
+  // is up (a touch screen's highlighter does not hear a release): the toolbar's
+  // placement by the whole painted selection is what this test is about.
   // Each highlight mark draws on its paragraph's line: the first at 100..120, the second at 200..220.
   const markRect = function (this: HTMLElement) {
     const blocks = Array.from(document.querySelectorAll('[data-block-id]'));
@@ -127,6 +132,7 @@ test.skipIf(!hasDom)('Viewer: a selection across two paragraphs puts the toolbar
     );
   });
   await settle();
+  touchPhone();
   const texts: Text[] = [];
   const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n.textContent ?? '').includes('sensor')) texts.push(n as Text);

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { InlineImageTagsContext } from '@plannotator/ui/components/ImageResolverContext';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
+import { TouchSelectionToolbar } from '@plannotator/ui/components/TouchSelectionToolbar';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
@@ -98,6 +99,10 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
           />,
           document.body,
         )}
+
+      {hook.touchSelectionOffer && (
+        <TouchSelectionToolbar offer={hook.touchSelectionOffer} />
+      )}
     </div>
   );
 });
