@@ -736,7 +736,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   expect(await autoRuns()).toEqual({});
 
   writeGhPulls(LATER());
-  expect((await page.request.get(`${url}api/inbox/reviews?refresh=1`)).status()).toBe(200);
+  expect((await page.request.get(`${url}api/inbox/pulls?refresh=1`)).status()).toBe(200);
   await openPulls();
   await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
   expect(await autoRuns()).toEqual({});
