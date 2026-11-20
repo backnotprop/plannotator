@@ -133,9 +133,14 @@ export function refreshForgejoHosts(now: number = Date.now()): void {
   }
 }
 
-/** `createRefCards` with the Bun runner by default (tests pass their own). */
+/**
+ * `createRefCards` with the Bun runner by default (tests pass their own). With no runner given (a real session), a
+ * Forgejo / Gitea link is read too, with the person's token for its host and only on a host they named
+ * (`forgeHostTrusted`); a test that hands its own runner gets no Forgejo reader unless it passes one, so no test
+ * reaches a real instance.
+ */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {
-  return createSharedRefCards({ ...options, run: options.run ?? refCliRunner });
+  return createSharedRefCards({ ...(options.run ? {} : { forgejo: forgejoRefReader }), ...options, run: options.run ?? refCliRunner });
 }
 
 /**
@@ -150,6 +155,8 @@ export async function refCardRouteResponse(
   options: { enabled: boolean | ((req: Request) => boolean); serverSession?: string },
 ): Promise<Response | null> {
   if (url.pathname !== REF_CARD_ROUTE) return null;
+  // A Forgejo the person named in config is only known to this process once it has read the config.
+  refreshForgejoHosts();
   const answer = await handleRefCardRoute(
     {
       method: req.method,

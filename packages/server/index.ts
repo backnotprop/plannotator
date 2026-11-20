@@ -53,7 +53,7 @@ import {
   type ArchivedPlan,
 } from "./storage";
 import { getRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, type RefRunner } from "./ref-cards";
+import { createRefCards, refCardRouteResponse, type ForgejoRefReader, type RefRunner } from "./ref-cards";
 import { detectProjectName } from "./project";
 import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
@@ -129,6 +129,8 @@ export interface ServerOptions {
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: Forgejo / Gitea cards, with `refRunner` (a real session reads them with the person's token, on hosts they named). */
+  forgejoRefReader?: ForgejoRefReader;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** When set to "archive", server runs in read-only archive browser mode */
@@ -288,7 +290,7 @@ export async function startPlannotatorServer(
   const notionAvailable = isNotionAvailable(isRemote);
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for,
   // and never in remote mode, where anyone who reaches the URL could drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCards(options.refRunner ? { run: options.refRunner, forgejo: options.forgejoRefReader } : {});
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 

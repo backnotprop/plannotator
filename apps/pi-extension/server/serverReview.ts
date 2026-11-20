@@ -30,7 +30,7 @@ import { contentHash } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
-import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
+import { createPiRefCards, handleRefCards, type ForgejoRefReader, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
@@ -346,6 +346,8 @@ export async function startReviewServer(options: {
 	callFlowInstall?: Pick<CallFlowInstallCoordinatorOptions, "install" | "preflight">;
 	/** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
 	refRunner?: RefRunner;
+	/** Tests: Forgejo / Gitea cards, with `refRunner` (a real session reads them with the person's token, on hosts they named). */
+	forgejoRefReader?: ForgejoRefReader;
 	/** "Ask this session": the in-process bridge to the Pi session that opened this review. */
 	sessionBridge?: SessionBridge;
 	/** Turns on `/api/host/status` and `/api/host/close` for a caller in another process (never in remote mode). */
@@ -1821,7 +1823,7 @@ export async function startReviewServer(options: {
 	// Missing is accepted (older clients).
 	const serverSession = createServerSessionNonce();
 	// Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
-	const refCards = createPiRefCards(options.refRunner);
+	const refCards = createPiRefCards(options.refRunner, options.forgejoRefReader);
 	// Static patch mode (`--patch-file`): caller-supplied diff bytes, no repo,
 	// no working tree. Advertised as `sourceKind: "patch"` on every diff payload
 	// (absent reads as "vcs") and enforced by 400ing the endpoints that would

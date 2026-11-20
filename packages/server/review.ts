@@ -128,7 +128,7 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
+import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type ForgejoRefReader, type RefRunner } from "./ref-cards";
 import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse, type OpencodeClient } from "./shared-handlers";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
@@ -252,6 +252,8 @@ export interface ReviewServerOptions {
   tailnetPublished?: boolean;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: Forgejo / Gitea cards, with `refRunner` (a real session reads them with the person's token, on hosts they named). */
+  forgejoRefReader?: ForgejoRefReader;
   /** Raw git diff patch string */
   rawPatch: string;
   /** Git ref used for the diff (e.g., "HEAD", "main..HEAD", "--staged") */
@@ -1875,7 +1877,7 @@ export async function startReviewServer(
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for, and
   // never in remote mode. In a `--tailscale` session only this machine's tabs and the tailnet owner's get
   // them (`refCardsTailnetAllowed`): other devices must not drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCards(options.refRunner ? { run: options.refRunner, forgejo: options.forgejoRefReader } : {});
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
   const compressAppHtml = isRemote || options.tailnetPublished === true;

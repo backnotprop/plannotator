@@ -19,7 +19,7 @@ import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
 import { getSourceRepoInfo } from "./repo";
-import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
+import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type ForgejoRefReader, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl, missingDraftResponse } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
@@ -212,6 +212,8 @@ export interface AnnotateServerOptions {
   tailnetPublished?: boolean;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: Forgejo / Gitea cards, with `refRunner` (a real session reads them with the person's token, on hosts they named). */
+  forgejoRefReader?: ForgejoRefReader;
   /** Project name for keying per-file version history (powers the annotate version diff). */
   project?: string;
   /** Called when server starts with the URL, remote status, and port */
@@ -363,7 +365,7 @@ export async function startAnnotateServer(
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for, and
   // never in remote mode. In a `--tailscale` session only this machine's tabs and the tailnet owner's get
   // them (`refCardsTailnetAllowed`): other devices must not drive the user's gh / glab.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  const refCards = createRefCards(options.refRunner ? { run: options.refRunner, forgejo: options.forgejoRefReader } : {});
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
   const compressAppHtml = isRemote || options.tailnetPublished === true;
