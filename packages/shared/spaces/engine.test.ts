@@ -316,12 +316,13 @@ describe("the space's key", () => {
     expect(spaceOf(s.spaces, again).documents).toHaveLength(1);
   });
 
-  test("the space a key brings back has pages and none is the main page: nothing is added, and the run did not finish", async () => {
+  test("the space a key brings back has pages and none is the main page: nothing is added, and it is gone (Share as new), never a Try again that loops", async () => {
     const s = setup({ token: true, seed: { extras: false } });
     expect((await s.run()).end).toBe("done");
     s.spaces.editPage(s.record.space_id, s.record.pages[s.world.main]!.doc_path, "# Rewritten in the space\n");
     const { again, result, later } = await shareAgain(s, renamed(s));
-    expect(result.end).toBe("failed");
+    expect([result.end, result.error?.code]).toEqual(["failed", "no_main_page"]);
+    expect(again.job).toMatchObject({ ended: "failed", gone: true });
     expect(again.created).toBe(false);
     expect(later.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path === "/v1/workspaces"}`)).toEqual(["POST true"]);
     expect(spaceOf(s.spaces, s.record).documents).toHaveLength(1);

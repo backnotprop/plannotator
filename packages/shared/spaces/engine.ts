@@ -222,13 +222,13 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
           if (made.space.id && made.space.id !== spaceId) {
             // A space this plan already had (its key), under its own id: its pages are taken as they are there, never
             // written over. The main page is the one at its path, else the one holding a version of it from here (its
-            // path may be worked out differently now); a space with pages and none of them it is not added to.
+            // path may be worked out differently now); a space with pages and none of them it is not added to (gone).
             if (!isSpaceId(made.space.id)) throw new SpacesError(0, "unknown_space_id", "The space answered with an id this share cannot keep.");
             let there: { id: string; doc_path: string; version: string | null } | null = null;
             if (doc && bytes && path) {
               const docs = made.space.documents.length > 0 ? made.space.documents : (await client.getSpace(made.space.id)).documents;
               there = docs.find((d) => d.doc_path === path) ?? docs.find((d) => d.version !== null && doc.versions.some((v) => holds(doc.id, v.version_number, d.version!))) ?? null;
-              if (!there && docs.length > 0) throw new Error("The space this plan's key names has pages, and none of them is its main page.");
+              if (!there && docs.length > 0) throw new SpacesError(0, "no_main_page", "The space this plan's key names has pages, and none of them is its main page.");
             }
             await adopt(made.space);
             if (doc && bytes && there) found(doc.id, seed.version!, there.doc_path, there, bytes);
@@ -434,9 +434,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         continue;
       }
       if (!(error instanceof SpacesError)) return end("failed");
-      // The key names a space of another team, or the space answered an id that cannot be kept: trying again gets the
-      // same answer. Gone, so the way on is Share as new (a key of its own).
-      if ((error.status === 409 && error.code === "external_key_conflict") || error.code === "unknown_space_id") {
+      // The key names a space of another team or one without this plan's main page, or the space answered an id that
+      // cannot be kept: trying again gets the same answer. Gone, so the way on is Share as new (a key of its own).
+      if ((error.status === 409 && error.code === "external_key_conflict") || error.code === "unknown_space_id" || error.code === "no_main_page") {
         record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended: "failed", gone: true };
         keep();
         return { end: "failed", error };
