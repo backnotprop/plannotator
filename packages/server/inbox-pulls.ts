@@ -442,7 +442,7 @@ function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number {
 }
 
 function cutOf(lists: [string, unknown][], countKey: "issueCount" | "count"): number[] {
-  return lists.filter(([, list]) => num(obj(list)[countKey]) > nodes(list).length).map(([name]) => Number(name.replace(/^\D+/, "")));
+  return lists.filter(([, list]) => typeof obj(list)[countKey] !== "number" || num(obj(list)[countKey]) > nodes(list).length).map(([name]) => Number(name.replace(/^\D+/, "")));
 }
 
 /** Which lists an answer is read for: the person's own (requested, authored, assigned, merged), or Others. */
