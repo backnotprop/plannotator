@@ -12,6 +12,8 @@ struct PicturePage: View {
   let bars: EdgeInsets
   @Binding var bare: Bool
   let context: CommentContext
+  /// The page on screen: only its picture is held ready to flatten a drawing onto.
+  var current = true
   let close: () -> Void
   @State private var picture: (image: UIImage, pixels: CGSize)?
   @State private var unreadable = false
@@ -34,12 +36,22 @@ struct PicturePage: View {
           desk.marks[item.id, default: []].append(mark)
         }
         .ignoresSafeArea()
-        .onAppear {
+        .onChange(of: current, initial: true) { _, on in
+          let file = item.id
+          guard on else {
+            // Another file is on screen: the desk lets go of this picture.
+            if desk.flatten?.file == file { desk.flatten = nil }
+            return
+          }
           let image = picture.image
           let pixels = picture.pixels
-          let (session, thread, file) = (context.session, context.thread, item.id)
-          desk.flatten[item.id] = { marks in PictureInk.flattened(image, pixels: pixels, kept: session.comments(thread, on: file).compactMap(\.marks), drawn: marks) }
+          let (session, thread) = (context.session, context.thread)
+          desk.flatten = (file, { marks in
+            guard let flat = PictureInk.flattened(image, pixels: pixels, kept: session.comments(thread, on: file).compactMap(\.marks), drawn: marks) else { return nil }
+            return await PictureInk.png(flat)
+          })
         }
+        .onDisappear { if desk.flatten?.file == item.id { desk.flatten = nil } }
       } else if unreadable {
         // A picture in a format the phone cannot read (an SVG), or one that says it is too large to decode: what
         // it is, and Share.
@@ -373,7 +385,17 @@ enum PictureInk {
 
   /// The picture with the marks on it, as a PNG: what the computer keeps and the agent opens. The marks of the
   /// comments already kept are not on it: each comment's drawing is its own.
-  static func flattened(_ image: UIImage, pixels: CGSize, kept: [[PictureMark]], drawn: [PictureMark]) -> Data? {
+  /// A drawn picture's pixels, ready to encode.
+  struct Flat: @unchecked Sendable { let image: CGImage }
+
+  /// The PNG of a flattened picture, encoded off the main thread (a large picture takes a while).
+  static func png(_ flat: Flat) async -> Data? {
+    await Task.detached(priority: .userInitiated) { UIImage(cgImage: flat.image).pngData() }.value
+  }
+
+  /// The picture with the drawing on it, as the window sends it: drawn here (the marks are layers, drawn on the main
+  /// thread), encoded by `png`.
+  static func flattened(_ image: UIImage, pixels: CGSize, kept: [[PictureMark]], drawn: [PictureMark]) -> Flat? {
     guard pixels.width > 0, pixels.height > 0 else { return nil }
     let scale = min(1, flatCap / max(pixels.width, pixels.height))
     let size = CGSize(width: (pixels.width * scale).rounded(), height: (pixels.height * scale).rounded())
@@ -381,7 +403,7 @@ enum PictureInk {
     format.scale = 1
     format.opaque = true
     let pinsBefore = kept.joined().filter { $0.kind == .pin }.count
-    return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+    let drawnImage = UIGraphicsImageRenderer(size: size, format: format).image { context in
       UIColor.black.setFill()
       context.fill(CGRect(origin: .zero, size: size))
       image.draw(in: CGRect(origin: .zero, size: size))
@@ -399,5 +421,6 @@ enum PictureInk {
         }
       }
     }
+    return drawnImage.cgImage.map(Flat.init)
   }
 }

@@ -6,6 +6,8 @@ import InboxWire
 public struct FileComment: Codable, Hashable, Sendable, Identifiable {
   /// `INBOX_ANNOTATION_CURRENT`: the file as it is on the computer now. Any other version is the sent one's sha256.
   public static let current = "current"
+  /// The type of a comment on the whole file (the window's `GLOBAL_COMMENT`).
+  public static let whole = "GLOBAL_COMMENT"
 
   /// The annotation's own id.
   public var id: String

@@ -367,6 +367,25 @@ struct LaunchOptions {
             session.addComment(thread: StandInData.files, item: code, version: .current, annotation: FileComments.lines(lineStart: 3, lineEnd: 4, code: "const CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000", comment: "Lower both on a metered connection?"))
           }
           await session.deliverHeld(thread: StandInData.files)
+        case "commentstanding":
+          // Two drawings on the flame graph that have not reached the computer: one it refused as too large (that
+          // comment is not saved, and no Send carries it), one that waits for a way to send it (it goes first).
+          let files = session.attachments(StandInData.files)
+          if let picture = files.first(where: { $0.name == "reconnect-flamegraph.png" }) {
+            func drawing(_ shade: CGFloat) -> Data {
+              UIGraphicsImageRenderer(size: CGSize(width: 24, height: 6)).pngData { context in
+                UIColor(white: shade, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 24, height: 6))
+              }
+            }
+            let mark = [PictureMark(kind: .stroke, points: [600, 150, 1800, 420], size: 12)]
+            await door.setOptions { $0.refusesMarkups = "markup_too_large" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "The flat top is the cap.", markup: nil), drawing: drawing(0.2), marks: mark)
+            await session.deliverHeld(thread: StandInData.files)
+            await door.setOptions { $0.refusesMarkups = "relay_upload_unavailable" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing(0.6), marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
+            await session.deliverHeld(thread: StandInData.files)
+          }
         case "filechangesnext":
           // The agent edits the plan after the phone last asked how the thread's files stand.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {

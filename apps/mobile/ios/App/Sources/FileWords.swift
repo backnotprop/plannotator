@@ -52,11 +52,37 @@ struct SelectableWords: UIViewRepresentable {
     context.coordinator.parent = self
     let drawn = Self.tinted(words, marked.map(\.range), writing: writing)
     if !view.attributedText.isEqual(to: drawn) { view.attributedText = drawn }
+    // VoiceOver: the words' own Comment, on all of them (a selection is hard to make without sight), and Edit the
+    // comment for each comment already on them.
+    view.accessibilityCustomActions = Self.voiceActions(words: words.string, comments: comments, marked: marked.map(\.comment), comment: { [coordinator = context.coordinator] in
+      coordinator.parent.comment($0, $1)
+    }, opened: { [coordinator = context.coordinator] in coordinator.parent.opened($0) })
     // Read as its words, with its state after them: the words are the label, the state the value.
     if let state {
       view.accessibilityLabel = words.string
       view.accessibilityValue = state
     }
+  }
+
+  /// The words' actions for VoiceOver: Comment on the whole run of words (where it starts past its leading blanks,
+  /// as a selection of them would), and Edit the comment for each comment on them.
+  static func voiceActions(words: String, comments: Bool, marked: [FileComment], comment: @escaping (Int, String) -> Void, opened: @escaping (FileComment) -> Void) -> [UIAccessibilityCustomAction] {
+    var actions: [UIAccessibilityCustomAction] = []
+    let quote = words.trimmingCharacters(in: .whitespacesAndNewlines)
+    if comments, !quote.isEmpty {
+      let start = (words as NSString).range(of: quote).location
+      actions.append(UIAccessibilityCustomAction(name: PhoneWords.comment) { _ in
+        comment(start == NSNotFound ? 0 : start, quote)
+        return true
+      })
+    }
+    for kept in marked {
+      actions.append(UIAccessibilityCustomAction(name: "\(PhoneWords.editComment): \(kept.words)") { _ in
+        opened(kept)
+        return true
+      })
+    }
+    return actions
   }
 
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {

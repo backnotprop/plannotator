@@ -8397,12 +8397,14 @@
       "id": "files-087",
       "title": "Panel foot: \"N annotations ride your next Send to <agent>. M are on other files.\" and Write the reply",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-15"
+      ],
       "mobile": "v1",
       "why": "sheet foot",
       "source": "SCOPE H. Comments and annotations; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8421,9 +8423,7 @@
       "id": "files-089",
       "title": "Comment on words of an agent's message: toolbar with Delete, Comment, Looks good",
       "surface": [
-        "door:POST annotations/:id/remove",
         "door:POST messages/:id/annotations",
-        "window:/api/inbox/annotations/:id/remove",
         "window:/api/inbox/messages/:id/annotations",
         "field:InboxAnnotationRecord.message",
         "field:InboxMessageCommentTarget.at"
@@ -16948,7 +16948,13 @@
         "check:file-07",
         "check:file-08",
         "check:file-09",
-        "check:file-10"
+        "check:file-10",
+        "check:file-11",
+        "check:file-12",
+        "check:file-13",
+        "check:file-14",
+        "check:file-15",
+        "check:file-16"
       ],
       "flows": [
         "file-01",
@@ -16960,7 +16966,13 @@
         "file-07",
         "file-08",
         "file-09",
-        "file-10"
+        "file-10",
+        "file-11",
+        "file-12",
+        "file-13",
+        "file-14",
+        "file-15",
+        "file-16"
       ],
       "mobile": "v1",
       "why": "The phone's own flow spec; each check is proved by a UI test.",
@@ -17274,6 +17286,23 @@
       "ios": {
         "state": "done",
         "fingerprint": "e7e3f6b3dc4c8c2d"
+      }
+    },
+    {
+      "id": "door-post-annotation-remove",
+      "title": "The door route POST annotations/:id/remove",
+      "surface": [
+        "door:POST annotations/:id/remove",
+        "window:/api/inbox/annotations/:id/remove"
+      ],
+      "flows": [
+        "file-15"
+      ],
+      "mobile": "v1",
+      "why": "A comment on a file removed before it is sent (the list's Remove, a cleared comment): the phone sends the removal once the computer may have the comment.",
+      "source": "files-089 split: the route is used by comments on files, not by comments on a message's words",
+      "ios": {
+        "state": "building"
       }
     },
     {
@@ -21460,90 +21489,6 @@
       "title": "frame:runs",
       "surface": [
         "frame:runs"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-20",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-check-file-11",
-      "title": "check:file-11",
-      "surface": [
-        "check:file-11"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-20",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-check-file-12",
-      "title": "check:file-12",
-      "surface": [
-        "check:file-12"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-20",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-check-file-13",
-      "title": "check:file-13",
-      "surface": [
-        "check:file-13"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-20",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-check-file-14",
-      "title": "check:file-14",
-      "surface": [
-        "check:file-14"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-20",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-check-file-15",
-      "title": "check:file-15",
-      "surface": [
-        "check:file-15"
-      ],
-      "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-20",
-      "ios": {
-        "state": "not-started"
-      }
-    },
-    {
-      "id": "undecided-check-file-16",
-      "title": "check:file-16",
-      "surface": [
-        "check:file-16"
       ],
       "flows": [],
       "mobile": "undecided",

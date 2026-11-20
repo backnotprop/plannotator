@@ -409,6 +409,20 @@ enum PhoneWords {
   static let noComments = "No comments"
   /// packages/inbox/components/Thread.tsx: a comment the computer would not keep.
   static let commentNotSaved = "The comment was not saved."
+  /// packages/inbox/components/AnnotationsChip.tsx: a comment whose place in the file is lost (it goes with its quote).
+  static let unanchored = "Unanchored"
+  /// packages/ui/components/Viewer.tsx: a comment on the whole document.
+  static let globalComment = "Global comment"
+  /// packages/inbox/components/Markup.tsx `markupToast`: a drawing added to the reply.
+  static let markupAdded = "Markup added to your reply"
+  static let addedToReply = "Added to your reply"
+  static let markupAddedSpoken = "Markup added to your reply."
+  /// packages/inbox/components/AttachmentPane.tsx, the panel's foot: what rides the next Send, comments for
+  /// annotations.
+  static func commentsRide(_ n: Int, agent: String, elsewhere: Int) -> String {
+    let lead = "\(CountWords.comments(n)) \(n == 1 ? "rides" : "ride") your next Send to \(agent)."
+    return elsewhere > 0 ? "\(lead) \(elsewhere) \(elsewhere == 1 ? "is" : "are") on other files." : lead
+  }
 
   /// VoiceOver's state for a task box in a document (it cannot be ticked here).
   static let taskTicked = "Checked"

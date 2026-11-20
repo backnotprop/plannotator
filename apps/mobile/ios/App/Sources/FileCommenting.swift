@@ -19,6 +19,8 @@ final class CommentDesk {
     case picture
     /// A spot on a page.
     case pin(PinnedElement)
+    /// The whole file: a document's or a code file's Global comment, a page's own comment.
+    case whole
   }
 
   struct Draft: Equatable {
@@ -50,8 +52,17 @@ final class CommentDesk {
   private(set) var sought: Sought?
   /// The reply field's keyboard is wanted.
   var wantsKeyboard = 0
-  /// Each picture's viewer, to flatten what was drawn onto the picture as a PNG.
-  @ObservationIgnored var flatten: [AttachmentID: ([PictureMark]) -> Data?] = [:]
+  /// The picture on screen's viewer, to flatten what was drawn onto it as a PNG (only that one: a picture let go
+  /// of its decoded pixels when the cover moved on).
+  @ObservationIgnored var flatten: (file: AttachmentID, make: ([PictureMark]) async -> Data?)?
+  /// The page on screen's pin at the middle of the screen (VoiceOver's pin).
+  @ObservationIgnored var pinMiddle: (() -> Void)?
+  /// The cover's toast, with Undo.
+  let toasts = CommentToast()
+  /// A drawing is being flattened to keep: Comment waits for it.
+  private(set) var keeping = false
+  /// What was being written on each file the person stepped away from, back when they return to it.
+  @ObservationIgnored private var parked: [AttachmentID: (draft: Draft?, editing: FileComment?, words: String)] = [:]
 
   func begin(_ draft: Draft) {
     editing = nil
@@ -75,6 +86,21 @@ final class CommentDesk {
 
   func seek(_ comment: FileComment) { sought = Sought(comment: comment, turn: (sought?.turn ?? 0) + 1) }
 
+  /// The cover stepped from one file to the next: what was being written on the last one waits for the person's
+  /// return to it, and what was being written on this one comes back. Not when the step is the way to the comment
+  /// whose words are being changed, or the place being commented on.
+  func step(from old: AttachmentID?, to now: AttachmentID) {
+    if editing?.attachment == now || draft?.file == now { return }
+    if let old, draft != nil || editing != nil || !words.isEmpty { parked[old] = (draft, editing, words) }
+    if let back = parked.removeValue(forKey: now) {
+      draft = back.draft
+      editing = back.editing
+      words = back.words
+    } else {
+      cancel()
+    }
+  }
+
   /// The lines being commented on in a code file, if any.
   func lines(in file: AttachmentID) -> ClosedRange<Int>? {
     if let draft, draft.file == file, case .lines(let range, _) = draft.target { return range }
@@ -90,30 +116,59 @@ final class CommentDesk {
     return picture && (!trimmed.isEmpty || !(marks[item.id] ?? []).isEmpty)
   }
 
-  /// Keep the comment being written (or the change to one), and clear the desk for the next.
-  func keep(session: InboxSession, thread: ThreadID, item: AttachmentItem, version: AttachmentVersion, picture: Bool) {
-    guard ready(on: item, picture: picture) else { return }
+  /// Keep the comment being written (or the change to one), and clear the desk for the next. `readKey`: the cache key
+  /// of the bytes on screen, which the comment was read on.
+  func keep(session: InboxSession, thread: ThreadID, item: AttachmentItem, version: AttachmentVersion, picture: Bool, readKey: String? = nil) {
+    guard ready(on: item, picture: picture), !keeping else { return }
     if let editing {
       session.editComment(editing.id, thread: thread, words: trimmed)
     } else {
       let target = draft?.file == item.id ? draft?.target : picture ? .picture : nil
       let on = draft?.file == item.id ? draft?.version ?? version : version
+      // The key read is the bytes on screen only for the version on screen (a comment begun on the other version
+      // keeps to it).
+      let read = on == version ? readKey : nil
       switch target {
       case .words(let block, let start, let quote)?:
-        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.words(block: block, start: start, quote: quote, comment: trimmed))
+        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.words(block: block, start: start, quote: quote, comment: trimmed), readKey: read)
       case .lines(let range, let code)?:
-        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.lines(lineStart: range.lowerBound, lineEnd: range.upperBound, code: code, comment: trimmed))
+        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.lines(lineStart: range.lowerBound, lineEnd: range.upperBound, code: code, comment: trimmed), readKey: read)
       case .pin(let element)?:
         let order = session.comments(thread, on: item.id).count
-        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.pin(element: element, order: order, comment: trimmed))
+        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.pin(element: element, order: order, comment: trimmed), readKey: read)
+      case .whole?:
+        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.whole(comment: trimmed), readKey: read)
       case .picture?:
         let drawn = marks[item.id] ?? []
-        // The drawing goes flattened onto the picture, as the window sends it.
-        let drawing = drawn.isEmpty ? nil : flatten[item.id]?(drawn)
-        if !drawn.isEmpty, drawing == nil { return }
-        session.addComment(thread: thread, item: item, version: on, annotation: FileComments.picture(name: item.name, comment: trimmed, markup: nil), drawing: drawing, marks: drawn.isEmpty ? nil : drawn)
-        marks[item.id] = nil
-        marking = false
+        let words = trimmed
+        let add = { (drawing: Data?) in
+          session.addComment(thread: thread, item: item, version: on, annotation: FileComments.picture(name: item.name, comment: words, markup: nil), drawing: drawing, marks: drawn.isEmpty ? nil : drawn, readKey: read)
+        }
+        guard !drawn.isEmpty else {
+          _ = add(nil)
+          break
+        }
+        // The drawing goes flattened onto the picture, as the window sends it; the picture is encoded off the main
+        // thread, and Comment waits for it.
+        guard let flatten, flatten.file == item.id else { return }
+        keeping = true
+        Task { @MainActor in
+          let drawing = await flatten.make(drawn)
+          keeping = false
+          guard let drawing, let made = add(drawing) else { return }
+          marks[item.id] = nil
+          marking = false
+          UINotificationFeedbackGenerator().notificationOccurred(.success)
+          cancel()
+          // The window's toast for a drawing added to the reply; Undo takes it back off and puts the marks and
+          // words back on the picture.
+          toasts.show(ToastWords(mark: .check, lead: PhoneWords.markupAdded, phoneLead: PhoneWords.addedToReply, speech: PhoneWords.markupAddedSpoken), said: ActionWords.movedBack) { [weak self] in
+            session.removeComment(made.id, thread: thread)
+            self?.marks[item.id] = drawn
+            if self?.words.isEmpty == true { self?.words = made.isWordlessMarkup ? "" : made.words }
+          }
+        }
+        return
       case nil:
         return
       }
@@ -133,6 +188,8 @@ struct CommentFoot: View {
   let version: AttachmentVersion
   let shown: FileFacts.Shown
   @Bindable var desk: CommentDesk
+  /// The cache key of the bytes on screen.
+  var readKey: String?
   @FocusState private var focused: Bool
   @ScaledMetric(relativeTo: .body) private var textLine: CGFloat = Size.mark
   private var oneLine: CGFloat { max(Size.replyRow, textLine + 2 * Space.step) }
@@ -143,7 +200,7 @@ struct CommentFoot: View {
 
   /// What the comment is on, in the file's own words: the words selected, a line's start, an element's words.
   private var quote: (symbol: String, words: String)? {
-    if let editing = desk.editing { return (Self.symbol(editing), editing.quote) }
+    if let editing = desk.editing { return (Self.symbol(editing), Self.label(editing, page: shown == .page)) }
     guard let draft = desk.draft, draft.file == item.id else { return nil }
     switch draft.target {
     case .words(_, _, let quote): return ("text.quote", quote)
@@ -151,15 +208,24 @@ struct CommentFoot: View {
       let first = code.components(separatedBy: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?.trimmingCharacters(in: .whitespaces) ?? ""
       return ("number", range.count == 1 ? "\(range.lowerBound)  \(first)" : "\(range.lowerBound)–\(range.upperBound)  \(first)")
     case .pin(let element): return ("mappin", element.text.isEmpty ? "<\(element.tag)>" : element.text)
+    case .whole: return ("doc.text", shown == .page ? PhoneWords.commentOnPage : PhoneWords.globalComment)
     case .picture: return nil
     }
   }
 
   static func symbol(_ comment: FileComment) -> String {
+    if comment.type == FileComment.whole { return "doc.text" }
     if comment.codeRange != nil { return "number" }
     if comment.elementTag != nil { return "mappin" }
     if !comment.images.isEmpty { return "scribble.variable" }
     return comment.blockId == "image" ? "photo" : "text.quote"
+  }
+
+  /// What a kept comment is on, as its row and the field say it: its quote, or for a comment on the whole file the
+  /// window's words for one.
+  static func label(_ comment: FileComment, page: Bool) -> String {
+    guard comment.type == FileComment.whole else { return comment.quote }
+    return page ? PhoneWords.commentOnPage : PhoneWords.globalComment
   }
 
   /// The window's words for each field (packages/inbox/components/ImageAttachmentView.tsx, AttachmentPane.tsx,
@@ -193,6 +259,11 @@ struct CommentFoot: View {
     .glassEffect(.regular, in: .rect(cornerRadius: Radius.foot))
     .barSized()
     .accessibilityIdentifier("page-mode")
+    // VoiceOver: with Comment on, the switch's action pins what is in the middle of the page on screen.
+    .accessibilityAction(named: PhoneWords.comment) {
+      if !desk.commenting { desk.commenting = true }
+      desk.pinMiddle?()
+    }
   }
 
   private var box: some View {
@@ -238,13 +309,13 @@ struct CommentFoot: View {
           .accessibilityIdentifier("comment-field")
         let ready = desk.ready(on: item, picture: picture)
         Button {
-          desk.keep(session: session, thread: thread, item: item, version: version, picture: picture)
+          desk.keep(session: session, thread: thread, item: item, version: version, picture: picture, readKey: readKey)
           focused = false
         } label: {
           SendDisc(ready: ready, symbol: "checkmark")
         }
         .buttonStyle(PressStyle())
-        .disabled(!ready)
+        .disabled(!ready || desk.keeping)
         .accessibilityLabel(PhoneWords.comment)
         .accessibilityIdentifier("comment-keep")
         .barSized()
@@ -291,10 +362,14 @@ struct CommentFoot: View {
 }
 
 /// The comments that wait for the next Send, file by file: a touch goes to where one is; a swipe or a long press
-/// changes its words or removes it.
+/// changes its words or removes it. A comment the next Send does not carry says why. At the foot, what rides the
+/// next Send, in the window's words (packages/inbox/components/AttachmentPane.tsx, the panel's foot).
 struct CommentsSheet: View {
   let session: InboxSession
   let thread: ThreadID
+  /// The file on screen behind the list, when it is opened from a file: the foot counts the comments on others.
+  var current: AttachmentID?
+  let toasts: CommentToast
   /// Go to a comment's place in its file.
   let open: (FileComment) -> Void
   let edit: (FileComment) -> Void
@@ -304,6 +379,7 @@ struct CommentsSheet: View {
     let comments = session.comments(thread)
     let files = session.attachments(thread)
     let order = comments.map(\.attachment).reduce(into: [AttachmentID]()) { if !$0.contains($1) { $0.append($1) } }
+    let riding = session.commentsToSend(thread)
     NavigationStack {
       List {
         ForEach(order, id: \.self) { file in
@@ -313,13 +389,13 @@ struct CommentsSheet: View {
                 dismiss()
                 open(comment)
               } label: {
-                CommentRow(session: session, comment: comment)
+                CommentRow(session: session, comment: comment, standing: session.commentStanding(comment, in: thread), page: files.first { $0.id == file }?.kind == .html)
               }
               .buttonStyle(RowStyle(selected: false))
               .listRowInsets(EdgeInsets())
               .listRowBackground(Surface.sheet)
               .swipeActions(edge: .trailing) {
-                Button(role: .destructive) { session.removeComment(comment.id, thread: thread) } label: { Label(PhoneWords.remove, systemImage: "trash") }
+                Button(role: .destructive) { toasts.removed(comment.id, thread: thread, session: session) } label: { Label(PhoneWords.remove, systemImage: "trash") }
                 Button {
                   dismiss()
                   edit(comment)
@@ -335,12 +411,26 @@ struct CommentsSheet: View {
                 } label: {
                   Label(PhoneWords.editComment, systemImage: "pencil")
                 }
-                Button(role: .destructive) { session.removeComment(comment.id, thread: thread) } label: { Label(PhoneWords.remove, systemImage: "trash") }
+                Button(role: .destructive) { toasts.removed(comment.id, thread: thread, session: session) } label: { Label(PhoneWords.remove, systemImage: "trash") }
               }
               .accessibilityIdentifier("comment/\(comment.words)")
             }
           } header: {
             Text(files.first { $0.id == file }?.name ?? "").font(TextRole.name).foregroundStyle(Token.mutedForeground).textCase(nil)
+          }
+        }
+        if !riding.isEmpty {
+          Section {
+            Text(PhoneWords.commentsRide(riding.count, agent: agent, elsewhere: current.map { here in riding.filter { $0.attachment != here }.count } ?? 0))
+              .font(TextRole.meta)
+              .foregroundStyle(Token.mutedForeground)
+              .padding(.horizontal, Space.page)
+              .padding(.vertical, Space.step)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .listRowInsets(EdgeInsets())
+              .listRowBackground(Surface.sheet)
+              .listRowSeparator(.hidden)
+              .accessibilityIdentifier("comments-ride")
           }
         }
       }
@@ -353,15 +443,32 @@ struct CommentsSheet: View {
         ToolbarItem(placement: .topBarLeading) { Button(PhoneWords.done) { dismiss() } }
       }
     }
+    .commentToast(toasts)
     .presentationDetents([.medium, .large])
     .presentationBackground(Surface.sheet)
     .onChange(of: comments.isEmpty) { _, empty in if empty { dismiss() } }
   }
+
+  /// The agent the thread's lines name, as the thread's own foot says it.
+  private var agent: String { session.thread(thread).map { ThreadScreen.agentName($0.thread) } ?? PhoneWords.anAgent }
 }
 
 struct CommentRow: View {
   let session: InboxSession
   let comment: FileComment
+  var standing: CommentStanding = .goes
+  var page = false
+
+  /// Why the next Send leaves it, or how it goes, in words the app already says.
+  private var note: (words: String, symbol: String, role: Color)? {
+    switch standing {
+    case .goes: return nil
+    case .unanchored: return (PhoneWords.unanchored, "location.slash", Token.mutedForeground)
+    case .drawingWaits: return (PhoneWords.willSend, "clock", Token.mutedForeground)
+    case .notSaved: return (PhoneWords.commentNotSaved, "exclamationmark.circle", Token.destructive)
+    case .window: return (PhoneWords.replyOnComputer, "desktopcomputer", Token.mutedForeground)
+    }
+  }
 
   var body: some View {
     HStack(alignment: .top, spacing: Space.step) {
@@ -369,14 +476,15 @@ struct CommentRow: View {
       VStack(alignment: .leading, spacing: Space.tight) {
         // A picture's quote is its own name, which the section already says.
         if comment.blockId != "image" {
-          Text(comment.codeRange.map { range in "\(range.lineStart == range.lineEnd ? "\(range.lineStart)" : "\(range.lineStart)–\(range.lineEnd)")  \(comment.quote)" } ?? comment.quote)
+          Text(comment.codeRange.map { range in "\(range.lineStart == range.lineEnd ? "\(range.lineStart)" : "\(range.lineStart)–\(range.lineEnd)")  \(comment.quote)" } ?? CommentFoot.label(comment, page: page))
             .font(comment.codeRange == nil ? TextRole.secondary : TextRole.code(.footnote))
             .foregroundStyle(Token.mutedForeground)
             .lineLimit(2)
         }
         Text(comment.words).font(TextRole.body).foregroundStyle(Token.foreground).multilineTextAlignment(.leading)
-        if session.commentRefusal(comment.id) != nil {
-          Label(PhoneWords.commentNotSaved, systemImage: "exclamationmark.circle").font(TextRole.meta).foregroundStyle(Token.destructive)
+        if let note {
+          Label(note.words, systemImage: note.symbol).font(TextRole.meta).foregroundStyle(note.role)
+            .accessibilityIdentifier("comment-standing")
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)

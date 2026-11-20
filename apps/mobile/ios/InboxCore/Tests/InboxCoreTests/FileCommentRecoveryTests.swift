@@ -151,11 +151,11 @@ final class FileCommentRecoveryTests: XCTestCase {
 
   // MARK: A drawing
 
-  private func pictureComment(_ door: StandInDoor, _ session: InboxSession, words: String = "Too red.") async throws -> FileComment {
+  private func pictureComment(_ door: StandInDoor, _ session: InboxSession, words: String = "Too red.", marks: [PictureMark]? = nil) async throws -> FileComment {
     _ = await door.addFile(thread: thread, message: StandInData.filesSecond, name: "flame.png", kind: .image, bytes: png(1), mediaType: "image/png", width: 8, height: 8)
     await session.readAttachments(thread)
     let item = try file(session, "flame.png")
-    return try XCTUnwrap(session.addComment(thread: thread, item: item, version: .current, annotation: FileComments.picture(name: item.name, comment: words, markup: nil), drawing: png(9)))
+    return try XCTUnwrap(session.addComment(thread: thread, item: item, version: .current, annotation: FileComments.picture(name: item.name, comment: words, markup: nil), drawing: png(9), marks: marks))
   }
 
   func testACommentIsNeverSavedNamingADrawingTheComputerWouldNotKeepAndAChangeTriesAgain() async throws {
@@ -218,6 +218,34 @@ final class FileCommentRecoveryTests: XCTestCase {
     await delivered(session)
     let gone = await door.pendingComments(thread)
     XCTAssertTrue(gone.isEmpty, "a removal followed the save that may have arrived")
+  }
+
+  func testUndoAfterRemoveBringsBackTheSameCommentAndItsDrawing() async throws {
+    let door = StandInDoor()
+    let (_, session) = try await seated(door: door)
+    let first = try planComment(session, words: "First.")
+    let drawn = try await pictureComment(door, session, marks: [PictureMark(kind: .pin, points: [4, 4], size: 2), PictureMark(kind: .stroke, points: [1, 1, 6, 6], size: 1)])
+    // Removed and brought back while the computer is away: nothing has gone yet, and nothing is lost.
+    await door.setOffline(true)
+    await session.refresh()
+    let hash = try XCTUnwrap(PendingDrawing.hash(try XCTUnwrap(drawn.images.first).path))
+    let removed = try XCTUnwrap(session.removeComment(first.id, thread: thread))
+    let removedDrawing = try XCTUnwrap(session.removeComment(drawn.id, thread: thread))
+    XCTAssertNil(session.drawing(hash), "the drawing left with its comment")
+    // Undone last first, as each toast's Undo is taken.
+    let backDrawing = try XCTUnwrap(session.restoreComment(removedDrawing))
+    let back = try XCTUnwrap(session.restoreComment(removed))
+    XCTAssertEqual(session.comments(thread).map(\.words), ["First.", "Too red."], "each back in its place")
+    XCTAssertEqual(back.annotation.filter { $0.key != "id" }, first.annotation.filter { $0.key != "id" }, "the same words and place")
+    XCTAssertEqual(backDrawing.images, drawn.images)
+    XCTAssertEqual(backDrawing.marks, drawn.marks, "and its marks")
+    XCTAssertNotNil(session.drawing(hash), "and the drawing it names, to go before it")
+    await door.setOffline(false)
+    await session.refresh()
+    await delivered(session)
+    XCTAssertEqual(session.comments(thread).map(\.saved), [true, true], "both saved again")
+    let onComputer = await door.pendingComments(thread)
+    XCTAssertEqual(Set(onComputer.map(\.id)), Set([back.id, backDrawing.id]))
   }
 
   func testAListReadBeforeASaveLandedNeverDropsWhatTheSaveMade() async throws {

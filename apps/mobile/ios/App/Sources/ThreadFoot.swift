@@ -179,13 +179,15 @@ struct Composer: View {
   }
 
   private func box(jumps: Bool) -> some View {
-    let riding = session.comments(id).count
+    // What the Send carries; the strip stays while any comment waits, so the list says why one does not go.
+    let riding = session.commentsToSend(id).count
+    let waiting = !session.comments(id).isEmpty
     return VStack(spacing: 0) {
       if jumps, waits != nil {
         jumpStrip
         Hairline().padding(.horizontal, Space.card)
       }
-      if riding > 0 {
+      if waiting {
         commentStrip(riding)
         Hairline().padding(.horizontal, Space.card)
       }

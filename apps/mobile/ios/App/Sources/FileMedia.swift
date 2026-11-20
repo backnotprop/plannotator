@@ -42,6 +42,8 @@ struct WebPage: UIViewRepresentable {
   /// A spot was pinned: what the page's element there is.
   var pinned: (PinnedElement) -> Void = { _ in }
   var opened: (FileComment) -> Void = { _ in }
+  /// Hands over the way to pin the element at the middle of the screen (VoiceOver's pin, with no touch).
+  var pinsMiddle: (@escaping () -> Void) -> Void = { _ in }
 
   /// The page's own scheme: apart from every site and from the phone's files. Only the page is served on it.
   static let scheme = "plannotator-file"
@@ -112,6 +114,7 @@ struct WebPage: UIViewRepresentable {
     view.scrollView.backgroundColor = .white
     view.accessibilityIdentifier = "file-page"
     view.addGestureRecognizer(context.coordinator.touches)
+    context.coordinator.touches.watchFocus(in: view)
     context.coordinator.pinning.attach(to: view)
     context.coordinator.ground = view.observe(\.underPageBackgroundColor, options: [.initial, .new]) { view, _ in
       Task { @MainActor in
@@ -143,6 +146,13 @@ struct WebPage: UIViewRepresentable {
     coordinator.pinning.pinned = pinned
     coordinator.pinning.opened = opened
     coordinator.pinning.set(commenting: commenting, in: view)
+    let pinning = coordinator.pinning
+    pinsMiddle { [weak pinning] in pinning?.pinMiddle() }
+    // VoiceOver: while commenting, the page's own action pins what is in the middle of the screen.
+    view.accessibilityCustomActions = commenting ? [UIAccessibilityCustomAction(name: PhoneWords.comment) { [weak pinning] _ in
+      pinning?.pinMiddle()
+      return true
+    }] : nil
     coordinator.pinning.show(pins, in: view)
     if let sought, sought.turn != coordinator.pinning.soughtTurn {
       coordinator.pinning.soughtTurn = sought.turn
@@ -185,11 +195,43 @@ struct WebPage: UIViewRepresentable {
       delegate = self
     }
 
-    /// VoiceOver and Switch Control activate a link with no touch on the page. (A hardware keyboard, Full Keyboard
-    /// Access included, is seen by its key: `pressesBegan`.)
+    /// VoiceOver and Switch Control activate a link with no touch on the page: what they show instead is where
+    /// their focus lands (`focusLanded`). (A hardware keyboard, Full Keyboard Access included, is seen by its key:
+    /// `pressesBegan`.)
     static var assistive: Bool { UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning }
 
-    var recent: Bool { gate.allows(at: Date(), assistive: Self.assistive) }
+    private weak var page: UIView?
+
+    /// Ask to open a link the page activated now: true once per tap, key or move of the focus into the page.
+    func open() -> Bool { gate.open(at: Date(), assistive: Self.assistive) }
+
+    func pageLoaded() { gate.pageLoaded(at: Date()) }
+
+    /// Hear where VoiceOver's or Switch Control's focus lands; a landing inside `page` is the person going there.
+    func watchFocus(in page: UIView) {
+      self.page = page
+      NotificationCenter.default.addObserver(self, selector: #selector(focused(_:)), name: UIAccessibility.elementFocusedNotification, object: nil)
+    }
+
+    @objc private func focused(_ note: Notification) {
+      guard let page, let element = note.userInfo?[UIAccessibility.focusedElementUserInfoKey], Self.isInside(element as AnyObject, page) else { return }
+      gate.focusLanded(at: Date())
+    }
+
+    /// Whether an accessibility element is in a view: the view itself, under it, or one of WebKit's elements whose
+    /// containers lead to a view under it.
+    static func isInside(_ element: AnyObject, _ page: UIView) -> Bool {
+      var at: AnyObject? = element
+      for _ in 0..<64 {
+        guard let current = at else { return false }
+        if let view = current as? UIView { return view === page || view.isDescendant(of: page) }
+        // WebKit's elements are not all `UIAccessibilityElement`s, but each answers for its container.
+        let container = NSSelectorFromString("accessibilityContainer")
+        guard let object = current as? NSObject, object.responds(to: container) else { return false }
+        at = object.perform(container)?.takeUnretainedValue()
+      }
+      return false
+    }
 
     private func place(_ touches: Set<UITouch>) -> CGPoint { touches.first?.location(in: nil) ?? .zero }
 
@@ -250,11 +292,14 @@ struct WebPage: UIViewRepresentable {
 
     /// A link the person just tapped, to a site: to the browser. Nothing else leaves.
     private func leave(_ action: WKNavigationAction) {
-      guard !commenting, action.navigationType == .linkActivated || action.targetFrame == nil, touches.recent, let target = action.request.url, ["http", "https"].contains(target.scheme?.lowercased() ?? "") else { return }
+      guard !commenting, action.navigationType == .linkActivated || action.targetFrame == nil, let target = action.request.url, ["http", "https"].contains(target.scheme?.lowercased() ?? ""), touches.open() else { return }
       UIApplication.shared.open(target)
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { touches.pageLoaded() }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+      touches.pageLoaded()
       pinning.loaded(webView)
     }
 

@@ -29,7 +29,8 @@ struct PinnedPage: View {
       pins: kept + (writing.map { [PagePins.Pin(id: "writing", number: comments.count + 1, x: $0.x, y: $0.y, comment: nil)] } ?? []),
       sought: desk.sought?.comment.attachment == context.item.id ? desk.sought : nil,
       pinned: { context.begin(.pin($0)) },
-      opened: { desk.edit($0) })
+      opened: { desk.edit($0) },
+      pinsMiddle: { desk.pinMiddle = $0 })
   }
 }
 
@@ -65,60 +66,97 @@ final class PagePins: NSObject {
   /// Read by the app only (`describe`), and quiet until commenting is on. `x` and `y` are in the page's own points.
   static let script = """
     (() => {
+      // The DOM's own methods and getters, taken now, before the page runs: a page can shadow a document's or a
+      // form's names with its own elements (`<img name="elementFromPoint">`), never these.
+      const own = (proto, name) => Object.getOwnPropertyDescriptor(proto, name);
+      const getter = (proto, name) => { const d = own(proto, name); return d && d.get; };
+      const call = (fn, self, ...args) => (fn ? Reflect.apply(fn, self, args) : undefined);
+      const D = Document.prototype, E = Element.prototype, N = Node.prototype, H = HTMLElement.prototype;
+      const doc = document;
+      const fromPoint = own(D, "elementFromPoint").value, queryAll = own(D, "querySelectorAll").value;
+      const body = getter(D, "body"), root = getter(D, "documentElement");
+      const rect = own(E, "getBoundingClientRect").value, attr = own(E, "getAttribute").value;
+      const localName = getter(E, "localName"), elId = getter(E, "id"), classes = getter(E, "classList");
+      const prev = getter(E, "previousElementSibling"), next = getter(E, "nextElementSibling");
+      const parent = getter(N, "parentElement"), nodeType = getter(N, "nodeType"), textContent = getter(N, "textContent");
+      const position = own(N, "compareDocumentPosition").value, innerText = getter(H, "innerText");
+      const style = getter(H, "style");
+      const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
       const pins = { on: false };
-      const quiet = new Set(["touchstart", "touchmove", "pointerdown", "pointermove"]);
+      // Touches and moves only watched, never held: scrolling never waits on this script.
+      const watched = new Set(["touchstart", "touchmove", "pointerdown", "pointermove", "pointerover", "pointerout", "pointerenter", "pointerleave", "mousemove", "mouseover", "mouseout", "mouseenter", "mouseleave"]);
       const stop = (event) => {
         if (!pins.on) return;
         event.stopImmediatePropagation();
-        if (event.cancelable && !quiet.has(event.type)) event.preventDefault();
+        if (event.cancelable && !watched.has(event.type)) event.preventDefault();
       };
-      for (const type of ["click", "dblclick", "auxclick", "contextmenu", "mousedown", "mouseup", "pointerdown", "pointerup", "pointermove", "touchstart", "touchmove", "touchend", "submit"]) {
-        window.addEventListener(type, stop, { capture: true, passive: false });
+      for (const type of ["click", "dblclick", "auxclick", "contextmenu", "mousedown", "mouseup", "pointerdown", "pointerup", "pointermove", "pointerover", "pointerout", "pointerenter", "pointerleave", "pointercancel", "mousemove", "mouseover", "mouseout", "mouseenter", "mouseleave", "touchstart", "touchmove", "touchend", "touchcancel", "submit"]) {
+        const passive = type === "touchstart" || type === "touchmove";
+        window.addEventListener(type, stop, { capture: true, passive });
       }
+      // A frame is a document of its own, which this script's listeners do not reach: while commenting, a touch on
+      // it lands on the frame's element here, in this document, and is a pin.
+      const frames = () => call(queryAll, doc, "iframe, frame, object, embed");
+      const still = (on) => {
+        for (const frame of frames()) {
+          const s = call(style, frame);
+          if (s) { if (on) s.setProperty("pointer-events", "none", "important"); else s.removeProperty("pointer-events"); }
+        }
+      };
+      new MutationObserver(() => { if (pins.on) still(true); }).observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+      pins.set = (on) => { pins.on = on; still(on); };
       const line = (text, max) => String(text || "").replace(/\\s+/g, " ").trim().slice(0, max);
+      const tagOf = (el) => call(localName, el);
       const step = (el) => {
-        const tag = el.localName;
-        if (el.id) return tag + "#" + CSS.escape(el.id);
+        const tag = tagOf(el);
+        const id = call(elId, el);
+        if (id) return tag + "#" + CSS.escape(id);
         let n = 1;
-        for (let prev = el.previousElementSibling; prev; prev = prev.previousElementSibling) if (prev.localName === tag) n += 1;
+        for (let p = call(prev, el); p; p = call(prev, p)) if (tagOf(p) === tag) n += 1;
         let more = n > 1;
-        for (let next = el.nextElementSibling; next && !more; next = next.nextElementSibling) if (next.localName === tag) more = true;
+        for (let x = call(next, el); x && !more; x = call(next, x)) if (tagOf(x) === tag) more = true;
         return more ? tag + ":nth-of-type(" + n + ")" : tag;
       };
+      const top = () => call(root, doc), page = () => call(body, doc);
       const selector = (el) => {
         const parts = [];
-        for (let at = el; at && at.nodeType === 1 && at !== document.documentElement; at = at.parentElement) {
+        for (let at = el; at && call(nodeType, at) === 1 && at !== top(); at = call(parent, at)) {
           parts.unshift(step(at));
-          if (at.id || at === document.body) break;
+          if (call(elId, at) || at === page()) break;
         }
         return parts.join(" > ");
       };
       const path = (el) => {
         const parts = [];
-        for (let at = el; at && at.nodeType === 1 && at !== document.documentElement; at = at.parentElement) {
-          const classes = Array.from(at.classList).slice(0, 2).map((name) => "." + name).join("");
-          parts.unshift(at.localName + (at.id ? "#" + at.id : "") + classes);
+        for (let at = el; at && call(nodeType, at) === 1 && at !== top(); at = call(parent, at)) {
+          const names = Array.from(call(classes, at) || []).slice(0, 2).map((name) => "." + name).join("");
+          const id = call(elId, at);
+          parts.unshift(tagOf(at) + (id ? "#" + id : "") + names);
         }
         return parts.join(" > ");
       };
       const heading = (el) => {
         let found = null;
-        for (const h of document.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
-          if (h === el || (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) found = h; else break;
+        for (const h of call(queryAll, doc, "h1,h2,h3,h4,h5,h6")) {
+          if (h === el || (call(position, h, el) & FOLLOWING)) found = h; else break;
         }
-        return found ? found.localName + ' "' + line(found.textContent, 100) + '"' : "";
+        return found ? tagOf(found) + ' "' + line(call(textContent, found), 100) + '"' : "";
       };
+      const words = (el) => { try { return call(innerText, el) || call(textContent, el); } catch (e) { return call(textContent, el); } };
       pins.describe = (x, y) => {
-        let el = document.elementFromPoint(x - window.scrollX, y - window.scrollY);
-        if (!el || el === document.documentElement) el = document.body;
+        let el = call(fromPoint, doc, x - window.scrollX, y - window.scrollY);
+        if (!el || el === top()) el = page();
         if (!el) return null;
-        const box = el.getBoundingClientRect();
+        const box = call(rect, el);
         return {
-          tag: el.localName, text: line(el.innerText || el.textContent, 400), selector: line(selector(el), 1024), path: line(path(el), 512), id: line(el.id, 100),
-          role: line(el.getAttribute("role"), 32), name: line(el.getAttribute("aria-label") || el.getAttribute("alt") || el.getAttribute("title"), 120), heading: heading(el),
+          tag: tagOf(el), text: line(words(el), 400), selector: line(selector(el), 1024), path: line(path(el), 512), id: line(call(elId, el), 100),
+          role: line(call(attr, el, "role"), 32), name: line(call(attr, el, "aria-label") || call(attr, el, "alt") || call(attr, el, "title"), 120), heading: heading(el),
           x: x, y: y, rect: { x: box.left, y: box.top, w: box.width, h: box.height, vw: window.innerWidth, vh: window.innerHeight },
         };
       };
+      // The element at the middle of what is on screen: where a pin goes when the person asks for one without a
+      // touch (VoiceOver).
+      pins.middle = () => ({ x: window.scrollX + window.innerWidth / 2, y: window.scrollY + window.innerHeight / 2 });
       window.__plannotatorPins = pins;
     })();
     """
@@ -143,7 +181,7 @@ final class PagePins: NSObject {
     commenting = on
     // While the page is used, a pin shows where a comment is and takes no touch from the page under it.
     views.forEach { $0.isUserInteractionEnabled = on }
-    view.evaluateJavaScript("window.__plannotatorPins && (window.__plannotatorPins.on = \(on ? "true" : "false")); undefined", in: nil, in: Self.world) { _ in }
+    view.evaluateJavaScript("window.__plannotatorPins && window.__plannotatorPins.set(\(on ? "true" : "false")); undefined", in: nil, in: Self.world) { _ in }
   }
 
   /// A page that loaded again starts quiet: say again whether commenting is on.
@@ -167,6 +205,17 @@ final class PagePins: NSObject {
         let answer = try? JSONDecoder().decode(JSONValue.self, from: data), let element = PinnedElement(answer)
       else { return }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
+      self?.pinned(element)
+    }
+  }
+
+  /// Pin the element at the middle of what is on screen: VoiceOver's way to pin, with no touch on the page.
+  func pinMiddle() {
+    guard commenting, let page else { return }
+    page.callAsyncJavaScript("const p = window.__plannotatorPins; if (!p) return null; const m = p.middle(); return p.describe(m.x, m.y)", arguments: [:], in: nil, in: Self.world) { [weak self] result in
+      guard case .success(let value) = result, JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value),
+        let answer = try? JSONDecoder().decode(JSONValue.self, from: data), let element = PinnedElement(answer)
+      else { return }
       self?.pinned(element)
     }
   }
@@ -222,17 +271,25 @@ final class PinView: UIControl {
   let pin: PagePins.Pin
   private let open: () -> Void
 
+  /// The disc's side at the person's text size: 26 points at the default, never past 44.
+  static var side: CGFloat { min(44, UIFontMetrics(forTextStyle: .footnote).scaledValue(for: 26)) }
+
   init(pin: PagePins.Pin, open: @escaping () -> Void) {
     self.pin = pin
     self.open = open
-    super.init(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-    let disc = UILabel(frame: CGRect(x: 9, y: 9, width: 26, height: 26))
+    let side = Self.side
+    let room = max(44, side + 18)
+    super.init(frame: CGRect(x: 0, y: 0, width: room, height: room))
+    let disc = UILabel(frame: CGRect(x: (room - side) / 2, y: (room - side) / 2, width: side, height: side))
     disc.text = "\(pin.number)"
     disc.textAlignment = .center
-    disc.font = .systemFont(ofSize: 14, weight: .bold)
+    // The number follows the person's text size, as the disc does.
+    disc.font = UIFont.systemFont(ofSize: side * 0.54, weight: .bold)
+    disc.adjustsFontSizeToFitWidth = true
+    disc.minimumScaleFactor = 0.6
     disc.textColor = .white
     disc.backgroundColor = PictureInk.ink.withAlphaComponent(pin.comment == nil ? 0.8 : 1)
-    disc.layer.cornerRadius = 13
+    disc.layer.cornerRadius = side / 2
     disc.layer.borderWidth = 2
     disc.layer.borderColor = UIColor.white.cgColor
     disc.layer.masksToBounds = true

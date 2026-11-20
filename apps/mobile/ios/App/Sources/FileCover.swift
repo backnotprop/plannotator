@@ -96,6 +96,9 @@ final class FileLoad {
     if case .ready(let url) = phase { return url }
     return nil
   }
+
+  /// The cache key of the bytes on screen: what a comment made on them was read on.
+  var key: String? { held?.key }
 }
 
 /// The loads of the files a cover has shown, so the bar's menu acts on the file that is on screen.
@@ -170,7 +173,15 @@ struct FileCover: View {
         // Back to a comment: its file comes on screen (said to the scroller itself: the cover may have been opened
         // on that file a moment ago, before its pages were laid out), and its viewer shows where it is.
         .onChange(of: desk.sought) { _, sought in
-          guard let file = sought?.comment.attachment else { return }
+          guard let comment = sought?.comment else { return }
+          let file = comment.attachment
+          // A comment made on the version that was sent opens on that version, and one on the file as it is now on
+          // that one.
+          if let item = items.first(where: { $0.id == file }) {
+            let load = shelf.load(file)
+            let wanted: AttachmentVersion = comment.version == FileComment.current ? .current : .sent
+            if load.target(item, session: session).version != wanted { load.asked = wanted }
+          }
           shown = file
           pages.scrollTo(file, anchor: .leading)
         }
@@ -182,7 +193,7 @@ struct FileCover: View {
           let load = shelf.load(current.id)
           let shown = FileFacts.shown(current.kind, name: current.name, size: load.url.map(Self.size(of:)) ?? current.size)
           if load.url != nil, [.picture, .document, .text, .code, .page].contains(shown) {
-            CommentFoot(session: session, thread: thread, item: current, version: load.target(current, session: session).version, shown: shown, desk: desk)
+            CommentFoot(session: session, thread: thread, item: current, version: load.target(current, session: session).version, shown: shown, desk: desk, readKey: load.key)
               .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { desk.foot = $0 }
           }
         }
@@ -207,8 +218,9 @@ struct FileCover: View {
           .accessibilityAddTraits(.isHeader)
           .accessibilityShowsLargeContentViewer { Text(current?.name ?? "") }
         }
-        let waiting = session.comments(thread).count
-        if waiting > 0 {
+        // The number is what the next Send carries; the list also shows the comments that stay, and why.
+        let waiting = session.commentsToSend(thread).count
+        if !session.comments(thread).isEmpty {
           // What waits for the next Send, whichever file it is on: a touch lists it.
           ToolbarItem(placement: .topBarTrailing) {
             Button {
@@ -226,6 +238,11 @@ struct FileCover: View {
         if let current, let url = shelf.load(current.id).url {
           ToolbarItem(placement: .topBarTrailing) {
             Menu {
+              if let whole = wholeComment(current, url: url) {
+                Button { desk.begin(CommentDesk.Draft(file: current.id, version: shelf.load(current.id).target(current, session: session).version, target: .whole)) } label: {
+                  Label(whole, systemImage: "text.bubble")
+                }
+              }
               ShareLink(item: url) { Label(PhoneWords.share, systemImage: "square.and.arrow.up") }
               if current.kind == .image {
                 Button { Task { await Copy.picture(url) } } label: { Label(PhoneWords.copyImage, systemImage: "square.on.square") }
@@ -248,15 +265,15 @@ struct FileCover: View {
     .accessibilityAction(.escape) { dismiss() }
     .statusBarHidden(bare && onDark)
     .motion(.fade, value: bare)
-    .onChange(of: shown) { _, now in
+    .onChange(of: shown) { old, now in
       bare = false
-      // Another file: what was being written on the last one is let go (a kept comment stays kept). Not when the
-      // step is the way to the comment whose words are being changed.
-      if desk.editing?.attachment != now, desk.draft?.file != now { desk.cancel() }
+      // Another file: what was being written on the last one waits for the person's return to it.
+      desk.step(from: old ?? start, to: now ?? start)
       desk.marking = false
     }
+    .commentToast(desk.toasts, lift: desk.foot)
     .sheet(isPresented: $desk.listOpen) {
-      CommentsSheet(session: session, thread: thread) { comment in
+      CommentsSheet(session: session, thread: thread, current: at, toasts: desk.toasts) { comment in
         // After the sheet is down, so the viewer is on screen to move.
         Task { @MainActor in
           try? await Task.sleep(for: .milliseconds(350))
@@ -285,6 +302,17 @@ struct FileCover: View {
     // How each file stands now (changed since sent, gone), asked once the cover is up.
     .task { await session.readAttachments(thread) }
     .onDisappear { shelf.closeAll(session) }
+  }
+
+  /// The More menu's way to comment on the whole file, in the window's words: a document's or a code file's
+  /// Global comment (packages/ui/components/Viewer.tsx), a page's own comment (HtmlPageComment.tsx).
+  private func wholeComment(_ item: AttachmentItem, url: URL) -> String? {
+    guard session.takesComments(item, in: thread) else { return nil }
+    switch FileFacts.shown(item.kind, name: item.name, size: Self.size(of: url)) {
+    case .document, .text, .code: return PhoneWords.globalComment
+    case .page: return PhoneWords.commentOnPage
+    default: return nil
+    }
   }
 
   /// The size of the bytes on screen.
@@ -347,7 +375,7 @@ struct FilePage: View {
 
   @ViewBuilder private func viewer(_ shown: FileFacts.Shown, _ url: URL, _ context: CommentContext) -> some View {
     switch shown {
-    case .picture: PicturePage(session: session, url: url, item: item, bars: bars, bare: $bare, context: context, close: close)
+    case .picture: PicturePage(session: session, url: url, item: item, bars: bars, bare: $bare, context: context, current: current, close: close)
     case .document, .text, .code: WordsPage(url: url, item: item, shown: shown, context: context)
     // The page runs to the foot of the screen under the comment field, which floats over it; the keyboard still
     // takes its room, so what is being commented on stays in view.

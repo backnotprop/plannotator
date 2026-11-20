@@ -52,8 +52,29 @@ final class FileFollowUpTests: XCTestCase {
   }
 
   func testALinkActivatedByAKeyOrThroughAnAssistiveTechnologyOpens() {
-    // VoiceOver or Switch Control: no touch reaches the page, and the activation is the person's.
-    XCTAssertTrue(PageGate().allows(at: start, assistive: true))
+    // VoiceOver or Switch Control: no touch reaches the page. The person moves the focus onto the link and
+    // activates it: that opens, once.
+    var voice = PageGate()
+    voice.pageLoaded(at: start)
+    XCTAssertFalse(voice.allows(at: start.addingTimeInterval(5), assistive: true), "no focus in the page: a script's click")
+    voice.focusLanded(at: start.addingTimeInterval(4))
+    XCTAssertTrue(voice.open(at: start.addingTimeInterval(5), assistive: true))
+    // A script clicking in a loop after it opens nothing more until the focus moves again.
+    for step in 1...20 { XCTAssertFalse(voice.open(at: start.addingTimeInterval(5 + Double(step) * 0.2), assistive: true)) }
+    voice.focusLanded(at: start.addingTimeInterval(10))
+    XCTAssertTrue(voice.open(at: start.addingTimeInterval(10.5), assistive: true), "the next link the person goes to")
+    // Never in the page's first second, nor twice within a second.
+    var early = PageGate()
+    early.pageLoaded(at: start)
+    early.focusLanded(at: start)
+    XCTAssertFalse(early.allows(at: start.addingTimeInterval(0.5), assistive: true))
+    XCTAssertTrue(early.allows(at: start.addingTimeInterval(1.1), assistive: true))
+    // A tap opens one link, not every link a script clicks after it.
+    var tap = PageGate()
+    tap.touchBegan(at: start, x: 10, y: 10)
+    tap.touchEnded(at: start.addingTimeInterval(0.05), x: 10, y: 10)
+    XCTAssertTrue(tap.open(at: start.addingTimeInterval(0.1), assistive: false))
+    XCTAssertFalse(tap.open(at: start.addingTimeInterval(0.15), assistive: false))
     // Return or Space on a hardware keyboard.
     var keys = PageGate()
     keys.keyPressed(at: start)

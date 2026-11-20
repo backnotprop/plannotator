@@ -97,6 +97,13 @@ extension InboxSession {
     return (try? JSONDecoder().decode(DoorReplyBody.self, from: write.body))?.annotationIds?.count ?? 0
   }
 
+  /// The comments a reply that waits carries, in the order made: the reply shows a line for each.
+  public func heldCommentList(_ write: HeldWrite) -> [FileComment] {
+    guard write.kind == .reply, let ids = (try? JSONDecoder().decode(DoorReplyBody.self, from: write.body))?.annotationIds else { return [] }
+    let wanted = Set(ids)
+    return (commentBook.kept[ThreadID(write.thread)] ?? []).filter { wanted.contains($0.id) }
+  }
+
   /// A thread's comments that wait for a Send, in the order made.
   public func comments(_ thread: ThreadID) -> [FileComment] {
     let riding = riding(thread)
@@ -188,7 +195,10 @@ extension InboxSession {
     guard let index = commentBook.kept[thread]?.firstIndex(where: { $0.id == id }), !riding(thread).contains(id) else { return }
     let comment = commentBook.kept[thread]![index]
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
-    if text.isEmpty, comment.images.isEmpty { return removeComment(id, thread: thread) }
+    if text.isEmpty, comment.images.isEmpty {
+      removeComment(id, thread: thread)
+      return
+    }
     let changed = comment.with(words: text.isEmpty ? Words.markupOnly : text)
     let retry = commentBook.refused[id] != nil || (!comment.saved && !held.contains { $0.kind == .annotation && $0.subject == id })
     guard changed != comment || retry else { return }
@@ -210,9 +220,23 @@ extension InboxSession {
     Task { await pump(thread.rawValue, readsList: false) }
   }
 
+  /// A comment just removed, with what its Undo brings back: its place in the list, the text it was read on and
+  /// the drawing the computer may not have yet.
+  public struct RemovedComment: Sendable, Equatable {
+    public let comment: FileComment
+    let index: Int
+    let readKey: String?
+    let drawings: [String: Data]
+  }
+
   /// Remove a waiting comment: here at once, and on the computer if it ever got there (or may have).
-  public func removeComment(_ id: String, thread: ThreadID) {
-    guard let comment = commentBook.kept[thread]?.first(where: { $0.id == id }), !riding(thread).contains(id) else { return }
+  @discardableResult
+  public func removeComment(_ id: String, thread: ThreadID) -> RemovedComment? {
+    guard let index = commentBook.kept[thread]?.firstIndex(where: { $0.id == id }), !riding(thread).contains(id) else { return nil }
+    let comment = commentBook.kept[thread]![index]
+    var drawings: [String: Data] = [:]
+    for image in comment.images { if let hash = PendingDrawing.hash(image.path), let bytes = drawing(hash) { drawings[hash] = bytes } }
+    let removed = RemovedComment(comment: comment, index: index, readKey: commentBook.readKeys[id], drawings: drawings)
     commentBook.kept[thread]?.removeAll { $0.id == id }
     commentBook.refused[id] = nil
     commentBook.readKeys[id] = nil
@@ -235,6 +259,31 @@ extension InboxSession {
     saveOutbox()
     keepComments()
     Task { await pump(thread.rawValue, readsList: false) }
+    return removed
+  }
+
+  /// Undo a removal: the same comment (its words, its place in the file, its marks, its drawing) back where it was
+  /// in the list, saved again as a new comment, since the computer may already be removing the old one.
+  @discardableResult
+  public func restoreComment(_ removed: RemovedComment) -> FileComment? {
+    let old = removed.comment
+    var comment = old
+    comment.id = FileComments.newID()
+    comment.annotation["id"] = .string(comment.id)
+    comment.saved = false
+    for (hash, bytes) in removed.drawings {
+      commentBook.drawings[hash] = bytes
+      copy.write(bytes, to: LocalCopy.drawingName(hash))
+      holdDrawing(hash, thread: old.thread)
+    }
+    var list = commentBook.kept[old.thread] ?? []
+    list.insert(comment, at: min(removed.index, list.count))
+    commentBook.kept[old.thread] = list
+    commentBook.readKeys[comment.id] = removed.readKey
+    holdSave(comment)
+    keepComments()
+    Task { await pump(old.thread.rawValue, readsList: false) }
+    return comment
   }
 
   /// A drawing no comment names any more, or one the computer has: its bytes leave the phone.

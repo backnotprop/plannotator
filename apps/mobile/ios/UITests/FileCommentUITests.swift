@@ -324,4 +324,115 @@ final class FileCommentUITests: XCTestCase {
     XCTAssertFalse(app.buttons["thread-comments"].exists)
     shot("22-away-reply-waits")
   }
+
+  // MARK: What a Send carries, and taking a change back
+
+  /// The toast's Undo (the picture's own Undo is another button).
+  @MainActor
+  private func toastUndo(_ app: XCUIApplication) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "label == 'Undo' AND identifier != 'picture-undo'")).firstMatch
+  }
+
+  @MainActor
+  func testACommentTheComputerDidNotKeepIsListedAndRidesNoSendAndARemovalIsUndone() {
+    let app = launch(stage: "files,commented,commentstanding")
+    // The strip and the tiles count what the next Send carries: the three comments and the drawing that waits
+    // for its way to the computer, not the drawing the computer refused.
+    let strip = app.buttons["thread-comments"]
+    XCTAssertTrue(strip.waitForExistence(timeout: 20))
+    XCTAssertEqual(strip.label, "4 comments")
+    XCTAssertTrue(tile(app, "retry-plan.md").label.contains("2 comments"), tile(app, "retry-plan.md").label)
+    XCTAssertTrue(tile(app, "reconnect-flamegraph.png").label.contains("1 comment"), tile(app, "reconnect-flamegraph.png").label)
+    shot("r2-01-tiles-count-comments")
+    strip.tap()
+    // Every comment is listed; the ones that do not go say why, and the foot says what goes.
+    XCTAssertTrue(app.staticTexts["reconnect-flamegraph.png"].waitForExistence(timeout: 5))
+    let refused = app.buttons.matching(NSPredicate(format: "label CONTAINS 'The flat top is the cap.'")).firstMatch
+    XCTAssertTrue(refused.label.contains("The comment was not saved."), refused.label)
+    let waits = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch
+    XCTAssertTrue(waits.label.contains("Will send"), waits.label)
+    let foot = app.staticTexts["comments-ride"]
+    if !foot.exists { app.swipeUp() }
+    XCTAssertTrue(foot.waitForExistence(timeout: 5))
+    XCTAssertEqual(foot.label, "4 comments ride your next Send to Claude Code.")
+    shot("r2-02-list-not-saved-and-drawing-waits")
+
+    // A long press offers Edit the comment and Remove; Remove says so, with Undo, and Undo brings it back.
+    let onPlan = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch
+    if !onPlan.isHittable { app.swipeDown() }
+    onPlan.press(forDuration: 1.0)
+    XCTAssertTrue(app.buttons["Edit the comment"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["Remove"].exists)
+    shot("r2-03-comment-row-long-press")
+    app.buttons["Remove"].tap()
+    XCTAssertTrue(app.staticTexts["Removed"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch.exists)
+    shot("r2-04-removed-with-undo")
+    toastUndo(app).tap()
+    let back = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch
+    XCTAssertTrue(back.waitForExistence(timeout: 5), "Undo brought the comment back")
+    XCTAssertTrue(back.label.contains("client drops its socket"), "on the same words: \(back.label)")
+    app.navigationBars["5 comments"].buttons["Done"].tap()
+    XCTAssertEqual(app.buttons["thread-comments"].label, "4 comments")
+
+    // The drawing that waits is drawn on the picture.
+    app.buttons["thread-comments"].tap()
+    app.buttons.matching(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch.tap()
+    let picture = app.images.matching(identifier: "file-picture").firstMatch
+    XCTAssertTrue(picture.waitForExistence(timeout: 20))
+    shot("r2-05-picture-drawing-waits")
+  }
+
+  @MainActor
+  func testAWholeFileTakesAGlobalCommentAndADrawingAddedCanBeTakenBack() {
+    let app = launch()
+    tile(app, "retry-plan.md").tap()
+    XCTAssertTrue(app.scrollViews["file-document"].waitForExistence(timeout: 20))
+    app.buttons["file-more"].tap()
+    XCTAssertTrue(app.buttons["Global comment"].waitForExistence(timeout: 5))
+    shot("r2-06-more-global-comment")
+    app.buttons["Global comment"].tap()
+    XCTAssertEqual(app.staticTexts["comment-quote"].label, "Global comment")
+    keep(app, "Shorter, please.")
+    app.buttons["comment-keep"].tap()
+    count(app, "1 comment")
+    app.buttons["file-comments"].firstMatch.tap()
+    let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Shorter, please.'")).firstMatch
+    XCTAssertTrue(row.waitForExistence(timeout: 5))
+    XCTAssertTrue(row.label.contains("Global comment"), row.label)
+    XCTAssertEqual(app.staticTexts["comments-ride"].label, "1 comment rides your next Send to Claude Code.")
+    shot("r2-07-global-comment-listed")
+    app.navigationBars["1 comment"].buttons["Done"].tap()
+
+    // A drawing kept on the picture: the window's toast, and Undo takes it off the reply and puts the marks back.
+    XCTAssertTrue(app.buttons["file-more"].waitForExistence(timeout: 5))
+    app.buttons["Done"].firstMatch.tap()
+    tile(app, "reconnect-flamegraph.png").tap()
+    let picture = app.images.matching(identifier: "file-picture").firstMatch
+    XCTAssertTrue(picture.waitForExistence(timeout: 20))
+    app.buttons["picture-mark"].tap()
+    picture.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.3)).press(forDuration: 0.05, thenDragTo: picture.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.7)))
+    app.buttons["comment-keep"].tap()
+    count(app, "2 comments")
+    // Shown as the phone's short words, read as the window's whole sentence.
+    XCTAssertTrue(app.staticTexts["Markup added to your reply."].waitForExistence(timeout: 5))
+    shot("r2-08-drawing-added-toast")
+    toastUndo(app).tap()
+    count(app, "1 comment")
+    XCTAssertTrue(app.buttons["picture-undo"].waitForExistence(timeout: 5), "the marks are back on the picture, not kept")
+  }
+
+  @MainActor
+  func testAReplyThatWaitsShowsALineForEachCommentItCarries() {
+    let app = launch(stage: "files,commented,away")
+    XCTAssertTrue(app.buttons["thread-comments"].waitForExistence(timeout: 20))
+    app.buttons["Send"].tap()
+    let line = app.descendants(matching: .any).matching(identifier: "held-comment").firstMatch
+    XCTAssertTrue(line.waitForExistence(timeout: 10))
+    let lines = app.descendants(matching: .any).matching(identifier: "held-comment")
+    XCTAssertEqual(lines.count, 3)
+    XCTAssertTrue(lines.element(boundBy: 2).label.contains("client.ts"), lines.element(boundBy: 2).label)
+    XCTAssertTrue(lines.element(boundBy: 2).label.contains("3–4"), lines.element(boundBy: 2).label)
+    shot("r2-09-held-reply-lines")
+  }
 }
