@@ -33,15 +33,18 @@ export function dismissRanked(keys: readonly string[]): Promise<InboxPullRiskAns
 export function useRankedChoice(keys: readonly string[], onDone: (next: InboxPullRiskAnswer) => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = async (ask: () => Promise<InboxPullRiskAnswer>, fallback: string) => {
+  const run = async (ask: () => Promise<InboxPullRiskAnswer>, fallback: string): Promise<{ failed: unknown } | null> => {
     setBusy(true);
     setError(null);
     try {
       onDone(await ask());
+      setBusy(false);
+      return null;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : fallback);
+      setBusy(false);
+      return { failed: cause };
     }
-    setBusy(false);
   };
   return {
     busy,

@@ -8,6 +8,7 @@ import type { PullsState } from './usePulls';
 const hasDom = typeof document !== 'undefined';
 const { inboxApi } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
+const { InboxApiError } = (hasDom ? await import('../apiError') : {}) as typeof import('../apiError');
 const { RISK_ASK_TIMING } = (hasDom ? await import('./riskAskGate') : {}) as typeof import('./riskAskGate');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 
@@ -68,7 +69,13 @@ const ANSWER: InboxPullRiskAnswer = {
 let root: Root | null = null;
 const restores: (() => void)[] = [];
 const TIMING = { ...RISK_ASK_TIMING };
-beforeEach(() => Object.assign(RISK_ASK_TIMING, { settleMs: 40, guardMs: 40, tickMs: 5 }));
+let focused = true;
+const hadFocus = hasDom ? document.hasFocus : null;
+beforeEach(() => {
+  Object.assign(RISK_ASK_TIMING, { settleMs: 40, guardMs: 40, tickMs: 5 });
+  focused = true;
+  document.hasFocus = () => focused;
+});
 const spy = <K extends keyof typeof inboxApi>(name: K, impl: (typeof inboxApi)[K]) => {
   const made = spyOn(inboxApi, name).mockImplementation(impl as never);
   restores.push(() => made.mockRestore());
@@ -152,6 +159,7 @@ afterEach(async () => {
   document.body.innerHTML = '';
   for (const restore of restores.splice(0)) restore();
   Object.assign(RISK_ASK_TIMING, TIMING);
+  if (hadFocus) document.hasFocus = hadFocus;
 });
 
 test.skipIf(!hasDom)('after a calm moment on Reviews it asks with the count and titles; a press right at open does nothing; Not now sends exactly the shown keys; keys arriving meanwhile wait for a new calm moment', async () => {
@@ -184,14 +192,12 @@ test.skipIf(!hasDom)('after a calm moment on Reviews it asks with the count and 
   expect(asking()!.querySelector('p')!.textContent).toBe('You turned on guided reviews for High. Make one now?');
 });
 
-test.skipIf(!hasDom)('a held Escape does nothing; the backdrop is Not now and a failed one says so and stays; Make them now sends the shown keys, says why when agents are off, and closes', async () => {
+test.skipIf(!hasDom)('a held Escape does nothing; a failed Not now (the backdrop) says so once, and the next Escape lets the person out without the server; it does not come back that visit', async () => {
   spy('pullRisk', async () => ANSWER);
   const sent: unknown[] = [];
-  let fail: unknown = 'down';
   spy('savePullRisk', async (input) => {
     sent.push(input);
-    if (fail) throw fail;
-    return { ...ANSWER, auto_waiting: [] };
+    throw 'make_now' in input ? new InboxApiError(409, 'launch_off', 'Starting agents from the Inbox is off in Settings → Agents.') : 'down';
   });
   await mount();
   await opened();
@@ -202,16 +208,48 @@ test.skipIf(!hasDom)('a held Escape does nothing; the backdrop is Not now and a 
   await press(dialog);
   expect(sent).toEqual([{ not_now: true, keys: [key(1), key(2)] }]);
   expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('That could not be saved.');
-  fail = new Error('Starting agents from the Inbox is off in Settings → Agents.');
   await press(button('make-now'));
+  expect(sent.at(-1)).toEqual({ make_now: true, keys: [key(1), key(2)] });
   expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('Starting agents from the Inbox is off in Settings → Agents.');
-  fail = null;
-  await press(button('make-now'));
-  expect(sent.slice(1)).toEqual([
-    { make_now: true, keys: [key(1), key(2)] },
-    { make_now: true, keys: [key(1), key(2)] },
-  ]);
+  await keyOn(asking()!, 'Escape');
   expect(asking()).toBeNull();
+  expect(sent).toHaveLength(2);
+  await wait(SETTLED * 2);
+  expect(asking()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a bare click (a screen reader sends only that) acts once the first moment has passed, never inside it', async () => {
+  spy('pullRisk', async () => ANSWER);
+  const sent: unknown[] = [];
+  sentTo(sent, () => ({ ...ANSWER, auto_waiting: [] }));
+  await mount();
+  await opened();
+  await click('[data-pull-risk-waiting-make-now]');
+  expect(sent).toEqual([]);
+  await armed();
+  await click('[data-pull-risk-waiting-make-now]');
+  expect(sent).toEqual([{ make_now: true, keys: [key(1), key(2)] }]);
+  expect(asking()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a window that is not focused never gets it; the click that brings the window back does nothing', async () => {
+  spy('pullRisk', async () => ANSWER);
+  const sent: unknown[] = [];
+  sentTo(sent);
+  focused = false;
+  await mount();
+  await wait(SETTLED * 3);
+  expect(asking()).toBeNull();
+  focused = true;
+  await opened();
+  await armed();
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  await press(button('make-now'));
+  expect(sent).toEqual([]);
+  expect(asking()).not.toBeNull();
+  await armed();
+  await press(button('not-now'));
+  expect(sent).toEqual([{ not_now: true, keys: [key(1), key(2)] }]);
 });
 
 test.skipIf(!hasDom)('it waits for the list, a focused field and another open dialog; past five it lists four and "+N more"; a title the list brings later fills in', async () => {
@@ -238,7 +276,7 @@ test.skipIf(!hasDom)('it waits for the list, a focused field and another open di
   expect(asking()!.querySelector('li')!.textContent).toBe('Refund to the card n/b#1');
 });
 
-test.skipIf(!hasDom)('never over a thread, nor for what was put off; never beside Risk rules, nor after its own question asked about the same keys', async () => {
+test.skipIf(!hasDom)('never over a thread, nor for what was put off; never beside Risk rules, nor after its own question asked about the same keys; Code review turned off closes it and sends nothing', async () => {
   spy('pullRisk', async () => ANSWER);
   spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
   await mount('thread-1');
@@ -274,4 +312,21 @@ test.skipIf(!hasDom)('never over a thread, nor for what was put off; never besid
   await mount();
   await wait(SETTLED * 2);
   expect(asking()).toBeNull();
+
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+  let off = false;
+  restores.splice(0).forEach((restore) => restore());
+  spy('pullRisk', async () => {
+    if (off) throw new InboxApiError(409, 'code_review_off', 'Code review is off.');
+    return ANSWER;
+  });
+  const posted: unknown[] = [];
+  sentTo(posted);
+  await mount();
+  await opened();
+  off = true;
+  await rerender(pullsStateOf(listOf([...LIST.pulls])));
+  expect(asking()).toBeNull();
+  expect(posted).toEqual([]);
 });

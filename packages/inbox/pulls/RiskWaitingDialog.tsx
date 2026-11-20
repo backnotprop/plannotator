@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { forgePullRefShort } from '@plannotator/core/forge-ref-card';
 import type { InboxPull, InboxPullRiskAnswer, InboxPullRiskAuto } from '@plannotator/core/inbox-types';
+import { InboxApiError } from '../apiError';
 import { Modal } from '../components/Updates';
 import { riskRankPhrase, riskTurnedOnWords, useRankedChoice } from './RiskAlreadyRanked';
 import { usePressGate, useSettled } from './riskAskGate';
@@ -47,7 +48,11 @@ export function RiskWaitingDialog({
     for (const key of waiting) asked.add(key);
     setShown({ keys: waiting, auto: answer.auto });
   }, [settled, waitingId]);
-  if (!shown) return null;
+  const off = !answer?.auto || !answer.auto_agent;
+  useEffect(() => {
+    if (off) setShown(null);
+  }, [off]);
+  if (!shown || off) return null;
   return <RiskWaitingAsk shown={shown} pulls={pulls ?? []} onAnswer={onAnswer} onClose={() => setShown(null)} />;
 }
 
@@ -59,14 +64,25 @@ function RiskWaitingAsk({ shown, pulls, onAnswer, onClose }: { shown: Shown; pul
     onAnswer(next);
     onClose();
   });
-  const act = (run: () => Promise<void>) => {
-    if (!choice.busy && gate.ok()) void run();
+  const [stuck, setStuck] = useState(false);
+  const after = (result: { failed: unknown } | null) => {
+    if (!result) return;
+    if (result.failed instanceof InboxApiError && result.failed.code === 'code_review_off') onClose();
+    else setStuck(true);
+  };
+  const notNow = () => {
+    if (choice.busy || !gate.ok()) return;
+    if (stuck) onClose();
+    else void choice.notNow().then(after);
+  };
+  const makeNow = () => {
+    if (!choice.busy && gate.ok()) void choice.makeNow().then(after);
   };
   const count = shown.keys.length;
   const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
   const listed = count <= RISK_WAITING_LISTED ? shown.keys : shown.keys.slice(0, LISTED_BEFORE_MORE);
   return (
-    <Modal labelledBy={titleId} onClose={() => act(choice.notNow)} testId="pull-risk-waiting" className="ib-riskd" ownKeys initialFocus="[data-pull-risk-waiting-not-now]">
+    <Modal labelledBy={titleId} onClose={notNow} testId="pull-risk-waiting" className="ib-riskd" ownKeys initialFocus="[data-pull-risk-waiting-not-now]">
       <div ref={host} data-pull-risk-waiting={count} data-pull-risk-waiting-armed={gate.armed ? '' : undefined}>
         <h2 id={titleId}>{riskRankPhrase(count, shown.auto.level, true)}</h2>
         <p className="ib-sub ib-riskd-l">{riskTurnedOnWords(shown.auto, count)}</p>
@@ -88,10 +104,10 @@ function RiskWaitingAsk({ shown, pulls, onAnswer, onClose }: { shown: Shown; pul
           </p>
         )}
         <div className="ib-acts-row ib-riskd-acts">
-          <button type="button" className="ib-btn" onClick={() => act(choice.notNow)} disabled={choice.busy} data-pull-risk-waiting-not-now="">
+          <button type="button" className="ib-btn" onClick={notNow} disabled={choice.busy} data-pull-risk-waiting-not-now="">
             Not now
           </button>
-          <button type="button" className="ib-btn ib-pri" onClick={() => act(choice.makeNow)} disabled={choice.busy} data-pull-risk-waiting-make-now="">
+          <button type="button" className="ib-btn ib-pri" onClick={makeNow} disabled={choice.busy} data-pull-risk-waiting-make-now="">
             Make them now
           </button>
         </div>
