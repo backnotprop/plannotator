@@ -96,7 +96,8 @@ const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; inf
   ['waiting for Keep, with changes', shared({ needs_keep: true, access: 'comment', changes: 2 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
   ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'comment' }), 'main', ['copy', 'open', 'keep'], { details: true }],
   ['the person\'s own space, signed out here', shared({ needs_keep: true, own: true, access: 'private', changes: 1 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
-  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['copy', 'open', 'try-again'], {}],
+  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['copy', 'open', 'open-space', 'try-again'], {}],
+  ['first share again, its space already there', status({ started: true, mode: 'newest', link: LINK, access: 'private', signed_in: true }), 'main', ['share'], { details: true }],
   ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], {}],
   ['details', shared(), 'details', [], {}],
@@ -188,6 +189,32 @@ describe.if(hasDom)('the panel, state by state', () => {
     over.press('try-again');
     expect(over.sent).toEqual([['share', {}]]);
     expect(panel(status({ phase: 'over_limit' })).host.querySelector('[data-share-act="sign-in"]')).not.toBeNull();
+  });
+
+  test('over the limit of the person\'s own space: Open in Spaces opens the space in a new tab beside Try again, which stays the primary; never on the sign-in state', () => {
+    const over = panel(status({ phase: 'over_limit', limit_own: true, link: LINK }));
+    const open = over.host.querySelector<HTMLAnchorElement>('.ib-shr-foot [data-share-act="open-space"]')!;
+    expect([open.getAttribute('href'), open.target, open.rel, open.textContent]).toEqual([LINK, '_blank', 'noopener noreferrer', 'Open in Spaces']);
+    expect(open.classList.contains('ib-shr-pri')).toBe(false);
+    expect(over.host.querySelector('[data-share-act="try-again"]')!.classList.contains('ib-shr-pri')).toBe(true);
+    // No link yet, or a link that is not http(s): nothing to open.
+    expect(panel(status({ phase: 'over_limit', limit_own: true })).buttons()).toEqual(['try-again']);
+    expect(panel(status({ phase: 'over_limit', limit_own: true, link: 'javascript:alert(1)' })).buttons()).toEqual(['try-again']);
+    // Over 100 MB without sign-in keeps Sign in alone, even with a link.
+    expect(panel(status({ phase: 'over_limit', link: LINK })).buttons()).toEqual(['sign-in']);
+  });
+
+  test('the first share again for a space already there: no switch, Details and Share go with the record\'s mode', () => {
+    const newest: SpaceShareDetails = { ...details, pages: 2 };
+    const s = status({ started: true, mode: 'newest', link: LINK, details: { all: details, newest } });
+    const p = panel(s);
+    expect(p.host.querySelector('[role="radiogroup"]')).toBeNull();
+    p.press('share');
+    expect(p.sent).toEqual([['share', { mode: 'newest' }]]);
+    const pagesRow = panel(s, 'details').host.querySelector('[data-share-row="Pages"] dd')!.textContent;
+    expect(pagesRow).toBe('2');
+    // Never started: the switch is there and its side is what goes.
+    expect(panel(status({ mode: 'newest' }), 'details').host.querySelector('[data-share-row="Pages"] dd')!.textContent).toBe('4');
   });
 
   test('Keep waits while a claim is going', () => {
