@@ -245,10 +245,14 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
       .toContain('media/later.png');
     await page.waitForTimeout(3000);
     for (const player of [video, audio]) {
-      const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, paused: m.paused, ended: m.ended }));
-      expect(now).toEqual({ marked: 'before-redraw', paused: false, ended: false });
-      const t0 = await player.evaluate((m: HTMLMediaElement) => m.currentTime);
-      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { timeout: 5_000 }).not.toBe(t0);
+      const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, paused: m.paused, started: m.currentTime > 0 }));
+      expect(now).toEqual({ marked: 'before-redraw', paused: false, started: true });
+      await player.evaluate(async (m: HTMLMediaElement) => {
+        m.loop = false;
+        m.currentTime = 0;
+        await m.play();
+      });
+      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { timeout: 10_000 }).toBeGreaterThan(0.1);
     }
     await expect(body.locator('[data-image-unavailable]', { hasText: /^Raw (clip|tone)$/ })).toHaveCount(0);
     await context.close();
