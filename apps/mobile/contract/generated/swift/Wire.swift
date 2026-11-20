@@ -1689,15 +1689,17 @@ public enum InboxActionResultBy: Codable, Hashable, Sendable, RawRepresentable {
 public enum InboxActionResultOutcome: Codable, Hashable, Sendable, RawRepresentable {
   case cant
   case done
+  case skip
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxActionResultOutcome] = [.cant, .done]
+  public static let known: [InboxActionResultOutcome] = [.cant, .done, .skip]
 
   public init(rawValue: String) {
     switch rawValue {
     case "cant": self = .cant
     case "done": self = .done
+    case "skip": self = .skip
     default: self = .unknown(rawValue)
     }
   }
@@ -1706,6 +1708,7 @@ public enum InboxActionResultOutcome: Codable, Hashable, Sendable, RawRepresenta
     switch self {
     case .cant: return "cant"
     case .done: return "done"
+    case .skip: return "skip"
     case .unknown(let value): return value
     }
   }
@@ -1750,15 +1753,17 @@ public struct InboxActionResultPerson: Codable, Hashable, Sendable {
 public enum InboxActionResultPersonOutcome: Codable, Hashable, Sendable, RawRepresentable {
   case cant
   case done
+  case skip
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxActionResultPersonOutcome] = [.cant, .done]
+  public static let known: [InboxActionResultPersonOutcome] = [.cant, .done, .skip]
 
   public init(rawValue: String) {
     switch rawValue {
     case "cant": self = .cant
     case "done": self = .done
+    case "skip": self = .skip
     default: self = .unknown(rawValue)
     }
   }
@@ -1767,6 +1772,7 @@ public enum InboxActionResultPersonOutcome: Codable, Hashable, Sendable, RawRepr
     switch self {
     case .cant: return "cant"
     case .done: return "done"
+    case .skip: return "skip"
     case .unknown(let value): return value
     }
   }
@@ -7398,17 +7404,19 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
   public var comments: Double
   public var done: Double?
   public var cant: Double?
+  public var skipped: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["reply_at", "picks", "comments", "done", "cant"]
+  static let knownKeys: Set<String> = ["reply_at", "picks", "comments", "done", "cant", "skipped"]
 
-  public init(replyAt: String? = nil, picks: Double, comments: Double, done: Double? = nil, cant: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(replyAt: String? = nil, picks: Double, comments: Double, done: Double? = nil, cant: Double? = nil, skipped: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.replyAt = replyAt
     self.picks = picks
     self.comments = comments
     self.done = done
     self.cant = cant
+    self.skipped = skipped
     self.unknownFields = unknownFields
   }
 
@@ -7419,6 +7427,7 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
     self.comments = try c.decode(Double.self, forKey: WireKey("comments"))
     self.done = try c.decodeIfPresent(Double.self, forKey: WireKey("done"))
     self.cant = try c.decodeIfPresent(Double.self, forKey: WireKey("cant"))
+    self.skipped = try c.decodeIfPresent(Double.self, forKey: WireKey("skipped"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -7429,6 +7438,7 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
     try c.encode(self.comments, forKey: WireKey("comments"))
     try c.encodeIfPresent(self.done, forKey: WireKey("done"))
     try c.encodeIfPresent(self.cant, forKey: WireKey("cant"))
+    try c.encodeIfPresent(self.skipped, forKey: WireKey("skipped"))
     try WireKey.write(unknownFields, to: &c)
   }
 }
@@ -10663,6 +10673,12 @@ public enum DoorRoutes {
   public static let postMessageHandoffUndo = DoorRoute(name: "POST messages/:id/handoff/undo", method: .post, path: "messages/{message}/handoff/undo", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/actions/:id`: the window's `/api/inbox/messages/{message}/actions/{action}`.
   public static let postMessageAction = DoorRoute(name: "POST messages/:id/actions/:id", method: .post, path: "messages/{message}/actions/{action}", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  /// `GET messages/:id/run`: the window's `/api/inbox/messages/{message}/run`.
+  public static let getMessageRun = DoorRoute(name: "GET messages/:id/run", method: .get, path: "messages/{message}/run", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  /// `POST messages/:id/run`: the window's `/api/inbox/messages/{message}/run`.
+  public static let postMessageRun = DoorRoute(name: "POST messages/:id/run", method: .post, path: "messages/{message}/run", grant: .phone, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  /// `POST messages/:id/secret`: the window's `/api/inbox/messages/{message}/secret`.
+  public static let postMessageSecret = DoorRoute(name: "POST messages/:id/secret", method: .post, path: "messages/{message}/secret", grant: .phone, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/delete`: the window's `/api/inbox/threads/{thread}/delete`.
   public static let postThreadDelete = DoorRoute(name: "POST threads/:id/delete", method: .post, path: "threads/{thread}/delete", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET threads/:id/draft`: the window's `/api/inbox/threads/{thread}/draft`.
@@ -10783,7 +10799,7 @@ public enum DoorRoutes {
   public static let getUpdate = DoorRoute(name: "GET update", method: .get, path: "update", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST update`.
   public static let postUpdate = DoorRoute(name: "POST update", method: .post, path: "update", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
-  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, postPullsLooked, getThreadPulls, postThreadPulls, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postMessageAction, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, postPair, postRevoke, getAccounts, postLinkBack, postUnlink, getUpdate, postUpdate]
+  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postProjectTags, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, postPullsLooked, getThreadPulls, postThreadPulls, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postMessageAction, getMessageRun, postMessageRun, postMessageSecret, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, postRexShow, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, postPair, postRevoke, getAccounts, postLinkBack, postUnlink, getUpdate, postUpdate]
 }
 
 /// The door's routes as requests: `Door.postThreadSeen(thread: id)`.
@@ -10859,6 +10875,9 @@ public enum Door {
   public static func postMessageReask(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageReask, path: "messages/\(segment(message.rawValue))/reask") }
   public static func postMessageHandoffUndo(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageHandoffUndo, path: "messages/\(segment(message.rawValue))/handoff/undo") }
   public static func postMessageAction(message: MessageID, action: String) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageAction, path: "messages/\(segment(message.rawValue))/actions/\(segment(action))") }
+  public static func getMessageRun(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.getMessageRun, path: "messages/\(segment(message.rawValue))/run") }
+  public static func postMessageRun(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageRun, path: "messages/\(segment(message.rawValue))/run") }
+  public static func postMessageSecret(message: MessageID) -> DoorRequest { DoorRequest(route: DoorRoutes.postMessageSecret, path: "messages/\(segment(message.rawValue))/secret") }
   public static func postThreadDelete(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.postThreadDelete, path: "threads/\(segment(thread.rawValue))/delete") }
   public static func getThreadDraft(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.getThreadDraft, path: "threads/\(segment(thread.rawValue))/draft") }
   public static func getThreadAttachments(thread: ThreadID) -> DoorRequest { DoorRequest(route: DoorRoutes.getThreadAttachments, path: "threads/\(segment(thread.rawValue))/attachments") }

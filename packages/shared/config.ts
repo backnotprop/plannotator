@@ -644,6 +644,18 @@ export interface PlannotatorConfig {
   /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
   inboxSpacesView?: "cards" | "list";
   /**
+   * Share this space (packages/shared/spaces/): the Share button on a plan's page in the Inbox, which puts a copy of
+   * the plan in a hosted space. Off unless set to `true` here (config only: no Settings row, no command); it also
+   * needs `inboxPlans`, and `PLANNOTATOR_SHARE=disabled` (or `share: "disabled"`) turns it off with every other
+   * share. Off: no share route, no button, no call to any host.
+   */
+  inboxSpaceShare?: boolean;
+  /**
+   * The Spaces origin a plan is shared to (`resolveSpacesUrl` in packages/shared/spaces/url.ts). Overridden by the
+   * PLANNOTATOR_SPACES_URL env var. `https`, or `http` on this computer only.
+   */
+  spacesUrl?: string;
+  /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.

@@ -1117,7 +1117,8 @@
           "type": "string",
           "enum": [
             "cant",
-            "done"
+            "done",
+            "skip"
           ],
           "x-open": true
         },
@@ -1164,7 +1165,8 @@
                   "type": "string",
                   "enum": [
                     "cant",
-                    "done"
+                    "done",
+                    "skip"
                   ],
                   "x-open": true
                 },
@@ -5330,6 +5332,9 @@
           "type": "number"
         },
         "cant": {
+          "type": "number"
+        },
+        "skipped": {
           "type": "number"
         }
       },
