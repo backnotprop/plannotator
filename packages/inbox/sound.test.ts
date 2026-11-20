@@ -103,7 +103,7 @@ describe('a plain message never swallows a question (the review\'s H1)', () => {
     expect(seen).toEqual([[true, true], [false, true], [false, true]]);
   });
 
-  test('"for every agent message": three plain messages seconds apart, one ring, all three the bell\'s', () => {
+  test('"every agent message": three plain messages seconds apart, one ring, all three the bell\'s', () => {
     let gate = QUIET_GATE;
     const seen = [0, 4_000, 8_000].map((now) => {
       const decided = decideRing(gate, { ...away, now, ...REPLY });
@@ -164,7 +164,7 @@ describe('every new thread rings the Ding-dong', () => {
 });
 
 describe('which sound: the Ding-dong for a question or a new thread, the Felt note for a plain reply', () => {
-  test('"for every agent message": a plain reply plays the note, not the bell, and its notice is the note\'s (silent)', () => {
+  test('"every agent message": a plain reply plays the note, not the bell, and its notice is the note\'s (silent)', () => {
     for (const when of ['messages', undefined] as const) {
       expect(decideRing(QUIET_GATE, { ...away, now: 0, when, ...REPLY })).toMatchObject({ ring: true, sound: 'note', rangFor: { plain: true } });
     }
@@ -175,7 +175,7 @@ describe('which sound: the Ding-dong for a question or a new thread, the Felt no
     expect(decideRing(QUIET_GATE, { ...away, now: 0, asks: false, plain: true, fresh: true }).sound).toBe('bell');
   });
 
-  test('"when an agent asks you or starts a thread": a plain reply plays nothing; a new thread or a question rings the bell', () => {
+  test('"questions and new threads": a plain reply plays nothing; a new thread or a question rings the bell', () => {
     expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...REPLY }).sound).toBeNull();
     expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...NEW_THREAD }).sound).toBe('bell');
     expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...QUESTION }).sound).toBe('bell');
@@ -200,14 +200,14 @@ describe('plainMessageRings: the owner\'s cadence ("Every message, as picked")',
     expect(rings([0, 100, 200, 300, 400], QUIET_GATE, [REPLY, REPLY, REPLY, REPLY, REPLY])).toEqual([true, false, false, false, false]);
   });
 
-  test('"when an agent asks you": a plain message neither rings nor starts or extends a burst', () => {
+  test('"questions and new threads": a plain message neither rings nor starts or extends a burst', () => {
     expect(rings([0, 10_000], QUIET_GATE, [REPLY, QUESTION], 'asks')).toEqual([false, true]);
     expect(decideRing(QUIET_GATE, { ...away, now: 0, when: 'asks', ...REPLY })).toEqual({ ring: false, sound: null, rangFor: { asks: false, plain: false, fresh: false }, gate: QUIET_GATE });
   });
 });
 
 describe('ringsFor: the person\'s choice', () => {
-  test('"for every agent message" (also nothing chosen, or a value this build does not know) rings for a plain reply; "when an agent asks you" only for a question', () => {
+  test('"every agent message" (also nothing chosen, or a value this build does not know) rings for a plain reply; "questions and new threads" not for one', () => {
     for (const when of ['messages', undefined, 'sometimes' as never] as const) expect([ringsFor(when, false), ringsFor(when, true)]).toEqual([true, true]);
     expect([ringsFor('asks', false), ringsFor('asks', true)]).toEqual([false, true]);
   });

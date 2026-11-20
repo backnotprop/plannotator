@@ -2050,11 +2050,11 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
 .ib-vslider:disabled { opacity: 0.45; }
 /* Settings → Play a sound: what rings it, under the label (the owner's two choices). The label's column is the
-   container: where it is too narrow for the two in a line (about 355 px: a phone, or a window under about
+   container: where it is too narrow for the two in a line (about 355 px at Text size 14, 375 px at 15: a phone, or a window under about
    940 px wide; on a desktop the column is 442 px), one under another, each the column's full width (as Rows' agents). */
 .ib-prow[data-settings-sound] .ib-txt { container: ib-sound-row / inline-size; }
 .ib-prow .ib-sound-when { align-self: flex-start; max-width: 100%; margin: 6px 0 3px; }
-@container ib-sound-row (max-width: 379px) {
+@container ib-sound-row (max-width: 399px) {
   .ib-prow .ib-sound-when { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; align-self: stretch; }
   .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; height: auto; min-height: 28px; padding-block: 5px; white-space: normal; line-height: 1.35; }
 }

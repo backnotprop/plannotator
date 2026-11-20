@@ -386,7 +386,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised.every((r) => r.silent)).toBe(true);
   });
 
-  test('"for every agent message": three new threads seconds apart, one ring, every notice silent', async () => {
+  test('"every agent message": three new threads seconds apart, one ring, every notice silent', async () => {
     bell = true;
     bellEvery = true;
     away();
