@@ -565,6 +565,8 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     const saved = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string; provider: string | null; model: string | null };
     await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: saved.rules, provider: saved.provider, model: saved.model, auto: null } });
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } });
+    await openPulls();
+    for (const n of [504, 507]) await expect(row(n).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 60_000 });
   }
 });
 
