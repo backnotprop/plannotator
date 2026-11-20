@@ -20,6 +20,7 @@ import {
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
+import type { FitAxis } from '@plannotator/ui/components/imageZoom';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
@@ -170,6 +171,17 @@ export function attachmentPageUrl(attachment: Pick<InboxAttachmentState, 'id'>, 
 
 /** Wider than this width-to-height ratio, an image is a panorama: the gallery crops it from the left, the viewer scrolls it sideways. */
 export const WIDE_IMAGE_RATIO = 4;
+
+/**
+ * How Fit fits an image of this size, in the viewer and in the swipe's neighbour picture alike (one rule, so a
+ * picture never slides in at one Fit and snaps to another): a panorama keeps a readable height (read from the left),
+ * except on a phone, where it fits whole (its height there would crop most of it off the right; a pinch reads it
+ * closer); a tall screenshot (taller than twice its width) fits its width (read from the top); anything else fits whole.
+ */
+export function imageFitAxis(natural: { width: number; height: number }, phone: boolean): FitAxis {
+  if (natural.width > natural.height * WIDE_IMAGE_RATIO) return phone ? 'contain' : 'height';
+  return natural.height > natural.width * 2 ? 'width' : 'contain';
+}
 
 /**
  * Whether an image fits in a `box`-pixel square at its own size, by the size

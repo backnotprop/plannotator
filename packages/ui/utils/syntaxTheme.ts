@@ -14,6 +14,8 @@
  * costs no additional bytes.
  */
 
+import { customSyntaxThemeFor } from './customSyntaxThemes';
+
 /** Plannotator theme id -> Shiki theme name, per mode. `null` = this palette
  *  has no counterpart in that mode and falls back to the Pierre default. */
 export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: string | null }> = {
@@ -71,6 +73,14 @@ export const DEFAULT_SYNTAX_THEME = { dark: 'pierre-dark', light: 'pierre-light'
  * customised it.
  */
 export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
+  // A custom theme's own code colours (customSyntaxThemes.ts), per half; a half without them, Pierre's default.
+  const custom = customSyntaxThemeFor(colorTheme, mode);
+  if (custom) {
+    return {
+      dark: customSyntaxThemeFor(colorTheme, 'dark') ?? DEFAULT_SYNTAX_THEME.dark,
+      light: customSyntaxThemeFor(colorTheme, 'light') ?? DEFAULT_SYNTAX_THEME.light,
+    };
+  }
   const map = SHIKI_THEME_MAP[colorTheme];
   if (!map || !map[mode]) return undefined;
   return { dark: map.dark || DEFAULT_SYNTAX_THEME.dark, light: map.light || DEFAULT_SYNTAX_THEME.light };

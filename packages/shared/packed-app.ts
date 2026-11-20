@@ -50,6 +50,8 @@ export interface PackedAppAnswer {
 export interface PackedApp {
   /** The page to serve, without the pack. */
   html: string;
+  /** The page as it goes out now: `html` through the `page` option (the person's themes written in), else `html`. */
+  page(): string;
   /**
    * The answer to a request no other route claimed: under `/assets/` the
    * packed file of exactly that name (404 when there is none, 405 for anything
@@ -81,7 +83,7 @@ export function packApp(html: string, assets: Record<string, PackedAsset>): stri
 }
 
 /** Split a built app into its page and assets. An unpacked page serves as-is. */
-export function openPackedApp(bundle: string): PackedApp {
+export function openPackedApp(bundle: string, options: { page?: (html: string) => string } = {}): PackedApp {
   const markerAt = bundle.indexOf(PACKED_ASSETS_MARKER);
   const html = markerAt < 0 ? bundle : bundle.slice(0, markerAt);
   const indexAt = markerAt + PACKED_ASSETS_MARKER.length;
@@ -113,11 +115,20 @@ export function openPackedApp(bundle: string): PackedApp {
     return pending;
   };
 
+  const pageNow = (): string => {
+    if (!options.page) return html;
+    try {
+      return options.page(html);
+    } catch {
+      return html;
+    }
+  };
   return {
     html,
+    page: pageNow,
     async answer(pathname, method, acceptEncoding, compress) {
       if (!pathname.startsWith(PACKED_ASSET_ROUTE_PREFIX)) {
-        const page = await prepareAppHtml(html, acceptEncoding, compress);
+        const page = await prepareAppHtml(pageNow(), acceptEncoding, compress);
         return { status: 200, headers: page.headers, body: page.body };
       }
       const plain = { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" };

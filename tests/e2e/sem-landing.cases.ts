@@ -264,6 +264,12 @@ const moved = (view: View) =>
 
 const noteOf = (view: View, file: string) => view.page.evaluate((selector) => document.querySelector(`${selector} [data-semantic-note]`)?.getAttribute('data-semantic-note') ?? null, view.shell(file));
 
+const switchOf = (view: View) => view.page.locator('[data-semantic-file-popover]').last().getByRole('switch', { name: 'Show in the diff' });
+
+async function tapAt(view: View, box: { x: number; y: number; width: number; height: number }, dy = box.height / 2) {
+  await view.page.touchscreen.tap(box.x + box.width / 2, box.y + dy);
+}
+
 const edgeOf = (view: View, file: string) =>
   view.page.evaluate(
     ({ selector, scroller }) => {
@@ -385,15 +391,16 @@ export function landingCases(type: BrowserType) {
       const box = (await note.boundingBox())!;
       const edge = (await header.boundingBox())!;
       expect(box.x >= edge.x && box.x + box.width <= edge.x + edge.width, 'the note sits inside the header').toBe(true);
-      expect(box.width, 'the note shows its words').toBeGreaterThan(30);
-      await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      expect(box.width, 'the chip is full size').toBeGreaterThan(30);
+      await tapAt(view, box);
+      await tapAt(view, (await switchOf(view).boundingBox())!);
       await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
     } finally {
       await view.close();
     }
   });
 
-  test(`${host} on a 320 px phone: the file name keeps its room beside the note, and a tap just above or below the note reaches it`, async () => {
+  test(`${host} on a 320 px phone: the file name keeps its room beside the chip, and a tap just above or below the chip opens its switch`, async () => {
     const view = await onPhone(host, [], 'a-money', 320);
     try {
       const shell = view.shell('a-money');
@@ -406,17 +413,24 @@ export function landingCases(type: BrowserType) {
       expect((await name.boundingBox())!.width, 'the file name keeps room to read').toBeGreaterThanOrEqual(64);
       for (const offset of [-7, 5]) {
         const box = (await note.boundingBox())!;
-        const was = await noteOf(view, 'a-money');
+        const row = (await view.page.locator(`${shell} [data-file-header]`).first().boundingBox())!;
         await view.page.waitForTimeout(600);
-        await view.page.touchscreen.tap(box.x + box.width / 2, offset < 0 ? box.y + offset : box.y + box.height + offset);
-        await expect.poll(() => noteOf(view, 'a-money'), { timeout: 5_000, message: `a tap ${offset} px off the note reaches it` }).not.toBe(was);
+        const at = { x: box.x + box.width / 2, y: offset < 0 ? Math.max(row.y + 1, box.y + offset) : Math.min(row.y + row.height - 1, box.y + box.height + offset) };
+        await expect.poll(() => view.page.evaluate(({ x, y }) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit?.closest('[data-semantic-note]') ? 'chip' : (hit?.outerHTML.slice(0, 160) ?? 'nothing');
+        }, at), { timeout: 2_000, message: `the point ${offset} px off the chip belongs to it` }).toBe('chip');
+        await view.page.touchscreen.tap(at.x, at.y);
+        await expect(switchOf(view), `a tap ${offset} px off the chip opens it`).toBeVisible({ timeout: 5_000 });
+        await view.page.keyboard.press('Escape');
+        await expect(switchOf(view)).toHaveCount(0);
       }
     } finally {
       await view.close();
     }
   });
 
-  test(`${host} on a phone: at the very end of the page, a tap on the last file's offered note leaves its header where it is`, async () => {
+  test(`${host} on a phone: at the very end of the page, flipping the last file's offered result in its chip leaves its header where it is`, async () => {
     const view = await onPhone(host, ['tail'], 'a-money');
     try {
       const shell = view.shell('f-tail');
@@ -456,11 +470,11 @@ export function landingCases(type: BrowserType) {
         };
         step();
       }, `${shell} [data-semantic-note]`);
-      await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      await tapAt(view, box);
+      await tapAt(view, (await switchOf(view).boundingBox())!);
       await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
       await view.page.waitForTimeout(1_000);
-      const again = (await note.boundingBox())!;
-      await view.page.touchscreen.tap(again.x + again.width / 2, again.y + again.height / 2);
+      await tapAt(view, (await switchOf(view).boundingBox())!);
       await expect(note).toHaveAttribute('data-semantic-note', 'off');
       await view.page.waitForTimeout(1_000);
       const tops = await view.page.evaluate(() => {
@@ -505,6 +519,7 @@ export function landingCases(type: BrowserType) {
           await heldUntilWatched(view, 'money', 'a-money', 'off');
           await still(view);
           await view.page.locator(`${view.shell('a-money')} [data-semantic-note="off"]`).click();
+          await switchOf(view).click();
           await expect.poll(() => noteOf(view, 'a-money')).toBe('semantic');
         } finally {
           await view.close();
