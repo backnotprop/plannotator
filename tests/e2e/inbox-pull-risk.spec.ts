@@ -93,10 +93,13 @@ const LISTED = () => [
   ghPull(510, 'Refund to the card on file', { authorAssociation: 'MEMBER' }),
   ghPull(511, 'Waive the card fee for teams', { authorAssociation: 'MEMBER' }),
 ];
-const LATER = () => [ghPull(498, 'Move the invoice job', { authorAssociation: 'MEMBER' }), ghPull(499, 'Retry the payouts', { authorAssociation: 'MEMBER' })];
+const member = { authorAssociation: 'MEMBER' };
+const LINE = (base: number) => [ghPull(base + 1, 'Refund to the card on file', member), ghPull(base + 2, 'Waive the card fee for teams', member)];
+const LINE_LATER = (base: number) => [ghPull(base - 2, 'Move the invoice job', member), ghPull(base - 1, 'Retry the payouts', member)];
+let lineRound = 0;
 
-function writeGhPulls(extra: ReturnType<typeof ghPull>[] = []) {
-  writeFileSync(join(fakes, 'gh-pulls.json'), JSON.stringify({ data: { viewer: { login: 'dana' }, requested: { nodes: [...LISTED(), ...extra] }, authored: { nodes: [] }, merged: { nodes: [] } } }));
+function writeGhPulls(extra: ReturnType<typeof ghPull>[] = [], listed = LISTED()) {
+  writeFileSync(join(fakes, 'gh-pulls.json'), JSON.stringify({ data: { viewer: { login: 'dana' }, requested: { nodes: [...listed, ...extra] }, authored: { nodes: [] }, merged: { nodes: [] } } }));
 }
 
 /** A fake gh: the list, each PR's patch, its head. */
@@ -702,11 +705,14 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   config.inboxPullRisk = { ...was, rules: RULES, provider: 'pi-sdk', auto: { level: 'high', make: 'guide' } };
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config));
   for (const name of ['pull-risk.json', 'pull-risk-auto.json']) rmSync(join(dataDir, 'inbox', name), { force: true });
+  const base = 600 + 10 * lineRound++;
+  writeGhPulls([], LINE(base));
   const launches = () => piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id')).length;
   const launchedBefore = launches();
   await start();
   context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   page = await context.newPage();
+  expect((await page.request.post(`${url}api/inbox/settings`, { data: { code_review: { on: true } } })).status()).toBe(200);
   expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
   await expect
     .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
@@ -730,23 +736,22 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   await waitingLine.getByRole('button', { name: 'Not now', exact: true }).click();
   await expect(waitingLine).toHaveCount(0);
   await openPulls();
-  await expect(row(510).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await page.waitForTimeout(1_500);
+  await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await expect(waitingLine).toHaveCount(0);
   expect(await autoRuns()).toEqual({});
 
-  writeGhPulls(LATER());
+  writeGhPulls(LINE_LATER(base), LINE(base));
   await expect.poll(async () => (await (await page.request.get(`${url}api/inbox/pulls?refresh=1`)).text()).includes('Move the invoice job'), { timeout: 60_000, intervals: [2_000] }).toBe(true);
   await openPulls();
   await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
   expect(await autoRuns()).toEqual({});
   await waitingLine.getByRole('button', { name: 'Make them now', exact: true }).click();
   await expect(waitingLine).toHaveCount(0);
-  await expect.poll(async () => (await autoRuns())[keyOf(498)]?.state, { timeout: 30_000 }).toBe('started');
+  await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');
   const runs = await autoRuns();
-  expect(Object.keys(runs).sort()).toEqual([keyOf(498), keyOf(499)]);
-  expect(['queued', 'started']).toContain(runs[keyOf(499)]!.state);
+  expect(Object.keys(runs).sort()).toEqual([keyOf(base - 2), keyOf(base - 1)]);
+  expect(['queued', 'started']).toContain(runs[keyOf(base - 1)]!.state);
   await expect.poll(launches, { timeout: 30_000 }).toBeGreaterThan(launchedBefore);
   const argv = piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id'))[launchedBefore]!.argv!;
-  expect(argv[argv.indexOf('--name') + 1]).toBe('Review #498: Move the invoice job');
+  expect(argv[argv.indexOf('--name') + 1]).toBe(`Review #${base - 2}: Move the invoice job`);
 });
