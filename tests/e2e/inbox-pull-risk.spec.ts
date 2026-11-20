@@ -707,6 +707,8 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config));
   for (const name of ['pull-risk.json', 'pull-risk-auto.json']) rmSync(join(dataDir, 'inbox', name), { force: true });
   const base = 600 + 10 * lineRound++;
+  mkdirSync(join(dataDir, 'agents-home', '.pi', 'agent'), { recursive: true });
+  writeFileSync(join(dataDir, 'agents-home', '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
   writeGhPulls([], LINE(base));
   const launches = () => piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id')).length;
   const launchedBefore = launches();
@@ -715,8 +717,8 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   page = await context.newPage();
   expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
   await expect
-    .poll(async () => JSON.stringify(((await (await page.request.get(`${url}api/inbox/sessions`)).json()) as { launch?: unknown }).launch ?? null), { timeout: 15_000 })
-    .toContain('"agent":"pi"');
+    .poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk?auto_agent=1`)).json()) as { auto_agent?: { agent: string } | null }).auto_agent?.agent ?? null, { timeout: 15_000 })
+    .toBe('pi');
   await openPulls();
   const waitingLine = page.locator('[data-pull-risk-waiting]');
   await expect(waitingLine)
