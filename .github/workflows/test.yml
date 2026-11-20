@@ -131,7 +131,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: runner.environment == 'self-hosted'
         with:
-          node-version: 22
+          node-version: 26
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
@@ -270,7 +270,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: runner.environment == 'self-hosted'
         with:
-          node-version: 22
+          node-version: 26
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
@@ -355,7 +355,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: runner.environment == 'self-hosted'
         with:
-          node-version: 22
+          node-version: 26
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
@@ -400,7 +400,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: runner.environment == 'self-hosted'
         with:
-          node-version: 22
+          node-version: 26
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
