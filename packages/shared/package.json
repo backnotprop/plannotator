@@ -24,6 +24,7 @@
     "./review-core": "./review-core.ts",
     "./review-image": "./review-image.ts",
     "./repo-files": "./repo-files.ts",
+    "./review-file-filter": "./review-file-filter.ts",
     "./fuzzy-path": "./fuzzy-path.ts",
     "./repo-files-node": "./repo-files-node.ts",
     "./review-markdown-image": "./review-markdown-image.ts",
@@ -240,9 +241,11 @@
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "parse5": "^7.3.0",
+    "picomatch": "4.0.7",
     "turndown": "^7.2.4"
   },
   "devDependencies": {
+    "@types/picomatch": "^4.0.2",
     "fast-check": "4.10.2"
   }
 }

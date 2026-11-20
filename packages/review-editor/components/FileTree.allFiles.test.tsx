@@ -15,6 +15,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
+import { markFirstCodePainted } from '../utils/firstCodePaint';
 import type { DiffFile } from '../types';
 import type { RepoFiles, RepoFilesState } from '../hooks/useRepoFiles';
 import { key, searchInput, typeInSearch } from './treeKeys.testing';
@@ -134,6 +135,44 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(el.querySelector('[data-repo-file-tree]')).toBeNull();
     await act(async () => all.click());
     expect(onScope).toHaveBeenCalledWith('all');
+  });
+
+  test('the filtered Changes tree keeps original selection indexes and full progress', async () => {
+    const onSelectFile = mock((_index: number) => {});
+    const shown = changed[1].path;
+    markFirstCodePainted();
+    const el = await mount(
+      <Tree
+        treeScope="changes"
+        header={{ view: 'tree', showCommits: false, onSelectView: () => {} }}
+        visiblePaths={new Set([shown])}
+        onSelectFile={onSelectFile}
+      />,
+    );
+    await settle();
+    const tree = el.querySelector<HTMLElement>('[data-changes-tree]')!.shadowRoot!;
+    expect(tree.querySelector('[data-item-path$="fileKindTree.ts"]')).toBeNull();
+    const row = tree.querySelector<HTMLElement>('[data-item-path$="explorerTree.ts"]')!;
+    await act(async () => row.click());
+    expect(onSelectFile).toHaveBeenCalledWith(1);
+    expect(el.querySelector('[data-review-progress-caption]')?.textContent).toContain('0 of 3 viewed');
+  });
+
+  test('the filtered All files tree adds matching deleted paths and keeps the original selection index', async () => {
+    const onSelectFile = mock((_index: number) => {});
+    const filteredPath = changed[2].path;
+    const el = await mount(
+      <Tree
+        visiblePaths={new Set([filteredPath])}
+        repoFiles={repo(ready({ paths: ['packages/shared/review-core.ts'] }))}
+        onSelectFile={onSelectFile}
+      />,
+    );
+    await settle();
+    expect(visibleRows(el)).toContain(`changed:${filteredPath}`);
+    expect(repoRow(el, changed[0].path)).toBeNull();
+    await act(async () => repoRow(el, filteredPath).click());
+    expect(onSelectFile).toHaveBeenCalledWith(2);
   });
 
   test('no header without a model (a host that draws its own)', async () => {

@@ -3630,6 +3630,8 @@ export async function startReviewServer(options: {
 			res.writeHead(result.status, result.headers);
 			res.end(result.body ?? undefined);
 		} else if (url.pathname === REPO_FILES_ENDPOINT && req.method === "GET") {
+			const requestAbort = url.searchParams.has("include") || url.searchParams.has("exclude") ? new AbortController() : null;
+			if (requestAbort) res.once("close", () => requestAbort.abort());
 			const result = await handleRepoFilesRequest({
 				params: url.searchParams,
 				unavailable: repoFilesUnavailable(),
@@ -3640,8 +3642,9 @@ export async function startReviewServer(options: {
 						? findRepoOnDiskChanges(reviewRuntime, listing.root, diffFileStates(currentPatch), snapshotCapturedAt)
 						: Promise.resolve(null),
 				lazyThreshold: options.repoFilesLazyThreshold,
+				signal: requestAbort?.signal,
 			});
-			json(res, result.body, result.status);
+			if (!requestAbort?.signal.aborted) json(res, result.body, result.status);
 		} else if (url.pathname === REPO_FILES_SEARCH_ENDPOINT && req.method === "GET") {
 			const result = await handleRepoFilesSearchRequest({
 				params: url.searchParams,

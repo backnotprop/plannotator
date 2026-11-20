@@ -1,3 +1,4 @@
+import { NoMatchingReviewFiles } from './ReviewFileFilter';
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { focusFileHeaderWhenLost } from '../utils/focusFileHeader';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
@@ -59,6 +60,7 @@ interface FileTreeProps {
   /** Markdown files shown rendered, Changes or Read (an eye after the name). */
   markdownPreviewedPaths?: ReadonlySet<string>;
   files: DiffFile[];
+  visiblePaths?: ReadonlySet<string>;
   activeFileIndex: number;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
@@ -155,6 +157,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   generatedFiles,
   markdownPreviewedPaths,
   files,
+  visiblePaths,
   activeFileIndex,
   onSelectFile,
   onDoubleClickFile,
@@ -227,12 +230,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   const effectiveGroupBy: FileGroupBy = groupBy ?? (groupByKind ? 'kind' : 'none');
   const statusBlocks = useMemo(
-    () => (effectiveGroupBy === 'status' && sinceBaseSections ? buildFileStatusBlocks(files, sinceBaseSections, stagedFiles) : null),
-    [effectiveGroupBy, files, sinceBaseSections, stagedFiles],
+    () => (effectiveGroupBy === 'status' && sinceBaseSections ? buildFileStatusBlocks(files, sinceBaseSections, stagedFiles, visiblePaths) : null),
+    [effectiveGroupBy, files, sinceBaseSections, stagedFiles, visiblePaths],
   );
   const kindBlocks = useMemo(
-    () => (effectiveGroupBy === 'kind' ? buildFileKindBlocks(files, generatedFiles) : null),
-    [files, effectiveGroupBy, generatedFiles],
+    () => (effectiveGroupBy === 'kind' ? buildFileKindBlocks(files, generatedFiles, visiblePaths) : null),
+    [files, effectiveGroupBy, generatedFiles, visiblePaths],
   );
   const blocks = useMemo<FileGroupBlock[] | null>(() => {
     if (statusBlocks) {
@@ -262,7 +265,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
     }
     return null;
   }, [statusBlocks, kindBlocks]);
-  const tree = useMemo(() => (blocks ? blocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, blocks]);
+  const tree = useMemo(() => (blocks ? blocks.flatMap((block) => block.tree) : buildFileTree(files, visiblePaths)), [files, blocks, visiblePaths]);
   const plainTree = useMemo(() => (blocks ? [] : tree), [blocks, tree]);
 
   const getSectionEntry = useMemo(() => {
@@ -411,8 +414,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const treeActivePath =
     rowActiveIndex >= 0 ? files[rowActiveIndex]?.path ?? null : isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path ?? null : null;
   const annotationCounts = annotationCountMap;
-  const showChangesTree = !searchQuery.trim() && !showAllFiles;
-  const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady;
+  const noFilterMatches = visiblePaths?.size === 0 && (
+    !showAllFiles || !!searchQuery.trim() || (!!repoReady && !repoFiles?.filtering &&
+      (repoReady.paths?.length ?? repoReady.dirs.get('')?.length) === 0)
+  );
+  const showChangesTree = !searchQuery.trim() && !showAllFiles && !noFilterMatches;
+  const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady && !noFilterMatches;
   const [repoVisited, setRepoVisited] = useState(false);
   useEffect(() => {
     if (showRepoTree) setRepoVisited(true);
@@ -552,8 +559,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
           </nav>
           {panelControls}
           {searchField}
+          {showAllFiles && repoFiles?.filtering && repoReady && !searchQuery.trim() && (
+            <div className="px-2 py-1 text-xs text-muted-foreground" role="status">Filtering files…</div>
+          )}
 
-          {searchQuery.trim() ? (
+          {noFilterMatches && header?.fileFilterInput ? (
+            <NoMatchingReviewFiles onClear={header.fileFilterInput.clear} />
+          ) : searchQuery.trim() ? (
             isSearchPending ? (
               <div className="py-6 text-center text-xs text-muted-foreground/50">Searching…</div>
             ) : searchGroups.length > 0 ? (
@@ -614,6 +626,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               repo={repoReady}
               loadDir={repoFiles!.loadDir}
               files={files}
+              visiblePaths={visiblePaths}
               activePath={activeRepoPath ?? treeActivePath}
               viewedFiles={viewedFiles}
               showViewedControls={showViewedControls}
