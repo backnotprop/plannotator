@@ -102,6 +102,8 @@ const BOM = [0xef, 0xbb, 0xbf];
 const withoutBom = (bytes: Uint8Array) => (bytes.length >= 3 && BOM.every((b, i) => bytes[i] === b) ? bytes.subarray(3) : bytes);
 /** The version a space names for these bytes: it drops a leading byte-order mark before it hashes. */
 const hostedVersionOf = (bytes: Uint8Array) => gitBlobSha(withoutBom(bytes));
+/** The version of an empty page: two empty pages share it. */
+const EMPTY_BLOB = gitBlobSha(new Uint8Array());
 const textOf = (bytes: Uint8Array) => new TextDecoder().decode(withoutBom(bytes));
 
 /** Marks that end one step without ending the run. */
@@ -181,22 +183,27 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     }
   };
   /**
-   * The space's version of a page is version `n` here: its stored id, or (they differ only for bytes that start with
-   * a byte-order mark, which the space drops) its bytes hashed as the space does.
+   * Which version here the space's version of a page is: `n` when given and it is, else any (newest first). The stored
+   * ids are compared first; bytes are read and hashed as the space does only when no id matched, and only for bytes
+   * that start with a byte-order mark (the one case the two differ).
    */
-  const holds = (docId: string, n: number, remote: string, bytes?: Uint8Array) => {
-    if (localHash(docId, n) === remote) return true;
-    const own = bytes ?? source.versionBytes(docId, n);
-    return own !== null && withoutBom(own) !== own && hostedVersionOf(own) === remote;
+  const heldVersion = (docId: string, remote: string, n?: number, bytes?: Uint8Array): number | null => {
+    if (n !== undefined && localHash(docId, n) === remote) return n;
+    const versions = [...docOf(docId).versions].reverse();
+    const byId = versions.find((v) => v.version === remote);
+    if (byId) return byId.version_number;
+    for (const v of versions) {
+      const own = v.version_number === n && bytes ? bytes : source.versionBytes(docId, v.version_number);
+      if (own !== null && withoutBom(own) !== own && hostedVersionOf(own) === remote) return v.version_number;
+    }
+    return null;
   };
   /**
    * A page found in the space (after a lost answer, or in a space a key brought back): ours from the version it holds
-   * when that is the one being sent or the newest here; any other (an older one put back there, an edit) is a page
-   * changed in the space, left alone.
+   * when that is any version of it here (what is newer then goes up), else a page changed in the space, left alone.
    */
   const found = (docId: string, n: number, path: string, there: { id: string; version: string | null }, bytes: Uint8Array) => {
-    const newest = docOf(docId).versions.slice(-1)[0]?.version_number ?? n;
-    const held = there.version === null ? null : holds(docId, n, there.version, bytes) ? n : newest !== n && holds(docId, newest, there.version) ? newest : null;
+    const held = there.version === null ? null : heldVersion(docId, there.version, n, bytes);
     record.pages[docId] = { lane: "page", remote_id: there.id, doc_path: path, pushed: held !== null ? [{ local: held, remote: there.version!, hash: localHash(docId, held) }] : [], stopped: held !== null ? null : { current: there.version } };
   };
 
@@ -227,7 +234,11 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
             let there: { id: string; doc_path: string; version: string | null } | null = null;
             if (doc && bytes && path) {
               const docs = made.space.documents.length > 0 ? made.space.documents : (await client.getSpace(made.space.id)).documents;
-              there = docs.find((d) => d.doc_path === path) ?? docs.find((d) => d.version !== null && doc.versions.some((v) => holds(doc.id, v.version_number, d.version!))) ?? null;
+              // By version, only a page no other page or file of ours is at, never the empty page (identical bytes share
+              // a version), and only when exactly one holds one of the main page's versions.
+              const others = new Set([...Object.entries(paths).filter(([id]) => id !== doc.id).map(([, p]) => p), ...Object.values(next.file_paths)]);
+              const byVersion = docs.filter((d) => d.version !== null && d.version !== EMPTY_BLOB && !others.has(d.doc_path) && heldVersion(doc.id, d.version) !== null);
+              there = docs.find((d) => d.doc_path === path) ?? (byVersion.length === 1 ? byVersion[0]! : null);
               if (!there && docs.length > 0) throw new SpacesError(0, "no_main_page", "The space this plan's key names has pages, and none of them is its main page.");
             }
             await adopt(made.space);

@@ -102,11 +102,15 @@ describe("the steps", () => {
     );
     expect(plan.steps.map((s) => s.kind)).toEqual(["create", "page-save", "file", "comment", "reply"]);
     // The anchor says where and what, never who or when.
-    expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ text: "x", originalText: "q" });
-    // An allow-list: an id, a tool, page, PR and artifact addresses, an element's description and anything unknown stay.
-    const leaky = spaceCommentAnchor(comment("L", { type: "COMMENT", text: "x", originalText: "q", source: "eslint", pageUrl: "/p", prUrl: "https://github.com/a/b/pull/1", artifact: { artifactUrl: "https://x/a", sourceUrl: "https://x/s" }, elementContext: { tag: "div" }, questionAnswer: { key: "k" }, futureField: "?", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } }));
-    expect(leaky).toEqual({ type: "COMMENT", text: "x", originalText: "q", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } });
-    for (const src of ["/Users/me/shot.png", "./shot.png", "file:///tmp/a.png", "C:\\a.png"]) expect((spaceCommentAnchor(comment("I", { imageRegion: { v: 1, src, sourceLine: 1, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } })).imageRegion as Record<string, unknown>).src).toBeUndefined();
+    expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ id: "Z", text: "x", originalText: "q" });
+    // An allow-list: a tool, page, PR and artifact addresses, an element's description and anything unknown stay; the
+    // id and an answer to a question go, as the space's parsers read them.
+    const leaky = spaceCommentAnchor(comment("L", { type: "COMMENT", text: "x", originalText: "q", source: "eslint", pageUrl: "/p", prUrl: "https://github.com/a/b/pull/1", artifact: { artifactUrl: "https://x/a", sourceUrl: "https://x/s" }, elementContext: { tag: "div" }, futureField: "?", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } }));
+    expect(leaky).toEqual({ id: "L", type: "COMMENT", text: "x", originalText: "q", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } });
+    // A picture's reference: relative inside the plan or on the web goes (the parser needs one); one naming this computer stays.
+    const srcOf = (src: string) => (spaceCommentAnchor(comment("I", { imageRegion: { v: 1, src, sourceLine: 1, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } })).imageRegion as Record<string, unknown>).src;
+    for (const src of ["figures/x.png", "./shot.png", "a/../b.png", "https://example.com/i.png"]) expect(srcOf(src)).toBe(src);
+    for (const src of ["/Users/me/shot.png", "~/shot.png", "file:///tmp/a.png", "C:\\a.png", "C:/a.png", "\\\\server\\share\\a.png", "../outside.png", "a/../../outside.png", "data:image/png;base64,AA"]) expect(srcOf(src)).toBeUndefined();
     expect(plan.details).toEqual({ pages: 1, files: 1, comments: 2, approval: null, not: { sent_comments: 1, pictures: 1, original_dates: true, files_over: 1, pages_over: 1, long_comments: 1, older_approvals: 1 } });
     expect(plan.changes).toBe(4);
   });

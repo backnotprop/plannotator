@@ -79,8 +79,9 @@ describe("what goes up", () => {
     expect(space.comments.map((c) => c.body)).toEqual(["Should the Free tier burst be lower?"]);
     expect(space.comments[0]!.key).toBe(s.world.unsent);
     expect(space.comments[0]!.document_version).toBe(main.versions[3]!.version);
-    // Where it sits and what it says only: no id, pictures or time.
-    expect(Object.keys(space.comments[0]!.anchor as object).sort()).toEqual(["blockId", "endOffset", "originalText", "startOffset", "text", "type"]);
+    // Where it sits and what it says only (its id too, so this side finds it again): no pictures or time.
+    expect(Object.keys(space.comments[0]!.anchor as object).sort()).toEqual(["blockId", "endOffset", "id", "originalText", "startOffset", "text", "type"]);
+    expect((space.comments[0]!.anchor as { id: string }).id).toBe("open-1");
     expect(JSON.stringify([...s.spaces.spaces.values()])).not.toContain(s.world.changesAsked);
     expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
     // The count never goes back and ends whole.
@@ -163,7 +164,11 @@ describe("the imported shape: every version and comment says it was put up at th
         prUrl: "https://github.com/acme/private-repo/pull/7",
         artifact: { artifactUrl: "https://github.com/acme/private-repo/artifact", sourceUrl: "https://github.com/acme/private-repo/src" },
         elementContext: { tag: "div", path: "body > div#secret-root", page: { url: "/private-route" } },
-        htmlAdditionalTargets: [{ text: "more", context: { tag: "span", path: "body > span#extra-secret" } }],
+        htmlAdditionalTargets: [{ label: "Button", text: "more", anchor: { selector: "button", tagName: "BUTTON", extra: "target-extra-secret" }, context: { tag: "span", path: "body > span#extra-secret" } }],
+        diagramAdditionalTargets: [{ family: "flowchart", kind: "edge", from: "A", to: "B", label: "Yes", url: "https://github.com/acme/private-repo/edge" }],
+        mathTargets: [{ blockId: "block-3", tex: "x^2", displayMode: false, path: "/Users/someone/math-secret" }],
+        diffContext: "modified",
+        questionAnswer: { v: 1, key: "q1", kind: "single", prompt: "Which?", selected: ["A"], sourceLine: 4, author: "question-author-secret" },
         imageRegion: { v: 1, src: "/Users/someone/private/shot.png", sourceLine: 3, box: { x: 1, y: 2, w: 3, h: 4 }, naturalWidth: 10, naturalHeight: 10 },
         diagramAnchor: { v: 1, family: "flowchart", kind: "node", id: "A", label: "Client", sourceLine: [2, 2], extra: "diagram-extra-secret" },
         htmlAnchor: { selector: "h1", tagName: "H1", point: { x: 0.5, y: 0.5 }, extra: "html-extra-secret" },
@@ -185,9 +190,10 @@ describe("the imported shape: every version and comment says it was put up at th
     expect(calls.adds.filter(isFilePage).map((c) => (c.json as Record<string, unknown>).actor)).toEqual([undefined]);
     for (const call of calls.saves) expect(Object.keys(call.json as object).sort()).toEqual(["actor", "body"]);
     expect(calls.comments.map((c) => c.idempotencyKey).sort()).toEqual([unsent, comment.id, leaky.id].sort());
-    // The leaky one kept where it sits: its picture's box without the local path, the diagram's and the HTML anchor's own fields.
+    // The leaky one kept where it sits: its id, its picture's box without the local path, every anchor's own position fields, the answer.
     const leakyAnchor = (calls.comments.find((c) => c.idempotencyKey === leaky.id)!.json as { anchor: Record<string, unknown> }).anchor;
     expect(leakyAnchor).toEqual({
+      id: "leaky-anchor-id",
       type: "COMMENT",
       text: "See the picture.",
       originalText: "The public API",
@@ -197,13 +203,18 @@ describe("the imported shape: every version and comment says it was put up at th
       imageRegion: { v: 1, sourceLine: 3, box: { x: 1, y: 2, w: 3, h: 4 }, naturalWidth: 10, naturalHeight: 10 },
       diagramAnchor: { v: 1, family: "flowchart", kind: "node", id: "A", label: "Client", sourceLine: [2, 2] },
       htmlAnchor: { selector: "h1", tagName: "H1", point: { x: 0.5, y: 0.5 } },
+      htmlAdditionalTargets: [{ label: "Button", text: "more", anchor: { selector: "button", tagName: "BUTTON" } }],
+      diagramAdditionalTargets: [{ family: "flowchart", kind: "edge", from: "A", to: "B", label: "Yes" }],
+      mathTargets: [{ blockId: "block-3", tex: "x^2", displayMode: false }],
+      diffContext: "modified",
+      questionAnswer: { v: 1, key: "q1", kind: "single", prompt: "Which?", selected: ["A"], sourceLine: 4 },
     });
     expect(calls.replies).toHaveLength(1);
     // A file takes no actor (its door refuses one).
     expect(calls.files.length).toBeGreaterThan(0);
     for (const call of calls.files) expect([call.json, call.query.includes("actor")]).toEqual([null, false]);
     const everything = JSON.stringify(s.spaces.calls.map((c) => c.json));
-    for (const leak of ["Maya Chen", "claude-code", "sess-secret-1", "author_label", "agent_", "2026-11-12T08:3", ...store.versions(plan, main).map((v) => v.committed_at), "leaky-anchor-id", "eslint-tool-id", "swift-otter", "@maya-host-id", "createdA", "private-page", "private-repo", "secret-root", "private-route", "extra-secret", "/Users/", "diagram-extra-secret", "html-extra-secret", "open-1", "open-2"]) expect(everything).not.toContain(leak);
+    for (const leak of ["Maya Chen", "claude-code", "sess-secret-1", "author_label", "agent_", "2026-11-12T08:3", ...store.versions(plan, main).map((v) => v.committed_at), "eslint-tool-id", "swift-otter", "@maya-host-id", "createdA", "private-page", "private-repo", "secret-root", "private-route", "extra-secret", "/Users/", "diagram-extra-secret", "html-extra-secret", "target-extra-secret", "math-secret", "question-author-secret"]) expect(everything).not.toContain(leak);
     // The stand-in reads them back as imported, with no author.
     const space = spaceOf(s.spaces, s.record);
     expect(space.documents.filter((d) => d.doc_path !== "dashboard-mockup.html").every((d) => d.versions.every((v) => v.imported?.at === SHARED_AT))).toBe(true);
@@ -328,15 +339,34 @@ describe("the space's key", () => {
     expect(spaceOf(s.spaces, s.record).documents).toHaveLength(1);
   });
 
-  test("a page whose version in that space is an older one of ours (put back there) is left alone, not written over", async () => {
+  test("the record is lost, the space holds v1 to v4 and there is a v5 here: v5 and its new comment go up, nothing twice", async () => {
     const s = setup({ token: true, seed: { extras: false } });
     expect((await s.run()).end).toBe("done");
-    const v2 = s.world.store.versions(s.world.plan, s.world.main)[1]!;
-    s.spaces.editPage(s.record.space_id, s.record.pages[s.world.main]!.doc_path, new TextDecoder().decode(s.world.store.versionBytes(s.world.plan, s.world.main, 2)!));
+    const { store, plan, main } = s.world;
+    store.addVersion(plan, main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    const v5 = store.versions(plan, main).slice(-1)[0]!;
+    store.saveComment(plan, { document_id: main, document_version: v5.version, annotation: { id: "open-5", type: "COMMENT", text: "On v5." }, at: new Date().toISOString() });
     const { again, result, later } = await shareAgain(s);
     expect(result.end).toBe("done");
-    expect(again.pages[s.world.main]!.stopped).toEqual({ current: v2.version });
-    expect(later.some((c) => c.method === "PATCH")).toBe(false);
+    expect(again.space_id).toBe(s.record.space_id);
+    expect(again.pages[main]!.pushed.map((p) => p.local)).toEqual([4, 5]);
+    expect(later.filter((c) => c.method === "PATCH").map((c) => c.status)).toEqual([200]);
+    expect(later.filter((c) => c.method === "POST" && c.path.endsWith("/documents"))).toHaveLength(0);
+    const space = spaceOf(s.spaces, again);
+    expect(mainOf({ ...s, record: again }).versions.map((v) => v.version)).toEqual(store.versions(plan, main).map((v) => v.version));
+    // The comment already up is the same one (its key); the new one is added once.
+    expect(space.comments.map((c) => c.body).sort()).toEqual(["On v5.", "Should the Free tier burst be lower?"]);
+  });
+
+  test("by version only when exactly one page there holds a version of the main page: two pages with the same bytes are no match", async () => {
+    const s = setup({ token: true, seed: { extras: false } });
+    expect((await s.run()).end).toBe("done");
+    const head = new TextDecoder().decode(s.world.store.versionBytes(s.world.plan, s.world.main, 4)!);
+    await createSpacesClient({ host: HOST, token: s.token, fetch: s.spaces.fetch }).addPage(s.record.space_id, { doc_path: "Copy.md", kind: "markdown", title: "Copy", body: head });
+    const { again, result, later } = await shareAgain(s, renamed(s));
+    expect([result.end, result.error?.code]).toEqual(["failed", "no_main_page"]);
+    expect(again.job).toMatchObject({ gone: true });
+    expect(later.filter((c) => c.method !== "GET").map((c) => c.method)).toEqual(["POST"]);
   });
 
   test("409 external_key_conflict, or an id the share cannot keep: gone (Share as new), not a Try again that gets the same answer", async () => {

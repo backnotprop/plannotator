@@ -353,43 +353,82 @@ export interface SpaceSharePlan {
 const annotationOf = (comment: PlanComment): Record<string, unknown> => (isObject(comment.anchor) ? comment.anchor : {});
 
 /**
- * A comment's anchor as it goes up: where it is and what it says, and nothing about who or when. An allow-list: its
- * type, words and selected text, the block and offset fields, and the diagram, HTML and picture anchors' own position
- * fields (a picture's address only when it is http(s)). Left here: its id, pictures, the commenter's name and the
- * people it names, the tool that made it, page, PR and artifact addresses, an element's description and its time.
+ * A picture's reference as it may go up: a web address, or a reference relative to the page that stays inside the
+ * plan. Null for anything that names this computer: an absolute path (`/`, `~`, `\\`, a drive letter), a `file:` or
+ * other address, or `..` that climbs out of the plan.
+ */
+export function spaceImageSrc(src: unknown): string | null {
+  if (typeof src !== "string" || src.length === 0) return null;
+  if (/^https?:\/\//i.test(src)) return src;
+  if (/^[\/\\~]/.test(src) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(src)) return null;
+  let depth = 0;
+  for (const name of src.split(/[\/\\]/)) {
+    if (name === "..") depth--;
+    else if (name !== "" && name !== ".") depth++;
+    if (depth < 0) return null;
+  }
+  return src;
+}
+
+/**
+ * A comment's anchor as it goes up: where it is and what it says (what the space's parsers need to place it), and
+ * nothing about who or when. An allow-list: its id, type, words and selected text, the block and offset fields, an
+ * answer to a question block, and the own position fields of the diagram, HTML, picture, math and diff anchors and of
+ * their extra targets (a picture's reference only when it is a web address or relative inside the plan). Left here:
+ * pictures, the commenter's name and the people it names, the tool that made it, page, PR and artifact addresses, an
+ * element's description, local paths and its time.
  */
 export function spaceCommentAnchor(comment: PlanComment): Record<string, unknown> {
-  // Only where it sits and what it says, field by field: never an id, a tool's or agent's name, a local path, a page or
-  // repository address, the element's description or anything added later. A space nobody kept is open to its link.
+  // Field by field: never a tool's or agent's name, a local path, a page or repository address, an element's
+  // description or anything added later. A space nobody kept is open to its link.
   const a = annotationOf(comment);
   const out: Record<string, unknown> = {};
-  const copy = (from: Record<string, unknown>, to: Record<string, unknown>, strings: string[], numbers: string[]) => {
+  const copy = (from: Record<string, unknown>, to: Record<string, unknown>, strings: string[], numbers: string[], booleans: string[] = []) => {
     for (const key of strings) if (typeof from[key] === "string") to[key] = from[key];
     for (const key of numbers) if (typeof from[key] === "number" && Number.isFinite(from[key])) to[key] = from[key];
+    for (const key of booleans) if (typeof from[key] === "boolean") to[key] = from[key];
     return to;
   };
   const lines = (value: unknown) => (value === null || typeof value === "number" || (Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number")) ? value : undefined);
-  copy(a, out, ["type", "text", "originalText", "blockId"], ["startOffset", "endOffset"]);
-  for (const key of ["startMeta", "endMeta"]) if (isObject(a[key])) out[key] = copy(a[key] as Record<string, unknown>, {}, ["parentTagName"], ["parentIndex", "textOffset"]);
-  if (isObject(a.diagramAnchor)) {
-    const d = a.diagramAnchor;
-    const anchor = copy(d, {}, ["family", "kind", "id", "from", "to", "label"], ["v"]);
-    if (lines(d.sourceLine) !== undefined) anchor.sourceLine = d.sourceLine;
-    out.diagramAnchor = anchor;
-  }
-  if (isObject(a.htmlAnchor)) {
-    const h = a.htmlAnchor;
+  const objects = (value: unknown) => (Array.isArray(value) ? value.filter(isObject) : []);
+  const diagramTarget = (d: Record<string, unknown>) => copy(d, {}, ["family", "kind", "id", "from", "to", "label"], []);
+  const htmlAnchor = (h: Record<string, unknown>) => {
     const anchor = copy(h, {}, ["selector", "tagName", "text"], []);
     if (isObject(h.point)) anchor.point = copy(h.point, {}, [], ["x", "y"]);
-    out.htmlAnchor = anchor;
+    return anchor;
+  };
+  copy(a, out, ["id", "type", "text", "originalText", "blockId"], ["startOffset", "endOffset"]);
+  if (a.diffContext === "added" || a.diffContext === "removed" || a.diffContext === "modified") out.diffContext = a.diffContext;
+  for (const key of ["startMeta", "endMeta"]) if (isObject(a[key])) out[key] = copy(a[key] as Record<string, unknown>, {}, ["parentTagName"], ["parentIndex", "textOffset"]);
+  if (isObject(a.diagramAnchor)) {
+    const anchor = { ...copy(a.diagramAnchor, {}, [], ["v"]), ...diagramTarget(a.diagramAnchor) };
+    if (lines(a.diagramAnchor.sourceLine) !== undefined) anchor.sourceLine = a.diagramAnchor.sourceLine;
+    out.diagramAnchor = anchor;
   }
+  if (Array.isArray(a.diagramAdditionalTargets)) out.diagramAdditionalTargets = objects(a.diagramAdditionalTargets).map(diagramTarget);
+  if (isObject(a.htmlAnchor)) out.htmlAnchor = htmlAnchor(a.htmlAnchor);
+  // An extra HTML target: its label, text and element anchor; never its element description.
+  if (Array.isArray(a.htmlAdditionalTargets))
+    out.htmlAdditionalTargets = objects(a.htmlAdditionalTargets).map((t) => {
+      const target = copy(t, {}, ["label", "text"], []);
+      if (isObject(t.anchor)) target.anchor = htmlAnchor(t.anchor);
+      return target;
+    });
+  if (Array.isArray(a.mathTargets)) out.mathTargets = objects(a.mathTargets).map((m) => copy(m, {}, ["blockId", "tex"], [], ["displayMode"]));
   if (isObject(a.imageRegion)) {
     const r = a.imageRegion;
-    // The picture's address only when it is on the web: a path names this computer's folders.
-    const region = copy(r, {}, typeof r.src === "string" && /^https?:\/\//i.test(r.src) ? ["src"] : [], ["v", "naturalWidth", "naturalHeight"]);
+    const region = copy(r, {}, [], ["v", "naturalWidth", "naturalHeight"]);
+    const src = spaceImageSrc(r.src);
+    if (src !== null) region.src = src;
     if (lines(r.sourceLine) !== undefined) region.sourceLine = r.sourceLine;
     if (isObject(r.box)) region.box = copy(r.box, {}, [], ["x", "y", "w", "h"]);
     out.imageRegion = region;
+  }
+  if (isObject(a.questionAnswer)) {
+    const q = a.questionAnswer;
+    const answer = copy(q, {}, ["key", "kind", "prompt", "other", "text", "note"], ["v", "sourceLine"], ["skipped", "by_reply"]);
+    if (Array.isArray(q.selected)) answer.selected = q.selected.filter((label) => typeof label === "string");
+    out.questionAnswer = answer;
   }
   return out;
 }
