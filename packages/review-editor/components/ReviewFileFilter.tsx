@@ -35,7 +35,7 @@ export function ReviewFileFilterControls({ input, active, renderRow }: {
     <>
       {renderRow ? renderRow(toggle) : toggle}
       {open && (
-        <div id={id} className="col-span-full row-start-2 mt-2 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 text-xs text-muted-foreground">
+        <div id={id} className="col-span-full row-start-2 mt-2 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 pe-1.5 text-xs text-muted-foreground">
           {(['include', 'exclude'] as const).map((kind) => (
             <React.Fragment key={kind}>
               <label htmlFor={`${id}-${kind}`} className="capitalize">{kind}</label>
