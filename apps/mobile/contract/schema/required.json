@@ -28,6 +28,14 @@
       "cursor",
       "serverSession"
     ],
+    "DoorKeyBody": [
+      "idempotency_key"
+    ],
+    "DoorMarkUnreadAnswer": [
+      "thread",
+      "through_seq",
+      "wrote"
+    ],
     "DoorPairAnswer": [
       "addresses",
       "computer",
@@ -66,6 +74,28 @@
       "key",
       "revision"
     ],
+    "DoorPinBody": [
+      "idempotency_key",
+      "pinned"
+    ],
+    "DoorPinsBody": [
+      "idempotency_key"
+    ],
+    "DoorPinsBodyRestore": [
+      "index",
+      "pinned_at",
+      "thread_id"
+    ],
+    "DoorPriorityAnswer": [
+      "before"
+    ],
+    "DoorPriorityBefore": [
+      "at",
+      "off_at"
+    ],
+    "DoorPriorityBody": [
+      "idempotency_key"
+    ],
     "DoorQuestionPick": [
       "key",
       "revision"
@@ -93,11 +123,30 @@
     "DoorReplyBodyTo": [
       "session"
     ],
+    "DoorResolveBody": [
+      "idempotency_key",
+      "resolved"
+    ],
     "DoorRevokeAnswer": [
       "device"
     ],
     "DoorSeenBody": [
       "idempotency_key"
+    ],
+    "DoorSnoozeAnswer": [
+      "snoozed"
+    ],
+    "DoorSnoozeBody": [
+      "idempotency_key",
+      "until"
+    ],
+    "DoorThreadAttachmentsAnswer": [
+      "attachments",
+      "serverSession"
+    ],
+    "DoorThreadDraftAnswer": [
+      "draft",
+      "serverSession"
     ],
     "InboxAck": [
       "at",
@@ -148,6 +197,9 @@
       "id",
       "thread_id"
     ],
+    "InboxAgentMark": [
+      "state"
+    ],
     "InboxAgentPlace": [
       "kind",
       "line"
@@ -174,6 +226,30 @@
       "sent_mtime",
       "sent_sha256",
       "size"
+    ],
+    "InboxAttachmentState": [
+      "changed_since_sent",
+      "current",
+      "id",
+      "kind",
+      "message_id",
+      "name",
+      "named_path",
+      "path",
+      "sent_at",
+      "sent_mtime",
+      "sent_sha256",
+      "size",
+      "unavailable"
+    ],
+    "InboxAttachmentStateCurrent": [
+      "mtime",
+      "sha256",
+      "size"
+    ],
+    "InboxAttachmentStateUnavailable": [
+      "code",
+      "message"
     ],
     "InboxAuthor": [
       "kind"
@@ -344,6 +420,9 @@
       "at",
       "label"
     ],
+    "InboxListRowLastAgent": [
+      "host"
+    ],
     "InboxListRowProject": [
       "id",
       "name"
@@ -403,6 +482,10 @@
     "InboxPicker": [
       "id",
       "name"
+    ],
+    "InboxPictureItPage": [
+      "attachment_id",
+      "title"
     ],
     "InboxProject": [
       "created_at",
@@ -477,6 +560,19 @@
     ],
     "InboxReaction": [
       "emoji"
+    ],
+    "InboxReplyDraft": [
+      "body",
+      "created_at",
+      "thread_id",
+      "updated_at",
+      "v"
+    ],
+    "InboxReplyMention": [
+      "at",
+      "label",
+      "thread_id",
+      "title"
     ],
     "InboxReplyQuote": [
       "of"

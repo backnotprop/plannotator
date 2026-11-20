@@ -11,6 +11,15 @@ A device holds at most one push token: `PUT .../devices/:dev/apns` (iPhone) or `
 
 With neither token a push answers `no_push_token`. Pushes are not rate limited: a push needs the phone's push token, which only the app and the relay hold.
 
+## Relay 1.1
+
+Contract section 4, "Relay 1.1 and push 2". The Inbox socket's `hello` says `version: "1.1"`; every 1.0 route answers as before.
+
+- A phone's own socket, `GET .../devices/:dev/socket` (device bearer, hibernating): the relay sends `{ n }` when an item is stored for that device, nothing else, and ignores what the phone sends. Sockets are told apart by their tags (`inbox`; `device` and `device:<id>`), which survive hibernation.
+- Cancel, `DELETE .../devices/:dev/commands/:id`: `204` while no Inbox socket has had the command, `409 already_handed` after, `404 command_not_found` when none is held. `commands.handed` defaults to handed: only 1.1's own insert writes 0, so a row 1.0 wrote (before the upgrade or during a rollback) is never taken back.
+- The APNs topic per phone: `PUT .../apns` takes `topic`, checked against `APNS_TOPICS` (`[vars]` in `wrangler.toml`); no topic is `ai.plannotator.app`, as in 1.0. `hello` lists `topic` per device and the Inbox's socket gets `{ type: "topic" }` when it changes: the Inbox sends the kinds push 2 added only to such a phone. Apple's 410 deletes only the token it refused.
+- A Live Activity: `PUT .../devices/:dev/liveactivity { token }` and `POST .../push { kind: "live", live }`, counts only (`src/live.ts`), at `<topic>.push-type.liveactivity`, priority 5.
+
 The overrides `APNS_ORIGIN`, `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` exist only for the proof and are honored only when they name a loopback host (`127.0.0.1`, `localhost`, `[::1]`); any other value is ignored, logged once, and the production host is used.
 
 ## Cloud agents
@@ -33,7 +42,7 @@ A paired cloud agent (contract section 13, "Through the relay") is a device regi
 
 ## Deploy
 
-The owner deploys the relay, never CI. `wrangler.toml` names the custom-domain route `relay.plannotator.ai`; that route and the Worker go live only when the owner runs, from this folder:
+The owner deploys the relay, never CI. The steps for relay 1.1, with the checks to run after and how to roll back, are in `GOING-LIVE.md`. `wrangler.toml` names the custom-domain route `relay.plannotator.ai`; that route and the Worker go live only when the owner runs, from this folder:
 
 ```sh
 wrangler secret put APNS_KEY              # the .p8 file's text
@@ -53,4 +62,4 @@ No workflow deploys it, and no workflow holds a Cloudflare, Apple or Google secr
 
 ## The proof
 
-`bun test` from this folder runs the relay under `wrangler dev` (`test/wrangler-relay.ts`; `test/cloud-agent.test.ts` is the cloud agent's proof, with a stand-in routine holding only its pairing string) (local only, persisted under `.wrangler/proof-*`) against a compiled Inbox when `PLANNOTATOR_INBOX_TEST_BINARY` names one, the CLI from source otherwise. Apple is a local HTTP/2 server; Google's two hosts are local servers the relay reaches through `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` (proof-only variables), with a service account whose RSA key is made for the run. `RELAY_PROOF_APPLE=1` adds the check against Apple's real hosts; `INBOX_PROOF_DIR` keeps the carriage's transcript and storage dumps. The relay workflow (`.github/workflows/relay.yml`) runs exactly this. The root `bun test` skips this folder.
+`test/relay-1-1.test.ts` proves relay 1.1 the same way, with this script as the Inbox and the phone; `test/sealed.test.ts` runs the Inbox's real relay client against it and searches every relay record, log line and push for a sentinel phrase. `bun test` from this folder runs the relay under `wrangler dev` (`test/wrangler-relay.ts`; `test/cloud-agent.test.ts` is the cloud agent's proof, with a stand-in routine holding only its pairing string) (local only, persisted under `.wrangler/proof-*`) against a compiled Inbox when `PLANNOTATOR_INBOX_TEST_BINARY` names one, the CLI from source otherwise. Apple is a local HTTP/2 server; Google's two hosts are local servers the relay reaches through `FCM_ORIGIN` and `FCM_OAUTH_ORIGIN` (proof-only variables), with a service account whose RSA key is made for the run. `RELAY_PROOF_APPLE=1` adds the check against Apple's real hosts; `INBOX_PROOF_DIR` keeps the carriage's transcript and storage dumps. The relay workflow (`.github/workflows/relay.yml`) runs exactly this. The root `bun test` skips this folder.

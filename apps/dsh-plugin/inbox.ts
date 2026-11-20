@@ -51,6 +51,7 @@ import {
   InboxWake,
   type InboxWakeTarget,
 } from "../../packages/shared/inbox/agent-link";
+import { isInboxTurnedOn } from "../../packages/shared/inbox/turned-on";
 import { inboxAgentTool, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 import { createUserMessage, sessionCwd, type DshContext, type DshUserMessage } from "./plan-review";
 
@@ -238,7 +239,8 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
   if (typeof profile?.name === "string" && DSH_NO_WAKE_PROFILES.includes(profile.name)) return null;
   if (!resolveInboxTool(loadConfig(), env, DSH_INBOX_HOST)) return null;
   const dataDir = deps.dataDir ?? getPlannotatorDataDir();
-  if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
+  // Only once the person turned the Inbox on here (turned-on.ts).
+  if (!existsSync(inboxRegistryFileOf(dataDir)) || !isInboxTurnedOn(dataDir, env)) return null;
   const agents = agentsServiceOf(ctx);
   if (!agents || typeof ctx.on !== "function") {
     warn("plannotator: this DSH has no agents service; the Plannotator Inbox connection is off");

@@ -2,7 +2,7 @@
 
 Every file under `package/src/` was cut from the Workspaces product repo at
 main `7379b0195de140adc00b4496eefe553a3eec803e`, read from
-`/Users/ramos/workspaces/projects/workspaces/worktrees/main` (read only; no
+`~/workspaces/projects/workspaces/worktrees/main` (read only; no
 edits, no state-changing git commands). Paths below are relative to that
 repo. "Last touched" is `git log -1` for the source file at that main, as
 an evidence anchor.

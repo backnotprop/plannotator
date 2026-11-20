@@ -19,7 +19,8 @@ button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offse
    header, which a phone draws opaque and sticky. */
 .ib-listcol[data-picking] .ib-group { position: relative; }
 .ib-group > .ib-pick-box { position: absolute; left: 14px; top: 9px; z-index: 3; }
-.ib-listcol[data-picking] .ib-band { padding-left: 42px; }
+/* The Agents view's bands (agentsView/) draw no box: their words stay where they are. */
+.ib-listcol[data-picking] :not(.ib-agband) > .ib-band { padding-left: 42px; }
 
 /* The fills: a picked row is filled; the open row keeps only the hover's. */
 .ib-listcol[data-picking] :is(.ib-row, .ib-nrow).ib-sel:not(.ib-picked)::before { background: transparent !important; }

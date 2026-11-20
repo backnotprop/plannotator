@@ -34,17 +34,19 @@
 
 .theme-tokyo-night.light {
   --background: #e1e2e7;
-  --foreground: #3760bf;
+  /* Was #3760bf: the same blue, darker, so body text stays clearly stronger than the muted text (about 7:1 on the background). */
+  --foreground: #28458a;
   --card: #e9e9ed;
-  --card-foreground: #3760bf;
+  --card-foreground: #28458a;
   --popover: #e9e9ed;
-  --popover-foreground: #3760bf;
+  --popover-foreground: #28458a;
   --primary: #2e7de9;
   --primary-foreground: #e1e2e7;
   --secondary: #a1a6c5;
   --secondary-foreground: #3760bf;
   --muted: #d0d3e1;
-  --muted-foreground: #848cb5;
+  /* Was #848cb5: darker, same hue and chroma, so it reads at 4.5:1 on the background. */
+  --muted-foreground: #5c6389;
   --accent: #007197;
   --accent-foreground: #e1e2e7;
   --destructive: #f52a65;

@@ -11,7 +11,7 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { ThreadTagLine } from './ThreadTagLine';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
@@ -2696,7 +2696,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setStale([]);
     setGuard(false);
   };
-  // The action items whose Done or Can't do it waits in the draft (approval "inbox-action-items-in-reply"):
+  // The action items whose Done, Can't do it or Skip waits in the draft (approval "inbox-action-items-in-reply"):
   // listed in the reply box, counted beside Send ("Draft · 1 done"), carried by the Send.
   const draftActions: ActionRow[] = thread.messages.flatMap((m) =>
     m.author.kind !== 'agent'
@@ -2707,7 +2707,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return [{ id: `${m.id}/${a.key}`, messageId: m.id, number: a.position + 1, prompt: a.prompt, outcome: mine.outcome, note: mine.note, seen: a.action_result?.by === 'agent' }];
         }),
   );
-  const draftCant = draftActions.filter((a) => a.outcome === 'cant' && !a.seen).length;
+  const [draftCant, draftSkipped] = (['cant', 'skip'] as const).map((o) => draftActions.filter((a) => a.outcome === o && !a.seen).length);
   /** Picks, annotations or action items wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
@@ -2718,7 +2718,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
-  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }, false);
+  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }, false);
 
   // The answers this reply carries, as the cards show them now: a saved pick, or one being
   // saved. The box lists them live (ReplyAnswers); they never go into the words, where a
@@ -3628,7 +3628,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
+            askerEnded: wordsEnded && wordsAsking && !(repliedTo && inboxSessionlessSend(repliedTo)) ? { name: wordsAsking.name } : null, // never for a reply to a script's post
             stuck,
             handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
@@ -5876,7 +5876,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}
-                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }}
                   onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
                   commentsOpen={commentsList !== null && !commentsList.card}
                 />

@@ -253,8 +253,10 @@ function useFit(ref: RefObject<HTMLDivElement | null>, toast: InboxToastModel, p
  * What a phone's toast keeps clear of, at the window's bottom: the open
  * thread's foot (Reply, the reply box), a Shape board's dock and pill (the
  * board takes the foot's place in its thread), and a full-screen file's bar,
- * its name chip and its captions. The image and video composers have their own
- * place for it (inbox.css), so their windows are left to the stylesheet.
+ * its name chip and its captions, and its Comment / Reply card (whose tabs a
+ * fixed height above the bottom covered: "Added to your reply" over them) or
+ * that card's pill. The image composer outside full screen has its own place
+ * for it (inbox.css), so its window is left to the stylesheet.
  */
 const PHONE_FLOOR = [
   'section.ib-pane .ib-pfoot',
@@ -265,8 +267,30 @@ const PHONE_FLOOR = [
   '.ib-view.ib-phone .ib-fvchip',
   '.ib-view.ib-phone .ib-optcap',
   '.ib-view.ib-phone .ib-linknote',
+  '.ib-fcomp.ib-phone',
+  '.ib-fcomp-pillwrap.ib-phone',
 ].join(', ');
-const PHONE_FLOOR_OWN = '.ib-imgcompose, .ib-fcomp';
+const PHONE_FLOOR_OWN = '.ib-imgcompose';
+/**
+ * Gathered into the corner control (full screen's tools tucked, inbox.css): gone for the toast from the moment the
+ * attribute flips, though its fade and its visibility take 340 ms to follow. The corner control is what is there.
+ */
+const PHONE_FLOOR_GATHERED = '[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap), .ib-fvdock[data-bar="tucked"] .ib-fvbar';
+
+/**
+ * Where a floor element's top rests, its own transform taken out: a card flying back from the corner control is
+ * measured where it lands, not low in mid-flight (it would land over the toast; a transform tells no observer).
+ */
+function restingTop(node: HTMLElement): number {
+  const box = node.getBoundingClientRect();
+  const style = getComputedStyle(node);
+  if (!style.transform || style.transform === 'none' || typeof DOMMatrixReadOnly === 'undefined') return box.top;
+  const m = new DOMMatrixReadOnly(style.transform);
+  if (m.m22 <= 0) return box.top;
+  // top' = top + origin·(1 − scaleY) + translateY, for the translate and scale the gathering uses.
+  const origin = parseFloat(style.transformOrigin.split(' ')[1] ?? '') || 0;
+  return box.top - m.m42 - origin * (1 - m.m22);
+}
 
 /**
  * How far above the window's bottom a phone's toast sits: 8 px over the
@@ -292,7 +316,7 @@ function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
       let top = Infinity;
       for (const node of found) {
         const box = node.getBoundingClientRect();
-        if (box.width > 0 && box.height > 0) top = Math.min(top, box.top);
+        if (box.width > 0 && box.height > 0 && !node.matches(PHONE_FLOOR_GATHERED)) top = Math.min(top, restingTop(node));
       }
       setFloor(top === Infinity ? null : Math.max(0, Math.round(container - top)) + 8);
       if (resize) {
@@ -312,13 +336,22 @@ function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
       });
     };
     const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(soon);
-    mutations?.observe(document.body, { childList: true, subtree: true });
+    // `data-tools`: full screen's tools gathered into the corner or brought back, the card with them.
+    mutations?.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tools'] });
     window.addEventListener('resize', measure);
+    // A floor element done moving (the card landed, the bar came back): measured where it ended.
+    const landed = (event: Event) => {
+      if (event.target instanceof HTMLElement && event.target.matches(PHONE_FLOOR)) soon();
+    };
+    document.addEventListener('transitionend', landed, true);
+    document.addEventListener('transitioncancel', landed, true);
     return () => {
       if (frame) cancelAnimationFrame(frame);
       mutations?.disconnect();
       resize?.disconnect();
       window.removeEventListener('resize', measure);
+      document.removeEventListener('transitionend', landed, true);
+      document.removeEventListener('transitioncancel', landed, true);
     };
   }, [ref]);
   return floor;
