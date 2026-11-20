@@ -11,10 +11,10 @@ const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const CHROMIUM_ARGS = ['--use-mock-keychain', '--password-store=basic', '--mute-audio', '--autoplay-policy=no-user-gesture-required'];
 
-function tone(): Buffer {
+function tone(seconds = 1): Buffer {
   const rate = 8000;
-  const data = Buffer.alloc(rate * 2);
-  for (let i = 0; i < rate; i++) data.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), i * 2);
+  const data = Buffer.alloc(rate * 2 * seconds);
+  for (let i = 0; i < rate * seconds; i++) data.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), i * 2);
   const header = Buffer.alloc(44);
   header.write('RIFF', 0, 'latin1');
   header.writeUInt32LE(36 + data.length, 4);
@@ -188,7 +188,35 @@ test('a sound and a video named in a message body play in place, beside a pictur
   }
 });
 
-test('a raw <img> naming a sound or a video plays in place and keeps playing when the message redraws', async ({ browserName }) => {
+type Player = ReturnType<Page['locator']>;
+const WAIT = { timeout: 15_000 };
+
+async function playMarked(player: Player): Promise<void> {
+  await player.evaluate(
+    (m: HTMLMediaElement) =>
+      new Promise<void>((done, fail) => {
+        m.muted = true;
+        m.loop = m.tagName === 'VIDEO';
+        m.dataset.marked = 'before-redraw';
+        m.addEventListener('emptied', () => (m.dataset.reset = 'emptied'));
+        m.addEventListener('loadstart', () => (m.dataset.reset = 'loadstart'));
+        setTimeout(() => fail(new Error('play() did not settle in 10 s')), 10_000);
+        m.play().then(done, fail);
+      }),
+  );
+}
+
+function advances(player: Player): Promise<{ from: number; to: number; paused: boolean }> {
+  return player.evaluate(
+    (m: HTMLMediaElement) =>
+      new Promise((done) => {
+        const from = m.currentTime;
+        setTimeout(() => done({ from, to: m.currentTime, paused: m.paused }), 1500);
+      }),
+  );
+}
+
+test('a raw <img> naming a sound or a video plays in place and keeps playing when the message redraws; in WebKit the looping video advances after it exactly when an untouched copy does', async ({ browserName }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const scratch = inboxScratch('plannotator-inbox-inline-media-raw-e2e-');
   const root = realpathSync(scratch);
@@ -198,10 +226,13 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
   const url = started.stdout.trim();
   const project = scratchProject(join(root, 'src'), 'raw-media');
   mkdirSync(join(project, 'media'), { recursive: true });
-  const wavPath = join(project, 'media', 'tone.wav');
+  const wavPath = join(project, 'media', 'long-tone.wav');
   const webmPath = join(project, 'media', 'clip.webm');
-  writeFileSync(wavPath, tone());
-  writeFileSync(webmPath, await recordClip());
+  const controlPath = join(project, 'media', 'control.webm');
+  const clip = await recordClip();
+  writeFileSync(wavPath, tone(30));
+  writeFileSync(webmPath, clip);
+  writeFileSync(controlPath, clip);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
   const browser = browserName === 'webkit' ? await webkit.launch() : await chromium.launch({ args: CHROMIUM_ARGS });
   try {
@@ -211,50 +242,73 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
       body: [`<p>The run: <img src="${webmPath}" alt="Raw clip"> and the tone: <img src="${wavPath}" alt="Raw tone"></p>`, '', '![Later](media/later.png)'].join('\n'),
     });
     const id = sent.message_id as string;
+    const control = await agent.send({ project_path: project, reply_to: id, body: `<p>The same clip, untouched: <img src="${controlPath}" alt="Control clip"></p>` });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
     const page = await context.newPage();
     await page.goto(`${url}#thread=${sent.thread_id}`);
     const body = page.locator(`[data-message-id="${id}"]`);
-    const video = body.locator('video[data-inline-media="video"]');
-    const audio = body.locator('audio[data-inline-media="audio"]');
-    await expect(video).toBeVisible();
-    await expect(audio).toBeVisible();
-    await expect(video).toHaveAttribute('controls', '');
-    await expect(audio).toHaveAttribute('controls', '');
-    await expect(body.locator('[data-image-unavailable]', { hasText: /^Raw (clip|tone)$/ })).toHaveCount(0);
-    for (const player of [video, audio]) {
-      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.readyState), { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
-      expect(await player.evaluate((m: HTMLMediaElement) => ({ paused: m.paused, autoplay: m.autoplay, time: m.currentTime }))).toEqual({ paused: true, autoplay: false, time: 0 });
-      await player.evaluate(async (m: HTMLMediaElement) => {
-        m.muted = true;
-        m.loop = true;
-        m.dataset.marked = 'before-redraw';
-        await m.play();
+    const players: [string, Player][] = [
+      ['video', body.locator('video[data-inline-media="video"]')],
+      ['sound', body.locator('audio[data-inline-media="audio"]')],
+      ['control video', page.locator(`[data-message-id="${control.message_id}"] video[data-inline-media="video"]`)],
+    ];
+    const chips = page.locator('[data-image-unavailable]', { hasText: /^(Raw clip|Raw tone|Control clip)$/ });
+
+    for (const [name, player] of players) {
+      await test.step(`${name}: drawn as a player with controls, loads metadata, does not start by itself`, async () => {
+        await expect(player, name).toBeVisible(WAIT);
+        await expect(player, name).toHaveAttribute('controls', '', WAIT);
+        await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.readyState), { ...WAIT, message: `${name} readyState` }).toBeGreaterThanOrEqual(1);
+        expect(await player.evaluate((m: HTMLMediaElement) => ({ paused: m.paused, autoplay: m.autoplay, time: m.currentTime })), name).toEqual({ paused: true, autoplay: false, time: 0 });
       });
-      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { timeout: 10_000 }).toBeGreaterThan(0.1);
+    }
+    await expect(chips).toHaveCount(0, WAIT);
+
+    for (const [name, player] of players) {
+      await test.step(`${name}: play() advances it`, async () => {
+        await playMarked(player);
+        await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { ...WAIT, message: `${name} currentTime` }).toBeGreaterThan(0.1);
+      });
     }
 
-    writeFileSync(join(project, 'media', 'later.png'), PNG);
-    await agent.send({ project_path: project, reply_to: id, body: 'One more note.' });
-    await expect(page.getByText('One more note.')).toBeVisible();
-    await expect
-      .poll(async () => {
-        const thread = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}`, url))).json()) as { thread: { messages: { id: string; inline_images?: { ref: string }[] }[] } };
-        return thread.thread.messages.find((m) => m.id === id)?.inline_images?.map((image) => image.ref) ?? [];
-      }, { timeout: 30_000 })
-      .toContain('media/later.png');
-    await page.waitForTimeout(3000);
-    for (const player of [video, audio]) {
-      const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, paused: m.paused, started: m.currentTime > 0 }));
-      expect(now).toEqual({ marked: 'before-redraw', paused: false, started: true });
-      await player.evaluate(async (m: HTMLMediaElement) => {
-        m.loop = false;
-        m.currentTime = 0;
-        await m.play();
+    let soundBefore = 0;
+    await test.step('the message redraws once its late picture is captured', async () => {
+      soundBefore = await players[1]![1].evaluate((m: HTMLMediaElement) => m.currentTime);
+      writeFileSync(join(project, 'media', 'later.png'), PNG);
+      await agent.send({ project_path: project, reply_to: id, body: 'One more note.' });
+      await expect(page.getByText('One more note.')).toBeVisible(WAIT);
+      await expect
+        .poll(async () => {
+          const thread = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}`, url))).json()) as { thread: { messages: { id: string; inline_images?: { ref: string }[] }[] } };
+          return thread.thread.messages.find((m) => m.id === id)?.inline_images?.map((image) => image.ref) ?? [];
+        }, { ...WAIT, message: 'later.png captured' })
+        .toContain('media/later.png');
+      await page.waitForTimeout(2000);
+    });
+
+    for (const [name, player] of players) {
+      await test.step(`${name}: the same element after the redraw, not paused, not reset`, async () => {
+        const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, reset: m.dataset.reset ?? null, paused: m.paused, started: m.currentTime > 0 }));
+        expect(now, name).toEqual({ marked: 'before-redraw', reset: null, paused: false, started: true });
       });
-      await expect.poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), { timeout: 10_000 }).toBeGreaterThan(0.1);
     }
-    await expect(body.locator('[data-image-unavailable]', { hasText: /^Raw (clip|tone)$/ })).toHaveCount(0);
+    await test.step('sound: still advancing after the redraw, past where it was before it', async () => {
+      const sound = await advances(players[1]![1]);
+      expect(sound.from, 'sound not reset').toBeGreaterThan(soundBefore);
+      expect(sound.to, 'sound advancing').toBeGreaterThan(sound.from);
+    });
+    await test.step('video: advancing after the redraw as the untouched copy is', async () => {
+      const [video, copy] = await Promise.all([advances(players[0]![1]), advances(players[2]![1])]);
+      console.log(`${browserName} video after redraw ${JSON.stringify(video)}; untouched copy ${JSON.stringify(copy)}`);
+      const moving = (m: { from: number; to: number; paused: boolean }) => !m.paused && m.to !== m.from;
+      if (browserName === 'chromium') {
+        expect(moving(video), `video ${JSON.stringify(video)}`).toBe(true);
+        expect(moving(copy), `copy ${JSON.stringify(copy)}`).toBe(true);
+      } else {
+        expect(moving(video), `video ${JSON.stringify(video)} vs untouched copy ${JSON.stringify(copy)}`).toBe(moving(copy));
+      }
+    });
+    await expect(chips).toHaveCount(0, WAIT);
     await context.close();
   } finally {
     await agent.close().catch(() => {});
