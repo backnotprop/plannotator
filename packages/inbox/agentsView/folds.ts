@@ -112,9 +112,12 @@ export interface AgentFolds {
   openAll: (keys: readonly string[]) => void;
 }
 
-/** The view's folds. `remember` false (the tour): every agent at its start, a click not kept. */
+const unheard = () => () => {};
+const unread = () => '';
+
+/** The view's folds. `remember` false (the tour, the view choice's picture): every agent at its start, a click not kept, the person's folds never read. */
 export function useAgentFolds(remember = true): AgentFolds {
-  const raw = useSyncExternalStore(subscribe, read, () => '');
+  const raw = useSyncExternalStore(remember ? subscribe : unheard, remember ? read : unread, unread);
   const [local, setLocal] = useState<Folds>(() => new Map());
   const folds = useMemo(() => (remember ? parseAgentFolds(raw) : local), [remember, raw, local]);
   const change = useCallback(

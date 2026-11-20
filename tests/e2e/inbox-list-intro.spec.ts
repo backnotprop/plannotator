@@ -85,7 +85,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
   // A fresh install: no update state and nothing that says an Inbox ran here (inboxUsedBefore), only the tour and the
   // agent notes behind it, so the one-time dialog is the first thing on the list.
   // Launch off here too (on by default since 0.28.52): New message must run no `claude --version` on the runner's PATH.
-  if (!options.earlier) writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' }, inboxAgentNotes: { offered: true } }));
+  // "Which view do you prefer?" (five threads, armed ahead of Rows, which then waits for it) is settled in both.
+  if (!options.earlier) writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' }, inboxAgentNotes: { offered: true }, inboxReveals: { view_choice: { shownAt: '2026-10-01T10:00:00.000Z' } } }));
   if (options.earlier) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: '0.29.0' }));
     writeFileSync(
@@ -102,6 +103,7 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
         favicon: 'glass',
         // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
         inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+        inboxReveals: { view_choice: { shownAt: '2026-10-01T10:00:00.000Z' } },
         ...(options.soundDue ? {} : { inboxSound: { dialogShownFor: '0.29.0' } }),
         ...(options.seenOld ? { inboxListIntro: { dueAt: '2026-10-20T10:00:00.000Z', shownAt: '2026-10-21T10:00:00.000Z' } } : {}),
       }),

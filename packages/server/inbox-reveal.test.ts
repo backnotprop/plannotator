@@ -14,7 +14,8 @@
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
  * shown or claimed at all (the owner chose the switch without the offer, 2026-11-17: `CODE_REVIEW_OFFER_SHOWN`), with
- * or without PLANNOTATOR_INBOX_PREVIEW; asked of someone who switched Code review off or on.
+ * or without PLANNOTATOR_INBOX_PREVIEW; asked of someone who switched Code review off or on. The view choice
+ * (`view_choice`): closed by List view's retired `list_view` stamp, holding the line, or claimed twice.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -103,6 +104,12 @@ interface Options {
   sends?: readonly Date[];
   /** A routine was made here and deleted again (inbox/scheduled.jsonl keeps its record). */
   routineMade?: boolean;
+  /**
+   * "open": the view choice (reveals.ts `view_choice`, five threads, `ahead`) never shown. Default: shown 3 days ago
+   * (`inboxReveals.view_choice`, merged into any `inboxReveals` the case brings), as the update-day dialogs are settled
+   * below, so the other offers are what these cases see.
+   */
+  viewChoice?: "open";
 }
 
 /** A cloud agent of `preset` in the data dir's inbox/cloud-agents.json, as Settings → Cloud agents pairs one. */
@@ -139,6 +146,7 @@ async function world(options: Options = {}) {
     ...(options.priorityUsed === false ? {} : { inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() } }),
     ...options.config,
   };
+  if (options.viewChoice !== "open") config.inboxReveals = { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() }, ...(options.config?.inboxReveals as Record<string, unknown> | undefined) };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true });
   // A tagged machine names no owner: the owner reaches it with a login they allowed.
   if (options.tailnet === "tagged") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [OWNER] });
@@ -390,7 +398,7 @@ describe("the Board reveal at day 4", () => {
   });
 
   test("a dev build decides nothing", async () => {
-    const w = await world({ version: "0.0.0-dev" });
+    const w = await world({ version: "0.0.0-dev", viewChoice: "open" });
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
     expect(w.saved().inboxBoard).toBeUndefined();
@@ -410,6 +418,7 @@ describe("the Board reveal at day 4", () => {
         inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString(), shownAt: hourAgo },
         inboxVoiceIntro: { dueAt: new Date(Date.now() - 2 * DAY).toISOString(), shownAt: hourAgo },
       },
+      viewChoice: "open",
     });
     expect(w.saved().inboxReveals).toBeUndefined();
     expect(await w.next()).toBeNull();
@@ -451,7 +460,7 @@ describe("the Board reveal at day 4", () => {
   });
 
   test("a dev build's list options claim does not stamp the spacing clock", async () => {
-    const w = await world({ version: "0.0.0-dev", config: { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } } });
+    const w = await world({ version: "0.0.0-dev", viewChoice: "open", config: { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } } });
     expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
     expect(w.saved().inboxListIntro.shownAt).toMatch(/^\d{4}-/);
     expect(w.saved().inboxReveals).toBeUndefined();
@@ -585,8 +594,47 @@ describe("the Checklist reveal at day 6", () => {
   });
 });
 
+describe('"Which view do you prefer?" (view_choice): offered once, again to whoever saw List view\'s dialog', () => {
+  const longAgo = new Date(Date.now() - 20 * DAY).toISOString();
+
+  test("an old list_view stamp does not close it: armed ahead beside the next offer, claimed once, the old stamp kept", async () => {
+    const w = await world({ viewChoice: "open", config: { inboxReveals: { list_view: { shownAt: longAgo, key: "old-page" } } } });
+    const reveal = (await w.settings()).reveal;
+    // It never holds the line (only the page sees the view): the Board stays next, the view choice beside it.
+    expect(reveal.next).toBe("board");
+    expect(reveal.ahead).toEqual(["view_choice"]);
+    expect((await w.claim("view_choice", "vc-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.view_choice.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxReveals.list_view.shownAt).toBe(longAgo);
+    // Spent: never armed or claimed again, by another page.
+    expect((await w.settings()).reveal.ahead).toEqual([]);
+    expect((await w.claim("view_choice", "vc-key-2")).show).toBe(false);
+  });
+
+  test("alone in the line it is next; Escape's Not now holds the next offer back three days", async () => {
+    const w = await world({ viewChoice: "open", config: { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false } });
+    expect(await w.next()).toBe("view_choice");
+    expect((await w.claim("view_choice", "vc-key-3")).show).toBe(true);
+    expect((await w.post("/api/inbox/reveal", { id: "view_choice", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+  });
+
+  test("under five threads: not offered", async () => {
+    const w = await world({ viewChoice: "open", threads: 4, config: { inboxBoard: false } });
+    const reveal = (await w.settings()).reveal;
+    expect(reveal.next).toBeNull();
+    expect(reveal.ahead).toEqual([]);
+    expect((await w.claim("view_choice")).show).toBe(false);
+  });
+
+  test("List view's retired id is refused", async () => {
+    const answer = await (await world({ viewChoice: "open" })).post("/api/inbox/reveal", { id: "list_view" });
+    expect(((await answer.json()) as Json).code).toBe("validation_error");
+  });
+});
+
 describe('"Set the rules" (Rules for your agents): last of the later group', () => {
-  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
 
   test("two days' use and ten threads: next, shown once (a second tab gets no), and Not now is final and holds the next dialog back", async () => {
     const w = await world({ threads: 10, config: decided });
@@ -706,7 +754,7 @@ describe("Priority: after personal agents, only while the person never added a t
 });
 
 describe("Routines: after three good days of sends, once, opt-in", () => {
-  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
   /**
    * The process (and the in-process Inbox) in a fixed-offset zone where it is about noon now (restored after the test),
    * so these cases never depend on the time of day: "earlier today, past the 40-minute gap" always exists.
@@ -1163,7 +1211,7 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
     expect(patience).toBeGreaterThan(3 * DAY - 60_000);
     expect(patience).toBeLessThanOrEqual(3 * DAY);
     // Everything decided and nothing shown lately: no date ahead, so a page schedules nothing.
-    const quiet = await world({ config: { inboxBoard: true, inboxSteps: true, inboxBro: true, inboxCodeReview: true, starAsk: { answer: "already", at: ago(DAY) }, inboxReveals: { grill_me_tip: { shownAt: ago(DAY) }, list_view: { shownAt: ago(DAY) } } } });
+    const quiet = await world({ config: { inboxBoard: true, inboxSteps: true, inboxBro: true, inboxCodeReview: true, starAsk: { answer: "already", at: ago(DAY) }, inboxReveals: { grill_me_tip: { shownAt: ago(DAY) }, view_choice: { shownAt: ago(DAY) } } } });
     expect((await quiet.settings()).reveal).toMatchObject({ next: null, again_in: null });
     const dev = await world({ version: "0.0.0-dev", config: { inboxReveals: { lastShownAt: ago(60_000) } } });
     expect((await dev.settings()).reveal.again_in).toBeNull();

@@ -7820,10 +7820,11 @@ dialog.ib-dlg.ib-bro.ib-gm h2 code { font-family: var(--font-mono); font-size: 0
   .ib-bro.ib-gm .ib-bi-text { padding: 20px 22px 0; }
 }
 /* GRILL-ME-TIP-END */
-/* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
-   small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
-   name and tags, one line, and its button (Smart groups' the primary one). */
-dialog.ib-dlg.ib-lvc { width: min(620px, calc(100vw - 32px)); }
+/* "Which view do you prefer?" (ListViewIntro.tsx, layout C): Agents, Smart groups and Simple list in three columns on
+   the well, Agents first and wider, each a small picture of the person's own list in that view (light for everyone,
+   scaled down), its name and tags, one line, and its button (the view in use the filled one). Each column is a subgrid
+   of the same four rows, so the names, lines and buttons line up whatever wraps. */
+dialog.ib-dlg.ib-lvc { width: min(980px, calc(100vw - 32px)); }
 .ib-lvc .ib-dlg-in { padding: 0; }
 .ib-lvc { --lvc-well: color-mix(in oklch, var(--background) 70%, var(--card)); }
 :root.light .ib-lvc { --lvc-well: color-mix(in oklch, var(--muted) 48%, var(--card)); }
@@ -7831,32 +7832,41 @@ dialog.ib-dlg.ib-lvc { width: min(620px, calc(100vw - 32px)); }
 .ib-lvc-head h2 { margin: 0; font-size: var(--ib-fs-16, 16px); font-weight: 650; }
 .ib-lvc-head h2:focus { outline: none; }
 .ib-lvc-head p { margin: 4px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.5; }
-.ib-lvc-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; padding: 18px 22px 20px; background: var(--lvc-well); }
-.ib-lvc-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.ib-lvc-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-lvc-choices { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0 18px; margin-top: 16px; padding: 18px 22px 20px; background: var(--lvc-well); }
+.ib-lvc-col { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 4px; min-width: 0; }
+.ib-lvc-name { display: flex; align-self: start; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
 /* The tags: text 4.5:1 or more and a 1 px edge 3:1 or more against the well, in light and dark. */
 .ib-lvc-tag { padding: 0 7px; border: 1px solid color-mix(in oklch, var(--primary) 80%, var(--foreground)); border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, var(--card)); color: color-mix(in oklch, var(--primary) 72%, var(--foreground)); font-size: var(--ib-fs-11, 11px); font-weight: 600; line-height: 1.5; }
+.ib-lvc .ib-lvc-tag { white-space: nowrap; }
 /* The view in use now: the same small tag, plain (the window's text on the card, a grey edge), beside Recommended. */
 .ib-lvc-inuse { border-color: color-mix(in oklch, var(--foreground) 56%, var(--card)); background: var(--card); color: var(--foreground); }
 .ib-lvc-line { margin-bottom: 12px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; }
-.pn-inbox .ib-lvc-pick, dialog .ib-lvc-pick { margin-top: auto; justify-content: center; min-height: 36px; }
-/* The picture: the real list column drawn 400 px wide in a light scope, scaled to the thumbnail (--th-s). */
-.ib-lvc-thumb { --th-s: 0.64; position: relative; display: block; height: 150px; margin-bottom: 8px; overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-lvc-pick, dialog .ib-lvc-pick { align-self: end; justify-content: center; min-height: 36px; }
+/* The picture: the real list column drawn 400 px wide in a light scope, scaled to the thumbnail (--th-s). Agents' is
+   zoomed out further, so four agents show whole. */
+.ib-lvc-thumb { --th-s: 0.64; position: relative; display: block; height: 250px; margin-bottom: 8px; overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-lvc-lead .ib-lvc-thumb { --th-s: 0.52; }
 .ib-lvc-frame { position: absolute; left: 0; top: 0; display: flex; width: calc(100% / var(--th-s)); height: calc(100% / var(--th-s)); transform: scale(var(--th-s)); transform-origin: 0 0; background: var(--card); text-align: left; pointer-events: none; }
-/* The rows fade out at the picture's foot, into its own light card, so none is cut mid-line. */
+/* The rows fade out at the picture's foot, into its own light card, so none is cut mid-line (Agents' only a little). */
 .ib-lvc-frame::after { content: ""; position: absolute; inset: auto 0 0; height: 30%; background: linear-gradient(to bottom, color-mix(in oklch, var(--card) 0%, transparent), var(--card)); }
+.ib-lvc-lead .ib-lvc-frame::after { height: 9%; }
 dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: auto; visibility: visible; flex: 1; width: auto; height: 100%; border-right: 0; }
 .ib-lvc-frame .ib-lbody { overflow: hidden; padding-top: 6px; }
-.ib-lvc-frame .ib-lbody > .ib-group > .ib-rw, .ib-lvc-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
+.ib-lvc-frame .ib-lbody > .ib-group > .ib-rw, .ib-lvc-frame .ib-lbody > .ib-group > .ib-mrow, .ib-lvc-frame .ib-lbody > .ib-ag { content-visibility: visible; }
 .ib-lvc-frame :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .ib-lvc-frame .ib-band .ib-ic { margin-left: auto; }
+.ib-lvc-frame .ib-ract { display: none; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* A phone: a bottom sheet, the two columns kept side by side with smaller pictures; 44 px buttons. */
+  /* A phone: a bottom sheet, Agents across the top, Smart groups and Simple list side by side under it; 44 px buttons. */
   dialog.ib-dlg.ib-lvc.ib-lvc-phone { margin: auto 8px calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); max-width: none; }
   .ib-lvc-phone .ib-lvc-head { padding: 18px 18px 0; }
-  .ib-lvc-phone .ib-lvc-choices { gap: 10px; padding: 14px 14px 16px; }
-  .ib-lvc-phone .ib-lvc-thumb { --th-s: 0.4; height: 110px; }
+  .ib-lvc-phone .ib-lvc-choices { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 12px; padding: 16px 16px 18px; }
+  .ib-lvc-phone .ib-lvc-lead { grid-column: 1 / -1; }
+  .ib-lvc-phone .ib-lvc-col { row-gap: 4px; }
+  .ib-lvc-phone .ib-lvc-thumb { --th-s: 0.4; height: 92px; }
+  .ib-lvc-phone .ib-lvc-lead .ib-lvc-thumb { --th-s: 0.46; height: 250px; }
   .ib-lvc-phone .ib-lvc-name { font-size: var(--ib-fs-15, 15px); }
+  .ib-lvc-phone .ib-lvc-line { margin-bottom: 10px; }
   .pn-inbox .ib-lvc-phone .ib-lvc-pick, dialog.ib-lvc-phone .ib-lvc-pick { min-height: 44px; }
 }
 

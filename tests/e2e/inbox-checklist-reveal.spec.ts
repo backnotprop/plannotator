@@ -101,7 +101,8 @@ async function world(steps?: boolean): Promise<World> {
       inboxBoard: true,
       inboxBoardIntro: { shownAt: boardShown },
       // The Sidebar tip (outside the line) was seen too: it shares the calm moment, and these cases read the stamps.
-      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown }, sidebar_tip: { shownAt: boardShown } },
+      // So was "Which view do you prefer?" (five threads, no tenure, armed ahead of the Checklist).
+      inboxReveals: { lastShownAt: boardShown, board: { shownAt: boardShown }, sidebar_tip: { shownAt: boardShown }, view_choice: { shownAt: past } },
       ...(steps === undefined ? {} : { inboxSteps: steps }),
     }),
   );

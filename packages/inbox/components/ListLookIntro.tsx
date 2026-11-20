@@ -10,7 +10,7 @@
  * is and Escape change nothing; "Customize rows" opens Settings → Rows. App retires it either way (the Inbox's claim).
  *
  * The dialog follows the person's mode, the picture too (the owner, q-fd707b9e). `PreviewList` and `lightScope` stay
- * here for the other dialogs that draw the person's rows in a light picture (ListViewIntro, VoiceIntro).
+ * here for the other dialogs that draw rows in a light picture (ListViewIntro's fixed demo, VoiceIntro).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
