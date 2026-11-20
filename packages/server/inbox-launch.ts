@@ -1630,8 +1630,6 @@ ${result.text}`);
     // The switch governs new starts only (the folder list above, compose's `to.launch` and block): an agent already
     // started keeps Stop, Open, Delete, Try again and Trust folder while it is off, and Settings → Agents' read and switch answer.
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
-    // Rex is asked whether its app is attached only for this computer's own window (inbox-rex.ts reads its socket).
-    const here = via === "local" && !door;
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
       // Never another site's page: a read here may start the person's login shell.
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
@@ -1639,11 +1637,12 @@ ${result.text}`);
       // person's rc counts for that Send. One read at a time either way.
       const ahead = new URL(req.url).searchParams.get("ahead") === "1";
       if (enabled() && config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
-      // Settings → Agents' own read (not New message's `ahead`): whether Rex's app is here, read now if stale.
-      // A headless Rex (a server with no app on this computer, inbox-rex-where.ts) answers any window of this Inbox:
-      // such a machine is used from another computer, and the row has to show there for Rex to be chosen at all.
-      const rexAsked = here || (options.rex?.headless === true && !door);
-      const rexHere = rexAsked && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
+      // Settings → Agents' own read (not New message's `ahead`): whether Rex is here on this Inbox's computer (on a
+      // Mac its app attached over this computer's socket, inbox-rex.ts; a headless Rex, its server answering), read
+      // now if stale. Asked for any window of this Inbox, this computer's own or the tailnet's: a Send from either
+      // starts in Rex here, and the row has to show where the person is for Rex to be chosen at all (a window on
+      // this computer opened on its tailnet address too). Never for the device door (a phone's or a linked machine's read).
+      const rexHere = !door && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
       return json({ launch: settingsState(rexHere, rexHere === false && options.rex?.shared?.() === true) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -2030,7 +2029,7 @@ ${result.text}`);
      */
     async prepare(
       target: InboxLaunchTarget,
-      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null; background?: boolean },
+      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null; background?: boolean; keepLastChoice?: boolean },
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
@@ -2190,7 +2189,7 @@ ${result.text}`);
         // always runs in the background: no new tab per run.
         ...(config().startIn === "rex" && host.rexCommand && input.background !== true ? { rex: {} } : {}),
       };
-      if (host.choices) {
+      if (host.choices && input.keepLastChoice !== true) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {

@@ -1,0 +1,189 @@
+import { chromium, expect, test, webkit, type Page } from './inbox-test';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { NO_BROWSER } from '../helpers/no-browser';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+
+const repo = resolve(__dirname, '../..');
+const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+const CHROMIUM_ARGS = ['--use-mock-keychain', '--password-store=basic', '--mute-audio', '--autoplay-policy=no-user-gesture-required'];
+
+function tone(): Buffer {
+  const rate = 8000;
+  const data = Buffer.alloc(rate * 2);
+  for (let i = 0; i < rate; i++) data.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), i * 2);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'latin1');
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVEfmt ', 8, 'latin1');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'latin1');
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
+async function recordClip(): Promise<Buffer> {
+  const browser = await chromium.launch({ args: CHROMIUM_ARGS });
+  try {
+    const page = await browser.newPage();
+    const base64 = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 160;
+      canvas.height = 90;
+      document.body.append(canvas);
+      const ctx = canvas.getContext('2d')!;
+      const recorder = new MediaRecorder(canvas.captureStream(15), { mimeType: 'video/webm;codecs=vp8' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      const stopped = new Promise((done) => (recorder.onstop = done));
+      let frame = 0;
+      const draw = () => {
+        ctx.fillStyle = `hsl(${(frame * 24) % 360} 70% 50%)`;
+        ctx.fillRect(0, 0, 160, 90);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect((frame * 8) % 160, 30, 30, 30);
+        frame++;
+      };
+      draw();
+      recorder.start(100);
+      const timer = setInterval(draw, 66);
+      await new Promise((done) => setTimeout(done, 1200));
+      clearInterval(timer);
+      recorder.stop();
+      await stopped;
+      const bytes = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
+      let s = '';
+      for (const b of bytes) s += String.fromCharCode(b);
+      return btoa(s);
+    });
+    return Buffer.from(base64, 'base64');
+  } finally {
+    await browser.close();
+  }
+}
+
+async function overflow(page: Page, messageId: string) {
+  return page.evaluate((id) => {
+    const message = document.querySelector(`[data-message-id="${id}"]`)!.getBoundingClientRect();
+    const players = [...document.querySelectorAll<HTMLElement>(`[data-message-id="${id}"] [data-inline-media]`)].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { kind: el.dataset.inlineMedia, left: r.left, right: r.right, width: r.width };
+    });
+    return { message: { left: message.left, right: message.right }, players, scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth };
+  }, messageId);
+}
+
+test('a sound and a video named in a message body play in place, beside a picture', async ({ browserName }, testInfo) => {
+  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  const scratch = inboxScratch('plannotator-inbox-inline-media-e2e-');
+  const root = realpathSync(scratch);
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  const url = started.stdout.trim();
+  const project = scratchProject(join(root, 'src'), 'sounds');
+  mkdirSync(join(project, 'media'), { recursive: true });
+  const wavPath = join(project, 'media', 'tone.wav');
+  const webmPath = join(project, 'media', 'clip.webm');
+  writeFileSync(wavPath, tone());
+  writeFileSync(webmPath, await recordClip());
+  writeFileSync(join(project, 'media', 'shot.png'), PNG);
+  const agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
+  const browser = browserName === 'webkit' ? await webkit.launch() : await chromium.launch({ args: CHROMIUM_ARGS });
+  try {
+    const sent = await agent.send({
+      project_path: project,
+      subject: 'The new notification sound',
+      body: ['Here is the tone the notification plays:', '', `![A test tone](${wavPath})`, '', 'And the animation it goes with:', '', `![A test clip](${webmPath})`, '', '![A screenshot](media/shot.png)'].join('\n'),
+    });
+    const id = sent.message_id as string;
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    const ranged: { range: string; status: number }[] = [];
+    page.on('response', async (r) => {
+      if (!r.url().includes('/image?') || !r.url().includes(encodeURIComponent('tone.wav'))) return;
+      const range = await r.request().headerValue('range');
+      if (range) ranged.push({ range, status: r.status() });
+    });
+    await page.goto(`${url}#thread=${sent.thread_id}`);
+    const body = page.locator(`[data-message-id="${id}"]`);
+    const audio = body.locator('audio[data-inline-media="audio"]');
+    const video = body.locator('video[data-inline-media="video"]');
+    await expect(audio).toHaveCount(1);
+    await expect(audio).toHaveAttribute('controls', '');
+    await expect(video).toHaveAttribute('controls', '');
+    await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration), { timeout: 30_000 }).toBeCloseTo(1, 1);
+    expect(await audio.evaluate((a: HTMLAudioElement) => ({ paused: a.paused, autoplay: a.autoplay, time: a.currentTime }))).toEqual({ paused: true, autoplay: false, time: 0 });
+    for (const r of ranged) expect(r.status, `Range ${r.range}`).toBe(206);
+    const slice = await audio.evaluate(async (a: HTMLAudioElement) => {
+      const res = await fetch(a.currentSrc, { headers: { Range: 'bytes=100-199' } });
+      return { status: res.status, range: res.headers.get('content-range'), bytes: (await res.arrayBuffer()).byteLength };
+    });
+    expect(slice).toEqual({ status: 206, range: 'bytes 100-199/16044', bytes: 100 });
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 30_000 }).toBeGreaterThan(0);
+    const picture = body.locator('img[alt="A screenshot"]');
+    await expect.poll(() => picture.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth)).toBe(1);
+    await expect(body.locator('[data-image-unavailable]')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('inline-media-desktop-1280-dark.png'), fullPage: false });
+    await body.screenshot({ path: testInfo.outputPath('inline-media-desktop-1280-dark-message.png') });
+
+    await audio.evaluate(async (a: HTMLAudioElement) => {
+      a.muted = true;
+      await a.play();
+    });
+    await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.currentTime), { timeout: 10_000 }).toBeGreaterThan(0.1);
+    const seeked = await audio.evaluate(
+      (a: HTMLAudioElement) =>
+        new Promise<number>((done) => {
+          a.pause();
+          a.addEventListener('seeked', () => done(a.currentTime), { once: true });
+          a.currentTime = 0.5;
+        }),
+    );
+    expect(seeked).toBeCloseTo(0.5, 1);
+
+    await audio.scrollIntoViewIfNeeded();
+    const box = (await audio.boundingBox())!;
+    const target = browserName === 'chromium' ? { x: box.x + 20, y: box.y + box.height / 2 } : { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.mouse.click(target.x, target.y);
+    await page.waitForTimeout(500);
+    await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
+    await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+    if (browserName === 'chromium') await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.paused)).toBe(false);
+    await audio.evaluate((a: HTMLAudioElement) => a.pause());
+    await context.close();
+
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', reducedMotion: 'reduce', hasTouch: true, isMobile: browserName === 'chromium' });
+    const phonePage = await phone.newPage();
+    await phonePage.goto(`${url}#thread=${sent.thread_id}`);
+    const phoneBody = phonePage.locator(`[data-message-id="${id}"]`);
+    await expect.poll(() => phoneBody.locator('video[data-inline-media]').evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect.poll(() => phoneBody.locator('audio[data-inline-media]').evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 30_000 }).toBeGreaterThan(0);
+    const fit = await overflow(phonePage, id);
+    expect(fit.players).toHaveLength(2);
+    for (const p of fit.players) {
+      expect(p.width, `${p.kind} has a width`).toBeGreaterThan(0);
+      expect(p.left, `${p.kind} left edge`).toBeGreaterThanOrEqual(fit.message.left - 0.5);
+      expect(p.right, `${p.kind} right edge`).toBeLessThanOrEqual(fit.message.right + 0.5);
+    }
+    expect(fit.scroll, 'no horizontal scroll').toBeLessThanOrEqual(fit.client);
+    await phonePage.screenshot({ path: testInfo.outputPath('inline-media-phone-390-dark.png') });
+    await phoneBody.locator('audio[data-inline-media]').scrollIntoViewIfNeeded();
+    await phonePage.screenshot({ path: testInfo.outputPath('inline-media-phone-390-dark-players.png') });
+    await phone.close();
+  } finally {
+    await agent.close().catch(() => {});
+    await browser.close().catch(() => {});
+    await removeInboxScratch(scratch);
+  }
+});

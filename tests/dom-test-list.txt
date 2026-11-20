@@ -424,6 +424,7 @@ packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.install.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.raw.test.tsx
 packages/review-editor/components/CallFlowFileBadge.interaction.test.tsx
+packages/review-editor/components/SemanticFileBadge.test.tsx
 packages/review-editor/components/CallFlowTreeView.interaction.test.tsx
 packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx
 packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx
@@ -667,6 +668,7 @@ packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
 packages/inbox/pulls/pullThreadStart.test.tsx
 packages/inbox/pulls/pullThreadGuide.test.tsx
+packages/inbox/pulls/pictureItAskHook.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/prs/checksTurn.test.tsx
@@ -860,6 +862,7 @@ packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
 packages/review-editor/components/FileHeader.counts.test.tsx
 packages/inbox/guide/useSemDiffClient.test.tsx
+packages/inbox/compose/pictureItBox.test.tsx
 packages/inbox/projectTagMenu.test.tsx
 packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
