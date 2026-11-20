@@ -14,8 +14,6 @@ struct ToastBanner: View {
   @Environment(\.dynamicTypeSize) private var typeSize
 
   private var words: ToastWords { toast.words }
-  /// An error, a bulk action some rows refused, or the largest text sizes: the words wrap, never cut.
-  private var wraps: Bool { words.wraps || typeSize.isAccessibilitySize }
 
   private var symbol: String {
     switch words.mark {
@@ -38,34 +36,32 @@ struct ToastBanner: View {
     Group {
       if typeSize.isAccessibilitySize {
         // The largest text sizes: the words take the whole width, and what can be touched stands under them.
-        VStack(alignment: .leading, spacing: Space.tight) {
-          HStack(alignment: .firstTextBaseline, spacing: Space.close) {
-            mark
-            said
+        boxed(
+          VStack(alignment: .leading, spacing: Space.tight) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.close) {
+              mark
+              said(lines: 4)
+            }
+            .padding(.trailing, Space.step)
+            HStack(spacing: Space.close) {
+              Spacer(minLength: 0)
+              undoButton
+              closeButton
+            }
           }
-          .padding(.trailing, Space.step)
-          HStack(spacing: Space.close) {
-            Spacer(minLength: 0)
-            undoButton
-            closeButton
-          }
+          .padding(.top, Space.step),
+          box: true)
+      } else if words.wraps {
+        // An error, or a bulk action some rows refused: the words are never cut. While they fit they are one line,
+        // a capsule as any toast; else they wrap, and the mark, Undo and × stay centred against them.
+        ViewThatFits(in: .horizontal) {
+          boxed(row(said(lines: 1)), box: false)
+          boxed(row(said(lines: 4)).padding(.vertical, Space.close), box: true)
         }
-        .padding(.top, Space.step)
       } else {
-        HStack(alignment: wraps ? .top : .center, spacing: Space.close) {
-          mark.padding(.top, wraps ? Space.hair : 0)
-          said
-          undoButton
-          closeButton
-        }
-        .padding(.vertical, wraps ? Space.close : 0)
+        boxed(row(said(lines: 1)), box: false)
       }
     }
-    .padding(.leading, Space.card)
-    .padding(.trailing, Space.tight)
-    .frame(minHeight: Size.wideButton)
-    .background(Surface.popover, in: shape)
-    .overlay(shape.strokeBorder(Token.border.opacity(0.6), lineWidth: 0.5))
     .shadow(color: Surface.shadow.color, radius: Surface.shadow.radius, y: Surface.shadow.y)
     .offset(x: drag)
     .opacity(1 - min(abs(drag) / 240, 0.6))
@@ -93,10 +89,31 @@ struct ToastBanner: View {
       .accessibilityHidden(true)
   }
 
-  private var said: some View {
+  /// The mark, the words, Undo and ×, on one centre line.
+  private func row(_ said: some View) -> some View {
+    HStack(alignment: .center, spacing: Space.close) {
+      mark
+      said
+      undoButton
+      closeButton
+    }
+  }
+
+  /// One line is a capsule; wrapped words keep a rounded box.
+  private func boxed(_ content: some View, box: Bool) -> some View {
+    let shape = RoundedRectangle(cornerRadius: box ? Radius.card : Size.wideButton / 2, style: .continuous)
+    return content
+      .padding(.leading, Space.card)
+      .padding(.trailing, Space.tight)
+      .frame(minHeight: Size.wideButton)
+      .background(Surface.popover, in: shape)
+      .overlay(shape.strokeBorder(Token.border.opacity(0.6), lineWidth: 0.5))
+  }
+
+  private func said(lines: Int) -> some View {
     line
       .font(TextRole.secondary)
-      .lineLimit(wraps ? 4 : 1)
+      .lineLimit(lines)
       .truncationMode(.tail)
       .multilineTextAlignment(.leading)
       .fixedSize(horizontal: false, vertical: true)
@@ -128,9 +145,6 @@ struct ToastBanner: View {
     .buttonStyle(PressStyle())
     .accessibilityLabel(PhoneWords.dismiss)
   }
-
-  /// One line is a capsule; wrapped words keep a rounded box.
-  private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: wraps ? Radius.card : Size.wideButton / 2, style: .continuous) }
 }
 
 private struct ToastHost: ViewModifier {
