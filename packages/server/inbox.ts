@@ -1599,7 +1599,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   let pullRiskAuto: PullRiskAuto | null = null;
-  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), onJudged: (pull, level) => pullRiskAuto?.judged(pull, level), autoRuns: () => pullRiskAuto?.runs() ?? {}, ...options.pullRisk });
+  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), onJudged: (pull, level, earlier) => pullRiskAuto?.judged(pull, level, earlier), autoRuns: () => pullRiskAuto?.runs() ?? {}, ...options.pullRisk });
   // Branch reviews (inbox-branch-service.ts): agents report a branch ready for review; nothing in it runs by itself.
   const branchService = createInboxBranchService({
     store,
@@ -5270,6 +5270,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     settings: () => (codeReviewOn() ? inboxPullRiskAutoOf((loadConfig().inboxPullRisk as { auto?: unknown } | undefined)?.auto) : null),
     listed: () => pullRisk.listed(),
+    covered: () => pullRisk.covered(),
     pullOf: (key) => pulls.find(key),
     stackOf: (key) => pulls.stack(key),
     levelOf: (pull) => pullRisk.levelOf(pull),
@@ -6164,11 +6165,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "POST") {
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          pullRisk.save(body);
-          pullRiskAuto?.resume();
+          if (body && typeof body === "object" && (body as { make_now?: unknown }).make_now === true) {
+            if (!launch.enabled()) return json({ error: "Starting agents from the Inbox is off in Settings \u2192 Agents.", code: "launch_off" }, 409);
+            const keys = (body as { keys?: unknown }).keys;
+            await pullRiskAuto?.makeNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
+          } else if (body && typeof body === "object" && (body as { not_now?: unknown }).not_now === true) {
+            const keys = (body as { keys?: unknown }).keys;
+            await pullRiskAuto?.notNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
+          } else {
+            pullRisk.save(body);
+            pullRiskAuto?.resume();
+          }
         }
         const answer = pullRisk.answer();
-        return json({ serverSession, ...answer, auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 }, ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
+        const waiting = (await pullRiskAuto?.waiting()) ?? { high: [], medium: [] };
+        return json({ serverSession, ...answer, auto_would_start: { high: waiting.high.length, medium: waiting.medium.length }, auto_waiting: answer.auto ? waiting[answer.auto.level] : [], auto_dismissed: answer.auto ? waiting[answer.auto.level].filter((key) => pullRiskAuto?.dismissed().has(key)) : [], ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.
@@ -6327,7 +6338,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
         const listed = await pulls.list(wanted, { refresh, others: url.searchParams.get("others") === "1", everywhere });
         // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
-        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
+        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls, { covered: pulls.othersCovered(listed), board: everywhere });
         pullRiskAuto?.resume();
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
@@ -6366,7 +6377,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = last ?? (await pullProjects());
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
-        pullRisk.assess(listed.pulls);
+        pullRisk.assess(listed.pulls, { covered: pulls.othersCovered(listed) });
         pullRiskAuto?.resume();
         // A reported branch's thread owns the person's own PR on that branch (the person's own choice still wins).
         const branchOwners = await branchService.owners(listed.pulls, projectsByRepo);
