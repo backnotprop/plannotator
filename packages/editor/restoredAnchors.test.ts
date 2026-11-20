@@ -51,6 +51,15 @@ describe("applyRestoredAnchors", () => {
     expect(next.startMeta).toBeUndefined();
   });
 
+  test("a comment whose text is gone but whose positions were saved keeps them for a later restore, with no block", () => {
+    const [next] = applyRestoredAnchors([ann()], [{ id: "a1", blockId: "", positionsStale: false }]);
+    expect(next.blockId).toBe("");
+    expect(next.originalText).toBe("The retry loop");
+    expect(next.startMeta).toEqual({ parentTagName: "P", parentIndex: 0, textOffset: 4 });
+    // Reported again on the next load: nothing changes, no draft save.
+    expect(applyRestoredAnchors([next], [{ id: "a1", blockId: "", positionsStale: false }])[0]).toBe(next);
+  });
+
   test("checkbox overrides are keyed by block and never moved", () => {
     const checkbox = ann({ id: "ann-checkbox-block-1-1" });
     const list = [checkbox];

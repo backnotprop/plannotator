@@ -871,3 +871,4 @@ packages/inbox/projectTagMenu.test.tsx
 packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
 packages/inbox/runCardLive.test.tsx
+packages/ui/components/Viewer.footnotesAutolinks.test.tsx
