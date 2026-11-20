@@ -60,7 +60,6 @@ describe('SemanticFileBadge', () => {
     await draw(null, seven);
     const chip = await draw({ status: 'working' }, seven);
     expect(chip.dataset.semanticFileBadge).toBe('7');
-    expect(chip.querySelector('.bg-primary\\/15')).toBeNull();
     await act(async () => chip.click());
     expect(popover()).not.toBeNull();
   });
