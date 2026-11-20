@@ -321,9 +321,16 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       api.resume();
     },
     async notNow(keys) {
-      if (stopped || !options.settings()) return;
+      const auto = options.settings();
+      if (stopped || !auto) return;
       const waitingNow = new Set((await waitingStacks()).map((group) => group.key));
-      const next = new Set([...dismissed, ...keys].filter((key) => waitingNow.has(key)));
+      const applies = async (key: string) => {
+        const pull = options.pullOf(key);
+        const level = pull?.state === "open" && !runs.has(key) ? options.levelOf(pull) : null;
+        return !!pull && !!level && inboxPullRiskReaches(level, auto) && !(await options.hasThread(pull).catch(() => false));
+      };
+      const kept = await Promise.all([...dismissed].map(async (key) => (waitingNow.has(key) || (await applies(key)) ? [key] : [])));
+      const next = new Set([...kept.flat(), ...keys.filter((key) => waitingNow.has(key))]);
       if (next.size === dismissed.size && [...next].every((key) => dismissed.has(key))) return;
       dismissed.clear();
       for (const key of next) dismissed.add(key);

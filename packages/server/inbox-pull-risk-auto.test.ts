@@ -54,6 +54,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
   const covered = new Set(["github.com/northwind/web-app"]);
   const levels = new Map<string, InboxPullRiskLevel>();
   const working = new Set<string>();
+  const threadCheckFails = new Set<string>();
   const clock = { now: Date.parse("2026-11-19T09:00:00.000Z") };
   const reads = { settings: 0, levels: 0, threads: 0 };
   let fail: string | null = null;
@@ -68,7 +69,11 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
     pullOf: (key) => listed.get(key) ?? null,
     stackOf: (key) => inboxPullStacks([...listed.values()]).find((stack) => stack.layers.some((layer) => layer.key === key)) ?? null,
     levelOf: (pull) => (reads.levels++, levels.get(pull.key) ?? null),
-    hasThread: async (pull) => (reads.threads++, threads.has(pull.key)),
+    hasThread: async (pull) => {
+      reads.threads++;
+      if (threadCheckFails.has(pull.key)) throw new Error("the board could not be read");
+      return threads.has(pull.key);
+    },
     settled: (run) => !working.has(run.thread_id),
     start: async (job) => {
       started.push(job);
@@ -105,6 +110,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
     clock,
     reads,
     working,
+    threadCheckFails,
     agentsKeepWorking: () => (keepWorking = true),
     set: (next: InboxPullRiskAuto | null) => (settings = next),
     started,
@@ -647,4 +653,20 @@ test("Not now is kept across a restart and forgotten with the pick; a PR that st
   again.set(null);
   again.auto.resume();
   expect(again.auto.dismissed().size).toBe(0);
+});
+
+test("Not now sticks for a PR that still waits even when its thread check fails a moment; it goes once the PR is closed", async () => {
+  const w = world(null);
+  for (const n of [1, 2]) w.list(pr(n), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  await w.auto.notNow([pr(1).key]);
+  w.threadCheckFails.add(pr(1).key);
+  await w.auto.notNow([pr(2).key]);
+  w.threadCheckFails.clear();
+  expect([...w.auto.dismissed()].sort()).toEqual([pr(1).key, pr(2).key]);
+  expect((await w.auto.waiting()).high.filter((key) => !w.auto.dismissed().has(key))).toEqual([]);
+  w.list(pr(1, { state: "closed" }), "high");
+  await w.auto.notNow([pr(2).key]);
+  expect([...w.auto.dismissed()]).toEqual([pr(2).key]);
 });
