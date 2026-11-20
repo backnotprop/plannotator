@@ -554,8 +554,8 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     await page.waitForTimeout(1_500);
     expect(await autoRuns()).toEqual({});
 
-    const handoffs = () => prompts().filter((l) => l.prompt!.includes('The Inbox sent this on its own'));
-    expect(handoffs()).toEqual([]);
+    const launched = () => piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id'));
+    expect(launched()).toEqual([]);
     await openRules();
     await dialog.locator('[data-pull-risk-save]').click();
     await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '2');
@@ -565,10 +565,10 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     const runs = await autoRuns();
     expect(Object.keys(runs).sort()).toEqual([keyOf(509), keyOf(510)]);
     expect(runs[keyOf(510)]!.state).toBe('queued');
-    await expect.poll(() => handoffs().length, { timeout: 30_000 }).toBe(1);
-    expect(handoffs()[0]!.prompt).toContain(`${REPO}/pull/509`);
-    expect(handoffs()[0]!.prompt).not.toContain(`${REPO}/pull/510`);
-    expect(piLog().some((l) => l.argv?.includes('--mode') && l.argv.includes('rpc'))).toBe(true);
+    await expect.poll(() => launched().length, { timeout: 30_000 }).toBe(1);
+    const argv = launched()[0]!.argv!;
+    expect(argv[argv.indexOf('--name') + 1]).toBe('Review #509: Charge the late fee twice');
+    expect(argv.join(' ')).not.toContain('#510');
 
     const saved = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string; provider: string | null; model: string | null };
     expect((await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: saved.rules, provider: saved.provider, model: saved.model, auto: null } })).status()).toBe(200);
