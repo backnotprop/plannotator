@@ -1200,7 +1200,7 @@
       "write": null,
       "key": null,
       "answer": "bytes",
-      "range": false,
+      "range": true,
       "relay": true
     },
     {

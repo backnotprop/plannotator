@@ -1,4 +1,4 @@
-import { SemanticFileBadge } from './SemanticFileBadge';
+import { SemanticFileBadge, type SemanticFileSwitch } from './SemanticFileBadge';
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
 import React, { useRef } from 'react';
@@ -71,7 +71,7 @@ interface FileHeaderProps {
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
   /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
   accessory?: React.ReactNode;
-  semanticNote?: React.ReactNode;
+  semantic?: SemanticFileSwitch;
   /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
   openIn?: React.ReactNode;
   /**
@@ -114,23 +114,6 @@ const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
 const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
 const ACTIONS_FOLD_WIDTH = 360;
 const ACTIONS_FOLD = '@max-[359px]/file-header:hidden';
-export const NOTE_WIDE = '@max-[339px]/file-header:hidden';
-export const NOTE_NARROW = 'hidden @max-[339px]/file-header:inline';
-
-function reachNote(node: HTMLSpanElement | null) {
-  node?.addEventListener('click', (event) => {
-    if (event.target === node) node.querySelector('button')?.click();
-  });
-}
-
-function NoteReach({ touch, children }: { touch: boolean; children: React.ReactNode }) {
-  if (!children) return null;
-  return (
-    <span ref={reachNote} className={`flex flex-none items-center ${touch ? '-my-2 py-2' : '[@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:py-2'}`}>
-      {children}
-    </span>
-  );
-}
 
 const FileHeaderView: React.FC<FileHeaderProps> = ({
   filePath,
@@ -160,7 +143,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   isTest = false,
   renderMarkdownView,
   accessory,
-  semanticNote,
+  semantic,
   openIn,
   keepsFolder = false,
   openInLine,
@@ -253,8 +236,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        <SemanticFileBadge filePath={filePath} />
-        <NoteReach touch={false}>{semanticNote}</NoteReach>
+        <SemanticFileBadge filePath={filePath} semantic={semantic} />
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -378,7 +360,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
       </div>}
-      {isCompactTouchLayout && <NoteReach touch>{semanticNote}</NoteReach>}
+      {isCompactTouchLayout && semantic && <SemanticFileBadge filePath={filePath} semantic={semantic} touch />}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (
         <CompactFileActions

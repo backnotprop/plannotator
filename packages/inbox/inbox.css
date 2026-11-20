@@ -2050,13 +2050,13 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
 .ib-vslider:disabled { opacity: 0.45; }
 /* Settings → Play a sound: what rings it, under the label (the owner's two choices). The label's column is the
-   container: where it is too narrow for the two in a line (about 360 px: a phone, or a desktop window with the
-   sidebar out), one under another, each the column's full width (as Rows' agents). */
+   container: where it is too narrow for the two in a line (about 355 px: a phone, or a window under about
+   940 px wide; on a desktop the column is 442 px), one under another, each the column's full width (as Rows' agents). */
 .ib-prow[data-settings-sound] .ib-txt { container: ib-sound-row / inline-size; }
 .ib-prow .ib-sound-when { align-self: flex-start; max-width: 100%; margin: 6px 0 3px; }
 @container ib-sound-row (max-width: 379px) {
   .ib-prow .ib-sound-when { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; align-self: stretch; }
-  .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; }
+  .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; height: auto; min-height: 28px; padding-block: 5px; white-space: normal; line-height: 1.35; }
 }
 .pn-inbox .ib-sw:disabled { opacity: 0.45; }
 /* Settings → Archived: the archived rows drawn as the section's card rows. */
@@ -3215,6 +3215,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox .ib-q-opt.ib-on .ib-q-lbl { color: var(--foreground); }
 .pn-inbox .ib-q-lbl b { font-weight: 550; }
 :root:not(.light) .pn-inbox .ib-q { color-scheme: dark; }
+:root:not(.light) .pn-inbox [data-inline-media] { color-scheme: dark; }
 /* "Replaces …" on the newer card: light, a pointer back, not a second banner. */
 .pn-inbox .ib-q-replaces { margin: 6px 0 0; display: flex; align-items: flex-start; gap: 6px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); user-select: none; }
 .pn-inbox .ib-q-replaces svg.ib-ic { margin-top: 2.5px; }
@@ -3780,6 +3781,32 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   /* Unread, the title is bigger, as beside a thread (approval "inbox-row-unread-bigger"): 16px 600, 14px 400 once read. */
   .ib-mrow.ib-u:not(.ib-sent) .ib-m2 { font-size: var(--ib-fs-16, 16px); font-weight: 600; letter-spacing: -0.006em; }
   .ib-mrow.ib-sent .ib-m2 { color: var(--muted-foreground); }
+  /* No preview (an unnamed thread's one message, whose title is that message, a preview that repeats the title, or
+     Grey line under the name "None", which is every row): line 3 would hold only the guided review book and the row's
+     end (the pin, the badge, the count or its words), alone on a line of their own under the title. They move up
+     beside the line above instead (the title, or with the name first the agents and the project), at its right end
+     and level with its last line, as on a two-line row (`.ib-lend`). Their column takes at most half the row
+     (`fit-content(50%)`); past that they wrap inside it, so a title always keeps half the row. Compact rows, whose
+     title is on line 1, and Time position "Under the preview", whose own line holds the row's end, keep theirs. The DOM
+     order stays, so a screen reader still reads the title, then the count. */
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(50%); column-gap: 8px; align-content: start; }
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > .ib-m1 { grid-column: 1 / -1; }
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead) { grid-column: 1; grid-row: 2; }
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > .ib-rowkey { justify-self: start; }
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) > .ib-m3 { grid-column: 2; grid-row: 2; align-self: end; min-height: 0; flex-wrap: wrap; row-gap: 2px; }
+  /* Beside the agents and the project (always one line): on its baseline, so a stopped or held badge, taller than the
+     line, never pushes it down, and marks that wrap hang below it rather than moving it. */
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > :is(.ib-m1-lead, .ib-m3) { align-self: baseline; }
+  .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > .ib-m3 { margin-block: -3px; }
+  /* Agent icons hidden: the line starts with the project's text, whose baseline is not an icon's, so the baseline
+     would set the marks 2px high. Both start at the top instead, the marks 2px up so their first line centres on the
+     project's; a badge, the one mark taller than that line, gives back what it is taller by. */
+  .ib-lk-noagents .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > :is(.ib-m1-lead, .ib-m3) { align-self: start; }
+  .ib-lk-noagents .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > .ib-m3 { margin-block: -1px -3px; }
+  .ib-lk-noagents .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)):has(> .ib-m1-lead:not([data-lead-empty])) > .ib-m3 > .ib-badge { margin-block: -2px; }
+  /* Off screen these rows are two lines: their content box, as the two-line row's (`.ib-lend`, below). */
+  .ib-lbody > .ib-group > .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) { contain-intrinsic-size: auto none auto 43px; }
+  .ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow:has(> .ib-m3:not(:empty)):has(> :is(.ib-m2, .ib-rowkey, .ib-lm-tt, .ib-m1-lead:not([data-lead-empty]))):not(:has(> .ib-m3 > .ib-pv)):not(:has(> .ib-m4)) { contain-intrinsic-size: auto none auto 46px; }
   .ib-mrow[data-lit] { animation: ib-lit 3000ms ease-in-out both; }
 
   /* a thread: Back on the left, the actions on the right, the reply at the foot above the keyboard */
