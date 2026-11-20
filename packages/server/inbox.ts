@@ -224,6 +224,7 @@ import { bitbucketRefReader, createRefCards, forgejoRefReader, readSignedInHosts
 import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
 import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-linear-cards";
 import { createLinearKey } from "./inbox-linear-key";
+import { createForgejoHosts } from "./inbox-forgejo-hosts";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -1421,6 +1422,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
   // Linear issue links answer from Linear (inbox-linear-cards.ts); a test's own runner gets no real Linear.
   const linearKey = createLinearKey({ dataDir, serverSession, json, readBody: (req) => readBody(req), changed: () => linearCards?.forget() });
+  const forgejoHosts = createForgejoHosts({ serverSession, json, readBody: (req) => readBody(req) });
   const linearCards = options.refRunner ? null : createLinearCards({ apiKey: () => linearKey.apiKey() });
   const refCards = withLinearCards(
     createRefCards(options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader, forgejo: options.forgejoRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader, forgejo: options.forgejoRefReader ?? forgejoRefReader }),
@@ -4006,6 +4008,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     voice: voice.settings(via),
     /** Settings → Accounts → Linear: never the key, only its source and, for a saved one, its last 4. */
     linear_key: linearKey.state(),
+    /** Settings → Accounts → Forgejo and Gitea: hosts and where each token comes from, never a token. */
+    forgejo_hosts: forgejoHosts.state(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). */
@@ -7015,6 +7019,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         const answer = await voice.route(req, url, via);
+        if (answer) return answer;
+      }
+      if (path === "/api/inbox/forgejo/hosts") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const answer = await forgejoHosts.route(req, path, via);
         if (answer) return answer;
       }
       if (path === "/api/inbox/linear/key") {

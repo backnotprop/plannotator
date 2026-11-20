@@ -4292,3 +4292,19 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
 
 /** Whether `id` is a key or session an agent face entry may name. */
 export const isInboxAgentFaceId = isId;
+
+/** One Forgejo / Gitea host in Settings → Accounts. Never a token: only where it comes from and, for a saved one, its last 4. */
+export interface InboxForgejoHostState {
+  /** `https://git.example.com` (an http origin only when the person saved one). */
+  origin: string;
+  /** Where the host is named: `config.json`'s forgejoHosts / forgejoTokens, or PLANNOTATOR_FORGEJO_URL. */
+  hostSource: "saved" | "env";
+  token: InboxVoiceKeyState;
+}
+
+/** Settings → Accounts → Forgejo and Gitea (`GET /api/inbox/settings` `forgejo_hosts`). codeberg.org is built in and not listed. */
+export interface InboxForgejoHostsState {
+  hosts: InboxForgejoHostState[];
+}
+
+export type InboxForgejoCheckVerdict = "accepted" | "refused" | "unreachable";
