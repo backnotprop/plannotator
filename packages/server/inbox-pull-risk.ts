@@ -299,7 +299,7 @@ export interface PullRiskOptions {
   agents?: () => InboxPullRiskAgent[];
   listModels?: (provider: string, cwd: string) => Promise<CatalogModel[]>;
   now?: () => number;
-  onJudged?: (pull: InboxPull, level: InboxPullRiskJudgment["level"]) => void;
+  onJudged?: (pull: InboxPull, level: InboxPullRiskJudgment["level"], again?: boolean) => void;
   autoRuns?: () => Record<string, InboxPullRiskAutoRun>;
 }
 
@@ -338,6 +338,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
   const settings = () => settingsOf(loadConfig().inboxPullRisk);
 
   let kept: Map<string, Kept> | null = null;
+  let lostJudgments = false;
   const load = (): Map<string, Kept> => {
     if (kept) return kept;
     kept = new Map();
@@ -350,6 +351,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
         if (typeof value?.head === "string" && typeof value.base === "string" && typeof value.rules === "string" && clean) kept.set(key, { head: value.head, base: value.base, rules: value.rules, ...clean });
       }
     } catch {
+      lostJudgments = true;
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
       } catch {
@@ -379,7 +381,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
 
   let listed: readonly InboxPull[] = [];
   /** A PR's layer or a reported branch: what the prompt and the store need, and how its diff is read. */
-  const queue: { job: string; pull: { key: string; head_sha: string; base: string; title: string }; listed?: InboxPull; rules: string; read: (signal: AbortSignal) => Promise<RiskDiff> }[] = [];
+  const queue: { job: string; pull: { key: string; head_sha: string; base: string; title: string }; listed?: InboxPull; again?: boolean; rules: string; read: (signal: AbortSignal) => Promise<RiskDiff> }[] = [];
   const queued = new Set<string>();
   /** When a job that failed may run again. */
   const waits = new Map<string, number>();
@@ -500,7 +502,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     const level = partial && judgment.level === "low" ? "medium" : judgment.level;
     const { where, ...ranked } = judgment;
     keep(pull.key, { ...ranked, level, ...(where && onScreen ? { where } : {}), head: pull.head_sha, base: pull.base, rules });
-    if (entry.listed) options.onJudged?.(entry.listed, level);
+    if (entry.listed) options.onJudged?.(entry.listed, level, entry.again);
   };
 
   const pump = () => {
@@ -563,7 +565,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           if (reported) {
             const { where: _where, ...same } = reported;
             keep(pull.key, same);
-            options.onJudged?.(pull, same.level);
+            options.onJudged?.(pull, same.level, one ? one.head === pull.head_sha : lostJudgments);
             continue;
           }
           const job = `${pull.key}\u0000${pull.head_sha}\u0000${pull.base}\u0000${hash}`;
@@ -574,6 +576,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
             job,
             pull: layer,
             listed: layer,
+            again: one ? one.head === pull.head_sha : lostJudgments,
             rules: hash,
             read: async (signal) => options.pulls.wholeDiff(layer.key, signal, options.roots ? await options.roots(layer.key).catch(() => []) : []),
           });

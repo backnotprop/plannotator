@@ -398,6 +398,16 @@ describe("risk ranking", () => {
     expect(runs.length).toBe(3);
   });
 
+  test("Make them now while starting agents is off: refused with launch_off, and no PR is marked", async () => {
+    const w = await riskWorld(async () => ({ text: '{"risk":"high","why":"It changes the retry schedule."}' }));
+    expect((await fetch(`${w.base}/api/inbox/launch/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) })).status).toBe(200);
+    expect((await save(w.base, { ...settings, auto: { level: "high", make: "guide" } })).status).toBe(200);
+    const refused = await save(w.base, { make_now: true });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code: string }).code).toBe("launch_off");
+    expect(((await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer).auto_runs).toEqual({});
+  });
+
   test("Code review off: refused before anything runs", async () => {
     const runs: RiskRun[] = [];
     const w = await world({ pullRisk: { run: async (run) => (runs.push(run), null), agents: () => [{ id: "pi-sdk", label: "Pi" }] } });

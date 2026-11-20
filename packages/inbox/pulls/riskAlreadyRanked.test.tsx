@@ -109,12 +109,36 @@ test.skipIf(!hasDom)('an info button opens on a tap, and Escape closes it withou
   let closed = 0;
   await mount(<RiskRulesDialog answer={SAVED} onSaved={() => {}} onClose={() => closed++} />);
   const info = '[data-pull-risk-info="rules"]';
-  expect(document.querySelector(info)!.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector(info)!.hasAttribute('data-open')).toBe(false);
   await click(info);
-  expect(document.querySelector(info)!.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector(info)!.hasAttribute('data-open')).toBe(true);
   await key(info, 'Escape');
-  expect(document.querySelector(info)!.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector(info)!.hasAttribute('data-open')).toBe(false);
   expect(closed).toBe(0);
   await key(info, 'Escape');
   expect(closed).toBe(1);
+});
+
+test.skipIf(!hasDom)('no agent can start here: Save closes with no question, so nothing is offered that would only fail', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  spy('savePullRisk', async () => ({ ...SAVED, auto_agent: null, auto_would_start: { high: 2, medium: 2 } }));
+  let done = 0;
+  await mount(<RiskRulesDialog answer={SAVED} onSaved={() => done++} onClose={() => {}} />);
+  await submit();
+  expect(done).toBe(1);
+  expect(document.querySelector('[data-pull-risk-ranked]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a refused Make them now says why in the question and closes nothing', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  spy('savePullRisk', async (input) => {
+    if ('make_now' in input) throw new Error('Starting agents from the Inbox is off in Settings → Agents.');
+    return { ...SAVED, auto_would_start: { high: 2, medium: 2 } };
+  });
+  let done = 0;
+  await mount(<RiskRulesDialog answer={SAVED} onSaved={() => done++} onClose={() => {}} />);
+  await submit();
+  await click('[data-pull-risk-make-now]');
+  expect(done).toBe(0);
+  expect(document.querySelector('[role="alert"]')!.textContent).toContain('off in Settings');
 });

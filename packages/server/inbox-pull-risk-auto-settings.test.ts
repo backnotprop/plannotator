@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
-import { createPullRisk } from "./inbox-pull-risk";
+import { createPullRisk, INBOX_PULL_RISK_FILE } from "./inbox-pull-risk";
+import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 let dataDir: string;
 const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
@@ -19,12 +20,13 @@ afterEach(() => {
 });
 
 const pull = { key: "github.com/n/b#1", number: 1, title: "PR 1", state: "open", head_sha: "head-1", base: "main", host: "github.com", repo: "n/b" } as InboxPull;
-const engine = (onJudged?: (pull: InboxPull, level: string) => void) =>
+let head = "head-1";
+const engine = (onJudged?: (pull: InboxPull, level: string, again?: boolean) => void) =>
   createPullRisk({
     dataDir,
     isOn: () => true,
     agents: () => [{ id: "pi-sdk", label: "Pi" }],
-    pulls: { wholeDiff: async () => ({ patch: "diff --git a/x b/x\n", partial: false, head_sha: "head-1" }) },
+    pulls: { wholeDiff: async () => ({ patch: "diff --git a/x b/x\n", partial: false, head_sha: head }) },
     run: async () => ({ text: '{"risk":"high","why":"It changes the billing webhook."}' }),
     onJudged,
   });
@@ -48,4 +50,37 @@ test("a judgment stored for a listed PR is handed on with its level, so the auto
   engine((judged, level) => seen.push([judged.key, level])).assess([pull]);
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   expect(seen).toEqual([[pull.key, "high"]]);
+});
+
+test("a ranking made again at the same head, for new rules or after a lost judgments file, says so; a new head or a new PR does not", async () => {
+  saveConfig({ inboxPullRisk: { rules: "Billing.", provider: "pi-sdk", model: null } });
+  const settle = async () => {
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  const seen: [string, string, boolean | undefined][] = [];
+  const risk = engine((judged, _level, again) => seen.push([judged.key, judged.head_sha!, again]));
+  risk.assess([pull]);
+  await settle();
+  risk.save({ rules: "Billing and auth.", provider: "pi-sdk", model: null });
+  risk.assess([pull]);
+  await settle();
+  head = "head-2";
+  risk.assess([{ ...pull, head_sha: "head-2" }]);
+  await settle();
+  const other = { ...pull, key: "github.com/n/b#2", number: 2, head_sha: "head-2" };
+  risk.assess([other]);
+  await settle();
+  head = "head-1";
+  expect(seen).toEqual([
+    [pull.key, "head-1", false],
+    [pull.key, "head-1", true],
+    [pull.key, "head-2", false],
+    [other.key, "head-2", false],
+  ]);
+  mkdirSync(inboxDir(dataDir), { recursive: true });
+  writeFileSync(join(inboxDir(dataDir), INBOX_PULL_RISK_FILE), "not json");
+  const after: (boolean | undefined)[] = [];
+  engine((_judged, _level, again) => after.push(again)).assess([pull]);
+  await settle();
+  expect(after).toEqual([true]);
 });

@@ -41,6 +41,8 @@ const VERDICTS: Record<string, string> = {
   'Upgrade the linter': 'I would say this looks fine to me.',
   'Split the settings page': '{"risk":"low","why":"It only moves settings components."}',
   'Change who can open settings': '{"risk":"high","why":"It changes the permission check on the settings route."}',
+  'Charge the late fee twice': '{"risk":"high","why":"It charges the late fee in src/charges/fees.ts."}',
+  'Refund to the card on file': '{"risk":"high","why":"It changes where refunds are charged back."}',
 };
 /** About 9 MB: past the review page's 8 MB, and more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
 const BIG_LINES = 400_000;
@@ -226,14 +228,16 @@ test.beforeAll(async ({ browser }) => {
         viewer: { login: 'dana' },
         requested: {
           nodes: [
-            ghPull(501, 'Retry failed charges on a new schedule', { authorAssociation: 'MEMBER' }),
+            ghPull(501, 'Retry failed charges on a new schedule'),
             ghPull(502, 'Send a receipt after checkout'),
             ghPull(503, 'Fix a typo in the README'),
             ghPull(504, 'Upgrade the linter'),
-            ghPull(505, 'Split the settings page', { authorAssociation: 'MEMBER' }),
-            ghPull(506, 'Change who can open settings', { baseRefName: 'b505', authorAssociation: 'MEMBER' }),
+            ghPull(505, 'Split the settings page'),
+            ghPull(506, 'Change who can open settings', { baseRefName: 'b505' }),
             ghPull(507, 'Regenerate the API client'),
             ghPull(508, STILL_RANKING),
+            ghPull(509, 'Charge the late fee twice', { authorAssociation: 'MEMBER' }),
+            ghPull(510, 'Refund to the card on file', { authorAssociation: 'MEMBER' }),
           ],
         },
         authored: { nodes: [] },
@@ -401,7 +405,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
   // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect.poll(() => prompts().length).toBe(8);
+  await expect.poll(() => prompts().length).toBe(10);
   await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
@@ -422,7 +426,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await shots('rows-refused');
 
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
-  expect(judged).toHaveLength(8);
+  expect(judged).toHaveLength(10);
   // Nothing of a diff is ever in an agent's argv.
   expect(judged.every((l) => l.argv!.join(' ').length < 2_000)).toBe(true);
   expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --no-extensions --no-skills --no-context-files --provider anthropic --model claude-sonnet-5 --thinking low');
@@ -523,9 +527,9 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     const tip = page.locator('[data-pn-tooltip][data-open]');
     await eachSheet('risk-dialog-info', async (width) => {
       const info = dialog.locator('[data-pull-risk-info="auto"]');
-      if ((await info.getAttribute('aria-expanded')) !== 'true') await info.click();
-      await expect(info).toHaveAttribute('aria-expanded', 'true');
-      await expect(tip).toContainText('after you save');
+      if ((await info.getAttribute('data-open')) === null) await info.click();
+      await expect(info).toHaveAttribute('data-open', '');
+      await expect(tip).toContainText('a new push ranks High after you save');
       await expect(tip).toBeInViewport({ ratio: 1 });
       await sheetFits(dialog, width, [info]);
     });
@@ -550,23 +554,33 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     await page.waitForTimeout(1_500);
     expect(await autoRuns()).toEqual({});
 
-    expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
+    const handoffs = () => prompts().filter((l) => l.prompt!.includes('The Inbox sent this on its own'));
+    expect(handoffs()).toEqual([]);
     await openRules();
     await dialog.locator('[data-pull-risk-save]').click();
     await expect(ranked).toHaveAttribute('data-pull-risk-ranked', '2');
     await dialog.getByRole('button', { name: 'Make them now', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    await expect.poll(async () => Object.keys(await autoRuns()).sort(), { timeout: 15_000 }).toEqual([keyOf(501), keyOf(505), keyOf(506)]);
-    expect(Object.values(await autoRuns()).every((run) => run.state === 'failed' && /off in Settings/.test(run.reason ?? ''))).toBe(true);
+    await expect.poll(async () => (await autoRuns())[keyOf(509)]?.state, { timeout: 30_000 }).toBe('started');
+    const runs = await autoRuns();
+    expect(Object.keys(runs).sort()).toEqual([keyOf(509), keyOf(510)]);
+    expect(runs[keyOf(510)]!.state).toBe('queued');
+    await expect.poll(() => handoffs().length, { timeout: 30_000 }).toBe(1);
+    expect(handoffs()[0]!.prompt).toContain(`${REPO}/pull/509`);
+    expect(handoffs()[0]!.prompt).not.toContain(`${REPO}/pull/510`);
+    expect(piLog().some((l) => l.argv?.includes('--mode') && l.argv.includes('rpc'))).toBe(true);
+
+    const saved = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string; provider: string | null; model: string | null };
+    expect((await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: saved.rules, provider: saved.provider, model: saved.model, auto: null } })).status()).toBe(200);
+    expect(Object.keys(await autoRuns())).toEqual([keyOf(509)]);
+    expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } })).status()).toBe(200);
+    await openPulls();
+    for (const n of [504, 507]) await expect(row(n).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 60_000 });
   } finally {
     page.off('request', onRequest);
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-    const saved = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string; provider: string | null; model: string | null };
-    await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: saved.rules, provider: saved.provider, model: saved.model, auto: null } });
-    await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } });
-    await openPulls();
-    for (const n of [504, 507]) await expect(row(n).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 60_000 });
+    await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
 });
 
@@ -640,7 +654,7 @@ test("the PR's page and its review carry the mark and the sentence; a stack show
 test('a restart redoes nothing', async () => {
   await context.close();
   await stopScratchInbox(dataDir);
-  const failed = (l: { prompt?: string }) => ['Upgrade the linter', 'Regenerate the API client', STILL_RANKING].some((title) => l.prompt!.includes(`Title: ${title}`));
+  const failed = (l: { prompt?: string }) => l.prompt!.includes('The Inbox sent this on its own') || ['Upgrade the linter', 'Regenerate the API client', STILL_RANKING].some((title) => l.prompt!.includes(`Title: ${title}`));
   const before = prompts().filter((l) => !failed(l)).length;
   await start();
   context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });

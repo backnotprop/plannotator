@@ -19,8 +19,8 @@ const AUTO_MAKES = [
   { value: 'guide', label: 'a guided review' },
 ];
 const RULES_INFO = 'Every open pull request is ranked against these rules: not touched is Low, maybe is Medium, definitely is High.';
-const AGENT_INFO = 'This agent reads the diff of each pull request to rank it. Diffs go only to the provider you choose here. Sonnet, Luna or similar is plenty.';
-const autoInfo = (level: 'high' | 'medium') => `A pull request ranked ${level === 'high' ? 'High' : 'Medium or High'} after you save gets one, made by that agent on its own, one at a time. Ones ranked before are left alone.`;
+const AGENT_INFO = 'This agent reads the whole diff of each pull request to rank it. Sonnet, Luna or similar works well.';
+const autoInfo = (level: 'high' | 'medium') => `When a new pull request or a new push ranks ${level === 'high' ? 'High' : 'Medium or High'} after you save, that agent makes one on its own, one at a time. The rest wait until you ask.`;
 
 export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make: string): InboxPullRiskAuto | null | undefined {
   if (make === (saved?.make ?? '')) return undefined;
@@ -86,7 +86,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
     try {
       const auto = riskAutoToSave(answer.auto, make);
       const next = await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}), ...(auto !== undefined ? { auto } : {}) });
-      if (make && riskAlreadyRanked(next) > 0) setAsking(next);
+      if (make && next.auto_agent && riskAlreadyRanked(next) > 0) setAsking(next);
       else onSaved(next);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The rules could not be saved.');

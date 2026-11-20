@@ -30,7 +30,7 @@ export function RiskInfo({ name, label, text }: { name: string; label: string; t
           className="ib-riskd-i"
           aria-label={label}
           aria-describedby={textId}
-          aria-expanded={open}
+          data-open={open ? '' : undefined}
           data-pull-risk-info={name}
           onPointerEnter={(event) => event.pointerType === 'mouse' && setHover(true)}
           onPointerLeave={(event) => event.pointerType === 'mouse' && setHover(false)}
@@ -47,7 +47,7 @@ export function RiskInfo({ name, label, text }: { name: string; label: string; t
           <Icon name="info" size={16} />
         </button>
       </Tooltip>
-      <span id={textId} className="ib-sr">
+      <span id={textId} hidden>
         {text}
       </span>
     </span>

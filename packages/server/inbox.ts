@@ -1591,7 +1591,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   let pullRiskAuto: PullRiskAuto | null = null;
-  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), onJudged: (pull, level) => pullRiskAuto?.judged(pull, level), autoRuns: () => pullRiskAuto?.runs() ?? {}, ...options.pullRisk });
+  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), onJudged: (pull, level, again) => pullRiskAuto?.judged(pull, level, again), autoRuns: () => pullRiskAuto?.runs() ?? {}, ...options.pullRisk });
   // Branch reviews (inbox-branch-service.ts): agents report a branch ready for review; nothing in it runs by itself.
   const branchService = createInboxBranchService({
     store,
@@ -6128,8 +6128,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "POST") {
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          if (body && typeof body === "object" && (body as { make_now?: unknown }).make_now === true) await pullRiskAuto?.makeNow();
-          else {
+          if (body && typeof body === "object" && (body as { make_now?: unknown }).make_now === true) {
+            if (!launch.enabled()) return json({ error: "Starting agents from the Inbox is off in Settings \u2192 Agents.", code: "launch_off" }, 409);
+            await pullRiskAuto?.makeNow();
+          } else {
             pullRisk.save(body);
             pullRiskAuto?.resume();
           }

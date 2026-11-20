@@ -1,9 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxPullStacks, type InboxPull, type InboxPullRiskAuto, type InboxPullRiskLevel } from "@plannotator/core/inbox-types";
-import { createPullRiskAuto, PULL_RISK_AUTO_RETRY_MS, PULL_RISK_AUTO_RUN_TIMEOUT_MS, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
+import { createPullRiskAuto, INBOX_PULL_RISK_AUTO_FILE, PULL_RISK_AUTO_RETRY_MS, PULL_RISK_AUTO_RUN_TIMEOUT_MS, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
 import { pullRiskAutoBody, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 import { inboxSkillsBlockFor } from "./inbox-skills";
 import { inboxReviewSkill } from "@plannotator/core/inbox-review";
@@ -76,10 +76,10 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
       return { thread_id: thread };
     },
   });
-  const judged = (pull: InboxPull, level: InboxPullRiskLevel) => {
+  const judged = (pull: InboxPull, level: InboxPullRiskLevel, again?: boolean) => {
     listed.set(pull.key, pull);
     levels.set(pull.key, level);
-    auto.judged(pull, level);
+    auto.judged(pull, level, again);
   };
   const list = (pull: InboxPull, level: InboxPullRiskLevel) => {
     listed.set(pull.key, pull);
@@ -504,4 +504,54 @@ test("the hand-off pastes the skills the window would: the person's own picture-
   expect(pictureIt).toContain("Draw it my way.");
   expect(pictureIt).not.toContain(PICTURE_IT_SKILL.body);
   expect(pullRiskAutoBody({ key: pr(880).key, stack: inboxPullStacks([pr(880)])[0]!, made: "guide", level: "high" }, blocks).body).toContain(curateOff);
+});
+
+test("ranked again at the same head (new rules, a new base) is no new ranking: it waits for Make them now and is counted, a stack once", async () => {
+  const w = world();
+  w.judged(pr(1), "high", true);
+  w.list(pr(10, { head: "feat/10" }), "high");
+  w.judged(pr(11, { base: "feat/10", head: "feat/11" }), "high", true);
+  w.judged(pr(12, { state: "closed" }), "high", true);
+  for (let i = 0; i < 2; i++) {
+    w.auto.resume();
+    await w.auto.idle();
+  }
+  expect(w.started).toEqual([]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 2, medium: 2 });
+  await w.auto.makeNow();
+  await w.auto.idle();
+  w.auto.resume();
+  await w.auto.idle();
+  expect(numbers(w.started).sort()).toEqual([1, 11]);
+});
+
+test("a run that failed under a pick is forgotten when the pick goes off: turned on again it waits for Make them now", async () => {
+  const w = world();
+  w.failWith("Signed out.");
+  w.judged(pr(7), "high");
+  await w.auto.idle();
+  expect(w.started).toHaveLength(1);
+  w.failWith(null);
+  w.set(null);
+  w.auto.resume();
+  w.set({ level: "high", make: "picture_it" });
+  w.clock.now += PULL_RISK_AUTO_RETRY_MS;
+  w.auto.resume();
+  await w.auto.idle();
+  expect(w.started).toHaveLength(1);
+  expect(w.auto.runs()).toEqual({});
+  expect(await w.auto.wouldStart()).toEqual({ high: 1, medium: 1 });
+});
+
+test("a runs file from before fresh PRs were kept starts none of its queued runs", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"));
+  mkdirSync(join(dataDir, "inbox"), { recursive: true });
+  const queued = { at: "2026-11-19T08:00:00.000Z", level: "high", made: "guide", state: "queued", thread_id: null };
+  writeFileSync(join(dataDir, "inbox", INBOX_PULL_RISK_AUTO_FILE), JSON.stringify({ v: 1, runs: { [pr(1).key]: queued, [pr(2).key]: { ...queued, state: "started", thread_id: "thr_2", started_at: queued.at } } }));
+  const w = world({ level: "high", make: "guide" }, dataDir);
+  for (const n of [1, 2]) w.list(pr(n), "high");
+  w.auto.resume();
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  expect(Object.keys(w.auto.runs())).toEqual([pr(2).key]);
 });
