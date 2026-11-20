@@ -37,4 +37,4 @@ export function parseInboxCardPr(value: unknown): InboxCardPr | null {
 }
 
 /** What a refused PR reference is told. */
-export const INBOX_CARD_PR_HINT = 'pr: "owner/repo#123", or the PR\'s URL (GitHub, GitLab, Bitbucket).';
+export const INBOX_CARD_PR_HINT = 'pr: "owner/repo#123", or the PR\'s URL (GitHub, GitLab, Bitbucket, Forgejo).';
