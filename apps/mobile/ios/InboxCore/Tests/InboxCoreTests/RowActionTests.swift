@@ -165,7 +165,9 @@ final class RowActionTests: XCTestCase {
     let outcome = await session.actMany(.star, on: threads)
     XCTAssertEqual(outcome.made, threads)
     var pins = await door.pins
-    XCTAssertEqual(pins, threads)
+    // Both starred. Their order is the order the computer took them in: they are sent a few at a time, at once.
+    XCTAssertEqual(Set(pins), Set(threads))
+    XCTAssertEqual(pins.count, threads.count)
     let undone = await session.undoMany(try XCTUnwrap(outcome.undo))
     XCTAssertTrue(undone)
     pins = await door.pins
