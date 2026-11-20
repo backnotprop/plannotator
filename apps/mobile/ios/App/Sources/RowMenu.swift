@@ -119,8 +119,8 @@ struct ThreadMenuItems: View {
   }
 }
 
-/// What a row offers a screen reader as its actions, beyond its swipes: the star, Priority, the copies, and Snooze
-/// with each of its times, in the menu's words. The menu itself needs a press and hold.
+/// What a row offers a screen reader as its actions, beyond its swipes: the star, Priority, the copies, Unsnooze,
+/// Move back, and Snooze with each of its times, in the menu's words. The menu itself needs a press and hold.
 struct RowSpokenActions: View {
   let row: InboxListRow
   let drawn: InboxListGroupId?
@@ -129,12 +129,20 @@ struct RowSpokenActions: View {
 
   var body: some View {
     let offered = ThreadMenuItems.offered(row, drawn: drawn, starred: starred, session: actions.session)
-    ForEach([RowOffers.Action.pin, .unpin, .priorityAdd, .priorityRemove, .copyLink, .copyId, .unsnooze].filter(offered.contains), id: \.self) { item in
+    ForEach([RowOffers.Action.pin, .unpin, .priorityAdd, .priorityRemove, .copyLink, .copyId, .unsnooze, .unread].filter(offered.contains), id: \.self) { item in
       Button(ThreadMenuItems.label(item, place: .row).0) { actions.perform(item, on: row) }
     }
     if offered.contains(.snooze) {
       ForEach(SnoozeRules().choices(), id: \.id) { choice in
-        Button("\(PhoneWords.snooze), \(choice.label)") { actions.snooze(row, until: choice.until) }
+        Button("\(PhoneWords.snooze), \(choice.label)") {
+          // The time is worked out when the action is taken, not when the row was drawn: a row drawn at 5:59 PM
+          // and snoozed "Later today" at 6:01 PM never goes to a time already past. Gone by then: Pick a time.
+          if let now = SnoozeRules().choices().first(where: { $0.id == choice.id }) {
+            actions.snooze(row, until: now.until)
+          } else {
+            actions.picking = .row(row, place: .list)
+          }
+        }
       }
       Button("\(PhoneWords.snooze), \(PhoneWords.pickATimeTitle)") { actions.picking = .row(row, place: .list) }
     }

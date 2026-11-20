@@ -24,6 +24,9 @@ public actor StandInDoor {
     public var racesPicks = 0
     /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
     public var proxyRefusesReplies: Int?
+    /// Threads whose archive something between the phone and the computer refuses with a web page (a 403): one
+    /// row of an act on several rows that is not taken.
+    public var proxyRefusesArchive: Set<String> = []
     /// True: the Authorization header never reaches the door, as when something in between strips it.
     public var stripsToken = false
     public init() {}
@@ -209,6 +212,8 @@ public actor StandInDoor {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
     case ("messages", 4, _) where parts[2] == "actions": answer = markAction(MessageID(parts[1]), parts[3], fields)
+    case ("messages", 3, "resolve") where options.proxyRefusesArchive.contains(parts[1]):
+      return DoorAnswerBytes(status: 403, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8))
     case ("messages", 3, "reply"):
       if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
       answer = reply(MessageID(parts[1]), fields)

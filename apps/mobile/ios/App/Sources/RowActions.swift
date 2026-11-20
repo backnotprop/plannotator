@@ -42,12 +42,28 @@ final class RowActions {
     }
   }
 
+  /// What an act on several rows told, so the refusals of its rows that come later fold into its toast.
+  private struct BulkShown {
+    let toast: UUID
+    let action: BulkAction
+    var made: [ThreadID]
+    let held: Int
+    let detail: String?
+    var refused: Int
+    var refusal: String?
+  }
+
   let session: InboxSession
   private(set) var toast: Toast?
+  private var bulkShown: BulkShown?
   var warning: Warning?
   var picking: SnoozeTarget?
   /// Picking rows: the list is the picks' list, a tap picks.
   private(set) var selecting = false
+  /// The list's edit mode: on in the same change that starts picking (the list empties its selection as it
+  /// starts, and `firstPick` is picked again); off in the change after picking ends (InboxScreen), since a list
+  /// leaving edit mode in the same change that empties its selection stays in edit mode, every circle drawn.
+  var editMode: EditMode = .inactive
   var picked: Set<ThreadID> = []
   /// The row picking started from: the list empties its selection as it starts, and this row is picked again.
   var firstPick: ThreadID?
@@ -106,9 +122,32 @@ final class RowActions {
   /// The reasons acts were not taken, said once: at once for an act the computer refused, later for acts that
   /// waited on the phone and gave way. Several at once (a bulk action sent when the computer was back) are counted.
   func told() {
-    let notices = session.actionNotices
-    guard let first = notices.values.first else { return }
+    var notices = session.actionNotices
+    guard !notices.isEmpty else { return }
     for id in notices.keys { session.clearActionNotice(id) }
+    // The rows of the act on several rows whose toast is up: said in that toast, and its Undo stays.
+    if let toast, case .many? = toast.undo, var shown = bulkShown, shown.toast == toast.id {
+      let theirs = notices.filter { shown.made.contains($0.key) }
+      if let first = theirs.values.first {
+        for id in theirs.keys { notices[id] = nil }
+        shown.refusal = shown.refusal ?? PhoneWords.actNotice(first, computer: session.computer.name)
+        shown.refused += theirs.count
+        shown.made.removeAll { theirs[$0] != nil }
+        bulkShown = shown
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        let heldOn = Array(repeating: session.computer.name, count: shown.held)
+        if let words = ActionWords.bulk(shown.action, made: shown.made.count, held: shown.held, heldOn: heldOn, refused: shown.refused, refusal: shown.refusal, detail: shown.detail) {
+          // The same toast, on the same clock: its words change, and its Undo now takes back only what was taken.
+          let undo = session.bulkUndoOffer
+          self.toast?.words = words
+          self.toast?.undo = undo.map { .many($0) }
+          AccessibilityNotification.Announcement(words.spoken).post()
+        } else {
+          show(ActionWords.failed(shown.refusal ?? ActionWords.threadsDidNotChange))
+        }
+      }
+    }
+    guard let first = notices.values.first else { return }
     UINotificationFeedbackGenerator().notificationOccurred(.warning)
     let why = PhoneWords.actNotice(first, computer: session.computer.name)
     show(notices.count > 1 ? ActionWords.didNotChange(notices.count, why: why) : ActionWords.failed(why))
@@ -202,6 +241,7 @@ final class RowActions {
     firstPick = thread
     picked = thread.map { [$0] } ?? []
     selecting = true
+    editMode = .active
     UISelectionFeedbackGenerator().selectionChanged()
   }
 
@@ -240,6 +280,9 @@ final class RowActions {
       // How many wait for the computer is the news here: the words wrap, never cut before it.
       if outcome.held > 0 { words.wraps = true }
       self.show(words, undo: outcome.undo.map { .many($0) }, until: outcome.undo?.expires)
+      if let shown = self.toast, outcome.undo != nil {
+        self.bulkShown = BulkShown(toast: shown.id, action: action, made: outcome.made, held: outcome.held, detail: iso.map { SnoozeRules().when($0) }, refused: outcome.refused.count, refusal: refusal)
+      }
       // Sent after the toast is up; what the computer refuses is said when it answers.
       await self.session.sendMany(outcome.made)
       self.told()

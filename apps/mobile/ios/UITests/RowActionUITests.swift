@@ -247,11 +247,14 @@ final class RowActionUITests: XCTestCase {
     let app = launch()
     let retry = row(app, "Retry logic for the relay client")
     XCTAssertTrue(retry.waitForExistence(timeout: 10))
+    // Where a row's words start with no selection circle before them.
+    let edge = retry.staticTexts["Retry logic for the relay client"].frame.minX
     retry.press(forDuration: 1.0)
     app.buttons["Select"].tap()
     app.buttons["Select all"].tap()
     // Every row of the open groups (Quiet is closed).
     XCTAssertTrue(app.staticTexts["6 selected"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.images["checkmark.circle.fill"].exists, "picked rows show their circle")
     app.buttons["Select all"].tap()
     XCTAssertTrue(app.staticTexts["Tap threads to select them"].waitForExistence(timeout: 5))
     shot("21-selecting-none")
@@ -262,7 +265,15 @@ final class RowActionUITests: XCTestCase {
     let title = app.navigationBars["Inbox"].staticTexts["Inbox"]
     XCTAssertTrue(title.waitForExistence(timeout: 5))
     XCTAssertGreaterThan(title.frame.height, 30, "the large title")
-    shot("40-after-done")
+    // The selection circles go, and stay gone: every row's words are back at the page's edge once the list's
+    // own animation has ended (an earlier build stayed in edit mode after Done, every circle still drawn).
+    wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.images["circle"])], timeout: 3)
+    sleep(1)
+    XCTAssertFalse(app.images["circle"].exists, "no empty selection circle")
+    XCTAssertFalse(app.images["checkmark.circle.fill"].exists, "no picked circle")
+    let words = row(app, "Retry logic for the relay client").staticTexts["Retry logic for the relay client"]
+    XCTAssertEqual(words.frame.minX, edge, accuracy: 1, "the row's words are back where they were")
+    shot("42-after-done")
   }
 
   @MainActor

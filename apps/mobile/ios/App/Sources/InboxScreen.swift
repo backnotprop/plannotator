@@ -35,8 +35,9 @@ struct InboxScreen: View {
     return NavigationStack(path: $path) {
       content(view)
         .background(Token.background.ignoresSafeArea())
-        // While picking only the title's words go: the bar keeps its kind, so the large title is back after Done.
-        .navigationTitle(selecting ? "" : PhoneWords.inbox)
+        // While picking the large title says how many are picked (as Mail's does): the bar keeps its kind, so
+        // nothing moves as picking starts or ends, and the large title is back after Done.
+        .navigationTitle(selecting ? (actions.picked.isEmpty ? PhoneWords.tapToSelect : PhoneWords.selected(actions.picked.count)) : PhoneWords.inbox)
         .toolbar { bar(view) }
         .toolbar(selecting ? .visible : .hidden, for: .bottomBar)
         .scrollEdgeEffectStyle(.hard, for: .top)
@@ -70,15 +71,6 @@ struct InboxScreen: View {
           actions.picked = all ? actions.picked.subtracting(every) : actions.picked.union(every)
         }
         .accessibilityAddTraits(all ? .isSelected : [])
-      }
-      ToolbarItem(placement: .principal) {
-        Text(actions.picked.isEmpty ? PhoneWords.tapToSelect : PhoneWords.selected(actions.picked.count))
-          .font(TextRole.heading)
-          .foregroundStyle(actions.picked.isEmpty ? Token.mutedForeground : Token.foreground)
-          .monospacedDigit()
-          .lineLimit(1)
-          .minimumScaleFactor(0.8)
-          .barSized()
       }
       ToolbarItem(placement: .confirmationAction) { Button(PhoneWords.done) { actions.stopSelecting() } }
       ToolbarItemGroup(placement: .bottomBar) { PickBar(actions: actions, view: view) }
@@ -182,7 +174,12 @@ struct InboxScreen: View {
       .listStyle(.plain)
       .listSectionSpacing(0)
       .scrollContentBackground(.hidden)
-      .environment(\.editMode, .constant(selecting ? .active : .inactive))
+      // A binding the list can hold, moved with picking (RowActions.editMode): a constant handed down left the list
+      // in edit mode after Done, its selection circles still drawn.
+      .environment(\.editMode, $actions.editMode)
+      .onChange(of: selecting) { _, now in
+        if !now { withAnimation(Motion.fade.animation(still: still)) { actions.editMode = .inactive } }
+      }
       .refreshable { await session.refresh() }
       // The last rows can be brought over the toast while it is up, and over the picks' bar while picking.
       .contentMargins(.bottom, selecting ? Size.wideButton + Space.section : actions.toast == nil ? 0 : Size.wideButton + Space.card, for: .scrollContent)
@@ -320,6 +317,7 @@ struct ListRow: View {
           .opacity(picked ? 1 : 0)
       }
     )
+    // They reach the row's one combined element, the one VoiceOver lands on (a UI test reads them there).
     .accessibilityActions {
       if !picking { RowSpokenActions(row: row, drawn: drawn, starred: starred, actions: actions) }
     }

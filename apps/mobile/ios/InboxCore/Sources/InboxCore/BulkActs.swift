@@ -59,11 +59,22 @@ public struct BulkUndo: Hashable, Sendable, Identifiable {
   public let id: String
   public let action: BulkAction
   public let expires: Date
-  /// Each row's own offer.
-  let offers: [UndoOffer]
+  /// Each row's own offer. One the computer refused, or that gave way, leaves: Undo never sends the reverse of a
+  /// write that was never taken.
+  var offers: [UndoOffer]
   /// Rows starred: a star has no offer of its own (the window's bulk Undo unstars them).
-  let starred: [ThreadID]
+  var starred: [ThreadID]
+  /// Every row the act was made on, refused or not: its toast says the refusals of these.
+  public let threads: Set<ThreadID>
   public var count: Int { offers.count + starred.count }
+
+  /// The same Undo without this thread's write (`key`): it was refused or gave way.
+  func without(_ key: String, thread: ThreadID, act: ThreadAct?) -> BulkUndo {
+    var next = self
+    next.offers.removeAll { $0.id == key }
+    if act == .star { next.starred.removeAll { $0 == thread } }
+    return next
+  }
 }
 
 /// The threads still to send, shared by the few senders that work through them.
@@ -132,7 +143,7 @@ extension InboxSession {
     book.undo = nil
     book.undoGroup = nil
     if !offers.isEmpty || !starred.isEmpty {
-      let group = BulkUndo(id: UUID().uuidString, action: action, expires: expires, offers: offers, starred: starred)
+      let group = BulkUndo(id: UUID().uuidString, action: action, expires: expires, offers: offers, starred: starred, threads: Set(outcome.made))
       book.undoGroup = group
       outcome.undo = group
     }
@@ -147,12 +158,20 @@ extension InboxSession {
     guard !queue.isEmpty else { return }
     guard reach != .away else { return retryLater() }
     let lane = SendLane(queue)
+    let id = UUID().uuidString
     let lanes = (0..<min(Self.atOnce, queue.count)).map { _ in
       Task { @MainActor [weak self] in
-        while let self, let thread = lane.take() { await self.pump(thread, readsList: false) }
+        // The computer stopped answering: what is left waits for it (retryLater), and is never tried one thread
+        // and one three-second probe at a time. `stop()` ends the senders too.
+        while !Task.isCancelled, let self, self.reach != .away, let thread = lane.take() { await self.pump(thread, readsList: false, quiet: true) }
       }
     }
+    sendLanes[id] = lanes
     for task in lanes { await task.value }
+    sendLanes[id] = nil
+    // Drawn once and saved once for the whole batch, however it ended.
+    endQuiet()
+    if reach == .away, !held.isEmpty { retryLater() }
     if book.needsListRead, client != nil {
       book.needsListRead = false
       await readList()
@@ -181,9 +200,10 @@ extension InboxSession {
   /// sent for it; for one the computer took, its reverse is held, and all of them are saved once and then sent.
   /// False when the offer is gone, or a row could not be put back.
   @discardableResult
-  public func undoMany(_ group: BulkUndo, now: Date? = nil) async -> Bool {
+  public func undoMany(_ offered: BulkUndo, now: Date? = nil) async -> Bool {
     let now = now ?? clock.now()
-    guard now < group.expires, book.undoGroup?.id == group.id else { return false }
+    // The offer as it stands now: the rows the computer refused since it was made have left it.
+    guard now < offered.expires, let group = book.undoGroup, group.id == offered.id else { return false }
     book.undoGroup = nil
     var all = true
     var touched: [ThreadID] = []

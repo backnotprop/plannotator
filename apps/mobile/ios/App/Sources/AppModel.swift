@@ -360,6 +360,9 @@ struct LaunchOptions {
           for thread in many { await door.add(thread) }
           await session.refresh()
           await session.actMany(.archive, on: many.map(\.threadId))
+        case "archiverefused":
+          // Something between the phone and the computer refuses one thread's archive: one row of several not taken.
+          await door.setOptions { $0.proxyRefusesArchive = [StandInData.checkout.rawValue] }
         case "readrow":
           await session.act(.read, on: StandInData.upload, undo: false)
         case "outdated":

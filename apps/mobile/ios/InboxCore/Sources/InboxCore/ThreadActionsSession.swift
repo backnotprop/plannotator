@@ -359,6 +359,7 @@ extension InboxSession {
   func noteRefusedAct(_ write: HeldWrite, _ notice: Notice) {
     leaveGroup(write)
     let thread = ThreadID(write.thread)
+    notTaken(write)
     if case .refused(_, let code) = notice, [WireErrorCode.threadNotFound.rawValue, WireErrorCode.messageNotFound.rawValue].contains(code) {
       missingThreads.insert(thread)
       return
@@ -366,6 +367,13 @@ extension InboxSession {
     book.notices[thread] = notice
     if book.undo?.id == write.id { book.undo = nil }
     book.needsListRead = true
+  }
+
+  /// A write of an act on several rows that was never taken leaves its one Undo: that Undo sends no reverse of it.
+  private func notTaken(_ write: HeldWrite) {
+    guard let group = book.undoGroup, group.threads.contains(ThreadID(write.thread)) else { return }
+    let next = group.without(write.id, thread: ThreadID(write.thread), act: write.act)
+    book.undoGroup = next.count == 0 ? nil : next
   }
 
   /// The thread's row as the computer last said it, with none of the person's acts drawn over it.
@@ -418,6 +426,7 @@ extension InboxSession {
       settleWithGroup(write)
       book.notices[thread] = .gaveWay
       if book.undo?.id == write.id { book.undo = nil }
+      notTaken(write)
       return true
     }
   }
