@@ -582,7 +582,7 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     page.off('request', onRequest);
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    const left = (await page.request.get(`${url}api/inbox/pulls/risk`).then((r) => r.json()).catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
     if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
@@ -778,7 +778,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands a dialog o
   } finally {
     await page.setViewportSize(VIEWPORTS[1440]).catch(() => {});
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' }).catch(() => {});
-    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    const left = (await page.request.get(`${url}api/inbox/pulls/risk`).then((r) => r.json()).catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
     if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
