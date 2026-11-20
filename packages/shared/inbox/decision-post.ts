@@ -54,7 +54,7 @@ export const DECISION_POST_BANNER = {
 /** Where the banner links: the Plannotator Inbox landing page (its canonical URL; answers 200, checked 2026-11-10). */
 export const DECISION_POST_LANDING = "https://plannotator.ai/inbox/";
 
-export type DecisionPostPlatform = "github" | "gitlab";
+export type DecisionPostPlatform = "github" | "gitlab" | "forgejo";
 
 // ── Privacy for a public post ──
 
@@ -140,8 +140,9 @@ export function decisionPostTally(doc: DecisionExportV1): string {
 
 function banner(platform: DecisionPostPlatform): string {
   // GitLab's sanitizer keeps no <picture>/<source>, and the banner is transparent with text coloured per theme, so one
-  // image would vanish on GitLab's dark theme: there the banner is its words, as a link.
-  if (platform === "gitlab") return `[**Decisions**, from Plannotator](${DECISION_POST_LANDING})`;
+  // image would vanish on GitLab's dark theme: there the banner is its words, as a link. A Forgejo's sanitizer is not
+  // known to keep them either (unverified), and a failed picture leaves nothing, so it gets the words too.
+  if (platform === "gitlab" || platform === "forgejo") return `[**Decisions**, from Plannotator](${DECISION_POST_LANDING})`;
   // No width or height: a banner that fails to load (the site not deployed yet, a proxy refusing it) leaves only its
   // alt text on one line, never an empty block the size of the picture.
   const img = `<img alt="${DECISION_POST_BANNER.alt}" src="${DECISION_POST_BANNER.light}">`;
