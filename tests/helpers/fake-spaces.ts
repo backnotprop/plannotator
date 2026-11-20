@@ -26,7 +26,13 @@
  * - Answers have the service's shapes as seen on its test copy (2026-11-19): `{ workspace, document }` on the
  *   create, every other record bare, a page's version also as a weak `ETag`; the approval is a `PUT`, and a tool's
  *   token gets `403 approval_human_only`.
- * - `/cli/login` and `/cli/token`: the browser sign-in for a tool on this computer, with PKCE.
+ * - `/cli/login`, `/cli/token` and `GET /v1/me`: the browser sign-in for a tool on this computer, with PKCE, as the
+ *   service answers it (read from its code by the Spaces side, 2026-11-19). `/cli/login` needs all of `redirect_uri`
+ *   (`http`, host `127.0.0.1` or `[::1]`, an explicit port; `localhost` is refused), `state`, `code_challenge` and
+ *   `code_challenge_method=S256`. `/cli/token` takes a form body only (anything else, JSON included, is `415`) with
+ *   `grant_type=authorization_code`, `code`, the same `redirect_uri` byte for byte and `code_verifier`; its errors are
+ *   `{ "error": "<words>" }`. A code lives 120 seconds and is spent on its first lookup, so a second exchange with it
+ *   always fails. The answer is `{ access_token, token_type, expires_at }` with no name: the name is `GET /v1/me`'s.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { gitBlobSha } from "../../packages/core/plans";
@@ -97,6 +103,8 @@ export interface FakeSpacesOptions {
   fileMax?: number;
   /** The approval call: `refuse` (as a tool's token is today) or `accept`. */
   approvals?: "refuse" | "accept";
+  /** `GET /v1/me` answers `name: null` (an account with no display name). */
+  nameless?: boolean;
   /** `/cli/login` sends the browser straight back with a code (default), or shows a page with an Allow link. */
   login?: "auto" | "page";
 }
@@ -110,12 +118,25 @@ const validPath = (path: unknown): path is string =>
   typeof path === "string" && path.length > 0 && !/[\\?#%\u0000-\u001f\u007f]/.test(path) && path.split("/").every((name) => name.length > 0 && name !== "." && name !== ".." && name.toLowerCase() !== ".git" && new TextEncoder().encode(name).length <= 255);
 const versionOf = (body: string) => gitBlobSha(body.replace(/^﻿/, ""));
 const pageMax = (kind: string) => (kind === "html" ? 16_000_000 : 1_572_864);
+/** A PKCE verifier or challenge: 43 to 128 of these characters. */
+const PKCE_VALUE = /^[A-Za-z0-9._~-]{43,128}$/;
+/** The way back to a tool: plain http to this computer's loopback address, an explicit port, any path. */
+const loopbackRedirect = (value: string) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "[::1]") && /^http:\/\/(127\.0\.0\.1|\[::1\]):\d+(\/|$)/.test(value);
+  } catch {
+    return false;
+  }
+};
 
 export function createFakeSpaces(options: FakeSpacesOptions = {}) {
   let origin = options.origin ?? "http://127.0.0.1:1";
   const spaces = new Map<string, FakeSpace>();
   const tokens = new Map<string, string>();
-  const codes = new Map<string, { challenge: string; name: string }>();
+  const codes = new Map<string, { challenge: string; redirect: string; name: string; until: number }>();
+  /** Every `/cli/token` body as it came (tests check what was sent, and that it was sent once). */
+  const exchanges: { contentType: string; body: string; origin: string | null; cookie: string | null; authorization: string | null }[] = [];
   const calls: FakeSpacesCall[] = [];
   const settings = { ...options };
   let openWrites = 0;
@@ -158,22 +179,36 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       const redirect = url.searchParams.get("redirect_uri") ?? "";
       const challenge = url.searchParams.get("code_challenge") ?? "";
       const state = url.searchParams.get("state") ?? "";
-      if (!/^http:\/\/(127\.0\.0\.1|\[::1\]):\d+\//.test(redirect) || !challenge || !state) return done(new Response("bad sign-in request", { status: 400 }));
+      if (!loopbackRedirect(redirect) || !PKCE_VALUE.test(challenge) || !state || url.searchParams.get("code_challenge_method") !== "S256") return done(new Response("bad sign-in request", { status: 400 }));
       const code = randomBytes(12).toString("hex");
-      codes.set(code, { challenge, name: signInAs });
-      const back = `${redirect}?code=${code}&state=${encodeURIComponent(state)}`;
-      if ((settings.login ?? "auto") === "auto") return done(new Response(null, { status: 302, headers: { Location: back } }));
-      return done(new Response(`<!doctype html><title>Stand-in sign-in</title><p>Allow Plannotator?</p><a id="allow" href="${back}">Allow</a>`, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
+      codes.set(code, { challenge, redirect, name: signInAs, until: Date.now() + 120_000 });
+      const back = new URL(redirect);
+      back.searchParams.set("code", code);
+      back.searchParams.set("state", state);
+      if ((settings.login ?? "auto") === "auto") return done(new Response(null, { status: 302, headers: { Location: back.toString() } }));
+      return done(new Response(`<!doctype html><title>Stand-in sign-in</title><p>Allow Plannotator?</p><a id="allow" href="${back.toString().replace(/&/g, "&amp;")}">Allow</a>`, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
     }
     if (method === "POST" && url.pathname === "/cli/token") {
-      const body = (await request.json().catch(() => null)) as { code?: string; code_verifier?: string } | null;
-      const held = body?.code ? codes.get(body.code) : undefined;
-      const challenge = body?.code_verifier ? createHash("sha256").update(body.code_verifier).digest("base64url") : "";
-      if (!held || held.challenge !== challenge) return done(fail(400, "invalid_grant"));
-      codes.delete(body!.code!);
+      const plain = (status: number, error: string) => done(json(status, { error }));
+      const contentType = request.headers.get("content-type") ?? "";
+      const raw = await request.text();
+      exchanges.push({ contentType, body: raw, origin: request.headers.get("origin"), cookie: request.headers.get("cookie"), authorization: request.headers.get("authorization") });
+      const site = request.headers.get("sec-fetch-site");
+      if (request.headers.get("cookie") && (site === "cross-site" || site === "same-site" || request.headers.get("origin") === "null")) return plain(403, "cross-site token exchange refused");
+      if (contentType.split(";")[0]!.trim().toLowerCase() !== "application/x-www-form-urlencoded") return plain(415, "token exchange requires form data");
+      const form = new URLSearchParams(raw);
+      if (form.get("grant_type") !== "authorization_code") return plain(400, "unsupported grant_type");
+      const code = form.get("code") ?? "";
+      const redirect = form.get("redirect_uri") ?? "";
+      const verifier = form.get("code_verifier") ?? "";
+      if (!code || !redirect || !PKCE_VALUE.test(verifier)) return plain(400, "invalid authorization code exchange");
+      // Spent on its first lookup, whatever comes of it.
+      const held = codes.get(code);
+      codes.delete(code);
+      if (!held || held.until < Date.now() || held.redirect !== redirect || held.challenge !== createHash("sha256").update(verifier).digest("base64url")) return plain(400, "invalid authorization code");
       const token = `wscli_live_${randomBytes(18).toString("hex")}`;
       tokens.set(token, held.name);
-      return done(json(200, { token, expires_at: null, user: { name: held.name } }));
+      return done(json(200, { access_token: token, token_type: "Bearer", expires_at: null }));
     }
 
     if (parts[0] !== "v1") return done(fail(404, "not_found"));
@@ -183,6 +218,11 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       fault.times--;
       if (fault.status === 0) throw new TypeError("fetch failed");
       return done(fail(fault.status, fault.code, fault.details, fault.status === 429 ? { "Retry-After": String(settings.retryAfter ?? 10) } : {}));
+    }
+    if (method === "GET" && url.pathname === "/v1/me") {
+      if (!user) return done(fail(401, "login_required"));
+      // For a CLI token `email` and `provider` are null, and `name` may be null too (an account with no display name).
+      return done(json(200, { user_id: `usr_${createHash("sha256").update(user).digest("hex").slice(0, 16)}`, email: null, name: settings.nameless ? null : user, memberships: [], auth_type: "cli_token", provider: null, assignee: null }));
     }
     const answer = await route(request, url, method, parts, user);
     if (fault?.after && answer.ok) {
@@ -363,6 +403,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     },
     spaces,
     calls,
+    exchanges,
     settings,
     /** The next `times` calls that match get this answer instead; `after`: the call is done first, then its answer is lost. */
     failNext(match: RegExp | ((call: { method: string; path: string }) => boolean), status: number, code: string, input: { times?: number; details?: Record<string, unknown>; after?: boolean } = {}) {
