@@ -848,6 +848,7 @@ packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
 packages/inbox/plans/spacesHome.test.tsx
+packages/inbox/plans/planShare.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
