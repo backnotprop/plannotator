@@ -72,11 +72,12 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
     state?.onLineSelection(range);
   };
   const on = found?.status !== 'off';
+  const filled = semantic ? found?.status === 'semantic' : true;
   const noted = found ? semanticNoteCount(found.summary) : 0;
   const count = changes.length || noted;
   const changesText = `${count} semantic change${count === 1 ? '' : 's'}`;
   const kinds = found ? semanticNoteParts(found.summary).join(', ') : '';
-  const both = kinds !== '' && changes.length > noted;
+  const both = kinds !== '' && changes.length > 0 && changes.length !== noted;
   const text = !kinds ? changesText : on ? (both ? `${changesText}; ${kinds}` : kinds) : both ? `${changesText}; ${kinds} not shown in the diff` : `${kinds}, not shown in the diff`;
 
   return (
@@ -98,7 +99,7 @@ export const SemanticFileBadge: React.FC<{ filePath: string; semantic?: Semantic
         }
       >
         <span className={`font-semibold tracking-[0.02em] ${TIGHT_WORD}`}>sem</span>
-        <span className={`${COUNT} ${on ? 'bg-primary/15 text-primary' : 'text-primary/80 ring-1 ring-inset ring-primary/40'}`}>{count}</span>
+        <span className={`${COUNT} ${filled ? 'bg-primary/15 text-primary' : 'text-primary/80 ring-1 ring-inset ring-primary/40'}`}>{count}</span>
         <ChevronDown aria-hidden="true" className={`w-3 h-3 flex-none text-muted-foreground ${TIGHT_WORD}`} />
       </Popover.Trigger>
       <Popover.Portal>
