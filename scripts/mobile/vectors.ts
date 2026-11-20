@@ -10,7 +10,9 @@
  * (the relay's collapse id, beside the existing relay vectors), questions (the
  * answer each act makes and the body that saves it), skew (health answers and
  * app headers read by the door's version rules), snooze (the snooze times,
- * words and the list's clock over snoozed rows, in each zone). The stream
+ * words and the list's clock over snoozed rows, in each zone), rows (the list's
+ * groups and what each row offers), acts (the words said after a row action,
+ * scripts/mobile/vectors-actions.ts). The stream
  * suite reads with the window's own parser, so it has its own generator,
  * scripts/mobile/vectors-stream.ts.
  */
@@ -33,6 +35,7 @@ import { archivedRowPatch, readRowPatch } from '../../packages/inbox/rowActions'
 import { rowMenuActions } from '../../packages/inbox/rowMenu';
 import { rowSwipeActions } from '../../packages/inbox/rowSwipe';
 import { ROOT, cli, jsonText, readRepoText, type Output } from './lib';
+import { ACTS_FIXTURE, ACTS_ROWS, actVectors } from './vectors-actions';
 import { buildWords } from './words';
 
 export const FIXTURES = {
@@ -42,6 +45,7 @@ export const FIXTURES = {
   skew: 'apps/mobile/contract/fixtures/skew.json',
   snooze: 'apps/mobile/contract/fixtures/snooze.json',
   rows: 'apps/mobile/contract/fixtures/rows.json',
+  acts: 'apps/mobile/contract/fixtures/acts.json',
   relay: 'packages/core/fixtures/inbox-relay-vectors.json',
 } as const;
 
@@ -54,6 +58,7 @@ export const VECTORS = {
   skew: 'apps/mobile/contract/vectors/skew.json',
   snooze: 'apps/mobile/contract/vectors/snooze.json',
   rows: 'apps/mobile/contract/vectors/rows.json',
+  acts: 'apps/mobile/contract/vectors/acts.json',
 } as const;
 
 const TIME_SCRIPT = 'scripts/mobile/vectors-time.ts';
@@ -332,6 +337,10 @@ export async function generateVectors(): Promise<Output[]> {
     { path: VECTORS.skew, text: jsonText(skewVectors()) },
     { path: VECTORS.snooze, text: jsonText(snoozeVectors()) },
     { path: VECTORS.rows, text: jsonText(rowVectors()) },
+    {
+      path: VECTORS.acts,
+      text: jsonText(actVectors(about('The words the window says after a row action: Mark read and Mark unread at each place, the set-aside warning, a bulk action\'s one toast, the short agent name and the address Copy link copies.', `${ACTS_FIXTURE} and ${ACTS_ROWS}`))),
+    },
   ];
 }
 

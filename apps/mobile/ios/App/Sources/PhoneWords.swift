@@ -8,7 +8,7 @@ import InboxWire
 /// today (sections, agents, delivery lines); the rest of the window's words live inside its components. Until each
 /// of these is a product constant with a row in scripts/mobile/words.ts, it lives here, in one file, with where it
 /// comes from, so the whole list can be read, approved and moved in one pass. Nothing outside this file and
-/// InboxCore's CountWords writes a visible word.
+/// InboxCore's CountWords and ActionWords (the toasts after a row action) writes a visible word.
 ///
 /// A refusal is never shown in the Inbox's own words (they name keys and revisions): the few a person must act on
 /// are said here, plainly.
@@ -190,6 +190,80 @@ enum PhoneWords {
     if marks.questions > 0 { out.append(head(marks.question).map { "\($0): \(plural(marks.questions, "question"))" } ?? plural(marks.questions, "question")) }
     return out
   }
+
+  // MARK: Acting on a row (FLOWS 3; every word here is the window's unless it says "the phone's own")
+  /// The row menu and the thread's More menu (packages/inbox/components/RowMenu.tsx `LABELS`, CopyMenus.tsx).
+  static let select = "Select"
+  static let starThread = "Star thread"
+  static let unstarThread = "Unstar thread"
+  static let addToPriority = "Add to Priority"
+  static let removeFromPriority = "Remove from Priority"
+  static let copyLink = "Copy link"
+  static let copyThreadID = "Copy thread ID"
+  static let snooze = "Snooze"
+  static let unsnooze = "Unsnooze"
+  static let markRead = "Mark read"
+  static let markUnread = "Mark unread"
+  static let moveBack = "Move back"
+  static let moveBackToTop = "Move back to the top"
+  static let archive = "Archive"
+  static let unarchive = "Unarchive"
+  static let archiveThread = "Archive thread"
+  static let unarchiveThread = "Unarchive thread"
+  /// The thread's More button (packages/inbox/components/Thread.tsx, "More").
+  static let more = "More"
+  /// The swipes (packages/inbox/rowSwipe.ts `SWIPE_QUIET_LABEL`, `SWIPE_QUIET_NAME`).
+  static let swipeQuiet = "Quiet"
+  static let swipeQuietName = "Mark read, move to Quiet"
+  /// Snooze's times (packages/ui/components/inbox-thread/SnoozeMenu.tsx).
+  static let snoozeUntil = "Snooze until"
+  static let pickATime = "Pick a time…"
+  static let pickATimeTitle = "Pick a time"
+  static let day = "Day"
+  static let time = "Time"
+  /// A snoozed row's return, said (packages/inbox/components/InboxList.tsx `SnoozedUntil`, `RowTime`).
+  static func snoozedUntil(_ when: String) -> String { "Snoozed until \(when)" }
+  static let backFromSnooze = "Back from snooze"
+  /// The thread's lines (packages/inbox/components/Thread.tsx `data-snooze-line`, `data-read-line`, the archived foot,
+  /// `snoozeBackWords`).
+  static func readLine(at time: String, agent: String) -> String { "Read \(time). It stays out of the top until \(agent) writes again." }
+  static func archivedLine(_ agent: String) -> String { "Archived. The next message from \(agent) starts a new thread." }
+  static func backFromSnooze(_ when: String) -> String { "Back from snooze · \(when)" }
+  /// A starred row (packages/inbox/components/PinnedRow.tsx), and the star on a list row (InboxList.tsx).
+  static let starred = "Starred"
+  static let moveUp = "Move up"
+  static let moveDown = "Move down"
+  /// The picks' bar and sheet (packages/inbox/components/PickBar.tsx).
+  static let selectAll = "Select all"
+  static func selected(_ n: Int) -> String { "\(n.formatted(.number.locale(Locale(identifier: "en_US")))) selected" }
+  /// The large title while picking with nothing picked: short enough to stand whole (the window's hint, "Tap
+  /// threads to select them", is cut off at a large title's size).
+  static let tapToSelect = "Select threads"
+  static let starThreads = "Star threads"
+  static let unstarThreads = "Unstar threads"
+  /// The toast's way out (packages/inbox/components/Toast.tsx).
+  static let dismiss = "Dismiss"
+  /// A closed group (packages/inbox/components/InboxList.tsx): ", new since closed" for a screen reader.
+  static let newSinceClosed = "new since closed"
+  /// The Archived list (packages/inbox/components/ArchivedGroup.tsx; its name is the window's group's, "Archived").
+  static let archived = "Archived"
+  static let nothingArchived = "Nothing archived."
+  static let showMore = "Show 20 more"
+  /// The warning before a Mark read that sets questions aside is ActionWords.setAsideWarning; its other button:
+  /// packages/inbox/components/MarkReadWarning.tsx.
+  /// Why an act on a thread was not taken: the Inbox's own short sentence, else the window's fallback
+  /// (packages/inbox/toastError.ts, App.tsx).
+  static func actNotice(_ notice: InboxSession.Notice, computer: String) -> String {
+    switch notice {
+    case .refused(_, "snooze_past"): return ActionWords.timePassed
+    case .refused(let words, _): return SendFailure.plain(words) ?? ActionWords.threadDidNotChange
+    case .unreadable: return ActionWords.unreachable
+    case .gaveWay: return actGaveWay
+    case .notOffered, .appNeedsUpdate: return self.notice(notice, computer: computer)
+    }
+  }
+  /// The phone's own: an act that waited on the phone while the thread changed on another device is not sent.
+  static let actGaveWay = "Not changed: it changed on another device"
 
   // MARK: Answering (FLOWS 5, mock 4; contract flow checks answer-01 to answer-14)
   /// FLOWS 5: the kind, above the prompt.
