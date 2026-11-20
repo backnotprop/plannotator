@@ -531,7 +531,7 @@ test('the automatic line: a pick names the agent it would start; Save starts not
       const info = dialog.locator('[data-pull-risk-info="auto"]');
       if ((await info.getAttribute('data-open')) === null) await info.click();
       await expect(info).toHaveAttribute('data-open', '');
-      await expect(tip).toContainText('opened or pushed after you save');
+      await expect(tip).toContainText('when Inbox can tell');
       await expect(tip).toBeInViewport({ ratio: 1 });
       await sheetFits(dialog, width, [info]);
     });
@@ -721,7 +721,8 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
       .poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk?auto_agent=1`)).json()) as { auto_agent?: { agent: string } | null }).auto_agent?.agent ?? null, { timeout: 15_000 })
       .toBe('pi');
     await page.setViewportSize(VIEWPORTS[390]);
-    await openPulls();
+    await page.goto(`${url}#pulls`);
+    await expect(page.locator('[data-pulls-list]')).toBeVisible();
     const waitingLine = page.locator('[data-pull-risk-waiting]');
     const firstRow = page.locator('[data-pulls-row]').first();
     await expect(firstRow).toBeVisible();
