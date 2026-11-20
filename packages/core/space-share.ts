@@ -172,7 +172,10 @@ export interface SpaceShareRecord {
   /** Per local comment id (`anno_…`): the hosted comment or reply, or why it stays here. */
   comments: Record<string, { remote_id: string; reply?: true } | { left: string }>;
   approval: { document_id: string; version_number: number } | null;
-  /** Old records only (the tool's own approval call, which a space always refuses, is no longer made): read, never written. */
+  /**
+   * Old records only, from the tool's own approval call (a space always refuses it; no longer made). Nothing in the
+   * product reads or writes it now: a record that carries it still loads, and keeps it as it was.
+   */
   approval_refused?: boolean;
   /**
    * The approval sent with the last Keep (the space's sign-in page records it with the claim) and what the page did

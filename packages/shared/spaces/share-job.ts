@@ -272,8 +272,8 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     return status(id);
   }
 
-  /** An approval the sign-in page was sent with Keep, and what it did with it. */
-  type KeepApproval = { ask: NonNullable<ReturnType<typeof spaceKeepApproval>>; outcome: SpacesApprovalOutcome };
+  /** An approval the sign-in page was sent with Keep, the space that page named, and what it did with it. */
+  type KeepApproval = { space: string; ask: NonNullable<ReturnType<typeof spaceKeepApproval>>; outcome: SpacesApprovalOutcome };
 
   /** A run going without the sign-in (waiting on a busy space, say) is stopped first: it would write over the record. */
   async function stopRun(live: Live): Promise<void> {
@@ -282,11 +282,16 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     await live.running;
   }
 
-  /** Kept with the record whatever the claim answers: the page already did it. Recorded is an approval that is up. */
-  function noteKeepApproval(record: SpaceShareRecord, approval: KeepApproval): void {
+  /**
+   * Kept with the record whatever the claim answers: the page already did it. Recorded is an approval that is up. Only
+   * for the space the page named: a record replaced meanwhile (Share as new) never takes another space's outcome.
+   */
+  function noteKeepApproval(record: SpaceShareRecord, approval: KeepApproval): boolean {
     const { ask, outcome } = approval;
+    if (record.space_id !== approval.space) return false;
     record.keep_approval = { outcome, document_id: ask.document_id, version_number: ask.version_number, version: ask.remote_version, at: new Date(now()).toISOString() };
     if (outcome === "recorded") record.approval = { document_id: ask.document_id, version_number: ask.version_number };
+    return true;
   }
 
   /** Signed in: make the space the person's own when it is up and not theirs yet. */
@@ -295,7 +300,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     await stopRun(live);
     const record = readSpaceShareRecord(options.dataDir, id);
     if (!record || !record.created || record.refused) return;
-    if (approval) noteKeepApproval(record, approval);
+    const noted = approval !== null && noteKeepApproval(record, approval);
     try {
       // Claiming a space that is already the person's own answers the same again. This call alone says whose it is.
       const space = await clientOf(record.host).claim(record.space_id);
@@ -309,7 +314,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       else {
         // The space refused the credential itself: it is forgotten. Anything else: nothing changed.
         if (spacesTokenRefused(error)) clearSpacesCredential(options.dataDir, record.host);
-        if (approval) saveSpaceShareRecord(options.dataDir, id, record);
+        if (noted) saveSpaceShareRecord(options.dataDir, id, record);
         return;
       }
     }
@@ -324,8 +329,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const live = liveOf(id);
     while (live.claiming || live.running) await (live.claiming ?? live.running);
     const record = readSpaceShareRecord(options.dataDir, id);
-    if (!record || !record.created) return;
-    noteKeepApproval(record, approval);
+    if (!record || !record.created || !noteKeepApproval(record, approval)) return;
     saveSpaceShareRecord(options.dataDir, id, record);
   }
 
@@ -389,7 +393,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
         live.signIn = null;
         if (result.kind === "signed_in") {
           saveSpacesCredential(options.dataDir, host, result.credential);
-          await claimAndGoOn(id, ask && result.approval ? { ask, outcome: result.approval } : null).catch(() => {});
+          await claimAndGoOn(id, space && ask && result.approval ? { space, ask, outcome: result.approval } : null).catch(() => {});
         } else if (result.kind === "claim_conflict" && space) {
           await lostClaim(id, space).catch(() => {});
         }

@@ -518,6 +518,35 @@ describe("Keep this space", () => {
     expect(s.record().approval).toEqual({ document_id: s.world.main, version_number: 4 });
   });
 
+  test("a record replaced while the sign-in waits (Share as new) never takes the old space's approval outcome", async () => {
+    const pages: string[] = [];
+    const s = setup({
+      jobs: {
+        // The browser is left on the sign-in page; the test presses Allow itself, later.
+        openBrowser: async (url) => {
+          pages.push(url);
+          return "opened";
+        },
+      },
+    });
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    const first = s.record().space_id;
+    expect(await s.jobs.keep(id)).toMatchObject({ keep: "waiting" });
+    s.jobs.share(id, { fresh: true });
+    await s.jobs.running(id);
+    expect(s.record().space_id).not.toBe(first);
+    // Allow on the old page: the old space records the approval; the new record must not say so.
+    const login = await s.spaces.fetch(pages[0]!, { redirect: "manual" });
+    expect(new URL(login.headers.get("location")!).searchParams.get("approval")).toBe("recorded");
+    await fetch(login.headers.get("location")!);
+    await s.settle();
+    expect(s.record().space_id).not.toBe(first);
+    expect(s.record().keep_approval).toBeUndefined();
+    expect(s.record().approval).toBeNull();
+  });
+
   test("someone else kept it first: the claim on the sign-in page is lost, no token comes, and the panel is told", async () => {
     const s = setup();
     s.jobs.share(s.world.plan, {});
