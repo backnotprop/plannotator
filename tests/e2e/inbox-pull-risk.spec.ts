@@ -723,7 +723,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands a dialog o
     await page.setViewportSize(VIEWPORTS[390]);
     await page.goto(`${url}#pulls`);
     await expect(page.locator('[data-pulls-list]')).toBeVisible();
-    const asking = page.locator('[data-dialog="pull-risk-waiting"]');
+    const asking = page.getByRole('dialog', { name: /already ranks? High$/ });
     const waitingLine = asking.locator('[data-pull-risk-waiting]');
     await expect(waitingLine)
       .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
@@ -750,12 +750,13 @@ test('set up with nothing ranked: no agent starts; once ranking lands a dialog o
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 
+    await expect(asking.locator('[data-pull-risk-waiting-armed]')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(asking).toHaveCount(0);
     await expect.poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { auto_dismissed?: string[] }).auto_dismissed?.sort()).toEqual([keyOf(base + 1), keyOf(base + 2)].sort());
     await openPulls();
     await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(1_000);
+    await page.waitForTimeout(1_500);
     await expect(asking).toHaveCount(0);
     expect(await autoRuns()).toEqual({});
 
@@ -764,6 +765,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands a dialog o
     await openPulls();
     await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
     expect(await autoRuns()).toEqual({});
+    await expect(asking.locator('[data-pull-risk-waiting-armed]')).toBeVisible();
     await asking.getByRole('button', { name: 'Make them now', exact: true }).click();
     await expect(asking).toHaveCount(0);
     await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');

@@ -1,7 +1,9 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { forgePullRefShort } from '@plannotator/core/forge-ref-card';
 import type { InboxPull, InboxPullRiskAnswer, InboxPullRiskAuto } from '@plannotator/core/inbox-types';
 import { Modal } from '../components/Updates';
-import { dismissRanked, riskRankPhrase, riskTurnedOnWords, useRankedChoice } from './RiskAlreadyRanked';
+import { riskRankPhrase, riskTurnedOnWords, useRankedChoice } from './RiskAlreadyRanked';
+import { usePressGate, useSettled } from './riskAskGate';
 
 export const RISK_WAITING_LISTED = 5;
 const LISTED_BEFORE_MORE = 4;
@@ -15,12 +17,12 @@ export function riskWaitingKeys(answer: InboxPullRiskAnswer | null): string[] {
 interface Shown {
   keys: string[];
   auto: InboxPullRiskAuto;
-  lines: { key: string; title: string | null; ref: string }[];
 }
 
-function lineOf(key: string, pull: InboxPull | undefined): Shown['lines'][number] {
-  if (!pull) return { key, title: null, ref: key.replace(/^[^/]+\//, '').replace(/:pull$/, '') };
-  return { key, title: pull.title, ref: `${pull.repo} ${pull.platform === 'gitlab' ? '!' : '#'}${pull.number}` };
+function lineOf(key: string, pull: InboxPull | undefined): { title: string | null; ref: string } {
+  const at = pull ? pull.repo.lastIndexOf('/') : -1;
+  if (!pull || at <= 0) return { title: pull?.title ?? null, ref: key.replace(/^[^/]+\//, '').replace(/#(\d+):pull$/, '!$1') };
+  return { title: pull.title, ref: forgePullRefShort({ platform: pull.platform, host: pull.host, owner: pull.repo.slice(0, at), repo: pull.repo.slice(at + 1), number: pull.number }) };
 }
 
 export function RiskWaitingDialog({
@@ -31,50 +33,53 @@ export function RiskWaitingDialog({
   onAnswer,
 }: {
   answer: InboxPullRiskAnswer | null;
-  pulls: readonly InboxPull[];
+  pulls: readonly InboxPull[] | null;
   blocked: boolean;
   asked: Set<string>;
   onAnswer: (next: InboxPullRiskAnswer) => void;
 }) {
   const [shown, setShown] = useState<Shown | null>(null);
   const waiting = riskWaitingKeys(answer).filter((key) => !asked.has(key));
-  const ready = !blocked && !shown && waiting.length > 0 && !!answer?.auto;
+  const settled = useSettled(!blocked && !shown && !!pulls && waiting.length > 0 && !!answer?.auto);
   const waitingId = waiting.join('\n');
   useEffect(() => {
-    if (!ready || !answer?.auto) return;
-    const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
+    if (!settled || !answer?.auto || waiting.length === 0) return;
     for (const key of waiting) asked.add(key);
-    setShown({ keys: waiting, auto: answer.auto, lines: waiting.map((key) => lineOf(key, byKey.get(key))) });
-  }, [ready, waitingId]);
+    setShown({ keys: waiting, auto: answer.auto });
+  }, [settled, waitingId]);
   if (!shown) return null;
-  return <RiskWaitingAsk shown={shown} onAnswer={onAnswer} onClose={() => setShown(null)} />;
+  return <RiskWaitingAsk shown={shown} pulls={pulls ?? []} onAnswer={onAnswer} onClose={() => setShown(null)} />;
 }
 
-function RiskWaitingAsk({ shown, onAnswer, onClose }: { shown: Shown; onAnswer: (next: InboxPullRiskAnswer) => void; onClose: () => void }) {
+function RiskWaitingAsk({ shown, pulls, onAnswer, onClose }: { shown: Shown; pulls: readonly InboxPull[]; onAnswer: (next: InboxPullRiskAnswer) => void; onClose: () => void }) {
   const titleId = useId();
+  const host = useRef<HTMLDivElement>(null);
+  const gate = usePressGate(host);
   const choice = useRankedChoice(shown.keys, (next) => {
     onAnswer(next);
     onClose();
   });
-  const notNow = () => {
-    if (choice.busy) return;
-    onClose();
-    void dismissRanked(shown.keys).then(onAnswer, () => {});
+  const act = (run: () => Promise<void>) => {
+    if (!choice.busy && gate.ok()) void run();
   };
   const count = shown.keys.length;
-  const listed = count <= RISK_WAITING_LISTED ? shown.lines : shown.lines.slice(0, LISTED_BEFORE_MORE);
+  const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
+  const listed = count <= RISK_WAITING_LISTED ? shown.keys : shown.keys.slice(0, LISTED_BEFORE_MORE);
   return (
-    <Modal labelledBy={titleId} onClose={notNow} testId="pull-risk-waiting" className="ib-riskd" ownKeys initialFocus="[data-pull-risk-waiting-not-now]">
-      <div data-pull-risk-waiting={count}>
+    <Modal labelledBy={titleId} onClose={() => act(choice.notNow)} testId="pull-risk-waiting" className="ib-riskd" ownKeys initialFocus="[data-pull-risk-waiting-not-now]">
+      <div ref={host} data-pull-risk-waiting={count} data-pull-risk-waiting-armed={gate.armed ? '' : undefined}>
         <h2 id={titleId}>{riskRankPhrase(count, shown.auto.level, true)}</h2>
         <p className="ib-sub ib-riskd-l">{riskTurnedOnWords(shown.auto, count)}</p>
         <ul className="ib-riskq-list">
-          {listed.map((line) => (
-            <li key={line.key} data-pull-risk-waiting-pull={line.key}>
-              {line.title && <span dir="auto">{line.title} </span>}
-              <span className="ib-riskq-ref">{line.ref}</span>
-            </li>
-          ))}
+          {listed.map((key) => {
+            const line = lineOf(key, byKey.get(key));
+            return (
+              <li key={key} data-pull-risk-waiting-pull={key}>
+                {line.title && <span dir="auto">{line.title} </span>}
+                <span className="ib-riskq-ref">{line.ref}</span>
+              </li>
+            );
+          })}
           {listed.length < count && <li className="ib-riskq-ref">+{count - listed.length} more</li>}
         </ul>
         {choice.error && (
@@ -83,10 +88,10 @@ function RiskWaitingAsk({ shown, onAnswer, onClose }: { shown: Shown; onAnswer: 
           </p>
         )}
         <div className="ib-acts-row ib-riskd-acts">
-          <button type="button" className="ib-btn" onClick={notNow} disabled={choice.busy} data-pull-risk-waiting-not-now="">
+          <button type="button" className="ib-btn" onClick={() => act(choice.notNow)} disabled={choice.busy} data-pull-risk-waiting-not-now="">
             Not now
           </button>
-          <button type="button" className="ib-btn ib-pri" onClick={() => void choice.makeNow()} disabled={choice.busy} data-pull-risk-waiting-make-now="">
+          <button type="button" className="ib-btn ib-pri" onClick={() => act(choice.makeNow)} disabled={choice.busy} data-pull-risk-waiting-make-now="">
             Make them now
           </button>
         </div>

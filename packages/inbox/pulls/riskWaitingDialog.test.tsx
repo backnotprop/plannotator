@@ -1,12 +1,14 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullRiskAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { pullsStateOf } from './reviewsTestState';
+import type { PullsState } from './usePulls';
 
 const hasDom = typeof document !== 'undefined';
 const { inboxApi } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
+const { RISK_ASK_TIMING } = (hasDom ? await import('./riskAskGate') : {}) as typeof import('./riskAskGate');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 
 const key = (n: number) => `github.com/n/b#${n}`;
@@ -38,6 +40,7 @@ const pull = (number: number, title: string) =>
     merged_at: null,
   }) as unknown as InboxPull;
 
+const listOf = (pulls: InboxPull[]) => ({ ...LIST, pulls }) as InboxPullsAnswer;
 const LIST = {
   fetched_at: '2026-11-03T10:00:00.000Z',
   hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }],
@@ -64,6 +67,8 @@ const ANSWER: InboxPullRiskAnswer = {
 
 let root: Root | null = null;
 const restores: (() => void)[] = [];
+const TIMING = { ...RISK_ASK_TIMING };
+beforeEach(() => Object.assign(RISK_ASK_TIMING, { settleMs: 40, guardMs: 40, tickMs: 5 }));
 const spy = <K extends keyof typeof inboxApi>(name: K, impl: (typeof inboxApi)[K]) => {
   const made = spyOn(inboxApi, name).mockImplementation(impl as never);
   restores.push(() => made.mockRestore());
@@ -73,10 +78,10 @@ const settle = async () => {
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   });
 };
-const page = (threadId: string | null = null) => (
+const page = (threadId: string | null = null, state: PullsState = pullsStateOf(LIST)) => (
   <SidebarProvider>
     <PullsPage
-      state={pullsStateOf(LIST)}
+      state={state}
       stackId={null}
       threadId={threadId}
       project={null}
@@ -93,17 +98,47 @@ const page = (threadId: string | null = null) => (
     />
   </SidebarProvider>
 );
-const mount = async (threadId: string | null = null) => {
+const mount = async (threadId: string | null = null, state?: PullsState) => {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root!.render(page(threadId)));
+  await act(async () => root!.render(page(threadId, state)));
+  await settle();
+};
+const rerender = async (state: PullsState) => {
+  await act(async () => root!.render(page(null, state)));
+  await settle();
+};
+const wait = async (ms: number) => {
+  await act(async () => new Promise((resolve) => setTimeout(resolve, ms)));
   await settle();
 };
 const click = async (selector: string) => {
   await act(async () => document.querySelector<HTMLElement>(selector)!.click());
   await settle();
+};
+const press = async (target: Element) => {
+  await act(async () => {
+    target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    target.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await settle();
+};
+const keyOn = async (target: Element, name: string, repeat = false) => {
+  await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, repeat, bubbles: true, cancelable: true })));
+  await settle();
+};
+const button = (name: 'not-now' | 'make-now') => document.querySelector(`[data-pull-risk-waiting-${name}]`)!;
+const SETTLED = 60;
+const opened = async () => {
+  for (let i = 0; i < 200 && !asking(); i++) await wait(2);
+  expect(asking()).not.toBeNull();
+};
+const armed = async () => {
+  for (let i = 0; i < 50 && !document.querySelector('[data-pull-risk-waiting-armed]'); i++) await wait(10);
+  expect(document.querySelector('[data-pull-risk-waiting-armed]')).not.toBeNull();
 };
 const asking = () => document.querySelector('[data-dialog="pull-risk-waiting"]');
 const sentTo = (sent: unknown[], answer: (input: unknown) => InboxPullRiskAnswer = () => ANSWER) =>
@@ -116,47 +151,98 @@ afterEach(async () => {
   root = null;
   document.body.innerHTML = '';
   for (const restore of restores.splice(0)) restore();
+  Object.assign(RISK_ASK_TIMING, TIMING);
 });
 
-test.skipIf(!hasDom)('on Reviews it asks with the count and the titles; Escape is Not now for exactly those keys and it stays closed', async () => {
-  spy('pullRisk', async () => ANSWER);
+test.skipIf(!hasDom)('after a calm moment on Reviews it asks with the count and titles; a press right at open does nothing; Not now sends exactly the shown keys; keys arriving meanwhile wait for a new calm moment', async () => {
+  let answer = ANSWER;
+  spy('pullRisk', async () => answer);
   const sent: unknown[] = [];
-  sentTo(sent);
+  sentTo(sent, () => answer);
   await mount();
+  expect(asking()).toBeNull();
+  await opened();
   expect(asking()!.querySelector('h2')!.textContent).toBe('2 already rank High');
   expect(asking()!.querySelector('p')!.textContent).toBe('You turned on guided reviews for High. Make one for each now?');
-  expect([...asking()!.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Refund to the card n/b #1', 'Waive the card fee n/b #2']);
-  await act(async () => asking()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
-  await settle();
+  expect([...asking()!.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Refund to the card n/b#1', 'Waive the card fee n/b#2']);
+  await press(button('not-now'));
+  expect(sent).toEqual([]);
+  answer = { ...ANSWER, auto_waiting: [key(1), key(2), key(3)] };
+  await rerender(pullsStateOf(listOf([...LIST.pulls])));
+  expect(asking()!.getAttribute('data-dialog')).toBe('pull-risk-waiting');
+  expect(asking()!.querySelectorAll('li')).toHaveLength(2);
+  await armed();
+  await keyOn(button('not-now'), 'Enter', true);
+  expect(sent).toEqual([]);
+  await press(button('not-now'));
   expect(sent).toEqual([{ not_now: true, keys: [key(1), key(2)] }]);
   expect(asking()).toBeNull();
+  await wait(5);
+  expect(asking()).toBeNull();
+  await opened();
+  expect(asking()!.querySelector('h2')!.textContent).toBe('1 already ranks High');
+  expect(asking()!.querySelector('p')!.textContent).toBe('You turned on guided reviews for High. Make one now?');
 });
 
-test.skipIf(!hasDom)('Make them now asks for exactly the shown keys and closes; with starting agents off it says why and stays', async () => {
+test.skipIf(!hasDom)('a held Escape does nothing; the backdrop is Not now and a failed one says so and stays; Make them now sends the shown keys, says why when agents are off, and closes', async () => {
   spy('pullRisk', async () => ANSWER);
   const sent: unknown[] = [];
-  let off = true;
+  let fail: unknown = 'down';
   spy('savePullRisk', async (input) => {
     sent.push(input);
-    if (off) throw new Error('Starting agents from the Inbox is off in Settings → Agents.');
+    if (fail) throw fail;
     return { ...ANSWER, auto_waiting: [] };
   });
   await mount();
-  await click('[data-pull-risk-waiting-make-now]');
+  await opened();
+  await armed();
+  const dialog = asking()!;
+  await keyOn(dialog, 'Escape', true);
+  expect(sent).toEqual([]);
+  await press(dialog);
+  expect(sent).toEqual([{ not_now: true, keys: [key(1), key(2)] }]);
+  expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('That could not be saved.');
+  fail = new Error('Starting agents from the Inbox is off in Settings → Agents.');
+  await press(button('make-now'));
   expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('Starting agents from the Inbox is off in Settings → Agents.');
-  off = false;
-  await click('[data-pull-risk-waiting-make-now]');
-  expect(sent).toEqual([
+  fail = null;
+  await press(button('make-now'));
+  expect(sent.slice(1)).toEqual([
     { make_now: true, keys: [key(1), key(2)] },
     { make_now: true, keys: [key(1), key(2)] },
   ]);
   expect(asking()).toBeNull();
 });
 
+test.skipIf(!hasDom)('it waits for the list, a focused field and another open dialog; past five it lists four and "+N more"; a title the list brings later fills in', async () => {
+  const keys = [1, 2, 3, 4, 5, 6].map(key);
+  spy('pullRisk', async () => ({ ...ANSWER, auto_waiting: keys }));
+  await mount(null, pullsStateOf(null));
+  await wait(SETTLED * 2);
+  expect(asking()).toBeNull();
+  const field = document.body.appendChild(document.createElement('input'));
+  field.focus();
+  await rerender(pullsStateOf(listOf([pull(2, 'Waive the card fee')])));
+  await wait(SETTLED * 2);
+  expect(asking()).toBeNull();
+  const other = document.body.appendChild(document.createElement('dialog'));
+  other.setAttribute('open', '');
+  field.blur();
+  field.remove();
+  await wait(SETTLED * 2);
+  expect(asking()).toBeNull();
+  other.remove();
+  await opened();
+  expect([...asking()!.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['n/b#1', 'Waive the card fee n/b#2', 'n/b#3', 'n/b#4', '+2 more']);
+  await rerender(pullsStateOf(listOf([pull(1, 'Refund to the card'), pull(2, 'Waive the card fee')])));
+  expect(asking()!.querySelector('li')!.textContent).toBe('Refund to the card n/b#1');
+});
+
 test.skipIf(!hasDom)('never over a thread, nor for what was put off; never beside Risk rules, nor after its own question asked about the same keys', async () => {
   spy('pullRisk', async () => ANSWER);
   spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
   await mount('thread-1');
+  await wait(SETTLED * 2);
   expect(asking()).toBeNull();
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
@@ -168,6 +254,7 @@ test.skipIf(!hasDom)('never over a thread, nor for what was put off; never besid
   const sent: unknown[] = [];
   sentTo(sent);
   await mount();
+  await wait(SETTLED * 2);
   expect(asking()).toBeNull();
   await click('[data-pulls-risk-chip]');
   await click('[data-pulls-risk-rules]');
@@ -178,11 +265,13 @@ test.skipIf(!hasDom)('never over a thread, nor for what was put off; never besid
   await click('[data-pull-risk-not-now]');
   expect(sent.at(-1)).toEqual({ not_now: true, keys: [key(1), key(2)] });
   expect(document.querySelector('[data-pull-risk-ranked]')).toBeNull();
+  await wait(SETTLED * 2);
   expect(asking()).toBeNull();
 
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
   answer = { ...ANSWER, auto_dismissed: [key(1), key(2)] };
   await mount();
+  await wait(SETTLED * 2);
   expect(asking()).toBeNull();
 });

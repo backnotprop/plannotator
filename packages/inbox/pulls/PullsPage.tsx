@@ -161,7 +161,6 @@ export interface PullsPageProps {
 
 const NO_JUDGMENTS: RiskJudgments = {};
 const NO_ROWS: readonly InboxReviewRow[] = [];
-const NO_PULLS: readonly InboxPull[] = [];
 const NO_LINKS: InboxPullsAnswer['links'] = {};
 const NO_FAILURES: RiskFailures = {};
 
@@ -338,7 +337,7 @@ export function PullsPage(given: PullsPageProps) {
           }}
         />
       )}
-      <RiskWaitingDialog answer={risk.answer} pulls={model?.pulls ?? NO_PULLS} blocked={rulesOpen || !!props.threadId} asked={riskAsked.current} onAnswer={risk.setAnswer} />
+      <RiskWaitingDialog answer={risk.answer} pulls={model?.pulls ?? null} blocked={rulesOpen || !!props.threadId} asked={riskAsked.current} onAnswer={risk.setAnswer} />
     </section>
   );
 
