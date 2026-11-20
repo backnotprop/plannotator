@@ -370,7 +370,8 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
         className="ib-chk-tick"
         data-action-tick=""
         aria-pressed={pending}
-        aria-label={`Done: ${action.prompt}`}
+        // A skip waiting in the draft is named as the question card names its skipped button: "Unskip", pressed.
+        aria-label={`${pending && result?.outcome === 'skip' ? 'Unskip' : 'Done'}: ${action.prompt}`}
         // aria-disabled, not disabled: a disabled button drops keyboard focus to the page. mark() ignores clicks while busy.
         aria-disabled={busy || undefined}
         onClick={onTick}

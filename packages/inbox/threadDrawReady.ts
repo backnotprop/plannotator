@@ -22,7 +22,8 @@
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { Block } from '@plannotator/ui/types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
-import { areLanguagesAttached, areThemesAttached, getFiletypeFromFileName, getHighlighterIfLoaded } from '@pierre/diffs';
+import { areLanguagesAttached, areThemesAttached, getFiletypeFromFileName, getHighlighterIfLoaded, registerCustomTheme, resolveTheme } from '@pierre/diffs';
+import { connectCustomSyntaxThemes, type CustomSyntaxPierre } from '@plannotator/ui/utils/customSyntaxThemes';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { ensureHighlight, forgetHighlightRejection, highlightRejection } from '@plannotator/ui/utils/codeHighlight';
 import { failedChunkUrl } from '@plannotator/ui/components/LazyBlockBoundary';
@@ -52,6 +53,8 @@ export function setThreadFenceTheme(next: string): void {
   theme = next;
 }
 export function setDiffThemes(next: ThemePair | undefined): void {
+  // A custom theme's code colours are themes Pierre resolves by name (customSyntaxThemes.ts).
+  connectCustomSyntaxThemes({ registerCustomTheme, resolveTheme } as unknown as CustomSyntaxPierre);
   diffThemes = next ?? DEFAULT_SYNTAX_THEME;
 }
 

@@ -182,6 +182,11 @@ async function headerOf(path: string): Promise<HTMLElement> {
   return box;
 }
 
+async function flip(header: HTMLElement) {
+  await act(async () => header.querySelector<HTMLButtonElement>('[data-semantic-note]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-semantic-file-popover] [role="switch"]')].at(-1)!.click());
+}
+
 const touchAt = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, composed: true }), { changedTouches: [{ clientX: x, clientY: 0 }] });
 
 async function pressArrow(gesture: string | Event[] = 'click', marker = 'data-expand-button') {
@@ -224,7 +229,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(reads.sort()).toEqual(['a.ts', 'b.ts']);
     expect(asked.sort()).toEqual(['a.ts', 'b.ts']);
     expect([...items.values()].every((item) => item.fileDiff.isPartial === false)).toBe(true);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.getAttribute('aria-label')).toContain('1 moved');
   });
 
   test.skipIf(!hasDom)('nothing to say, an unsupported file or texts that do not fit the patch: no note, the plain diff', async () => {
@@ -281,9 +286,9 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(calls).toBe(2);
     expect(asked).toEqual(['a.ts']);
     expect([...items.values()][0]!.fileDiff.semanticOperations).toBeUndefined();
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect(offered?.textContent).toContain('1 moved');
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    expect(header.querySelector('[data-semantic-note="off"]')?.getAttribute('aria-label')).toContain('1 moved');
+    await flip(header);
     expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
@@ -331,9 +336,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       await options.loadDiffFiles({ name: 'a.ts' });
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect([offered?.dataset.semanticNote, offered?.getAttribute('aria-label')?.includes('1 moved')]).toEqual(['off', true]);
+    await flip(header);
     expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
@@ -359,7 +365,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
     const note = (await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]');
-    expect([note?.dataset.semanticNote === 'working', note?.textContent?.includes('1 moved')]).toEqual([false, true]);
+    expect([note?.dataset.semanticNote === 'working', note?.getAttribute('aria-label')?.includes('1 moved')]).toEqual([false, true]);
   });
 
   for (const [when, engineMs, settleMs] of [['before the engine answers', 400, 40], ['while its answer waits to be drawn', 20, 80]] as const) {
@@ -381,9 +387,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
         await options.loadDiffFiles({ name: 'a.ts' });
         await new Promise((resolve) => setTimeout(resolve, 700));
       });
-      const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-      expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
-      await act(async () => offered!.click());
+      const header = await headerOf('a.ts');
+      const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note]');
+      expect([offered?.dataset.semanticNote, offered?.getAttribute('aria-label')?.includes('1 moved')]).toEqual(['off', true]);
+      await flip(header);
       expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
     });
   }
@@ -662,10 +669,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop });
-    const tap = async (path: string) => {
-      const note = (await headerOf(path)).querySelector<HTMLButtonElement>('[data-semantic-note="off"]')!;
-      await act(async () => note.click());
-    };
+    const tap = async (path: string) => flip(await headerOf(path));
     const held = () => [...document.querySelectorAll<HTMLElement>('div')].map((element) => element.style.paddingBottom).find(Boolean) ?? '';
     return { ...page, tap, held };
   }
@@ -686,6 +690,53 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.held()).toBe('800px');
   });
 
+  async function settled(page: { held: () => string }, content: () => number) {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return content() + (parseFloat(this.style.paddingBottom) || 0);
+      },
+    });
+    return async () => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      });
+      return page.held();
+    };
+  }
+
+  test.skipIf(!hasDom)('two quick taps at the end of the page settle back to the length the page had before the first', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts', 'b.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('b.ts');
+    await page.tap('a.ts');
+    content = 9_400;
+    expect(await settle()).toBe('600px');
+  });
+
+  test.skipIf(!hasDom)('a fling into the padding right after a tap is not pulled back up when the hold settles', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('a.ts');
+    content = 9_700;
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: 9_400 });
+    expect(await settle()).toBe('400px');
+  });
+
+  test.skipIf(!hasDom)('a hold that settled to nothing is not picked up by a later toggle on a page that now fits', async () => {
+    let content = 10_000;
+    const page = await atTheEnd(['a.ts'], 10_000 - 700);
+    const settle = await settled(page, () => content);
+    await page.tap('a.ts');
+    expect(await settle()).toBe('');
+    content = 700;
+    for (const element of document.querySelectorAll('div')) Object.defineProperty(element, 'scrollTop', { configurable: true, value: 0 });
+    await page.tap('a.ts');
+    expect(await settle()).toBe('');
+  });
+
   test.skipIf(!hasDom)('a file taller than what is left below the window holds the page even with more than a screen left', async () => {
     const page = await atTheEnd(['a.ts'], 10_000 - 700 - 900);
     page.resize('a.ts', 3000);
@@ -704,13 +755,14 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await engaged.land();
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
-    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
-    const name = offered?.getAttribute('aria-label');
-    await act(async () => offered!.click());
+    const header = await headerOf('a.ts');
+    const offered = header.querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
+    expect([offered?.textContent, offered?.dataset.semanticNote, header.querySelector('.line-through')]).toEqual(['sem1', 'off', null]);
+    await flip(header);
     expect(engaged.swapped('a.ts')).toBe(true);
+    expect(document.querySelector('[data-semantic-file-popover] [role="switch"]')?.isConnected).toBe(true);
     const shown = (await headerOf('a.ts')).querySelector('[data-semantic-note]');
-    expect([shown?.getAttribute('aria-pressed'), shown?.getAttribute('aria-label')]).toEqual(['true', name]);
+    expect([shown?.getAttribute('data-semantic-note'), shown?.getAttribute('aria-label')]).toEqual(['semantic', 'Semantic changes for a.ts: 1 moved']);
   });
 
   test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
@@ -870,12 +922,12 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     expect(page.drawnKey('a.ts')).not.toContain(':c1');
-    const shown = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect(shown?.dataset.semanticNote).toBe('semantic');
-    await act(async () => shown!.click());
-    const off = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
-    expect(off?.dataset.semanticNote).toBe('off');
-    await act(async () => off!.click());
+    const shown = await headerOf('a.ts');
+    expect(shown.querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('semantic');
+    await flip(shown);
+    const off = await headerOf('a.ts');
+    expect(off.querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
+    await flip(off);
     expect(page.drawnKey('a.ts')).toContain(':c1');
   });
 
@@ -890,7 +942,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
     await page.land();
     expect(page.drawnKey('a.ts')).toContain(':c2');
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('2 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('Semantic changes for a.ts: 2 moved');
   });
 
   test.skipIf(!hasDom)('turning Power Up off after the switch was turned on by hand offers the answer without it, and leaves the drawn file alone', async () => {

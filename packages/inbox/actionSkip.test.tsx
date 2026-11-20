@@ -4,7 +4,8 @@
  * into the reply draft like Done. Failures to catch: Skip asking for words or
  * sending a note; a skipped row offering a note field, reading as Done (a
  * check, a "Done" chip, struck through words), or still holding the card's
- * Stopped badge and watching line; the header counting a skip as done or
+ * Stopped badge and watching line; its dot named "Done" to a screen reader;
+ * the header counting a skip as done or
  * dropping it from the total; the tick not taking a skip back; the next open
  * item not opening; a sent skip reading as a Done; the reply box, its sent list
  * and the Draft label calling a skip something else.
@@ -144,6 +145,8 @@ test.skipIf(!hasDom)('a skip in the draft: quiet, the skip arrow and "Skipped" c
 
   const tick = row.querySelector<HTMLButtonElement>('[data-action-tick]')!;
   expect(tick.getAttribute('aria-pressed')).toBe('true');
+  // Never "Done: …, pressed" on a skipped row: the question card's own word for a skip that can be taken back.
+  expect(tick.getAttribute('aria-label')).toBe('Unskip: Approve the production deploy on Vercel');
   click(tick);
   await settle();
   expect(marks).toEqual([null]);
