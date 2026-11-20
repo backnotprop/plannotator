@@ -43,11 +43,14 @@
  *   `grant_type=authorization_code`, `code`, the same `redirect_uri` byte for byte and `code_verifier`; its errors are
  *   `{ "error": "<words>" }`. A code lives 120 seconds and is spent on its first lookup, so a second exchange with it
  *   always fails. The answer is `{ access_token, token_type, expires_at }` with no name: the name is `GET /v1/me`'s.
- * - The "tool connect" page on `/cli/login` (names as built on the Spaces side, 2026-11-20; read from its report, not
- *   run): `client_name` (a name it does not know is `400`), `space` (the press claims it for the person; another
- *   owner sends back `error=claim_conflict&state` with no code) and `approve_document` + `approve_version` (the press
- *   records the approval of that page at that version, and the way back carries `approval=recorded|moved|none`, only
- *   when `approve_document` was sent; `moved`: the page is at another version there). Cancel sends back
+ * - The "tool connect" page on `/cli/login` (names as built on the Spaces side, 2026-11-20; run against its test copy
+ *   in T14f): `client_name` (a name it does not know is `400`), `space` and `approve_document` + `approve_version`.
+ *   A `space` the person may claim when the page is drawn (no owner, or theirs) makes it the "becomes your space"
+ *   page: the press claims it and records the approval (the way back carries `approval=recorded|moved|none`, only
+ *   when `approve_document` was sent; `moved`: the page is at another version there); taken by someone else between
+ *   the drawing and the press, the way back is `error=claim_conflict&state` with no code. A space someone else owns
+ *   when the page is drawn gets the plain connect page: the press only signs in (a code and state, nothing else;
+ *   no claim, no approval), and the tool's own claim then answers `409 claim_conflict`. Cancel sends back
  *   `error=access_denied&state` only when `client_name` was sent; without it, Cancel is a link to the site's home and
  *   nothing comes back. Not from the contract: a `space` it does not hold claims nothing (and its approval is `none`).
  */
@@ -200,13 +203,21 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
   const faults: { match: (call: { method: string; path: string }) => boolean; status: number; code: string; times: number; details?: Record<string, unknown>; after?: boolean }[] = [];
   let signInAs = "Maya Chen";
 
-  type FakeLogin = { challenge: string; redirect: string; state: string; clientName: string | null; space: string | null; approveDocument: string | null; approveVersion: string | null };
+  type FakeLogin = { challenge: string; redirect: string; state: string; clientName: string | null; space: string | null; approveDocument: string | null; approveVersion: string | null; claimable: boolean };
   /** Pages shown (`login: "page"`), waiting for Allow or Cancel. */
   const pressing = new Map<string, FakeLogin>();
-  /** Allow pressed: the claim of a space named, the approval sent with it, then back with a code (or the claim lost). */
+  /** A space the page may claim for the person when it is drawn: no owner yet, or theirs. */
+  const claimableAtDraw = (id: string | null) => {
+    const space = id ? spaces.get(id) : undefined;
+    return !!space && !space.deleted && (space.owner === null || space.owner === signInAs);
+  };
+  /**
+   * Allow pressed. A page drawn for a space it may claim: the claim, the approval sent with it, then back with a code
+   * (or the claim lost, when someone else took it since). A page drawn for a space someone else owns: a code only.
+   */
   function press(login: FakeLogin): string {
     const back = new URL(login.redirect);
-    const space = login.space ? spaces.get(login.space) : undefined;
+    const space = login.space && login.claimable ? spaces.get(login.space) : undefined;
     const held = space && !space.deleted ? space : undefined;
     if (held && held.owner !== null && held.owner !== signInAs) {
       back.searchParams.set("error", "claim_conflict");
@@ -218,7 +229,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     codes.set(code, { challenge: login.challenge, redirect: login.redirect, name: signInAs, until: Date.now() + 120_000 });
     back.searchParams.set("code", code);
     back.searchParams.set("state", login.state);
-    if (login.approveDocument !== null) {
+    if (login.approveDocument !== null && login.claimable) {
       const doc = held?.documents.find((d) => d.id === login.approveDocument);
       const current = doc?.versions[doc.versions.length - 1]?.version;
       let approval = "none";
@@ -294,7 +305,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!loopbackRedirect(redirect) || !PKCE_VALUE.test(challenge) || !state || url.searchParams.get("code_challenge_method") !== "S256") return done(new Response("bad sign-in request", { status: 400 }));
       const clientName = url.searchParams.get("client_name");
       if (clientName !== null && !CLIENT_NAMES.has(clientName)) return done(new Response("unknown client_name", { status: 400 }));
-      const login = { challenge, redirect, state, clientName, space: url.searchParams.get("space"), approveDocument: url.searchParams.get("approve_document"), approveVersion: url.searchParams.get("approve_version") };
+      const login = { challenge, redirect, state, clientName, space: url.searchParams.get("space"), approveDocument: url.searchParams.get("approve_document"), approveVersion: url.searchParams.get("approve_version"), claimable: claimableAtDraw(url.searchParams.get("space")) };
       if ((settings.login ?? "auto") === "auto") return done(new Response(null, { status: 302, headers: { Location: (settings.consent ?? "allow") === "allow" ? press(login) : cancelled(login) } }));
       const ticket = randomBytes(12).toString("hex");
       pressing.set(ticket, login);

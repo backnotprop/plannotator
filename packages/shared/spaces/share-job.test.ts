@@ -547,17 +547,49 @@ describe("Keep this space", () => {
     expect(s.record().approval).toBeNull();
   });
 
-  test("someone else kept it first: the claim on the sign-in page is lost, no token comes, and the panel is told", async () => {
-    const s = setup();
+  test("someone else kept it between the page and the press: the claim on the page is lost, no token comes, and the panel is told", async () => {
+    const holder: { s: ReturnType<typeof setup> | null } = { s: null };
+    const s = setup({
+      spaces: { login: "page" },
+      jobs: {
+        // The page is drawn while the space is free; someone else keeps it; then Allow is pressed.
+        openBrowser: async (url) => {
+          const t = holder.s!;
+          t.opened.push(url);
+          const page = await (await t.spaces.fetch(url)).text();
+          t.spaces.keptBy(t.record().space_id, "Someone Else");
+          const press = await t.spaces.fetch(`${HOST}${/href="(\/cli\/login\/allow[^"]+)"/.exec(page)![1]}`, { redirect: "manual" });
+          await fetch(press.headers.get("location")!);
+          return "opened";
+        },
+      },
+    });
+    holder.s = s;
     s.jobs.share(s.world.plan, {});
     await s.settle();
-    s.spaces.keptBy(s.record().space_id, "Someone Else");
     await s.jobs.keep(s.world.plan);
     await s.settle();
     expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "refused", kept: false, signed_in: false, keep: null });
     expect(s.record().refused).toBe(true);
     expect(s.spaces.exchanges).toHaveLength(0);
     expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Someone Else");
+  });
+
+  test("someone else owned it when the page was drawn: a sign-in only; our own claim gets 409, and the space is never shown as kept", async () => {
+    const s = setup();
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    s.spaces.keptBy(s.record().space_id, "Someone Else");
+    await s.jobs.keep(id);
+    await s.settle();
+    // The page signed in only (a code, no claim); the claim that says whose it is was ours, and it lost.
+    const claims = s.spaces.calls.filter((c) => c.method === "POST" && c.path.endsWith("/claim"));
+    expect(claims.map((c) => [c.signedIn, c.status, c.code])).toEqual([[true, 409, "claim_conflict"]]);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "refused", kept: false, signed_in: true, keep: null });
+    expect([s.record().kept, s.record().refused, s.record().approval]).toEqual([false, true, null]);
+    expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Someone Else");
+    expect(s.spaces.spaces.get(s.record().space_id)!.approvals).toEqual([]);
   });
 
   test("a sign-in given up changes nothing; from a remote window there is no browser to come back", async () => {

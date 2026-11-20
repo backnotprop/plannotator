@@ -131,14 +131,32 @@ describe("the connect page", () => {
     expect(spaces.exchanges).toHaveLength(0);
   });
 
-  test("a space someone else kept first: the claim is lost, no token and nothing traded", async () => {
+  test("a space taken by someone else between the page and the press: the claim is lost, no token and nothing traded", async () => {
+    const spaces = createFakeSpaces({ origin: HOST, login: "page" });
+    const { space, doc, version } = await sharedSpace(spaces);
+    const signIn = await startSpacesSignIn({ host: HOST, fetch: spaces.fetch, keep: { space, approve: { document: doc, version } } });
+    open.push(signIn);
+    // The page is drawn while the space is still free ("becomes your space"); someone else keeps it before the press.
+    const page = await (await spaces.fetch(signIn.url)).text();
+    spaces.keptBy(space, "Someone Else");
+    const press = await spaces.fetch(`${HOST}${/href="(\/cli\/login\/allow[^"]+)"/.exec(page)![1]}`, { redirect: "manual" });
+    const back = press.headers.get("location")!;
+    expect(new URL(back).searchParams.has("code")).toBe(false);
+    await fetch(back);
+    expect(await signIn.done).toEqual({ kind: "claim_conflict" });
+    expect(spaces.exchanges).toHaveLength(0);
+    expect(spaces.spaces.get(space)!.owner).toBe("Someone Else");
+    expect(spaces.spaces.get(space)!.approvals).toHaveLength(0);
+  });
+
+  test("a space someone else owns when the page is drawn: the plain connect, a sign-in with no claim and no approval", async () => {
     const spaces = createFakeSpaces({ origin: HOST });
     const { space, doc, version } = await sharedSpace(spaces);
     spaces.keptBy(space, "Someone Else");
     const { back, result } = await signInWith(spaces, spaces.fetch, { space, approve: { document: doc, version } });
-    expect(new URL(back!).searchParams.has("code")).toBe(false);
-    expect(result).toEqual({ kind: "claim_conflict" });
-    expect(spaces.exchanges).toHaveLength(0);
+    expect([...new URL(back!).searchParams.keys()].sort()).toEqual(["code", "state"]);
+    // A sign-in, not a Keep: the space is still the other person's, and nothing was approved.
+    expect(result).toMatchObject({ kind: "signed_in", approval: "none" });
     expect(spaces.spaces.get(space)!.owner).toBe("Someone Else");
     expect(spaces.spaces.get(space)!.approvals).toHaveLength(0);
   });
