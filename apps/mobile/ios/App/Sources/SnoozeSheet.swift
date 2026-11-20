@@ -1,6 +1,19 @@
 import InboxCore
 import SwiftUI
 
+/// The time the snooze menus read: the system's clock, or, in a debug build, one a test set with `-clockAt` (an
+/// ISO 8601 moment: the clock reads it when first asked, and runs on), so a test of the menu does not depend on the day.
+enum AppClock {
+  static let shift: TimeInterval = {
+    #if DEBUG
+      if let at = UserDefaults.standard.string(forKey: "clockAt"), let moment = ISO8601DateFormatter().date(from: at) { return moment.timeIntervalSinceNow }
+    #endif
+    return 0
+  }()
+
+  static func now() -> Date { Date().addingTimeInterval(shift) }
+}
+
 /// Snooze's times as a menu's items (the window's "Snooze until": Later today, Tomorrow, In 3 days, Next week, each
 /// with its real local time, then Pick a time…). Used inside a row's menu, the thread's More menu and the picks' bar.
 struct SnoozeTimes: View {
@@ -9,7 +22,7 @@ struct SnoozeTimes: View {
 
   var body: some View {
     let rules = SnoozeRules()
-    let now = Date()
+    let now = AppClock.now()
     Section(PhoneWords.snoozeUntil) {
       ForEach(rules.choices(now: now), id: \.id) { choice in
         Button {
