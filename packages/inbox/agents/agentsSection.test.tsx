@@ -254,6 +254,30 @@ test.skipIf(!hasDom)('an agent waiting on the person keeps its place, and its ro
   expect(rows()[1]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code');
 });
 
+test.skipIf(!hasDom)('Show agent status sorts waiting then working and puts the waiting count on the Agents heading, including linked machines', () => {
+  const local = [
+    agent('ses_idle_1'),
+    agent('ses_working', { status_mark: { state: 'working' } }),
+    agent('ses_waiting_1', { status_mark: { state: 'blocked', where: 'inbox' } }),
+    agent('ses_idle_2'),
+  ];
+  const linked = [
+    agent('ses_waiting_2', { status_mark: { state: 'blocked', kind: 'question', where: 'terminal' } }),
+    agent('ses_linked_idle'),
+  ];
+  setInboxAgents([{ ...group(local, SELF), status_marks: true }, group(linked, MAC)]);
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]) })} />);
+  const groups = [...surface()!.querySelectorAll<HTMLElement>('[data-agents-machine]')];
+  expect([...groups[0]!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent)).toEqual([
+    'ses_waiting_1',
+    'ses_working',
+    'ses_idle_1',
+    'ses_idle_2',
+  ]);
+  expect([...groups[1]!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((row) => row.dataset.sidebarAgent)).toEqual(['ses_waiting_2', 'ses_linked_idle']);
+  expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toContain('2 waiting');
+});
+
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {
   const alone = machinesModel([view(SELF, 'Studio')]);
   mount(<Sidebar {...sidebarProps({ machines: alone })} />);
