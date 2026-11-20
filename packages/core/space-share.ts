@@ -26,9 +26,12 @@ export const SPACE_HTML_MAX = 16_000_000;
 export const SPACE_FILE_MAX = 104_857_600;
 /** Every file of a space nobody kept, in bytes. */
 export const SPACE_OPEN_FILES_MAX = 104_857_600;
-/** A comment's words, and its anchor as JSON, in bytes. */
+/** A comment's words, its anchor as JSON, and the whole call, in bytes. */
 export const SPACE_COMMENT_BODY_MAX = 8 * 1024;
 export const SPACE_COMMENT_ANCHOR_MAX = 16 * 1024;
+export const SPACE_COMMENT_REQUEST_MAX = 32 * 1024;
+/** Room in a comment's call for what is known only when it is sent: the version it is on, the actor, the field names. */
+const SPACE_COMMENT_CALL_ROOM = 256;
 export const SPACE_NAME_MAX = 120;
 
 export const spacePageMax = (kind: SpacePageKind) => (kind === "html" ? SPACE_HTML_MAX : SPACE_TEXT_MAX);
@@ -143,9 +146,9 @@ export interface SpaceShareRecord {
   /** The Spaces origin it went to. */
   host: string;
   space_id: string;
-  /** The create call as first made (kept so a retry sends the same call): the name, and the page and version in it. */
+  /** The create call as first made (kept so a retry sends the same call): the name, the page and version in it, and its share time (`at`). */
   name: string;
-  seed: { doc: string | null; version: number | null } | null;
+  seed: { doc: string | null; version: number | null; at?: string } | null;
   /** The create answered. */
   created: boolean;
   /** The link, exactly as the space returned it. */
@@ -155,6 +158,8 @@ export interface SpaceShareRecord {
   kept: boolean;
   /** The share was started signed in: it is never made, or gone on with, without a sign-in. */
   signed?: boolean;
+  /** Made by Share as new: its key is the plan's id and this space's own id, never one an older space has (`spaceExternalKey`). */
+  as_new?: true;
   /** Who can open it, as the space said last (`private`, `link_edit`, …); null when it has not said. */
   visibility?: string | null;
   owner: string | null;
@@ -186,7 +191,7 @@ export interface SpaceShareRecord {
   } | null;
 }
 
-export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; at: string }): SpaceShareRecord {
+export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; as_new?: boolean; at: string }): SpaceShareRecord {
   return {
     v: 1,
     host: input.host,
@@ -198,6 +203,7 @@ export function newSpaceShareRecord(input: { host: string; space_id: string; nam
     mode: input.mode,
     kept: input.kept,
     signed: input.signed === true,
+    ...(input.as_new ? { as_new: true as const } : {}),
     owner: null,
     refused: false,
     pages: {},
@@ -227,7 +233,9 @@ export function isSpaceShareRecord(value: unknown): value is SpaceShareRecord {
     typeof value.kept === "boolean" &&
     isObject(value.pages) &&
     isObject(value.files) &&
-    isObject(value.comments)
+    isObject(value.comments) &&
+    (value.seed === null || (isObject(value.seed) && (value.seed.at === undefined || typeof value.seed.at === "string"))) &&
+    (value.as_new === undefined || value.as_new === true)
   );
 }
 
@@ -244,12 +252,28 @@ export interface SpaceImported {
 }
 
 /**
- * The fields a call carries to say where a version or a comment came from. The engine hands every version and
- * comment it sends through here. Today it adds nothing: the hosted side does not take them yet and their names are
- * not final, and an unknown field is refused there. When it does, this is the one place to write them.
+ * The fields a call carries to say where a version or a comment came from (the hosted "imported" actor). The engine
+ * hands every version and comment it sends through here, with its origin and the time of this share run. Today only
+ * that time goes (`at`): no author's name, no agent and not the version's or comment's own time, until the owner says
+ * those go up. Sending them is a change here and nowhere else: `origin` already holds them.
+ *
+ * A Spaces server without this shape refuses it (`422 validation_error`: unknown fields are refused), so a share needs
+ * one with it. Nothing checks for that: the switch stays off until the server it points at has it.
  */
-export function spaceImportedFields(_origin: SpaceImported | null): Record<string, unknown> {
-  return {};
+export function spaceImportedFields(_origin: SpaceImported | null, sharedAt: string): { actor: { kind: "imported"; at: string } } {
+  return { actor: { kind: "imported", at: sharedAt } };
+}
+
+/**
+ * The hosted space's key for this plan, sent on a signed-in create only (a key with no account is refused): its `pln_`
+ * id, or for a Share as new `<pln id>:<the new space's id without ws_>`, a key no other space ever had, since a create
+ * naming a key the person already has answers that space. Null when it would not be a key the service takes.
+ */
+export const SPACE_EXTERNAL_KEY_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
+export function spaceExternalKey(planId: string | null | undefined, signedIn: boolean, asNewSpace: string | null = null): string | null {
+  if (!signedIn || typeof planId !== "string") return null;
+  const key = asNewSpace ? `${planId}:${asNewSpace.replace(/^ws_/, "")}` : planId;
+  return SPACE_EXTERNAL_KEY_RE.test(key) ? key : null;
 }
 
 /** A comment's origin: the person's display name when one is kept, its agent fields, and when it was made. */
@@ -329,13 +353,84 @@ export interface SpaceSharePlan {
 const annotationOf = (comment: PlanComment): Record<string, unknown> => (isObject(comment.anchor) ? comment.anchor : {});
 
 /**
- * A comment's anchor as it goes up: where it is and what it says, and nothing about who or when. Left here: its
- * pictures (paths on this computer), the commenter's name and the people it names (a space nobody kept is open to
- * every holder of its link), and when it was made.
+ * A picture's reference as it may go up: a web address, or a reference relative to the page that stays inside the
+ * plan. Null for anything that names this computer: an absolute path (`/`, `~`, `\\`, a drive letter), a `file:` or
+ * other address, or `..` that climbs out of the plan.
+ */
+export function spaceImageSrc(src: unknown): string | null {
+  if (typeof src !== "string" || src.length === 0) return null;
+  if (/^https?:\/\//i.test(src)) return src;
+  if (/^[\/\\~]/.test(src) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(src)) return null;
+  let depth = 0;
+  for (const name of src.split(/[\/\\]/)) {
+    if (name === "..") depth--;
+    else if (name !== "" && name !== ".") depth++;
+    if (depth < 0) return null;
+  }
+  return src;
+}
+
+/**
+ * A comment's anchor as it goes up: where it is and what it says (what the space's parsers need to place it), and
+ * nothing about who or when. An allow-list: its id, type, words and selected text, the block and offset fields, an
+ * answer to a question block, and the own position fields of the diagram, HTML, picture, math and diff anchors and of
+ * their extra targets (a picture's reference only when it is a web address or relative inside the plan). Left here:
+ * pictures, the commenter's name and the people it names, the tool that made it, page, PR and artifact addresses, an
+ * element's description, local paths and its time.
  */
 export function spaceCommentAnchor(comment: PlanComment): Record<string, unknown> {
-  const { images: _images, author: _author, mentions: _mentions, createdA: _createdA, ...rest } = annotationOf(comment);
-  return rest;
+  // Field by field: never a tool's or agent's name, a local path, a page or repository address, an element's
+  // description or anything added later. A space nobody kept is open to its link.
+  const a = annotationOf(comment);
+  const out: Record<string, unknown> = {};
+  const copy = (from: Record<string, unknown>, to: Record<string, unknown>, strings: string[], numbers: string[], booleans: string[] = []) => {
+    for (const key of strings) if (typeof from[key] === "string") to[key] = from[key];
+    for (const key of numbers) if (typeof from[key] === "number" && Number.isFinite(from[key])) to[key] = from[key];
+    for (const key of booleans) if (typeof from[key] === "boolean") to[key] = from[key];
+    return to;
+  };
+  const lines = (value: unknown) => (value === null || typeof value === "number" || (Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number")) ? value : undefined);
+  const objects = (value: unknown) => (Array.isArray(value) ? value.filter(isObject) : []);
+  const diagramTarget = (d: Record<string, unknown>) => copy(d, {}, ["family", "kind", "id", "from", "to", "label"], []);
+  const htmlAnchor = (h: Record<string, unknown>) => {
+    const anchor = copy(h, {}, ["selector", "tagName", "text"], []);
+    if (isObject(h.point)) anchor.point = copy(h.point, {}, [], ["x", "y"]);
+    return anchor;
+  };
+  copy(a, out, ["id", "type", "text", "originalText", "blockId"], ["startOffset", "endOffset"]);
+  if (a.diffContext === "added" || a.diffContext === "removed" || a.diffContext === "modified") out.diffContext = a.diffContext;
+  for (const key of ["startMeta", "endMeta"]) if (isObject(a[key])) out[key] = copy(a[key] as Record<string, unknown>, {}, ["parentTagName"], ["parentIndex", "textOffset"]);
+  if (isObject(a.diagramAnchor)) {
+    const anchor = { ...copy(a.diagramAnchor, {}, [], ["v"]), ...diagramTarget(a.diagramAnchor) };
+    if (lines(a.diagramAnchor.sourceLine) !== undefined) anchor.sourceLine = a.diagramAnchor.sourceLine;
+    out.diagramAnchor = anchor;
+  }
+  if (Array.isArray(a.diagramAdditionalTargets)) out.diagramAdditionalTargets = objects(a.diagramAdditionalTargets).map(diagramTarget);
+  if (isObject(a.htmlAnchor)) out.htmlAnchor = htmlAnchor(a.htmlAnchor);
+  // An extra HTML target: its label, text and element anchor; never its element description.
+  if (Array.isArray(a.htmlAdditionalTargets))
+    out.htmlAdditionalTargets = objects(a.htmlAdditionalTargets).map((t) => {
+      const target = copy(t, {}, ["label", "text"], []);
+      if (isObject(t.anchor)) target.anchor = htmlAnchor(t.anchor);
+      return target;
+    });
+  if (Array.isArray(a.mathTargets)) out.mathTargets = objects(a.mathTargets).map((m) => copy(m, {}, ["blockId", "tex"], [], ["displayMode"]));
+  if (isObject(a.imageRegion)) {
+    const r = a.imageRegion;
+    const region = copy(r, {}, [], ["v", "naturalWidth", "naturalHeight"]);
+    const src = spaceImageSrc(r.src);
+    if (src !== null) region.src = src;
+    if (lines(r.sourceLine) !== undefined) region.sourceLine = r.sourceLine;
+    if (isObject(r.box)) region.box = copy(r.box, {}, [], ["x", "y", "w", "h"]);
+    out.imageRegion = region;
+  }
+  if (isObject(a.questionAnswer)) {
+    const q = a.questionAnswer;
+    const answer = copy(q, {}, ["key", "kind", "prompt", "other", "text", "note"], ["v", "sourceLine"], ["skipped", "by_reply"]);
+    if (Array.isArray(q.selected)) answer.selected = q.selected.filter((label) => typeof label === "string");
+    out.questionAnswer = answer;
+  }
+  return out;
 }
 
 const picturesOf = (comment: PlanComment) => {
@@ -455,7 +550,13 @@ export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | nul
     if (!up.get(doc.id)?.has(target.document_version)) continue;
     const known = record?.comments[comment.id];
     if (known && "left" in known) continue;
-    if (utf8Length(comment.body) > SPACE_COMMENT_BODY_MAX || utf8Length(JSON.stringify(spaceCommentAnchor(comment))) > SPACE_COMMENT_ANCHOR_MAX) {
+    const anchor = spaceCommentAnchor(comment);
+    if (
+      utf8Length(comment.body) > SPACE_COMMENT_BODY_MAX ||
+      utf8Length(JSON.stringify(anchor)) > SPACE_COMMENT_ANCHOR_MAX ||
+      // The whole call too: the words escaped as JSON may weigh more than they do as text.
+      utf8Length(JSON.stringify({ anchor, body: comment.body })) + SPACE_COMMENT_CALL_ROOM > SPACE_COMMENT_REQUEST_MAX
+    ) {
       details.not.long_comments++;
       continue;
     }

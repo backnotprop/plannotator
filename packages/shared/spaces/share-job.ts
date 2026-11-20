@@ -57,6 +57,7 @@ export function spaceShareSource(store: PlanStore, id: string): SpaceShareSource
     older_approvals: older,
   };
   return {
+    plan_id: id,
     local,
     versionBytes: (doc, n) => store.versionBytes(id, doc, n),
     artifactBytes: (path) => {
@@ -254,8 +255,9 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     if (!record) {
       // Whether the space is the person's own is what the space answers, never assumed here.
       const host = options.host();
-      // Started signed in: it is never made, or gone on with, without the sign-in (the person saw "Only you").
-      record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, signed: credentialOf(host) !== null, at: new Date(now()).toISOString() });
+      // Started signed in: it is never made, or gone on with, without the sign-in (the person saw "Only you"). Share as
+      // new has a key of its own (`as_new`), so it never lands in a space an older key names.
+      record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, signed: credentialOf(host) !== null, as_new: input.fresh === true, at: new Date(now()).toISOString() });
       saveSpaceShareRecord(options.dataDir, id, record);
     }
     // Waiting for Keep (the sign-in is gone, or a write was not allowed), or the space is gone: nothing is sent,
