@@ -4147,8 +4147,8 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   const moved = review.locator(`[data-guide-file-shell="${SEM_PATH}"]`);
   const plain = review.locator(`[data-guide-file-shell="${SEM_PLAIN_PATH}"]`);
   const note = moved.locator('[data-semantic-note="semantic"]');
-  await expect(note).toContainText('1 moved', { timeout: 30_000 });
-  await expect(note).toContainText('1 renamed');
+  await expect(note).toHaveAttribute('aria-label', /1 moved/, { timeout: 30_000 });
+  await expect(note).toHaveAttribute('aria-label', /1 renamed/);
   await expect(moved.locator('[data-semantic-start]').first()).toBeAttached();
   await expect(plain.locator('[data-column-number]').first()).toBeVisible();
   await expect(plain.locator('[data-semantic-note]')).toHaveCount(0);
@@ -4184,6 +4184,6 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await toggle.click();
   await page.keyboard.press('Escape');
-  await expect(moved.locator('[data-semantic-note="semantic"]')).toContainText('1 moved', { timeout: 30_000 });
+  await expect(moved.locator('[data-semantic-note="semantic"]')).toHaveAttribute('aria-label', /1 moved/, { timeout: 30_000 });
   expect(world.errors).toEqual([]);
 });

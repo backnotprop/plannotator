@@ -7,18 +7,21 @@
  * (scripts/inbox-sim.ts).
  *
  * Never audible: an init script replaces AudioContext with a stub that only
- * counts oscillators (the sound is four, so four oscillators are one ring).
+ * counts oscillators (each sound is four, so four oscillators are one ring)
+ * and the Felt note's D5 (`notes`).
  * Whether the tab is in front is set the way notifications.spec.ts sets it
  * (document.visibilityState and document.hasFocus()). A fake `tailscale`
  * that always fails is first on PATH, so the real one never runs; the update
  * check is off and points at a dead port, so nothing asks GitHub.
  *
  * Proves: a question while the tab is hidden rings once; a burst of three
- * rings once; a visible tab rings nothing; a plain reply rings under the
- * default ("for every agent message") and not under "when an agent asks you";
+ * rings once; a visible tab rings nothing; a plain reply plays the Felt note
+ * under the default ("every agent message") and nothing under "questions and
+ * new threads";
  * a question right after agent chatter still rings;
  * the sound off rings nothing (and notifications stop being silent); two tabs
- * ring once; a fresh install never shows the dialog; after an update the
+ * ring once; the two sound choices stay inside their Settings row from 320 to
+ * 1440 px; a fresh install never shows the dialog; after an update the
  * dialog shows once, in one of two tabs, and not again on reload.
  * Screenshots (light and dark) land in PLANNOTATOR_SOUND_SHOTS (default
  * .local/proof/sound/).
@@ -43,7 +46,7 @@ const VERSION = '0.29.0';
 
 declare global {
   interface Window {
-    __sound: { oscillators: number; contexts: number };
+    __sound: { oscillators: number; contexts: number; notes: number };
     __front: { visible: boolean; focused: boolean };
     __notified: { title: string; silent: boolean }[];
   }
@@ -51,9 +54,10 @@ declare global {
 
 /** Runs in every page before its own code. */
 function stubPage(): void {
-  const sound = { oscillators: 0, contexts: 0 };
+  const sound = { oscillators: 0, contexts: 0, notes: 0 };
   window.__sound = sound;
-  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  const frequency = () => ({ ...param(), setValueAtTime: (value: number) => void (Math.abs(value - 440 * Math.pow(2, 5 / 12)) < 0.01 && sound.notes++) });
   class CountingAudioContext {
     state = 'running';
     currentTime = 0;
@@ -72,7 +76,7 @@ function stubPage(): void {
     }
     createOscillator() {
       sound.oscillators++;
-      return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
+      return { type: 'sine', frequency: frequency(), connect: (to: unknown) => to, start() {}, stop() {} };
     }
   }
   (window as unknown as { AudioContext: unknown }).AudioContext = CountingAudioContext;
@@ -183,6 +187,7 @@ async function agent(world: World, name = 'Claude Code', host = 'claude-code'): 
 const config = (world: World): { inboxSound?: Record<string, unknown> } => savedConfig(world.dataDir);
 
 const rings = (page: Page) => page.evaluate(() => window.__sound.oscillators / 4);
+const notes = (page: Page) => page.evaluate(() => window.__sound.notes);
 
 /** Put the tab in front or away, with the events a browser fires when that happens. */
 async function setFront(page: Page, visible: boolean, focused: boolean): Promise<void> {
@@ -322,17 +327,19 @@ test('with the tab visible and focused nothing rings', async () => {
   expect(await rings(page)).toBe(before);
 });
 
-test('by default a plain reply rings once; a question right after it still rings (chatter never swallows a question)', async () => {
+test('by default a plain reply plays the Felt note once; a question right after it still rings (chatter never swallows a question)', async () => {
   await awayAgain(page);
   const before = await rings(page);
+  const notesBefore = await notes(page);
   const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Starting the migration now.' });
   await settled(page, started.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 1);
-  // A fresh burst, then a plain reply in that thread: it rings.
+  // A fresh burst, then a plain reply in that thread: it plays the note, not the Ding-dong.
   await awayAgain(page);
   const reply = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.', reply_to: started.thread_id as string });
   await settled(page, reply.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 2);
+  expect(await notes(page)).toBe(notesBefore + 1);
   // Another plain reply seconds later: within the burst, quiet.
   const more = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Indexes rebuilt too.', reply_to: started.thread_id as string });
   await settled(page, more.thread_id);
@@ -379,13 +386,13 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   await second.close();
 });
 
-test('Settings: the row, Play always plays, "when an agent asks you" quiets a plain message, and the switch off silences the next question (notifications ring the system again)', async () => {
+test('Settings: the row, Play always plays, "questions and new threads" rings a new thread but not a plain reply, and the switch off silences the next question (notifications ring the system again)', async () => {
   await setFront(page, true, true);
   await page.getByRole('button', { name: 'Settings' }).click();
   const block = page.locator('[data-settings-notifications]');
   const row = block.locator('[data-settings-sound]');
   await expect(row).toContainText('Play a sound');
-  await expect(row.getByRole('radio', { name: 'for every agent message' })).toBeChecked();
+  await expect(row.getByRole('radio', { name: 'every agent message' })).toBeChecked();
   await expect(row).toContainText('A reply, a new thread or a question, while no Inbox tab is in front');
   await expect(row.getByRole('slider', { name: 'Volume' })).toHaveValue('60');
   await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
@@ -395,19 +402,21 @@ test('Settings: the row, Play always plays, "when an agent asks you" quiets a pl
   await row.getByRole('button', { name: 'Play the sound' }).click();
   await expect.poll(() => rings(page)).toBe(before + 1);
 
-  // "When an agent asks you": a plain message rings nothing; the next question does.
-  await row.getByRole('radio', { name: 'when an agent asks you' }).check();
+  await row.getByRole('radio', { name: 'questions and new threads' }).check();
   await expect.poll(() => config(fresh).inboxSound?.when).toBe('asks');
-  await expect(row).toContainText('When an agent asks you, while no Inbox tab is in front');
+  await expect(row.locator('.ib-desc')).toHaveText('While no Inbox tab is in front');
   await awayAgain(page);
   const asks = await rings(page);
-  const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
-  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${plain.thread_id}`)).status()).toBe(200);
+  const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
+  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${started.thread_id}`)).status()).toBe(200);
+  await expect.poll(() => rings(page)).toBe(asks + 1);
+  await expect.poll(() => page.evaluate(() => window.__notified.at(-1))).toMatchObject({ silent: true });
+  await fresh.agents[0]!.send({ project_path: fresh.project, body: 'And the logs too.', reply_to: started.message_id });
   await quietFor(page);
-  expect(await rings(page)).toBe(asks);
+  expect(await rings(page)).toBe(asks + 1);
   const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Keep last week’s backup too?') });
   await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${asked.thread_id}`)).status()).toBe(200);
-  await expect.poll(() => rings(page)).toBe(asks + 1);
+  await expect.poll(() => rings(page)).toBe(asks + 2);
   await setFront(page, true, true);
 
   const sw = row.getByRole('switch', { name: 'Play a sound' });
@@ -425,6 +434,70 @@ test('Settings: the row, Play always plays, "when an agent asks you" quiets a pl
   expect(await rings(page)).toBe(off);
   await expect.poll(() => page.evaluate(() => window.__notified.at(-1)?.title)).toContain('Codex');
   expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(false);
+});
+
+test('Settings: the two "Play a sound" choices stay inside their row at every width, side by side at 1280 px, with the slider and the switch beside them', async () => {
+  await setFront(page, true, true);
+  await page.evaluate(() => (location.hash = '#settings/general'));
+  const row = page.locator('[data-settings-notifications] [data-settings-sound]');
+  const sw = row.getByRole('switch', { name: 'Play a sound' });
+  await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  const asks = row.getByRole('radio', { name: 'questions and new threads' });
+  await expect(asks).toBeChecked();
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  const sidebar = page.locator('.pn-inbox .ib-sb');
+  const faults = (at: string, oneLine: boolean) =>
+    row.evaluate(
+      (el, [at, oneLine]) => {
+        const box = (q: Element) => q.getBoundingClientRect();
+        const txt = box(el.querySelector('.ib-txt')!);
+        const seg = el.querySelector('.ib-sound-when')!;
+        const choices = [...seg.querySelectorAll('.ib-seg-o')];
+        const ctl = box(el.querySelector('.ib-ctl')!);
+        const out: string[] = [];
+        if (el.scrollWidth > el.clientWidth + 1) out.push(`row scrolls (${el.scrollWidth} > ${el.clientWidth})`);
+        const spage = document.querySelector('.ib-spage')!;
+        if (spage.scrollWidth > spage.clientWidth + 1) out.push(`page scrolls (${spage.scrollWidth} > ${spage.clientWidth})`);
+        for (const o of choices) {
+          if (box(o).right > Math.min(box(seg).right, txt.right) + 1) out.push(`a choice ends at ${Math.round(box(o).right)}, past the column's ${Math.round(txt.right)}`);
+          if (o.scrollWidth > o.clientWidth + 1) out.push(`a choice is cut (${o.scrollWidth} > ${o.clientWidth})`);
+        }
+        if (oneLine && new Set(choices.map((o) => Math.round(box(o).top))).size > 1) out.push('the choices are not on one line');
+        if (ctl.right > box(el).right + 1) out.push(`the controls end past the row`);
+        if (ctl.left < txt.right - 1 && ctl.top < txt.bottom - 1) out.push('the controls overlap the column');
+        const inLine = choices.reduce((sum, o) => sum + o.scrollWidth, 0) + 2 * (choices.length - 1) + 6;
+        return out.length ? `${at}: column ${Math.round(txt.width)} px, the pair in a line ${inLine} px: ${out.join('; ')}` : '';
+      },
+      [at, oneLine] as const,
+    );
+  const broken: string[] = [];
+  for (const [width, withSidebar] of [[320, false], [390, false], [768, false], [1024, false], [1280, false], [1440, false], [1280, true]] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    if (withSidebar) {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press('Control+b');
+      await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+      await expect(page.locator('.ib-sb-panel[data-hidden]')).toHaveCount(0);
+    }
+    await row.scrollIntoViewIfNeeded();
+    await expect(row.getByRole('slider', { name: 'Volume' })).toBeVisible();
+    await expect(sw).toBeVisible();
+    await page.waitForTimeout(300);
+    const name = `row-${width}${withSidebar ? '-sidebar' : ''}`;
+    const oneLine = width === 1280 && !withSidebar;
+    broken.push(await faults(name, oneLine));
+    await row.locator('xpath=..').screenshot({ path: join(shots, `${name}.png`) });
+    if (oneLine) {
+      await row.getByRole('radio', { name: 'every agent message' }).check();
+      await page.waitForTimeout(300);
+      broken.push(await faults(`${name}, every agent message chosen`, true));
+      await asks.check();
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 820 });
+  expect(broken.filter(Boolean)).toEqual([]);
 });
 
 test('after an update the dialog shows once: in one of two tabs opened together, and never again on reload', async ({ browser }) => {
