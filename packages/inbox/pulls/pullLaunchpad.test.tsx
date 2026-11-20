@@ -29,6 +29,7 @@ import { inboxPullStacks, inboxReviewRows, type InboxMessageWire, type InboxPull
 import type { InboxShapeSummary } from '../api';
 import type { PullsPageProps } from './PullsPage';
 import { pullsStateOf } from './reviewsTestState';
+import { REVIEW_ROW_AUTO_STOPPED } from './reviewsModel';
 
 const hasDom = typeof document !== 'undefined';
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
@@ -342,8 +343,8 @@ test.skipIf(!hasDom)('a live thread: Picture it and Guided review each ask once 
 test.skipIf(!hasDom)('an agent that ended without what it was asked for: the lines say it stopped, and both asks open the New review box again', async () => {
   mount(single.key, answer({ [single.key]: { ...live, guide: null, picture_it_asked_at: '2026-11-03T09:05:00.000Z', agent: { ...live.agent!, ended: true } } }));
   await settle();
-  expect(line('picture')).toBe('Picture page' + 'The agent stopped before sending a Picture page.');
-  expect(line('guide')).toBe('Guided review' + 'The agent stopped before sending a guided review.');
+  expect(line('picture')).toBe('Picture page' + REVIEW_ROW_AUTO_STOPPED.picture_it);
+  expect(line('guide')).toBe('Guided review' + REVIEW_ROW_AUTO_STOPPED.guide);
   expect(line('thread')).toContain('ended');
   expect(row()).toEqual(['diff', 'guide', 'picture']);
   await click('[data-launch-go="guide"]');

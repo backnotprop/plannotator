@@ -1,10 +1,11 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxPullStacks, type InboxPull, type InboxPullRiskAuto, type InboxPullRiskLevel } from "@plannotator/core/inbox-types";
-import { createPullRiskAuto, PULL_RISK_AUTO_RETRY_MS, PULL_RISK_AUTO_RUN_TIMEOUT_MS, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
+import { createPullRiskAuto, INBOX_PULL_RISK_AUTO_FILE, PULL_RISK_AUTO_RETRY_MS, PULL_RISK_AUTO_RUN_TIMEOUT_MS, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
 import { pullRiskAutoBody, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
+import type { PullRiskEarlier } from "./inbox-pull-risk";
 import { inboxSkillsBlockFor } from "./inbox-skills";
 import { inboxReviewSkill } from "@plannotator/core/inbox-review";
 import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
@@ -43,12 +44,14 @@ const pr = (number: number, fields: Partial<InboxPull> = {}): InboxPull => ({
   ...fields,
 });
 
-function world(initial: InboxPullRiskAuto | null = { level: "high", make: "picture_it" }, dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"))) {
+function world(initial: InboxPullRiskAuto | null = { level: "high", make: "picture_it" }, given?: string) {
+  const dataDir = given ?? mkdtempSync(join(tmpdir(), "pull-risk-auto-"));
   dirs.push(dataDir);
   let settings = initial;
   const started: PullRiskAutoJob[] = [];
   const threads = new Set<string>();
   const listed = new Map<string, InboxPull>();
+  const covered = new Set(["github.com/northwind/web-app"]);
   const levels = new Map<string, InboxPullRiskLevel>();
   const working = new Set<string>();
   const clock = { now: Date.parse("2026-11-19T09:00:00.000Z") };
@@ -61,6 +64,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
     now: () => clock.now,
     settings: () => (reads.settings++, settings),
     listed: () => [...listed.values()],
+    covered: () => covered,
     pullOf: (key) => listed.get(key) ?? null,
     stackOf: (key) => inboxPullStacks([...listed.values()]).find((stack) => stack.layers.some((layer) => layer.key === key)) ?? null,
     levelOf: (pull) => (reads.levels++, levels.get(pull.key) ?? null),
@@ -76,11 +80,16 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
       return { thread_id: thread };
     },
   });
-  const judged = (pull: InboxPull, level: InboxPullRiskLevel) => {
+  const judged = (pull: InboxPull, level: InboxPullRiskLevel, earlier: PullRiskEarlier = "none") => {
     listed.set(pull.key, pull);
     levels.set(pull.key, level);
-    auto.judged(pull, level);
+    auto.judged(pull, level, earlier);
   };
+  if (initial && !existsSync(join(dataDir, "inbox", INBOX_PULL_RISK_AUTO_FILE))) {
+    listed.set(pr(0).key, pr(0));
+    auto.resume();
+    listed.delete(pr(0).key);
+  }
   const list = (pull: InboxPull, level: InboxPullRiskLevel) => {
     listed.set(pull.key, pull);
     levels.set(pull.key, level);
@@ -91,6 +100,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
     judged,
     list,
     listed,
+    covered,
     levels,
     clock,
     reads,
@@ -179,14 +189,14 @@ test("one agent running at a time: the next starts once the last one's thread ha
   expect(w.auto.runs()[pr(1).key]).toMatchObject({ done: true });
 });
 
-test("a pass queues at most three, highest risk and newest first; the rest are picked up by later passes", async () => {
+test("Make them now queues at most three, highest risk and newest first; the rest are picked up by later passes", async () => {
   const w = world({ level: "medium", make: "guide" });
   w.list(pr(1, { updated_at: "2026-11-18T01:00:00.000Z" }), "medium");
   w.list(pr(2, { updated_at: "2026-11-18T02:00:00.000Z" }), "high");
   w.list(pr(3, { updated_at: "2026-11-18T03:00:00.000Z" }), "medium");
   w.list(pr(4, { updated_at: "2026-11-18T04:00:00.000Z" }), "high");
   w.list(pr(5, { updated_at: "2026-11-18T05:00:00.000Z" }), "medium");
-  w.auto.resume();
+  await w.auto.makeNow();
   await w.auto.idle();
   expect(numbers(w.started)).toEqual([4, 2, 5]);
   w.auto.resume();
@@ -309,7 +319,7 @@ test("after a restart a waiting stack takes one place in the queue, not one per 
   again.agentsKeepWorking();
   again.working.add("thr_1");
   for (const pull of [pr(1), pr(10, { head: "feat/10" }), pr(11, { base: "feat/10", head: "feat/11" }), pr(12, { base: "feat/11", head: "feat/12" }), pr(20), pr(21), pr(22)]) again.list(pull, "high");
-  again.auto.resume();
+  await again.auto.makeNow();
   await again.auto.idle();
   const queued = Object.entries(again.auto.runs()).filter(([, run]) => run.state === "queued").map(([key]) => key);
   expect(queued.sort()).toEqual([pr(10).key, pr(11).key, pr(12).key, pr(20).key, pr(21).key].sort());
@@ -439,7 +449,7 @@ test("a stack is one run: a layer at the level starts one agent for the whole st
   });
 });
 
-test("turned on, or after a crash, it covers PRs judged before: each open one at the level without a review thread or a run", async () => {
+test("PRs ranked before the pick was saved start by no later pass, nor after a restart, only on Make them now; one ranked anew counts as new", async () => {
   const w = world(null);
   w.judged(pr(1), "high");
   w.judged(pr(2), "medium");
@@ -448,16 +458,46 @@ test("turned on, or after a crash, it covers PRs judged before: each open one at
   w.threads.add(pr(3).key);
   await w.auto.idle();
   w.set({ level: "high", make: "guide" });
+  for (let i = 0; i < 2; i++) {
+    w.auto.resume();
+    await w.auto.idle();
+  }
+  expect(w.started).toEqual([]);
   expect(await w.auto.wouldStart()).toEqual({ high: 1, medium: 2 });
-  w.auto.resume();
-  await w.auto.idle();
-  expect(numbers(w.started)).toEqual([1]);
-  expect(await w.auto.wouldStart()).toEqual({ high: 0, medium: 1 });
-  const again = world({ level: "medium", make: "guide" }, w.dataDir);
+  const again = world({ level: "high", make: "guide" }, w.dataDir);
   for (const n of [1, 2]) again.list(pr(n), n === 1 ? "high" : "medium");
   again.auto.resume();
   await again.auto.idle();
+  expect(again.started).toEqual([]);
+  again.judged(pr(2, { head_sha: "b".repeat(40) }), "high", "new_head");
+  await again.auto.idle();
   expect(numbers(again.started)).toEqual([2]);
+  await again.auto.makeNow();
+  await again.auto.idle();
+  expect(numbers(again.started)).toEqual([2, 1]);
+  expect(await again.auto.wouldStart()).toEqual({ high: 0, medium: 0 });
+  await again.auto.makeNow();
+  again.auto.resume();
+  await again.auto.idle();
+  expect(numbers(again.started)).toEqual([2, 1]);
+});
+
+test("turned off and on again, a PR that ranked while it was on and never started waits for Make them now", async () => {
+  const w = world();
+  w.agentsKeepWorking();
+  for (const n of [1, 2, 3, 4, 5]) w.judged(pr(n), "high");
+  await w.auto.idle();
+  expect(numbers(w.started)).toEqual([1]);
+  w.set(null);
+  w.auto.resume();
+  w.set({ level: "high", make: "picture_it" });
+  w.working.clear();
+  for (let i = 0; i < 3; i++) {
+    w.auto.resume();
+    await w.auto.idle();
+  }
+  expect(numbers(w.started)).toEqual([1]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 4, medium: 4 });
 });
 
 test("the hand-off pastes the skills the window would: the person's own picture-it wins, and Shape and Chapter diagrams apply", () => {
@@ -474,4 +514,137 @@ test("the hand-off pastes the skills the window would: the person's own picture-
   expect(pictureIt).toContain("Draw it my way.");
   expect(pictureIt).not.toContain(PICTURE_IT_SKILL.body);
   expect(pullRiskAutoBody({ key: pr(880).key, stack: inboxPullStacks([pr(880)])[0]!, made: "guide", level: "high" }, blocks).body).toContain(curateOff);
+});
+
+test("ranked again at the same head (new rules, a new base) is no new ranking: it waits for Make them now and is counted, a stack once", async () => {
+  const w = world();
+  w.judged(pr(1), "high", "same_head");
+  w.list(pr(10, { head: "feat/10" }), "high");
+  w.judged(pr(11, { base: "feat/10", head: "feat/11" }), "high", "same_head");
+  w.judged(pr(12, { state: "closed" }), "high", "same_head");
+  for (let i = 0; i < 2; i++) {
+    w.auto.resume();
+    await w.auto.idle();
+  }
+  expect(w.started).toEqual([]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 2, medium: 2 });
+  await w.auto.makeNow();
+  await w.auto.idle();
+  w.auto.resume();
+  await w.auto.idle();
+  expect(numbers(w.started).sort()).toEqual([1, 11]);
+});
+
+test("a run that failed under a pick is forgotten when the pick goes off: turned on again it waits for Make them now", async () => {
+  const w = world();
+  w.failWith("Signed out.");
+  w.judged(pr(7), "high");
+  await w.auto.idle();
+  expect(w.started).toHaveLength(1);
+  w.failWith(null);
+  w.set(null);
+  w.auto.resume();
+  w.set({ level: "high", make: "picture_it" });
+  w.clock.now += PULL_RISK_AUTO_RETRY_MS;
+  w.auto.resume();
+  await w.auto.idle();
+  expect(w.started).toHaveLength(1);
+  expect(w.auto.runs()).toEqual({});
+  expect(await w.auto.wouldStart()).toEqual({ high: 1, medium: 1 });
+});
+
+test("a runs file from before fresh PRs were kept starts none of its queued runs", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"));
+  mkdirSync(join(dataDir, "inbox"), { recursive: true });
+  const queued = { at: "2026-11-19T08:00:00.000Z", level: "high", made: "guide", state: "queued", thread_id: null };
+  writeFileSync(join(dataDir, "inbox", INBOX_PULL_RISK_AUTO_FILE), JSON.stringify({ v: 1, runs: { [pr(1).key]: queued, [pr(2).key]: { ...queued, state: "started", thread_id: "thr_2", started_at: queued.at } } }));
+  const w = world({ level: "high", make: "guide" }, dataDir);
+  for (const n of [1, 2]) w.list(pr(n), "high");
+  w.auto.resume();
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  expect(Object.keys(w.auto.runs())).toEqual([pr(2).key]);
+});
+
+test("set up for the first time: the open PRs ranked then wait and are counted; a PR opened later starts; a restart keeps the line", async () => {
+  const w = world(null);
+  for (const n of [1, 2, 3]) w.list(pr(n), "medium");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  for (const n of [1, 2, 3]) w.judged(pr(n), "high");
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 3, medium: 3 });
+  const again = world({ level: "high", make: "guide" }, w.dataDir);
+  for (const n of [1, 2, 3]) again.list(pr(n), "high");
+  again.judged(pr(2), "high");
+  again.judged(pr(4), "high");
+  await again.auto.idle();
+  expect(numbers(again.started)).toEqual([4]);
+});
+
+test("a repository first listed while the pick is on starts nothing for its PRs, and one opened there later starts", async () => {
+  const w = world();
+  const other = (number: number) => pr(number, { key: `github.com/northwind/api#${number}`, repo: "northwind/api", url: `https://github.com/northwind/api/pull/${number}`, head: `api/${number}` });
+  for (const n of [40, 41]) w.list(other(n), "high");
+  w.covered.add("github.com/northwind/api");
+  w.auto.resume();
+  for (const n of [40, 41]) w.judged(other(n), "high");
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  w.judged(other(42), "high");
+  await w.auto.idle();
+  expect(numbers(w.started)).toEqual([42]);
+});
+
+test("a repository whose Others are not read yet: its own PRs and the teammates' that land later all wait; one opened after Others was read starts", async () => {
+  const w = world(null);
+  w.covered.clear();
+  for (const n of [12, 30]) w.list(pr(n, { mine: true }), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  for (const n of [12, 30]) w.judged(pr(n, { mine: true }), "high");
+  await w.auto.idle();
+  for (let n = 31; n <= 80; n++) w.list(pr(n), "high");
+  w.covered.add("github.com/northwind/web-app");
+  w.auto.resume();
+  for (let n = 31; n <= 80; n++) w.judged(pr(n), "high");
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  expect((await w.auto.waiting()).high).toHaveLength(52);
+  w.judged(pr(81), "high");
+  await w.auto.idle();
+  expect(numbers(w.started)).toEqual([81]);
+});
+
+test("Make them now makes only the PRs the count it answered came from", async () => {
+  const w = world(null);
+  for (const n of [1, 2, 3]) w.list(pr(n), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  const shown = (await w.auto.waiting()).high;
+  expect(shown.sort()).toEqual([pr(1).key, pr(2).key, pr(3).key].sort());
+  w.list(pr(4), "high");
+  await w.auto.makeNow([pr(1).key, pr(3).key]);
+  await w.auto.idle();
+  w.auto.resume();
+  await w.auto.idle();
+  expect(numbers(w.started).sort()).toEqual([1, 3]);
+  expect(await w.auto.waiting()).toEqual({ high: [pr(2).key, pr(4).key], medium: [pr(2).key, pr(4).key] });
+});
+
+test("Not now is kept across a restart and forgotten with the pick; a PR that starts waiting later is the only one left to ask about", async () => {
+  const w = world(null);
+  for (const n of [1, 2]) w.list(pr(n), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  await w.auto.notNow([...(await w.auto.waiting()).high, "github.com/northwind/web-app#999"]);
+  expect([...w.auto.dismissed()].sort()).toEqual([pr(1).key, pr(2).key]);
+  const again = world({ level: "high", make: "guide" }, w.dataDir);
+  for (const n of [1, 2, 3]) again.list(pr(n), "high");
+  const left = (await again.auto.waiting()).high.filter((key) => !again.auto.dismissed().has(key));
+  expect(left).toEqual([pr(3).key]);
+  again.set(null);
+  again.auto.resume();
+  expect(again.auto.dismissed().size).toBe(0);
 });

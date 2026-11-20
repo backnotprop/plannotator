@@ -672,6 +672,8 @@ interface OthersAnswer {
   total: number | null;
   /** The projects' repositories when it was read (as `HostAnswer.repos`). */
   repos: string;
+  /** The repositories (lowercased) whose every open PR this answer holds: none when the searches came back cut. */
+  covered: string[];
 }
 
 /** The Others read of a host: separate from the person's own lists, which never fail with it. */
@@ -727,6 +729,8 @@ export interface InboxPulls {
      */
     options?: { refresh?: boolean; others?: boolean; everywhere?: boolean },
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
+  /** The projects' repositories (`host/owner/repo`, lowercased) whose every open PR that list answer holds, Others' included. */
+  othersCovered(listed: object): readonly string[];
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
   stack(key: string): InboxPullStack | null;
@@ -1048,6 +1052,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const gitRead = options.gitRead ?? pullFileGitRead;
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
+  const coveredOf = new WeakMap<object, string[]>();
   const holdUntil = new Map<string, number>();
   const fileHoldUntil = new Map<string, number>();
   /** GitHub's GraphQL budget nearly spent: list reads of the host wait until `resetAt` (diffs do not). */
@@ -1406,7 +1411,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         calls = plan.queries.map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
       }
       if (calls.length === 0) {
-        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey };
+        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey, covered: [] };
         others.error = null;
         return;
       }
@@ -1441,7 +1446,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       spent(host, parsed);
       const all = covered.length >= new Set(repos.map((r) => r.toLowerCase())).size;
-      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey };
+      const whole = (parsed.open_total ?? parsed.pulls.length) <= parsed.pulls.length;
+      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey, covered: whole ? covered.map((r) => r.toLowerCase()) : [] };
       others.error = null;
     })()
       .catch(() => {
@@ -1573,7 +1579,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         return othersTotal > shown ? { shown, total: othersTotal, of: "others" } : undefined;
       };
       const times = asked.map((a) => a.own.answer?.at).filter((t): t is number => typeof t === "number");
-      return {
+      const result = {
         fetched_at: times.length > 0 ? new Date(Math.min(...times)).toISOString() : null,
         hosts: asked.map(({ host, state, own, reposKey }): InboxPullHost => {
           const capped = cappedOfHost(host, state, own, reposKey);
@@ -1595,6 +1601,11 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         clis: { ...cliStates },
         unsigned: unsigned.sort(),
       };
+      coveredOf.set(result, asked.flatMap(({ host, state }) => (state.others.answer?.covered ?? []).filter((repo) => wanted.has(inboxPullRepoKey(host, repo))).map((repo) => inboxPullRepoKey(host, repo))));
+      return result;
+    },
+    othersCovered(listed) {
+      return coveredOf.get(listed) ?? [];
     },
     find(key) {
       return findKnown(key) ?? null;
