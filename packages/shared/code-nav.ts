@@ -408,12 +408,14 @@ export function parseRgJsonOutput(
   stdout: string,
   symbol: string,
   language?: string,
+  originFilePath?: string,
 ): CodeNavLocation[] {
   const locations: CodeNavLocation[] = [];
+  const originLocations: CodeNavLocation[] = [];
   const lines = stdout.split("\n");
 
   for (const line of lines) {
-    if (locations.length >= PARSE_CAP) break;
+    if (!originFilePath && locations.length >= PARSE_CAP) break;
     if (!line.trim()) continue;
 
     let parsed: { type: string; data: RgMatchData };
@@ -426,14 +428,18 @@ export function parseRgJsonOutput(
     if (parsed.type !== "match") continue;
 
     const d = parsed.data;
-    const snippet = d.lines.text.trimEnd();
-    const column = d.submatches?.[0]?.start ?? 0;
-    const kind = classifyMatch(snippet, symbol, language);
     const filePath = d.path.text.startsWith("./")
       ? d.path.text.slice(2)
       : d.path.text;
+    // rg's parallel output order is arbitrary. Keep origin-file matches even
+    // after the repository-wide cap, so ranking can still prefer that file.
+    const target = filePath === originFilePath ? originLocations : locations;
+    if (target.length >= PARSE_CAP) continue;
+    const snippet = d.lines.text.trimEnd();
+    const column = d.submatches?.[0]?.start ?? 0;
+    const kind = classifyMatch(snippet, symbol, language);
 
-    locations.push({
+    target.push({
       kind,
       confidence: kind === "definition" ? "likely" : "possible",
       filePath,
@@ -443,7 +449,7 @@ export function parseRgJsonOutput(
     });
   }
 
-  return locations;
+  return [...originLocations, ...locations].slice(0, PARSE_CAP);
 }
 
 // ---------------------------------------------------------------------------
@@ -636,6 +642,7 @@ export async function resolveCodeNav(
     result.stdout,
     request.symbol,
     request.language,
+    request.filePath,
   ).filter((loc) => isCodeNavPathAllowed(loc.filePath, request.filePath));
 
   const ranked = rankLocations(locations, {
