@@ -1,4 +1,4 @@
-import type { PRContext, PRMetadata, PRRuntime } from './pr-types';
+import { getForgejoOrigin, type PRContext, type PRMetadata, type PRRuntime } from './pr-types';
 import { ghAccountTokenFor } from './pr-github-account';
 
 const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
@@ -180,6 +180,63 @@ function isGitLabArtifactHost(url: URL, metadata: Extract<PRMetadata, { platform
     || url.pathname.startsWith(`${projectPath}/-/blob/`);
 }
 
+const FORGEJO_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+type ForgejoArtifactKind = 'attachment' | 'raw' | 'src';
+
+/**
+ * Which kind of Forgejo artifact a URL is, or null when it is none. Only the
+ * routes Forgejo serves to a token are accepted (`registerMixedRoutes`):
+ *   /attachments/<uuid>                       an issue, PR or comment upload
+ *   /<owner>/<repo>/attachments/<uuid>        the same, repository-scoped
+ *   /<owner>/<repo>/raw/(branch|tag|commit)/<ref>/<path>   a file in the PR's repository
+ *   /<owner>/<repo>/src/(branch|tag|commit)/<ref>/<path>    its page, read as the raw file
+ * Everything else on the instance, `/api/v1/...` included, is refused, so a
+ * link in a PR description cannot steer a credentialed request elsewhere.
+ * The origin must be the one the review was started on: a PR whose own `url`
+ * names another origin gets no artifacts, so a hostile instance cannot point
+ * a token configured for a different instance at itself.
+ */
+function forgejoArtifactKind(
+  url: URL,
+  metadata: Extract<PRMetadata, { platform: 'forgejo' }>,
+): ForgejoArtifactKind | null {
+  const origin = getForgejoOrigin(metadata).toLowerCase();
+  if (providerOrigin(metadata) !== origin || !isSameOrigin(url, origin)) return null;
+  if (url.username !== '' || url.password !== '') return null;
+  const parts = url.pathname.split('/');
+  if (parts.length === 3 && parts[1] === 'attachments') {
+    return FORGEJO_UUID_RE.test(parts[2] ?? '') ? 'attachment' : null;
+  }
+  if (parts.length < 5) return null;
+  const [, owner, repo, section, ...rest] = parts;
+  if (
+    owner?.toLowerCase() !== metadata.owner.toLowerCase()
+    || repo?.toLowerCase() !== metadata.repo.toLowerCase()
+  ) return null;
+  if (section === 'attachments') {
+    return rest.length === 1 && FORGEJO_UUID_RE.test(rest[0] ?? '') ? 'attachment' : null;
+  }
+  if (section !== 'raw' && section !== 'src') return null;
+  const [refType, ...path] = rest;
+  if (refType !== 'branch' && refType !== 'tag' && refType !== 'commit') return null;
+  if (path.length === 0 || path.some((segment) => segment === '')) return null;
+  return section;
+}
+
+/** A Forgejo `src` page is read as its raw file; the token routes do not serve the page. */
+function forgejoContentUrl(
+  url: URL,
+  metadata: Extract<PRMetadata, { platform: 'forgejo' }>,
+): URL {
+  if (forgejoArtifactKind(url, metadata) !== 'src') return url;
+  const rawUrl = new URL(url);
+  const parts = rawUrl.pathname.split('/');
+  parts[3] = 'raw';
+  rawUrl.pathname = parts.join('/');
+  return rawUrl;
+}
+
 function gitlabProjectPath(metadata: Extract<PRMetadata, { platform: 'gitlab' }>): string {
   return metadata.projectPath.replace(/^\/+|\/+$/g, '');
 }
@@ -209,15 +266,17 @@ function gitlabUploadApiUrl(
 
 function isProviderArtifactUrl(url: URL, metadata: PRMetadata): boolean {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
-  // Bitbucket and Forgejo artifact documents are not supported yet: no URL is a provider artifact.
-  if (metadata.platform === 'bitbucket' || metadata.platform === 'forgejo') return false;
+  // Bitbucket artifact documents are not supported yet: no URL is a provider artifact.
+  if (metadata.platform === 'bitbucket') return false;
+  if (metadata.platform === 'forgejo') return forgejoArtifactKind(url, metadata) !== null;
   return metadata.platform === 'github'
     ? isGitHubArtifactHost(url, metadata)
     : isGitLabArtifactHost(url, metadata);
 }
 
 function providerContentUrl(url: URL, metadata: PRMetadata): URL {
-  if (metadata.platform === 'bitbucket' || metadata.platform === 'forgejo') return url;
+  if (metadata.platform === 'bitbucket') return url;
+  if (metadata.platform === 'forgejo') return forgejoContentUrl(url, metadata);
   if (metadata.platform === 'github') {
     const metadataOrigin = providerOrigin(metadata);
     if (isSameOrigin(url, metadataOrigin)) {
@@ -331,13 +390,18 @@ async function providerAuthHeaders(runtime: PRRuntime, metadata: PRMetadata): Pr
     const chosen = ghAccountTokenFor(metadata);
     if (chosen) return { Authorization: `Bearer ${chosen}` };
   }
+  // Forgejo has no CLI to ask: the server hands the runtime the token configured for exactly this origin.
+  if (metadata.platform === 'forgejo') {
+    const token = runtime.forgejoToken?.(providerOrigin(metadata)) ?? null;
+    return token ? { Authorization: `token ${token}` } : {};
+  }
   const cacheKey = `${metadata.platform}:${metadata.host.toLowerCase()}`;
   const cached = providerAuthCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.promise;
 
   const promise = (async (): Promise<Record<string, string>> => {
     try {
-      if (metadata.platform === 'bitbucket' || metadata.platform === 'forgejo') return {};
+      if (metadata.platform === 'bitbucket') return {};
       const command = metadata.platform === 'github' ? 'gh' : 'glab';
       const args = metadata.platform === 'github'
         ? ['auth', 'token', '--hostname', metadata.host]
@@ -374,6 +438,13 @@ function shouldSendProviderAuth(url: URL, metadata: PRMetadata): boolean {
  * bare transport status, which reads as a broken artifact rather than a missing login.
  */
 function providerAuthRequiredError(metadata: PRMetadata): PRArtifactDocumentError {
+  if (metadata.platform === 'forgejo') {
+    return new PRArtifactDocumentError(
+      `Artifact host requires authentication: add a token for ${providerOrigin(metadata)} under forgejoTokens in config.json `
+        + '(scopes read:issue and read:repository), or set PLANNOTATOR_FORGEJO_TOKEN and PLANNOTATOR_FORGEJO_URL',
+      401,
+    );
+  }
   const loginHint = metadata.platform === 'github'
     ? `gh auth login --hostname ${metadata.host}`
     : metadata.platform === 'bitbucket'
@@ -392,7 +463,8 @@ function providerAuthRequiredError(metadata: PRMetadata): PRArtifactDocumentErro
  * would point at the wrong problem.
  */
 function isProviderAuthRefusal(status: number, metadata: PRMetadata): boolean {
-  return status === 401 || (status === 403 && metadata.platform === 'gitlab');
+  // Forgejo answers 403 to a token missing the scope the attachment needs.
+  return status === 401 || (status === 403 && (metadata.platform === 'gitlab' || metadata.platform === 'forgejo'));
 }
 
 function responseContentLength(response: Response): number | undefined {

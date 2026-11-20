@@ -884,7 +884,7 @@ export interface PlannotatorConfig {
    * `"http://forgejo.lan:3000"`). A token is sent only to the origin it is keyed
    * to, so a link to any other host, or to the same host over another scheme,
    * never receives it. Scopes: `read:repository` and `read:issue` to read a PR and its
-   * comments, `write:repository` to post a review.
+   * attachments, `write:repository` to post a review.
    * Stored in plain text in config.json, so prefer PLANNOTATOR_FORGEJO_TOKEN
    * with PLANNOTATOR_FORGEJO_URL. Never sent to the browser: getServerConfig()
    * allowlists its keys.
