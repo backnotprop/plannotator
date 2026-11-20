@@ -955,8 +955,8 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
       )
       .toBe(true);
     for (const box of JSON.parse(measured) as ReturnType<typeof touchTargets>) {
-      expect(box.right).toBeLessThanOrEqual(390);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.right, box.what).toBeLessThanOrEqual(390);
+      expect(box.height, box.what).toBeGreaterThanOrEqual(44);
     }
     await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
     await shot(page, name, schemes);
@@ -977,7 +977,8 @@ const touchTargets = (els: Element[]) =>
     .filter((el) => el.checkVisibility())
     .map((el) => {
       const box = el.getBoundingClientRect();
-      return { right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
+      const what = `${el.outerHTML.slice(0, 160)} in ${el.parentElement?.className ?? ''}`;
+      return { what, right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
     });
 
 test('one PR with no review thread, on its launchpad: Guided review, the New review box, "on its way", the guided review arriving, the thread line, and Open the diff in each', async ({ browser }) => {
