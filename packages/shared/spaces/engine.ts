@@ -13,9 +13,11 @@
  *   progress says so meanwhile.
  * - It never writes over another's work. A save names the version it expects the space to hold; when the space holds
  *   another (412), that page is marked `stopped` and left alone, and the rest goes on.
- * - It tells when the space is no longer open to it. A write the space says is not allowed, to a space made here and
- *   never kept, means someone else kept it (`spaceKeptByAnother` in client.ts, the one place that reads it):
- *   `refused`, and nothing more is sent. Any other "no" is a run that did not finish; where the space is simply not
+ * - It never says whose a space is. A page save or file upload the space does not allow (403), to a space made here
+ *   and not known to be the person's own, means it has an owner now: perhaps this person, from the browser or another
+ *   computer. The run ends as `keep` (the record's `job.keep`), nothing more is sent, and Keep this space asks the one
+ *   call that knows (the claim: theirs, or `409 claim_conflict`). The same when the claim a signed-in create makes
+ *   is lost. Any other "no" is a run that did not finish; where the space is simply not
  *   there for this caller (`spaceNotAvailable`) the record says so (`job.gone`), so "Share as new" can be offered.
  *   A space is never made again by itself.
  * - The space is the person's own only when the space says so: `kept` is read from the create's answer, and a
@@ -37,7 +39,7 @@ import {
   type SpaceShareRecord,
   type SpaceShareStep,
 } from "@plannotator/core/space-share";
-import { spaceKeptByAnother, spaceNotAvailable, SpacesError, type SpacesClient, type SpacesSpace } from "./client";
+import { spaceKeptByAnother, spaceNotAvailable, spacesTokenRefused, spaceWriteNotAllowed, SpacesError, type SpacesClient, type SpacesSpace } from "./client";
 
 export interface SpaceShareSource {
   local: LocalSpace;
@@ -53,7 +55,11 @@ export interface SpaceShareProgress {
   link: string | null;
 }
 
-export type SpaceShareEnd = "done" | "failed" | "stopped" | "over_limit" | "refused";
+/** `keep`: a write was not allowed; the space has an owner, and Keep this space finds out whether it is this person. */
+export type SpaceShareEnd = "done" | "failed" | "stopped" | "over_limit" | "refused" | "keep";
+
+/** The reason a run is aborted with when the server goes down (not the person's Stop): its record is left as running. */
+export const SPACE_SHARE_SHUTDOWN = "shutdown";
 
 export interface SpaceShareRun {
   source: SpaceShareSource;
@@ -96,6 +102,8 @@ const textOf = (bytes: Uint8Array) => new TextDecoder().decode(withoutBom(bytes)
 
 /** Marks that end one step without ending the run. */
 class StepLeft extends Error {}
+/** The space has an owner and is not known to be this person's: the run stops until Keep this space is pressed. */
+class NeedsKeep extends Error {}
 
 export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResult> {
   const { record, client, source } = run;
@@ -120,7 +128,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   // What a run that did not finish had done still counts: "13 of 40" after "12 of 40".
   const base = record.job ? record.job.done : 0;
   record.job = { done: base, total: base + first.steps.length, ended: null };
-  if (!client.signedIn && first.file_bytes > SPACE_OPEN_FILES_MAX) return end("over_limit");
+  // A space nobody owns holds 100 MB of files: what the space is (or, not made yet, how the share was started).
+  if ((record.created ? !record.kept : !record.signed) && first.file_bytes > SPACE_OPEN_FILES_MAX) return end("over_limit");
   keep();
   tell();
 
@@ -152,8 +161,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
       record.owner = mine.owner_name ?? record.owner;
       record.visibility = mine.visibility ?? record.visibility ?? null;
     } catch (error) {
-      if (!spaceKeptByAnother(error, "claim")) throw error;
-      record.refused = true;
+      if (!spaceKeptByAnother(error)) throw error;
+      // It has another owner by now. Said only when the person presses Keep; here the run just stops for it.
+      throw new NeedsKeep();
     }
   };
   /** A page found in the space by its path after a lost answer: ours when it holds what was sent, else left alone. */
@@ -181,7 +191,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
           const made = await client.createSpace({ id: spaceId, name: record.name, document }, doc && seed.version ? originOf(doc.id, seed.version) : {});
           await adopt(made.space);
           if (doc && bytes && path) {
-            if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
+            if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, url: made.document.url, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
             else {
               const there = made.space.documents.find((d) => d.doc_path === path) ?? (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === path);
               if (!there) throw new SpacesError(0, "no_first_page", "The space answered without its first page.");
@@ -205,7 +215,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const path = paths[doc.id]!;
         try {
           const made = await client.addPage(spaceId, { doc_path: path, kind: doc.kind, title: doc.title, body: textOf(bytes) }, originOf(doc.id, step.version));
-          record.pages[doc.id] = { lane: "page", remote_id: made.id, doc_path: path, pushed: [{ local: step.version, remote: made.version, hash: localHash(doc.id, step.version) }], stopped: null };
+          record.pages[doc.id] = { lane: "page", remote_id: made.id, doc_path: path, url: made.url, pushed: [{ local: step.version, remote: made.version, hash: localHash(doc.id, step.version) }], stopped: null };
         } catch (error) {
           if (!(error instanceof SpacesError) || error.code !== "path_conflict") throw error;
           const there = (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === path);
@@ -222,7 +232,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const bytes = bytesOf(doc.id, step.version);
         const pushed = (remote: string) => page.pushed.push({ local: step.version, remote, hash: localHash(doc.id, step.version) });
         try {
-          pushed((await client.savePage(spaceId, page.remote_id, bytes, doc.kind, last.remote, originOf(doc.id, step.version))).version);
+          const saved = await client.savePage(spaceId, page.remote_id, bytes, doc.kind, last.remote, originOf(doc.id, step.version));
+          pushed(saved.version);
+          page.url = saved.url ?? page.url;
         } catch (error) {
           if (!(error instanceof SpacesError)) throw error;
           if (error.code === "version_conflict") {
@@ -332,8 +344,20 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   let lastStep = "";
   let sameStep = 0;
   let serverTries = 0;
+  /** Aborted: the person's Stop ends it as stopped; the server going down leaves it as it was, a run not finished. */
+  const aborted = (): SpaceShareResult => {
+    if (run.signal?.reason !== SPACE_SHARE_SHUTDOWN) return end("stopped");
+    record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended: null };
+    keep();
+    return { end: "stopped" };
+  };
+  const needsKeep = (): SpaceShareResult => {
+    record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended: "failed", keep: true };
+    keep();
+    return { end: "keep" };
+  };
   for (;;) {
-    if (run.signal?.aborted) return end("stopped");
+    if (run.signal?.aborted) return aborted();
     const next = plan();
     const step = next.steps[0];
     if (!step) break;
@@ -345,7 +369,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     try {
       await attempt(step, next);
     } catch (error) {
-      if (run.signal?.aborted) return end("stopped");
+      if (run.signal?.aborted) return aborted();
+      if (error instanceof NeedsKeep) return needsKeep();
       if (error instanceof StepLeft) {
         if (step.kind === "comment" || step.kind === "reply") record.comments[step.id] = { left: "left" };
         else return end("failed");
@@ -368,28 +393,18 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         sameStep = 0;
         continue;
       }
-      // Someone else kept the space: said by the space, never guessed from a "no" that could mean something else.
-      if (record.created && !record.kept && spaceKeptByAnother(error, "write")) {
-        record.refused = true;
-        record.job = null;
-        keep();
-        return { end: "refused" };
-      }
-      if (error.status === 413 && error.code === "quota_exceeded" && !client.signedIn) return end("over_limit");
+      // The space has an owner now, and it is not known to be this person: only a claim says whose.
+      if (record.created && !record.kept && spaceWriteNotAllowed(error)) return needsKeep();
+      if (error.status === 413 && error.code === "quota_exceeded") return end("over_limit");
       // The space is not there for this caller any more (expired, removed, or made private): the run did not finish,
       // and it is never made again by itself. No sign-in is started or suggested for a call made without one.
-      if (record.created && spaceNotAvailable(error, client.signedIn) && !(client.signedIn && error.status === 401)) {
+      if (record.created && spaceNotAvailable(error, client.signedIn)) {
         record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended: "failed", gone: true };
         keep();
         return { end: "failed", error };
       }
       // Anything else: the run did not finish. A sign-in the space refused is forgotten.
-      return end("failed", { error, signedOut: error.status === 401 && client.signedIn });
-    }
-    if (record.refused) {
-      record.job = null;
-      keep();
-      return { end: "refused" };
+      return end("failed", { error, signedOut: client.signedIn && spacesTokenRefused(error) });
     }
     serverTries = 0;
     record.job = { done: (record.job?.done ?? 0) + 1, total: Math.max(record.job?.total ?? 0, (record.job?.done ?? 0) + next.steps.length), ended: null };

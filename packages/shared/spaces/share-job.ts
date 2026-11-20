@@ -17,9 +17,9 @@ import { readFileSync } from "node:fs";
 import { isPlanId, planApprovalsOn, planPictureTypeOf, PLAN_PERSON } from "@plannotator/core/plans";
 import { newSpaceId, newSpaceShareRecord, planSpaceShare, type LocalSpace, type SpaceShareMode, type SpaceShareRecord, type SpaceShareStatus } from "@plannotator/core/space-share";
 import type { PlanStore } from "../plans/store";
-import { createSpacesClient, spaceKeptByAnother, SpacesError } from "./client";
+import { createSpacesClient, spaceKeptByAnother, spacesTokenRefused, SpacesError } from "./client";
 import { clearSpacesCredential, readSpacesCredential, saveSpacesCredential } from "./credential";
-import { runSpaceShare, type SpaceShareProgress, type SpaceShareSource } from "./engine";
+import { runSpaceShare, SPACE_SHARE_SHUTDOWN, type SpaceShareProgress, type SpaceShareSource } from "./engine";
 import { dropSpaceShareRecord, readSpaceShareRecord, saveSpaceShareRecord } from "./record";
 import { startSpacesSignIn, type SpacesSignIn } from "./signin";
 
@@ -130,6 +130,11 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
   const now = options.now ?? Date.now;
   const credentialOf = (host: string) => readSpacesCredential(options.dataDir, host);
   const clientOf = (host: string, signal?: AbortSignal) => createSpacesClient({ host, token: credentialOf(host)?.token ?? null, fetch: options.fetch, signal });
+  /**
+   * Nothing more goes up until the person signs in and keeps the space: it is theirs (or was started signed in) and
+   * the sign-in is gone from this computer, or a write was not allowed and only a claim says whose it is now.
+   */
+  const needsKeepOf = (record: SpaceShareRecord | null, signedIn: boolean) => !!record && !record.refused && (((record.kept || record.signed === true) && !signedIn) || record.job?.keep === true);
   const inFlight = (live: Live) => live.running !== null || live.claiming !== null || live.keep === "waiting";
 
   /** The plan as a share reads it. While something is in flight the status is asked for often: it is read once then. */
@@ -153,13 +158,13 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const planOf = (mode: SpaceShareMode) => planSpaceShare(source.local, record, { mode, signedIn });
     const plan = planOf(record?.mode ?? "all");
     const running = live.running !== null;
-    // The person's own space, and the sign-in is gone from this computer: nothing can be sent until they sign in
-    // again, which the result panel's Keep does. Nothing is offered that would only fail.
-    const signedOut = !!record?.kept && !signedIn;
-    const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : signedOut && record.shared_at ? "shared" : record.job ? (record.job.ended ?? "failed") : record.shared_at ? "shared" : "none";
-    const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" ? { done: record.job.done, total: record.job.total } : null;
+    const needsKeep = needsKeepOf(record, signedIn);
+    const gone = record?.job?.gone === true;
+    // A space that is up and waits for Keep shows as the result, with Keep this space; one that is gone has no link.
+    const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : gone ? "gone" : needsKeep && record.created && record.share_url ? "shared" : record.job ? (record.job.ended ?? "failed") : record.shared_at ? "shared" : "none";
+    const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" && phase !== "gone" ? { done: record.job.done, total: record.job.total } : null;
     const until = running ? (live.progress?.waiting_until ?? null) : null;
-    const link = record?.share_url ?? null;
+    const link = phase === "gone" ? null : (record?.share_url ?? null);
     return {
       phase,
       progress,
@@ -167,18 +172,19 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       link,
       shared_once: !!record?.shared_at,
       kept: !!record?.kept && signedIn,
-      // Said as the space is: only a space the space itself calls private is "only you".
-      access: !record ? (signedIn ? "private" : "edit") : record.kept ? (record.visibility === "private" ? "private" : "comment") : record.created ? "edit" : signedIn ? "private" : "edit",
+      // Said as the space is: only a space the space itself calls private is "only you"; one a write was refused by
+      // has an owner, and its link still reads and comments.
+      access: !record ? (signedIn ? "private" : "edit") : record.kept ? (record.visibility === "private" ? "private" : "comment") : record.job?.keep ? "comment" : record.created ? "edit" : signedIn || record.signed ? "private" : "edit",
       signed_in: signedIn,
       who: signedIn ? (credential.name ?? (record?.kept ? record.owner : null)) : null,
       keep: live.keep,
       busy: live.claiming !== null,
-      gone: phase === "failed" && record?.job?.gone === true,
+      needs_keep: needsKeep && !running,
       mode: record?.mode ?? "all",
       versions: Math.max(0, ...source.local.documents.map((d) => d.versions.length)),
-      changes: phase === "shared" && !signedOut ? plan.changes : 0,
-      // A page's address in the space is the link and its path.
-      stopped_pages: record ? source.local.documents.filter((d) => record.pages[d.id]?.stopped).map((d) => ({ title: d.title, url: link ? `${link.replace(/\/+$/, "")}/${record.pages[d.id]!.doc_path.split("/").map(encodeURIComponent).join("/")}` : null })) : [],
+      changes: phase === "shared" ? plan.changes : 0,
+      // A page's address is the one the space returned for it; without one, the space's own link.
+      stopped_pages: record ? source.local.documents.filter((d) => record.pages[d.id]?.stopped).map((d) => ({ title: d.title, url: record.pages[d.id]!.url ?? link })) : [],
       details: { all: planOf("all").details, newest: planOf("newest").details },
     };
   }
@@ -240,18 +246,20 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     if (record?.refused) return status(id);
     if (!record) {
       // Whether the space is the person's own is what the space answers, never assumed here.
-      record = newSpaceShareRecord({ host: options.host(), space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, at: new Date(now()).toISOString() });
+      const host = options.host();
+      // Started signed in: it is never made, or gone on with, without the sign-in (the person saw "Only you").
+      record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, signed: credentialOf(host) !== null, at: new Date(now()).toISOString() });
       saveSpaceShareRecord(options.dataDir, id, record);
     }
-    // The person's own space with no sign-in on this computer: nothing is sent, and no browser is opened by an
-    // Update. The panel's Keep signs in.
-    if (record.kept && !credentialOf(record.host)) return status(id);
+    // Waiting for Keep (the sign-in is gone, or a write was not allowed), or the space is gone: nothing is sent,
+    // and no browser is opened by an Update. The panel's Keep signs in; Share as new starts over.
+    if (needsKeepOf(record, credentialOf(record.host) !== null) || record.job?.gone) return status(id);
     start(id, record);
     return status(id);
   }
 
   function stop(id: string): SpaceShareStatus | null {
-    liveOf(id).abort?.abort();
+    liveOf(id).abort?.abort("stop");
     return status(id);
   }
 
@@ -260,23 +268,24 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const live = liveOf(id);
     // A run going without the sign-in (waiting on a busy space, say) is stopped first: it goes on signed in.
     if (live.running) {
-      live.abort?.abort();
+      live.abort?.abort("stop");
       await live.running;
     }
     const record = readSpaceShareRecord(options.dataDir, id);
     if (!record || !record.created || record.refused) return;
     try {
-      // Claiming a space that is already the person's own answers the same again.
+      // Claiming a space that is already the person's own answers the same again. This call alone says whose it is.
       const space = await clientOf(record.host).claim(record.space_id);
       record.kept = true;
+      if (record.job?.keep) record.job = { done: record.job.done, total: record.job.total, ended: record.job.ended };
       record.owner = space.owner_name ?? record.owner;
       record.share_url = space.share_url ?? record.share_url;
       record.visibility = space.visibility ?? record.visibility ?? null;
     } catch (error) {
-      if (spaceKeptByAnother(error, "claim")) record.refused = true;
+      if (spaceKeptByAnother(error)) record.refused = true;
       else {
-        // The space refused the sign-in: it is forgotten. Anything else: nothing changed.
-        if (error instanceof SpacesError && error.status === 401) clearSpacesCredential(options.dataDir, record.host);
+        // The space refused the credential itself: it is forgotten. Anything else: nothing changed.
+        if (spacesTokenRefused(error)) clearSpacesCredential(options.dataDir, record.host);
         return;
       }
     }
@@ -376,7 +385,8 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     claiming: (id) => lives.get(id)?.claiming ?? null,
     close() {
       for (const live of lives.values()) {
-        live.abort?.abort();
+        // Not the person's Stop: the record is left as a run not finished, which the next Try again goes on from.
+        live.abort?.abort(SPACE_SHARE_SHUTDOWN);
         live.signIn?.cancel();
         live.signIn = null;
         live.keep = null;

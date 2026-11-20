@@ -126,7 +126,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
 
   const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(body === null ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
   const fail = (status: number, code: string, details?: Record<string, unknown>, headers: Record<string, string> = {}) => json(status, { error: { code, message: code.replace(/_/g, " "), ...(details ? { details } : {}) } }, headers);
-  const docWire = (space: FakeSpace, doc: FakeDoc) => ({ id: doc.id, workspace_id: space.id, doc_path: doc.doc_path, kind: doc.kind, title: doc.title, version: doc.versions[doc.versions.length - 1]!.version, version_count: doc.versions.length });
+  const docWire = (space: FakeSpace, doc: FakeDoc) => ({ file_url: `${space.share_url}/${doc.doc_path.split("/").map(encodeURIComponent).join("/")}@${doc.versions[doc.versions.length - 1]!.version}`, id: doc.id, workspace_id: space.id, doc_path: doc.doc_path, kind: doc.kind, title: doc.title, version: doc.versions[doc.versions.length - 1]!.version, version_count: doc.versions.length });
   const spaceWire = (space: FakeSpace, user: string | null = null) => ({
     access: space.owner !== null && space.owner === user ? "owner" : "edit",
     id: space.id,

@@ -197,6 +197,54 @@ describe("a run that stopped goes on", () => {
   });
 });
 
+describe("ended from outside", () => {
+  const until = (calls: number, reason: string) => async (s: ReturnType<typeof setup>) => {
+    const abort = new AbortController();
+    let seen = 0;
+    const client = createSpacesClient({ host: HOST, signal: abort.signal, fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+      const response = await s.spaces.fetch(input, init);
+      if (++seen === calls) abort.abort(reason);
+      return response;
+    }) as typeof fetch });
+    return runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client, signal: abort.signal });
+  };
+
+  test("the server going down is not the person's Stop: the record stays a run not finished, and the next run goes on", async () => {
+    const s = setup();
+    await until(3, "shutdown")(s);
+    expect(s.record.job).toEqual({ done: 3, total: 12, ended: null });
+    const stopped = setup();
+    await until(3, "stop")(stopped);
+    expect(stopped.record.job).toMatchObject({ done: 3, ended: "stopped" });
+    expect((await s.run()).end).toBe("done");
+    expect(writes(s.spaces)).toHaveLength(12);
+  });
+});
+
+describe("the sign-in and the limit", () => {
+  test("only a credential the space itself refuses (401 unauthorized) is forgotten; any other 401 is not", async () => {
+    for (const [code, forgotten] of [["unauthorized", true], ["login_required", false], ["http_401", false]] as const) {
+      const s = setup({ token: true, seed: { extras: false } });
+      s.spaces.failNext(/^PUT .*\/documents\//, 401, code);
+      const result = await s.run();
+      expect([code, result.end, result.signedOut ?? false]).toEqual([code, "failed", forgotten]);
+    }
+  });
+
+  test("the space's own quota answer is over the limit, signed in or not", async () => {
+    const s = setup({ token: true });
+    s.spaces.failNext(/assets\//, 413, "quota_exceeded");
+    expect((await s.run()).end).toBe("over_limit");
+  });
+
+  test("a stopped page keeps the address the space gave for it", async () => {
+    const s = setup();
+    await s.run();
+    const url = s.record.pages[s.world.pages.rollout]!.url!;
+    expect(url.startsWith(`${s.record.share_url}/Rollout%20checklist.md@`)).toBe(true);
+  });
+});
+
 describe("waiting when the space says so", () => {
   test("a 429 is waited out for its Retry-After, said in the progress, and the share finishes", async () => {
     const s = setup({ spaces: { openWrites: 5, retryAfter: 7 } });
@@ -246,18 +294,16 @@ describe("Update", () => {
     expect(s.spaces.calls.length).toBe(before);
   });
 
-  test("someone else kept the space (the space says the write is not allowed): refused, and nothing more is sent", async () => {
+  test("a page save the space does not allow: the run stops for Keep, and never says whose the space is", async () => {
     const s = setup();
     await s.run();
     s.spaces.keptBy(s.record.space_id, "Someone Else");
     s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
-    const run = () => runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
-    expect((await run()).end).toBe("refused");
-    expect(s.record.refused).toBe(true);
+    const result = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
+    expect(result.end).toBe("keep");
+    expect(s.record.refused).toBe(false);
+    expect(s.record.job).toMatchObject({ ended: "failed", keep: true });
     expect(mainOf(s).versions).toHaveLength(4);
-    const before = s.spaces.calls.length;
-    expect((await run()).end).toBe("refused");
-    expect(s.spaces.calls.length).toBe(before);
   });
 
   test("kept by someone else with its link still open: a comment alone still goes up; the next page save is what says it is theirs", async () => {
@@ -346,14 +392,14 @@ describe("whose the space is", () => {
     expect(s.record.kept).toBe(true);
   });
 
-  test("the same, but someone else kept it meanwhile: refused, and not called the person's own", async () => {
+  test("the same, but it has another owner by then: the run stops for Keep; only the person's own Keep says it is someone else's", async () => {
     const s = setup({ seed: { extras: false } });
     s.spaces.failNext(/^POST \/v1\/workspaces$/, 0, "lost", { after: true });
     await s.run();
     s.spaces.keptBy(s.record.space_id, "Someone Else");
     const token = s.spaces.issueToken("Maya Chen");
     const result = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, token, fetch: s.spaces.fetch }) });
-    expect([result.end, s.record.kept, s.record.refused]).toEqual(["refused", false, true]);
+    expect([result.end, s.record.kept, s.record.refused, s.record.job?.keep]).toEqual(["keep", false, false, true]);
   });
 });
 

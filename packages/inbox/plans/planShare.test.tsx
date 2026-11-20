@@ -91,7 +91,10 @@ const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; inf
   ['over the limit', status({ phase: 'over_limit', progress: { done: 3, total: 9 } }), 'main', ['sign-in'], {}],
   ['did not finish', status({ phase: 'failed', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['nothing went up', status({ phase: 'failed', progress: { done: 0, total: 9 } }), 'main', ['try-again'], {}],
-  ['the space is no longer there', status({ phase: 'failed', gone: true, progress: { done: 3, total: 9 }, link: LINK, shared_once: true }), 'main', ['copy', 'open', 'share-new', 'try-again'], {}],
+  ['started signed in, the sign-in gone', status({ phase: 'failed', needs_keep: true, access: 'private', progress: { done: 0, total: 9 } }), 'main', ['keep'], {}],
+  ['the space is gone', status({ phase: 'gone', shared_once: true }), 'main', ['share-new'], {}],
+  ['waiting for Keep, with changes', shared({ needs_keep: true, access: 'comment', changes: 2 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
+  ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'private' }), 'main', ['copy', 'open', 'keep'], { details: true }],
   ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], {}],
   ['details', shared(), 'details', [], {}],
@@ -157,6 +160,17 @@ describe.if(hasDom)('the panel, state by state', () => {
     // Three states, three different lines: a kept space never borrows the private one's words.
     expect(new Set([open.words, keptAfter.words, madeSignedIn.words]).size).toBe(3);
     expect(lineOf(status({ signed_in: true, access: 'private' })).mark).toBe('lock');
+  });
+
+  test('waiting for Keep: Update is shown with its count and waits; the gone state has no link to copy', () => {
+    const waits = panel(shared({ needs_keep: true, access: 'comment', changes: 2 }));
+    expect(waits.host.querySelector<HTMLButtonElement>('[data-share-act="update"]')!.disabled).toBe(true);
+    expect(waits.host.querySelector<HTMLButtonElement>('[data-share-act="keep"]')!.disabled).toBe(false);
+    expect(panel(shared({ changes: 2 })).host.querySelector<HTMLButtonElement>('[data-share-act="update"]')!.disabled).toBe(false);
+    const gone = panel(status({ phase: 'gone', shared_once: true }));
+    expect(gone.host.querySelector('input')).toBeNull();
+    gone.press('share-new');
+    expect(gone.sent).toEqual([['share', { mode: 'all', fresh: true }]]);
   });
 
   test('Keep waits while a claim is going', () => {

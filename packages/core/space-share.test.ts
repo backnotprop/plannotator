@@ -166,6 +166,8 @@ describe("the button", () => {
     expect(spaceShareButton(status({ phase: "shared", shared_once: true, changes: 2 }))).toEqual({ label: "Update", state: "update" });
     expect(spaceShareButton(status({ phase: "shared", shared_once: true, changes: 2, stopped_pages: [{ title: "Rollout" }] }))).toEqual({ label: "Shared", state: "look" });
     expect(spaceShareButton(status({ phase: "refused", shared_once: true }))).toEqual({ label: "Shared", state: "look" });
+    expect(spaceShareButton(status({ phase: "shared", shared_once: true, changes: 2, needs_keep: true }))).toEqual({ label: "Shared", state: "look" });
+    expect(spaceShareButton(status({ phase: "gone", shared_once: true }))).toEqual({ label: "Shared", state: "look" });
     expect(spaceShareButton(status({ phase: "failed" }))).toEqual({ label: "Share", state: "failed" });
     expect(spaceShareButton(status({ phase: "failed", shared_once: true }))).toEqual({ label: "Shared", state: "look" });
   });

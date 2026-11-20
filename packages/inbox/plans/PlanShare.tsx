@@ -52,6 +52,7 @@ export const SHARE_WORDS = {
   failed: 'Couldn’t reach Spaces.',
   tryAgain: 'Try again',
   stopped: 'Sharing stopped',
+  gone: 'This space is gone',
   stopSharing: 'Stop sharing',
   deletes: 'Deletes the copy in Spaces for good.',
   del: 'Delete',
@@ -138,9 +139,9 @@ function LinkRow({ link, primary }: { link: string; primary: boolean }) {
   );
 }
 
-function Row({ mark, children, right, warn }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean }) {
+function Row({ mark, children, right, warn, oneLine }: { mark: Parameters<typeof Mark>[0]['name']; children: ReactNode; right?: ReactNode; warn?: boolean; oneLine?: boolean }) {
   return (
-    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}`} data-share-row-mark={mark}>
+    <div className={`ib-shr-arow${warn ? ' ib-shr-warnrow' : ''}${oneLine ? ' ib-shr-oneline' : ''}`} data-share-row-mark={mark}>
       <span className="ib-shr-disc">
         <Mark name={mark} />
       </span>
@@ -393,7 +394,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
         {SHARE_WORDS.onlyYou}
       </Row>
     ) : status.access === 'comment' ? (
-      <Row mark="globe" right={invite}>
+      <Row mark="globe" right={invite} oneLine>
         {SHARE_WORDS.anyoneComment}
       </Row>
     ) : (
@@ -466,28 +467,20 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
     case 'shared': {
       const stopped = status.stopped_pages.length > 0;
       const update = status.changes > 0;
+      // Waiting for Keep (a write was not allowed, or the sign-in is gone): Keep is offered, and Update waits for it.
+      const waits = status.needs_keep === true;
+      const offerKeep = waits || (!stopped && !update && !status.kept);
       return (
         <>
-          {link && <LinkRow link={link} primary={!stopped && !update} />}
+          {link && <LinkRow link={link} primary={!stopped && !update && !waits} />}
           {stopped
             ? status.stopped_pages.map((page) => (
                 <Row key={page.title} mark="excl" warn right={pageLink(page.url) ?? link ? <LinkBtn href={(pageLink(page.url) ?? link)!} name="open-page">{SHARE_WORDS.openInSpaces}</LinkBtn> : undefined}>
                   {page.title} changed
                 </Row>
               ))
-            : access(!update ? <InfoMark /> : undefined)}
-          {update ? (
-            <Row
-              mark="doc"
-              right={
-                <Btn kind="pri" onClick={() => actions.share({})} name="update">
-                  {SHARE_WORDS.update}
-                </Btn>
-              }
-            >
-              {changesWords(status.changes)}
-            </Row>
-          ) : !stopped && !status.kept ? (
+            : access(!update && !waits ? <InfoMark /> : undefined)}
+          {offerKeep && (
             <Row
               mark="user"
               right={
@@ -498,11 +491,37 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
             >
               {SHARE_WORDS.makeYours}
             </Row>
-          ) : null}
+          )}
+          {update && (
+            <Row
+              mark="doc"
+              right={
+                <Btn kind="pri" onClick={() => actions.share({})} name="update" disabled={waits}>
+                  {SHARE_WORDS.update}
+                </Btn>
+              }
+            >
+              {changesWords(status.changes)}
+            </Row>
+          )}
           {!stopped && !update && <Foot left={detailsLink} />}
         </>
       );
     }
+    case 'gone':
+      // The space is no longer there for this computer: one line, and the one way on.
+      return (
+        <>
+          <Msg mark="excl" tone="warn" first>
+            {SHARE_WORDS.gone}
+          </Msg>
+          <Foot>
+            <Btn kind="pri" onClick={() => actions.share({ mode: status.mode, fresh: true })} name="share-new">
+              {SHARE_WORDS.shareAsNew}
+            </Btn>
+          </Foot>
+        </>
+      );
     case 'refused':
       return (
         <>
@@ -540,15 +559,16 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
           </Msg>
           {link && <LinkRow link={link} primary={false} />}
           <Foot>
-            {/* The space is no longer there for this computer: the way on is a new one. */}
-            {status.gone && (
-              <Btn onClick={() => actions.share({ mode: status.mode, fresh: true })} name="share-new">
-                {SHARE_WORDS.shareAsNew}
+            {/* Started signed in and the sign-in is gone: signing in again is the way on, never a share without it. */}
+            {status.needs_keep ? (
+              <Btn kind="pri" onClick={actions.keep} name="keep" disabled={status.busy === true}>
+                {SHARE_WORDS.keep}
+              </Btn>
+            ) : (
+              <Btn kind="pri" onClick={() => actions.share({})} name="try-again">
+                {SHARE_WORDS.tryAgain}
               </Btn>
             )}
-            <Btn kind="pri" onClick={() => actions.share({})} name="try-again">
-              {SHARE_WORDS.tryAgain}
-            </Btn>
           </Foot>
         </>
       );

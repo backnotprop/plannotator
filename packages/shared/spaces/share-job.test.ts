@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakeSpaces } from "../../../tests/helpers/fake-spaces";
 import { seedSpaceShareWorld } from "../../../tests/helpers/space-share-world";
-import { readSpacesCredential, saveSpacesCredential, spacesCredentialPath } from "./credential";
+import { clearSpacesCredential, readSpacesCredential, saveSpacesCredential, spacesCredentialPath } from "./credential";
 import { readSpaceShareRecord } from "./record";
 import { createSpaceShareJobs, handleSpaceShareRoute, type SpaceShareJobsOptions } from "./share-job";
 import { DEFAULT_SPACES_URL, isLoopbackSpacesUrl, normalizeSpacesUrl, resolveSpacesUrl, spaceShareOn } from "./url";
@@ -113,10 +113,22 @@ describe("the status", () => {
     s.jobs.share(id, {});
     await s.settle();
     const link = s.jobs.status(id)!.link!;
-    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", stopped_pages: [{ title: "Rollout checklist", url: `${link}/Rollout%20checklist.md` }], changes: 0 });
+    // Its address is the one the space returned for the page, never one built here.
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", stopped_pages: [{ title: "Rollout checklist", url: s.record().pages[s.world.pages.rollout]!.url }], changes: 0 });
+    expect(s.record().pages[s.world.pages.rollout]!.url!.startsWith(`${link}/`)).toBe(true);
     s.spaces.keptBy(first, "Someone Else");
     s.world.store.addVersion(id, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     s.jobs.share(id, {});
+    await s.settle();
+    // The write was not allowed: Keep is offered, the changes still wait, and nothing says whose the space is.
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", needs_keep: true, access: "comment", kept: false });
+    expect(s.jobs.status(id)!.changes).toBeGreaterThan(0);
+    const waiting = s.spaces.calls.length;
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.spaces.calls.length).toBe(waiting);
+    // Keep signs in and claims: the claim is what says it is someone else's.
+    await s.jobs.keep(id);
     await s.settle();
     expect(s.jobs.status(id)).toMatchObject({ phase: "refused" });
     // Update again does nothing; Share as new makes a second space with its own link.
@@ -132,6 +144,76 @@ describe("the status", () => {
   });
 });
 
+describe("a write that is not allowed", () => {
+  test("the person kept it themselves elsewhere: Keep finds it is theirs, and the Update goes on", async () => {
+    const s = setup();
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    // Kept from the browser, as the same person the sign-in here will be.
+    s.spaces.keptBy(s.record().space_id, "Maya Chen");
+    s.world.store.addVersion(id, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", needs_keep: true, changes: 1 });
+    expect(s.record().refused).toBe(false);
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, needs_keep: false, changes: 0, access: "comment" });
+    expect(s.spaces.spaces.get(s.record().space_id)!.documents.find((d) => d.doc_path.startsWith("Rate limiting"))!.versions).toHaveLength(5);
+    expect(s.spaces.spaces.size).toBe(1);
+  });
+});
+
+describe("started signed in", () => {
+  test("the sign-in is gone before the space was made: nothing is ever made without it, and Keep is the way on", async () => {
+    const s = setup({ seed: { extras: false } });
+    const id = s.world.plan;
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.spaces.failNext(/^POST \/v1\/workspaces$/, 502, "bad_gateway");
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "failed", needs_keep: false, access: "private" });
+    clearSpacesCredential(s.dataDir, HOST);
+    const calls = s.spaces.calls.length;
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.spaces.calls.length).toBe(calls);
+    expect(s.spaces.spaces.size).toBe(0);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "failed", needs_keep: true, access: "private", signed_in: false });
+    expect(s.opened).toEqual([]);
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, access: "private" });
+    expect([...s.spaces.spaces.values()].map((space) => space.owner)).toEqual(["Maya Chen"]);
+  });
+
+  test("a 401 that is not the space refusing the credential keeps the sign-in", async () => {
+    const s = setup({ seed: { extras: false } });
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.spaces.failNext(/^POST \/v1\/workspaces$/, 401, "login_required");
+    s.jobs.share(s.world.plan, {});
+    await s.settle();
+    expect(readSpacesCredential(s.dataDir, HOST)).not.toBeNull();
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "failed", signed_in: true, needs_keep: false });
+  });
+});
+
+describe("going down", () => {
+  test("a run cut by the server going down is left as a run not finished, never as stopped by the person", async () => {
+    const s = setup({ jobs: { sleep: (_ms, signal) => new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true })) } });
+    s.spaces.failNext(/assets\//, 429, "rate_limited");
+    s.jobs.share(s.world.plan, {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "sharing" });
+    const running = s.jobs.running(s.world.plan);
+    s.jobs.close();
+    await running;
+    expect(s.record().job).toMatchObject({ ended: null });
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "failed" });
+  });
+});
+
 describe("a space that is no longer there", () => {
   test("removed there, then Update with no account: it did not finish, no sign-in is started, and Share as new makes a new space", async () => {
     const s = setup();
@@ -143,12 +225,17 @@ describe("a space that is no longer there", () => {
     s.world.store.addVersion(id, s.world.main, { bytes: enc("# v5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     s.jobs.share(id, {});
     await s.settle();
-    expect(s.jobs.status(id)).toMatchObject({ phase: "failed", gone: true, keep: null, signed_in: false });
+    // Its own state: no dead link, nothing to try again, no sign-in started or suggested.
+    expect(s.jobs.status(id)).toMatchObject({ phase: "gone", link: null, progress: null, keep: null, signed_in: false, needs_keep: false });
     expect(s.opened).toEqual([]);
-    expect(s.spaces.spaces.size).toBe(1);
+    const calls = s.spaces.calls.length;
+    s.jobs.share(id, {});
+    await s.settle();
+    expect([s.spaces.calls.length, s.spaces.spaces.size]).toEqual([calls, 1]);
     s.jobs.share(id, { fresh: true });
     await s.settle();
-    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", gone: false });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared" });
+    expect(s.jobs.status(id)!.link).not.toBeNull();
     expect(s.record().space_id).not.toBe(first);
   });
 
@@ -240,7 +327,7 @@ describe("Keep this space", () => {
     expect(readSpacesCredential(s.dataDir, HOST)).toBeNull();
     // Signed out: the result panel with Keep, which signs in. No Update is offered that could only fail, an Update
     // pressed anyway sends nothing, and no browser is ever opened by it.
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: false, kept: false, changes: 0, keep: null });
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: false, kept: false, needs_keep: true, changes: 1, keep: null, access: "private" });
     const calls = s.spaces.calls.length;
     expect(s.jobs.share(s.world.plan, {})).toMatchObject({ phase: "shared", keep: null });
     await s.settle();

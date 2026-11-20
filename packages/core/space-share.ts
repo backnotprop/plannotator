@@ -123,6 +123,8 @@ export interface SpaceSharePage {
   /** The hosted page's (or file's) id; null until the call that makes it answered. */
   remote_id: string | null;
   doc_path: string;
+  /** The page's address, as the space last returned it (`file_url`), when it did. */
+  url?: string | null;
   pushed: SpaceSharePushed[];
   /** The page changed in the space since the last push: it is left alone. `current`: the version the space holds. */
   stopped: { current: string | null } | null;
@@ -153,6 +155,8 @@ export interface SpaceShareRecord {
   mode: SpaceShareMode;
   /** The space is the person's own (made signed in, or kept later). */
   kept: boolean;
+  /** The share was started signed in: it is never made, or gone on with, without a sign-in. */
+  signed?: boolean;
   /** Who can open it, as the space said last (`private`, `link_edit`, …); null when it has not said. */
   visibility?: string | null;
   owner: string | null;
@@ -171,10 +175,18 @@ export interface SpaceShareRecord {
   shared_at: string | null;
   updated_at: string;
   /** A run not finished: how many steps it has done, and how it ended (null while it runs, or the Inbox died in it). */
-  job: { done: number; total: number; ended: "failed" | "stopped" | "over_limit" | null; /** The space was not there for this caller: only a new space can go on. */ gone?: boolean } | null;
+  job: {
+    done: number;
+    total: number;
+    ended: "failed" | "stopped" | "over_limit" | null;
+    /** The space was not there for this caller: only a new space can go on. */
+    gone?: boolean;
+    /** A write was not allowed: the space has an owner now. Keep this space finds out whether it is this person. */
+    keep?: boolean;
+  } | null;
 }
 
-export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; at: string }): SpaceShareRecord {
+export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; at: string }): SpaceShareRecord {
   return {
     v: 1,
     host: input.host,
@@ -185,6 +197,7 @@ export function newSpaceShareRecord(input: { host: string; space_id: string; nam
     share_url: null,
     mode: input.mode,
     kept: input.kept,
+    signed: input.signed === true,
     owner: null,
     refused: false,
     pages: {},
@@ -484,8 +497,9 @@ export interface SpaceShareStatus {
   /**
    * `none`: never shared. `sharing`: a run is going. `shared`: up. `failed`: the last run did not finish. `stopped`:
    * the person stopped it. `over_limit`: more than a space nobody kept may hold. `refused`: someone else kept it.
+   * `gone`: the space is no longer there for this computer.
    */
-  phase: "none" | "sharing" | "shared" | "failed" | "stopped" | "over_limit" | "refused";
+  phase: "none" | "sharing" | "shared" | "failed" | "stopped" | "over_limit" | "refused" | "gone";
   /** Steps done of all, while a run is going or after one that did not finish. */
   progress: { done: number; total: number } | null;
   /** The space asked to wait: the seconds left. */
@@ -515,8 +529,12 @@ export interface SpaceShareStatus {
   stopped_pages: { title: string; url?: string | null }[];
   /** The claim is going: Keep waits for it. */
   busy?: boolean;
-  /** The run ended because the space is no longer there for this caller: "Share as new" is offered beside Try again. */
-  gone?: boolean;
+  /**
+   * Nothing more goes up until the person signs in and keeps the space: a write was not allowed (the space has an
+   * owner, perhaps this person from elsewhere), or the space is theirs and the sign-in is gone from this computer.
+   * Keep this space is offered; Update waits for it.
+   */
+  needs_keep?: boolean;
   details: Record<SpaceShareMode, SpaceShareDetails>;
 }
 
@@ -524,8 +542,9 @@ export interface SpaceShareStatus {
 export function spaceShareButton(status: SpaceShareStatus | null): { label: "Share" | "Sharing" | "Shared" | "Update"; state: "idle" | "busy" | "shared" | "update" | "look" | "failed" } {
   if (!status || status.phase === "none") return { label: "Share", state: "idle" };
   if (status.phase === "sharing") return { label: "Sharing", state: "busy" };
-  if (status.phase === "refused" || status.stopped_pages.length > 0) return { label: "Shared", state: "look" };
-  if (status.phase === "failed" || status.phase === "stopped" || status.phase === "over_limit") return status.shared_once ? { label: "Shared", state: "look" } : { label: "Share", state: "failed" };
+  // Waiting for Keep, a stopped page, or someone else's by now: it needs a look, and never reads Update.
+  if (status.phase === "refused" || status.stopped_pages.length > 0 || (status.phase === "shared" && status.needs_keep)) return { label: "Shared", state: "look" };
+  if (status.phase === "failed" || status.phase === "stopped" || status.phase === "over_limit" || status.phase === "gone") return status.shared_once ? { label: "Shared", state: "look" } : { label: "Share", state: "failed" };
   if (status.changes > 0) return { label: "Update", state: "update" };
   return { label: "Shared", state: "shared" };
 }

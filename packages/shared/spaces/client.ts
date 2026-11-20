@@ -25,15 +25,22 @@ export class SpacesError extends Error {
 }
 
 /**
- * "This space now belongs to someone else": the one place that reads it off an answer. Only an answer that says so
- * counts: a claim that lost (`409 claim_conflict`), or a page save or file upload that is not allowed (`403`) to a
- * space this computer made and never kept (a comment is still taken there). Everything else is not that:
- * `401 login_required` (no account where one is asked: an owner made it private, or the space is gone),
- * `404 workspace_not_found` (not available to this person) and any other answer.
+ * "This space now belongs to someone else": the one place that reads it off an answer, and only a claim says it
+ * (`409 claim_conflict`). A write that is not allowed never does: the person may have kept the space themselves, in
+ * the browser or from another computer.
  */
-export function spaceKeptByAnother(error: unknown, call: "write" | "claim"): boolean {
-  if (!(error instanceof SpacesError)) return false;
-  return call === "claim" ? error.status === 409 && error.code === "claim_conflict" : error.status === 403;
+export function spaceKeptByAnother(error: unknown): boolean {
+  return error instanceof SpacesError && error.status === 409 && error.code === "claim_conflict";
+}
+
+/** A page save or a file upload the space does not allow (`403`): it has an owner now. Whose, a claim finds out. */
+export function spaceWriteNotAllowed(error: unknown): boolean {
+  return error instanceof SpacesError && error.status === 403;
+}
+
+/** The space refused the credential itself (`401 unauthorized`): not any 401 (a sign-in asked for, a proxy's page). */
+export function spacesTokenRefused(error: unknown): boolean {
+  return error instanceof SpacesError && error.status === 401 && error.code === "unauthorized";
 }
 
 /**
@@ -43,7 +50,7 @@ export function spaceKeptByAnother(error: unknown, call: "write" | "claim"): boo
  */
 export function spaceNotAvailable(error: unknown, signedIn: boolean): boolean {
   if (!(error instanceof SpacesError)) return false;
-  return signedIn ? error.status === 404 && error.code === "workspace_not_found" : error.status === 401;
+  return signedIn ? error.status === 404 && error.code === "workspace_not_found" : error.status === 401 && error.code === "login_required";
 }
 
 /** How long a call may take before it counts as not answered: a minute, and longer for many bytes. */
@@ -64,11 +71,11 @@ export interface SpacesClient {
   readonly host: string;
   readonly signedIn: boolean;
   /** `imported` (here and below): the origin fields of what is sent (`spaceImportedFields`), merged into the call. */
-  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null }, imported?: Record<string, unknown>): Promise<{ space: SpacesSpace; document: { id: string; version: string } | null }>;
+  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null }, imported?: Record<string, unknown>): Promise<{ space: SpacesSpace; document: { id: string; version: string; url: string | null } | null }>;
   getSpace(id: string): Promise<SpacesSpace>;
-  addPage(spaceId: string, body: { doc_path: string; kind: SpacePageKind; title: string; body: string }, imported?: Record<string, unknown>): Promise<{ id: string; version: string }>;
+  addPage(spaceId: string, body: { doc_path: string; kind: SpacePageKind; title: string; body: string }, imported?: Record<string, unknown>): Promise<{ id: string; version: string; url: string | null }>;
   /** Replace a page's text; `ifMatch` is the version the space is expected to hold (412 `version_conflict` otherwise). */
-  savePage(spaceId: string, docId: string, bytes: Uint8Array, kind: SpacePageKind, ifMatch: string, imported?: Record<string, unknown>): Promise<{ version: string }>;
+  savePage(spaceId: string, docId: string, bytes: Uint8Array, kind: SpacePageKind, ifMatch: string, imported?: Record<string, unknown>): Promise<{ version: string; url: string | null }>;
   putFile(spaceId: string, path: string, bytes: Uint8Array, contentType: string, title?: string | null): Promise<{ id: string | null; content_hash: string | null }>;
   addComment(spaceId: string, docId: string, body: { anchor: unknown; body: string; document_version: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
   addReply(spaceId: string, docId: string, annotationId: string, body: { body: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
@@ -159,7 +166,7 @@ export function createSpacesClient(options: { host: string; token?: string | nul
       const { body } = await call("POST", "/v1/workspaces", { json: input.document ? { ...input, document: { ...input.document, ...imported } } : input });
       const space = spaceOf(under(body, "workspace"));
       const document = isObject(body) && isObject(body.document) ? body.document : null;
-      return { space, document: document && text(document.id) && text(document.version) ? { id: document.id as string, version: document.version as string } : null };
+      return { space, document: document && text(document.id) && text(document.version) ? { id: document.id as string, version: document.version as string, url: text(document.file_url) } : null };
     },
     async getSpace(id) {
       return spaceOf(under((await call("GET", ws(id))).body, "workspace"));
@@ -167,12 +174,13 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     async addPage(spaceId, input, imported = {}) {
       const { body, headers } = await call("POST", `${ws(spaceId)}/documents`, { json: { ...input, ...imported } });
       const document = under(body, "document");
-      return { id: text(document.id) ?? "", version: versionOf(document, headers) };
+      return { id: text(document.id) ?? "", version: versionOf(document, headers), url: text(document.file_url) };
     },
     // A raw save has no JSON to carry origin fields in; how they ride on it is the hosted side's to settle.
     async savePage(spaceId, docId, bytes, kind, ifMatch, _imported = {}) {
       const { body, headers } = await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}`, { bytes, headers: { "Content-Type": SPACE_PAGE_MEDIA_TYPE[kind], "If-Match": `"${ifMatch}"` } });
-      return { version: versionOf(under(body, "document"), headers) };
+      const document = under(body, "document");
+      return { version: versionOf(document, headers), url: text(document.file_url) };
     },
     async putFile(spaceId, path, bytes, contentType, title) {
       const query = title ? `?title=${encodeURIComponent(title)}` : "";

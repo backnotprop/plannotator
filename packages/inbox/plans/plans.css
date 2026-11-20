@@ -331,6 +331,9 @@
 .ib-shr-disc .ib-ic { width: 14px; height: 14px; }
 .ib-shr-warnrow .ib-shr-disc { color: var(--warning); }
 .ib-shr-atext { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+/* The longest access line stays on one line beside Invite: the row gives it its gaps. */
+.ib-shr-oneline { gap: 6px; }
+.ib-shr-oneline .ib-shr-atext { white-space: nowrap; overflow-wrap: normal; }
 :root:not(.light) .ib-shr-disc { background: color-mix(in oklch, var(--foreground) 9%, transparent); }
 
 .ib-shr-b { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 6px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; white-space: nowrap; flex-shrink: 0; cursor: pointer; text-decoration: none; }
