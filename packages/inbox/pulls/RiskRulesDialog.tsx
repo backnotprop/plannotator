@@ -20,7 +20,7 @@ const AUTO_MAKES = [
 ];
 const RULES_INFO = 'Every open pull request is ranked against these rules: not touched is Low, maybe is Medium, definitely is High.';
 const AGENT_INFO = 'This agent reads the whole diff of each pull request to rank it. Sonnet, Luna or similar works well.';
-const AUTO_INFO = "Your team's pull requests opened or pushed after you save get one automatically, once. The rest wait until you ask.";
+const AUTO_INFO = "Your team's new pull requests and pushes that reach this level get one, once, when Inbox can tell. Others wait.";
 
 export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make: string): InboxPullRiskAuto | null | undefined {
   if (make === (saved?.make ?? '')) return undefined;

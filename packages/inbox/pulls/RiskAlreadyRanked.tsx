@@ -13,6 +13,10 @@ export function riskRankWords(count: number, level: InboxPullRiskAuto['level'], 
   return `${count}${already ? ' already' : ''} ${count === 1 ? 'ranks' : 'rank'} ${riskFilterWords[level]}.`;
 }
 
+export function riskMakeWords(make: InboxPullRiskAuto['make']): string {
+  return `Make ${MADE[make]} for each`;
+}
+
 export function dismissRanked(keys: readonly string[]): Promise<InboxPullRiskAnswer> {
   return inboxApi.savePullRisk({ not_now: true, keys: [...keys] });
 }
@@ -47,7 +51,7 @@ export function RiskAlreadyRanked({ titleId, saved, onDone }: { titleId: string;
   return (
     <div data-pull-risk-ranked={count}>
       <h2 id={titleId}>{riskRankWords(count, auto.level, true)}</h2>
-      <p className="ib-sub ib-riskd-l">Make {MADE[auto.make]} for each now?</p>
+      <p className="ib-sub ib-riskd-l">{riskMakeWords(auto.make)} now?</p>
       {choice.error && (
         <p className="ib-error" role="alert">
           {choice.error}

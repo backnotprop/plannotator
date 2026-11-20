@@ -715,51 +715,68 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   await start();
   context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   page = await context.newPage();
-  expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
-  await expect
-    .poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk?auto_agent=1`)).json()) as { auto_agent?: { agent: string } | null }).auto_agent?.agent ?? null, { timeout: 15_000 })
-    .toBe('pi');
-  await openPulls();
-  const waitingLine = page.locator('[data-pull-risk-waiting]');
-  await expect(waitingLine)
-    .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
-    .catch(async (cause: Error) => {
-      const risk = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as Record<string, unknown>;
-      const { pending, judgments, auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs } = risk;
-      throw new Error(`${cause.message}\nrisk answer now: ${JSON.stringify({ pending, judgments: Object.keys((judgments ?? {}) as object), auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs })}`);
-    });
-  await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High.');
-  expect(await autoRuns()).toEqual({});
-  expect(launches()).toBe(launchedBefore);
-  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
-  for (const size of SHEETS) {
-    await page.setViewportSize(size);
+  try {
+    expect((await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: true } })).status()).toBe(200);
+    await expect
+      .poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk?auto_agent=1`)).json()) as { auto_agent?: { agent: string } | null }).auto_agent?.agent ?? null, { timeout: 15_000 })
+      .toBe('pi');
+    await page.setViewportSize(VIEWPORTS[390]);
+    await openPulls();
+    const waitingLine = page.locator('[data-pull-risk-waiting]');
+    const firstRow = page.locator('[data-pulls-row]').first();
+    await expect(firstRow).toBeVisible();
+    const rowTop = async () => (await firstRow.boundingBox())!.y;
+    const topBefore = await rowTop();
+    await expect(waitingLine)
+      .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
+      .catch(async (cause: Error) => {
+        const risk = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as Record<string, unknown>;
+        const { pending, judgments, auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs } = risk;
+        throw new Error(`${cause.message}\nrisk answer now: ${JSON.stringify({ pending, judgments: Object.keys((judgments ?? {}) as object), auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs })}`);
+      });
+    await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High. Make a guided review for each?');
+    expect(await rowTop()).toBe(topBefore);
+    expect(await autoRuns()).toEqual({});
+    expect(launches()).toBe(launchedBefore);
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    for (const size of SHEETS) {
+      await page.setViewportSize(size);
+      await page.waitForTimeout(350);
+      await sheetFits(waitingLine, size.width);
+      await page.screenshot({ path: join(proofDir, `risk-line-${size.width}.png`) });
+    }
+    await page.setViewportSize(VIEWPORTS[1440]);
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
     await page.waitForTimeout(350);
-    await sheetFits(waitingLine, size.width);
-    await page.screenshot({ path: join(proofDir, `risk-line-${size.width}.png`) });
+    const topWithLine = await rowTop();
+
+    await waitingLine.getByRole('button', { name: 'Not now', exact: true }).click();
+    await expect(waitingLine).toHaveCount(0);
+    expect(await rowTop()).toBe(topWithLine);
+    await openPulls();
+    await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
+    await expect(waitingLine).toHaveCount(0);
+    expect(await autoRuns()).toEqual({});
+
+    writeGhPulls(LINE_LATER(base), LINE(base));
+    await expect.poll(async () => (await (await page.request.get(`${url}api/inbox/pulls?refresh=1`)).text()).includes('Move the invoice job'), { timeout: 60_000, intervals: [2_000] }).toBe(true);
+    await openPulls();
+    await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
+    expect(await autoRuns()).toEqual({});
+    await waitingLine.getByRole('button', { name: 'Make them now', exact: true }).click();
+    await expect(waitingLine).toHaveCount(0);
+    await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');
+    const runs = await autoRuns();
+    expect(Object.keys(runs).sort()).toEqual([keyOf(base - 2), keyOf(base - 1)]);
+    expect(['queued', 'started']).toContain(runs[keyOf(base - 1)]!.state);
+    await expect.poll(launches, { timeout: 30_000 }).toBeGreaterThan(launchedBefore);
+    const argv = piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id'))[launchedBefore]!.argv!;
+    expect(argv[argv.indexOf('--name') + 1]).toBe(`Review #${base - 2}: Move the invoice job`);
+  } finally {
+    await page.setViewportSize(VIEWPORTS[1440]).catch(() => {});
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' }).catch(() => {});
+    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
+    await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
-  await page.setViewportSize(VIEWPORTS[1440]);
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-
-  await waitingLine.getByRole('button', { name: 'Not now', exact: true }).click();
-  await expect(waitingLine).toHaveCount(0);
-  await openPulls();
-  await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect(waitingLine).toHaveCount(0);
-  expect(await autoRuns()).toEqual({});
-
-  writeGhPulls(LINE_LATER(base), LINE(base));
-  await expect.poll(async () => (await (await page.request.get(`${url}api/inbox/pulls?refresh=1`)).text()).includes('Move the invoice job'), { timeout: 60_000, intervals: [2_000] }).toBe(true);
-  await openPulls();
-  await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
-  expect(await autoRuns()).toEqual({});
-  await waitingLine.getByRole('button', { name: 'Make them now', exact: true }).click();
-  await expect(waitingLine).toHaveCount(0);
-  await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');
-  const runs = await autoRuns();
-  expect(Object.keys(runs).sort()).toEqual([keyOf(base - 2), keyOf(base - 1)]);
-  expect(['queued', 'started']).toContain(runs[keyOf(base - 1)]!.state);
-  await expect.poll(launches, { timeout: 30_000 }).toBeGreaterThan(launchedBefore);
-  const argv = piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id'))[launchedBefore]!.argv!;
-  expect(argv[argv.indexOf('--name') + 1]).toBe(`Review #${base - 2}: Move the invoice job`);
 });

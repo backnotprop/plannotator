@@ -257,7 +257,6 @@ export function PullsPage(given: PullsPageProps) {
         </Tip>
       </div>
       {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
-      {risk.answer && <RiskWaitingLine answer={risk.answer} onAnswer={risk.setAnswer} />}
       <ReviewsMenu
         className="ib-lbody"
         busy={state.loading && !model}
@@ -322,6 +321,7 @@ export function PullsPage(given: PullsPageProps) {
           />
         )}
       </ReviewsMenu>
+      {risk.answer && <RiskWaitingLine answer={risk.answer} onAnswer={risk.setAnswer} />}
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (

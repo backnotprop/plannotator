@@ -10432,8 +10432,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-riskd .ib-riskd-acts { flex-direction: row; margin-top: 10px; }
   .ib-riskd .ib-riskd-acts .ib-btn { flex: 1; }
 }
-.ib-riskw { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 4px 8px 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card, var(--background)); font-size: var(--ib-fs-13, 13px); }
-.ib-riskw-t { flex: 1 1 auto; min-width: 0; font-weight: 600; }
+.ib-riskw-live { flex: none; }
+.ib-riskw { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 10px; padding: 4px 4px 4px 12px; border-radius: 6px; background: var(--ib-hover-s, var(--muted)); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-riskw-t { flex: 1 1 12em; min-width: 0; }
 .ib-riskw-acts { display: flex; gap: 6px; margin-left: auto; }
 .ib-riskw-err { flex-basis: 100%; color: var(--destructive); font-size: var(--ib-fs-12, 12px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {

@@ -48,7 +48,7 @@ test.skipIf(!hasDom)('the line counts what waits minus what was put off, and Mak
   const answers: InboxPullRiskAnswer[] = [];
   await mount(ANSWER, (next) => answers.push(next));
   expect(line()!.getAttribute('data-pull-risk-waiting')).toBe('2');
-  expect(line()!.querySelector('.ib-riskw-t')!.textContent).toBe('2 rank High.');
+  expect(line()!.querySelector('.ib-riskw-t')!.textContent).toBe('2 rank High. Make a guided review for each?');
   await act(async () => document.querySelector<HTMLElement>('[data-pull-risk-waiting-make-now]')!.click());
   expect(sent).toEqual([{ make_now: true, keys: ['a#1', 'a#3'] }]);
   expect(answers).toHaveLength(1);

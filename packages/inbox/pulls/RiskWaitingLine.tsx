@@ -1,5 +1,5 @@
 import type { InboxPullRiskAnswer } from '@plannotator/core/inbox-types';
-import { riskRankWords, useRankedChoice } from './RiskAlreadyRanked';
+import { riskMakeWords, riskRankWords, useRankedChoice } from './RiskAlreadyRanked';
 
 export function riskLineKeys(answer: InboxPullRiskAnswer | null): string[] {
   if (!answer?.auto || !answer.auto_agent) return [];
@@ -14,7 +14,9 @@ export function RiskWaitingLine({ answer, onAnswer }: { answer: InboxPullRiskAns
     <div role="status" className="ib-riskw-live">
       {keys.length > 0 && answer?.auto && (
         <div className="ib-riskw" data-pull-risk-waiting={keys.length}>
-          <span className="ib-riskw-t">{riskRankWords(keys.length, answer.auto.level, false)}</span>
+          <span className="ib-riskw-t">
+            {riskRankWords(keys.length, answer.auto.level, false)} {riskMakeWords(answer.auto.make)}?
+          </span>
           <span className="ib-riskw-acts">
             <button type="button" className="ib-btn" onClick={() => void choice.notNow()} disabled={choice.busy} data-pull-risk-waiting-not-now="">
               Not now
