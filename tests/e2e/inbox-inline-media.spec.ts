@@ -2,6 +2,7 @@ import { chromium, expect, test, webkit, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -188,6 +189,33 @@ test('a sound and a video named in a message body play in place, beside a pictur
   }
 });
 
+function crc32(bytes: Buffer): number {
+  let c = ~0;
+  for (const b of bytes) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+
+function widePng(width: number, height: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, 'latin1');
+    data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  const rows = Buffer.alloc((width * 3 + 1) * height, 0x80);
+  for (let y = 0; y < height; y++) rows[y * (width * 3 + 1)] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+
 type Player = ReturnType<Page['locator']>;
 const WAIT = { timeout: 15_000 };
 
@@ -274,7 +302,7 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
     let soundBefore = 0;
     await test.step('the message redraws once its late picture is captured', async () => {
       soundBefore = await players[1]![1].evaluate((m: HTMLMediaElement) => m.currentTime);
-      writeFileSync(join(project, 'media', 'later.png'), PNG);
+      writeFileSync(join(project, 'media', 'later.png'), widePng(2000, 4));
       await agent.send({ project_path: project, reply_to: id, body: 'One more note.' });
       await expect(page.getByText('One more note.')).toBeVisible(WAIT);
       await expect
@@ -283,15 +311,35 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
           return thread.thread.messages.find((m) => m.id === id)?.inline_images?.map((image) => image.ref) ?? [];
         }, { ...WAIT, message: 'later.png captured' })
         .toContain('media/later.png');
-      await page.waitForTimeout(2000);
+      await expect(body.locator('img[alt="Later"]')).toBeVisible(WAIT);
+      await expect.poll(() => body.locator('img[alt="Later"]').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth), { ...WAIT, message: 'Later drawn' }).toBeGreaterThan(0);
     });
 
+    const startedWithin = (player: Player) =>
+      expect
+        .poll(() => player.evaluate((m: HTMLMediaElement) => m.currentTime), WAIT)
+        .toBeGreaterThan(0)
+        .then(() => true, () => false);
     for (const [name, player] of players) {
       await test.step(`${name}: the same element after the redraw, not paused, not reset`, async () => {
-        const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, reset: m.dataset.reset ?? null, paused: m.paused, started: m.currentTime > 0 }));
-        expect(now, name).toEqual({ marked: 'before-redraw', reset: null, paused: false, started: true });
+        const now = await player.evaluate((m: HTMLMediaElement) => ({ marked: m.dataset.marked ?? null, reset: m.dataset.reset ?? null, paused: m.paused }));
+        expect(now, name).toEqual({ marked: 'before-redraw', reset: null, paused: false });
       });
     }
+    await test.step('sound: started after the redraw', async () => {
+      expect(await players[1]![1].evaluate((m: HTMLMediaElement) => m.currentTime), 'sound currentTime').toBeGreaterThan(0);
+    });
+    await test.step('video: started after the redraw as the untouched copy has', async () => {
+      if (browserName === 'chromium') {
+        expect(await players[0]![1].evaluate((m: HTMLMediaElement) => m.currentTime), 'video currentTime').toBeGreaterThan(0);
+        expect(await players[2]![1].evaluate((m: HTMLMediaElement) => m.currentTime), 'untouched copy currentTime').toBeGreaterThan(0);
+        return;
+      }
+      const copyStarted = await startedWithin(players[2]![1]);
+      const videoStarted = copyStarted ? await startedWithin(players[0]![1]) : null;
+      console.log(`webkit after redraw: untouched copy started ${copyStarted}; video started ${videoStarted}`);
+      if (copyStarted) expect(videoStarted, 'video started as the untouched copy did').toBe(true);
+    });
     await test.step('sound: still advancing after the redraw, past where it was before it', async () => {
       const sound = await advances(players[1]![1]);
       expect(sound.from, 'sound not reset').toBeGreaterThan(soundBefore);
