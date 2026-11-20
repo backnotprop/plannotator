@@ -1,6 +1,6 @@
 /**
- * Share this space against a REAL Spaces server: one share, one Update, then (with a token) the claim's effect and
- * the approval. Skipped by default: it does nothing unless SPACES_E2E_URL names the server. Nothing in CI or in the
+ * Share this space against a REAL Spaces server: one share, one Update, then (with a token) the claim's effect (a run
+ * sends no approval: that goes only with Keep, on the sign-in page). Skipped by default: it does nothing unless SPACES_E2E_URL names the server. Nothing in CI or in the
  * test suite runs it; the unit tests use a stand-in (tests/helpers/fake-spaces.ts), which proves this side of the
  * contract only.
  *
@@ -8,7 +8,7 @@
  * - SPACES_E2E_URL: the origin of a TEST copy of Spaces (none existed when this was written). `https`, or `http` on
  *   this computer. Never the real service: it creates spaces it cannot delete without a token.
  * - SPACES_E2E_TOKEN (optional): a `wscli_live_…` token of a test account, to run the signed-in half (a private
- *   space, the approval, the delete at the end). Without it only the no-account half runs.
+ *   space, the delete at the end). Without it only the no-account half runs.
  *
  * - SPACES_E2E_MODE (optional): `all` (default) or `newest`.
  * - SPACES_E2E_BURST (optional): a number of small writes (the same file again, which changes nothing) made after
@@ -20,7 +20,7 @@
  * It works in a scratch data dir of its own and prints each step's result as a line of JSON; exit 1 on a surprise.
  * What to read in its output, since each is unconfirmed against a real server: the create's answer shape
  * (`share_url`, the first page's id and version), the media type a Mermaid page's raw save takes, whether a replayed
- * comment (same Idempotency-Key) makes one comment, and the code of the approval call. And the "imported" shape
+ * comment (same Idempotency-Key) makes one comment. And the "imported" shape
  * (it needs a server that has it: one without refuses the `actor` with 422): the `read back` line says, for the main
  * page's newest version, one comment and one reply as the server reads them back, whether `imported` is there and
  * `author` is null. The reads are `GET …/documents/{doc}/versions` (newest first) and `GET …/documents/{doc}/annotations`

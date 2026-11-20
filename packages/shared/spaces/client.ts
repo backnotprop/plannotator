@@ -86,7 +86,6 @@ export interface SpacesClient {
   addComment(spaceId: string, docId: string, body: { anchor: unknown; body: string; document_version: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
   addReply(spaceId: string, docId: string, annotationId: string, body: { body: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
   claim(spaceId: string): Promise<SpacesSpace>;
-  approve(spaceId: string, docId: string, version: string): Promise<void>;
   deleteSpace(spaceId: string): Promise<void>;
 }
 
@@ -222,9 +221,6 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     async claim(spaceId) {
       // No body: the space wants none. A 200 alone says the space is the caller's now (its answer is the space).
       return spaceOf(under((await call("POST", `${ws(spaceId)}/claim`)).body, "workspace"));
-    },
-    async approve(spaceId, docId, version) {
-      await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}/approval`, { json: { version } });
     },
     async deleteSpace(spaceId) {
       await call("DELETE", ws(spaceId));

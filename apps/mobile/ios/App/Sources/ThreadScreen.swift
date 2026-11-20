@@ -45,6 +45,11 @@ final class ScrollBox {
 struct ThreadScreen: View {
   let session: InboxSession
   let id: ThreadID
+  /// What the person does to the thread itself (its More menu, the lines over it), and the toast that answers.
+  let actions: RowActions
+  @Environment(\.dismiss) private var dismiss
+  /// How tall the foot is: the toast stands over it.
+  @State private var foot: CGFloat = 0
   @State private var words = ""
   @State private var drafts = ThreadDrafts()
   @State private var tail: CGFloat = 0
@@ -75,9 +80,11 @@ struct ThreadScreen: View {
   }
 
   var body: some View {
-    Group {
+    // The thread's row, found once for everything this draw asks of it.
+    let row = session.row(id)
+    return Group {
       if let thread = model?.thread {
-        messages(thread)
+        messages(thread, row: row)
       } else if session.missingThreads.contains(id) {
         Standing(symbol: "tray", words: PhoneWords.threadGone)
       } else if session.reach == .away {
@@ -107,8 +114,27 @@ struct ThreadScreen: View {
         // The bar does not grow with the text: a long press shows the title large, as the system's own does.
         .accessibilityShowsLargeContentViewer { Text(title) }
       }
+      // More: what a row's menu offers, for the open thread (the window's ⋯ sheet).
+      if let row {
+        ToolbarItem(placement: .topBarTrailing) {
+          Menu {
+            ThreadMenuItems(row: row, drawn: RowOffers.backIn(row), starred: row.pinnedAt != nil, actions: actions, place: .thread)
+          } label: {
+            Image(systemName: "ellipsis")
+          }
+          .accessibilityLabel(PhoneWords.more)
+        }
+      }
     }
+    .toastHost(actions, lift: foot)
+    // Mark unread closes the thread: left open, its next look would read it again.
+    .onChange(of: actions.closes) { _, _ in dismiss() }
     .task { await session.open(id) }
+  }
+
+  /// The agent the thread's lines name: the last one to write in it.
+  private func agentName(_ thread: InboxThread) -> String {
+    thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) } ?? PhoneWords.anAgent
   }
 
   /// The cards the person can still act on, in thread order: what the thread lands on and what the jump visits.
@@ -135,7 +161,7 @@ struct ThreadScreen: View {
     }
   }
 
-  private func messages(_ thread: InboxThread) -> some View {
+  private func messages(_ thread: InboxThread, row: InboxListRow?) -> some View {
     // A reply that only carried a permission prompt's answer is said by the prompt's own card.
     let said = PermissionPrompt.saidByCards(in: thread)
     // A permission prompt's message with no question left draws nothing, as in the window.
@@ -318,7 +344,17 @@ struct ThreadScreen: View {
     }
     .scrollDismissesKeyboard(.interactively)
     .refreshable { await session.refresh() }
+    // Where the thread stands, said under the title bar: snoozed, read, back from a snooze.
+    .safeAreaInset(edge: .top, spacing: 0) {
+      // The scroll view keeps what is on screen in place under the taller top: nothing is covered when a line
+      // comes (a thread rests with its newest message's name row under the title bar, which says the same).
+      if let row { ThreadLines(row: row, agent: agentName(thread), actions: actions) }
+    }
     .safeAreaInset(edge: .bottom, spacing: 0) {
+      if let row, ListRules.archived(row) {
+        ArchivedFoot(row: row, agent: agentName(thread), actions: actions)
+          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
+      } else {
       Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items, inCard: keyboard && !composing) { card in
         scroll.rest = nil
         scroll.landed = true
@@ -332,6 +368,8 @@ struct ThreadScreen: View {
         let next = jumped.flatMap { open.firstIndex(of: $0) }.map { open[($0 + 1) % open.count] } ?? open[0]
         jumped = next
         withAnimation { show(next, proxy) }
+      }
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       }
     }
     // A Send the computer refused: the person's words come back to the box, never lost.

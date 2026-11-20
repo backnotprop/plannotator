@@ -73,8 +73,12 @@ describe.if(posix)("a run", () => {
     const end = w.ended[0]!;
     expect(end.outcome).toBe("exited");
     expect(end.view).toMatchObject({ state: "failed", exit_code: 3 });
-    expect(end.view.lines.slice(1).sort()).toEqual(["err", "no newline", "out"]);
-    expect(end.view.lines[0]!.endsWith(w.dir.split("/").pop()!)).toBe(true);
+    // stdout and stderr are two pipes: "err" can be read before the folder's line, so no order between them is held.
+    const folder = end.view.lines.filter((line) => line.endsWith(w.dir.split("/").pop()!));
+    expect(folder).toHaveLength(1);
+    expect(end.view.lines.filter((line) => line !== folder[0]).sort()).toEqual(["err", "no newline", "out"]);
+    // Within stdout the order holds: the folder first.
+    expect(end.view.lines.filter((line) => line !== "err")[0]).toBe(folder[0]);
   });
 
   test("a saved secret is in the env as $NAME, and never in the output or what the agent gets", async () => {

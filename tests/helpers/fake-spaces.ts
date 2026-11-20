@@ -43,6 +43,18 @@
  *   `grant_type=authorization_code`, `code`, the same `redirect_uri` byte for byte and `code_verifier`; its errors are
  *   `{ "error": "<words>" }`. A code lives 120 seconds and is spent on its first lookup, so a second exchange with it
  *   always fails. The answer is `{ access_token, token_type, expires_at }` with no name: the name is `GET /v1/me`'s.
+ * - The "tool connect" page on `/cli/login` (names as built on the Spaces side, 2026-11-20; run against its test copy
+ *   in T14f): `client_name` (a name it does not know is `400`), `space` and `approve_document` + `approve_version`.
+ *   A `space` the person may claim when the page is drawn (no owner, or theirs) makes it the "becomes your space"
+ *   page: the press claims it and records the approval (`moved`: the page is at another version there); taken by
+ *   someone else between the drawing and the press, the way back is `error=claim_conflict&state` with no code. A
+ *   space someone else owns when the page is drawn (or one it does not hold) gets the plain connect page: the press
+ *   only signs in (no claim, nothing approved), and the tool's own claim then answers `409 claim_conflict`.
+ *   `approval=recorded|moved|none` is on a way back with a code whenever an approval was asked (`approve_document` +
+ *   `approve_version` sent), whether or not the space line was drawn: `none` when nothing was recorded. It is absent
+ *   only when no approval was asked. Cancel sends back
+ *   `error=access_denied&state` only when `client_name` was sent; without it, Cancel is a link to the site's home and
+ *   nothing comes back. Not from the contract: a `space` it does not hold claims nothing (and its approval is `none`).
  */
 import { createHash, randomBytes } from "node:crypto";
 import { gitBlobSha } from "../../packages/core/plans";
@@ -131,9 +143,14 @@ export interface FakeSpacesOptions {
   approvals?: "refuse" | "accept";
   /** `GET /v1/me` answers `name: null` (an account with no display name). */
   nameless?: boolean;
-  /** `/cli/login` sends the browser straight back with a code (default), or shows a page with an Allow link. */
+  /** `/cli/login` sends the browser straight back (default), or shows a page with Allow and Cancel links. */
   login?: "auto" | "page";
+  /** What the person presses on the page when `login` is `auto`: Allow (default) or Cancel. */
+  consent?: "allow" | "cancel";
 }
+
+/** The tool names the connect page knows. */
+const CLIENT_NAMES = new Set(["Plannotator"]);
 
 const ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const newId = (prefix: string) => `${prefix}_${[...randomBytes(26)].map((b) => ID_ALPHABET[b % 32]).join("")}`;
@@ -188,6 +205,57 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
   const faults: { match: (call: { method: string; path: string }) => boolean; status: number; code: string; times: number; details?: Record<string, unknown>; after?: boolean }[] = [];
   let signInAs = "Maya Chen";
 
+  type FakeLogin = { challenge: string; redirect: string; state: string; clientName: string | null; space: string | null; approveDocument: string | null; approveVersion: string | null; claimable: boolean };
+  /** Pages shown (`login: "page"`), waiting for Allow or Cancel. */
+  const pressing = new Map<string, FakeLogin>();
+  /** A space the page may claim for the person when it is drawn: no owner yet, or theirs. */
+  const claimableAtDraw = (id: string | null) => {
+    const space = id ? spaces.get(id) : undefined;
+    return !!space && !space.deleted && (space.owner === null || space.owner === signInAs);
+  };
+  /**
+   * Allow pressed. A page drawn for a space it may claim: the claim, the approval sent with it, then back with a code
+   * (or the claim lost, when someone else took it since). A page drawn for a space someone else owns: a code only.
+   */
+  function press(login: FakeLogin): string {
+    const back = new URL(login.redirect);
+    const space = login.space && login.claimable ? spaces.get(login.space) : undefined;
+    const held = space && !space.deleted ? space : undefined;
+    if (held && held.owner !== null && held.owner !== signInAs) {
+      back.searchParams.set("error", "claim_conflict");
+      back.searchParams.set("state", login.state);
+      return back.toString();
+    }
+    if (held) held.owner = signInAs;
+    const code = randomBytes(12).toString("hex");
+    codes.set(code, { challenge: login.challenge, redirect: login.redirect, name: signInAs, until: Date.now() + 120_000 });
+    back.searchParams.set("code", code);
+    back.searchParams.set("state", login.state);
+    if (login.approveDocument !== null && login.approveVersion !== null) {
+      // Asked: always answered, `none` when the page recorded nothing (no space line, or no such page there).
+      const doc = held?.documents.find((d) => d.id === login.approveDocument);
+      const current = doc?.versions[doc.versions.length - 1]?.version;
+      let approval = "none";
+      if (held && doc && current) {
+        if (current !== login.approveVersion) approval = "moved";
+        else {
+          approval = "recorded";
+          if (!held.approvals.some((a) => a.document_id === doc.id && a.version === current && a.by === signInAs)) held.approvals.push({ document_id: doc.id, version: current, by: signInAs });
+        }
+      }
+      back.searchParams.set("approval", approval);
+    }
+    return back.toString();
+  }
+  /** Cancel pressed: back with `access_denied` only for a tool that named itself; else the site's home. */
+  function cancelled(login: FakeLogin): string {
+    if (login.clientName === null) return `${origin}/`;
+    const back = new URL(login.redirect);
+    back.searchParams.set("error", "access_denied");
+    back.searchParams.set("state", login.state);
+    return back.toString();
+  }
+
   const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(body === null ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
   const fail = (status: number, code: string, details?: Record<string, unknown>, headers: Record<string, string> = {}) => json(status, { error: { code, message: code.replace(/_/g, " "), ...(details ? { details } : {}) } }, headers);
   const docWire = (space: FakeSpace, doc: FakeDoc) => ({ file_url: `${space.share_url}/${doc.doc_path.split("/").map(encodeURIComponent).join("/")}@${doc.versions[doc.versions.length - 1]!.version}`, id: doc.id, workspace_id: space.id, doc_path: doc.doc_path, kind: doc.kind, title: doc.title, version: doc.versions[doc.versions.length - 1]!.version, version_count: doc.versions.length });
@@ -238,13 +306,19 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       const challenge = url.searchParams.get("code_challenge") ?? "";
       const state = url.searchParams.get("state") ?? "";
       if (!loopbackRedirect(redirect) || !PKCE_VALUE.test(challenge) || !state || url.searchParams.get("code_challenge_method") !== "S256") return done(new Response("bad sign-in request", { status: 400 }));
-      const code = randomBytes(12).toString("hex");
-      codes.set(code, { challenge, redirect, name: signInAs, until: Date.now() + 120_000 });
-      const back = new URL(redirect);
-      back.searchParams.set("code", code);
-      back.searchParams.set("state", state);
-      if ((settings.login ?? "auto") === "auto") return done(new Response(null, { status: 302, headers: { Location: back.toString() } }));
-      return done(new Response(`<!doctype html><title>Stand-in sign-in</title><p>Allow Plannotator?</p><a id="allow" href="${back.toString().replace(/&/g, "&amp;")}">Allow</a>`, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
+      const clientName = url.searchParams.get("client_name");
+      if (clientName !== null && !CLIENT_NAMES.has(clientName)) return done(new Response("unknown client_name", { status: 400 }));
+      const login = { challenge, redirect, state, clientName, space: url.searchParams.get("space"), approveDocument: url.searchParams.get("approve_document"), approveVersion: url.searchParams.get("approve_version"), claimable: claimableAtDraw(url.searchParams.get("space")) };
+      if ((settings.login ?? "auto") === "auto") return done(new Response(null, { status: 302, headers: { Location: (settings.consent ?? "allow") === "allow" ? press(login) : cancelled(login) } }));
+      const ticket = randomBytes(12).toString("hex");
+      pressing.set(ticket, login);
+      return done(new Response(`<!doctype html><title>Stand-in sign-in</title><p>Connect Plannotator?</p><a id="allow" href="/cli/login/allow?ticket=${ticket}">Allow</a> <a id="cancel" href="/cli/login/cancel?ticket=${ticket}">Cancel</a>`, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
+    }
+    if (method === "GET" && (url.pathname === "/cli/login/allow" || url.pathname === "/cli/login/cancel")) {
+      const login = pressing.get(url.searchParams.get("ticket") ?? "");
+      if (!login) return done(new Response("not found", { status: 404 }));
+      pressing.delete(url.searchParams.get("ticket")!);
+      return done(new Response(null, { status: 302, headers: { Location: url.pathname.endsWith("/allow") ? press(login) : cancelled(login) } }));
     }
     if (method === "POST" && url.pathname === "/cli/token") {
       const plain = (status: number, error: string) => done(json(status, { error }));
