@@ -1,6 +1,6 @@
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { listLookClasses, type ListLook } from '../listLook';
-import type { ListView } from '../listView';
+import { flatRows, type ListView } from '../listView';
 import type { MachinesModel } from '../machines';
 import { AgentsList } from '../agentsView/AgentsList';
 import { LineRow } from '../agentsView/LineRow';
@@ -55,6 +55,17 @@ export interface ListViewIntroProps {
   onPick: (view: ListView) => void;
   /** Escape or a click outside: the current view stays (the line counts it as Not now). */
   onDismiss: () => void;
+}
+
+/**
+ * The choice's three pictures of the person's list (App passes it the list as drawn, `filterList`; null: none): the
+ * sections, for the Agents picture (AgentsList's `picture` draws only its top), the groups' first rows, and the
+ * Simple list's first rows.
+ */
+export function viewChoicePictures(sections: InboxListSection[] | null): Pick<ListViewIntroProps, 'sections' | 'groups' | 'flat'> {
+  if (!sections) return { sections: [], groups: [], flat: [] };
+  const groups = sections.flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : []));
+  return { sections, groups, flat: flatRows(sections, null, { epoch: 0, keep: null }).rows.slice(0, 10) };
 }
 
 const noop = () => {};

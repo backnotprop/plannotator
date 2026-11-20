@@ -320,6 +320,7 @@ import {
   revealAgainAt,
   revealStamp,
   revealStampNotNow,
+  revealWaitStarts,
   type RevealId,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
@@ -3755,19 +3756,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The line's own rules hold for this page load (`setup`: the agent note, which keeps no spacing). A dev build: free. */
   const lineFree = (kind: "setup" | "spaced", load: string | null): boolean => revealLineFree(kind, revealState(new Date(), load), new Date());
   /**
-   * The dialog this page may arm, or null. The first time an entry is next is kept, for the patience and the
-   * retirement.
+   * The dialog this page may arm, or null. The first time an entry is next, or an `ahead` offer is armed beside it, is
+   * kept, for the patience and the retirement (reveals.ts `revealWaitStarts`).
    */
   const revealNow = (load: string | null = null, read?: { now: Date; state: RevealState }): RevealId | null => {
     if (!snoozeIntroRelease) return null;
     const now = read?.now ?? new Date();
     const state = read?.state ?? revealState(now, load);
-    const next = revealNext(state, now);
-    if (next && !state.waitingSince?.[next]) {
+    const starts = revealWaitStarts(state, now);
+    if (starts.length > 0) {
       const reveals = loadConfig().inboxReveals;
-      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, [next]: now.toISOString() } } });
+      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } } });
     }
-    return next;
+    return revealNext(state, now);
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
@@ -3899,6 +3900,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
   const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
+  /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
+  const waitingFrom = (state: RevealState, now: Date): RevealState => {
+    const starts = revealWaitStarts(state, now);
+    return starts.length === 0 ? state : { ...state, waitingSince: { ...state.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } };
+  };
   const lineReport = (load: string | null) => {
     const now = new Date();
     const state = revealState(now, load);
@@ -3913,11 +3919,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
-      // With `next` waiting from this read on (`revealNow` has just kept it), so the end of its patience is named too.
-      again_in:
-        snoozeIntroRelease
-          ? againIn(revealAgainAt(next && !state.waitingSince?.[next] ? { ...state, waitingSince: { ...state.waitingSince, [next]: now.toISOString() } } : state, now), now)
-          : null,
+      // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
+      // their patience and their 14 days is named too.
+      again_in: snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.

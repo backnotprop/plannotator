@@ -77,7 +77,7 @@ import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads'
 import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { flatRows, readListView, useListView, type ListSort } from './listView';
+import { readListView, useListView, type ListSort } from './listView';
 import { useShowLight } from './showLight';
 import { useHeldRead } from './app/useHeldRead';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
@@ -238,7 +238,7 @@ import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
 import { GrillMeTip } from './components/GrillMeTip';
-import { ListViewIntro } from './components/ListViewIntro';
+import { ListViewIntro, viewChoicePictures } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
 import { useRoutinesReveal } from './components/useRoutinesReveal';
@@ -4032,11 +4032,10 @@ function Inbox() {
   });
   const listViewIntroOpen = listViewReveal.stage === 'open';
   const listViewChoiceOpen = listViewIntroOpen && shown !== null;
-  // The choice's three pictures: the person's own list under their agents (the sections; the agents are agentsList.ts's,
-  // which every list read fills), as the groups draw it, and as the Simple list draws it.
-  const listViewChoiceSections = listViewChoiceOpen && shown ? filterList(shown) : [];
-  const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceSections.flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : []));
-  const listViewChoiceFlat = listViewChoiceOpen ? flatRows(listViewChoiceSections, null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The choice's three pictures (`viewChoicePictures`), taken once as the dialog opens and kept while it is open, so a
+  // render of the page never lays the whole list out again under the dialog.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a picture of the list as the dialog opened, on purpose
+  const listViewChoicePictures = useMemo(() => viewChoicePictures(listViewChoiceOpen && shown ? filterList(shown) : null), [listViewChoiceOpen]);
   const { reveal: priorityReveal, dialog: priorityDialog } = usePriorityReveal({
     due: lineLatch?.next === 'priority',
     revealAt,
@@ -6092,9 +6091,9 @@ function Inbox() {
       {sidebarTip.stage === 'open' && <SidebarTipCard gone={!sidebarDocked || !listIntroClear || sidebarCustomizing} onSay={say} onLeave={sidebarTip.close} />}
       {listViewChoiceOpen && (
         <ListViewIntro
-          groups={listViewChoiceGroups}
-          flat={listViewChoiceFlat}
-          sections={listViewChoiceSections}
+          groups={listViewChoicePictures.groups}
+          flat={listViewChoicePictures.flat}
+          sections={listViewChoicePictures.sections}
           machines={machines}
           look={readListLook()}
           awayMachines={machines.away}

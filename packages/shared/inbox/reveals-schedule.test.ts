@@ -37,6 +37,7 @@ import {
   revealNotNowAllowed,
   revealStamp,
   revealStampNotNow,
+  revealWaitStarts,
   type RevealEntry,
   type RevealId,
   type RevealState,
@@ -170,7 +171,8 @@ function simulate(user: User, days = 30): Shown[] {
       // line has next, at its moment.
       const next = revealNext(state(), now, TABLE);
       const ahead = revealAhead(state(), now, TABLE);
-      if (next && !saved.waitingSince?.[next]) saved = { ...saved, waitingSince: { ...saved.waitingSince, [next]: now.toISOString() } };
+      // The server keeps when `next` and each `ahead` offer first waited (patience, retirement).
+      for (const id of revealWaitStarts(state(), now, TABLE)) saved = { ...saved, waitingSince: { ...saved.waitingSince, [id]: now.toISOString() } };
       if (next === "sound") {
         show("sound", true);
         continue;
@@ -300,6 +302,22 @@ describe("30 days of a heavy user", () => {
     const shown = simulate({ ...HEAVY, moment: (id, day) => id !== VIEW_CHOICE && HEAVY.moment(id, day) });
     expect(shown.some((s) => s.id === VIEW_CHOICE)).toBe(false);
     expect(when(shown)).toEqual(when(simulate({ ...HEAVY, seen: [VIEW_CHOICE] })));
+    expectSpaced(shown);
+    // With a grill-me gap from day 0: the view choice, next from day 0 and never claimed, holds the tip only for its
+    // patience (3 days), as any card does; the tip goes then, once, and every other dialog keeps its day and hour.
+    const gap = simulate({ ...HEAVY, grillMeGap: 0, moment: (id, day) => id !== VIEW_CHOICE && HEAVY.moment(id, day) }, 40);
+    expect(gap.filter((s) => s.id === GRILL_ME).map((s) => s.day)).toEqual([3]);
+    expect(when(gap.filter((s) => s.id !== GRILL_ME))).toEqual(when(simulate({ ...HEAVY, moment: (id, day) => id !== VIEW_CHOICE && HEAVY.moment(id, day) }, 40)));
+    expectSpaced(gap);
+  });
+
+  test("someone on the Agents view whose voice dialog never finds its moment (voice next for good, the view choice only ever ahead of it): the view choice retires 14 days after it was first armed, and the grill-me tip goes then, once", () => {
+    const stuck = (id: RevealId, day: number) => id !== VIEW_CHOICE && id !== "voice" && UPGRADER.moment(id, day);
+    const shown = simulate({ ...UPGRADER, grillMeGap: 0, moment: stuck }, 40);
+    expect(shown.some((s) => s.id === VIEW_CHOICE || s.id === "voice")).toBe(false);
+    // First armed ahead on day 0 (beside Rows, at 13:00): 14 days on, at the first load after that hour.
+    expect(shown.filter((s) => s.id === GRILL_ME).map((s) => [s.day, s.at.getHours()])).toEqual([[14, 13]]);
+    expect(when(shown.filter((s) => s.id !== GRILL_ME))).toEqual(when(simulate({ ...UPGRADER, moment: stuck }, 40)));
     expectSpaced(shown);
   });
 

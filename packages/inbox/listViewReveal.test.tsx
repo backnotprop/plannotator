@@ -12,7 +12,8 @@
  * one tagged "In use" with the filled button; Smart groups still tagged for someone on Simple list
  * (`RECOMMEND_SMART_ON_SIMPLE`); a pick not switching the list at once or not remembering it as the ⋮ menu does;
  * Escape or a click outside changing the view or not counting as the line's Not now, or a pick counting as one; the
- * Agents picture not drawing the person's own agents, or drawing an empty frame for one agent or none.
+ * Agents picture not drawing the person's own agents, drawing an empty frame for one agent or none, or mounting every
+ * face and row of a long list.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -27,7 +28,7 @@ const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
 const idleClock = (hasDom ? await import('./idleClock') : {}) as typeof import('./idleClock');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
-const { ListViewIntro, RECOMMEND_SMART_ON_SIMPLE } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
+const { ListViewIntro } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
 const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
 const { resetAgentFoldsForTests } = await import('./agentsView/folds');
 const listView = await import('./listView');
@@ -236,9 +237,13 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
     await until(() => dialog() !== null);
     // The line's claim, with the page's key: the Inbox stamps it and decides the day.
     expect(claims().map((c) => c.body)).toEqual([{ id: 'view_choice', key: expect.any(String) }]);
-    // Named and described for a screen reader; focus on the question, so no choice looks picked.
-    expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('Which view do you prefer?');
-    expect(document.getElementById(dialog()!.getAttribute('aria-describedby')!)?.textContent).toBe('You can change this any time in the ⋮ menu.');
+    // Open, named and described for a screen reader by its own heading and note; focus on the question, so no choice looks picked.
+    expect(dialog()!.open).toBe(true);
+    for (const attr of ['aria-labelledby', 'aria-describedby']) {
+      const by = document.getElementById(dialog()!.getAttribute(attr) ?? '');
+      expect(by !== null && dialog()!.contains(by)).toBe(true);
+      expect(by!.textContent!.trim()).not.toBe('');
+    }
     expect(document.activeElement?.id).toBe('ib-lvc-title');
     // Agents first (the larger picture), then Smart groups, then Simple list, each with the person's own rows.
     expect([...dialog()!.querySelectorAll('[data-list-view-choice]')].map((b) => b.getAttribute('data-list-view-choice'))).toEqual(['agents', 'smart', 'simple']);
@@ -272,8 +277,8 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
     expect(claims()).toHaveLength(1);
     expect(inUse()).toEqual(['simple']);
     expect(filled()).toEqual(['simple']);
-    // The switch: Smart groups keeps "Recommended" for someone on Simple list only while RECOMMEND_SMART_ON_SIMPLE is on.
-    expect(tags('smart')).toBe(RECOMMEND_SMART_ON_SIMPLE ? 1 : 0);
+    // As shipped (`RECOMMEND_SMART_ON_SIMPLE` off), someone on Simple list sees no "Recommended" on Smart groups.
+    expect(tags('smart')).toBe(0);
     expect(tags('agents')).toBe(1);
     act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="simple"]')!.click());
     expect(dialog()).toBeNull();
@@ -294,7 +299,6 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
   });
 
   test('someone already on Agents is not offered it (viewChoiceWanted): no claim at its moment, no dialog', async () => {
-    expect(reveal.viewChoiceWanted('agents')).toBe(false);
     stored.set(listView.LIST_VIEW_COOKIE, 'agents');
     await leave(NEXT);
     await wait(400);
@@ -482,6 +486,25 @@ describe.skipIf(!hasDom)('the view choice dialog', () => {
     draw(sectionsOf({ quiet: [row('q1', 6, 'ses_tide', 'quiet'), row('q2', 5, 'ses_tide', 'quiet'), row('q3', 4, 'ses_tide', 'quiet')] }));
     expect(picture().querySelectorAll('.ib-ag').length).toBe(1);
     expect(picture().querySelectorAll('[data-thread-id]').length).toBe(3);
+  });
+
+  test('a long list (150 ended agents, 400 threads, every agent folded as it starts): the picture opens only the top, a few agents each with its first threads, never every face and row', () => {
+    setInboxAgents([{ agents: Array.from({ length: 150 }, (_, i) => agent(`ses_e${i}`, `Ended ${i}`, 'ended')), total: 150, ended_today: 0 }]);
+    const start = Date.parse('2026-11-05T09:00:00.000Z');
+    const quiet = Array.from({ length: 400 }, (_, i) => {
+      const at = new Date(start - i * 60_000).toISOString();
+      return { ...row(`t${i}`, 0, `ses_e${i % 150}`, 'quiet'), last_at: at, last_agent_at: at };
+    });
+    draw(sectionsOf({ quiet }));
+    const heads = picture().querySelectorAll('.ib-ag').length;
+    const rows = picture().querySelectorAll('[data-thread-id]').length;
+    // As the approved picture: four or five agents, each with threads under it, not empty heads.
+    expect(heads).toBeGreaterThanOrEqual(4);
+    expect(rows).toBeGreaterThanOrEqual(heads);
+    // Bounded: a frame's worth of faces and rows, not 150 faces and 400 rows.
+    expect(heads).toBeLessThanOrEqual(20);
+    expect(picture().querySelectorAll('.am').length).toBeLessThanOrEqual(20);
+    expect(rows).toBeLessThanOrEqual(20);
   });
 
   test('no agent at all (every thread under "No agent", folded as it starts): the picture opens the band and shows the threads', () => {

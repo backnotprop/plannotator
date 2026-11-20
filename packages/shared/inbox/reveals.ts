@@ -12,8 +12,9 @@
  * (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
- *  - Day 0 is setup only: every offer needs tenure (two days or more since first use), but Code review's
- *    (`CODE_REVIEW_OFFER`, the owner, 2026-11-06: "show up like immediately"), which takes day 0's one dialog.
+ *  - Tenure: the later group's offers need two days or more since first use. The same-day group has none, so on a
+ *    person's first day the update-day dialogs and the view choice (once there are five threads) may show, the gap
+ *    apart, as may Code review's offer (`CODE_REVIEW_OFFER`, the owner, 2026-11-06: "show up like immediately").
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
  *  - Ahead at its moment: an offer marked `ahead` (the view choice, whose "who" only the page can see) may also
@@ -35,8 +36,9 @@
  *  - Patience: an entry that has been next for `REVEAL_PATIENCE_MS` (3 days) without its moment lets the next entry
  *    that qualifies go first. It stays in line: when every qualifying entry has waited that long, the one that has
  *    waited longest is next.
- *  - Retirement: an offer next for `REVEAL_RETIRE_MS` (14 days) without its moment retires without a word. An
- *    update-day dialog never retires (patience still lets the others pass it).
+ *  - Retirement: an offer next for `REVEAL_RETIRE_MS` (14 days) without its moment retires without a word (an `ahead`
+ *    offer counts from when it was first armed, beside `next` or as it: `revealWaitStarts`). An update-day dialog
+ *    never retires (patience still lets the others pass it).
  *  - No active-days counter (the owner, 2026-11-02): "different days" for heavy use come from the dates of the agent
  *    messages the person has read.
  *
@@ -227,7 +229,7 @@ export interface RevealState {
   threads: number;
   /** Per entry: its own conditions hold (not shown yet; its feature never decided by the person). Absent: false. */
   open: Partial<Record<RevealId, boolean>>;
-  /** Per entry: when it first became next (config.json `inboxReveals.waitingSince`). Patience counts from it. */
+  /** Per entry: when it first became next, or an `ahead` offer first armed (config.json `inboxReveals.waitingSince`, `revealWaitStarts`). Patience and retirement count from it. */
   waitingSince?: Partial<Record<RevealId, string>>;
   /**
    * When a tip outside the line was last shown (config.json `inboxReveals.sidebar_tip.shownAt`, `launch_tip.shownAt`):
@@ -353,6 +355,17 @@ export function revealAhead(state: RevealState, now: Date, table: readonly Revea
   return table
     .filter((entry, at) => entry.ahead === true && entry.kind === "offer" && entry.id !== next && (nextEntry === null || nextEntry.kind === "offer" || at < nextAt) && revealQualifies(entry, state, now))
     .map((entry) => entry.id);
+}
+
+/**
+ * The entries whose wait starts now (config.json `inboxReveals.waitingSince`, which the server keeps at each read):
+ * `next`, and each `ahead` offer armed beside it, the first time each is. An `ahead` offer's clock starts when it is
+ * first armed, so one whose moment never comes (someone on Agents never claims the view choice) retires 14 days on
+ * (`revealRetired`) instead of standing ahead for good and keeping the grill-me tip away (`lastResort`).
+ */
+export function revealWaitStarts(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): RevealId[] {
+  const next = revealNext(state, now, table);
+  return [...(next ? [next] : []), ...revealAhead(state, now, table)].filter((id) => !state.waitingSince?.[id]);
 }
 
 /** The `aside` entries a page may arm on this load (the star ask): each one that may be claimed now. */
