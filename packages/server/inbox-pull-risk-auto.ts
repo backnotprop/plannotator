@@ -48,7 +48,7 @@ export interface PullRiskAuto {
   wouldStart(): Promise<Record<InboxPullRiskAuto["level"], number>>;
   waiting(): Promise<Record<InboxPullRiskAuto["level"], string[]>>;
   makeNow(keys?: readonly string[]): Promise<void>;
-  notNow(keys: readonly string[]): void;
+  notNow(keys: readonly string[]): Promise<void>;
   dismissed(): ReadonlySet<string>;
   idle(): Promise<void>;
   stop(): void;
@@ -320,11 +320,14 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       save();
       api.resume();
     },
-    notNow(keys) {
+    async notNow(keys) {
       if (stopped || !options.settings()) return;
-      const before = dismissed.size;
-      for (const key of keys) dismissed.add(key);
-      if (dismissed.size !== before) save();
+      const waitingNow = new Set((await waitingStacks()).map((group) => group.key));
+      const next = new Set([...dismissed, ...keys].filter((key) => waitingNow.has(key)));
+      if (next.size === dismissed.size && [...next].every((key) => dismissed.has(key))) return;
+      dismissed.clear();
+      for (const key of next) dismissed.add(key);
+      save();
     },
     dismissed() {
       return dismissed;

@@ -6167,10 +6167,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (body && typeof body === "object" && (body as { make_now?: unknown }).make_now === true) {
             if (!launch.enabled()) return json({ error: "Starting agents from the Inbox is off in Settings \u2192 Agents.", code: "launch_off" }, 409);
             const keys = (body as { keys?: unknown }).keys;
-            await pullRiskAuto?.makeNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : undefined);
+            await pullRiskAuto?.makeNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
           } else if (body && typeof body === "object" && (body as { not_now?: unknown }).not_now === true) {
             const keys = (body as { keys?: unknown }).keys;
-            pullRiskAuto?.notNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
+            await pullRiskAuto?.notNow(Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : []);
           } else {
             pullRisk.save(body);
             pullRiskAuto?.resume();

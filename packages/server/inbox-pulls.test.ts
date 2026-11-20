@@ -430,6 +430,8 @@ describe("risk ranking", () => {
     const answer = await settledRisk(w.base);
     expect(Object.keys(answer.judgments).sort()).toEqual([key(601), key(602)]);
     expect([...(answer.auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    expect((await save(w.base, { make_now: true })).status).toBe(200);
+    expect((await settledRisk(w.base)).auto_runs).toEqual({});
   });
 
   test("a PR the Pull requests page's read no longer finds open (closed elsewhere) leaves the judgments and what waits", async () => {

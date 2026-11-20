@@ -638,7 +638,8 @@ test("Not now is kept across a restart and forgotten with the pick; a PR that st
   for (const n of [1, 2]) w.list(pr(n), "high");
   w.set({ level: "high", make: "guide" });
   w.auto.resume();
-  w.auto.notNow((await w.auto.waiting()).high);
+  await w.auto.notNow([...(await w.auto.waiting()).high, "github.com/northwind/web-app#999"]);
+  expect([...w.auto.dismissed()].sort()).toEqual([pr(1).key, pr(2).key]);
   const again = world({ level: "high", make: "guide" }, w.dataDir);
   for (const n of [1, 2, 3]) again.list(pr(n), "high");
   const left = (await again.auto.waiting()).high.filter((key) => !again.auto.dismissed().has(key));
