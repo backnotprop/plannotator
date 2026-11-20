@@ -118,7 +118,7 @@ for (const width of [393, 320])
         await page.waitForTimeout(400);
         const areaBox = (await area.boundingBox())!;
         const opened = (await content.boundingBox())!;
-        // On the part the viewer showed (its height, from the left): far taller than the old 80 px preview.
+        // On a phone the viewer shows the panorama whole, so it opens a third of the area tall from its left: far taller than the old 80 px preview.
         expect(opened.height).toBeGreaterThan(areaBox.height / 3 - 4);
         expect(Math.abs(opened.x - areaBox.x)).toBeLessThan(2);
         await shot(page, `drawing-opened-${width}-${scheme}`);

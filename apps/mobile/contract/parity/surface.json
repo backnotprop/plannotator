@@ -23,6 +23,7 @@
       "GET markups/:id",
       "GET messages/:id/guide",
       "GET messages/:id/image",
+      "GET messages/:id/run",
       "GET open-in/file/raw",
       "GET open-in/file/view",
       "GET projects",
@@ -85,6 +86,8 @@
       "POST messages/:id/reask",
       "POST messages/:id/reply",
       "POST messages/:id/resolve",
+      "POST messages/:id/run",
+      "POST messages/:id/secret",
       "POST messages/:id/send-now",
       "POST messages/:id/take-back",
       "POST messages/:id/to",
@@ -387,7 +390,8 @@
       "/favicon.ico",
       "/favicon.png",
       "/manifest.webmanifest",
-      "/mcp"
+      "/mcp",
+      "/plannotator-themes.js"
     ],
     "frame": [
       "agent-faces",
@@ -409,6 +413,7 @@
       "reactions",
       "record",
       "rows",
+      "runs",
       "shapes",
       "show",
       "show-archived",
