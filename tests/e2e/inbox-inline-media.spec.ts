@@ -280,7 +280,7 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
       ['sound', body.locator('audio[data-inline-media="audio"]')],
       ['control video', page.locator(`[data-message-id="${control.message_id}"] video[data-inline-media="video"]`)],
     ];
-    const chips = page.locator('[data-image-unavailable]', { hasText: /^(Raw clip|Raw tone|Control clip)$/ });
+    const chips = page.locator('[data-message-id] [data-image-unavailable]', { hasText: /^(Raw clip|Raw tone|Control clip)$/ });
 
     for (const [name, player] of players) {
       await test.step(`${name}: drawn as a player with controls, loads metadata, does not start by itself`, async () => {
@@ -303,8 +303,8 @@ test('a raw <img> naming a sound or a video plays in place and keeps playing whe
     await test.step('the message redraws once its late picture is captured', async () => {
       soundBefore = await players[1]![1].evaluate((m: HTMLMediaElement) => m.currentTime);
       writeFileSync(join(project, 'media', 'later.png'), widePng(2000, 4));
-      await agent.send({ project_path: project, reply_to: id, body: 'One more note.' });
-      await expect(page.getByText('One more note.')).toBeVisible(WAIT);
+      const note = await agent.send({ project_path: project, reply_to: id, body: 'One more note.' });
+      await expect(page.locator(`[data-message-id="${note.message_id}"]`)).toBeVisible(WAIT);
       await expect
         .poll(async () => {
           const thread = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}`, url))).json()) as { thread: { messages: { id: string; inline_images?: { ref: string }[] }[] } };
