@@ -6,6 +6,21 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 
 export const LINEAR_KEY_FILE = join("inbox", "linear-key");
 
+function savedLinearKey(dataDir: string): string | null {
+  try {
+    return readFileSync(join(dataDir, LINEAR_KEY_FILE), "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const envLinearKey = (env: Record<string, string | undefined>): string | null => env.LINEAR_API_KEY?.trim() || null;
+
+/** The key Linear is read with: the one saved in Settings → Accounts (under `dataDir`), else `LINEAR_API_KEY`. */
+export function readLinearApiKey(dataDir: string, env: Record<string, string | undefined> = process.env): string | null {
+  return savedLinearKey(dataDir) ?? envLinearKey(env);
+}
+
 export interface LinearKey {
   apiKey(): string | null;
   state(): InboxLinearKeyState;
@@ -23,14 +38,8 @@ export function createLinearKey(options: {
   const { json } = options;
   const keyPath = join(options.dataDir, LINEAR_KEY_FILE);
   const env = options.env ?? process.env;
-  const savedKey = (): string | null => {
-    try {
-      return readFileSync(keyPath, "utf8").trim() || null;
-    } catch {
-      return null;
-    }
-  };
-  const envKey = (): string | null => env.LINEAR_API_KEY?.trim() || null;
+  const savedKey = () => savedLinearKey(options.dataDir);
+  const envKey = () => envLinearKey(env);
   const writeKey = (key: string) => {
     mkdirSync(join(options.dataDir, "inbox"), { recursive: true, mode: 0o700 });
     const temp = `${keyPath}.${process.pid}.tmp`;
@@ -44,7 +53,7 @@ export function createLinearKey(options: {
     return { source: envKey() ? "env" : null, last4: null };
   };
   return {
-    apiKey: () => savedKey() ?? envKey(),
+    apiKey: () => readLinearApiKey(options.dataDir, env),
     state,
     async route(req, path, via) {
       if (path !== "/api/inbox/linear/key") return null;

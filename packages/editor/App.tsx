@@ -58,6 +58,8 @@ import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, typ
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
+import { linearLinkCardProvider } from '@plannotator/ui/utils/linearLinkCards';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
@@ -667,6 +669,7 @@ const App: React.FC = () => {
   // Hover cards for issue, PR and MR links (ui RefHoverCard): the server reads them with this
   // computer's gh / glab (GET /api/ref, ref-cards.ts). Only when a Plannotator server serves
   // the page, never on a share link. A card shows only when the forge answered (`onlyWithData`).
+  // Linear issue links get one too, read with the Linear API key (ui linearLinkCards).
   // (The transport is installed further down, once `isSharedSession` exists.)
   const refCardRootRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState<Origin | null>(null);
@@ -2811,7 +2814,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isApiMode || isSharedSession) return;
     setRefCardTransport(refCardRouteTransport('/api/ref'));
-    return () => setRefCardTransport(null);
+    const removeLinearCards = registerRefCardProvider(linearLinkCardProvider);
+    return () => {
+      removeLinearCards();
+      setRefCardTransport(null);
+    };
   }, [isApiMode, isSharedSession]);
 
   // The user's current direct-edit text: the open editor buffer, else the
