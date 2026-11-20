@@ -160,6 +160,10 @@ describe("a write that is not allowed", () => {
     expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, needs_keep: false, changes: 0, access: "comment" });
     expect(s.spaces.spaces.get(s.record().space_id)!.documents.find((d) => d.doc_path.startsWith("Rate limiting"))!.versions).toHaveLength(5);
     expect(s.spaces.spaces.size).toBe(1);
+    // Made with no account: no key on the create. The Update after Keep is the owner's imported save, and it went up.
+    expect(s.spaces.calls.find((c) => c.method === "POST" && c.path === "/v1/workspaces")!.json).not.toHaveProperty("external_key");
+    const update = s.spaces.calls.filter((c) => c.method === "PATCH" && c.signedIn);
+    expect(update.map((c) => [c.status, (c.json as { actor: { kind: string } }).actor.kind])).toEqual([[200, "imported"]]);
   });
 });
 
@@ -368,6 +372,8 @@ describe("Keep this space", () => {
     s.jobs.share(s.world.plan, {});
     await s.settle();
     expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Maya Chen");
+    // Signed in: the plan's id is the space's key.
+    expect(s.spaces.spaces.get(s.record().space_id)!.external_key).toBe(s.world.plan);
     // Made signed in: the space itself says private, and only then is it "only you".
     expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: true, access: "private" });
     s.spaces.revoke(token);
@@ -388,6 +394,27 @@ describe("Keep this space", () => {
     expect(s.opened).toHaveLength(1);
     expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: true, kept: true, changes: 0 });
     expect(s.spaces.spaces.size).toBe(1);
+  });
+
+  test("signed in, Share as new makes a new space each time under a key of its own, even once the record is gone; a plain Share keeps the plan's id", async () => {
+    const s = setup({ seed: { extras: false } });
+    const id = s.world.plan;
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    const made: string[] = [];
+    for (const fresh of [false, true, true]) {
+      s.jobs.share(id, { fresh });
+      await s.settle();
+      made.push(s.record().space_id);
+    }
+    // Stop sharing deletes the last space and forgets the record; Share as new after it is still a space of its own.
+    expect((await s.jobs.remove(id)).ok).toBe(true);
+    s.jobs.share(id, { fresh: true });
+    await s.settle();
+    made.push(s.record().space_id);
+    expect(new Set(made).size).toBe(4);
+    const keys = made.map((ws) => s.spaces.spaces.get(ws)!.external_key);
+    expect(keys).toEqual([id, `${id}:${made[1]!.slice(3)}`, `${id}:${made[2]!.slice(3)}`, `${id}:${made[3]!.slice(3)}`]);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true });
   });
 
   test("one claim at a time: a second Keep joins the first, and an Update pressed meanwhile neither starts nor undoes it", async () => {
