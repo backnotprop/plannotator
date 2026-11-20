@@ -149,12 +149,12 @@ describe("the connect page", () => {
     expect(spaces.spaces.get(space)!.approvals).toHaveLength(0);
   });
 
-  test("a space someone else owns when the page is drawn: the plain connect, a sign-in with no claim and no approval", async () => {
+  test("a space someone else owns when the page is drawn: the plain connect, a sign-in with no claim, and the approval asked answered none", async () => {
     const spaces = createFakeSpaces({ origin: HOST });
     const { space, doc, version } = await sharedSpace(spaces);
     spaces.keptBy(space, "Someone Else");
     const { back, result } = await signInWith(spaces, spaces.fetch, { space, approve: { document: doc, version } });
-    expect([...new URL(back!).searchParams.keys()].sort()).toEqual(["code", "state"]);
+    expect([...new URL(back!).searchParams.entries()].filter(([k]) => k !== "code" && k !== "state")).toEqual([["approval", "none"]]);
     // A sign-in, not a Keep: the space is still the other person's, and nothing was approved.
     expect(result).toMatchObject({ kind: "signed_in", approval: "none" });
     expect(spaces.spaces.get(space)!.owner).toBe("Someone Else");

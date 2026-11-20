@@ -46,11 +46,13 @@
  * - The "tool connect" page on `/cli/login` (names as built on the Spaces side, 2026-11-20; run against its test copy
  *   in T14f): `client_name` (a name it does not know is `400`), `space` and `approve_document` + `approve_version`.
  *   A `space` the person may claim when the page is drawn (no owner, or theirs) makes it the "becomes your space"
- *   page: the press claims it and records the approval (the way back carries `approval=recorded|moved|none`, only
- *   when `approve_document` was sent; `moved`: the page is at another version there); taken by someone else between
- *   the drawing and the press, the way back is `error=claim_conflict&state` with no code. A space someone else owns
- *   when the page is drawn gets the plain connect page: the press only signs in (a code and state, nothing else;
- *   no claim, no approval), and the tool's own claim then answers `409 claim_conflict`. Cancel sends back
+ *   page: the press claims it and records the approval (`moved`: the page is at another version there); taken by
+ *   someone else between the drawing and the press, the way back is `error=claim_conflict&state` with no code. A
+ *   space someone else owns when the page is drawn (or one it does not hold) gets the plain connect page: the press
+ *   only signs in (no claim, nothing approved), and the tool's own claim then answers `409 claim_conflict`.
+ *   `approval=recorded|moved|none` is on a way back with a code whenever an approval was asked (`approve_document` +
+ *   `approve_version` sent), whether or not the space line was drawn: `none` when nothing was recorded. It is absent
+ *   only when no approval was asked. Cancel sends back
  *   `error=access_denied&state` only when `client_name` was sent; without it, Cancel is a link to the site's home and
  *   nothing comes back. Not from the contract: a `space` it does not hold claims nothing (and its approval is `none`).
  */
@@ -229,7 +231,8 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     codes.set(code, { challenge: login.challenge, redirect: login.redirect, name: signInAs, until: Date.now() + 120_000 });
     back.searchParams.set("code", code);
     back.searchParams.set("state", login.state);
-    if (login.approveDocument !== null && login.claimable) {
+    if (login.approveDocument !== null && login.approveVersion !== null) {
+      // Asked: always answered, `none` when the page recorded nothing (no space line, or no such page there).
       const doc = held?.documents.find((d) => d.id === login.approveDocument);
       const current = doc?.versions[doc.versions.length - 1]?.version;
       let approval = "none";

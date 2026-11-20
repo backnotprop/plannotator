@@ -588,6 +588,9 @@ describe("Keep this space", () => {
     expect(claims.map((c) => [c.signedIn, c.status, c.code])).toEqual([[true, 409, "claim_conflict"]]);
     expect(s.jobs.status(id)).toMatchObject({ phase: "refused", kept: false, signed_in: true, keep: null });
     expect([s.record().kept, s.record().refused, s.record().approval]).toEqual([false, true, null]);
+    // The approval was asked (the plan is approved and the space held v4); the page answered none, and that is kept.
+    expect(new URL(s.opened[0]!).searchParams.get("approve_document")).not.toBeNull();
+    expect(s.record().keep_approval).toMatchObject({ outcome: "none", version_number: 4 });
     expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Someone Else");
     expect(s.spaces.spaces.get(s.record().space_id)!.approvals).toEqual([]);
   });
