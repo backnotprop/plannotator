@@ -8,7 +8,7 @@ import { sniffInboxVideo } from "./video";
 
 export type InboxMessageMediaOpen =
   | { ok: true; handle: FileHandle; size: number; contentType: string; etag: string; named: string }
-  | { ok: false; status: number; code: string; error: string };
+  | { ok: false; status: number; code: string; error: string; notYet?: true };
 
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 const HEAD_BYTES = 64 * 1024;
