@@ -54,19 +54,19 @@ export const SETS_LABEL = 'Sets';
  * second, after the agent's own mark (approval "inbox-generated-agent-icons"; only for an agent whose project has a
  * name to draw).
  */
-export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false): { faces: FanChoice[][]; spots: FanSpot[][] } {
+export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false, grow = 0): { faces: FanChoice[][]; spots: FanSpot[][] } {
   const kinds: FanChoice[] = ['agent', ...(project ? ['project' as const] : []), 'transparent', 'totman', ...(own ? [OWN_CHOICE as FanChoice] : []), SETS_CHOICE];
   const base = { ...FAN_OPTIONS, ...(touch ? FAN_TOUCH : {}) };
   // Near a window's edge the inner arc's five kinds would crowd: it moves out (and the colours with it) until they
   // keep their pitch, a few steps at most.
   let best: { faces: FanChoice[][]; spots: FanSpot[][] } | null = null;
   for (let extra = 0; extra <= 48; extra += 8) {
-    const options = { ...(touch ? FAN_TOUCH : {}), inner: base.inner + extra };
+    const options = { ...(touch ? FAN_TOUCH : {}), inner: base.inner + extra + grow };
     const one = fanLayout(cx, cy, w, h, [kinds.length, GLASS_FACES.length], options);
     const far = Math.max(...one.flat().map((s) => Math.hypot(s.x, s.y)));
     const half = Math.ceil(GLASS_FACES.length / 2);
     best =
-      far <= (touch ? 165 : 120) + extra
+      far <= (touch ? 165 : 120) + extra + grow
         ? { faces: [kinds, [...GLASS_FACES]], spots: one }
         : { faces: [kinds, GLASS_FACES.slice(0, half), GLASS_FACES.slice(half)], spots: fanLayout(cx, cy, w, h, [kinds.length, half, GLASS_FACES.length - half], options) };
     const inner = best.spots[0]!;
@@ -113,7 +113,10 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
   // Offered for an agent with a project, on a machine that keeps a tile (a linked one from before tiles keeps none).
   const takesTiles = useAgentTakesTiles(agent);
   const project = useAgentProjectTile(agent) !== null && takesTiles;
-  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own, project) : null), [place, touch, own, project]);
+  // A mark larger than the sidebar's (its button past 28 px: the Agents view's 44): the arcs and the plate's hole move
+  // out by half the difference, so the choices keep their room round it.
+  const grow = place ? Math.max(0, Math.round((Math.min(place.rect.width, place.rect.height) - 28) / 2)) : 0;
+  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own, project, grow) : null), [place, touch, own, project, grow]);
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
@@ -288,7 +291,7 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
               if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) onMark();
             }}
           >
-            <span className="am-fan-dial" aria-hidden="true" style={{ '--r': `${Math.round(dial.reach)}px`, '--a': `${dial.aim.toFixed(1)}deg` } as CSSProperties}>
+            <span className="am-fan-dial" aria-hidden="true" style={{ '--r': `${Math.round(dial.reach)}px`, '--a': `${dial.aim.toFixed(1)}deg`, ...(grow > 0 ? { '--grow': `${grow}px` } : {}) } as CSSProperties}>
               <span className="am-fan-shade">
                 <span className="am-fan-plate" data-shade="" />
               </span>

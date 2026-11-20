@@ -232,6 +232,23 @@ export function agentFaceOf(id: string | null | undefined): AgentFace {
   return (id && resolved.get(id)) || 'agent';
 }
 
+/**
+ * Every kept entry's chain by each of its ids: the entry's key and every session it was or is (this Inbox's entries,
+ * then each linked machine's). The list's Agents view (agentsView/model.ts) finds an agent the list no longer names,
+ * an ended one, through it, so its sessions stay one agent.
+ */
+export function agentFaceChains(): ReadonlyMap<string, { id: string; sessions: readonly string[] }> {
+  boot();
+  const out = new Map<string, { id: string; sessions: readonly string[] }>();
+  for (const kept of [entries(), ...linkedGroups().map(linkedFaces)]) {
+    for (const [key, entry] of Object.entries(kept)) {
+      const chain = { id: key, sessions: [key, ...entry.sessions] };
+      for (const id of chain.sessions) if (!out.has(id)) out.set(id, chain);
+    }
+  }
+  return out;
+}
+
 let sending: Promise<void> | null = null;
 async function send(): Promise<void> {
   while (true) {

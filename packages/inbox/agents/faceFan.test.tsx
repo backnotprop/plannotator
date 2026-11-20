@@ -384,3 +384,21 @@ test("a finger's fan has finger-sized room: neighbours on an arc 44 px apart, in
     }
   }
 });
+
+test.skipIf(!hasDom)("a 44 px face (the list's Agents view) draws at 44, and its picker's plate and arcs move out with it", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="ib-agh"><AgentMark id="ses_big" host="claude-code" name="Ops" size={44} /></div>));
+  const icon = document.querySelector<HTMLButtonElement>('[data-agent-icon="ses_big"]')!;
+  expect(icon.querySelector('.am')!.getAttribute('data-size')).toBe('44');
+  icon.getBoundingClientRect = () => ({ left: 8, top: 362, width: 44, height: 44, right: 52, bottom: 406, x: 8, y: 362, toJSON: () => ({}) }) as DOMRect;
+  pointer(icon, 'pointerdown', { x: 30, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the big face to open its picker');
+  // The plate's hole and the dial's arcs grow by half of what the face gained over the sidebar's 28 px button.
+  expect((document.querySelector<HTMLElement>('.am-fan-dial')!.style.getPropertyValue('--grow'))).toBe('8px');
+  const near = (spots: { x: number; y: number }[][]) => Math.min(...spots[0]!.map((s) => Math.hypot(s.x, s.y)));
+  expect(near(fan.fanArcs(30, 384, 1024, 768, false, true, false, 8).spots)).toBeGreaterThan(near(fan.fanArcs(30, 384, 1024, 768).spots) + 7);
+});

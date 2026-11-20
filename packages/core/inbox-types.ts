@@ -3621,8 +3621,9 @@ export interface InboxComposeProject {
 
 /**
  * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
- * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
- * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ * `agents`; packages/server/inbox-agents-list.ts) and the list's Agents view. An agent is a live session, a session
+ * that owns a thread waiting on the person (ended or not), a session that ended in the last seven days
+ * (`INBOX_AGENTS_ENDED_DAYS`), or a session the Inbox launched (a stopped one is idle).
  */
 export interface InboxAgent {
   /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
