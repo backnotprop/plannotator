@@ -19,6 +19,7 @@ export interface RepoTreeHandle {
 
 interface RepoTreeViewProps extends FileRowState {
   touch?: boolean;
+  searchAccessory?: React.ReactNode;
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
   files: DiffFile[];
@@ -273,8 +274,10 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   return (
     <PierreFileTree
       model={model}
+      header={props.searchAccessory}
       className="review-file-tree"
       data-repo-file-tree=""
+      data-review-tree-filter={props.searchAccessory ? '' : undefined}
       aria-label="All files"
       style={{ height: '100%' }}
       renderContextMenu={(item, context) =>

@@ -330,7 +330,7 @@ const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView
   };
 
   return (
-    <div className="-mx-2 px-4 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]" data-panel-tabs-row="">
+    <div className="-mx-2 pl-4 pr-2 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]" data-panel-tabs-row="">
     <div
       ref={listRef}
       role="tablist"
@@ -389,7 +389,7 @@ const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView
  * Changes N / All files moved down to the list's sticky tools row
  * (`ScopeSwitch`, drawn by the panel through `PanelControlsRow`).
  */
-export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
+export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width: number; showFileFilter?: boolean }> = ({ model, width, showFileFilter = true }) => {
   const narrow = width < NARROW_HEADER_WIDTH;
   const views = panelViews(model);
   const { noun, connector } = diffWords(model);
@@ -402,7 +402,7 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
     return views.length > 1 ? (
       <ViewTabs model={model} views={views} narrow={narrow} trailing={trailing} />
     ) : (
-      <div className="-mx-2 px-4 h-7 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]">
+      <div className="-mx-2 pl-4 pr-2 h-7 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]">
         <span className="text-[13px] font-medium text-muted-foreground">Files</span>
         {trailing}
       </div>
@@ -411,10 +411,12 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
 
   return (
     <div className="flex-shrink-0 flex flex-col px-2 pt-1" data-review-panel-header="">
-      {model.fileFilterInput ? (
-        <ReviewFileFilterControls input={model.fileFilterInput} active={model.fileFilterActive ?? false}>
-          {renderViewRow}
-        </ReviewFileFilterControls>
+      {showFileFilter && model.fileFilterInput ? (
+        <ReviewFileFilterControls
+          input={model.fileFilterInput}
+          active={model.fileFilterActive ?? false}
+          renderRow={renderViewRow}
+        />
       ) : renderViewRow()}
       {showSentence ? (
         <div className="mt-1 px-2 text-[13px] leading-6 text-muted-foreground flex flex-wrap items-center gap-x-1" data-panel-sentence="">

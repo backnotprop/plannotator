@@ -1,4 +1,3 @@
-import { NoMatchingReviewFiles } from './ReviewFileFilter';
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { focusFileHeaderWhenLost } from '../utils/focusFileHeader';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
@@ -22,6 +21,7 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoTreeView, type RepoTreeHandle } from './RepoTreeView';
+import { NoMatchingReviewFiles, ReviewFileFilterControls, ReviewTreeSearchAccessory } from './ReviewFileFilter';
 import { ReviewPanelHeader, ScopeSwitch, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 
 import type { TreeScope } from '../hooks/useTreeScope';
@@ -226,7 +226,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
   sinceBaseSections,
   snapshotId,
 }) => {
-  const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
+  const hasSearchQuery = searchQuery.trim().length > 0;
+  const isSearchVisible = !!onSearchChange && (isSearchOpen || hasSearchQuery);
 
   const effectiveGroupBy: FileGroupBy = groupBy ?? (groupByKind ? 'kind' : 'none');
   const statusBlocks = useMemo(
@@ -379,7 +380,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       stagedCount={stagedFiles.size}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
-      onCloseSearch={searchQuery.trim() ? onSearchClear : onSearchClose}
+      onCloseSearch={hasSearchQuery ? onSearchClear : onSearchClose}
       onToggleAllFolders={showAllFiles ? toggleAllRepoFolders : handleToggleAllFolders}
       areAllFoldersExpanded={showAllFiles ? repoFoldersOpen : foldersExpanded}
       collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
@@ -415,11 +416,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
     rowActiveIndex >= 0 ? files[rowActiveIndex]?.path ?? null : isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path ?? null : null;
   const annotationCounts = annotationCountMap;
   const noFilterMatches = visiblePaths?.size === 0 && (
-    !showAllFiles || !!searchQuery.trim() || (!!repoReady && !repoFiles?.filtering &&
+    !showAllFiles || hasSearchQuery || (!!repoReady && !repoFiles?.filtering &&
       (repoReady.paths?.length ?? repoReady.dirs.get('')?.length) === 0)
   );
-  const showChangesTree = !searchQuery.trim() && !showAllFiles && !noFilterMatches;
-  const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady && !noFilterMatches;
+  const showChangesTree = !hasSearchQuery && !showAllFiles;
+  const showRepoTree = !hasSearchQuery && showAllFiles && !!repoReady;
+  const showTree = showChangesTree || showRepoTree;
   const [repoVisited, setRepoVisited] = useState(false);
   useEffect(() => {
     if (showRepoTree) setRepoVisited(true);
@@ -456,6 +458,34 @@ export const FileTree: React.FC<FileTreeProps> = ({
     />
   ) : null;
 
+  const fileFilter = header?.fileFilterInput;
+  const filterInTree = showTree && !isSearchVisible;
+  const filterControls = fileFilter ? (
+    <ReviewFileFilterControls
+      input={fileFilter}
+      active={header?.fileFilterActive ?? false}
+      renderRow={filterInTree ? undefined : (toggle) => (
+        <div className="flex items-center justify-end gap-1">
+          {searchField && <div className="min-w-0 flex-1">{searchField}</div>}
+          {toggle}
+        </div>
+      )}
+    />
+  ) : null;
+  const filterEmptyState = noFilterMatches && fileFilter ? (
+    <NoMatchingReviewFiles onClear={fileFilter.clear} />
+  ) : null;
+  const searchAccessory = filterInTree && filterControls ? (
+    <ReviewTreeSearchAccessory>
+      {filterControls}
+      {filterEmptyState && (
+        <div className="z-10 col-span-full row-start-3 self-start">
+          {filterEmptyState}
+        </div>
+      )}
+    </ReviewTreeSearchAccessory>
+  ) : undefined;
+
   return (
     <aside
       data-review-sidebar=""
@@ -464,7 +494,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: panelWidth }}
     >
-      {header && <ReviewPanelHeader model={header} width={panelWidth} />}
+      {header && <ReviewPanelHeader model={header} width={panelWidth} showFileFilter={false} />}
 
       {/* Worktree picker */}
       {worktrees && worktrees.length > 0 && onSelectWorktree && (
@@ -504,14 +534,19 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       {/* The list: the nav rows scroll with it; the tools and progress rows
           stick to its top. Then the file tree, All files or search results. */}
-      <OverlayScrollArea ref={scrollAreaRef} className={showChangesTree || showRepoTree ? 'flex-none' : 'flex-1 min-h-0'}>
+      <OverlayScrollArea ref={scrollAreaRef} className={showTree ? 'flex-none' : 'flex-1 min-h-0'}>
         <div
           {...reviewPanelBodyProps(header)}
           data-review-panel-list=""
-          className="px-2 pb-2"
+          data-review-file-filter={fileFilter ? '' : undefined}
+          className={searchAccessory ? 'px-2' : 'px-2 pb-1'}
           style={countColumnVars(totalAdditions, totalDeletions)}
         >
-          <nav aria-label="Review views" className="pb-1 flex flex-col empty:hidden" data-review-views-nav="">
+          <nav
+            aria-label="Review views"
+            className={`flex flex-col empty:hidden ${fileFilter ? '' : 'pb-1'}`}
+            data-review-views-nav=""
+          >
           {onSelectAllFiles && files.length > 0 && (
             <AllChangesRow
               active={isAllFilesActive}
@@ -558,14 +593,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
           )}
           </nav>
           {panelControls}
-          {searchField}
-          {showAllFiles && repoFiles?.filtering && repoReady && !searchQuery.trim() && (
+          {searchAccessory ? null : filterControls ?? searchField}
+          {showAllFiles && repoFiles?.filtering && repoReady && !hasSearchQuery && (
             <div className="px-2 py-1 text-xs text-muted-foreground" role="status">Filtering files…</div>
           )}
 
-          {noFilterMatches && header?.fileFilterInput ? (
-            <NoMatchingReviewFiles onClear={header.fileFilterInput.clear} />
-          ) : searchQuery.trim() ? (
+          {!filterInTree && filterEmptyState ? filterEmptyState : hasSearchQuery ? (
             isSearchPending ? (
               <div className="py-6 text-center text-xs text-muted-foreground/50">Searching…</div>
             ) : searchGroups.length > 0 ? (
@@ -586,7 +619,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
           ) : null}
         </div>
       </OverlayScrollArea>
-      <div className={showChangesTree || showRepoTree ? 'flex-1 min-h-0 relative' : 'hidden'} style={countColumnVars(totalAdditions, totalDeletions)}>
+      <div
+        className={showTree ? 'relative min-h-0 flex-1' : 'hidden'}
+        style={countColumnVars(totalAdditions, totalDeletions)}
+      >
         <div
           className={`absolute inset-0 px-2 pb-2 ${showChangesTree ? '' : 'invisible pointer-events-none'}`}
           inert={!showChangesTree}
@@ -595,6 +631,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           {treeMounts && <ChangesTreeView
             key={touchRows ? 'touch' : 'pointer'}
             touch={touchRows}
+            searchAccessory={showChangesTree ? searchAccessory : undefined}
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
             tree={plainTree}
@@ -622,6 +659,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             <RepoTreeView
               key={touchRows ? 'touch' : 'pointer'}
               touch={touchRows}
+              searchAccessory={showRepoTree ? searchAccessory : undefined}
               handleRef={repoTreeRef}
               repo={repoReady}
               loadDir={repoFiles!.loadDir}

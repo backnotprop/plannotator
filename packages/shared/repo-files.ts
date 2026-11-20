@@ -363,7 +363,7 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
   if (input.unavailable) {
     return { status: 200, body: { available: false, ...input.unavailable } satisfies RepoFilesResponse };
   }
-  if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+  if (input.signal?.aborted || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
   const dir = input.params.get("dir") ?? "";
   if (dir && !isSafeRepoRequestPath(dir)) return { status: 400, body: { error: "Invalid folder", reason: "bad-request" } };
 
@@ -375,12 +375,13 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
     };
   }
   // The snapshot can move while the listing loads.
-  if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+  if (input.signal?.aborted || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
 
   const threshold = input.lazyThreshold ?? REPO_FILES_LAZY_THRESHOLD;
   // What changed on disk since the snapshot: once per listing (a live change
   // lists again, so a new listing object), and only with the root request.
   const onDisk = listing.live && input.loadOnDisk && dir === "" ? await onDiskOnce(listing, input.loadOnDisk) : null;
+  if (input.signal?.aborted) return { status: 409, body: STALE_BODY };
   const base = {
     available: true as const,
     revision: listing.revision,
@@ -398,7 +399,7 @@ export async function handleRepoFilesRequest(input: RepoFilesRequestInput): Prom
     let paths = listing.paths;
     if (include || exclude) {
       const matching = await filterListing(listing, include, exclude, input.signal);
-      if (!matching || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+      if (!matching || input.signal?.aborted || !input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
       paths = matching;
     }
     return {

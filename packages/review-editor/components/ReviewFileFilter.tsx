@@ -2,10 +2,10 @@ import React, { useCallback, useId, useSyncExternalStore } from 'react';
 import { ListFilter } from 'lucide-react';
 import type { ReviewFileFilterInput } from '../hooks/useReviewFileFilter';
 
-export function ReviewFileFilterControls({ input, active, children }: {
+export function ReviewFileFilterControls({ input, active, renderRow }: {
   input: ReviewFileFilterInput;
   active: boolean;
-  children: (toggle: React.ReactNode) => React.ReactNode;
+  renderRow?: (toggle: React.ReactNode) => React.ReactNode;
 }) {
   const { draft, open } = useSyncExternalStore(input.subscribe, input.getSnapshot);
   const id = useId();
@@ -22,7 +22,9 @@ export function ReviewFileFilterControls({ input, active, children }: {
       aria-controls={open ? id : undefined}
       title="Filter files"
       onClick={input.toggle}
-      className={`relative grid size-7 shrink-0 place-items-center rounded-md hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary ${active ? 'text-primary bg-primary/10' : 'text-muted-foreground'}`}
+      className={`relative col-start-2 row-start-1 grid size-7 shrink-0 place-items-center self-center rounded-md focus-visible:ring-2 focus-visible:ring-primary [@media(pointer:coarse)]:size-11 ${
+        open || active ? 'bg-primary/15 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'
+      }`}
     >
       <ListFilter className="size-4" aria-hidden="true" />
       {active && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-primary" aria-hidden="true" />}
@@ -31,9 +33,9 @@ export function ReviewFileFilterControls({ input, active, children }: {
 
   return (
     <>
-      {children(toggle)}
+      {renderRow ? renderRow(toggle) : toggle}
       {open && (
-        <div id={id} className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div id={id} className="col-span-full row-start-2 mt-2 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 text-xs text-muted-foreground">
           {(['include', 'exclude'] as const).map((kind) => (
             <React.Fragment key={kind}>
               <label htmlFor={`${id}-${kind}`} className="capitalize">{kind}</label>
@@ -64,4 +66,20 @@ export function NoMatchingReviewFiles({ onClear }: { onClear: () => void }) {
       <button type="button" onClick={onClear} className="text-primary underline underline-offset-2">Clear filter</button>
     </div>
   );
+}
+
+/** Stop native events before they reach the shadow tree's focus handlers. */
+export function ReviewTreeSearchAccessory({ children }: { children: React.ReactNode }) {
+  return <div className="contents" ref={isolateTreeEvents}>{children}</div>;
+}
+
+function isolateTreeEvents(element: HTMLDivElement | null) {
+  if (!element) return;
+  const stop = (event: Event) => event.stopPropagation();
+  element.addEventListener('focusin', stop);
+  element.addEventListener('keydown', stop);
+  return () => {
+    element.removeEventListener('focusin', stop);
+    element.removeEventListener('keydown', stop);
+  };
 }

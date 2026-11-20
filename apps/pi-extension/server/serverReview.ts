@@ -3631,7 +3631,11 @@ export async function startReviewServer(options: {
 			res.end(result.body ?? undefined);
 		} else if (url.pathname === REPO_FILES_ENDPOINT && req.method === "GET") {
 			const requestAbort = url.searchParams.has("include") || url.searchParams.has("exclude") ? new AbortController() : null;
-			if (requestAbort) res.once("close", () => requestAbort.abort());
+			if (requestAbort) {
+				res.once("close", () => {
+					if (!res.writableEnded) requestAbort.abort();
+				});
+			}
 			const result = await handleRepoFilesRequest({
 				params: url.searchParams,
 				unavailable: repoFilesUnavailable(),
