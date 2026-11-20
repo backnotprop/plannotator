@@ -112,6 +112,8 @@ async function startWorld(options: { version?: string; config?: Record<string, u
       favicon: 'glass',
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      // "Which view do you prefer?" (five threads, armed ahead of voice on a release build): settled.
+      inboxReveals: { view_choice: { shownAt: '2026-10-01T10:00:00.000Z' } },
       ...options.config,
     }),
   );
