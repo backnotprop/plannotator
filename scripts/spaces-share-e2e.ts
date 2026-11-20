@@ -20,7 +20,11 @@
  * It works in a scratch data dir of its own and prints each step's result as a line of JSON; exit 1 on a surprise.
  * What to read in its output, since each is unconfirmed against a real server: the create's answer shape
  * (`share_url`, the first page's id and version), the media type a Mermaid page's raw save takes, whether a replayed
- * comment (same Idempotency-Key) makes one comment, and the code of the approval call.
+ * comment (same Idempotency-Key) makes one comment, and the code of the approval call. And the "imported" shape
+ * (it needs a server that has it: one without refuses the `actor` with 422): the `read back` line says, for the main
+ * page's newest version and for one comment as the server reads them back, whether `imported` is there and `author`
+ * is null. The two reads (`GET …/documents/{doc}/versions` and `GET …/documents/{doc}/annotations`) are the routes
+ * the Spaces notes name; their answer shapes are read leniently and are unconfirmed.
  */
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,6 +75,25 @@ const dataDir = mkdtempSync(join(tmpdir(), "spaces-share-e2e-"));
 const world = seedSpaceShareWorld(dataDir);
 const record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: "Plannotator share check", mode, kept: token !== null, at: new Date().toISOString() });
 let ok = (await share("first share", record, dataDir, world.plan, world.store)) === "done";
+
+/** One page version and one comment as the server reads them back: is each marked imported, with no author? */
+async function readBack() {
+  const page = record.pages[world.main]?.remote_id;
+  const commentId = Object.values(record.comments).find((c): c is { remote_id: string } => "remote_id" in c && !("reply" in c))?.remote_id ?? null;
+  if (!page) return say("read back", { skipped: "the main page is not up" });
+  const get = async (path: string) => {
+    const response = await fetch(`${host}/v1/workspaces/${encodeURIComponent(record.space_id)}/documents/${encodeURIComponent(page)}/${path}`, { headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    return { status: response.status, body: (await response.json().catch(() => null)) as Record<string, unknown> | null };
+  };
+  const listOf = (body: Record<string, unknown> | null, name: string): Record<string, unknown>[] => (Array.isArray(body?.[name]) ? (body![name] as Record<string, unknown>[]) : Array.isArray(body?.items) ? (body!.items as Record<string, unknown>[]) : Array.isArray(body) ? (body as Record<string, unknown>[]) : []);
+  const fact = (item: Record<string, unknown> | undefined) => (item ? { imported: item.imported !== undefined && item.imported !== null, imported_value: item.imported ?? null, author_is_null: item.author === null, agent_present: "agent" in item } : null);
+  const versions = await get("versions");
+  const newest = listOf(versions.body, "versions").slice(-1)[0];
+  const comments = await get("annotations");
+  const comment = listOf(comments.body, "annotations").find((c) => c.id === commentId) ?? listOf(comments.body, "annotations")[0];
+  say("read back", { page_version: { status: versions.status, ...fact(newest) }, comment: { status: comments.status, ...fact(comment) } });
+}
+if (ok) await readBack();
 const burst = Number(process.env.SPACES_E2E_BURST ?? 0);
 if (ok && burst > 0) {
   const { TINY_PNG } = await import("../tests/helpers/space-share-world");

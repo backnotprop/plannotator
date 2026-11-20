@@ -7,8 +7,8 @@
  * - the button reads the wrong word for where the share stands.
  */
 import { describe, expect, test } from "bun:test";
-import { isPlanAssetPath, type PlanComment } from "./plans";
-import { spaceCommentAnchor, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
+import { isPlanAssetPath, planId, type PlanComment } from "./plans";
+import { spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
 
 const DOC = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ1";
 const DOC2 = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ2";
@@ -170,5 +170,19 @@ describe("the button", () => {
     expect(spaceShareButton(status({ phase: "gone", shared_once: true }))).toEqual({ label: "Shared", state: "look" });
     expect(spaceShareButton(status({ phase: "failed" }))).toEqual({ label: "Share", state: "failed" });
     expect(spaceShareButton(status({ phase: "failed", shared_once: true }))).toEqual({ label: "Shared", state: "look" });
+  });
+});
+
+describe("what a call says of where a thing came from", () => {
+  test("only the share's time goes: never the author, the agent or the thing's own time", () => {
+    const origin = { author_label: "Maya Chen", agent_host: "claude-code", agent_session: "s-1", agent_name: "Claude", at: "2026-11-02T09:15:00.000Z" };
+    expect(spaceImportedFields(origin, "2026-11-20T10:00:00.000Z")).toEqual({ actor: { kind: "imported", at: "2026-11-20T10:00:00.000Z" } });
+  });
+
+  test("the plan's id is the key only signed in, and only when the service takes it as one", () => {
+    const id = planId("pln");
+    expect(spaceExternalKey(id, true)).toBe(id);
+    expect(spaceExternalKey(id, false)).toBeNull();
+    for (const bad of ["", "pln 1", "x".repeat(129), "pln/1", null]) expect(spaceExternalKey(bad, true)).toBeNull();
   });
 });

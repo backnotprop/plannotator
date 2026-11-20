@@ -57,6 +57,7 @@ export function spaceShareSource(store: PlanStore, id: string): SpaceShareSource
     older_approvals: older,
   };
   return {
+    plan_id: id,
     local,
     versionBytes: (doc, n) => store.versionBytes(id, doc, n),
     artifactBytes: (path) => {

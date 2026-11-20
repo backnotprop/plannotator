@@ -67,7 +67,7 @@ describe("what goes up", () => {
     const main = mainOf(s);
     expect(main.versions.map((v) => v.version)).toEqual(s.world.store.versions(s.world.plan, s.world.main).map((v) => v.version));
     // Each save named the version before it.
-    const saves = s.spaces.calls.filter((c) => c.method === "PUT" && c.path.includes(`/documents/${main.id}`));
+    const saves = s.spaces.calls.filter((c) => c.method === "PATCH" && c.path.includes(`/documents/${main.id}`));
     expect(saves.map((c) => c.ifMatch)).toEqual(main.versions.slice(0, 3).map((v) => `"${v.version}"`));
     // The record: the hosted page and each pushed pair.
     expect(s.record.pages[s.world.main]!.pushed.map((p) => [p.local, p.remote])).toEqual(main.versions.map((v, i) => [i + 1, v.version]));
@@ -117,6 +117,111 @@ describe("what goes up", () => {
   });
 });
 
+describe("the imported shape: every version and comment says it was put up at this run's time, and nothing more", () => {
+  const SHARED_AT = "2026-11-20T10:00:00.000Z";
+  const runAt = (s: ReturnType<typeof setup>, at: string, token: string | null = s.token) =>
+    runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, token, fetch: s.spaces.fetch }), now: () => Date.parse(at) });
+  /** Every JSON body sent, by the kind of call. */
+  const sent = (spaces: FakeSpaces) => {
+    const of = (test: (c: FakeSpaces["calls"][number]) => boolean) => spaces.calls.filter((c) => c.method !== "GET" && test(c));
+    return {
+      create: of((c) => c.method === "POST" && c.path === "/v1/workspaces"),
+      saves: of((c) => c.method === "PATCH" && /\/documents\/[^/]+$/.test(c.path)),
+      rawSaves: of((c) => c.method === "PUT" && /\/documents\/[^/]+$/.test(c.path)),
+      adds: of((c) => c.method === "POST" && /\/documents$/.test(c.path)),
+      comments: of((c) => c.method === "POST" && c.path.endsWith("/annotations")),
+      replies: of((c) => c.method === "POST" && c.path.endsWith("/replies")),
+      files: of((c) => c.method === "PUT" && c.path.includes("/assets/")),
+    };
+  };
+
+  test("the create, every page save, every comment and reply carry one actor with one share time; files and page adds none; no author, agent or original time anywhere", async () => {
+    const s = setup({ seed: { extras: true } });
+    const { store, plan, main, unsent } = s.world;
+    // A version and a comment that do know who and when: none of it goes.
+    store.addVersion(plan, main, { bytes: enc("# Rate limiting\n\nv5 by an agent\n"), committed_at: "2026-11-12T08:30:00.000Z", source: "agent-tool", author_label: "Maya Chen", agent_host: "claude-code", agent_session: "sess-secret-1", agent_name: "Claude" });
+    const head = store.versions(plan, main).slice(-1)[0]!;
+    const comment = store.saveComment(plan, { document_id: main, document_version: head.version, annotation: { id: "open-2", type: "COMMENT", text: "Is 90 enough?" }, at: "2026-11-12T08:31:00.000Z" });
+    store.saveComment(plan, { document_id: main, document_version: head.version, annotation: { id: "reply-2", type: "COMMENT", text: "Yes.", inReplyTo: "open-2" }, at: "2026-11-12T08:32:00.000Z" });
+    expect((await runAt(s, SHARED_AT)).end).toBe("done");
+    const calls = sent(s.spaces);
+    const actor = { kind: "imported", at: SHARED_AT };
+    expect(calls.create).toHaveLength(1);
+    expect((calls.create[0]!.json as Record<string, unknown>).actor).toEqual(actor);
+    // Page versions after the first go as the JSON save, with the page's text and the actor only: never a path.
+    expect(calls.saves.length).toBeGreaterThanOrEqual(4);
+    expect(calls.rawSaves).toHaveLength(0);
+    for (const call of [...calls.saves, ...calls.comments, ...calls.replies]) expect((call.json as Record<string, unknown>).actor).toEqual(actor);
+    for (const call of calls.saves) expect(Object.keys(call.json as object).sort()).toEqual(["actor", "body"]);
+    expect(calls.comments.map((c) => c.idempotencyKey).sort()).toEqual([unsent, comment.id].sort());
+    expect(calls.replies).toHaveLength(1);
+    // A file takes no actor (its door refuses one), nor does a page add.
+    expect(calls.files.length).toBeGreaterThan(0);
+    for (const call of calls.files) expect([call.json, call.query.includes("actor")]).toEqual([null, false]);
+    for (const call of calls.adds) expect((call.json as Record<string, unknown>).actor).toBeUndefined();
+    const everything = JSON.stringify(s.spaces.calls.map((c) => c.json));
+    for (const leak of ["Maya Chen", "claude-code", "sess-secret-1", "author_label", "agent_", "2026-11-12T08:3", ...store.versions(plan, main).map((v) => v.committed_at)]) expect(everything).not.toContain(leak);
+    // The stand-in reads them back as imported, with no author.
+    const space = spaceOf(s.spaces, s.record);
+    expect(mainOf(s).versions.every((v) => v.imported?.at === SHARED_AT)).toBe(true);
+    expect(space.comments.every((c) => c.imported?.at === SHARED_AT && c.replies.every((r) => r.imported?.at === SHARED_AT))).toBe(true);
+  });
+
+  test("a run that goes on later says its own time; the create sent again is the call first made, time included", async () => {
+    const s = setup({ seed: { extras: false } });
+    s.spaces.failNext(/^POST \/v1\/workspaces$/, 0, "lost", { after: true });
+    expect((await runAt(s, "2026-11-20T10:00:00.000Z")).end).toBe("failed");
+    expect((await runAt(s, "2026-11-20T11:00:00.000Z")).end).toBe("done");
+    const calls = sent(s.spaces);
+    expect(calls.create.map((c) => (c.json as { actor: { at: string } }).actor.at)).toEqual(["2026-11-20T10:00:00.000Z", "2026-11-20T10:00:00.000Z"]);
+    // The first answer was lost; the second is the space's replay of the same call (another body would be a 409).
+    expect(calls.create.map((c) => c.status)).toEqual([0, 201]);
+    expect(s.spaces.spaces.size).toBe(1);
+    expect(new Set(calls.saves.map((c) => (c.json as { actor: { at: string } }).actor.at))).toEqual(new Set(["2026-11-20T11:00:00.000Z"]));
+  });
+
+  test("the plan's id is the space's external_key on a signed-in create only (a key with no account is refused)", async () => {
+    const open = setup({ seed: { extras: false } });
+    expect((await runAt(open, SHARED_AT)).end).toBe("done");
+    expect(sent(open.spaces).create[0]!.json).not.toHaveProperty("external_key");
+    const mine = setup({ token: true, seed: { extras: false } });
+    expect((await runAt(mine, SHARED_AT)).end).toBe("done");
+    expect(mine.world.plan).toMatch(/^[A-Za-z0-9_.:-]{1,128}$/);
+    expect((sent(mine.spaces).create[0]!.json as Record<string, unknown>).external_key).toBe(mine.world.plan);
+    expect(spaceOf(mine.spaces, mine.record).external_key).toBe(mine.world.plan);
+    // What the engine never does, the stand-in refuses as the service does.
+    const refused = await createSpacesClient({ host: HOST, fetch: open.spaces.fetch }).createSpace({ id: newSpaceId(), name: "x", document: null, external_key: open.world.plan }).catch((e: { status: number }) => e.status);
+    expect(refused).toBe(422);
+  });
+
+  test("an Update after the person kept the space carries the actor and goes up; another account's is refused (403 imported_owner_only) and stops for Keep", async () => {
+    const s = setup({ seed: { extras: false } });
+    expect((await runAt(s, SHARED_AT)).end).toBe("done");
+    // The person keeps it (the claim Keep this space makes), then an Update with a new version and a comment.
+    const token = s.spaces.issueToken("Maya Chen");
+    await createSpacesClient({ host: HOST, token, fetch: s.spaces.fetch }).claim(s.record.space_id);
+    s.record.kept = true;
+    const { store, plan, main } = s.world;
+    store.addVersion(plan, main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    const head = store.versions(plan, main).slice(-1)[0]!;
+    store.saveComment(plan, { document_id: main, document_version: head.version, annotation: { id: "open-2", text: "And Team?" }, at: new Date().toISOString() });
+    const before = s.spaces.calls.length;
+    expect((await runAt(s, "2026-11-21T09:00:00.000Z", token)).end).toBe("done");
+    const update = s.spaces.calls.slice(before).filter((c) => c.method !== "GET" && c.method !== "PUT");
+    expect(update.map((c) => [c.method, c.status, (c.json as { actor?: unknown }).actor])).toEqual([
+      ["PATCH", 200, { kind: "imported", at: "2026-11-21T09:00:00.000Z" }],
+      ["POST", 201, { kind: "imported", at: "2026-11-21T09:00:00.000Z" }],
+    ]);
+    // Someone else's account sends the next one: the space says only its owner may.
+    store.addVersion(plan, main, { bytes: enc("# Rate limiting\n\nv6\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    s.record.kept = false;
+    const other = s.spaces.issueToken("Someone Else");
+    expect((await runAt(s, "2026-11-21T10:00:00.000Z", other)).end).toBe("keep");
+    expect(s.spaces.calls[s.spaces.calls.length - 1]).toMatchObject({ method: "PATCH", status: 403 });
+    expect(s.record.job).toMatchObject({ keep: true });
+  });
+});
+
 describe("a call tried twice is one thing", () => {
   test("the create's answer is lost: the same call again, one space", async () => {
     const s = setup();
@@ -144,7 +249,7 @@ describe("a call tried twice is one thing", () => {
   test("a page add, a save and a comment whose answers were lost are not made twice", async () => {
     const s = setup();
     s.spaces.failNext(/^POST .*\/documents$/, 0, "lost", { after: true });
-    s.spaces.failNext(/^PUT .*\/documents\//, 0, "lost", { after: true });
+    s.spaces.failNext(/^PATCH .*\/documents\//, 0, "lost", { after: true });
     s.spaces.failNext(/annotations$/, 0, "lost", { after: true });
     let end = (await s.run()).end;
     for (let i = 0; i < 4 && end !== "done"; i++) end = (await s.run()).end;
@@ -225,7 +330,7 @@ describe("the sign-in and the limit", () => {
   test("only a credential the space itself refuses (401 unauthorized) is forgotten; any other 401 is not", async () => {
     for (const [code, forgotten] of [["unauthorized", true], ["login_required", false], ["http_401", false]] as const) {
       const s = setup({ token: true, seed: { extras: false } });
-      s.spaces.failNext(/^PUT .*\/documents\//, 401, code);
+      s.spaces.failNext(/^PATCH .*\/documents\//, 401, code);
       const result = await s.run();
       expect([code, result.end, result.signedOut ?? false]).toEqual([code, "failed", forgotten]);
     }
@@ -285,7 +390,7 @@ describe("Update", () => {
     s.world.store.addVersion(s.world.plan, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     const next = spaceShareSource(s.world.store, s.world.plan)!;
     expect((await runSpaceShare({ source: next, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) })).end).toBe("done");
-    expect(writes(s.spaces).slice(12)).toEqual(["PUT /v1/workspaces/ws/documents/doc"]);
+    expect(writes(s.spaces).slice(12)).toEqual(["PATCH /v1/workspaces/ws/documents/doc"]);
     expect(mainOf(s).versions).toHaveLength(5);
   });
 
@@ -321,23 +426,26 @@ describe("Update", () => {
     expect(mainOf(s).versions).toHaveLength(4);
   });
 
-  test("kept by someone else with its link still open: a comment alone still goes up; the next page save is what says it is theirs", async () => {
+  test("kept by someone else with its link still open: an imported comment alone is refused (403 imported_owner_only) and the run stops for Keep, as a page save does", async () => {
     const s = setup();
     await s.run();
     s.spaces.keptBy(s.record.space_id, "Someone Else");
     const head = s.world.store.versions(s.world.plan, s.world.main)[3]!;
     s.world.store.saveComment(s.world.plan, { document_id: s.world.main, document_version: head.version, annotation: { id: "open-2", text: "And Team?" }, at: new Date().toISOString() });
     const run = () => runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: s.spaces.fetch }) });
-    expect((await run()).end).toBe("done");
-    expect(spaceOf(s.spaces, s.record).comments).toHaveLength(2);
+    expect((await run()).end).toBe("keep");
+    const last = s.spaces.calls[s.spaces.calls.length - 1]!;
+    expect([last.method, last.path.endsWith("/annotations"), last.status]).toEqual(["POST", true, 403]);
+    expect(spaceOf(s.spaces, s.record).comments).toHaveLength(1);
     expect(s.record.refused).toBe(false);
+    expect(s.record.job).toMatchObject({ ended: "failed", keep: true });
   });
 
   const gone: [string, (s: ReturnType<typeof setup>) => void, boolean][] = [
     ["the space expired or was removed (no account: 401 login_required)", (s) => s.spaces.remove(s.record.space_id), true],
     ["someone kept it and made it private (no account: 401 login_required)", (s) => s.spaces.keptBy(s.record.space_id, "Someone Else", true), true],
-    ["a route the service does not have (404 not_found)", (s) => s.spaces.failNext(/^PUT .*\/documents\//, 404, "not_found"), false],
-    ["the service failing (502)", (s) => s.spaces.failNext(/^PUT .*\/documents\//, 502, "bad_gateway"), false],
+    ["a route the service does not have (404 not_found)", (s) => s.spaces.failNext(/^PATCH .*\/documents\//, 404, "not_found"), false],
+    ["the service failing (502)", (s) => s.spaces.failNext(/^PATCH .*\/documents\//, 502, "bad_gateway"), false],
   ];
   for (const [name, arrange, isGone] of gone) {
     test(`${name}: a run that did not finish, never "someone else kept it", never a new space by itself`, async () => {

@@ -23,6 +23,14 @@
  * - Limits: a page 1,572,864 bytes (HTML 16,000,000), a file and an ownerless space's files 100 MiB (both can be set
  *   small for a test), a comment 8 KiB; without a credential a number of writes a minute, then `429` with
  *   `Retry-After`.
+ * - The "imported" shape (as landed on the Spaces side, 2026-11-20; read from its report, not run): an `actor`
+ *   `{ kind: "imported", at, author_label?, agent_host?, agent_session?, agent_name? }` on the create, a page's JSON
+ *   `PATCH` (with `body`; with a path change it is `422 validation_error` on `actor`), a comment and a reply (never
+ *   with `mentions`). Allowed while the space has no owner, then only to its owner: else `403 imported_owner_only`.
+ *   Read back as `imported: { author_label, agent_host, agent_session, agent_name, at }` with `author: null`,
+ *   `author_standing: null` and no `agent` (`GET …/documents/:id/versions` and `…/annotations`). The create takes
+ *   `external_key` (1-128 of `A-Za-z0-9_.:-`) with an account only (`422` without), echoed on that answer only.
+ *   Unknown fields are refused everywhere (`422`), an upload's query included: a file takes no actor.
  * - Answers have the service's shapes as seen on its test copy (2026-11-19): `{ workspace, document }` on the
  *   create, every other record bare, a page's version also as a weak `ETag`; the approval is a `PUT`, and a tool's
  *   token gets `403 approval_human_only`.
@@ -37,10 +45,19 @@
 import { createHash, randomBytes } from "node:crypto";
 import { gitBlobSha } from "../../packages/core/plans";
 
+/** The `imported` a record is read back with: the actor's fields, each null when not sent. */
+export interface FakeImported {
+  author_label: string | null;
+  agent_host: string | null;
+  agent_session: string | null;
+  agent_name: string | null;
+  at: string;
+}
 interface FakeVersion {
   version: string;
   body: string;
   by: string | null;
+  imported?: FakeImported | null;
 }
 interface FakeDoc {
   id: string;
@@ -64,7 +81,8 @@ interface FakeComment {
   anchor: unknown;
   document_version: string | null;
   by: string | null;
-  replies: { id: string; key: string | null; body: string; by: string | null }[];
+  imported: FakeImported | null;
+  replies: { id: string; key: string | null; body: string; by: string | null; imported: FakeImported | null }[];
 }
 export interface FakeSpace {
   id: string;
@@ -80,6 +98,7 @@ export interface FakeSpace {
   deleted: boolean;
   createBody: string;
   createAnswer: unknown;
+  external_key: string | null;
 }
 
 export interface FakeSpacesCall {
@@ -89,6 +108,8 @@ export interface FakeSpacesCall {
   signedIn: boolean;
   idempotencyKey: string | null;
   ifMatch: string | null;
+  /** The JSON body as sent, when it was JSON. */
+  json: unknown;
   status: number;
 }
 
@@ -118,6 +139,21 @@ const validPath = (path: unknown): path is string =>
   typeof path === "string" && path.length > 0 && !/[\\?#%\u0000-\u001f\u007f]/.test(path) && path.split("/").every((name) => name.length > 0 && name !== "." && name !== ".." && name.toLowerCase() !== ".git" && new TextEncoder().encode(name).length <= 255);
 const versionOf = (body: string) => gitBlobSha(body.replace(/^﻿/, ""));
 const pageMax = (kind: string) => (kind === "html" ? 16_000_000 : 1_572_864);
+const ACTOR_KEYS = ["kind", "at", "author_label", "agent_host", "agent_session", "agent_name"];
+const EXTERNAL_KEY = /^[A-Za-z0-9_.:-]{1,128}$/;
+/** An `actor` as sent: absent (undefined), the imported fields, or refused (null). */
+function actorOf(value: unknown): FakeImported | null | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const actor = value as Record<string, unknown>;
+  if (actor.kind !== "imported" || typeof actor.at !== "string" || Number.isNaN(Date.parse(actor.at))) return null;
+  if (Object.keys(actor).some((key) => !ACTOR_KEYS.includes(key))) return null;
+  const field = (key: string) => (typeof actor[key] === "string" ? (actor[key] as string) : null);
+  return { author_label: field("author_label"), agent_host: field("agent_host"), agent_session: field("agent_session"), agent_name: field("agent_name"), at: actor.at };
+}
+/** How a comment or reply reads back: an imported one names no author. */
+const authorWire = (record: { by: string | null; imported: FakeImported | null }) =>
+  record.imported ? { imported: record.imported, author: null, author_standing: null } : { author: record.by ? { name: record.by } : null, author_standing: record.by ? "member" : "anonymous" };
 /** A PKCE verifier or challenge: 43 to 128 of these characters. */
 const PKCE_VALUE = /^[A-Za-z0-9._~-]{43,128}$/;
 /** The way back to a tool: plain http to this computer's loopback address, an explicit port, any path. */
@@ -166,7 +202,9 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     const auth = request.headers.get("authorization");
     const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
     const user = bearer ? (tokens.get(bearer) ?? null) : null;
-    const call: FakeSpacesCall = { method, path: url.pathname, query: url.search, signedIn: bearer !== null, idempotencyKey: request.headers.get("idempotency-key"), ifMatch: request.headers.get("if-match"), status: 0 };
+    let sent: unknown = null;
+    if ((request.headers.get("content-type") ?? "").startsWith("application/json")) sent = await request.clone().json().catch(() => null);
+    const call: FakeSpacesCall = { method, path: url.pathname, query: url.search, signedIn: bearer !== null, idempotencyKey: request.headers.get("idempotency-key"), ifMatch: request.headers.get("if-match"), json: sent, status: 0 };
     calls.push(call);
     const done = (response: Response) => {
       call.status = response.status;
@@ -253,13 +291,18 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       } catch {
         return fail(422, "validation_error");
       }
-      const unknown = Object.keys(body).find((key) => !["id", "name", "note", "document", "org_id"].includes(key));
+      const unknown = Object.keys(body).find((key) => !["id", "name", "note", "document", "org_id", "external_key", "actor"].includes(key));
       if (unknown) return fail(422, "validation_error", { fields: [unknown] });
+      const actor = actorOf(body.actor);
+      if (actor === null) return fail(422, "validation_error", { fields: ["actor"] });
+      if (body.external_key !== undefined && (typeof body.external_key !== "string" || !EXTERNAL_KEY.test(body.external_key))) return fail(422, "validation_error", { fields: ["external_key"] });
+      // A key names a space of an account: with none it is refused.
+      if (body.external_key !== undefined && !user) return fail(422, "validation_error", { fields: ["external_key"] });
       const id = typeof body.id === "string" ? body.id : newId("ws");
       if (!/^ws_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) return fail(422, "validation_error", { fields: ["id"] });
       const existing = spaces.get(id);
       if (existing) return existing.createBody === raw && !existing.deleted ? json(201, existing.createAnswer) : fail(409, "workspace_id_conflict");
-      const space: FakeSpace = { id, name: typeof body.name === "string" ? body.name.slice(0, 120) : "Untitled", owner: user, visibility: user ? "private" : "link_edit", share_url: `${origin}/s/${id.slice(3, 15).toLowerCase()}`, documents: [], assets: [], comments: [], approvals: [], deleted: false, createBody: raw, createAnswer: null };
+      const space: FakeSpace = { id, name: typeof body.name === "string" ? body.name.slice(0, 120) : "Untitled", owner: user, visibility: user ? "private" : "link_edit", share_url: `${origin}/s/${id.slice(3, 15).toLowerCase()}`, documents: [], assets: [], comments: [], approvals: [], deleted: false, createBody: raw, createAnswer: null, external_key: typeof body.external_key === "string" ? body.external_key : null };
       let first: FakeDoc | null = null;
       if (body.document !== null) {
         const d = (body.document ?? {}) as Record<string, unknown>;
@@ -268,10 +311,11 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
         const text = typeof d.body === "string" ? d.body : "";
         if (!validPath(path) || !PAGE_TYPES[kind] || ((kind === "mermaid" || kind === "graphviz") && PAGE_EXTENSIONS[extensionOf(path)] !== kind)) return fail(422, "validation_error", { fields: ["document"] });
         if (new TextEncoder().encode(text).length > pageMax(kind)) return fail(422, "validation_error", { fields: ["body"] });
-        first = { id: newId("doc"), doc_path: path, kind, title: typeof d.title === "string" ? d.title : path, versions: [{ version: versionOf(text), body: text, by: user }] };
+        first = { id: newId("doc"), doc_path: path, kind, title: typeof d.title === "string" ? d.title : path, versions: [{ version: versionOf(text), body: text, by: user, imported: actor ?? null }] };
         space.documents.push(first);
       }
-      space.createAnswer = { workspace: spaceWire(space), document: first ? docWire(space, first) : null };
+      // The key is echoed on this answer only.
+      space.createAnswer = { workspace: { ...spaceWire(space), ...(space.external_key ? { external_key: space.external_key } : {}) }, document: first ? docWire(space, first) : null };
       spaces.set(id, space);
       return json(201, space.createAnswer);
     }
@@ -293,6 +337,8 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     const outsider = space.owner !== null && space.owner !== user;
     if (outsider && space.visibility === "private") return user ? fail(404, "workspace_not_found") : fail(401, "login_required");
     if (outsider && method !== "GET" && !(rest[0] === "documents" && rest[2] === "annotations")) return fail(403, "forbidden");
+    /** An imported record may be written while the space has no owner, then by its owner only. */
+    const importedRefused = () => (space.owner !== null && space.owner !== user ? fail(403, "imported_owner_only") : null);
 
     if (rest.length === 0 && method === "GET") return json(200, spaceWire(space, user));
     if (rest.length === 0 && method === "DELETE") {
@@ -316,6 +362,42 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     const doc = rest[0] === "documents" && rest[1] ? space.documents.find((d) => d.id === rest[1]) : undefined;
     if (rest[0] === "documents" && rest[1] && !doc) return fail(404, "document_not_found");
 
+    if (doc && rest.length === 2 && method === "PATCH") {
+      const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!body || typeof body !== "object") return fail(422, "validation_error");
+      const unknown = Object.keys(body).find((key) => !["body", "doc_path", "title", "actor"].includes(key));
+      if (unknown) return fail(422, "validation_error", { fields: [unknown] });
+      const actor = actorOf(body.actor);
+      if (actor === null) return fail(422, "validation_error", { fields: ["actor"] });
+      if (actor) {
+        if (typeof body.body !== "string") return fail(422, "validation_error", { fields: ["body"] });
+        // The same path again is no change; another path with an actor is refused.
+        if (body.doc_path !== undefined && body.doc_path !== doc.doc_path) return fail(422, "validation_error", { fields: ["actor"] });
+        const refused = importedRefused();
+        if (refused) return refused;
+      }
+      if (body.doc_path !== undefined && (!validPath(body.doc_path) || PAGE_EXTENSIONS[extensionOf(body.doc_path)] !== doc.kind)) return fail(422, "validation_error", { fields: ["doc_path"] });
+      if (typeof body.body === "string" && new TextEncoder().encode(body.body).length > pageMax(doc.kind)) return fail(422, "validation_error", { fields: ["body"] });
+      const current = doc.versions[doc.versions.length - 1]!.version;
+      const expected = request.headers.get("if-match")?.replace(/^W\//, "").replace(/"/g, "");
+      if (expected && expected !== current) return fail(412, "version_conflict", { current_version: current });
+      if (typeof body.doc_path === "string") doc.doc_path = body.doc_path;
+      if (typeof body.title === "string") doc.title = body.title;
+      if (typeof body.body === "string") {
+        const text = body.body.replace(/^\uFEFF/, "");
+        doc.versions.push({ version: versionOf(text), body: text, by: user, imported: actor ?? null });
+        space.approvals = space.approvals.filter((a) => a.document_id !== doc.id);
+      }
+      const version = doc.versions[doc.versions.length - 1]!.version;
+      return json(200, docWire(space, doc), { ETag: `W/"${version}"` });
+    }
+    if (doc && rest[2] === "versions" && rest.length === 3 && method === "GET") {
+      return json(200, { versions: doc.versions.map((v, i) => ({ version: v.version, version_number: i + 1, ...(v.imported ? { imported: v.imported, author: null } : { author: v.by ? { name: v.by } : null }) })) });
+    }
+    if (doc && rest[2] === "annotations" && rest.length === 3 && method === "GET") {
+      return json(200, { annotations: space.comments.filter((c) => c.document_id === doc.id).map((c) => ({ id: c.id, document_id: doc.id, body: c.body, anchor: c.anchor, ...authorWire(c), replies: c.replies.map((r) => ({ id: r.id, annotation_id: c.id, body: r.body, ...authorWire(r) })) })) });
+    }
+
     if (doc && rest.length === 2 && method === "PUT") {
       const type = (request.headers.get("content-type") ?? "").split(";")[0]!.trim();
       if (type !== PAGE_TYPES[doc.kind]) return fail(422, "validation_error", { fields: ["content-type"] });
@@ -336,29 +418,45 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       const key = request.headers.get("idempotency-key")?.trim() || null;
       const usable = key && key.length <= 200 ? key : null;
       if (!body || typeof body.body !== "string" || !body.anchor || typeof body.anchor !== "object") return fail(422, "validation_error", { fields: ["anchor"] });
+      const unknown = Object.keys(body).find((key) => !["anchor", "body", "attachments", "mentions", "supersedes", "document_version", "author", "actor"].includes(key));
+      if (unknown) return fail(422, "validation_error", { fields: [unknown] });
+      const actor = actorOf(body.actor);
+      if (actor === null || (actor && body.mentions !== undefined)) return fail(422, "validation_error", { fields: ["actor"] });
+      if (actor) {
+        const refused = importedRefused();
+        if (refused) return refused;
+      }
       if (new TextEncoder().encode(body.body).length > 8 * 1024 || JSON.stringify(body.anchor).length > 16 * 1024) return fail(422, "validation_error", { fields: ["body"] });
       const again = usable ? space.comments.find((c) => c.key === usable) : undefined;
       // The same key on another target is refused; a reply's key shares the space's keys.
       if (usable && space.comments.some((c) => c.replies.some((r) => r.key === usable))) return fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });
       if (again) return again.document_id === doc.id ? json(200, { id: again.id, document_id: doc.id }) : fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });
-      const comment: FakeComment = { id: newId("anno"), document_id: doc.id, key: usable, body: body.body, anchor: body.anchor, document_version: typeof body.document_version === "string" ? body.document_version : null, by: user, replies: [] };
+      const comment: FakeComment = { id: newId("anno"), document_id: doc.id, key: usable, body: body.body, anchor: body.anchor, document_version: typeof body.document_version === "string" ? body.document_version : null, by: user, imported: actor ?? null, replies: [] };
       space.comments.push(comment);
-      return json(201, { id: comment.id, document_id: doc.id, author: null, author_standing: user ? "member" : "anonymous" });
+      return json(201, { id: comment.id, document_id: doc.id, ...authorWire(comment) });
     }
     if (doc && rest[2] === "annotations" && rest[4] === "replies" && rest.length === 5 && method === "POST") {
       const comment = space.comments.find((c) => c.id === rest[3]);
       if (!comment) return fail(404, "annotation_not_found");
       const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
       if (!body || typeof body.body !== "string") return fail(422, "validation_error", { fields: ["body"] });
+      const unknown = Object.keys(body).find((key) => !["body", "mentions", "author", "actor"].includes(key));
+      if (unknown) return fail(422, "validation_error", { fields: [unknown] });
+      const actor = actorOf(body.actor);
+      if (actor === null || (actor && body.mentions !== undefined)) return fail(422, "validation_error", { fields: ["actor"] });
+      if (actor) {
+        const refused = importedRefused();
+        if (refused) return refused;
+      }
       const sent = request.headers.get("idempotency-key")?.trim() || null;
       // A key over 200 characters is ignored, not refused.
       const key = sent && sent.length <= 200 ? sent : null;
       const again = key ? comment.replies.find((r) => r.key === key) : undefined;
       if (again) return json(200, { id: again.id, annotation_id: comment.id });
       if (key && (space.comments.some((c) => c.key === key) || space.comments.some((c) => c !== comment && c.replies.some((r) => r.key === key)))) return fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });
-      const reply = { id: newId("reply"), key, body: body.body, by: user };
+      const reply = { id: newId("reply"), key, body: body.body, by: user, imported: actor ?? null };
       comment.replies.push(reply);
-      return json(201, { id: reply.id, annotation_id: comment.id });
+      return json(201, { id: reply.id, annotation_id: comment.id, ...authorWire(reply) });
     }
     if (doc && rest[2] === "approval" && rest.length === 3 && method === "PUT") {
       if (!user) return fail(401, "login_required");
@@ -375,6 +473,9 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       const path = rest.slice(1).join("/");
       if (!validPath(path)) return fail(422, "validation_error", { fields: ["path"] });
       if (PAGE_EXTENSIONS[extensionOf(path)]) return fail(422, "validation_error", { fields: ["path"] });
+      // Only `?title=`: an upload takes no actor, nor anything else.
+      const extra = [...url.searchParams.keys()].find((key) => key !== "title");
+      if (extra) return fail(422, "validation_error", { fields: [extra] });
       if (space.documents.some((d) => d.doc_path === path)) return fail(409, "path_conflict", { doc_path: path });
       const bytes = new Uint8Array(await request.arrayBuffer());
       if (bytes.length > (settings.fileMax ?? 104_857_600)) return fail(413, "artifact_too_large", { max_bytes: settings.fileMax ?? 104_857_600 });

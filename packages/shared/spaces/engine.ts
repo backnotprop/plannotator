@@ -13,9 +13,9 @@
  *   progress says so meanwhile.
  * - It never writes over another's work. A save names the version it expects the space to hold; when the space holds
  *   another (412), that page is marked `stopped` and left alone, and the rest goes on.
- * - It never says whose a space is. A page save or file upload the space does not allow (403), to a space made here
- *   and not known to be the person's own, means it has an owner now: perhaps this person, from the browser or another
- *   computer. The run ends as `keep` (the record's `job.keep`), nothing more is sent, and Keep this space asks the one
+ * - It never says whose a space is. A write the space does not allow (403: a page save, a file upload, or an imported
+ *   comment's `imported_owner_only`), to a space made here and not known to be the person's own, means it has an
+ *   owner now: perhaps this person, from the browser or another computer. The run ends as `keep` (the record's `job.keep`), nothing more is sent, and Keep this space asks the one
  *   call that knows (the claim: theirs, or `409 claim_conflict`). The same when the claim a signed-in create makes
  *   is lost. Any other "no" is a run that did not finish; where the space is simply not
  *   there for this caller (`spaceNotAvailable`) the record says so (`job.gone`), so "Share as new" can be offered.
@@ -31,6 +31,7 @@ import {
   planSpaceShare,
   SPACE_OPEN_FILES_MAX,
   spaceCommentAnchor,
+  spaceExternalKey,
   spaceImportedFields,
   spaceImportedOfComment,
   spacePageKindOfPath,
@@ -42,6 +43,8 @@ import {
 import { spaceKeptByAnother, spaceNotAvailable, spacesTokenRefused, spaceWriteNotAllowed, SpacesError, type SpacesClient, type SpacesSpace } from "./client";
 
 export interface SpaceShareSource {
+  /** The plan's id (`pln_…`): the space's `external_key` on a signed-in create. */
+  plan_id?: string;
   local: LocalSpace;
   versionBytes(doc: string, version: number): Uint8Array | null;
   artifactBytes(path: string): Uint8Array | null;
@@ -124,6 +127,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   };
 
   if (record.refused) return { end: "refused" };
+  /** The time of this run: every version and comment it sends says it was put up then (`spaceImportedFields`). */
+  const sharedAt = stamp();
   const first = plan();
   // What a run that did not finish had done still counts: "13 of 40" after "12 of 40".
   const base = record.job ? record.job.done : 0;
@@ -146,8 +151,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     return bytes;
   };
   const localHash = (docId: string, n: number) => docOf(docId).versions.find((v) => v.version_number === n)?.version ?? "";
-  /** Where a version came from (its agent and its own time), as the call carries it: nothing yet (`spaceImportedFields`). */
-  const originOf = (docId: string, n: number) => spaceImportedFields(docOf(docId).versions.find((v) => v.version_number === n)?.imported ?? null);
+  /** Where a version came from, as the call carries it (`spaceImportedFields`: today the time of the run only). */
+  const originOf = (docId: string, n: number, at = sharedAt) => spaceImportedFields(docOf(docId).versions.find((v) => v.version_number === n)?.imported ?? null, at);
   /** The space is there: its link, and whether it is the person's own, as the space says (never assumed). */
   const adopt = async (space: SpacesSpace) => {
     record.created = true;
@@ -181,7 +186,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
       case "create": {
         // The same call every time: the page and version in it are kept before it is first made.
         if (!record.seed) {
-          record.seed = { doc: step.doc, version: step.version };
+          record.seed = { doc: step.doc, version: step.version, at: sharedAt };
           keep();
         }
         const seed = record.seed;
@@ -190,7 +195,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const path = doc ? paths[doc.id]! : null;
         const document = doc && bytes && path && isSpacePageKind(doc.kind) ? { path, kind: doc.kind, title: doc.title, body: textOf(bytes) } : null;
         try {
-          const made = await client.createSpace({ id: spaceId, name: record.name, document }, doc && seed.version ? originOf(doc.id, seed.version) : {});
+          // The key only with an account (a key sent without one is refused); the actor only with a first page.
+          const externalKey = spaceExternalKey(source.plan_id, client.signedIn);
+          const made = await client.createSpace({ id: spaceId, name: record.name, document, ...(externalKey ? { external_key: externalKey } : {}) }, document && seed.version ? originOf(doc!.id, seed.version, seed.at ?? sharedAt) : {});
           await adopt(made.space);
           if (doc && bytes && path) {
             if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
@@ -216,7 +223,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const bytes = bytesOf(doc.id, step.version);
         const path = paths[doc.id]!;
         try {
-          const made = await client.addPage(spaceId, { doc_path: path, kind: doc.kind, title: doc.title, body: textOf(bytes) }, originOf(doc.id, step.version));
+          // No actor: the add-page call does not take one (its body is strict).
+          const made = await client.addPage(spaceId, { doc_path: path, kind: doc.kind, title: doc.title, body: textOf(bytes) });
           record.pages[doc.id] = { lane: "page", remote_id: made.id, doc_path: path, pushed: [{ local: step.version, remote: made.version, hash: localHash(doc.id, step.version) }], stopped: null };
         } catch (error) {
           if (!(error instanceof SpacesError) || error.code !== "path_conflict") throw error;
@@ -307,9 +315,9 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
           if (step.kind === "reply") {
             const parent = record.comments[step.parent];
             if (!parent || !("remote_id" in parent)) throw new StepLeft();
-            record.comments[comment.id] = { remote_id: (await client.addReply(spaceId, page.remote_id, parent.remote_id, { body: comment.body }, comment.id, spaceImportedFields(spaceImportedOfComment(comment)))).id, reply: true };
+            record.comments[comment.id] = { remote_id: (await client.addReply(spaceId, page.remote_id, parent.remote_id, { body: comment.body }, comment.id, spaceImportedFields(spaceImportedOfComment(comment), sharedAt))).id, reply: true };
           } else {
-            record.comments[comment.id] = { remote_id: (await client.addComment(spaceId, page.remote_id, { anchor: spaceCommentAnchor(comment), body: comment.body, document_version: version }, comment.id, spaceImportedFields(spaceImportedOfComment(comment)))).id };
+            record.comments[comment.id] = { remote_id: (await client.addComment(spaceId, page.remote_id, { anchor: spaceCommentAnchor(comment), body: comment.body, document_version: version }, comment.id, spaceImportedFields(spaceImportedOfComment(comment), sharedAt))).id };
           }
         } catch (error) {
           // A comment the space does not take as it is stays here; the rest goes on.

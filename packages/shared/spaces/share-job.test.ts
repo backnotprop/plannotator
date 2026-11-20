@@ -160,6 +160,10 @@ describe("a write that is not allowed", () => {
     expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, needs_keep: false, changes: 0, access: "comment" });
     expect(s.spaces.spaces.get(s.record().space_id)!.documents.find((d) => d.doc_path.startsWith("Rate limiting"))!.versions).toHaveLength(5);
     expect(s.spaces.spaces.size).toBe(1);
+    // Made with no account: no key on the create. The Update after Keep is the owner's imported save, and it went up.
+    expect(s.spaces.calls.find((c) => c.method === "POST" && c.path === "/v1/workspaces")!.json).not.toHaveProperty("external_key");
+    const update = s.spaces.calls.filter((c) => c.method === "PATCH" && c.signedIn);
+    expect(update.map((c) => [c.status, (c.json as { actor: { kind: string } }).actor.kind])).toEqual([[200, "imported"]]);
   });
 });
 
@@ -368,6 +372,8 @@ describe("Keep this space", () => {
     s.jobs.share(s.world.plan, {});
     await s.settle();
     expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Maya Chen");
+    // Signed in: the plan's id is the space's key.
+    expect(s.spaces.spaces.get(s.record().space_id)!.external_key).toBe(s.world.plan);
     // Made signed in: the space itself says private, and only then is it "only you".
     expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", kept: true, access: "private" });
     s.spaces.revoke(token);

@@ -143,9 +143,9 @@ export interface SpaceShareRecord {
   /** The Spaces origin it went to. */
   host: string;
   space_id: string;
-  /** The create call as first made (kept so a retry sends the same call): the name, and the page and version in it. */
+  /** The create call as first made (kept so a retry sends the same call): the name, the page and version in it, and its share time (`at`). */
   name: string;
-  seed: { doc: string | null; version: number | null } | null;
+  seed: { doc: string | null; version: number | null; at?: string } | null;
   /** The create answered. */
   created: boolean;
   /** The link, exactly as the space returned it. */
@@ -244,13 +244,21 @@ export interface SpaceImported {
 }
 
 /**
- * The fields a call carries to say where a version or a comment came from. The engine hands every version and
- * comment it sends through here. Today it adds nothing: the hosted side does not take them yet and their names are
- * not final, and an unknown field is refused there. When it does, this is the one place to write them.
+ * The fields a call carries to say where a version or a comment came from (the hosted "imported" actor). The engine
+ * hands every version and comment it sends through here, with its origin and the time of this share run. Today only
+ * that time goes (`at`): no author's name, no agent and not the version's or comment's own time, until the owner says
+ * those go up. Sending them is a change here and nowhere else: `origin` already holds them.
+ *
+ * A Spaces server without this shape refuses it (`422 validation_error`: unknown fields are refused), so a share needs
+ * one with it. Nothing checks for that: the switch stays off until the server it points at has it.
  */
-export function spaceImportedFields(_origin: SpaceImported | null): Record<string, unknown> {
-  return {};
+export function spaceImportedFields(_origin: SpaceImported | null, sharedAt: string): { actor: { kind: "imported"; at: string } } {
+  return { actor: { kind: "imported", at: sharedAt } };
 }
+
+/** The hosted space's key for this plan (its `pln_` id), sent on a signed-in create only: a key with no account is refused. */
+export const SPACE_EXTERNAL_KEY_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
+export const spaceExternalKey = (planId: string | null | undefined, signedIn: boolean): string | null => (signedIn && typeof planId === "string" && SPACE_EXTERNAL_KEY_RE.test(planId) ? planId : null);
 
 /** A comment's origin: the person's display name when one is kept, its agent fields, and when it was made. */
 export const spaceImportedOfComment = (comment: PlanComment): SpaceImported => ({ author_label: comment.author_label, agent_host: comment.agent_host, agent_session: comment.agent_session, agent_name: comment.agent_name, at: comment.created_at });

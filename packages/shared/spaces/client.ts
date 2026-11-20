@@ -70,11 +70,17 @@ export interface SpacesSpace {
 export interface SpacesClient {
   readonly host: string;
   readonly signedIn: boolean;
-  /** `imported` (here and below): the origin fields of what is sent (`spaceImportedFields`), merged into the call. */
-  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null }, imported?: Record<string, unknown>): Promise<{ space: SpacesSpace; document: { id: string; version: string; url: string | null } | null }>;
+  /**
+   * `imported` (here and below): the origin fields of what is sent (`spaceImportedFields`, the `actor`), merged into
+   * the call's JSON (on the create, beside `document`). `external_key`: the plan's id, signed in only.
+   */
+  createSpace(body: { id: string; name: string; document: { path: string; kind: SpacePageKind; title: string; body: string } | null; external_key?: string }, imported?: Record<string, unknown>): Promise<{ space: SpacesSpace; document: { id: string; version: string; url: string | null } | null }>;
   getSpace(id: string): Promise<SpacesSpace>;
   addPage(spaceId: string, body: { doc_path: string; kind: SpacePageKind; title: string; body: string }, imported?: Record<string, unknown>): Promise<{ id: string; version: string; url: string | null }>;
-  /** Replace a page's text; `ifMatch` is the version the space is expected to hold (412 `version_conflict` otherwise). */
+  /**
+   * Replace a page's text; `ifMatch` is the version the space is expected to hold (412 `version_conflict` otherwise).
+   * With `imported` it is the JSON `PATCH` (`{ body, actor }`, never a path), else the raw `PUT`.
+   */
   savePage(spaceId: string, docId: string, bytes: Uint8Array, kind: SpacePageKind, ifMatch: string, imported?: Record<string, unknown>): Promise<{ version: string; url: string | null }>;
   putFile(spaceId: string, path: string, bytes: Uint8Array, contentType: string, title?: string | null): Promise<{ id: string | null; content_hash: string | null }>;
   addComment(spaceId: string, docId: string, body: { anchor: unknown; body: string; document_version: string }, key: string, imported?: Record<string, unknown>): Promise<{ id: string }>;
@@ -163,7 +169,7 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     host: options.host,
     signedIn: token !== null,
     async createSpace(input, imported = {}) {
-      const { body } = await call("POST", "/v1/workspaces", { json: input.document ? { ...input, document: { ...input.document, ...imported } } : input });
+      const { body } = await call("POST", "/v1/workspaces", { json: { ...input, ...imported } });
       const space = spaceOf(under(body, "workspace"));
       const document = isObject(body) && isObject(body.document) ? body.document : null;
       return { space, document: document && text(document.id) && text(document.version) ? { id: document.id as string, version: document.version as string, url: text(document.file_url) } : null };
@@ -176,9 +182,16 @@ export function createSpacesClient(options: { host: string; token?: string | nul
       const document = under(body, "document");
       return { id: text(document.id) ?? "", version: versionOf(document, headers), url: text(document.file_url) };
     },
-    // A raw save has no JSON to carry origin fields in; how they ride on it is the hosted side's to settle.
-    async savePage(spaceId, docId, bytes, kind, ifMatch, _imported = {}) {
-      const { body, headers } = await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}`, { bytes, headers: { "Content-Type": SPACE_PAGE_MEDIA_TYPE[kind], "If-Match": `"${ifMatch}"` } });
+    // Origin fields ride only on JSON: such a save is the PATCH with the page's text as `body` and no path, so it is
+    // never a rename (an actor with a path change is refused). The decoder drops a leading byte-order mark, as the
+    // space does.
+    async savePage(spaceId, docId, bytes, kind, ifMatch, imported = {}) {
+      const target = `${ws(spaceId)}/documents/${segment(docId)}`;
+      const ifMatchHeader = { "If-Match": `"${ifMatch}"` };
+      const { body, headers } =
+        Object.keys(imported).length > 0
+          ? await call("PATCH", target, { json: { body: new TextDecoder().decode(bytes), ...imported }, headers: ifMatchHeader })
+          : await call("PUT", target, { bytes, headers: { "Content-Type": SPACE_PAGE_MEDIA_TYPE[kind], ...ifMatchHeader } });
       const document = under(body, "document");
       return { version: versionOf(document, headers), url: text(document.file_url) };
     },
