@@ -427,6 +427,38 @@ describe("Skip (the owner's variant A, 2026-11-19)", () => {
     expect(row.unsent?.skipped ?? 0).toBe(0);
   });
 
+  test("a note sent with a skip is dropped: the reply never carries it", () => {
+    const { store, asked, action } = setup();
+    store.markAction(asked.id, action.key, { outcome: "skip", note: "Not this week.", staged: true });
+    expect(actionOf(store, asked.id).action_result).toMatchObject({ outcome: "skip", note: null });
+    const { reply } = store.sendReply(asked.id, { idempotency_key: "k1", words: "", actions: [{ key: action.key }] });
+    expect(reply.body).not.toContain("Not this week.");
+  });
+
+  test("the agent's own done settles a skip in the draft and one already sent; the message is never refused", () => {
+    // In the draft (Q3): the agent's, the skip kept under person, nothing left to send.
+    const draft = setup();
+    draft.store.markAction(draft.asked.id, draft.action.key, { outcome: "skip", staged: true });
+    const ref = `${draft.asked.id}/${draft.action.key}`;
+    const seen = draft.store.sendMessage({ project_id: draft.project.id, author: AGENT, body: "I deployed it from the CLI.", reply_to: draft.asked.id, done: [ref] });
+    expect(seen.done).toEqual([ref]);
+    expect(actionOf(draft.store, draft.asked.id)).toMatchObject({ state: "closed", action_result: { outcome: "done", by: "agent", person: { outcome: "skip", note: null } } });
+    expect(rowOf(draft.store, draft.asked.thread_id).unsent?.skipped ?? 0).toBe(0);
+
+    // Sent: the same record shape, and the send goes through rather than "invalid_done … Nothing was sent".
+    const sent = setup();
+    sent.store.markAction(sent.asked.id, sent.action.key, { outcome: "skip", staged: true });
+    const { reply } = sent.store.sendReply(sent.asked.id, { idempotency_key: "k1", words: "", actions: [{ key: sent.action.key }] });
+    expect(actionOf(sent.store, sent.asked.id)).toMatchObject({ state: "sent", sent_reply_id: reply.id });
+    const sentRef = `${sent.asked.id}/${sent.action.key}`;
+    const after = sent.store.sendMessage({ project_id: sent.project.id, author: AGENT, body: "Deployed it myself after all.", reply_to: reply.id, done: [sentRef] });
+    expect(after.done).toEqual([sentRef]);
+    expect(actionOf(sent.store, sent.asked.id)).toMatchObject({ state: "closed", action_result: { outcome: "done", by: "agent", person: { outcome: "skip", note: null } } });
+    // Nothing of it waits on the person or goes to the agent again.
+    expect(rowOf(sent.store, sent.asked.thread_id).unsent?.skipped ?? 0).toBe(0);
+    expect(() => sent.store.sendReply(sent.asked.id, { idempotency_key: "k2", words: "", actions: [{ key: sent.action.key }] })).toThrow(expect.objectContaining({ code: "nothing_to_send" }));
+  });
+
   test("a skip and its time survive a reload from disk, still in the draft", () => {
     const first = setup();
     first.store.markAction(first.asked.id, first.action.key, { outcome: "skip", staged: true });

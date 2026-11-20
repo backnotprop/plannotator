@@ -4418,10 +4418,12 @@ export class InboxStore {
       this.appendQuestion({ ...record, superseded_by: by }, at);
     }
     // The action items the agent saw done: closed, nothing sent. A Done or Can't do it the person
-    // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3).
+    // had waiting in their draft is kept under `person`: its note still goes with their Send (Q3). A skip
+    // the person already sent is kept the same way (nothing of it is left to send).
     for (const questionId of doneIds) {
       const record = this.questions.get(questionId)!;
-      const mine = record.action_result?.by === "person" && record.action_result.staged === true ? record.action_result : null;
+      const result = record.action_result?.by === "person" ? record.action_result : null;
+      const mine = result && (result.staged === true || result.outcome === "skip") ? result : null;
       this.appendQuestion(
         {
           ...record,
@@ -4581,9 +4583,11 @@ export class InboxStore {
       // Open, or the person's Done or Can't do it waiting in their draft: the agent's done settles that one, and the
       // person's note still goes with their Send (approval "inbox-action-items-in-reply", Q3). One the person marked
       // through the timed path (decision mode, the phone door), inside its Undo window, is theirs and goes as they said.
+      // One the person skipped and sent: the agent may still see it done (the person chose not to, the agent did it).
       const open = records.filter((r) => {
         const state = inboxQuestionState(r, resolved);
-        return state === "open" || (state === "picked" && r.action_result?.by === "person" && r.action_result.staged === true);
+        const mark = r.action_result?.by === "person" ? r.action_result : null;
+        return state === "open" || (state === "picked" && mark?.staged === true) || (state === "sent" && mark?.outcome === "skip");
       });
       if (open.length === 0) {
         const state = inboxQuestionState(records[0]!, resolved);

@@ -340,7 +340,7 @@ public actor StandInDoor {
     }
   }
 
-  /// `markAction`: Done (with an optional note), Can't do it (with a reason), Skip (a note optional), or null to take it back.
+  /// `markAction`: Done (with an optional note), Can't do it (with a reason), Skip (no note: one sent is dropped), or null to take it back.
   private func markAction(_ message: MessageID, _ key: String, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
     do {
       let at = try target(message)
@@ -361,6 +361,7 @@ public actor StandInDoor {
         guard case .string(let text) = raw else { return refuse(422, "validation_error", "note: text.", field: "note") }
         note = text.trimmingCharacters(in: .whitespacesAndNewlines)
       }
+      if outcome == .skip { note = "" }
       if outcome == .cant, note.isEmpty { return refuse(422, "validation_error", "note: say why you can't do it; the agent gets it word for word.", field: "note") }
       let state = questions[q].state
       if state == .sent { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }

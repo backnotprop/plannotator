@@ -1596,7 +1596,7 @@ export interface InboxActionResult {
    * before Skip only ever holds "done" or "cant".
    */
   outcome: "done" | "cant" | "skip";
-  /** The person's note with Done or Skip, or the reason with Can't do it; null for none. */
+  /** The person's note with Done, or the reason with Can't do it; null for none (always for Skip). */
   note: string | null;
   at: string;
   by: "person" | "agent";
@@ -3279,6 +3279,7 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
  * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
  */
+/* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
 const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
 export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;

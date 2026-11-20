@@ -328,7 +328,7 @@ export const INBOX_ACTION_NOTE_MAX = Number.POSITIVE_INFINITY;
 /**
  * The person's Done, Can't do it or Skip, checked: `outcome` "done" (with an
  * optional note), "cant" (with a reason, required) or "skip" (they chose not
- * to do it; a note optional, approval "action-item-skip"). Null outcome: the Undo.
+ * to do it; it takes no note: one sent is dropped). Null outcome: the Undo.
  */
 export function checkInboxActionResult(
   raw: { outcome?: unknown; note?: unknown },
@@ -339,7 +339,7 @@ export function checkInboxActionResult(
   if (raw.note !== undefined && raw.note !== null && typeof raw.note !== "string") return { ok: false, field: "note", message: "note: text." };
   const note = typeof raw.note === "string" ? raw.note.trim() : "";
   if (outcome === "cant" && note === "") return { ok: false, field: "note", message: "note: say why you can't do it; the agent gets it word for word." };
-  return { ok: true, outcome, note: note === "" ? null : note };
+  return { ok: true, outcome, note: note === "" || outcome === "skip" ? null : note };
 }
 
 // ─────────────────────────────── What the agent gets ───────────────────────────────
@@ -396,8 +396,9 @@ function reportedItem(r: ReportedAction, heading: "###" | "####", timeZone: stri
     return [head, `You saw it done, ${inboxActionTime(result.at, timeZone)}.`, ...(note ? [`${label}: ${note}`] : [])].join("\n");
   }
   if (result.outcome === "cant") return `${head}\nCan't do it: ${flatNote(result.note)}`;
-  const line = result.outcome === "skip" ? "Skipped by the person" : "Done";
-  return [head, `${line}, ${inboxActionTime(result.at, timeZone)}.`, ...(result.note ? [`Note: ${flatNote(result.note)}`] : [])].join("\n");
+  // A skip carries no note (`checkInboxActionResult` drops one).
+  if (result.outcome === "skip") return `${head}\nSkipped by the person, ${inboxActionTime(result.at, timeZone)}.`;
+  return [head, `Done, ${inboxActionTime(result.at, timeZone)}.`, ...(result.note ? [`Note: ${flatNote(result.note)}`] : [])].join("\n");
 }
 
 /** "x of y done." for one message: y its action items not superseded (the agent's own `done` counts as done). */
@@ -438,8 +439,8 @@ export function inboxActionCountWords(counts: { done: number; cant: number; skip
  * "Couldn't do 1 action item.", "Did 1 action item, couldn't do 1.", "Skipped 1
  * action item.", `inboxActionCountWords`), then the
  * "Action items you asked for" section, each action item A-numbered as the
- * card, with "Done, 3:12 PM." and the note, "Skipped by the person, 3:12 PM."
- * (and a note, if any), or "Can't do it: <reason>" (an item
+ * card, with "Done, 3:12 PM." and the note, "Skipped by the person, 3:12 PM.",
+ * or "Can't do it: <reason>" (an item
  * the agent saw done itself while the person's mark waited in their draft:
  * "You saw it done, 3:14 PM." and the person's note). One message: "x of y
  * done." then its items. Several (one reply answers one session's messages),
@@ -499,10 +500,12 @@ export function composeInboxActionsReply(input: {
  * "inbox-action-items-in-reply"): the action sentence joins the reply's own
  * first line when it has one ("Answered 1 question, did 1 action item."),
  * else opens the reply; the "Action items you asked for" section goes after
- * everything else (the words, the still-open line, the answers). Joined, a
- * skip always names its kind, so "skipped 1" never leaves the agent guessing
- * between a question and an action item: "Answered 1 question, skipped 1
- * question, did 1 action item, skipped 1 action item."
+ * everything else (the words, the still-open line, the answers). When the
+ * person skipped an action item, every skip in the joined line names its
+ * kind: "Answered 1 question, skipped 1 question, did 1 action item, skipped
+ * 1 action item." With no action item skipped the answers' line is left as
+ * the store has always written it, a bare skip and all ("Answered 1
+ * question, skipped 1, did 1 action item.").
  */
 export function withInboxActionsSection(replyBody: string, actionsSection: string): string {
   if (actionsSection === "") return replyBody;

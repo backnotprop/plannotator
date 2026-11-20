@@ -455,10 +455,10 @@ describe("Skip (the owner's variant A, 2026-11-19)", () => {
     record({ key, position, id: `msg_01M5F3B7KD2WQ9XN4C8VJTR6YE/${key}`, revision: 1, action_result: { outcome, note, at: AT, by: "person", staged: true } });
   const sectionOf = (...reported: InboxQuestionRecord[]) => composeInboxActionsSection({ groups: [{ message_id: "m1", reported, all: reported }], timeZone: "UTC" });
 
-  test("a skip needs no words; a note it carries is kept; the outcome is still checked", () => {
+  test("a skip takes no words: none needed, one sent is dropped; the outcome is still checked", () => {
     expect(checkInboxActionResult({ outcome: "skip" })).toEqual({ ok: true, outcome: "skip", note: null });
     expect(checkInboxActionResult({ outcome: "skip", note: "   " })).toEqual({ ok: true, outcome: "skip", note: null });
-    expect(checkInboxActionResult({ outcome: "skip", note: "Not this week." })).toEqual({ ok: true, outcome: "skip", note: "Not this week." });
+    expect(checkInboxActionResult({ outcome: "skip", note: "Not this week." })).toEqual({ ok: true, outcome: "skip", note: null });
     expect(checkInboxActionResult({ outcome: "skipped" })).toMatchObject({ ok: false, field: "outcome" });
   });
 
@@ -466,8 +466,10 @@ describe("Skip (the owner's variant A, 2026-11-19)", () => {
     expect(composeInboxActionsReply({ reported: [skipped()], all: [skipped()], timeZone: "UTC" })).toBe(
       ["Skipped 1 action item.", "", "## Action items you asked for", "", "0 of 1 done.", "", "### A1. Approve the production deploy on Vercel", "Skipped by the person, 3:12 PM."].join("\n"),
     );
+    // A note on a stored skip (written by hand, or by a build that kept one) never reaches the agent.
     const withNote = composeInboxActionsReply({ reported: [skipped({ action_result: { outcome: "skip", note: "Not this week.", at: AT, by: "person", staged: true } })], all: [skipped()], timeZone: "UTC" });
-    expect(withNote.endsWith("Skipped by the person, 3:12 PM.\nNote: Not this week.")).toBe(true);
+    expect(withNote.endsWith("Skipped by the person, 3:12 PM.")).toBe(true);
+    expect(withNote).not.toContain("Note:");
     expect(sectionOf(marked("a-2", 1, "done"), skipped()).split("\n\n")[0]).toBe("Did 1 action item, skipped 1.");
     expect(sectionOf(marked("a-2", 1, "cant", "No key."), skipped()).split("\n\n")[0]).toBe("Couldn't do 1 action item, skipped 1.");
     expect(sectionOf(marked("a-2", 1, "done"), marked("a-3", 2, "cant", "No key."), skipped(), skipped({ key: "a-4", position: 3, id: "msg_01M5F3B7KD2WQ9XN4C8VJTR6YE/a-4" })).split("\n\n")[0]).toBe(
