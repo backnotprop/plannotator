@@ -241,7 +241,7 @@ import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher 
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
-import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
+import { inboxAgentsEndedSince, inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
@@ -2192,7 +2192,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (owner && (!listed || listed.has(row.thread_id))) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
     }
     const group = inboxAgentsGroup({
-      sessions: live.agentSessions(inboxStartOfDay(live.clock())),
+      sessions: live.agentSessions(inboxAgentsEndedSince(live.clock())),
+      today: inboxStartOfDay(live.clock()),
       launches: launch.agents(),
       waits,
       archived,
@@ -5024,7 +5025,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let lastLabelVersion = live.labelVersion();
   // From the start, as the presence: a session's first poll moves the Agents however soon a window opened. The launches'
   // part is learned at the first look (they are made below), so an Inbox with launches says `agents` once then.
-  let lastAgentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#`;
+  let lastAgentsSignature = `${live.agentsSignature(inboxAgentsEndedSince(live.clock()))}#`;
   // What the list shows from Rex (inbox-rex.ts, made below): a place line or the app moving says `agents` too.
   let rexVersion: () => number = () => 0;
   let rexWatch: () => void = () => {};
@@ -5041,7 +5042,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}#${rexVersion()}#${agentStatus.on() ? 1 : 0}`;
+    const agentsSignature = `${live.agentsSignature(inboxAgentsEndedSince(live.clock()))}#${launched}#${rexVersion()}#${agentStatus.on() ? 1 : 0}`;
     const agents = agentsSignature !== lastAgentsSignature;
     lastAgentsSignature = agentsSignature;
     if (!moved && !labels && !agents) return;
