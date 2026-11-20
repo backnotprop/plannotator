@@ -103,6 +103,8 @@ import {
   type InboxTag,
   inboxAskingMessage,
   inboxDefaultSkip,
+  inboxSessionlessSend,
+  inboxWordsDefault,
   inboxDeliveryState,
   type InboxDeliveryConnection,
   type InboxDeliveryDecision,
@@ -2467,12 +2469,16 @@ export class InboxStore {
         }
       : null;
     const statesOf = (message: InboxMessage) => askingStates?.get(message.id) ?? [];
-    const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf)) : null;
+    // The same "answers itself" test as the window's Send (`answersItself`): a saved pick, or an action item marked in the draft.
+    const answersItself = (message: InboxMessage) => this.questionsOf(message.id).some((q) => (q.kind !== "action" && q.state === "picked") || inboxActionInDraft(q));
+    const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf), answersItself) : null;
     const delivery = this.rowDelivery(root, lastReal, asking, sent, recipients, root.resolved_at !== null && !agentAfterArchive);
     // "Session ended" on the row: the session this thread would reach, by the rule the thread's note uses (a waking
     // connection, not heard from, with the grace). A person's reply with its own `to` is not owed to that session.
     const presence = this.deliveryPresence;
-    const reached = asking ?? (lastReal.author.kind === "agent" ? lastReal : null);
+    // An agent wrote last: the message the person's words would answer, by the Send's own rule (`inboxWordsDefault`).
+    const lastAgentReal = lastReal.author.kind === "agent" ? lastReal : null;
+    const reached = asking ?? (lastAgentReal ? (inboxWordsDefault(messages.slice(0, messages.indexOf(lastAgentReal) + 1), answersItself) ?? lastAgentReal) : null);
     const reachedSession = reached?.author.kind === "agent" ? reached.author.session : null;
     const movedAway = lastReal.author.kind === "person" && !!lastReal.to;
     const resumes = (session: string | null | undefined) => !!session && presence?.launchResumes?.(root.id, session) === true;
@@ -2700,9 +2706,11 @@ export class InboxStore {
         ? (last.delivery?.at ?? recipients.find((r) => r.owner)?.delivered_at ?? null)
         : (sent?.checked_at ?? null);
       // The session that asked (the thread's own rule, with its defaults): called ended only when its message
-      // came through a waking connection and the Inbox has not heard from it (with the grace).
+      // came through a waking connection and the Inbox has not heard from it (with the grace). Never for a reply to a
+      // script's post (`inboxSessionlessSend`, its own question answered): that reply is the script's, not that session's.
       const askingAuthor = asking?.author.kind === "agent" ? asking.author : null;
-      const askerEnded = !resolved && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
+      const toScript = !!repliedTo && inboxSessionlessSend(repliedTo);
+      const askerEnded = !resolved && !toScript && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),

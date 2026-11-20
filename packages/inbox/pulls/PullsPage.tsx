@@ -14,9 +14,9 @@
  *   chip only when the Board is on and a card links it; Reply at the foot goes
  *   into the review thread. No merge button.
  * - A single open PR opens its launchpad instead (PullLaunchpad.tsx, approval
- *   "pr-launchpad"): the ways into it (guided review, the diff, the review
- *   thread; its Shape board and System only while those are on), then its
- *   details. Starting a review is this view's: the New review box, filled in
+ *   "pr-launchpad"): one row of buttons (Open the diff, Guided review, Picture
+ *   it, Start a thread; its Shape board while Shape is on), a line for each
+ *   thing made for it, then its details. Starting a review is this view's: the New review box, filled in
  *   with the PR. A Reviews row about one open PR opens it, also once an agent
  *   reviewed that PR (`reviewRowLaunchpad`, the owner's answer, 2026-11-09).
  *
@@ -135,12 +135,13 @@ export interface PullsPageProps {
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
-  onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  onNewReview: (pick: ReviewBoxPull, opener: HTMLElement, ask?: 'picture_it') => void;
   /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
   onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
-  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape door. */
+  onOpenPicture?: (threadId: string, attachmentId: string | null, messageId: string) => void;
+  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape board button. */
   shapes?: ReadonlyMap<string, InboxShapeSummary> | null;
   onOpenShape?: (shape: InboxShapeSummary) => void;
   /** System's button and drawing; absent while System does not show. */
@@ -298,6 +299,7 @@ export function PullsPage(given: PullsPageProps) {
             notRanked={ranked.notRanked}
             judgments={judgments}
             riskFailed={riskFailed}
+            autoRuns={risk.answer?.auto_runs}
             projectNames={props.projectNames}
             selected={props.threadId ?? open?.stack.id ?? null}
             phone={phone}
@@ -554,7 +556,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     ) : null;
   // One open PR opens its launchpad; a stack of several keeps this page.
   if (stack.layers.length === 1 && start) {
-    const newReview = (opener: HTMLElement) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener);
+    const newReview = (opener: HTMLElement, ask?: 'picture_it') => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener, ask);
     const hide = () => {
       // The pane closes onto a row that leaves with it: focus goes to the Reviews row now in its place.
       const list = () => document.querySelector('.pn-inbox .ib-lbody');
@@ -578,7 +580,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             // Back on the PR's page, on the button that left it.
             requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-pulls-stack="${CSS.escape(stack.id)}"] [data-launch-go="start-thread"]`)?.focus());
           }}
-          onGuide={canStart ? newReview : null}
+          onGuide={canStart ? (opener) => newReview(opener) : null}
           onDiff={() => props.onReview(stack.id, start.key, 'layer')}
           onStarted={(threadId, carried) => {
             props.state.reload();
@@ -602,17 +604,18 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
-        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: newReview } : null}
+        start={canStart ? { onStart: (opener) => newReview(opener), onPictureIt: (opener) => newReview(opener, 'picture_it') } : null}
         startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
         untiedThread={link ? null : untiedPullThread(start.key)}
         shapes={props.shapes ?? null}
-        system={!!props.system}
         risk={riskLines}
         onClose={props.onClose}
         onDiff={() => props.onReview(stack.id, start.key, 'layer')}
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
+        onPicture={(thread, page) => (props.onOpenPicture ? props.onOpenPicture(thread, page.attachment_id, page.message_id) : props.onOpenThread(thread))}
         onShape={(shape) => props.onOpenShape?.(shape)}
+        onAsked={props.state.reload}
         onHide={hide}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
       />

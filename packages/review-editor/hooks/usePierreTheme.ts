@@ -11,9 +11,11 @@ import { buildPierreFontCSS } from '../utils/pierreFontCss';
  * resolve the same theme this diff pane does. Re-exported here because it is
  * the import path the review editor has always used.
  */
-import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import { resolvePierreSyntaxTheme as resolveSyntaxTheme } from '../utils/pierreSyntaxTheme';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
-export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+export { SHIKI_THEME_MAP } from '@plannotator/ui/utils/syntaxTheme';
+// The theme pair for Pierre's diff views, a custom theme's code colours registered first.
+export { resolveSyntaxTheme };
 
 export interface PierreTheme {
   type: 'dark' | 'light';

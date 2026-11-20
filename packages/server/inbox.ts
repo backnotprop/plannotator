@@ -152,7 +152,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
-import { inboxSkillsRoute } from "./inbox-skills";
+import { inboxSkillsBlockFor, inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { answerSemDiffRequest, createSemDiffAssets, isSemDiffRequest, type SemDiffSource } from "@plannotator/shared/sem-diff-assets";
@@ -226,7 +226,8 @@ import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-lin
 import { createLinearKey } from "./inbox-linear-key";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
-import { handleFavicon } from "./shared-handlers";
+import { handleCustomThemesScript, handleFavicon } from "./shared-handlers";
+import { isRegisteredThemeId, pageWithCustomThemes } from "@plannotator/shared/theme-files";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import type { WebFraming } from "./inbox-web-prototypes";
@@ -235,7 +236,7 @@ import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-d
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
 import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd, type InboxPullRiskAnswer } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -346,12 +347,14 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
+import { createPullRiskAuto, type PullRiskAuto } from "./inbox-pull-risk-auto";
+import { lastStartedReviewAgent, pullRiskAutoAgent, pullRiskAutoSettled, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
+import { INBOX_PULL_ASKS, inboxPullRiskAutoOf, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { createInboxBranchService } from "./inbox-branch-service";
@@ -1592,7 +1595,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     );
   };
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
-  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), ...options.pullRisk });
+  let pullRiskAuto: PullRiskAuto | null = null;
+  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), onJudged: (pull, level) => pullRiskAuto?.judged(pull, level), autoRuns: () => pullRiskAuto?.runs() ?? {}, ...options.pullRisk });
   // Branch reviews (inbox-branch-service.ts): agents report a branch ready for review; nothing in it runs by itself.
   const branchService = createInboxBranchService({
     store,
@@ -1636,6 +1640,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     threadsOf: (id) => store.threadsOf(id),
     threadMessageIds: (id) => store.threadMessageIds(id),
     message: (id) => store.message(id),
+    messageSeq: (id) => store.messageCursor(id),
     threadSubject: (id) => store.threadSubject(id),
     threadProject: (id) => {
       const root = store.message(id);
@@ -2830,9 +2835,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           break;
         case "light":
         case "dark":
-          // A palette id (packages/ui/themes); the page resolves an unknown one to its default.
-          if (typeof value !== "string" || !THEME_ID.test(value)) {
-            throw new InboxError("validation_error", `theme.${field}: a palette id.`, { field: `theme.${field}` });
+          // A palette id: a built-in (packages/ui/themes) or a custom theme in this data dir
+          // (`plannotator theme add`, packages/shared/theme-files.ts), and nothing else.
+          if (typeof value !== "string" || !THEME_ID.test(value) || !isRegisteredThemeId(dataDir, value)) {
+            throw new InboxError("validation_error", `theme.${field}: a palette id (a built-in theme, or one added with plannotator theme add).`, { field: `theme.${field}` });
           }
           next[field] = value;
           break;
@@ -5240,6 +5246,38 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The hand-off stands without the coupling.
     }
   };
+  const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
+  const pullRiskAutoPick = { launch, lastReviewAgent: () => lastStartedReviewAgent(store, [...[...pullOwners.all().values()].map((owner) => owner.thread_id), ...pullOwners.started().keys()]) };
+  const pullRiskAutoAgentWords = async (on: boolean): Promise<Pick<InboxPullRiskAnswer, "auto_agent" | "auto_agent_unavailable">> => {
+    if (!on) return { auto_agent: null };
+    const configured = (loadConfig().inboxPullRisk as { auto?: { agent?: unknown } } | undefined)?.auto?.agent;
+    const picked = await pullRiskAutoAgent(pullRiskAutoPick, typeof configured === "string" && configured.trim() ? configured.trim() : null);
+    if (picked && "unavailable" in picked) return { auto_agent: null, auto_agent_unavailable: picked.unavailable };
+    return { auto_agent: picked ? { agent: picked.agent, name: picked.name } : null };
+  };
+  pullRiskAuto = createPullRiskAuto({
+    dataDir,
+    settings: () => (codeReviewOn() ? inboxPullRiskAutoOf((loadConfig().inboxPullRisk as { auto?: unknown } | undefined)?.auto) : null),
+    listed: () => pullRisk.listed(),
+    pullOf: (key) => pulls.find(key),
+    stackOf: (key) => pulls.stack(key),
+    levelOf: (pull) => pullRisk.levelOf(pull),
+    hasThread: async (pull) => machines?.pullLinkedThere(pull.key) === true || !!linkInboxPulls([pull], pullLinkStore, new Map([[`${pull.host}/${pull.repo}`.toLowerCase(), await pullRepoProjects(pull)]]), pullOwnersNow())[pull.key],
+    settled: (run) => pullRiskAutoSettled(pullLinkStore, run),
+    start: pullRiskAutoStart({
+      ...pullRiskAutoPick,
+      store,
+      resolveProject,
+      projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
+      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
+      own: (layers, threadId, made) => {
+        const keys = layers.map((layer) => layer.key);
+        const theirs = layers.every((layer) => !layer.mine);
+        pullOwners.set(keys, threadId, { ask: made, theirs });
+        couplePulls(keys, threadId);
+      },
+    }),
+  });
   /**
    * A thread started from a PR's page that the window never tied (a list found it by its first message,
    * `linkInboxPulls`): kept as the PR's owner now, as the tie would have, with the same coupling (`theirs`, the
@@ -5653,7 +5691,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `/assets/`, so the page loads its entry script up front and the rest (the guided and code review, the
    * diagram runtimes, the syntax grammars) on first use. An unpacked page (the not-built line) serves whole.
    */
-  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
+  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE, { page: (html) => pageWithCustomThemes(html, dataDir) });
+  // The page as it goes out (the person's themes written in), and a number that changes with it: a compressed
+  // body made for one page is ready only for that page.
+  let windowPageNow = "";
+  let windowPageVersion = 0;
+  const currentWindowPage = (): string => {
+    const page = windowApp.page();
+    if (page !== windowPageNow) {
+      windowPageNow = page;
+      windowPageVersion++;
+    }
+    return page;
+  };
+  const readyKey = (encoding: string, path: string) => (path === "/" ? `${encoding} /#${windowPageVersion}` : `${encoding} ${path}`);
   const semDiffAssets = createSemDiffAssets(options.semDiff);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
   // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
@@ -5661,10 +5712,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // asks of localhost and of an HTTPS address); gzip (a plain-http address, Safari) on first ask.
   const compressedReady = new Set<string>();
   const warmCompressed = (path: string, encoding: "br" | "gzip"): Promise<void> => {
-    const key = `${encoding} ${path}`;
+    if (path === "/") currentWindowPage();
+    const key = readyKey(encoding, path);
     if (compressedReady.has(key)) return Promise.resolve();
     const made: Promise<boolean> =
-      path === "/" ? encodeAppHtml(windowApp.html, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
+      path === "/" ? encodeAppHtml(windowPageNow, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
     return made.then(
       (ok) => {
         if (ok) compressedReady.add(key);
@@ -5681,7 +5733,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const compressWindowAsset = (req: Request, via: RequestVia, path: string): boolean => {
     if (via !== "local" || req.headers.has("x-forwarded-for")) return true;
     const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
-    if (encoding === "identity" || compressedReady.has(`${encoding} ${path}`)) return true;
+    if (path === "/") currentWindowPage();
+    if (encoding === "identity" || compressedReady.has(readyKey(encoding, path))) return true;
     void warmCompressed(path, encoding);
     return false;
   };
@@ -6081,8 +6134,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
           pullRisk.save(body);
+          pullRiskAuto?.resume();
         }
-        return json({ serverSession, ...pullRisk.answer() });
+        const answer = pullRisk.answer();
+        return json({ serverSession, ...answer, auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 }, ...(await pullRiskAutoAgentWords(!!answer.auto || url.searchParams.get("auto_agent") === "1")) });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.
@@ -6242,6 +6297,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = await pulls.list(wanted, { refresh, others: url.searchParams.get("others") === "1", everywhere });
         // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
+        pullRiskAuto?.resume();
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const owners = new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]);
@@ -6280,6 +6336,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
         pullRisk.assess(listed.pulls);
+        pullRiskAuto?.resume();
         // A reported branch's thread owns the person's own PR on that branch (the person's own choice still wins).
         const branchOwners = await branchService.owners(listed.pulls, projectsByRepo);
         const owners = new Map([...branchOwners, ...pullOwnersNow()]);
@@ -6461,8 +6518,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
           return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
         }
-        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
+        if (body.ask !== undefined && !isInboxPullAsk(body.ask)) throw new InboxError("validation_error", `ask: ${INBOX_PULL_ASKS.join(", ")}.`, { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: body.ask ?? null, theirs });
         couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }
@@ -7917,7 +7974,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // One origin: notification permission is per origin (inbox-canonical.ts).
         const canonical = inboxCanonicalRedirect(req, url, baseUrl, via);
         if (canonical) return canonical;
-        const page = windowApp.html;
+        const page = currentWindowPage();
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
@@ -7930,6 +7987,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
+      // The person's own themes, for the window's first frame (packages/shared/theme-files.ts).
+      // A literal (CUSTOM_THEMES_SCRIPT_PATH), so the API table check reads this route.
+      if (path === "/plannotator-themes.js" && req.method === "GET") return handleCustomThemesScript(url.searchParams, dataDir);
       // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
       if (req.method === "GET") {
         const appIcon = inboxAppIconResponse(path, faviconState());
@@ -8303,6 +8363,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ask.stop();
     // No judgment written after stop, and no agent left running.
     pullRisk.stop();
+    pullRiskAuto?.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

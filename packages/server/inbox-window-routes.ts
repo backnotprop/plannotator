@@ -94,7 +94,7 @@ export const ROUTE_FILES = [
 ] as const;
 
 /** A path is a route of the Inbox when it starts with one of these. */
-const ROUTE_START = /^\/(api\/|mcp$|favicon\.(png|ico)$|manifest\.webmanifest$|apple-touch-icon\.png$|app-icon\/|assets\/|$)/;
+const ROUTE_START = /^\/(api\/|mcp$|favicon\.(png|ico)$|manifest\.webmanifest$|apple-touch-icon\.png$|plannotator-themes\.js$|app-icon\/|assets\/|$)/;
 
 const PARAM = ':id';
 

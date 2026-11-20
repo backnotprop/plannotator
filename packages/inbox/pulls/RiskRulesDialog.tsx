@@ -1,14 +1,27 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { InboxPullRiskAnswer, InboxPullRiskModels } from '@plannotator/core/inbox-types';
+import type { InboxPullRiskAnswer, InboxPullRiskAuto, InboxPullRiskModels } from '@plannotator/core/inbox-types';
 import { modelSelectOptions } from '@plannotator/core/model-catalog';
 import { InlinePicker } from '@plannotator/ui/components/InlinePicker';
 import { inboxApi } from '../api';
+import { HostMark } from '../icons';
 import { Modal } from '../components/Updates';
+import { riskFilterWords } from './risk';
 
 const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user data.';
 const LOADING = [{ value: '', label: 'Loading models…' }];
 /** What the guided review's picker calls an agent's own default model. */
 const AGENT_DEFAULT = { value: '', label: 'Default' };
+const AUTO_MAKES = [
+  { value: '', label: 'nothing' },
+  { value: 'picture_it', label: 'a Picture page' },
+  { value: 'guide', label: 'a guided review' },
+];
+
+export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make: string): InboxPullRiskAuto | null | undefined {
+  if (make === (saved?.make ?? '')) return undefined;
+  if (make !== 'picture_it' && make !== 'guide') return null;
+  return { ...saved, level: saved?.level ?? 'high', make };
+}
 
 /**
  * "No slop zone rules": the person's words for what a high-risk pull request is, and the
@@ -27,6 +40,9 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   const [saving, setSaving] = useState(false);
   // Branch reviews (present only while it is on): rank the branches agents report too. Off until the person ticks it.
   const [branches, setBranches] = useState(answer.branches === true);
+  const [make, setMake] = useState<string>(answer.auto?.make ?? '');
+  const [autoAgent, setAutoAgent] = useState<Pick<InboxPullRiskAnswer, 'auto_agent' | 'auto_agent_unavailable'> | null>(answer.auto ? answer : null);
+  const autoId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   // The words come first: the box takes the focus, not Save.
   useEffect(() => field.current?.focus(), []);
@@ -47,11 +63,23 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       });
     return () => controller.abort();
   }, [provider]);
+  useEffect(() => {
+    if (!make || autoAgent) return;
+    const controller = new AbortController();
+    inboxApi
+      .pullRisk(controller.signal, true)
+      .then((next) => {
+        if (!controller.signal.aborted) setAutoAgent(next);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [make, autoAgent]);
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      onSaved(await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}) }));
+      const auto = riskAutoToSave(answer.auto, make);
+      onSaved(await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}), ...(auto !== undefined ? { auto } : {}) }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The rules could not be saved.');
       setSaving(false);
@@ -118,6 +146,21 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
             </p>
           </>
         )}
+        <div className="ib-riskd-row ib-riskd-auto" role="group" aria-labelledby={autoId} data-pull-risk-auto={make}>
+          <span id={autoId}>When one ranks {riskFilterWords[answer.auto?.level ?? 'high']}, make</span>
+          <InlinePicker keysStayInList label="" value={make} options={AUTO_MAKES} onChange={setMake} />
+          {make && autoAgent && (
+            <span className="ib-riskd-with" data-pull-risk-auto-agent={autoAgent.auto_agent?.agent ?? ''}>
+              {autoAgent.auto_agent ? (
+                <>
+                  with <HostMark host={autoAgent.auto_agent.agent} /> {autoAgent.auto_agent.name}
+                </>
+              ) : (
+                (autoAgent.auto_agent_unavailable ?? 'No agent can be started here.')
+              )}
+            </span>
+          )}
+        </div>
         {error && (
           <p className="ib-error" role="alert">
             {error}
