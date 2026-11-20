@@ -47,6 +47,7 @@ export function MessageBody({
   renderReplacedCard,
   renderReplacesLine,
   renderActions,
+  renderRunBlock,
   comments,
   sentAnswers,
   sentActions,
@@ -87,7 +88,7 @@ export function MessageBody({
   const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
   const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
-  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
+  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
   const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion } = useBodyComments({ comments, message, blocks, onPick });
 
@@ -196,7 +197,7 @@ export function MessageBody({
         questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
-        renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
+        renderDirectiveBlock={renderActions || renderRunBlock || noteBlocks.length > 0 ? directiveBlock : undefined}
       />
       )}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}

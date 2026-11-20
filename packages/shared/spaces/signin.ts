@@ -1,8 +1,9 @@
 /**
  * "Keep this space": the sign-in Spaces has for a tool on this computer. A browser page at Spaces
  * (`/cli/login`) asks the signed-in person to allow it, then sends the browser back to a listener on this computer
- * (`http://127.0.0.1:<port>/callback`) with a short-lived code, which is traded with its PKCE verifier for a token
- * (`POST /cli/token`). The listener is this sign-in's own: one port, loopback only, closed once the code came, the
+ * (`http://127.0.0.1:<port>/callback`) with a short-lived code (120 seconds, single use), which is traded once with
+ * its PKCE verifier and the same way back for a token (`POST /cli/token`, a form body). The person's name is read
+ * after, with the token (`GET /v1/me`). The listener is this sign-in's own: one port, loopback only, closed once the code came, the
  * person cancelled or the wait ran out. The `state` it made is the only thing it answers to.
  *
  * The token is returned to the caller, which keeps it (credential.ts). It is never logged and never in a URL: the
@@ -35,23 +36,45 @@ export function spacesLoginUrl(host: string, input: { redirectUri: string; state
   return url.toString();
 }
 
-/** Trade the code for the token. Null when the space refused it or did not answer with one. */
-export async function exchangeSpacesCode(host: string, input: { code: string; verifier: string }, doFetch: typeof fetch = fetch): Promise<SpacesCredential | null> {
+/**
+ * Trade the code for the token: one form-encoded `POST /cli/token` with `grant_type`, `code`, the `redirect_uri` that
+ * went to `/cli/login` (byte for byte) and the verifier. Nothing else rides on it: no Origin, no cookie, no
+ * Authorization. Never tried twice: the space spends a code on its first lookup, so a second try always fails. Null
+ * when the space refused it or did not answer with a token. The name is the account's (`GET /v1/me`), and a sign-in
+ * that cannot read it still finishes, with no name.
+ */
+export async function exchangeSpacesCode(host: string, input: { code: string; verifier: string; redirectUri: string }, doFetch: typeof fetch = fetch): Promise<SpacesCredential | null> {
+  let token: string | null = null;
   try {
     const response = await doFetch(`${host}/cli/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ code: input.code, code_verifier: input.verifier }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code: input.code, redirect_uri: input.redirectUri, code_verifier: input.verifier }).toString(),
       redirect: "error",
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) return null;
     const body = (await response.json()) as Record<string, unknown> | null;
-    const token = body && (typeof body.token === "string" ? body.token : typeof body.access_token === "string" ? body.access_token : null);
-    if (!token) return null;
-    const user = body.user && typeof body.user === "object" ? (body.user as Record<string, unknown>) : body;
-    const name = typeof user.name === "string" && user.name.trim() ? user.name.trim() : null;
-    return { token, name };
+    token = body && typeof body.access_token === "string" && body.access_token.length > 0 ? body.access_token : null;
+  } catch {
+    return null;
+  }
+  if (!token) return null;
+  return { token, name: await spacesAccountName(host, token, doFetch) };
+}
+
+/** The signed-in account's display name (`name` on `GET /v1/me`, and nothing else of that answer), or null. */
+async function spacesAccountName(host: string, token: string, doFetch: typeof fetch): Promise<string | null> {
+  try {
+    const response = await doFetch(`${host}/v1/me`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as Record<string, unknown> | null;
+    const name = body && typeof body.name === "string" ? body.name.trim() : "";
+    return name ? name.slice(0, 200) : null;
   } catch {
     return null;
   }
@@ -83,7 +106,8 @@ export async function startSpacesSignIn(options: { host: string; fetch?: typeof 
     if (req.method !== "GET" || url.pathname !== "/callback" || used || url.searchParams.get("state") !== pkce.state) return answer(404, "Not found.");
     used = true;
     const code = url.searchParams.get("code");
-    void (code ? exchangeSpacesCode(options.host, { code, verifier: pkce.verifier }, options.fetch) : Promise.resolve(null)).then((credential) => {
+    // Loaded once only (`used`): a second load of the page finds nothing here, and the code is never traded twice.
+    void (code ? exchangeSpacesCode(options.host, { code, verifier: pkce.verifier, redirectUri }, options.fetch) : Promise.resolve(null)).then((credential) => {
       answer(credential ? 200 : 400, credential ? "Signed in. You can close this tab." : "Sign-in did not finish. You can close this tab.", () => finish(credential));
     });
   });
@@ -93,6 +117,9 @@ export async function startSpacesSignIn(options: { host: string; fetch?: typeof 
   });
   const address = server.address();
   const port = address && typeof address === "object" ? address.port : 0;
+  // The one way back, made once: the login page and the exchange get this same string (the space compares them).
+  // `127.0.0.1` literally: the space refuses `localhost`.
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
   const timer = setTimeout(() => finish(null), options.timeoutMs ?? 10 * 60_000);
   (timer as { unref?: () => void }).unref?.();
   function finish(credential: SpacesCredential | null) {
@@ -102,7 +129,7 @@ export async function startSpacesSignIn(options: { host: string; fetch?: typeof 
     settle(credential);
   }
   return {
-    url: spacesLoginUrl(options.host, { redirectUri: `http://127.0.0.1:${port}/callback`, state: pkce.state, challenge: pkce.challenge }),
+    url: spacesLoginUrl(options.host, { redirectUri, state: pkce.state, challenge: pkce.challenge }),
     done,
     cancel: () => finish(null),
   };
