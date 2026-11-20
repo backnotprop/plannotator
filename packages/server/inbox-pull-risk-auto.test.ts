@@ -51,6 +51,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
   const started: PullRiskAutoJob[] = [];
   const threads = new Set<string>();
   const listed = new Map<string, InboxPull>();
+  const covered = new Set(["github.com/northwind/web-app"]);
   const levels = new Map<string, InboxPullRiskLevel>();
   const working = new Set<string>();
   const clock = { now: Date.parse("2026-11-19T09:00:00.000Z") };
@@ -63,6 +64,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
     now: () => clock.now,
     settings: () => (reads.settings++, settings),
     listed: () => [...listed.values()],
+    covered: () => covered,
     pullOf: (key) => listed.get(key) ?? null,
     stackOf: (key) => inboxPullStacks([...listed.values()]).find((stack) => stack.layers.some((layer) => layer.key === key)) ?? null,
     levelOf: (pull) => (reads.levels++, levels.get(pull.key) ?? null),
@@ -98,6 +100,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
     judged,
     list,
     listed,
+    covered,
     levels,
     clock,
     reads,
@@ -584,6 +587,7 @@ test("a repository first listed while the pick is on starts nothing for its PRs,
   const w = world();
   const other = (number: number) => pr(number, { key: `github.com/northwind/api#${number}`, repo: "northwind/api", url: `https://github.com/northwind/api/pull/${number}`, head: `api/${number}` });
   for (const n of [40, 41]) w.list(other(n), "high");
+  w.covered.add("github.com/northwind/api");
   w.auto.resume();
   for (const n of [40, 41]) w.judged(other(n), "high");
   await w.auto.idle();
@@ -591,6 +595,26 @@ test("a repository first listed while the pick is on starts nothing for its PRs,
   w.judged(other(42), "high");
   await w.auto.idle();
   expect(numbers(w.started)).toEqual([42]);
+});
+
+test("a repository whose Others are not read yet: its own PRs and the teammates' that land later all wait; one opened after Others was read starts", async () => {
+  const w = world(null);
+  w.covered.clear();
+  for (const n of [12, 30]) w.list(pr(n, { mine: true }), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  for (const n of [12, 30]) w.judged(pr(n, { mine: true }), "high");
+  await w.auto.idle();
+  for (let n = 31; n <= 80; n++) w.list(pr(n), "high");
+  w.covered.add("github.com/northwind/web-app");
+  w.auto.resume();
+  for (let n = 31; n <= 80; n++) w.judged(pr(n), "high");
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  expect((await w.auto.waiting()).high).toHaveLength(52);
+  w.judged(pr(81), "high");
+  await w.auto.idle();
+  expect(numbers(w.started)).toEqual([81]);
 });
 
 test("Make them now makes only the PRs the count it answered came from", async () => {

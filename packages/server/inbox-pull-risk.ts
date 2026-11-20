@@ -40,7 +40,7 @@ import { join, sep } from "node:path";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { createProvider } from "@plannotator/ai/provider";
 import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED, type AIProvider, type AISession, type CatalogModel, type ClaudeAgentSDKConfig, type CodexSDKConfig, type PiSDKConfig } from "@plannotator/ai/types";
-import { inboxPullIsOpen, inboxPullRiskAutoOf, type InboxPull, type InboxPullRiskAgent, type InboxPullRiskAnswer, type InboxPullRiskAuto, type InboxPullRiskAutoRun, type InboxPullRiskJudgment, type InboxPullRiskModels } from "@plannotator/core/inbox-types";
+import { inboxPullIsOpen, inboxPullRepoKey, inboxPullRiskAutoOf, type InboxPull, type InboxPullRiskAgent, type InboxPullRiskAnswer, type InboxPullRiskAuto, type InboxPullRiskAutoRun, type InboxPullRiskJudgment, type InboxPullRiskModels } from "@plannotator/core/inbox-types";
 import { resolveModelChoice } from "@plannotator/core/model-catalog";
 import { childPath } from "@plannotator/shared/child-env";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
@@ -266,7 +266,7 @@ export interface PullRisk {
   /** The settings, and the judgments and failures of the PRs the last `assess` saw. */
   answer(): InboxPullRiskAnswer;
   /** Start judging what has none yet. Never waits, never throws. */
-  assess(pulls: readonly InboxPull[], more?: boolean): void;
+  assess(pulls: readonly InboxPull[], read?: { covered?: readonly string[]; board?: boolean }): void;
   /**
    * A branch an agent just reported (Branch reviews): judged once at that head, only while the person's `branches`
    * switch is on. Never waits, never throws. Nothing else ever queues a branch.
@@ -280,6 +280,8 @@ export interface PullRisk {
   branchRankable(): boolean;
   levelOf(pull: InboxPull): InboxPullRiskJudgment["level"] | null;
   listed(): readonly InboxPull[];
+  /** The repositories (`host/owner/repo`, lowercased) whose every open PR `listed` holds. */
+  covered(): ReadonlySet<string>;
   /** Save the dialog. Throws InboxError on a bad input or a config that can't be written. */
   save(input: unknown): void;
   models(provider: string): Promise<InboxPullRiskModels>;
@@ -381,6 +383,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
   };
 
   let listed: readonly InboxPull[] = [];
+  let covered = new Set<string>();
   /** A PR's layer or a reported branch: what the prompt and the store need, and how its diff is read. */
   const queue: { job: string; pull: { key: string; head_sha: string; base: string; title: string }; listed?: InboxPull; earlier?: PullRiskEarlier; rules: string; read: (signal: AbortSignal) => Promise<RiskDiff> }[] = [];
   const queued = new Set<string>();
@@ -543,14 +546,22 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       return { ...shown, ...(options.branchesOn?.() ? { branches } : {}), agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure, auto_runs: options.autoRuns?.() ?? {} };
     },
     listed: () => listed,
+    covered: () => covered,
     levelOf(pull) {
       const { rules } = settings();
       const one = rules && pull.head_sha ? load().get(pull.key) : undefined;
       return one && one.head === pull.head_sha && one.base === pull.base && one.rules === hashOf(rules) ? one.level : null;
     },
-    assess(pulls, more = false) {
-      const keys = new Set(pulls.map((pull) => pull.key));
-      listed = more ? [...listed.filter((pull) => !keys.has(pull.key)), ...pulls] : pulls;
+    assess(pulls, read = {}) {
+      const repos = new Set(read.covered ?? []);
+      if (read.board) {
+        const keys = new Set(pulls.map((pull) => pull.key));
+        listed = [...listed.filter((pull) => !keys.has(pull.key) && !repos.has(inboxPullRepoKey(pull.host, pull.repo))), ...pulls];
+        for (const repo of repos) covered.add(repo);
+      } else {
+        listed = pulls;
+        covered = repos;
+      }
       if (stopping.signal.aborted || now() < agentPausedUntil) return;
       try {
         const { rules, provider } = settings();

@@ -31,6 +31,7 @@ export interface PullRiskAutoOptions {
   dataDir: string;
   settings: () => InboxPullRiskAuto | null;
   listed: () => readonly InboxPull[];
+  covered: () => ReadonlySet<string>;
   pullOf: (key: string) => InboxPull | null;
   stackOf: (key: string) => InboxPullStack | null;
   levelOf: (pull: InboxPull) => InboxPullRiskLevel | null;
@@ -129,13 +130,13 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
   };
   const repoOf = (pull: Pick<InboxPull, "host" | "repo">) => `${pull.host}/${pull.repo}`.toLowerCase();
   const watch = (pulls: readonly InboxPull[]) => {
-    const highest = new Map<string, number>();
-    for (const pull of pulls) {
-      const repo = repoOf(pull);
-      if (!seen.has(repo)) highest.set(repo, Math.max(highest.get(repo) ?? 0, pull.number));
+    let changed = false;
+    for (const repo of options.covered()) {
+      if (seen.has(repo)) continue;
+      seen.set(repo, Math.max(0, ...pulls.filter((pull) => repoOf(pull) === repo).map((pull) => pull.number)));
+      changed = true;
     }
-    for (const [repo, number] of highest) seen.set(repo, number);
-    if (highest.size > 0) save();
+    if (changed) save();
   };
 
   const busy = (): boolean => {

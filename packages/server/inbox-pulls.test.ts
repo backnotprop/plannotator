@@ -399,25 +399,48 @@ describe("risk ranking", () => {
     expect(runs.length).toBe(3);
   });
 
-  test("the Pull requests page's read while ranking runs: the answer in which nothing is left ranking still has every judgment and what waits", async () => {
-    const member = { author: { login: "tomas" }, authorAssociation: "MEMBER" };
+  const member = { author: { login: "tomas" }, authorAssociation: "MEMBER" };
+  const key = (n: number) => `github.com/northwind/billing-svc#${n}`;
+  const memberWorld = async (others: number[], othersDelayMs = 0) => {
     const w = await world({
       codeReview: true,
       answer: { data: { ...GH_ANSWER.data, requested: { nodes: [ghPull(601, member), ghPull(602, member)] }, authored: { nodes: [] } } },
       config: { inboxPullRisk: { ...settings, auto: { level: "high", make: "guide" } } },
       pullRisk: { run: async () => (await Bun.sleep(200), { text: '{"risk":"high","why":"It changes the retry schedule."}' }), agents: () => [{ id: "pi-sdk", label: "Pi" }], listModels: async () => [] },
     });
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: others.length, nodes: others.map((n) => ghPull(n, member)) } } };
+    w.forge.othersDelayMs = othersDelayMs;
     await w.send("Looking at the retries.", "retries");
-    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
-    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    return w;
+  };
+  const settledRisk = async (base: string) => {
     const started = Date.now();
     let answer: InboxPullRiskAnswer;
     do {
-      answer = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
+      answer = (await (await fetch(`${base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
     } while (answer.pending > 0 && Date.now() - started < 5_000);
     expect(answer.pending).toBe(0);
-    expect(Object.keys(answer.judgments).sort()).toEqual(["github.com/northwind/billing-svc#601", "github.com/northwind/billing-svc#602"]);
-    expect([...(answer.auto_waiting ?? [])].sort()).toEqual(["github.com/northwind/billing-svc#601", "github.com/northwind/billing-svc#602"]);
+    return answer;
+  };
+
+  test("the Pull requests page's read while ranking runs: the answer in which nothing is left ranking still has every judgment and what waits", async () => {
+    const w = await memberWorld([601, 602]);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const answer = await settledRisk(w.base);
+    expect(Object.keys(answer.judgments).sort()).toEqual([key(601), key(602)]);
+    expect([...(answer.auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+  });
+
+  test("a PR the Pull requests page's read no longer finds open (closed elsewhere) leaves the judgments and what waits", async () => {
+    const w = await memberWorld([601], 300);
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect([...((await settledRisk(w.base)).auto_waiting ?? [])].sort()).toEqual([key(601), key(602)]);
+    await Bun.sleep(400);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const answer = await settledRisk(w.base);
+    expect(Object.keys(answer.judgments)).toEqual([key(601)]);
+    expect(answer.auto_waiting).toEqual([key(601)]);
   });
 
   test("Make them now while starting agents is off: refused with launch_off, and no PR is marked", async () => {
