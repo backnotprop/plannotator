@@ -202,7 +202,7 @@ export function AgentStatusMenuItem() {
 }
 
 /**
- * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
+ * The list's view (listView.ts): Grouped, List or Agents, one choice (`menuitemradio`, its state announced), drawn as
  * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
  * list at once and leaves the menu open, as a tick does.
  */
