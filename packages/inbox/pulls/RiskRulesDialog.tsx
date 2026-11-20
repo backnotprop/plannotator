@@ -22,7 +22,7 @@ const RULES_INFO = 'Every open pull request is ranked against these rules: not t
 const AGENT_INFO = 'This agent reads the whole diff of each pull request to rank it. Sonnet, Luna or similar works well.';
 const AUTO_INFO = {
   high: 'New pull requests and pushes from your team that rank High get one, once. The rest wait until you ask.',
-  medium: 'New pull requests and pushes from your team that rank Medium or High get one, once. Others wait for you.',
+  medium: 'New pull requests and pushes from your team that rank Medium or High get one, once. The rest wait until you ask.',
 } as const;
 
 export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make: string): InboxPullRiskAuto | null | undefined {
