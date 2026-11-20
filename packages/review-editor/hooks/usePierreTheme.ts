@@ -321,6 +321,16 @@ export function usePierreTheme(options?: {
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
           }
+          /* Keep wrapped diff columns (split, semantic split, unified) bounded to
+             1fr without expanding to unbreakable min-content widths such as
+             long code suggestions (issue #3772). */
+          [data-diff][data-overflow='wrap'],
+          [data-file][data-overflow='wrap'] {
+            --diffs-code-grid: var(--diffs-grid-number-column-width) minmax(0, 1fr);
+          }
+          [data-overflow='wrap'] [data-line-annotation] {
+            min-width: 0;
+          }
           /* Pierre's own horizontal scrollbar, at the bottom of each file's
              code (theme.css lets it keep its own size). Its thumb is
              transparent until hover upstream; here it has a quiet mix of the
