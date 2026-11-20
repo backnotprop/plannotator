@@ -158,8 +158,8 @@ export interface SpaceShareRecord {
   kept: boolean;
   /** The share was started signed in: it is never made, or gone on with, without a sign-in. */
   signed?: boolean;
-  /** Which space of this plan it is: 1 (or absent) the first, one more for each Share as new (`spaceExternalKey`). */
-  key_n?: number;
+  /** Made by Share as new: its key is the plan's id and this space's own id, never one an older space has (`spaceExternalKey`). */
+  as_new?: true;
   /** Who can open it, as the space said last (`private`, `link_edit`, …); null when it has not said. */
   visibility?: string | null;
   owner: string | null;
@@ -191,7 +191,7 @@ export interface SpaceShareRecord {
   } | null;
 }
 
-export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; key_n?: number; at: string }): SpaceShareRecord {
+export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; as_new?: boolean; at: string }): SpaceShareRecord {
   return {
     v: 1,
     host: input.host,
@@ -203,7 +203,7 @@ export function newSpaceShareRecord(input: { host: string; space_id: string; nam
     mode: input.mode,
     kept: input.kept,
     signed: input.signed === true,
-    ...(input.key_n && input.key_n > 1 ? { key_n: input.key_n } : {}),
+    ...(input.as_new ? { as_new: true as const } : {}),
     owner: null,
     refused: false,
     pages: {},
@@ -233,7 +233,9 @@ export function isSpaceShareRecord(value: unknown): value is SpaceShareRecord {
     typeof value.kept === "boolean" &&
     isObject(value.pages) &&
     isObject(value.files) &&
-    isObject(value.comments)
+    isObject(value.comments) &&
+    (value.seed === null || (isObject(value.seed) && (value.seed.at === undefined || typeof value.seed.at === "string"))) &&
+    (value.as_new === undefined || value.as_new === true)
   );
 }
 
@@ -264,13 +266,13 @@ export function spaceImportedFields(_origin: SpaceImported | null, sharedAt: str
 
 /**
  * The hosted space's key for this plan, sent on a signed-in create only (a key with no account is refused): its `pln_`
- * id for the first space, then `<id>:2`, `<id>:3` for each Share as new (`key_n`), since a create naming a key the
- * person already has answers that space. Null when it would not be a key the service takes.
+ * id, or for a Share as new `<pln id>:<the new space's id without ws_>`, a key no other space ever had, since a create
+ * naming a key the person already has answers that space. Null when it would not be a key the service takes.
  */
 export const SPACE_EXTERNAL_KEY_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
-export function spaceExternalKey(planId: string | null | undefined, signedIn: boolean, n = 1): string | null {
+export function spaceExternalKey(planId: string | null | undefined, signedIn: boolean, asNewSpace: string | null = null): string | null {
   if (!signedIn || typeof planId !== "string") return null;
-  const key = Number.isInteger(n) && n > 1 ? `${planId}:${n}` : planId;
+  const key = asNewSpace ? `${planId}:${asNewSpace.replace(/^ws_/, "")}` : planId;
   return SPACE_EXTERNAL_KEY_RE.test(key) ? key : null;
 }
 
@@ -351,13 +353,45 @@ export interface SpaceSharePlan {
 const annotationOf = (comment: PlanComment): Record<string, unknown> => (isObject(comment.anchor) ? comment.anchor : {});
 
 /**
- * A comment's anchor as it goes up: where it is and what it says, and nothing about who or when. Left here: its
- * pictures (paths on this computer), the commenter's name and the people it names (a space nobody kept is open to
- * every holder of its link), and when it was made.
+ * A comment's anchor as it goes up: where it is and what it says, and nothing about who or when. An allow-list: its
+ * type, words and selected text, the block and offset fields, and the diagram, HTML and picture anchors' own position
+ * fields (a picture's address only when it is http(s)). Left here: its id, pictures, the commenter's name and the
+ * people it names, the tool that made it, page, PR and artifact addresses, an element's description and its time.
  */
 export function spaceCommentAnchor(comment: PlanComment): Record<string, unknown> {
-  const { images: _images, author: _author, mentions: _mentions, createdA: _createdA, ...rest } = annotationOf(comment);
-  return rest;
+  // Only where it sits and what it says, field by field: never an id, a tool's or agent's name, a local path, a page or
+  // repository address, the element's description or anything added later. A space nobody kept is open to its link.
+  const a = annotationOf(comment);
+  const out: Record<string, unknown> = {};
+  const copy = (from: Record<string, unknown>, to: Record<string, unknown>, strings: string[], numbers: string[]) => {
+    for (const key of strings) if (typeof from[key] === "string") to[key] = from[key];
+    for (const key of numbers) if (typeof from[key] === "number" && Number.isFinite(from[key])) to[key] = from[key];
+    return to;
+  };
+  const lines = (value: unknown) => (value === null || typeof value === "number" || (Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number")) ? value : undefined);
+  copy(a, out, ["type", "text", "originalText", "blockId"], ["startOffset", "endOffset"]);
+  for (const key of ["startMeta", "endMeta"]) if (isObject(a[key])) out[key] = copy(a[key] as Record<string, unknown>, {}, ["parentTagName"], ["parentIndex", "textOffset"]);
+  if (isObject(a.diagramAnchor)) {
+    const d = a.diagramAnchor;
+    const anchor = copy(d, {}, ["family", "kind", "id", "from", "to", "label"], ["v"]);
+    if (lines(d.sourceLine) !== undefined) anchor.sourceLine = d.sourceLine;
+    out.diagramAnchor = anchor;
+  }
+  if (isObject(a.htmlAnchor)) {
+    const h = a.htmlAnchor;
+    const anchor = copy(h, {}, ["selector", "tagName", "text"], []);
+    if (isObject(h.point)) anchor.point = copy(h.point, {}, [], ["x", "y"]);
+    out.htmlAnchor = anchor;
+  }
+  if (isObject(a.imageRegion)) {
+    const r = a.imageRegion;
+    // The picture's address only when it is on the web: a path names this computer's folders.
+    const region = copy(r, {}, typeof r.src === "string" && /^https?:\/\//i.test(r.src) ? ["src"] : [], ["v", "naturalWidth", "naturalHeight"]);
+    if (lines(r.sourceLine) !== undefined) region.sourceLine = r.sourceLine;
+    if (isObject(r.box)) region.box = copy(r.box, {}, [], ["x", "y", "w", "h"]);
+    out.imageRegion = region;
+  }
+  return out;
 }
 
 const picturesOf = (comment: PlanComment) => {

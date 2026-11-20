@@ -125,15 +125,17 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     const headers: Record<string, string> = { Accept: "application/json", ...init.headers };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (init.json !== undefined) headers["Content-Type"] = "application/json";
-    // A connection that stalls ends as a call that was not answered (about 50 KB a second at the least for bytes).
-    const timeout = AbortSignal.timeout((options.timeoutMs ?? SPACES_CALL_TIMEOUT_MS) + (init.bytes ? init.bytes.length / 50 : 0));
+    // The body, made once: JSON as its UTF-8 bytes, or the raw bytes.
+    const payload = init.json !== undefined ? new TextEncoder().encode(JSON.stringify(init.json)) : init.bytes;
+    // A connection that stalls ends as a call that was not answered (about 50 KB a second at the least for a body).
+    const timeout = AbortSignal.timeout((options.timeoutMs ?? SPACES_CALL_TIMEOUT_MS) + (payload ? payload.length / 50 : 0));
     let response: Response;
     let raw: string;
     try {
       response = await doFetch(`${options.host}${path}`, {
         method,
         headers,
-        body: init.json !== undefined ? JSON.stringify(init.json) : (init.bytes as BodyInit | undefined),
+        body: payload as BodyInit | undefined,
         redirect: "error",
         signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
       });
@@ -184,13 +186,21 @@ export function createSpacesClient(options: { host: string; token?: string | nul
     },
     // Origin fields ride only on JSON: such a save is the PATCH with the page's text as `body` and no path, so it is
     // never a rename (an actor with a path change is refused). The decoder drops a leading byte-order mark, as the
-    // space does.
+    // space does. Bytes that are not UTF-8 would change as text: they go as they are, by the raw PUT, with no actor.
     async savePage(spaceId, docId, bytes, kind, ifMatch, imported = {}) {
       const target = `${ws(spaceId)}/documents/${segment(docId)}`;
       const ifMatchHeader = { "If-Match": `"${ifMatch}"` };
+      let decoded: string | null = null;
+      if (Object.keys(imported).length > 0) {
+        try {
+          decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          decoded = null;
+        }
+      }
       const { body, headers } =
-        Object.keys(imported).length > 0
-          ? await call("PATCH", target, { json: { body: new TextDecoder().decode(bytes), ...imported }, headers: ifMatchHeader })
+        decoded !== null
+          ? await call("PATCH", target, { json: { body: decoded, ...imported }, headers: ifMatchHeader })
           : await call("PUT", target, { bytes, headers: { "Content-Type": SPACE_PAGE_MEDIA_TYPE[kind], ...ifMatchHeader } });
       const document = under(body, "document");
       return { version: versionOf(document, headers), url: text(document.file_url) };

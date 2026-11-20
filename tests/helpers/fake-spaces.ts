@@ -114,6 +114,8 @@ export interface FakeSpacesCall {
   /** The JSON body as sent, when it was JSON. */
   json: unknown;
   status: number;
+  /** The error's code, when it answered one. */
+  code: string | null;
 }
 
 export interface FakeSpacesOptions {
@@ -201,7 +203,19 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     assets: space.assets.map((a) => ({ id: a.id, path: a.path, content_type: a.content_type, size: a.size, content_hash: a.hashes[a.hashes.length - 1] })),
   });
 
+  const callOf = new WeakMap<Request, FakeSpacesCall>();
+  /** Every answer, with its error's code kept on the call. */
   async function handle(request: Request): Promise<Response> {
+    const response = await respond(request);
+    const call = callOf.get(request);
+    if (call && !response.ok && (response.headers.get("content-type") ?? "").startsWith("application/json")) {
+      const body = (await response.clone().json().catch(() => null)) as { error?: { code?: unknown } } | null;
+      call.code = typeof body?.error?.code === "string" ? body.error.code : null;
+    }
+    return response;
+  }
+
+  async function respond(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
     const auth = request.headers.get("authorization");
@@ -209,8 +223,9 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
     const user = bearer ? (tokens.get(bearer) ?? null) : null;
     let sent: unknown = null;
     if ((request.headers.get("content-type") ?? "").startsWith("application/json")) sent = await request.clone().json().catch(() => null);
-    const call: FakeSpacesCall = { method, path: url.pathname, query: url.search, signedIn: bearer !== null, idempotencyKey: request.headers.get("idempotency-key"), ifMatch: request.headers.get("if-match"), json: sent, status: 0 };
+    const call: FakeSpacesCall = { method, path: url.pathname, query: url.search, signedIn: bearer !== null, idempotencyKey: request.headers.get("idempotency-key"), ifMatch: request.headers.get("if-match"), json: sent, status: 0, code: null };
     calls.push(call);
+    callOf.set(request, call);
     const done = (response: Response) => {
       call.status = response.status;
       return response;
@@ -346,7 +361,9 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       return json(200, spaceWire(space, user));
     }
     // Someone else's space. Made private: no account is asked to sign in, another account does not find it. Kept
-    // with its link still open: holders of the link read and comment, and a page save or a file upload is not allowed.
+    // with its link still open: holders of the link read and comment, and a page save or a file upload is not allowed
+    // (`403 forbidden`: they may not edit at all, imported or not). A comment they may write, but not an imported one
+    // (`403 imported_owner_only`, below).
     const outsider = space.owner !== null && space.owner !== user;
     if (outsider && space.visibility === "private") return user ? fail(404, "workspace_not_found") : fail(401, "login_required");
     if (outsider && method !== "GET" && !(rest[0] === "documents" && rest[2] === "annotations")) return fail(403, "forbidden");

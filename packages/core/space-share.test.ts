@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { isPlanAssetPath, planId, type PlanComment } from "./plans";
-import { spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
+import { isSpaceShareRecord, spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
 
 const DOC = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ1";
 const DOC2 = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ2";
@@ -102,7 +102,11 @@ describe("the steps", () => {
     );
     expect(plan.steps.map((s) => s.kind)).toEqual(["create", "page-save", "file", "comment", "reply"]);
     // The anchor says where and what, never who or when.
-    expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ id: "Z", text: "x", originalText: "q" });
+    expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ text: "x", originalText: "q" });
+    // An allow-list: an id, a tool, page, PR and artifact addresses, an element's description and anything unknown stay.
+    const leaky = spaceCommentAnchor(comment("L", { type: "COMMENT", text: "x", originalText: "q", source: "eslint", pageUrl: "/p", prUrl: "https://github.com/a/b/pull/1", artifact: { artifactUrl: "https://x/a", sourceUrl: "https://x/s" }, elementContext: { tag: "div" }, questionAnswer: { key: "k" }, futureField: "?", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } }));
+    expect(leaky).toEqual({ type: "COMMENT", text: "x", originalText: "q", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } });
+    for (const src of ["/Users/me/shot.png", "./shot.png", "file:///tmp/a.png", "C:\\a.png"]) expect((spaceCommentAnchor(comment("I", { imageRegion: { v: 1, src, sourceLine: 1, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } })).imageRegion as Record<string, unknown>).src).toBeUndefined();
     expect(plan.details).toEqual({ pages: 1, files: 1, comments: 2, approval: null, not: { sent_comments: 1, pictures: 1, original_dates: true, files_over: 1, pages_over: 1, long_comments: 1, older_approvals: 1 } });
     expect(plan.changes).toBe(4);
   });
@@ -183,9 +187,19 @@ describe("what a call says of where a thing came from", () => {
     const id = planId("pln");
     expect(spaceExternalKey(id, true)).toBe(id);
     expect(spaceExternalKey(id, false)).toBeNull();
-    // Share as new: the next key, so a new space; the first is the bare id.
-    expect([spaceExternalKey(id, true, 1), spaceExternalKey(id, true, 2), spaceExternalKey(id, true, 3)]).toEqual([id, `${id}:2`, `${id}:3`]);
-    expect(spaceExternalKey("x".repeat(127), true, 2)).toBeNull();
+    // Share as new: a key of its own, from the new space's id, never one an older space had.
+    const space = newSpaceId();
+    expect(spaceExternalKey(id, true, space)).toBe(`${id}:${space.slice(3)}`);
+    expect(spaceExternalKey(id, false, space)).toBeNull();
+    expect(spaceExternalKey("x".repeat(110), true, space)).toBeNull();
     for (const bad of ["", "pln 1", "x".repeat(129), "pln/1", null]) expect(spaceExternalKey(bad, true)).toBeNull();
   });
+});
+
+test("a record read back with a share time or Share as new mark of the wrong kind is no record", () => {
+  const record = newSpaceShareRecord({ host: "https://spaces.invalid", space_id: newSpaceId(), name: "P", mode: "all", kept: false, as_new: true, at: "2026-11-20T10:00:00.000Z" });
+  expect(isSpaceShareRecord(record)).toBe(true);
+  expect(isSpaceShareRecord({ ...record, seed: { doc: null, version: null, at: "2026-11-20T10:00:00.000Z" } })).toBe(true);
+  expect(isSpaceShareRecord({ ...record, seed: { doc: null, version: null, at: 5 } })).toBe(false);
+  expect(isSpaceShareRecord({ ...record, as_new: "yes" })).toBe(false);
 });

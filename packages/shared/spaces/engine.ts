@@ -181,19 +181,22 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     }
   };
   /**
-   * A page found in the space by its path (after a lost answer, or in a space a key brought back): ours from the
-   * version it holds when that is what was sent or another version of this page here (newest first), else left alone.
+   * The space's version of a page is version `n` here: its stored id, or (they differ only for bytes that start with
+   * a byte-order mark, which the space drops) its bytes hashed as the space does.
+   */
+  const holds = (docId: string, n: number, remote: string, bytes?: Uint8Array) => {
+    if (localHash(docId, n) === remote) return true;
+    const own = bytes ?? source.versionBytes(docId, n);
+    return own !== null && withoutBom(own) !== own && hostedVersionOf(own) === remote;
+  };
+  /**
+   * A page found in the space (after a lost answer, or in a space a key brought back): ours from the version it holds
+   * when that is the one being sent or the newest here; any other (an older one put back there, an edit) is a page
+   * changed in the space, left alone.
    */
   const found = (docId: string, n: number, path: string, there: { id: string; version: string | null }, bytes: Uint8Array) => {
-    const held =
-      there.version === null
-        ? null
-        : there.version === hostedVersionOf(bytes)
-          ? n
-          : ([...docOf(docId).versions].reverse().find((v) => {
-              const other = source.versionBytes(docId, v.version_number);
-              return other !== null && hostedVersionOf(other) === there.version;
-            })?.version_number ?? null);
+    const newest = docOf(docId).versions.slice(-1)[0]?.version_number ?? n;
+    const held = there.version === null ? null : holds(docId, n, there.version, bytes) ? n : newest !== n && holds(docId, newest, there.version) ? newest : null;
     record.pages[docId] = { lane: "page", remote_id: there.id, doc_path: path, pushed: held !== null ? [{ local: held, remote: there.version!, hash: localHash(docId, held) }] : [], stopped: held !== null ? null : { current: there.version } };
   };
 
@@ -203,8 +206,8 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     switch (step.kind) {
       case "create": {
         // The same call every time: the page and version in it are kept before it is first made.
-        if (!record.seed) {
-          record.seed = { doc: step.doc, version: step.version, at: sharedAt };
+        if (!record.seed || !record.seed.at) {
+          record.seed = record.seed ? { ...record.seed, at: sharedAt } : { doc: step.doc, version: step.version, at: sharedAt };
           keep();
         }
         const seed = record.seed;
@@ -214,21 +217,30 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const document = doc && bytes && path && isSpacePageKind(doc.kind) ? { path, kind: doc.kind, title: doc.title, body: textOf(bytes) } : null;
         try {
           // The key only with an account (a key sent without one is refused); the actor only with a first page.
-          const externalKey = spaceExternalKey(source.plan_id, client.signedIn, record.key_n);
+          const externalKey = spaceExternalKey(source.plan_id, client.signedIn, record.as_new ? spaceId : null);
           const made = await client.createSpace({ id: spaceId, name: record.name, document, ...(externalKey ? { external_key: externalKey } : {}) }, document && seed.version ? originOf(doc!.id, seed.version, seed.at ?? sharedAt) : {});
-          await adopt(made.space);
-          if (record.space_id !== spaceId) {
-            // A space this plan already had (its key): its pages are taken as they are there, never written over.
-            const there = path ? (made.space.documents.find((d) => d.doc_path === path) ?? (await client.getSpace(record.space_id)).documents.find((d) => d.doc_path === path)) : null;
-            if (doc && bytes && path && there) found(doc.id, seed.version!, path, there, bytes);
+          if (made.space.id && made.space.id !== spaceId) {
+            // A space this plan already had (its key), under its own id: its pages are taken as they are there, never
+            // written over. The main page is the one at its path, else the one holding a version of it from here (its
+            // path may be worked out differently now); a space with pages and none of them it is not added to.
+            if (!isSpaceId(made.space.id)) throw new SpacesError(0, "unknown_space_id", "The space answered with an id this share cannot keep.");
+            let there: { id: string; doc_path: string; version: string | null } | null = null;
+            if (doc && bytes && path) {
+              const docs = made.space.documents.length > 0 ? made.space.documents : (await client.getSpace(made.space.id)).documents;
+              there = docs.find((d) => d.doc_path === path) ?? docs.find((d) => d.version !== null && doc.versions.some((v) => holds(doc.id, v.version_number, d.version!))) ?? null;
+              if (!there && docs.length > 0) throw new Error("The space this plan's key names has pages, and none of them is its main page.");
+            }
+            await adopt(made.space);
+            if (doc && bytes && there) found(doc.id, seed.version!, there.doc_path, there, bytes);
           } else if (doc && bytes && path) {
+            await adopt(made.space);
             if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
             else {
               const there = made.space.documents.find((d) => d.doc_path === path) ?? (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === path);
               if (!there) throw new SpacesError(0, "no_first_page", "The space answered without its first page.");
               found(doc.id, seed.version!, path, there, bytes);
             }
-          }
+          } else await adopt(made.space);
         } catch (error) {
           // The id is taken by a create that was not this exact call: the space is there; take it as it is.
           if (!(error instanceof SpacesError) || error.code !== "workspace_id_conflict") throw error;
@@ -422,6 +434,13 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         continue;
       }
       if (!(error instanceof SpacesError)) return end("failed");
+      // The key names a space of another team, or the space answered an id that cannot be kept: trying again gets the
+      // same answer. Gone, so the way on is Share as new (a key of its own).
+      if ((error.status === 409 && error.code === "external_key_conflict") || error.code === "unknown_space_id") {
+        record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended: "failed", gone: true };
+        keep();
+        return { end: "failed", error };
+      }
       if (error.status === 429) {
         const until = now() + (error.retryAfter ?? 10) * 1000;
         tell(until);

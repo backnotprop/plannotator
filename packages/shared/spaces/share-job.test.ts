@@ -396,23 +396,24 @@ describe("Keep this space", () => {
     expect(s.spaces.spaces.size).toBe(1);
   });
 
-  test("signed in, Share as new makes a new space each time: the plan's next key (`:2`, `:3`), never the space the key before names", async () => {
+  test("signed in, Share as new makes a new space each time under a key of its own, even once the record is gone; a plain Share keeps the plan's id", async () => {
     const s = setup({ seed: { extras: false } });
     const id = s.world.plan;
     saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
-    s.jobs.share(id, {});
-    await s.settle();
-    const first = s.record().space_id;
+    const made: string[] = [];
+    for (const fresh of [false, true, true]) {
+      s.jobs.share(id, { fresh });
+      await s.settle();
+      made.push(s.record().space_id);
+    }
+    // Stop sharing deletes the last space and forgets the record; Share as new after it is still a space of its own.
+    expect((await s.jobs.remove(id)).ok).toBe(true);
     s.jobs.share(id, { fresh: true });
     await s.settle();
-    const second = s.record();
-    s.jobs.share(id, { fresh: true });
-    await s.settle();
-    const third = s.record();
-    expect(new Set([first, second.space_id, third.space_id]).size).toBe(3);
-    expect(s.spaces.spaces.size).toBe(3);
-    expect([first, second.space_id, third.space_id].map((ws) => s.spaces.spaces.get(ws)!.external_key)).toEqual([id, `${id}:2`, `${id}:3`]);
-    expect([second.key_n, third.key_n]).toEqual([2, 3]);
+    made.push(s.record().space_id);
+    expect(new Set(made).size).toBe(4);
+    const keys = made.map((ws) => s.spaces.spaces.get(ws)!.external_key);
+    expect(keys).toEqual([id, `${id}:${made[1]!.slice(3)}`, `${id}:${made[2]!.slice(3)}`, `${id}:${made[3]!.slice(3)}`]);
     expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true });
   });
 

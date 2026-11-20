@@ -250,16 +250,14 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     if (live.running || live.claiming) return status(id);
     const source = spaceShareSource(options.store(), id);
     if (!source) return null;
-    const before = readSpaceShareRecord(options.dataDir, id);
-    let record = input.fresh ? null : before;
+    let record = input.fresh ? null : readSpaceShareRecord(options.dataDir, id);
     if (record?.refused) return status(id);
     if (!record) {
-      // Share as new is a new space: the next key of this plan (a create naming a key the person has answers that space).
-      const keyN = input.fresh && before ? (before.key_n ?? 1) + 1 : 1;
       // Whether the space is the person's own is what the space answers, never assumed here.
       const host = options.host();
-      // Started signed in: it is never made, or gone on with, without the sign-in (the person saw "Only you").
-      record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, signed: credentialOf(host) !== null, key_n: keyN, at: new Date(now()).toISOString() });
+      // Started signed in: it is never made, or gone on with, without the sign-in (the person saw "Only you"). Share as
+      // new has a key of its own (`as_new`), so it never lands in a space an older key names.
+      record = newSpaceShareRecord({ host, space_id: newSpaceId(), name: source.local.name, mode: input.mode ?? "all", kept: false, signed: credentialOf(host) !== null, as_new: input.fresh === true, at: new Date(now()).toISOString() });
       saveSpaceShareRecord(options.dataDir, id, record);
     }
     // Waiting for Keep (the sign-in is gone, or a write was not allowed), or the space is gone: nothing is sent,
