@@ -54,6 +54,7 @@
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
+    "./inbox-inline-media": "./inbox-inline-media.ts",
     "./inbox-push": "./inbox-push.ts",
     "./inbox-door-version": "./inbox-door-version.ts",
     "./inbox-wire-models": "./inbox-wire-models.ts",
