@@ -8,7 +8,7 @@ import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
-import { htmlBlockPlayer, wireHtmlBlockPlayers } from "./htmlBlockMedia";
+import { htmlBlockPlayer, htmlBlockPlayersIn, keepHtmlBlockPlayers, wireHtmlBlockPlayers } from "./htmlBlockMedia";
 
 interface HtmlBlockProps {
   block: Block;
@@ -274,7 +274,9 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
       const template = ref.current.ownerDocument.createElement('template');
       template.innerHTML = sanitized;
       resolveHostMedia(template.content, ref.current.ownerDocument, resolveImage, preserveVideos, responsiveImages);
+      const earlier = htmlBlockPlayersIn(ref.current);
       ref.current.replaceChildren(template.content);
+      keepHtmlBlockPlayers(ref.current, earlier);
     } else if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }

@@ -94,7 +94,13 @@ async function render(body: string, inline: InboxInlineImage[], opened: InboxInl
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(
+  });
+  await redraw(body, inline, opened);
+}
+
+async function redraw(body: string, inline: InboxInlineImage[], opened: InboxInlineImage[]) {
+  await act(async () => {
+    root!.render(
       <MessageBody
         message={message(body, inline)}
         projectRoot="/work/shop"
@@ -349,14 +355,18 @@ test.skipIf(!hasDom)('a sound or a video the body shows is a native player in pl
   expect(video.hasAttribute('autoplay')).toBe(false);
 });
 
-test.skipIf(!hasDom)('a raw <img> naming a sound or a video draws the player in place; one that fails to load is the chip', async () => {
-  await render(['<p>The run: <img src="rec/clip.mp4" alt="Clip"> and <img src="notes/hi.wav" alt="Voice"> end there.</p>'].join('\n'), [], []);
+test.skipIf(!hasDom)('a raw <img> naming a sound or a video draws the player in place, the same element across a redraw; one that fails to load is the chip', async () => {
+  const body = '<p>The run: <img src="rec/clip.mp4" alt="Clip"> and <img src="notes/hi.wav" alt="Voice"> end there.</p>\n\n![B](design/b.png)';
+  await render(body, [B], []);
   const url = (path: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(path)}`;
-  expect(host!.querySelectorAll('img')).toHaveLength(0);
+  expect(host!.querySelectorAll('img[alt="Clip"], img[alt="Voice"]')).toHaveLength(0);
   const video = host!.querySelector<HTMLVideoElement>('video[data-inline-media]')!;
   expect([video.getAttribute('src'), video.getAttribute('aria-label'), video.hasAttribute('controls'), video.hasAttribute('playsinline'), video.hasAttribute('autoplay')]).toEqual([url('rec/clip.mp4'), 'Clip', true, true, false]);
   const audio = host!.querySelector<HTMLAudioElement>('audio[data-inline-media]')!;
   expect([audio.getAttribute('src'), audio.getAttribute('aria-label'), audio.getAttribute('preload')]).toEqual([url('notes/hi.wav'), 'Voice', 'metadata']);
+  await redraw(body, [{ ...B, width: 3200 }], []);
+  expect(host!.querySelector('video[data-inline-media]')).toBe(video);
+  expect(host!.querySelector('audio[data-inline-media]')).toBe(audio);
   await act(async () => {
     video.dispatchEvent(new Event('error'));
   });

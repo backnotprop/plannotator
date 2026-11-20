@@ -4,7 +4,7 @@ const PLAYER_CLASS = { audio: "annotation-exclude block max-w-full my-2", video:
 
 export function htmlBlockPlayer(doc: Document, src: string, alt: string, writtenSrc: string, media: "audio" | "video"): HTMLMediaElement {
   const player = doc.createElement(media);
-  player.setAttribute("src", src);
+  player.setAttribute("data-inline-media-src", src);
   player.setAttribute("controls", "");
   player.setAttribute("preload", "metadata");
   if (media === "video") player.setAttribute("playsinline", "");
@@ -15,9 +15,29 @@ export function htmlBlockPlayer(doc: Document, src: string, alt: string, written
   return player;
 }
 
+export function htmlBlockPlayersIn(root: HTMLElement): Map<string, HTMLMediaElement> {
+  const players = new Map<string, HTMLMediaElement>();
+  root.querySelectorAll<HTMLMediaElement>("[data-inline-media-src]").forEach((player) => {
+    const src = player.getAttribute("data-inline-media-src")!;
+    if (!player.hidden && !players.has(src)) players.set(src, player);
+  });
+  return players;
+}
+
+export function keepHtmlBlockPlayers(root: HTMLElement, earlier: Map<string, HTMLMediaElement>): void {
+  root.querySelectorAll<HTMLMediaElement>("[data-inline-media-src]").forEach((player) => {
+    const kept = earlier.get(player.getAttribute("data-inline-media-src")!);
+    if (!kept || kept.isConnected) return;
+    earlier.delete(player.getAttribute("data-inline-media-src")!);
+    player.replaceWith(kept);
+  });
+}
+
 export function wireHtmlBlockPlayers(root: HTMLElement): () => void {
   const cleanups: (() => void)[] = [];
   root.querySelectorAll<HTMLMediaElement>("[data-inline-media]").forEach((player) => {
+    const src = player.getAttribute("data-inline-media-src");
+    if (src && !player.hasAttribute("src")) player.setAttribute("src", src);
     const onError = () => {
       if (player.hidden) return;
       const noun = player.tagName === "AUDIO" ? "Sound" : "Video";
