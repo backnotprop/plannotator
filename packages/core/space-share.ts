@@ -26,9 +26,12 @@ export const SPACE_HTML_MAX = 16_000_000;
 export const SPACE_FILE_MAX = 104_857_600;
 /** Every file of a space nobody kept, in bytes. */
 export const SPACE_OPEN_FILES_MAX = 104_857_600;
-/** A comment's words, and its anchor as JSON, in bytes. */
+/** A comment's words, its anchor as JSON, and the whole call, in bytes. */
 export const SPACE_COMMENT_BODY_MAX = 8 * 1024;
 export const SPACE_COMMENT_ANCHOR_MAX = 16 * 1024;
+export const SPACE_COMMENT_REQUEST_MAX = 32 * 1024;
+/** Room in a comment's call for what is known only when it is sent: the version it is on, the actor, the field names. */
+const SPACE_COMMENT_CALL_ROOM = 256;
 export const SPACE_NAME_MAX = 120;
 
 export const spacePageMax = (kind: SpacePageKind) => (kind === "html" ? SPACE_HTML_MAX : SPACE_TEXT_MAX);
@@ -155,6 +158,8 @@ export interface SpaceShareRecord {
   kept: boolean;
   /** The share was started signed in: it is never made, or gone on with, without a sign-in. */
   signed?: boolean;
+  /** Which space of this plan it is: 1 (or absent) the first, one more for each Share as new (`spaceExternalKey`). */
+  key_n?: number;
   /** Who can open it, as the space said last (`private`, `link_edit`, …); null when it has not said. */
   visibility?: string | null;
   owner: string | null;
@@ -186,7 +191,7 @@ export interface SpaceShareRecord {
   } | null;
 }
 
-export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; at: string }): SpaceShareRecord {
+export function newSpaceShareRecord(input: { host: string; space_id: string; name: string; mode: SpaceShareMode; kept: boolean; signed?: boolean; key_n?: number; at: string }): SpaceShareRecord {
   return {
     v: 1,
     host: input.host,
@@ -198,6 +203,7 @@ export function newSpaceShareRecord(input: { host: string; space_id: string; nam
     mode: input.mode,
     kept: input.kept,
     signed: input.signed === true,
+    ...(input.key_n && input.key_n > 1 ? { key_n: input.key_n } : {}),
     owner: null,
     refused: false,
     pages: {},
@@ -256,9 +262,17 @@ export function spaceImportedFields(_origin: SpaceImported | null, sharedAt: str
   return { actor: { kind: "imported", at: sharedAt } };
 }
 
-/** The hosted space's key for this plan (its `pln_` id), sent on a signed-in create only: a key with no account is refused. */
+/**
+ * The hosted space's key for this plan, sent on a signed-in create only (a key with no account is refused): its `pln_`
+ * id for the first space, then `<id>:2`, `<id>:3` for each Share as new (`key_n`), since a create naming a key the
+ * person already has answers that space. Null when it would not be a key the service takes.
+ */
 export const SPACE_EXTERNAL_KEY_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
-export const spaceExternalKey = (planId: string | null | undefined, signedIn: boolean): string | null => (signedIn && typeof planId === "string" && SPACE_EXTERNAL_KEY_RE.test(planId) ? planId : null);
+export function spaceExternalKey(planId: string | null | undefined, signedIn: boolean, n = 1): string | null {
+  if (!signedIn || typeof planId !== "string") return null;
+  const key = Number.isInteger(n) && n > 1 ? `${planId}:${n}` : planId;
+  return SPACE_EXTERNAL_KEY_RE.test(key) ? key : null;
+}
 
 /** A comment's origin: the person's display name when one is kept, its agent fields, and when it was made. */
 export const spaceImportedOfComment = (comment: PlanComment): SpaceImported => ({ author_label: comment.author_label, agent_host: comment.agent_host, agent_session: comment.agent_session, agent_name: comment.agent_name, at: comment.created_at });
@@ -463,7 +477,13 @@ export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | nul
     if (!up.get(doc.id)?.has(target.document_version)) continue;
     const known = record?.comments[comment.id];
     if (known && "left" in known) continue;
-    if (utf8Length(comment.body) > SPACE_COMMENT_BODY_MAX || utf8Length(JSON.stringify(spaceCommentAnchor(comment))) > SPACE_COMMENT_ANCHOR_MAX) {
+    const anchor = spaceCommentAnchor(comment);
+    if (
+      utf8Length(comment.body) > SPACE_COMMENT_BODY_MAX ||
+      utf8Length(JSON.stringify(anchor)) > SPACE_COMMENT_ANCHOR_MAX ||
+      // The whole call too: the words escaped as JSON may weigh more than they do as text.
+      utf8Length(JSON.stringify({ anchor, body: comment.body })) + SPACE_COMMENT_CALL_ROOM > SPACE_COMMENT_REQUEST_MAX
+    ) {
       details.not.long_comments++;
       continue;
     }

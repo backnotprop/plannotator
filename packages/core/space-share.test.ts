@@ -183,6 +183,9 @@ describe("what a call says of where a thing came from", () => {
     const id = planId("pln");
     expect(spaceExternalKey(id, true)).toBe(id);
     expect(spaceExternalKey(id, false)).toBeNull();
+    // Share as new: the next key, so a new space; the first is the bare id.
+    expect([spaceExternalKey(id, true, 1), spaceExternalKey(id, true, 2), spaceExternalKey(id, true, 3)]).toEqual([id, `${id}:2`, `${id}:3`]);
+    expect(spaceExternalKey("x".repeat(127), true, 2)).toBeNull();
     for (const bad of ["", "pln 1", "x".repeat(129), "pln/1", null]) expect(spaceExternalKey(bad, true)).toBeNull();
   });
 });

@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitBlobSha } from "@plannotator/core/plans";
-import { newSpaceId, newSpaceShareRecord, type SpaceShareMode, type SpaceShareRecord } from "@plannotator/core/space-share";
+import { newSpaceId, newSpaceShareRecord, planSpaceShare, spaceCommentAnchor, type SpaceShareMode, type SpaceShareRecord } from "@plannotator/core/space-share";
 import { createFakeSpaces, type FakeSpaces } from "../../../tests/helpers/fake-spaces";
 import { seedSpaceShareWorld, type SpaceShareWorld } from "../../../tests/helpers/space-share-world";
 import { createSpacesClient } from "./client";
@@ -135,7 +135,7 @@ describe("the imported shape: every version and comment says it was put up at th
     };
   };
 
-  test("the create, every page save, every comment and reply carry one actor with one share time; files and page adds none; no author, agent or original time anywhere", async () => {
+  test("the create, every page add and save, every comment and reply carry one actor with one share time; files (and a file that goes as a page) none; no author, agent or original time anywhere", async () => {
     const s = setup({ seed: { extras: true } });
     const { store, plan, main, unsent } = s.world;
     // A version and a comment that do know who and when: none of it goes.
@@ -151,19 +151,22 @@ describe("the imported shape: every version and comment says it was put up at th
     // Page versions after the first go as the JSON save, with the page's text and the actor only: never a path.
     expect(calls.saves.length).toBeGreaterThanOrEqual(4);
     expect(calls.rawSaves).toHaveLength(0);
-    for (const call of [...calls.saves, ...calls.comments, ...calls.replies]) expect((call.json as Record<string, unknown>).actor).toEqual(actor);
+    // A page's add carries it; a file here that goes up as a page (its extension is a page's) is a file, and does not.
+    const isFilePage = (c: FakeSpaces["calls"][number]) => (c.json as { doc_path?: string }).doc_path === "dashboard-mockup.html";
+    expect(calls.adds.filter((c) => !isFilePage(c)).length).toBeGreaterThan(0);
+    for (const call of [...calls.adds.filter((c) => !isFilePage(c)), ...calls.saves, ...calls.comments, ...calls.replies]) expect((call.json as Record<string, unknown>).actor).toEqual(actor);
+    expect(calls.adds.filter(isFilePage).map((c) => (c.json as Record<string, unknown>).actor)).toEqual([undefined]);
     for (const call of calls.saves) expect(Object.keys(call.json as object).sort()).toEqual(["actor", "body"]);
     expect(calls.comments.map((c) => c.idempotencyKey).sort()).toEqual([unsent, comment.id].sort());
     expect(calls.replies).toHaveLength(1);
-    // A file takes no actor (its door refuses one), nor does a page add.
+    // A file takes no actor (its door refuses one).
     expect(calls.files.length).toBeGreaterThan(0);
     for (const call of calls.files) expect([call.json, call.query.includes("actor")]).toEqual([null, false]);
-    for (const call of calls.adds) expect((call.json as Record<string, unknown>).actor).toBeUndefined();
     const everything = JSON.stringify(s.spaces.calls.map((c) => c.json));
     for (const leak of ["Maya Chen", "claude-code", "sess-secret-1", "author_label", "agent_", "2026-11-12T08:3", ...store.versions(plan, main).map((v) => v.committed_at)]) expect(everything).not.toContain(leak);
     // The stand-in reads them back as imported, with no author.
     const space = spaceOf(s.spaces, s.record);
-    expect(mainOf(s).versions.every((v) => v.imported?.at === SHARED_AT)).toBe(true);
+    expect(space.documents.filter((d) => d.doc_path !== "dashboard-mockup.html").every((d) => d.versions.every((v) => v.imported?.at === SHARED_AT))).toBe(true);
     expect(space.comments.every((c) => c.imported?.at === SHARED_AT && c.replies.every((r) => r.imported?.at === SHARED_AT))).toBe(true);
   });
 
@@ -219,6 +222,65 @@ describe("the imported shape: every version and comment says it was put up at th
     expect((await runAt(s, "2026-11-21T10:00:00.000Z", other)).end).toBe("keep");
     expect(s.spaces.calls[s.spaces.calls.length - 1]).toMatchObject({ method: "PATCH", status: 403 });
     expect(s.record.job).toMatchObject({ keep: true });
+  });
+});
+
+describe("the space's key", () => {
+  test("a signed-in create whose key the person already has answers that space under its own id: the share takes that id for every later call and writes nothing over what is there", async () => {
+    const s = setup({ token: true, seed: { extras: true } });
+    expect((await s.run()).end).toBe("done");
+    const first = s.record.space_id;
+    const held = mainOf(s).versions.length;
+    // The record here is lost; the same plan is shared again, with a new id made here and the same key.
+    const again = newSpaceShareRecord({ host: HOST, space_id: newSpaceId(), name: "Rate limiting for public endpoints", mode: "all", kept: false, at: new Date().toISOString() });
+    const sentId = again.space_id;
+    const before = s.spaces.calls.length;
+    const result = await runSpaceShare({ source: spaceShareSource(s.world.store, s.world.plan)!, record: again, save: () => {}, client: createSpacesClient({ host: HOST, token: s.token, fetch: s.spaces.fetch }) });
+    expect(result.end).toBe("done");
+    expect([again.space_id === first, again.space_id === sentId, s.spaces.spaces.size]).toEqual([true, false, 1]);
+    const later = s.spaces.calls.slice(before);
+    expect(later[0]).toMatchObject({ method: "POST", path: "/v1/workspaces", status: 200 });
+    // Every call after the create went to the space the key named, and none was refused as not found.
+    expect(later.slice(1).every((c) => c.path.startsWith(`/v1/workspaces/${first}`))).toBe(true);
+    expect(later.some((c) => c.status === 404)).toBe(false);
+    // Its pages are taken as they are there: nothing older is saved on top, and the comment is the one already up.
+    expect(mainOf({ ...s, record: again }).versions).toHaveLength(held);
+    expect(again.pages[s.world.main]!.pushed.map((p) => p.local)).toEqual([4]);
+    expect(spaceOf(s.spaces, again).comments).toHaveLength(1);
+  });
+
+  test("the key names the same team or none: a call naming another team for it is refused by the space", async () => {
+    const s = setup({ token: true, seed: { extras: false } });
+    expect((await s.run()).end).toBe("done");
+    const client = createSpacesClient({ host: HOST, token: s.token, fetch: s.spaces.fetch });
+    const other = await client.createSpace({ id: newSpaceId(), name: "x", document: null, external_key: s.world.plan, org_id: "org_1" } as Parameters<typeof client.createSpace>[0]).catch((e: { status: number; code: string; details: Record<string, unknown> }) => [e.status, e.code, e.details.workspace_id]);
+    expect(other).toEqual([409, "external_key_conflict", s.record.space_id]);
+  });
+});
+
+describe("a comment too long for the space", () => {
+  const longComment = (s: ReturnType<typeof setup>, id: string, text: string, originalText = "The public API") => {
+    const head = s.world.store.versions(s.world.plan, s.world.main).slice(-1)[0]!;
+    return s.world.store.saveComment(s.world.plan, { document_id: s.world.main, document_version: head.version, annotation: { id, type: "COMMENT", text, originalText }, at: new Date().toISOString() });
+  };
+
+  test("over 8 KB of words, or a call over 32 KB once its words are written as JSON: never sent, counted under Not shared, and the share finishes", async () => {
+    const s = setup({ seed: { extras: false } });
+    longComment(s, "long-1", "x".repeat(8 * 1024 + 1));
+    // Under 8 KB as text and an anchor under 16 KB, but a call over 32 KB: control characters weigh six bytes as JSON.
+    const words = "\u0001".repeat(2708);
+    const probe = longComment(s, "long-2", words);
+    const anchorBytes = enc(JSON.stringify(spaceCommentAnchor(probe))).length;
+    const padded = longComment(s, "long-2", words, "y".repeat(16_384 - anchorBytes + "The public API".length));
+    expect(enc(padded.body).length).toBeLessThanOrEqual(8 * 1024);
+    expect(enc(JSON.stringify(spaceCommentAnchor(padded))).length).toBeLessThanOrEqual(16 * 1024);
+    expect(enc(JSON.stringify({ anchor: spaceCommentAnchor(padded), body: padded.body, document_version: "0".repeat(40), actor: { kind: "imported", at: new Date().toISOString() } })).length).toBeGreaterThan(32 * 1024);
+    const source = spaceShareSource(s.world.store, s.world.plan)!;
+    expect(planSpaceShare(source.local, null, { mode: "all", signedIn: false }).details.not.long_comments).toBe(2);
+    expect((await s.run()).end).toBe("done");
+    const sent = s.spaces.calls.filter((c) => c.path.endsWith("/annotations"));
+    expect(sent.map((c) => c.idempotencyKey)).toEqual([s.world.unsent]);
+    expect(s.spaces.calls.some((c) => c.status === 413 || c.status === 422)).toBe(false);
   });
 });
 

@@ -21,15 +21,17 @@
  *   `401 login_required`. A space that expired or was removed is never `410`: with no account `401 login_required`,
  *   signed in `404 workspace_not_found`.
  * - Limits: a page 1,572,864 bytes (HTML 16,000,000), a file and an ownerless space's files 100 MiB (both can be set
- *   small for a test), a comment 8 KiB; without a credential a number of writes a minute, then `429` with
- *   `Retry-After`.
+ *   small for a test), a comment 8 KiB (its anchor 16 KiB, the whole call 32 KiB, `413`); without a credential a
+ *   number of writes a minute, then `429` with `Retry-After`.
  * - The "imported" shape (as landed on the Spaces side, 2026-11-20; read from its report, not run): an `actor`
  *   `{ kind: "imported", at, author_label?, agent_host?, agent_session?, agent_name? }` on the create, a page's JSON
  *   `PATCH` (with `body`; with a path change it is `422 validation_error` on `actor`), a comment and a reply (never
  *   with `mentions`). Allowed while the space has no owner, then only to its owner: else `403 imported_owner_only`.
  *   Read back as `imported: { author_label, agent_host, agent_session, agent_name, at }` with `author: null`,
  *   `author_standing: null` and no `agent` (`GET …/documents/:id/versions` and `…/annotations`). The create takes
- *   `external_key` (1-128 of `A-Za-z0-9_.:-`) with an account only (`422` without), echoed on that answer only.
+ *   `external_key` (1-128 of `A-Za-z0-9_.:-`) with an account only (`422` without), echoed on that answer only. A
+ *   key the same account already gave a space answers that space under its own id (`200`; the id sent is not used),
+ *   or `409 external_key_conflict` (`details.workspace_id`, `details.org_id`) when the call names another team.
  *   Unknown fields are refused everywhere (`422`), an upload's query included: a file takes no actor.
  * - Answers have the service's shapes as seen on its test copy (2026-11-19): `{ workspace, document }` on the
  *   create, every other record bare, a page's version also as a weak `ETag`; the approval is a `PUT`, and a tool's
@@ -99,6 +101,7 @@ export interface FakeSpace {
   createBody: string;
   createAnswer: unknown;
   external_key: string | null;
+  org_id: string | null;
 }
 
 export interface FakeSpacesCall {
@@ -169,6 +172,8 @@ const loopbackRedirect = (value: string) => {
 export function createFakeSpaces(options: FakeSpacesOptions = {}) {
   let origin = options.origin ?? "http://127.0.0.1:1";
   const spaces = new Map<string, FakeSpace>();
+  /** Per account and key, the space it names. */
+  const keys = new Map<string, string>();
   const tokens = new Map<string, string>();
   const codes = new Map<string, { challenge: string; redirect: string; name: string; until: number }>();
   /** Every `/cli/token` body as it came (tests check what was sent, and that it was sent once). */
@@ -302,7 +307,14 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       if (!/^ws_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) return fail(422, "validation_error", { fields: ["id"] });
       const existing = spaces.get(id);
       if (existing) return existing.createBody === raw && !existing.deleted ? json(201, existing.createAnswer) : fail(409, "workspace_id_conflict");
-      const space: FakeSpace = { id, name: typeof body.name === "string" ? body.name.slice(0, 120) : "Untitled", owner: user, visibility: user ? "private" : "link_edit", share_url: `${origin}/s/${id.slice(3, 15).toLowerCase()}`, documents: [], assets: [], comments: [], approvals: [], deleted: false, createBody: raw, createAnswer: null, external_key: typeof body.external_key === "string" ? body.external_key : null };
+      const orgId = typeof body.org_id === "string" ? body.org_id : null;
+      const keyed = user && typeof body.external_key === "string" ? spaces.get(keys.get(`${user}\n${body.external_key}`) ?? "") : undefined;
+      if (keyed && !keyed.deleted) {
+        if (keyed.org_id !== orgId) return fail(409, "external_key_conflict", { workspace_id: keyed.id, org_id: keyed.org_id });
+        const page = keyed.documents[0];
+        return json(200, { workspace: { ...spaceWire(keyed), external_key: keyed.external_key }, document: page ? docWire(keyed, page) : null });
+      }
+      const space: FakeSpace = { id, name: typeof body.name === "string" ? body.name.slice(0, 120) : "Untitled", owner: user, visibility: user ? "private" : "link_edit", share_url: `${origin}/s/${id.slice(3, 15).toLowerCase()}`, documents: [], assets: [], comments: [], approvals: [], deleted: false, createBody: raw, createAnswer: null, external_key: typeof body.external_key === "string" ? body.external_key : null, org_id: orgId };
       let first: FakeDoc | null = null;
       if (body.document !== null) {
         const d = (body.document ?? {}) as Record<string, unknown>;
@@ -317,6 +329,7 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       // The key is echoed on this answer only.
       space.createAnswer = { workspace: { ...spaceWire(space), ...(space.external_key ? { external_key: space.external_key } : {}) }, document: first ? docWire(space, first) : null };
       spaces.set(id, space);
+      if (user && space.external_key) keys.set(`${user}\n${space.external_key}`, id);
       return json(201, space.createAnswer);
     }
 
@@ -352,9 +365,17 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
       const kind = String(body?.kind ?? "");
       const text = typeof body?.body === "string" ? body.body : "";
       if (!body || !validPath(path) || !PAGE_TYPES[kind] || PAGE_EXTENSIONS[extensionOf(path)] !== kind) return fail(422, "validation_error", { fields: ["doc_path"] });
+      const unknown = Object.keys(body).find((key) => !["doc_path", "kind", "body", "title", "actor"].includes(key));
+      if (unknown) return fail(422, "validation_error", { fields: [unknown] });
+      const actor = actorOf(body.actor);
+      if (actor === null) return fail(422, "validation_error", { fields: ["actor"] });
+      if (actor) {
+        const refused = importedRefused();
+        if (refused) return refused;
+      }
       if (new TextEncoder().encode(text).length > pageMax(kind)) return fail(422, "validation_error", { fields: ["body"] });
       if (space.documents.some((d) => d.doc_path === path) || space.assets.some((a) => a.path === path)) return fail(409, "path_conflict", { doc_path: path });
-      const doc: FakeDoc = { id: newId("doc"), doc_path: path, kind, title: typeof body.title === "string" ? body.title : path, versions: [{ version: versionOf(text), body: text, by: user }] };
+      const doc: FakeDoc = { id: newId("doc"), doc_path: path, kind, title: typeof body.title === "string" ? body.title : path, versions: [{ version: versionOf(text), body: text, by: user, imported: actor ?? null }] };
       space.documents.push(doc);
       return json(201, docWire(space, doc), { ETag: `W/"${doc.versions[0]!.version}"` });
     }
@@ -426,7 +447,8 @@ export function createFakeSpaces(options: FakeSpacesOptions = {}) {
         const refused = importedRefused();
         if (refused) return refused;
       }
-      if (new TextEncoder().encode(body.body).length > 8 * 1024 || JSON.stringify(body.anchor).length > 16 * 1024) return fail(422, "validation_error", { fields: ["body"] });
+      if (new TextEncoder().encode(body.body).length > 8 * 1024 || new TextEncoder().encode(JSON.stringify(body.anchor)).length > 16 * 1024) return fail(422, "validation_error", { fields: ["body"] });
+      if (new TextEncoder().encode(JSON.stringify(body)).length > 32 * 1024) return fail(413, "payload_too_large");
       const again = usable ? space.comments.find((c) => c.key === usable) : undefined;
       // The same key on another target is refused; a reply's key shares the space's keys.
       if (usable && space.comments.some((c) => c.replies.some((r) => r.key === usable))) return fail(422, "validation_error", { fields: { "Idempotency-Key": "already used on another target" } });

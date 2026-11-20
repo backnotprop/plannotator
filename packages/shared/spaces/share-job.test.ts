@@ -396,6 +396,26 @@ describe("Keep this space", () => {
     expect(s.spaces.spaces.size).toBe(1);
   });
 
+  test("signed in, Share as new makes a new space each time: the plan's next key (`:2`, `:3`), never the space the key before names", async () => {
+    const s = setup({ seed: { extras: false } });
+    const id = s.world.plan;
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.jobs.share(id, {});
+    await s.settle();
+    const first = s.record().space_id;
+    s.jobs.share(id, { fresh: true });
+    await s.settle();
+    const second = s.record();
+    s.jobs.share(id, { fresh: true });
+    await s.settle();
+    const third = s.record();
+    expect(new Set([first, second.space_id, third.space_id]).size).toBe(3);
+    expect(s.spaces.spaces.size).toBe(3);
+    expect([first, second.space_id, third.space_id].map((ws) => s.spaces.spaces.get(ws)!.external_key)).toEqual([id, `${id}:2`, `${id}:3`]);
+    expect([second.key_n, third.key_n]).toEqual([2, 3]);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true });
+  });
+
   test("one claim at a time: a second Keep joins the first, and an Update pressed meanwhile neither starts nor undoes it", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
