@@ -83,3 +83,20 @@ Forgejo refuses to approve, or request changes on, your own pull request. **Comm
 - Comments on a whole file are added to the review body instead of posted as file comments.
 - Viewed files are not synced to the instance. Plannotator still remembers them locally.
 - Stacked pull request discovery is not available.
+
+## Links and cards in the Inbox
+
+The [Plannotator Inbox](/docs/reference/inbox/) shows a Forgejo or Gitea link as a card (title, state, branches, checks and review) and tracks its pull request on a thread, read with the same token. An address names its forge by its path, so any host can look like one. To keep a link in a message from making Plannotator contact a server you never chose, the Inbox reads only:
+
+- `codeberg.org`, which is built in;
+- the hosts you name in `forgejoHosts`;
+- the origin of any token you set.
+
+```json
+{
+  "forgejoHosts": ["git.example.com", "git.example.org:8443"]
+}
+```
+
+Put that in `~/.plannotator/config.json`. A link to any other host shows its mark and a note on how to name it, and nothing is fetched. Cards use `https` only. When a card cannot load, it says why in terms of the token: no working token, an account that cannot see the pull request, a rate limit, or a host you have not named.
+
