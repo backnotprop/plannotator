@@ -402,6 +402,7 @@ export interface ParsedPulls {
    * `issueCount`, GitLab `count`).
    */
   open_total?: number;
+  cut?: number[];
   /** GitHub's GraphQL budget after this read: what is left, and when it fills again (ISO). */
   rate?: { remaining: number; reset_at: string };
   /**
@@ -438,6 +439,10 @@ function cappedOf(lists: unknown[], countKey: "issueCount" | "count"): ParsedPul
 /** The Others reads' total count (GitHub `issueCount`, GitLab `count`). */
 function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number {
   return lists.reduce<number>((sum, list) => sum + Math.max(num(obj(list)[countKey]), nodes(list).length), 0);
+}
+
+function cutOf(lists: [string, unknown][], countKey: "issueCount" | "count"): number[] {
+  return lists.filter(([, list]) => num(obj(list)[countKey]) > nodes(list).length).map(([name]) => Number(name.replace(/^\D+/, "")));
 }
 
 /** Which lists an answer is read for: the person's own (requested, authored, assigned, merged), or Others. */
@@ -529,11 +534,12 @@ export function parseGithubPulls(stdout: string, host: string, part: PullsPart =
   const reset = str(rate.resetAt);
   const budget = typeof rate.remaining === "number" && reset ? { rate: { remaining: rate.remaining, reset_at: reset } } : {};
   if (part === "others") {
-    const others = Object.keys(data)
+    const named = Object.keys(data)
       .filter((k) => /^others\d+$/.test(k))
-      .map((k) => data[k]);
+      .map((k): [string, unknown] => [k, data[k]]);
+    const others = named.map(([, list]) => list);
     for (const list of others) read(list, null);
-    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), ...budget };
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), cut: cutOf(named, "issueCount"), ...budget };
   }
   const list = (name: "authored" | "merged" | "assigned" | "requested") => (part === "every" ? data[`every${name[0]!.toUpperCase()}${name.slice(1)}`] : data[name]);
   read(list("authored"), null);
@@ -626,11 +632,12 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
     }
   };
   if (part === "others") {
-    const projects = Object.keys(data)
+    const named = Object.keys(data)
       .filter((k) => /^p\d+$/.test(k))
-      .map((k) => obj(data[k]).mergeRequests);
+      .map((k): [string, unknown] => [k, obj(data[k]).mergeRequests]);
+    const projects = named.map(([, list]) => list);
     for (const list of projects) read(list, null);
-    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count") };
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count"), cut: cutOf(named, "count") };
   }
   read(user.authored, null);
   read(user.merged, null);
@@ -672,7 +679,7 @@ interface OthersAnswer {
   total: number | null;
   /** The projects' repositories when it was read (as `HostAnswer.repos`). */
   repos: string;
-  /** The repositories (lowercased) whose every open PR this answer holds: none when the searches came back cut. */
+  /** The repositories (lowercased) whose every open PR this answer holds: none of a search that came back cut. */
   covered: string[];
 }
 
@@ -1401,13 +1408,16 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const cli = state.cli;
       let calls: string[][];
       let covered: string[];
+      let groups: string[][];
       if (cli === "gh") {
         const plan = githubOthersSearches(ordered);
         covered = plan.covered;
+        groups = plan.searches.map((q) => q.split(" ").filter((t) => t.startsWith("repo:")).map((t) => t.slice(5)));
         calls = plan.searches.length ? [["api", "graphql", "--hostname", host, "-f", `query=${githubOthersQuery(plan.searches.length)}`, ...plan.searches.flatMap((q, i) => ["-f", `others${i}=${q}`])]] : [];
       } else {
         const plan = gitlabOthersQueries(ordered);
         covered = plan.covered;
+        groups = plan.covered.map((repo) => [repo]);
         calls = plan.queries.map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
       }
       if (calls.length === 0) {
@@ -1446,8 +1456,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       spent(host, parsed);
       const all = covered.length >= new Set(repos.map((r) => r.toLowerCase())).size;
-      const whole = (parsed.open_total ?? parsed.pulls.length) <= parsed.pulls.length;
-      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey, covered: whole ? covered.map((r) => r.toLowerCase()) : [] };
+      const cut = new Set(parsed.cut ?? []);
+      const whole = groups.flatMap((group, i) => (cut.has(i) ? [] : group.map((r) => r.toLowerCase())));
+      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey, covered: whole };
       others.error = null;
     })()
       .catch(() => {
