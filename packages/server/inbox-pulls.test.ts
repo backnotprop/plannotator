@@ -233,7 +233,7 @@ function postForge(): PostForge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions>; pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">; repoDelayMs?: number; config?: Record<string, unknown> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -242,6 +242,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  if (options.config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(options.config));
   const f = options.gitlab ? gitlabForge() : forge(options.answer);
   const post = postForge();
   // The project's origin as git reads it; `setRepo` changes it (read again at the project's next message).
@@ -396,6 +397,27 @@ describe("risk ranking", () => {
     expect(answer.rules).toBe("Anything in billing.");
     expect(answer.judgments["github.com/northwind/billing-svc#412"]).toEqual({ level: "high", why: "It changes the retry schedule." });
     expect(runs.length).toBe(3);
+  });
+
+  test("the Pull requests page's read while ranking runs: the answer in which nothing is left ranking still has every judgment and what waits", async () => {
+    const member = { author: { login: "tomas" }, authorAssociation: "MEMBER" };
+    const w = await world({
+      codeReview: true,
+      answer: { data: { ...GH_ANSWER.data, requested: { nodes: [ghPull(601, member), ghPull(602, member)] }, authored: { nodes: [] } } },
+      config: { inboxPullRisk: { ...settings, auto: { level: "high", make: "guide" } } },
+      pullRisk: { run: async () => (await Bun.sleep(200), { text: '{"risk":"high","why":"It changes the retry schedule."}' }), agents: () => [{ id: "pi-sdk", label: "Pi" }], listModels: async () => [] },
+    });
+    await w.send("Looking at the retries.", "retries");
+    expect((await fetch(`${w.base}/api/inbox/reviews`)).status).toBe(200);
+    expect((await w.pulls("?everywhere=1&machines=1")).status).toBe(200);
+    const started = Date.now();
+    let answer: InboxPullRiskAnswer;
+    do {
+      answer = (await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer;
+    } while (answer.pending > 0 && Date.now() - started < 5_000);
+    expect(answer.pending).toBe(0);
+    expect(Object.keys(answer.judgments).sort()).toEqual(["github.com/northwind/billing-svc#601", "github.com/northwind/billing-svc#602"]);
+    expect([...(answer.auto_waiting ?? [])].sort()).toEqual(["github.com/northwind/billing-svc#601", "github.com/northwind/billing-svc#602"]);
   });
 
   test("Make them now while starting agents is off: refused with launch_off, and no PR is marked", async () => {

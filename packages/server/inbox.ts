@@ -6301,7 +6301,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
         const listed = await pulls.list(wanted, { refresh, others: url.searchParams.get("others") === "1", everywhere });
         // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
-        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
+        pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls, everywhere);
         pullRiskAuto?.resume();
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));

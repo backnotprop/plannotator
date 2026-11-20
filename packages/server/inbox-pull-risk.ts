@@ -266,7 +266,7 @@ export interface PullRisk {
   /** The settings, and the judgments and failures of the PRs the last `assess` saw. */
   answer(): InboxPullRiskAnswer;
   /** Start judging what has none yet. Never waits, never throws. */
-  assess(pulls: readonly InboxPull[]): void;
+  assess(pulls: readonly InboxPull[], more?: boolean): void;
   /**
    * A branch an agent just reported (Branch reviews): judged once at that head, only while the person's `branches`
    * switch is on. Never waits, never throws. Nothing else ever queues a branch.
@@ -548,8 +548,9 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       const one = rules && pull.head_sha ? load().get(pull.key) : undefined;
       return one && one.head === pull.head_sha && one.base === pull.base && one.rules === hashOf(rules) ? one.level : null;
     },
-    assess(pulls) {
-      listed = pulls;
+    assess(pulls, more = false) {
+      const keys = new Set(pulls.map((pull) => pull.key));
+      listed = more ? [...listed.filter((pull) => !keys.has(pull.key)), ...pulls] : pulls;
       if (stopping.signal.aborted || now() < agentPausedUntil) return;
       try {
         const { rules, provider } = settings();
