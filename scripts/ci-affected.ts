@@ -85,7 +85,7 @@ export const KNOWN_TOP = [
 /** File kinds the graph handles: code, or data a test reaches by an import, a path string or its name. Any other kind runs everything. */
 const KNOWN_EXT = new Set([
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'md', 'mdx', 'json', 'jsonc', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'txt',
-  'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'woff', 'woff2', 'mp4', 'webm',
+  'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'ttf', 'woff', 'woff2', 'mp4', 'webm',
   'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz',
 ]);
 // Package.resolved: a Swift lockfile (the native app's), data no Bun test reads; it plans like any data file.
