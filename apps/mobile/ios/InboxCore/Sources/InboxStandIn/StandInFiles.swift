@@ -157,6 +157,43 @@ extension StandInData {
     </html>
     """
 
+  /// A page that tries every way out of its viewer once it has loaded: a fetch, a scripted click on a link to a site
+  /// and on a phone number, and a move of `location` to another page. On the phone none of them goes anywhere; the page says what it
+  /// tried, and what its policy refused.
+  public static let leavingPageName = "leaving.html"
+  public static let leavingPage = """
+    <!doctype html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Leaving</title>
+    <style>body { margin: 20px; font: 17px/1.45 -apple-system, system-ui, sans-serif; }</style>
+    </head>
+    <body>
+    <h1>A page that tries to leave</h1>
+    <p id="net">Network: not tried</p>
+    <p id="moved">Links: not tried</p>
+    <a id="site" href="https://example.invalid/away">A site</a>
+    <a id="call" href="tel:5550100">A call</a>
+    <script>
+    document.addEventListener("securitypolicyviolation", (event) => {
+      if (event.effectiveDirective === "connect-src") document.getElementById("net").textContent = "Network: refused by connect-src";
+    });
+    document.getElementById("net").textContent = "Network: tried";
+    fetch("https://example.invalid/data").catch(() => {});
+    setTimeout(() => {
+      document.getElementById("site").click();
+      document.getElementById("call").click();
+      document.getElementById("moved").textContent = "Links: clicked by the page";
+      // A page that loads when allowed (a site that cannot be reached would leave this one up).
+      setTimeout(() => { location.href = "about:blank"; }, 300);
+    }, 1500);
+    </script>
+    </body>
+    </html>
+    """
+
   /// A second of a quiet tone, as a WAV file: 8 kHz, 8 bits, one channel.
   public static func tone(seconds: Int = 3) -> Data {
     let rate = 8000

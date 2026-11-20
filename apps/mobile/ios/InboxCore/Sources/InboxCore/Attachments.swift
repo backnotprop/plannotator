@@ -163,6 +163,13 @@ public final class AttachmentCache: @unchecked Sendable {
 
   public func contains(_ key: String) -> Bool { lock.withLock { index[key] != nil } }
 
+  /// The kept files whose keys start with `prefix` (one file's versions: `att_…@`), as they stand.
+  public func entries(prefix: String) -> [(key: String, size: Int64, opened: Date)] {
+    guard let folder else { return [] }
+    let found = lock.withLock { index.filter { $0.key.hasPrefix(prefix) } }
+    return found.filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0.value.file).path) }.map { ($0.key, $0.value.size, $0.value.opened) }
+  }
+
   /// The kept file for a key, as it stands: nothing written and not marked opened (a row asking whether a file is
   /// kept has not opened it).
   public func kept(_ key: String) -> URL? {

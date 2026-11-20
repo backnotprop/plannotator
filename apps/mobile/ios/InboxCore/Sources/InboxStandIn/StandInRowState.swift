@@ -43,6 +43,9 @@ struct StandInState {
   var byteReads = 0
   /// Files that change after each byte read, as a log an agent appends to does, this many times more.
   var churn: [String: Int] = [:]
+  /// A file that changes right after the computer next says how a thread's files stand: the agent edits it after
+  /// the phone last asked.
+  var changeAfterRead: (id: String, bytes: Data?)?
 }
 
 extension StandInDoor {
@@ -81,6 +84,8 @@ extension StandInDoor {
   }
   /// The file changes on the computer after it was sent (nil: it is deleted).
   public func changeFile(_ id: String, to bytes: Data?) { state.files[id]?.current = bytes }
+  /// The file changes on the computer right after the next answer about the thread's files.
+  public func changeFileAfterNextRead(_ id: String, to bytes: Data?) { state.changeAfterRead = (id, bytes) }
   /// The file changes after each of the next `times` byte reads.
   public func keepChanging(_ id: String, times: Int) { state.churn[id] = times }
   public func setPartCap(_ bytes: Int) { state.partCap = bytes }
@@ -145,6 +150,10 @@ extension StandInDoor {
       let id = ThreadID(parts[1])
       guard threads.contains(where: { $0.threadId == id }) else { return refuse(404, "thread_not_found", "No thread \(id.rawValue).") }
       let states = state.files.values.filter { $0.thread == id }.sorted { $0.record.id < $1.record.id }.map(attachmentState)
+      if let change = state.changeAfterRead {
+        state.changeAfterRead = nil
+        state.files[change.id]?.current = change.bytes
+      }
       return encode(200, DoorThreadAttachmentsAnswer(serverSession: session, attachments: states, inlineImages: []))
     }
     if parts.count == 3, parts[0] == "attachments", ["image", "video", "audio", "download"].contains(parts[2]) {

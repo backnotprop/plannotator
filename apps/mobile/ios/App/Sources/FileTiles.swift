@@ -116,31 +116,94 @@ struct FileThumb: View {
   }
 
   private func load() async {
-    guard let url = try? await session.openAttachment(item) else { return }
+    guard let opened = try? await session.openHeld(item) else { return }
     let pixels = side * scale * 2
-    picture = await Task.detached { Pictures.small(url, pixels: pixels) }.value
-    session.attachmentClosed(item)
+    picture = await Task.detached { Pictures.small(opened.url, pixels: pixels) }.value
+    // Its own hold: never the cover's, which may hold the same file.
+    opened.hold.map(session.release)
   }
 }
 
-/// Reading pictures off the phone's files.
+/// Reading pictures off the phone's files: always through ImageIO's downsampling, off the main thread, and never
+/// more pixels than a phone holds for one page (the pages beside it are alive too).
 enum Pictures {
-  /// A picture made small for a tile, without reading it whole.
-  nonisolated static func small(_ url: URL, pixels: CGFloat) -> UIImage? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: pixels]
-    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary).map { UIImage(cgImage: $0) }
+  /// The most pixels the viewer decodes for one picture: 16 million (64 MB), drawn down to fit when larger.
+  static let viewerPixels: Double = 16_000_000
+  /// The most pixels a tile's picture is made of.
+  static let thumbPixels: Double = 1_000_000
+  /// A file that says it is larger than this (a side over 50,000, or 250 million pixels) is not decoded at all: a
+  /// picture made to exhaust a phone, or a broken header.
+  static let refusedSide: Double = 50_000
+  static let refusedPixels: Double = 250_000_000
+
+  /// A picture's own size in pixels, turned as its file says it is held. Nil when the file is no picture the phone
+  /// reads, or says it is of a size that is refused.
+  nonisolated static func size(_ source: CGImageSource) -> CGSize? {
+    guard CGImageSourceGetCount(source) > 0, let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return nil }
+    let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
+    let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
+    guard width > 0, height > 0, width <= refusedSide, height <= refusedSide, width * height <= refusedPixels else { return nil }
+    let turned = ((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1) >= 5
+    return turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
   }
 
-  /// A picture for the viewer, at its own size in points (a pixel is a point: its numbers are the file's), read down
-  /// only when it is larger than a phone can hold in memory.
-  nonisolated static func whole(_ url: URL) -> UIImage? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 0 else { return nil }
-    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-    let width = (properties?[kCGImagePropertyPixelWidth] as? CGFloat) ?? 0
-    let height = (properties?[kCGImagePropertyPixelHeight] as? CGFloat) ?? 0
-    // Through the thumbnail maker at the picture's own size: it turns a photo the way its file says it is held.
-    guard let image = small(url, pixels: min(max(width, height, 1), 8192)) else { return nil }
-    return UIImage(cgImage: image.cgImage!, scale: 1, orientation: .up)
+  /// Decoded here, at most `longSide` pixels on its long side: the thumbnail maker reads a large file down as it
+  /// decodes it, and turns a photo the way its file says it is held.
+  nonisolated private static func decoded(_ source: CGImageSource, longSide: Double) -> CGImage? {
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true,
+      kCGImageSourceThumbnailMaxPixelSize: max(1, longSide.rounded(.up)),
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+  }
+
+  /// The long side that keeps a picture of `size` within `pixels`.
+  nonisolated static func longSide(_ size: CGSize, within pixels: Double) -> Double {
+    let scale = min(1, (pixels / (size.width * size.height)).squareRoot())
+    return max(size.width, size.height) * scale
+  }
+
+  /// A picture made small for a tile: its short side `pixels` across (it fills a square), within `thumbPixels`.
+  nonisolated static func small(_ url: URL, pixels: CGFloat) -> UIImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let size = size(source) else { return nil }
+    let short = min(size.width, size.height)
+    let wanted = max(size.width, size.height) * min(1, Double(pixels) / short)
+    return decoded(source, longSide: min(wanted, longSide(size, within: thumbPixels))).map { UIImage(cgImage: $0) }
+  }
+
+  /// A picture for the viewer, and its own size in pixels: the viewer lays it out at that size in points (a pixel is
+  /// a point: a place on it is a place in the file), drawing a larger picture from fewer pixels.
+  nonisolated static func whole(_ url: URL) -> (image: UIImage, pixels: CGSize)? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let size = size(source), let image = decoded(source, longSide: longSide(size, within: viewerPixels)) else { return nil }
+    return (UIImage(cgImage: image, scale: 1, orientation: .up), size)
+  }
+
+  /// The picture file's own type, for the pasteboard (`public.png`).
+  nonisolated static func type(_ url: URL) -> String? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceGetType(source) as String?
+  }
+}
+
+/// More's copies, read off the main thread.
+enum Copy {
+  /// The picture's own bytes, as its own type: nothing is decoded.
+  static func picture(_ url: URL) async {
+    let read = await Task.detached { (data: try? Data(contentsOf: url, options: .mappedIfSafe), type: Pictures.type(url)) }.value
+    if let data = read.data, let type = read.type {
+      UIPasteboard.general.setData(data, forPasteboardType: type)
+    } else if let file = NSItemProvider(contentsOf: url) {
+      UIPasteboard.general.itemProviders = [file]
+    }
+  }
+
+  /// The file's words; a file that is not UTF-8 text is copied as the file itself.
+  static func words(_ url: URL) async {
+    let words = await Task.detached { try? String(contentsOf: url, encoding: .utf8) }.value
+    if let words {
+      UIPasteboard.general.string = words
+    } else if let file = NSItemProvider(contentsOf: url) {
+      UIPasteboard.general.itemProviders = [file]
+    }
   }
 }

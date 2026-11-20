@@ -4,13 +4,73 @@ import PDFKit
 import SwiftUI
 import WebKit
 
-/// An HTML page an agent attached, as the page itself: in a web view that keeps nothing (no cookies, no storage
-/// kept between openings), with no bridge into the app and no token of the computer's. The page's own script runs,
-/// since a prototype is a page that does things; a link to another site opens in the browser, and nothing else
-/// leaves the page. Its relative pictures and frames are not fetched yet (they come with the page routes).
+/// An HTML page an agent attached, as the page itself, held to the window's policy for a page
+/// (packages/server/inbox-pages.ts `INBOX_PAGE_CSP`): the page's own script runs, since a prototype is a page that
+/// does things, but nothing it does reaches the network, the phone or the app.
+///
+/// - It is served under a scheme of its own (`WebPage.scheme`) with its policy as a response header, which the page
+///   cannot loosen: sandboxed (an opaque origin: no cookies or storage of any site, no forms), script only its own
+///   inline script, no fetch, XHR, WebSocket or beacon, no script, style, font, frame or media from anywhere.
+///   Pictures come from the web over HTTPS, as the window's do.
+/// - A content rule list blocks the same loads again, apart from the page: whatever the page says, a load that is
+///   not the page itself or a picture over HTTPS never starts.
+/// - The web view keeps nothing (a store of its own, gone when it closes), has no bridge into the app and no token
+///   of the computer's, reads no file of the phone's, and never opens a window or asks for the camera, the
+///   microphone or the phone's motion.
+/// - The page never navigates: a link the person taps that leads to a site opens in the browser (only just after a
+///   touch on the page, so a script cannot send them there), and no other link, script or form takes the page away.
+///
+/// Its relative pictures and frames are not fetched yet (they come with the page routes).
 struct WebPage: UIViewRepresentable {
   let url: URL
   let name: String
+
+  /// The page's own scheme: apart from every site and from the phone's files. Only the page is served on it.
+  static let scheme = "plannotator-file"
+  static let address = URL(string: "\(scheme)://page/page.html")!
+
+  /// `INBOX_PAGE_CSP`, with pictures over HTTPS only, and popups allowed by the sandbox only so a link that opens
+  /// in a new window reaches the navigation rules below (no window is ever opened).
+  static let policy = [
+    "sandbox allow-scripts allow-modals allow-popups",
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "frame-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'none'",
+  ].joined(separator: "; ")
+
+  /// Every load blocked, then let through again: the page's own scheme, a picture over HTTPS, and the page's own
+  /// made-up addresses (data:, blob:, about:).
+  static let rules = """
+    [
+      {"trigger": {"url-filter": ".*"}, "action": {"type": "block"}},
+      {"trigger": {"url-filter": "^\(scheme):"}, "action": {"type": "ignore-previous-rules"}},
+      {"trigger": {"url-filter": "^https://", "resource-type": ["image"]}, "action": {"type": "ignore-previous-rules"}},
+      {"trigger": {"url-filter": "^data:"}, "action": {"type": "ignore-previous-rules"}},
+      {"trigger": {"url-filter": "^blob:"}, "action": {"type": "ignore-previous-rules"}},
+      {"trigger": {"url-filter": "^about:"}, "action": {"type": "ignore-previous-rules"}}
+    ]
+    """
+
+  @MainActor private static var compiled: WKContentRuleList?
+
+  /// The rule list, compiled once.
+  @MainActor static func ruleList() async -> WKContentRuleList? {
+    if let compiled { return compiled }
+    let list: WKContentRuleList? = await withCheckedContinuation { done in
+      WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "file-page", encodedContentRuleList: rules) { list, _ in done.resume(returning: list) }
+    }
+    compiled = list
+    return list
+  }
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -19,58 +79,159 @@ struct WebPage: UIViewRepresentable {
     configuration.websiteDataStore = .nonPersistent()
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
     configuration.allowsInlineMediaPlayback = true
+    configuration.setURLSchemeHandler(context.coordinator.server, forURLScheme: Self.scheme)
+    // Its own controller, kept: the rule list goes on it before the page loads. No message handler, no script.
+    configuration.userContentController = context.coordinator.content
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = context.coordinator
+    view.uiDelegate = context.coordinator
     view.allowsLinkPreview = false
-    view.isOpaque = false
-    view.backgroundColor = .clear
-    view.scrollView.backgroundColor = .clear
+    // A page that sets no ground of its own is on white, as a browser draws it: its default ink is black.
+    view.isOpaque = true
+    view.backgroundColor = .white
+    view.scrollView.backgroundColor = .white
     view.accessibilityIdentifier = "file-page"
+    view.addGestureRecognizer(context.coordinator.touches)
     context.coordinator.load(url, in: view)
     return view
   }
 
   func updateUIView(_ view: WKWebView, context: Context) {
-    if context.coordinator.shown != url { context.coordinator.load(url, in: view) }
+    if context.coordinator.server.file != url { context.coordinator.load(url, in: view) }
   }
 
-  final class Coordinator: NSObject, WKNavigationDelegate {
-    var shown: URL?
+  /// Serves the page, and nothing else: any other address on the scheme is not found.
+  final class PageServer: NSObject, WKURLSchemeHandler {
+    var file: URL?
+
+    func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
+      let asked = task.request.url ?? WebPage.address
+      let page = asked.scheme == WebPage.scheme && asked.host == WebPage.address.host && asked.path == WebPage.address.path
+      let bytes = page ? file.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) } : nil
+      let headers = [
+        "Content-Type": bytes == nil ? "text/plain" : "text/html; charset=utf-8", "Content-Security-Policy": WebPage.policy, "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+      ]
+      guard let response = HTTPURLResponse(url: asked, statusCode: bytes == nil ? 404 : 200, httpVersion: "HTTP/1.1", headerFields: headers) else { return task.didFailWithError(URLError(.badURL)) }
+      task.didReceive(response)
+      task.didReceive(bytes ?? Data())
+      task.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
+  }
+
+  /// When the person last touched the page: a link leaves for the browser only just after a touch. Watches, never
+  /// takes a touch from the page.
+  final class TouchWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private(set) var last = Date.distantPast
+
+    override init(target: Any?, action: Selector?) {
+      super.init(target: target, action: action)
+      cancelsTouchesInView = false
+      delaysTouchesBegan = false
+      delaysTouchesEnded = false
+      delegate = self
+    }
+
+    var recent: Bool { Date().timeIntervalSince(last) < 1 }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) { last = Date() }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { last = Date() }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+      last = Date()
+      state = .failed
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+  }
+
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    let server = PageServer()
+    let content = WKUserContentController()
+    let touches = TouchWatch(target: nil, action: nil)
 
     func load(_ url: URL, in view: WKWebView) {
-      shown = url
-      // As a string with no address of its own: the page is no file on the phone and no page of any site, so it
-      // can read neither.
-      let html = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-      view.loadHTMLString(html, baseURL: nil)
+      server.file = url
+      Task { @MainActor in
+        // No rule list, no page: the page is never shown without both of its walls.
+        guard let rules = await WebPage.ruleList() else { return }
+        content.removeAllContentRuleLists()
+        content.add(rules)
+        view.load(URLRequest(url: WebPage.address))
+      }
+    }
+
+    /// The page itself (a place on it, or the page again).
+    private func isPage(_ target: URL?) -> Bool {
+      guard let target else { return false }
+      return target.scheme == WebPage.scheme && target.host == WebPage.address.host && target.path == WebPage.address.path
+    }
+
+    /// A link the person just tapped, to a site: to the browser. Nothing else leaves.
+    private func leave(_ action: WKNavigationAction) {
+      guard action.navigationType == .linkActivated || action.targetFrame == nil, touches.recent, let target = action.request.url, ["http", "https"].contains(target.scheme?.lowercased() ?? "") else { return }
+      UIApplication.shared.open(target)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
-      guard action.navigationType == .linkActivated || action.navigationType == .formSubmitted else { return decisionHandler(.allow) }
-      // A place on the same page.
-      if let target = action.request.url, target.scheme == "about" { return decisionHandler(.allow) }
-      if action.navigationType == .linkActivated, let target = action.request.url, ["http", "https"].contains(target.scheme?.lowercased() ?? "") { UIApplication.shared.open(target) }
+      if let frame = action.targetFrame, !frame.isMainFrame {
+        // A frame of the page's own (its policy frames nothing from elsewhere).
+        let scheme = action.request.url?.scheme?.lowercased() ?? ""
+        return decisionHandler([WebPage.scheme, "about", "data", "blob"].contains(scheme) ? .allow : .cancel)
+      }
+      if action.targetFrame != nil, isPage(action.request.url) { return decisionHandler(.allow) }
+      // Anything else would put another page under the file's own name: never.
+      leave(action)
       decisionHandler(.cancel)
+    }
+
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+      leave(action)
+      return nil
+    }
+
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void) {
+      decisionHandler(.deny)
+    }
+
+    func webView(_ webView: WKWebView, requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void) {
+      decisionHandler(.deny)
     }
   }
 }
 
 /// A video or a recording, in the system's player. Read from the phone's own copy, so it plays, seeks and plays
-/// again with the computer away.
+/// again with the computer away. One the system cannot play (a WebM, an Ogg) is a file to share.
 struct PlayerPage: View {
-  let url: URL
+  let session: InboxSession
   let item: AttachmentItem
+  let url: URL
+  /// The page on screen: one swiped away stops.
+  let current: Bool
+  @State private var playable: Bool?
 
   var body: some View {
-    ZStack {
-      Color.black.ignoresSafeArea()
-      PlayerView(url: url)
+    Group {
+      switch playable {
+      case true?:
+        ZStack {
+          Color.black.ignoresSafeArea()
+          PlayerView(url: url, current: current)
+        }
+      case false?:
+        FileCard(session: session, item: item, url: url, note: PhoneWords.fileNotShown(item.name))
+      case nil:
+        Waiting()
+      }
     }
+    .task(id: url) { playable = (try? await AVURLAsset(url: url).load(.isPlayable)) ?? false }
   }
 }
 
 struct PlayerView: UIViewControllerRepresentable {
   let url: URL
+  let current: Bool
 
   func makeUIViewController(context: Context) -> AVPlayerViewController {
     let controller = AVPlayerViewController()
@@ -82,6 +243,7 @@ struct PlayerView: UIViewControllerRepresentable {
 
   func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
     if (controller.player?.currentItem?.asset as? AVURLAsset)?.url != url { controller.player = AVPlayer(url: url) }
+    if !current { controller.player?.pause() }
   }
 
   static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: ()) { controller.player?.pause() }

@@ -9,6 +9,14 @@ struct FileBook {
   var open: [AttachmentID: [(version: AttachmentVersion, key: String)]] = [:]
 }
 
+/// One viewer's hold on a file's bytes, from `openHeld`: while it is held, room is never made with those bytes.
+/// Released once, with `release`, whatever version the file opens in by then.
+public struct AttachmentHold: Hashable, Sendable {
+  public let file: AttachmentID
+  public let version: AttachmentVersion
+  let key: String
+}
+
 /// Whether a file's bytes can be opened now.
 public enum AttachmentAvailability: Hashable, Sendable {
   /// Kept on the phone: it opens with or without the computer.
@@ -76,7 +84,8 @@ extension InboxSession {
   }
 
   /// The cache's key for one version of a file: its id and the hash of those bytes, so a changed file is a new entry.
-  static func cacheKey(_ item: AttachmentItem, _ version: AttachmentVersion) -> String {
+  /// Two opens of a file show the same bytes only when their keys are the same.
+  public static func cacheKey(_ item: AttachmentItem, _ version: AttachmentVersion) -> String {
     switch version {
     case .sent: return "\(item.id.rawValue)@\(item.sentSha256)"
     case .current: return "\(item.id.rawValue)@\(item.current?.sha256 ?? (item.changedSinceSent == false ? item.sentSha256 : "current"))"
@@ -103,13 +112,41 @@ extension InboxSession {
   /// against the hash the computer named. Cancelling the calling task stops the fetch; the next one resumes it.
   /// The file stays kept while it is open: call `attachmentClosed` when the viewer closes.
   public func openAttachment(_ item: AttachmentItem, version: AttachmentVersion? = nil, progress: @Sendable @escaping (Int64, Int64?) -> Void = { _, _ in }) async throws -> URL {
+    try await openHeld(item, version: version, progress: progress).url
+  }
+
+  /// `openAttachment`, with the hold it took: a viewer that may open a file twice at once (a version asked while
+  /// another comes) releases exactly its own with `release`.
+  public func openHeld(_ item: AttachmentItem, version: AttachmentVersion? = nil, progress: @Sendable @escaping (Int64, Int64?) -> Void = { _, _ in }) async throws -> (url: URL, hold: AttachmentHold?) {
     let version = version ?? item.opens
     let url = try await fetchAttachment(item, version: version, progress: progress)
-    if let bytes, let key = keptKey(item, version: version) {
-      bytes.hold(key)
-      files.open[item.id, default: []].append((version, key))
-    }
-    return url
+    guard let bytes, let key = keptKey(item, version: version) else { return (url, nil) }
+    bytes.hold(key)
+    files.open[item.id, default: []].append((version, key))
+    return (url, AttachmentHold(file: item.id, version: version, key: key))
+  }
+
+  /// Release one hold from `openHeld`.
+  public func release(_ hold: AttachmentHold) {
+    guard var opened = files.open[hold.file], let index = opened.lastIndex(where: { $0.version == hold.version && $0.key == hold.key }) else { return }
+    opened.remove(at: index)
+    bytes?.release(hold.key)
+    files.open[hold.file] = opened.isEmpty ? nil : opened
+  }
+
+  /// The file as this phone last read it, when the computer has not said how it stands since the app started (so
+  /// it opens as sent) and the phone keeps no sent copy but does keep a later version: the item with that version
+  /// as its current one, changed since sent. A file read before a relaunch then opens with the computer away, and
+  /// says it is not the sent version.
+  public func lastKept(_ item: AttachmentItem) -> AttachmentItem? {
+    guard item.changedSinceSent == nil, item.unavailable == nil, let bytes, keptKey(item, version: .sent) == nil else { return nil }
+    let prefix = "\(item.id.rawValue)@"
+    let sent = Self.cacheKey(item, .sent)
+    guard let last = bytes.entries(prefix: prefix).filter({ $0.key != sent }).max(by: { $0.opened < $1.opened }) else { return nil }
+    var kept = item
+    kept.changedSinceSent = true
+    kept.current = InboxAttachmentStateCurrent(sha256: String(last.key.dropFirst(prefix.count)), size: last.size, mtime: "")
+    return kept
   }
 
   /// The viewer of a file opened with `openAttachment` closed: room can be made with it again. `version`: the one

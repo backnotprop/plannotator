@@ -4,6 +4,9 @@ import SwiftUI
 
 /// One file's bytes for its viewer: fetched through the session (from the phone's own copy when it has one), then
 /// given the file's own name, since the system's viewers and the share sheet read a file's kind from its name.
+///
+/// Opens can overlap (a version asked while another comes, a changed file's new hash): only the latest one lands,
+/// and every other lets go of what it took.
 @MainActor
 @Observable
 final class FileLoad {
@@ -12,6 +15,8 @@ final class FileLoad {
     case ready(URL)
     /// Not kept on the phone, and the computer does not answer.
     case away
+    /// Larger than the phone fetches: trying again cannot help.
+    case tooLarge
     case failed(String)
   }
 
@@ -20,44 +25,69 @@ final class FileLoad {
   private(set) var progress: Double?
   /// The version the person asked for; nil is the one the file opens with.
   var asked: AttachmentVersion?
-  @ObservationIgnored private var held: (item: AttachmentItem, version: AttachmentVersion, folder: URL)?
+  /// What is on screen: the bytes' cache key, the hold on them, and the folder that gives them the file's name.
+  @ObservationIgnored private var held: (key: String, hold: AttachmentHold?, folder: URL)?
+  /// Moves with each open and each close: an open that comes back after a newer one began lands nothing.
+  @ObservationIgnored private var generation = 0
 
-  func shows(_ item: AttachmentItem) -> AttachmentVersion { asked ?? item.opens }
+  /// The file and the version that open: the one asked for, else the one the file opens with; but a file the
+  /// computer has not spoken of since the app started, whose sent version this phone does not keep, opens as this
+  /// phone last read it while the computer is away (`lastKept`: it says it changed since sent).
+  func target(_ item: AttachmentItem, session: InboxSession) -> (item: AttachmentItem, version: AttachmentVersion) {
+    if asked != .sent, item.changedSinceSent == nil, session.availability(item, version: .sent) == .notKept, let kept = session.lastKept(item) { return (kept, .current) }
+    return (item, asked ?? item.opens)
+  }
 
   func open(_ item: AttachmentItem, session: InboxSession) async {
-    let version = shows(item)
-    if let held, held.version == version, held.item.id == item.id, case .ready = phase { return }
+    let (target, version) = target(item, session: session)
+    let key = InboxSession.cacheKey(target, version)
+    // The same bytes are on screen already (a changed file has another key: its hash is in it).
+    if let held, held.key == key, case .ready = phase { return }
     close(session)
+    let mine = generation
     phase = .waiting
     progress = nil
+    let opened: (url: URL, hold: AttachmentHold?)
     do {
-      let kept = try await session.openAttachment(item, version: version) { [weak self] got, total in
+      opened = try await session.openHeld(target, version: version) { [weak self] got, total in
         guard let total, total > 0 else { return }
-        Task { @MainActor in self?.progress = Double(got) / Double(total) }
+        Task { @MainActor in if self?.generation == mine { self?.progress = Double(got) / Double(total) } }
       }
-      let folder = FileManager.default.temporaryDirectory.appendingPathComponent("open-files/\(UUID().uuidString)", isDirectory: true)
-      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-      let named = folder.appendingPathComponent(item.name.replacingOccurrences(of: "/", with: "_"))
-      // A second name for the same bytes: nothing is copied.
-      do { try FileManager.default.linkItem(at: kept, to: named) } catch { try FileManager.default.copyItem(at: kept, to: named) }
-      held = (item, version, folder)
-      phase = .ready(named)
-    } catch AttachmentError.notKept {
-      phase = .away
-    } catch AttachmentError.fetch(.tooLarge) {
-      phase = .failed(PhoneWords.fileTooLarge(item.name))
-    } catch AttachmentError.unavailable(let words) {
-      phase = .failed(words)
-    } catch is CancellationError {
-      phase = .waiting
     } catch {
-      phase = .failed(PhoneWords.fileNotShown(item.name))
+      guard mine == generation else { return }
+      switch error {
+      case AttachmentError.notKept: phase = .away
+      case AttachmentError.fetch(.tooLarge): phase = .tooLarge
+      case AttachmentError.unavailable(let words): phase = .failed(words)
+      case is CancellationError: phase = .waiting
+      default: phase = .failed(PhoneWords.fileNotShown(item.name))
+      }
+      return
     }
+    guard mine == generation else {
+      opened.hold.map(session.release)
+      return
+    }
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("open-files/\(UUID().uuidString)", isDirectory: true)
+    let named = folder.appendingPathComponent(FileFacts.localName(item.name))
+    do {
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      // A second name for the same bytes: nothing is copied.
+      do { try FileManager.default.linkItem(at: opened.url, to: named) } catch { try FileManager.default.copyItem(at: opened.url, to: named) }
+    } catch {
+      opened.hold.map(session.release)
+      try? FileManager.default.removeItem(at: folder)
+      phase = .failed(PhoneWords.fileNotShown(item.name))
+      return
+    }
+    held = (key, opened.hold, folder)
+    phase = .ready(named)
   }
 
   func close(_ session: InboxSession) {
+    generation += 1
     guard let held else { return }
-    session.attachmentClosed(held.item, version: held.version)
+    held.hold.map(session.release)
     try? FileManager.default.removeItem(at: held.folder)
     self.held = nil
   }
@@ -121,7 +151,7 @@ struct FileCover: View {
         ScrollView(.horizontal) {
           LazyHStack(spacing: 0) {
             ForEach(items) { item in
-              FilePage(session: session, item: item, load: shelf.load(item.id), bars: bars, bare: $bare) { dismiss() }
+              FilePage(session: session, item: item, load: shelf.load(item.id), bars: bars, current: item.id == at, bare: $bare) { dismiss() }
                 .containerRelativeFrame([.horizontal, .vertical])
                 .id(item.id)
             }
@@ -155,9 +185,10 @@ struct FileCover: View {
             Menu {
               ShareLink(item: url) { Label(PhoneWords.share, systemImage: "square.and.arrow.up") }
               if current.kind == .image {
-                Button { UIPasteboard.general.image = UIImage(contentsOfFile: url.path) } label: { Label(PhoneWords.copyImage, systemImage: "square.on.square") }
-              } else if current.isText {
-                Button { UIPasteboard.general.string = try? String(contentsOf: url, encoding: .utf8) } label: { Label(PhoneWords.copyFile, systemImage: "square.on.square") }
+                Button { Task { await Copy.picture(url) } } label: { Label(PhoneWords.copyImage, systemImage: "square.on.square") }
+              } else if current.isText, FileFacts.shown(current.kind, name: current.name, size: Self.size(of: url)) != .card {
+                // Past 16 MB a text file is not words to paste: Share hands the file on.
+                Button { Task { await Copy.words(url) } } label: { Label(PhoneWords.copyFile, systemImage: "square.on.square") }
               }
             } label: {
               Image(systemName: "ellipsis")
@@ -170,6 +201,8 @@ struct FileCover: View {
       .toolbarVisibility(bare && onDark ? .hidden : .visible, for: .navigationBar)
       .toolbarColorScheme(onDark ? .dark : nil, for: .navigationBar)
     }
+    // The two-finger scrub closes the file, as Done does.
+    .accessibilityAction(.escape) { dismiss() }
     .statusBarHidden(bare && onDark)
     .motion(.fade, value: bare)
     .onChange(of: shown) { _, _ in bare = false }
@@ -178,6 +211,9 @@ struct FileCover: View {
     .task { await session.readAttachments(thread) }
     .onDisappear { shelf.closeAll(session) }
   }
+
+  /// The size of the bytes on screen.
+  static func size(of url: URL) -> Int64 { (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 }.map(Int64.init) ?? 0 }
 
   /// A picture, a video and a recording are shown on black, whatever the phone's appearance.
   static func onDark(_ item: AttachmentItem) -> Bool { [.picture, .player].contains(FileFacts.shown(item.kind, name: item.name, size: item.size)) }
@@ -190,12 +226,14 @@ struct FilePage: View {
   let load: FileLoad
   /// How much of the screen the bars cover, at each edge.
   let bars: EdgeInsets
+  /// The page on screen (the cover lays out the ones beside it too).
+  let current: Bool
   @Binding var bare: Bool
   let close: () -> Void
 
   var body: some View {
-    let version = load.shows(item)
-    let size = version == .sent ? item.size : item.current?.size ?? item.size
+    let (shownItem, version) = load.target(item, session: session)
+    let size = version == .sent ? item.size : shownItem.current?.size ?? item.size
     let shown = FileFacts.shown(item.kind, name: item.name, size: size)
     let onDark = FileCover.onDark(item)
     Group {
@@ -208,6 +246,8 @@ struct FilePage: View {
         }
       case .away:
         Standing(symbol: "wifi.slash", words: PhoneWords.awayNoCopy(session.computer.name), action: PhoneWords.tryAgain) { Task { await load.open(item, session: session) } }
+      case .tooLarge:
+        Standing(symbol: "doc", words: PhoneWords.fileTooLarge(item.name))
       case .failed(let words):
         Standing(symbol: "doc", words: words, action: PhoneWords.tryAgain) { Task { await load.open(item, session: session) } }
       case .ready(let url):
@@ -217,22 +257,23 @@ struct FilePage: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .environment(\.colorScheme, onDark ? .dark : colorScheme)
     .safeAreaInset(edge: .top, spacing: 0) {
-      if !(bare && onDark) { VersionLine(item: item, load: load) }
+      if !(bare && onDark) { VersionLine(item: shownItem, version: version, load: load) }
     }
     // A picture fills the screen and keeps clear of the bars itself; every other page starts under the title bar.
     .safeAreaPadding(.top, bars.top)
     .safeAreaPadding(.bottom, bars.bottom)
-    .task(id: "\(version.rawValue)/\(item.current?.sha256 ?? "")") { await load.open(item, session: session) }
+    // Opened again when another version is asked or the file's hash moves (the agent changed it).
+    .task(id: InboxSession.cacheKey(shownItem, version)) { await load.open(item, session: session) }
   }
 
   @Environment(\.colorScheme) private var colorScheme
 
   @ViewBuilder private func viewer(_ shown: FileFacts.Shown, _ url: URL) -> some View {
     switch shown {
-    case .picture: PicturePage(url: url, item: item, bars: bars, bare: $bare, close: close)
+    case .picture: PicturePage(session: session, url: url, item: item, bars: bars, bare: $bare, close: close)
     case .document, .text, .code: WordsPage(url: url, item: item, shown: shown)
     case .page: WebPage(url: url, name: item.name).ignoresSafeArea(edges: .bottom)
-    case .player: PlayerPage(url: url, item: item)
+    case .player: PlayerPage(session: session, item: item, url: url, current: current)
     case .pdf: PDFPage(url: url).accessibilityIdentifier("file-pdf")
     case .card: FileCard(session: session, item: item, url: url)
     }
@@ -241,13 +282,15 @@ struct FilePage: View {
 
 /// The note over a file that is not what was sent: what is on screen, and the way to the other version.
 struct VersionLine: View {
+  /// The file as it is on screen (`FileLoad.target`) and the version shown.
   let item: AttachmentItem
+  let version: AttachmentVersion
   let load: FileLoad
 
   private var words: (line: String, link: String?, to: AttachmentVersion)? {
     if let unavailable = item.unavailable { return (unavailable.code == .attachmentMissing ? PhoneWords.fileGone : PhoneWords.fileOtherKind, nil, .sent) }
-    guard item.changedSinceSent == true else { return nil }
-    return load.shows(item) == .sent ? (PhoneWords.fileShowingSent, PhoneWords.viewCurrent, .current) : (PhoneWords.fileChanged, PhoneWords.viewSent, .sent)
+    guard item.changedSinceSent == true || load.asked == .sent else { return nil }
+    return version == .sent ? (PhoneWords.fileShowingSent, PhoneWords.viewCurrent, .current) : (PhoneWords.fileChanged, PhoneWords.viewSent, .sent)
   }
 
   var body: some View {
@@ -274,12 +317,14 @@ struct VersionLine: View {
   }
 }
 
-/// A file the phone does not draw (a zip, a text file past 16 MB, a picture in a format the phone cannot read): what
+/// A file the phone does not draw (a zip, a text file past 16 MB, a picture or a recording the phone cannot read): what
 /// it is, and the share sheet, which is how a phone saves a file or hands it to another app.
 struct FileCard: View {
   let session: InboxSession
   let item: AttachmentItem
   let url: URL
+  /// Why a file of a kind the phone draws is not drawn ("… does not show here.").
+  var note: String?
 
   var body: some View {
     VStack(spacing: Space.card) {
@@ -287,6 +332,7 @@ struct FileCard: View {
       VStack(spacing: Space.tight) {
         Text(item.name).font(TextRole.heading).foregroundStyle(Token.foreground).multilineTextAlignment(.center)
         Text(FileFacts.detail(item)).font(TextRole.secondary).monospacedDigit().foregroundStyle(Token.mutedForeground).multilineTextAlignment(.center)
+        if let note { Text(note).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.center) }
       }
       ShareLink(item: url) { Text(PhoneWords.share).actionGround(.filled, height: Size.wideButton) }
         .buttonStyle(PressStyle())

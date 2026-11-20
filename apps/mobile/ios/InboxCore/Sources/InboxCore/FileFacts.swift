@@ -144,6 +144,19 @@ public enum FileFacts {
     }
   }
 
+  /// The name a file is given in a folder of its own on the phone, where the system's viewers and the share sheet
+  /// read its kind from it: its own name, unless no file can have it ("", ".", "..", a slash, more than 255 bytes),
+  /// then "file" with the name's own extension, or the name cut to fit before its extension.
+  public static func localName(_ name: String) -> String {
+    let name = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\u{0}", with: "")
+    let suffix = ext(name).flatMap { $0.utf8.count <= 32 ? ".\($0)" : nil } ?? ""
+    if name.isEmpty || name == "." || name == ".." { return "file" }
+    guard name.utf8.count > 255 else { return name }
+    var base = String(name.dropLast(suffix.count))
+    while !base.isEmpty, base.utf8.count + suffix.utf8.count > 255 { base.removeLast() }
+    return base.isEmpty ? "file" + suffix : base + suffix
+  }
+
   /// A code file's lines: a line break at the end of the file ends its last line, it does not start another.
   public static func lines(_ text: String) -> [Substring] {
     var lines = text.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)

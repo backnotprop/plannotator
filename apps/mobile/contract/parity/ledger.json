@@ -7240,11 +7240,10 @@
         "file-05"
       ],
       "mobile": "v1",
-      "why": "native Markdown document",
+      "why": "native Markdown document; building: raw HTML blocks, display math and link reference definitions are not ported yet, so a `<details>` block is drawn as its own text and the block ids after one are not the window's",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L51, L69",
       "ios": {
-        "state": "done",
-        "fingerprint": "e3b0c44298fc1c14"
+        "state": "building"
       }
     },
     {
@@ -7301,11 +7300,10 @@
         "file-06"
       ],
       "mobile": "v1",
-      "why": "sandboxed web view block",
+      "why": "sandboxed web view block; building: the page's relative pictures and frames are not fetched yet (they come with the page routes)",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L20-L22, L27, L54",
       "ios": {
-        "state": "done",
-        "fingerprint": "3b785b5ea2402007"
+        "state": "building"
       }
     },
     {
@@ -7690,11 +7688,10 @@
         "file-03"
       ],
       "mobile": "rethink",
-      "why": "position pill in the toolbar plus swipe; no bar under the file",
+      "why": "position pill in the toolbar plus swipe; no bar under the file; building: the cover leaves the pictures in a message's words out and steps through a message's attached files first, not the window's order",
       "source": "SCOPE D. Stepping between files, and picture choices; F L51",
       "ios": {
-        "state": "done",
-        "fingerprint": "e3b0c44298fc1c14"
+        "state": "building"
       }
     },
     {

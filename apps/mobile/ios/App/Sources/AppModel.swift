@@ -353,6 +353,15 @@ struct LaunchOptions {
           await session.open(StandInData.files)
           await session.readAttachments(StandInData.files)
           if let plan = session.attachments(StandInData.files).first, (try? await session.openAttachment(plan)) != nil { session.attachmentClosed(plan) }
+        case "filechangesnext":
+          // The agent edits the plan after the phone last asked how the thread's files stand.
+          if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
+            await door.changeFileAfterNextRead(plan.id, to: Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
+          }
+        case "filespage":
+          // A page that tries to leave: to the network, to a site, to the phone's dialer.
+          _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.leavingPageName, kind: .html, bytes: Data(StandInData.leavingPage.utf8))
+          await session.refresh()
         case "filechanged", "filegone":
           // The plan changes on the computer after it was sent, or is deleted there.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {

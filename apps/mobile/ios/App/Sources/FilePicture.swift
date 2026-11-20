@@ -6,26 +6,30 @@ import UIKit
 /// wide picture: whole first). Two taps go in and back out; one tap puts the bars away; pulled down while whole, it
 /// closes.
 struct PicturePage: View {
+  let session: InboxSession
   let url: URL
   let item: AttachmentItem
   let bars: EdgeInsets
   @Binding var bare: Bool
   let close: () -> Void
-  @State private var picture: UIImage?
+  @State private var picture: (image: UIImage, pixels: CGSize)?
   @State private var unreadable = false
+  /// VoiceOver keeps the bars: with them away there would be nothing to move to but the picture.
+  @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
   var body: some View {
     Group {
       if let picture {
-        PictureView(picture: picture, name: item.name, bars: UIEdgeInsets(top: bars.top, left: bars.leading, bottom: bars.bottom, right: bars.trailing)) { bare.toggle() } pulledDown: { close() }
-          .ignoresSafeArea()
-      } else if unreadable {
-        // A picture in a format the phone cannot read (an SVG): its mark and name; the bar's menu still shares it.
-        VStack(spacing: Space.step) {
-          Image(systemName: "photo").font(.system(size: 34)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
-          Text(PhoneWords.fileNotShown(item.name)).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.center)
+        PictureView(picture: picture.image, pixels: picture.pixels, name: item.name, bars: UIEdgeInsets(top: bars.top, left: bars.leading, bottom: bars.bottom, right: bars.trailing)) {
+          if !voiceOver { bare.toggle() }
+        } pulledDown: {
+          close()
         }
-        .padding(Space.section)
+        .ignoresSafeArea()
+      } else if unreadable {
+        // A picture in a format the phone cannot read (an SVG), or one that says it is too large to decode: what
+        // it is, and Share.
+        FileCard(session: session, item: item, url: url, note: PhoneWords.fileNotShown(item.name))
       } else {
         Waiting()
       }
@@ -37,11 +41,14 @@ struct PicturePage: View {
       picture = read
       unreadable = read == nil
     }
+    .onChange(of: voiceOver) { _, on in if on { bare = false } }
   }
 }
 
 struct PictureView: UIViewRepresentable {
   let picture: UIImage
+  /// The picture's own size in pixels (the image may be drawn from fewer).
+  let pixels: CGSize
   let name: String
   let bars: UIEdgeInsets
   let tapped: () -> Void
@@ -50,14 +57,14 @@ struct PictureView: UIViewRepresentable {
   func makeUIView(context: Context) -> PictureScroll {
     let view = PictureScroll()
     view.bars = bars
-    view.show(picture, name: name)
+    view.show(picture, pixels: pixels, name: name)
     view.tapped = tapped
     view.pulledDown = pulledDown
     return view
   }
 
   func updateUIView(_ view: PictureScroll, context: Context) {
-    if view.picture.image !== picture { view.show(picture, name: name) }
+    if view.picture.image !== picture { view.show(picture, pixels: pixels, name: name) }
     if view.bars != bars { view.bars = bars }
     view.tapped = tapped
     view.pulledDown = pulledDown
@@ -107,14 +114,18 @@ final class PictureScroll: UIScrollView, UIScrollViewDelegate {
 
   @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-  func show(_ image: UIImage, name: String) {
+  /// The picture's own size in pixels, which is the content's size in points.
+  private var pixels = CGSize.zero
+
+  func show(_ image: UIImage, pixels: CGSize, name: String) {
     picture.image = image
     picture.accessibilityLabel = name
+    self.pixels = pixels
     zoomScale = 1
-    content.frame = CGRect(origin: .zero, size: image.size)
+    content.frame = CGRect(origin: .zero, size: pixels)
     picture.frame = content.bounds
     marks.frame = content.bounds
-    contentSize = image.size
+    contentSize = pixels
     fitted = .zero
     setNeedsLayout()
   }
@@ -125,10 +136,10 @@ final class PictureScroll: UIScrollView, UIScrollViewDelegate {
   override func layoutSubviews() {
     super.layoutSubviews()
     let size = room.size
-    guard size.width > 0, size.height > 0, let image = picture.image, size != fitted else { return centre() }
+    guard size.width > 0, size.height > 0, picture.image != nil, size != fitted else { return centre() }
     let wasWhole = fitted == .zero || zoomScale <= whole * 1.01
     fitted = size
-    whole = PictureFit.whole(width: image.size.width, height: image.size.height, roomWidth: size.width, roomHeight: size.height)
+    whole = PictureFit.whole(width: pixels.width, height: pixels.height, roomWidth: size.width, roomHeight: size.height)
     minimumZoomScale = whole
     maximumZoomScale = PictureFit.most(whole: whole)
     if wasWhole { zoomScale = whole }
@@ -166,14 +177,16 @@ final class PictureScroll: UIScrollView, UIScrollViewDelegate {
   @objc private func singleTapped() { tapped() }
 
   @objc private func doubleTapped(_ tap: UITapGestureRecognizer) {
-    guard let image = picture.image else { return }
+    guard picture.image != nil else { return }
     let size = room.size
-    let target = PictureFit.doubleTap(from: zoomScale, whole: whole, width: image.size.width, height: image.size.height, roomWidth: size.width, roomHeight: size.height)
-    guard target > whole * 1.01 else { return setZoomScale(whole, animated: true) }
+    // Reduce Motion: the picture is at its new size at once.
+    let animated = !UIAccessibility.isReduceMotionEnabled
+    let target = PictureFit.doubleTap(from: zoomScale, whole: whole, width: pixels.width, height: pixels.height, roomWidth: size.width, roomHeight: size.height)
+    guard target > whole * 1.01 else { return setZoomScale(whole, animated: animated) }
     // In, about the place tapped.
     let point = tap.location(in: content)
     let width = size.width / target
     let height = size.height / target
-    zoom(to: CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height), animated: true)
+    zoom(to: CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height), animated: animated)
   }
 }
