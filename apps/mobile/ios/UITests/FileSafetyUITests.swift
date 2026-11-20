@@ -37,7 +37,7 @@ final class FileSafetyUITests: XCTestCase {
   }
 
   private func words(_ app: XCUIApplication, _ text: String) -> XCUIElement {
-    app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    app.descendants(matching: .any).matching(NSPredicate(format: "(elementType == %d OR elementType == %d) AND (label CONTAINS %@ OR value CONTAINS %@)", XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.textView.rawValue, text, text)).firstMatch
   }
 
   @MainActor
@@ -71,7 +71,7 @@ final class FileSafetyUITests: XCTestCase {
   }
 
   @MainActor
-  func testATaskBoxIsReadAsTickedOrNot() {
+  func testATaskBoxIsReadAsTickedOrNotAndNotAsASwitch() {
     let app = launch(stage: "files")
     tile(app, "retry-plan.md").tap()
     let done = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Reproduce on a sleeping laptop'")).firstMatch
@@ -79,9 +79,11 @@ final class FileSafetyUITests: XCTestCase {
     if !done.waitForExistence(timeout: 20) { app.swipeUp() }
     XCTAssertTrue(done.waitForExistence(timeout: 10))
     XCTAssertTrue(open.exists)
-    // A toggle's state, as the system gives it to VoiceOver: on, off.
-    XCTAssertEqual(done.value as? String, "1", "a ticked box is read as ticked: \(done.debugDescription)")
-    XCTAssertEqual(open.value as? String, "0", "an open one as not ticked, not as plain text: \(open.debugDescription)")
+    // Its state is read as a value. It is not a switch: nothing tells the person to toggle what cannot be toggled.
+    XCTAssertEqual(done.value as? String, "Checked", "a ticked box is read as ticked: \(done.debugDescription)")
+    XCTAssertEqual(open.value as? String, "Not checked", "an open one as not ticked, not as plain text: \(open.debugDescription)")
+    XCTAssertNotEqual(done.elementType, .switch, "not a switch")
+    XCTAssertNotEqual(done.elementType, .toggle)
     XCTAssertFalse(done.label.contains("Done"), "not the Done button's word")
   }
 }

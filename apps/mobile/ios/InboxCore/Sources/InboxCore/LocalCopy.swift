@@ -83,7 +83,9 @@ public struct LocalCopy: Sendable {
 /// restarts the door sees one intent.
 public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   /// `state`: a thread action (ThreadAct): archive, read, star, snooze, priority and their reverses.
-  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state }
+  /// `annotation`: a comment on a file, saved or changed; `annotationRemove`: one removed; `markup`: a drawing on a
+  /// picture, kept on the computer before the comment that names it (FileCommentsSession.swift).
+  public enum Kind: String, Codable, Sendable { case pick, reply, seen, action, state, annotation, annotationRemove, markup }
 
   /// The idempotency key.
   public var id: String
@@ -112,4 +114,6 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   /// The reverses an Undo made of an act whose answer never came carry that act's key. The first to meet the
   /// computer's row says whether the act was taken: if there is nothing to take back, none of them goes.
   public var undoes: String?
+  /// A comment's write: the comment's id. A drawing's: the hash that names it.
+  public var subject: String?
 }

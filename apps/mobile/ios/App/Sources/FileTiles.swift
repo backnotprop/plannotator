@@ -7,6 +7,9 @@ import SwiftUI
 struct FileOpen: Identifiable, Hashable {
   let thread: ThreadID
   let file: AttachmentID
+  /// A comment to open at, and whether its words are to be changed at once.
+  var seek: FileComment?
+  var edits = false
   var id: String { file.rawValue }
 }
 

@@ -17,13 +17,31 @@ import WebKit
 /// - The web view keeps nothing (a store of its own, gone when it closes), has no bridge into the app and no token
 ///   of the computer's, reads no file of the phone's, and never opens a window or asks for the camera, the
 ///   microphone or the phone's motion.
-/// - The page never navigates: a link the person taps that leads to a site opens in the browser (only just after a
-///   touch on the page, so a script cannot send them there), and no other link, script or form takes the page away.
+/// - The page never navigates: a link the person taps that leads to a site opens in the browser (only just after
+///   their own tap or key, `PageGate`, so a script cannot send them there, nor a finger that only scrolls), and no
+///   other link, script or form takes the page away.
+///
+/// Comments (`PagePins`) add one thing to this, and nothing to the page's own reach: a script of the app's, in a
+/// content world of its own that the page's scripts cannot see or call, which answers one question when the app
+/// asks it ("what is under this point?") and, while the person is commenting, keeps their touches from the page's
+/// own handlers. It is put there by the app, not loaded by the page, so the page's policy does not cover it and is
+/// not loosened for it. No message handler is added: the answer comes back as the result of the app's own call, so
+/// there is still nothing the page can post to.
 ///
 /// Its relative pictures and frames are not fetched yet (they come with the page routes).
 struct WebPage: UIViewRepresentable {
   let url: URL
   let name: String
+  /// What floats over the page's foot (the comment field): the page scrolls its own end clear of it.
+  var foot: CGFloat = 0
+  /// The person is commenting: a touch pins a spot, and nothing of the page answers it.
+  var commenting = false
+  /// The pins on the page: the waiting comments', and the one being written (no comment yet).
+  var pins: [PagePins.Pin] = []
+  var sought: CommentDesk.Sought?
+  /// A spot was pinned: what the page's element there is.
+  var pinned: (PinnedElement) -> Void = { _ in }
+  var opened: (FileComment) -> Void = { _ in }
 
   /// The page's own scheme: apart from every site and from the phone's files. Only the page is served on it.
   static let scheme = "plannotator-file"
@@ -80,8 +98,10 @@ struct WebPage: UIViewRepresentable {
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
     configuration.allowsInlineMediaPlayback = true
     configuration.setURLSchemeHandler(context.coordinator.server, forURLScheme: Self.scheme)
-    // Its own controller, kept: the rule list goes on it before the page loads. No message handler, no script.
+    // Its own controller, kept: the rule list goes on it before the page loads. No message handler; one script of
+    // the app's own, in its own world (`PagePins`).
     configuration.userContentController = context.coordinator.content
+    context.coordinator.content.addUserScript(WKUserScript(source: PagePins.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: PagePins.world))
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.navigationDelegate = context.coordinator
     view.uiDelegate = context.coordinator
@@ -92,12 +112,42 @@ struct WebPage: UIViewRepresentable {
     view.scrollView.backgroundColor = .white
     view.accessibilityIdentifier = "file-page"
     view.addGestureRecognizer(context.coordinator.touches)
+    context.coordinator.pinning.attach(to: view)
+    context.coordinator.ground = view.observe(\.underPageBackgroundColor, options: [.initial, .new]) { view, _ in
+      Task { @MainActor in
+        guard let ground = view.underPageBackgroundColor else { return }
+        view.backgroundColor = ground
+        view.scrollView.backgroundColor = ground
+      }
+    }
+    let pinning = context.coordinator.pinning
+    context.coordinator.touches.tapped = { [weak pinning] touch in pinning?.tapped(touch) }
     context.coordinator.load(url, in: view)
+    apply(to: view, context.coordinator)
     return view
   }
 
   func updateUIView(_ view: WKWebView, context: Context) {
     if context.coordinator.server.file != url { context.coordinator.load(url, in: view) }
+    apply(to: view, context.coordinator)
+  }
+
+  private func apply(to view: WKWebView, _ coordinator: Coordinator) {
+    // The page runs under the comment field; its own end scrolls clear of it.
+    let room = foot
+    if abs(view.scrollView.contentInset.bottom - room) > 0.5 {
+      view.scrollView.contentInset.bottom = room
+      view.scrollView.verticalScrollIndicatorInsets.bottom = room
+    }
+    coordinator.commenting = commenting
+    coordinator.pinning.pinned = pinned
+    coordinator.pinning.opened = opened
+    coordinator.pinning.set(commenting: commenting, in: view)
+    coordinator.pinning.show(pins, in: view)
+    if let sought, sought.turn != coordinator.pinning.soughtTurn {
+      coordinator.pinning.soughtTurn = sought.turn
+      coordinator.pinning.look(at: sought.comment, in: view)
+    }
   }
 
   /// Serves the page, and nothing else: any other address on the scheme is not found.
@@ -120,10 +170,12 @@ struct WebPage: UIViewRepresentable {
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
   }
 
-  /// When the person last touched the page: a link leaves for the browser only just after a touch. Watches, never
-  /// takes a touch from the page.
+  /// Watches the person's touches and keys on the page for `PageGate` (a link leaves for the browser only just
+  /// after their own tap or key). Watches, never takes a touch from the page.
   final class TouchWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
-    private(set) var last = Date.distantPast
+    private(set) var gate = PageGate()
+    /// A tap ended, on this view of the page (the page takes it too, unless its comments' script stops it).
+    var tapped: (UITouch) -> Void = { _ in }
 
     override init(target: Any?, action: Selector?) {
       super.init(target: target, action: action)
@@ -133,15 +185,38 @@ struct WebPage: UIViewRepresentable {
       delegate = self
     }
 
-    var recent: Bool { Date().timeIntervalSince(last) < 1 }
+    /// VoiceOver and Switch Control activate a link with no touch on the page. (A hardware keyboard, Full Keyboard
+    /// Access included, is seen by its key: `pressesBegan`.)
+    static var assistive: Bool { UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) { last = Date() }
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { last = Date() }
+    var recent: Bool { gate.allows(at: Date(), assistive: Self.assistive) }
+
+    private func place(_ touches: Set<UITouch>) -> CGPoint { touches.first?.location(in: nil) ?? .zero }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+      // A second finger is not a tap.
+      if (event.allTouches?.count ?? 1) > 1 { return gate.touchCancelled() }
+      let at = place(touches)
+      gate.touchBegan(at: Date(), x: at.x, y: at.y)
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+      let at = place(touches)
+      gate.touchMoved(x: at.x, y: at.y)
+    }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-      last = Date()
+      let at = place(touches)
+      if gate.touchEnded(at: Date(), x: at.x, y: at.y), let touch = touches.first { tapped(touch) }
       state = .failed
     }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+      gate.touchCancelled()
+      state = .failed
+    }
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
+      // Return, Enter or Space on a hardware keyboard activates the link that has the focus.
+      let activates: Set<UIKeyboardHIDUsage> = [.keyboardReturnOrEnter, .keypadEnter, .keyboardSpacebar]
+      if presses.contains(where: { $0.key.map { activates.contains($0.keyCode) } ?? false }) { gate.keyPressed(at: Date()) }
+    }
 
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
   }
@@ -150,6 +225,11 @@ struct WebPage: UIViewRepresentable {
     let server = PageServer()
     let content = WKUserContentController()
     let touches = TouchWatch(target: nil, action: nil)
+    let pinning = PagePins()
+    /// Past the page's own end (the room under the comment field) is the page's own ground, not white.
+    var ground: NSKeyValueObservation?
+    /// While the person comments, no link leaves: a touch is a pin.
+    var commenting = false
 
     func load(_ url: URL, in view: WKWebView) {
       server.file = url
@@ -170,8 +250,12 @@ struct WebPage: UIViewRepresentable {
 
     /// A link the person just tapped, to a site: to the browser. Nothing else leaves.
     private func leave(_ action: WKNavigationAction) {
-      guard action.navigationType == .linkActivated || action.targetFrame == nil, touches.recent, let target = action.request.url, ["http", "https"].contains(target.scheme?.lowercased() ?? "") else { return }
+      guard !commenting, action.navigationType == .linkActivated || action.targetFrame == nil, touches.recent, let target = action.request.url, ["http", "https"].contains(target.scheme?.lowercased() ?? "") else { return }
       UIApplication.shared.open(target)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+      pinning.loaded(webView)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {

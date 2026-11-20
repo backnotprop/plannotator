@@ -388,6 +388,32 @@ enum PhoneWords {
   static let done = "Done"
   static let selected = "Selected"
 
+  // MARK: Comments on files (FLOWS 7; every one is the window's own word)
+  /// packages/inbox/components/ImageAttachmentView.tsx, HtmlPageComment.tsx: the button that keeps a comment.
+  static let comment = "Comment"
+  /// packages/inbox/components/AttachmentPane.tsx:264, the field over a selection or a line.
+  static let commentOnThis = "Comment on this…"
+  /// packages/inbox/components/ImageAttachmentView.tsx:370.
+  static let commentOnImage = "Comment on this image…"
+  /// The same field once something is drawn on the picture.
+  static let whatShouldChange = "What should change?"
+  /// packages/inbox/components/HtmlPageComment.tsx:384.
+  static let commentOnPage = "Comment on this page…"
+  /// packages/inbox/components/ImageAttachmentView.tsx:393.
+  static let markUp = "Mark up"
+  /// apps/mobile/contract/flows/07-attachment.md: the page's two modes ("Comment" and "Use the page").
+  static let useThePage = "Use the page"
+  /// packages/inbox/components/AnnotationsChip.tsx: "Edit the comment", "No comments", and Remove.
+  static let editComment = "Edit the comment"
+  static let remove = "Remove"
+  static let noComments = "No comments"
+  /// packages/inbox/components/Thread.tsx: a comment the computer would not keep.
+  static let commentNotSaved = "The comment was not saved."
+
+  /// VoiceOver's state for a task box in a document (it cannot be ticked here).
+  static let taskTicked = "Checked"
+  static let taskOpen = "Not checked"
+
   // MARK: Files (FLOWS 7; the window's file viewer)
   /// apps/mobile/contract/flows/07-attachment.md: "File 2 of 4".
   static func filePlace(_ at: Int, of count: Int) -> String { "File \(at) of \(count)" }

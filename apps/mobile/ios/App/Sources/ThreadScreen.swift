@@ -68,6 +68,8 @@ struct ThreadScreen: View {
   @State private var pageWidth: CGFloat = 0
   /// The file open over the thread.
   @State private var opened: FileOpen?
+  /// The list of comments on files that wait for the Send.
+  @State private var commentsOpen = false
 
   private var model: ThreadModel? { session.thread(id) }
   private var title: String {
@@ -130,7 +132,15 @@ struct ThreadScreen: View {
     }
     // A file opens over the thread, full screen; closed, the thread is where it was.
     .environment(\.openFile) { item in opened = FileOpen(thread: id, file: item.id) }
-    .fullScreenCover(item: $opened) { open in FileCover(session: session, thread: open.thread, start: open.file) }
+    .fullScreenCover(item: $opened) { open in FileCover(session: session, thread: open.thread, start: open.file, seek: open.seek, edits: open.edits) }
+    // A comment in the list opens its file, at the comment.
+    .sheet(isPresented: $commentsOpen) {
+      CommentsSheet(session: session, thread: id) { comment in
+        opened = FileOpen(thread: id, file: comment.attachment, seek: comment)
+      } edit: { comment in
+        opened = FileOpen(thread: id, file: comment.attachment, seek: comment, edits: true)
+      }
+    }
     .toastHost(actions, lift: foot)
     // Mark unread closes the thread: left open, its next look would read it again.
     .onChange(of: actions.closes) { _, _ in dismiss() }
@@ -203,7 +213,8 @@ struct ThreadScreen: View {
           // A reply that waits for the computer is the person's own message already, said to be waiting.
           ForEach(held) { write in
             Divider().overlay(Token.border).padding(.vertical, Space.card)
-            HeldReply(words: write.words ?? "", to: MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread), computer: session.computer.name)
+            // A reply that is only comments on files says how many it carries.
+            HeldReply(words: (write.words ?? "").isEmpty ? CountWords.comments(session.heldComments(write)) : write.words ?? "", to: MessageView.addressee(of: write.message.map { MessageID($0) }, in: thread), computer: session.computer.name)
           }
         }
         .padding(.top, Space.step)
@@ -377,6 +388,8 @@ struct ThreadScreen: View {
         let next = jumped.flatMap { open.firstIndex(of: $0) }.map { open[($0 + 1) % open.count] } ?? open[0]
         jumped = next
         withAnimation { show(next, proxy) }
+      } comments: {
+        commentsOpen = true
       }
       .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       }

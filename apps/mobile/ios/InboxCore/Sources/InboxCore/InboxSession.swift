@@ -141,6 +141,11 @@ public final class InboxSession {
   var draftBook = DraftBook()
   /// Attachments: what the computer says of each, and the bytes kept on the phone (AttachmentsSession.swift).
   var files = FileBook()
+  /// Comments on files that wait for a Send (FileCommentsSession.swift).
+  var commentBook = CommentBook()
+  /// Whether the phone splits a file's text into the window's blocks, by the bytes' cache key: read once, and never
+  /// a reason to draw again.
+  @ObservationIgnored var commentSplits: [String: Bool] = [:]
   let bytes: AttachmentCache?
   /// What time it is, and how the session waits for a time (a snooze's end).
   let clock: SessionClock
@@ -189,6 +194,7 @@ public final class InboxSession {
       notices[ThreadID(thread)] = back.notice
     }
     loadDrafts()
+    loadComments()
     armWake()
     await refresh()
   }
@@ -472,7 +478,8 @@ public final class InboxSession {
 
   /// A reply's words that wait for the computer, oldest first: drawn in the thread as the person's own message.
   public func heldReplies(_ id: ThreadID) -> [HeldWrite] {
-    held.filter { $0.kind == .reply && $0.thread == id.rawValue && !($0.words ?? "").isEmpty }
+    // A reply with words, or one that carries comments on files and no words: both are the person's, waiting.
+    held.filter { $0.kind == .reply && $0.thread == id.rawValue && (!($0.words ?? "").isEmpty || heldComments($0) > 0) }
   }
 
   func keepGivenBack() {
@@ -542,6 +549,12 @@ public final class InboxSession {
       break
     case .state:
       noteRefusedAct(write, notice)
+    case .annotation, .markup:
+      // The comment stays on the phone with the reason; a Send made after it does not go on without it.
+      commentRefused(write, notice)
+      pullBackSends(after: write, notice: notice)
+    case .annotationRemove:
+      commentRefused(write, notice)
     }
   }
 
@@ -676,7 +689,14 @@ public final class InboxSession {
     quietly(quiet) { _ = book.inFlight.insert(write.id) }
     defer { quietly(quiet) { _ = book.inFlight.remove(write.id) } }
     do {
-      let answer = try await client.resend(method: method, path: write.path, body: write.body)
+      let answer: DoorAnswerBytes
+      if write.kind == .markup {
+        // A drawing is its own bytes, its key in the query (the door's raw-body rule).
+        guard let drawing = write.subject.flatMap(drawing) else { throw DoorFailure.notOffered(route: write.route) }
+        answer = try await client.sendBytes(path: write.path, query: [URLQueryItem(name: "idempotency_key", value: write.id)], body: drawing, type: "image/png")
+      } else {
+        answer = try await client.resend(method: method, path: write.path, body: write.body)
+      }
       if removed { return false }
       quietly(quiet) {
         apply(write, answer)
@@ -754,11 +774,18 @@ public final class InboxSession {
       threads[thread] = model
       copy.saveThread(model)
     case .reply:
+      commentsSent(write)
       if let result = try? JSONDecoder().decode(ReplyResult.self, from: answer.body), let read = result.threadRead { take(read) }
     case .seen:
       break
     case .state:
       landAct(write, answer)
+    case .annotation:
+      commentSaved(write, answer)
+    case .annotationRemove:
+      commentRemoved(write)
+    case .markup:
+      drawingKept(write, answer)
     }
   }
 
@@ -778,7 +805,7 @@ public final class InboxSession {
         }
         body.questions = questions
         held[index].body = encode(body)
-      case .seen, .action, .state:
+      case .seen, .action, .state, .annotation, .annotationRemove, .markup:
         break
       }
     }
@@ -833,7 +860,7 @@ public final class InboxSession {
 
   private func encode<Body: Encodable>(_ body: Body) -> Data { (try? JSONEncoder().encode(body)) ?? Data("{}".utf8) }
 
-  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil, shown: ShownState? = nil, waited: Bool = false, undoes: String? = nil) {
+  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil, shown: ShownState? = nil, waited: Bool = false, undoes: String? = nil, subject: String? = nil) {
     // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
     // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers, and
     // has waited if it turns out not to (markWaited).
@@ -841,6 +868,7 @@ public final class InboxSession {
     var write = HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: clock.now(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil, act: act)
     write.shown = shown
     write.undoes = undoes
+    write.subject = subject
     hold(write)
   }
 
@@ -932,7 +960,9 @@ public final class InboxSession {
     guard let model = thread(id), !sending.contains(id), !SendPlan.needsComputer(model.thread), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
     let targets = SendPlan.targets(in: model.thread)
-    guard !targets.isEmpty, !text.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
+    // The comments on files that wait: they ride the last reply, with the words (the window's `routeSendAnnotations`).
+    let riding = commentsToSend(id)
+    guard !targets.isEmpty, !text.isEmpty || !riding.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     sending.insert(id)
     defer { sending.remove(id) }
     notices[id] = nil
@@ -940,7 +970,7 @@ public final class InboxSession {
     keepGivenBack()
     // A reply with neither an answer nor words is never made: the Inbox refuses one ("write a reply or send at
     // least one answer"). So with no words, the agent that wrote last and asked nothing gets no reply.
-    let carrying = targets.enumerated().filter { index, target in !target.questions.isEmpty || !target.actions.isEmpty || (index == targets.count - 1 && !text.isEmpty) }.map(\.element)
+    let carrying = targets.enumerated().filter { index, target in !target.questions.isEmpty || !target.actions.isEmpty || (index == targets.count - 1 && (!text.isEmpty || !riding.isEmpty)) }.map(\.element)
     for (index, target) in carrying.enumerated() {
       let last = index == carrying.count - 1
       let key = UUID().uuidString
@@ -949,6 +979,10 @@ public final class InboxSession {
       var body = DoorReplyBody(idempotencyKey: key, words: words, questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
       // The computer's draft these words came from goes when they are sent (the door forwards `clear_draft`).
       if !words.isEmpty, let clearDraft { body.clearDraft = clearDraft }
+      if last, !riding.isEmpty {
+        body.feedback = feedback(riding, thread: id)
+        body.annotationIds = riding.map(\.id)
+      }
       enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: words.isEmpty ? nil : words)
     }
     // The words are in the outbox now: the thread's draft on the phone is spent.
@@ -961,7 +995,7 @@ public final class InboxSession {
   /// Whether Send has anything to carry for this thread.
   public func canSend(thread id: ThreadID, words: String) -> Bool {
     guard standing == .ok, let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil, !SendPlan.needsComputer(model.thread) else { return false }
-    return SendPlan.hasSomethingToSend(thread: model.thread, words: words) && !SendPlan.targets(in: model.thread).isEmpty
+    return (SendPlan.hasSomethingToSend(thread: model.thread, words: words) || !commentsToSend(id).isEmpty) && !SendPlan.targets(in: model.thread).isEmpty
   }
 
   public func canAnswer() -> Bool { standing == .ok && (skew == nil || offers(DoorRoutes.postMessagePicks)) }

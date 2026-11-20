@@ -67,8 +67,15 @@ extension InboxSession {
   public func readAttachments(_ thread: ThreadID) async {
     if client == nil { _ = await connect() }
     guard let client, offers(DoorRoutes.getThreadAttachments) else { return }
-    if let read = try? await client.get(Door.getThreadAttachments(thread: thread), as: DoorThreadAttachmentsAnswer.self) {
+    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return }
+    if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: answer.body) {
       files.states[thread] = read.attachments + (read.inlineImages ?? [])
+      // The comments that wait for a Send, the window's among them (an older Inbox's door lists none).
+      if let waiting = read.annotations { takeComments(thread, from: waiting) }
+    } else if case .object(var fields)? = try? JSONDecoder().decode(JSONValue.self, from: answer.body) {
+      // A comment this app cannot read never hides the files: they are read without the comments.
+      fields["annotations"] = nil
+      if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: JSONEncoder().encode(JSONValue.object(fields))) { files.states[thread] = read.attachments + (read.inlineImages ?? []) }
     }
   }
 
@@ -147,6 +154,15 @@ extension InboxSession {
     kept.changedSinceSent = true
     kept.current = InboxAttachmentStateCurrent(sha256: String(last.key.dropFirst(prefix.count)), size: last.size, mtime: "")
     return kept
+  }
+
+  /// What a file opens as: the version asked for, else the one the file opens with; but a file whose sent version
+  /// this phone does not keep, which the computer has not spoken of since the app started, opens as this phone last
+  /// read it (`lastKept`). `keptCopy` says so: that copy is neither the sent version nor known to be the file as it
+  /// is now, so the viewer says only that the computer is away, and offers no other version.
+  public func opening(_ item: AttachmentItem, asked: AttachmentVersion?) -> (item: AttachmentItem, version: AttachmentVersion, keptCopy: Bool) {
+    if asked != .sent, item.changedSinceSent == nil, availability(item, version: .sent) == .notKept, let kept = lastKept(item) { return (kept, .current, true) }
+    return (item, asked ?? item.opens, false)
   }
 
   /// The viewer of a file opened with `openAttachment` closed: room can be made with it again. `version`: the one

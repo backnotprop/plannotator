@@ -353,6 +353,20 @@ struct LaunchOptions {
           await session.open(StandInData.files)
           await session.readAttachments(StandInData.files)
           if let plan = session.attachments(StandInData.files).first, (try? await session.openAttachment(plan)) != nil { session.attachmentClosed(plan) }
+        case "commented":
+          // The person read the plan and the code and left comments on both: they wait for the next Send.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          let files = session.attachments(StandInData.files)
+          for file in files.prefix(2) { if (try? await session.openAttachment(file)) != nil { session.attachmentClosed(file) } }
+          if let plan = files.first(where: { $0.name == StandInData.planName }) {
+            session.addComment(thread: StandInData.files, item: plan, version: .current, annotation: FileComments.words(block: "block-3", start: 4, quote: "client drops its socket", comment: "Say which client: the phone's or the desktop's."))
+            session.addComment(thread: StandInData.files, item: plan, version: .current, annotation: FileComments.words(block: "block-7", start: 0, quote: "Stop after ten minutes and say so.", comment: "Say it where? A banner, or the status line."))
+          }
+          if let code = files.first(where: { $0.name == StandInData.codeName }) {
+            session.addComment(thread: StandInData.files, item: code, version: .current, annotation: FileComments.lines(lineStart: 3, lineEnd: 4, code: "const CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000", comment: "Lower both on a metered connection?"))
+          }
+          await session.deliverHeld(thread: StandInData.files)
         case "filechangesnext":
           // The agent edits the plan after the phone last asked how the thread's files stand.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
