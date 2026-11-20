@@ -8,7 +8,7 @@
   --shadow:0 0 0 1px rgba(24,30,70,.1),0 1px 2px rgba(24,30,70,.08),0 24px 48px -20px rgba(24,30,70,.28);
   --star:rgba(52,60,120,.24); --bv:#ddd5ff; --ba:#ffe4ae; --bg:#c4efe5;
   --serif:"Iowan Old Style","Charter","Georgia",serif;
-  --sans:"Inter",-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --sans:"Spaces Inter",-apple-system,"Helvetica Neue",Arial,sans-serif;
 }
 html:not(.light) .loop path{stroke-width:1.3px}
 html:not(.light) .beams polygon{fill:rgba(255,255,255,.06)}
@@ -135,13 +135,16 @@ mark.g{--mk:var(--green)}
   .sheet .ph{display:block}
   .sheet.plan .q{margin-bottom:10px}
 }
+/* The page's own variable Inter, under its own name, so weights such as 550 and 650 render as designed.
+   The rest of the site keeps the Inter it loads from Google Fonts. */
+@font-face{font-family:"Spaces Inter";src:url(/fonts/inter-variable/inter-latin-wght-normal.woff2) format("woff2");font-weight:100 900;font-display:block}
 @font-face{font-family:"Geist Mono Variable";src:url(/fonts/geist-mono/geist-mono-latin-wght-normal.woff2) format("woff2");font-weight:100 900;font-display:block}
 :root{
   --ground:#f0f3fa;--ink:#14162b;--soft:#5b607a;
   --violet:#b7a4ff;--amber:#ffc65e;--green:#79dcc5;--mk-ink:#14162b;
   --btn:#14162b;--btn-ink:#ffffff;
   --serif:"Iowan Old Style","Charter","Georgia",serif;
-  --sans:"Inter",-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --sans:"Spaces Inter",-apple-system,"Helvetica Neue",Arial,sans-serif;
   --mono:"Geist Mono Variable",ui-monospace,"SF Mono",Menlo,monospace;
   --V:#5c46dc;--rule2:#5c46dc;
   --line:rgba(20,22,43,.09);--seam:rgba(20,22,43,.36);--edge:rgba(20,26,66,.24);--stage:#e1e6f3;
@@ -270,7 +273,7 @@ html .stg.one .shf.shf{padding:0}
 .shf{
   --shf-width:1312px;--shf-gutter:clamp(16px,4.4vw,64px);--shf-gap:clamp(64px,6.7vw,96px);--shf-radius:24px;
   --shf-panel:#e6eaf5;--shf-raised:#ffffff;--shf-text:#14162b;--shf-muted:#5b607a;--shf-quiet:#868ba3;--shf-rule:rgba(20,26,66,.14);--shf-iris:#6363ef;
-  --shf-head:"Inter",-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --shf-head:"Spaces Inter",-apple-system,"Helvetica Neue",Arial,sans-serif;
   --shf-serif:"Iowan Old Style","Charter","Georgia",serif;
   --shf-mono:"Geist Mono Variable",ui-monospace,"SF Mono",Menlo,monospace;
   position:relative;box-sizing:border-box;width:min(var(--shf-width),calc(100% - 2*var(--shf-gutter)));margin:var(--shf-gap) auto 0;padding:48px;overflow:hidden;border-radius:var(--shf-radius);background:var(--shf-panel)
