@@ -35,7 +35,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
 import { POWER_UP_PERIOD_MS, POWER_UP_ROW, powerUpCss } from '../semDiff/powerUpCss';
-import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
+import type { SemanticFileState } from '../semDiff/semanticFileState';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
@@ -2182,15 +2182,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
-  const heldLengthRef = useRef<((keep?: boolean) => number) | null>(null);
+  const heldLengthRef = useRef<((keep?: boolean) => { px: number; height: number } | null) | null>(null);
   const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
     const root = scrollRef.current;
     const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
     const node = itemNodeRef.current.get(itemId);
     const most = page ? Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight) : 0;
-    if (root && page && page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most) {
-      const height = page.scrollHeight;
-      let px = (heldLengthRef.current?.(true) ?? 0) + most;
+    const held = heldLengthRef.current?.(true) ?? null;
+    if (root && page && (held || (page.scrollTop > 0 && page.scrollHeight - page.scrollTop - page.clientHeight < most))) {
+      const height = held?.height ?? page.scrollHeight;
+      let px = (held?.px ?? 0) + most;
       root.style.paddingBottom = `${px}px`;
       let settled = false;
       let calm = 0;
@@ -2204,7 +2205,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           frame = requestAnimationFrame(settle);
           return;
         }
-        px = Math.min(px, Math.max(0, height - natural));
+        px = Math.min(px, Math.max(0, Math.max(height, page.scrollTop + page.clientHeight) - natural));
         root.style.paddingBottom = px > 0 ? `${px}px` : '';
         settled = true;
       };
@@ -2225,7 +2226,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
         if (!keep) root.style.paddingBottom = '';
         heldLengthRef.current = null;
-        return px;
+        return settled && px === 0 ? null : { px, height };
       };
     }
     showSemantic(itemId, on);
@@ -4140,10 +4141,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           </button>
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
-        semanticNote={(() => {
+        semantic={(() => {
           const semState = semStateRef.current.get(item.id);
           if (!semState || !semanticEnabledRef.current) return undefined;
-          return <SemanticFileNote state={semState} onToggle={() => toggleInPlace(item.id, semState.status !== 'semantic')} />;
+          return { state: semState, onToggle: () => toggleInPlace(item.id, semState.status !== 'semantic') };
         })()}
         />
         {/* A collapsed generated file must read as an intentional fold, never
