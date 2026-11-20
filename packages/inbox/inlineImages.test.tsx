@@ -328,3 +328,23 @@ test.skipIf(!hasDom)('a picture choice carries the size recorded when the messag
   expect(tiles[1]!.hasAttribute('data-question-tile-shape')).toBe(false);
   expect(host!.querySelector('[data-question-tiles]')!.getAttribute('data-question-tiles-shape')).toBe('mixed');
 });
+
+test.skipIf(!hasDom)('a sound or a video the body shows is a native player in place, and a picture stays a picture', async () => {
+  await render(['![B](design/b.png)', '', 'Listen: ![Voice note](notes/hi.m4a)', '', '![Demo](rec/demo.MOV)', '', '![](rec/untitled.webm)'].join('\n'), [B], []);
+  expect(host!.querySelector('[data-inline-media][src$="untitled.webm"]')!.getAttribute('aria-label')).toBe('untitled.webm');
+  const url = (path: string) => `/api/inbox/messages/${ID}/image?path=${encodeURIComponent(path)}`;
+  expect(host!.querySelector<HTMLImageElement>('img[alt="B"]')!.getAttribute('src')).toBe(url('design/b.png'));
+  expect(host!.querySelectorAll('img')).toHaveLength(1);
+  const audio = host!.querySelector<HTMLAudioElement>('audio')!;
+  expect(audio.getAttribute('src')).toBe(url('notes/hi.m4a'));
+  expect(audio.getAttribute('aria-label')).toBe('Voice note');
+  expect(audio.hasAttribute('controls')).toBe(true);
+  expect(audio.getAttribute('preload')).toBe('metadata');
+  expect(audio.hasAttribute('autoplay')).toBe(false);
+  const video = host!.querySelector<HTMLVideoElement>('video')!;
+  expect(video.getAttribute('src')).toBe(url('rec/demo.MOV'));
+  expect(video.getAttribute('aria-label')).toBe('Demo');
+  expect(video.hasAttribute('playsinline')).toBe(true);
+  expect(video.getAttribute('preload')).toBe('metadata');
+  expect(video.hasAttribute('autoplay')).toBe(false);
+});

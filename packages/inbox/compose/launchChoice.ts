@@ -1,15 +1,6 @@
 import { launchChoiceLine, launchEffortsFor, type InboxLaunchChoice, type InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
 
-/** An effort, or an OpenCode agent, the CLI no longer lists is dropped. */
-export function initialLaunchChoice(choices: InboxLaunchChoices | null | undefined): InboxLaunchChoice {
-  const last = choices?.last;
-  if (!choices || !last) return {};
-  return {
-    ...(last.model ? { model: last.model } : {}),
-    ...(last.effort && launchEffortsFor(choices, last.model).includes(last.effort) ? { effort: last.effort } : {}),
-    ...(last.primary_agent && choices.primary_agents?.includes(last.primary_agent) ? { primary_agent: last.primary_agent } : {}),
-  };
-}
+export { initialLaunchChoice } from '@plannotator/core/inbox-launch-choice';
 
 export function pickLaunchModel(choice: InboxLaunchChoice, choices: InboxLaunchChoices, model: string | null): InboxLaunchChoice {
   const next: InboxLaunchChoice = model ? { model } : {};
