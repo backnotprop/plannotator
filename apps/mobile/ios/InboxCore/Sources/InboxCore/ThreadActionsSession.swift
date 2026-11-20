@@ -24,6 +24,8 @@ struct ActionBook {
   /// A list read this pump already made for a waited act.
   var checked = false
   var needsListRead = false
+  /// An act on several rows is under way: the list is read once after all of them, not after each.
+  var batching = false
   /// The Archived group as last read (`GET threads/archived`) and how many it asks for.
   var archived: ArchivedModel?
   var archivedLimit = UndoOffer.archivedFirst
@@ -115,8 +117,11 @@ extension InboxSession {
     guard var model = list else { return nil }
     let acts = drawnActs
     guard !acts.isEmpty else { return model }
+    // By thread, once: an act on a thousand rows draws in one pass over the list, not one per act.
+    let byThread = Dictionary(grouping: acts, by: \.thread)
     func draw(_ row: InboxListRow) -> InboxListRow {
-      acts.filter { $0.thread == row.threadId.rawValue }.reduce(row) { row, write in write.act!.drawn(row, at: SnoozeRules.iso(write.madeAt)) }
+      guard let own = byThread[row.threadId.rawValue] else { return row }
+      return own.reduce(row) { row, write in write.act!.drawn(row, at: SnoozeRules.iso(write.madeAt)) }
     }
     for index in model.sections.indices { model.sections[index].threads = model.sections[index].threads.map(draw) }
     model.snoozed = model.snoozed?.map(draw)
@@ -144,8 +149,11 @@ extension InboxSession {
   /// A thread's row as the list draws it, else as its last read carried it.
   public func row(_ thread: ThreadID, now: Date? = nil) -> InboxListRow? {
     let now = now ?? clock.now()
-    if let row = listView(now: now)?.row(thread) { return row }
-    if let row = archivedRows().first(where: { $0.threadId == thread }) { return row }
+    _ = book.tick
+    // The row itself, as it stands by `now`: found without drawing the whole list (its groups and their order),
+    // since every act asks for one row.
+    if let row = shownList()?.everyRow.first(where: { $0.threadId == thread }) { return ListRules.asOf(row, now: now) }
+    if book.archived != nil, let row = archivedRows().first(where: { $0.threadId == thread }) { return row }
     guard let row = threads[thread]?.row else { return nil }
     let acts = drawnActs.filter { $0.thread == thread.rawValue }
     return ListRules.asOf(acts.reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) }, now: now)
@@ -161,12 +169,19 @@ extension InboxSession {
     if book.archived != nil, let model = list {
       let listed = Dictionary(model.everyRow.map { ($0.threadId, $0) }, uniquingKeysWith: { first, _ in first })
       rows = rows.map { listed[$0.threadId] ?? $0 }
-      for row in listed.values where ListRules.archived(row) && !rows.contains(where: { $0.threadId == row.threadId }) { rows.append(row) }
+      let known = Set(rows.map(\.threadId))
+      for row in listed.values where ListRules.archived(row) && !known.contains(row.threadId) { rows.append(row) }
     }
-    rows = rows.map { row in acts.filter { $0.thread == row.threadId.rawValue }.reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) } }
+    let byThread = Dictionary(grouping: acts, by: \.thread)
+    rows = rows.map { row in (byThread[row.threadId.rawValue] ?? []).reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) } }
     // A thread archived here and not read back yet joins the group.
-    for write in acts where write.act == .archive && !rows.contains(where: { $0.threadId.rawValue == write.thread }) {
-      if let row = list.flatMap({ ListView.of($0).row(ThreadID(write.thread)) }) { rows.append(write.act!.drawn(row, at: SnoozeRules.iso(write.madeAt))) }
+    var have = Set(rows.map(\.threadId.rawValue))
+    let archivedHere = acts.filter { $0.act == .archive && !have.contains($0.thread) }
+    if !archivedHere.isEmpty, let model = list {
+      let listed = Dictionary(model.everyRow.map { ($0.threadId.rawValue, $0) }, uniquingKeysWith: { first, _ in first })
+      for write in archivedHere where have.insert(write.thread).inserted {
+        if let row = listed[write.thread] { rows.append((byThread[write.thread] ?? []).reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) }) }
+      }
     }
     return ListRules.archivedRows(rows)
   }

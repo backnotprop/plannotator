@@ -82,6 +82,7 @@ extension InboxSession {
     book.undoGroup = nil
     var offers: [UndoOffer] = []
     var starred: [ThreadID] = []
+    book.batching = true
     for thread in threads {
       book.undo = nil
       switch await self.act(act, on: thread, undo: true) {
@@ -100,6 +101,7 @@ extension InboxSession {
       }
     }
     book.undo = nil
+    await endBatch()
     if !offers.isEmpty || !starred.isEmpty {
       // One clock for all of them, started when the last one was made.
       let expires = clock.now().addingTimeInterval(UndoOffer.seconds)
@@ -120,13 +122,23 @@ extension InboxSession {
     guard now < group.expires, book.undoGroup?.id == group.id else { return false }
     book.undoGroup = nil
     var all = true
+    book.batching = true
     for offer in group.offers {
       book.undo = offer
       if !(await undo(offer, now: now)) { all = false }
     }
     for thread in group.starred where await self.act(.unstar, on: thread, undo: false) == .refused { all = false }
     book.undo = nil
+    await endBatch()
     return all
+  }
+
+  /// The acts on several rows are made: the list is read once, so each row comes from the computer.
+  private func endBatch() async {
+    book.batching = false
+    guard book.needsListRead, client != nil else { return }
+    book.needsListRead = false
+    await readList()
   }
 
   /// Forget the Undo on offer (its toast was dismissed, or another took its place).

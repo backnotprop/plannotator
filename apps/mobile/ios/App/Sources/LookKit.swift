@@ -29,8 +29,9 @@ struct RowStyle: ButtonStyle {
   }
 }
 
-/// What a swipe or a menu item does, by role: its colour is the role's, never a colour of its own. Archive and
-/// mark read are quiet, an answer is the accent, a thing destroyed is red.
+/// What a swipe or a menu item does, by role: its colour is the role's, never a colour of its own. Mark read and
+/// Mark unread are quiet; Archive and Unarchive are the accent, as the window's Archive swipe is (the person's own
+/// doing, and it can be undone); a thing destroyed is red.
 enum RowAction {
   case quiet, act, destructive
 

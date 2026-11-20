@@ -288,3 +288,26 @@ extension RowActionTests {
     XCTAssertEqual(session.archivedRows().map(\.threadId), [StandInData.bumps])
   }
 }
+
+extension RowActionTests {
+  /// A thousand rows archived at once: every one goes, the list is drawn without them, and one Undo is offered.
+  func testAThousandRowsAreArchivedAtOnce() async throws {
+    let door = StandInDoor()
+    let threads = StandInData.manyThreads(now: Date(), count: 1000)
+    for thread in threads { await door.add(thread) }
+    let session = await pairedSession(door: door)
+    await session.start()
+    let ids = threads.map(\.threadId)
+    let started = Date()
+    let outcome = await session.actMany(.archive, on: ids)
+    let took = Date().timeIntervalSince(started)
+    XCTAssertEqual(outcome.made.count, 1000)
+    XCTAssertEqual(outcome.undo?.count, 1000)
+    let view = try XCTUnwrap(session.listView())
+    XCTAssertFalse(view.groups.flatMap(\.threads).contains { ids.contains($0.threadId) })
+    XCTAssertEqual(session.archivedRows().count, 1000)
+    // Drawn in one pass over the list: far from the minutes a pass per act took.
+    XCTAssertLessThan(took, 30, "took \(took) s")
+    print("archived 1000 rows in \(took) s")
+  }
+}

@@ -723,7 +723,7 @@ public final class InboxSession {
       if !(await deliver(next)) { break }
     }
     // A thread action landed: the list is read again, so its row comes from the computer.
-    if book.needsListRead, client != nil, !removed {
+    if book.needsListRead, !book.batching, client != nil, !removed {
       book.needsListRead = false
       await readList()
     }

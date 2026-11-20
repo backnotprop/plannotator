@@ -74,12 +74,10 @@ final class RowBreakUITests: XCTestCase {
     assertOnScreen(app.buttons["Star thread"], "the menu", in: app)
     shot("\(prefix)-02-menu")
     app.buttons["Star thread"].tap()
-    XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Starred, Migrate every billing table")).firstMatch.waitForExistence(timeout: 5))
-    // A short swipe leaves the row open on Archive.
+    // A full swipe to the left archives it at once.
     let again = reach(app, "Migrate every billing table, ")
-    again.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.3)).press(forDuration: 0.1, thenDragTo: again.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.3)), withVelocity: .slow, thenHoldForDuration: 0.2)
-    XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 5))
-    app.buttons["Archive"].tap()
+    XCTAssertTrue(again.label.contains("Starred"), again.label)
+    again.swipeLeft(velocity: .fast)
     let undo = app.buttons["Undo"]
     XCTAssertTrue(undo.waitForExistence(timeout: 5))
     assertOnScreen(undo, "Undo", in: app)
@@ -162,7 +160,8 @@ final class RowBreakUITests: XCTestCase {
     shot("break-thousand-02-scrolled")
 
     // Pick every row and archive them at once: one toast counts them, one Undo.
-    let any = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "#")).firstMatch
+    top(app)
+    let any = row(app, "Checkout redesign")
     XCTAssertTrue(any.waitForExistence(timeout: 5))
     any.press(forDuration: 1.0)
     app.buttons["Select"].tap()
