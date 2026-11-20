@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { learnForgejoHosts } from "./forge-refs";
 import { derivePersonThreadSubject, PERSON_THREAD_NAME_COLUMNS, PERSON_THREAD_NAME_WORDS, suggestPersonThreadName } from "./inbox-questions";
 
 /** Display columns as the rule counts them (CJK and emoji two). */
@@ -36,6 +37,11 @@ const TABLE: [string, string][] = [
   ["https://github.com/backnotprop/plannotator/pull/1934", "PR 1934"],
   ["Hey can you check https://github.com/backnotprop/plannotator/pull/1934#issuecomment-123 and tell me what you think", "PR 1934"],
   ["https://github.com/backnotprop/plannotator/issues/12", "Issue 12"],
+  // A Forgejo / Gitea writes a pull request /pulls/<n>: a PR on any host, like GitHub's.
+  ["https://codeberg.org/acme/widgets/pulls/7", "PR 7"],
+  ["https://git.example.test/acme/widgets/pulls/7/files", "PR 7"],
+  ["Can you check https://codeberg.org/acme/widgets/pulls/7#issuecomment-3 please", "PR 7"],
+  ["https://codeberg.org/acme/widgets/issues/12", "Issue 12"],
   ["https://example.com/docs/getting-started", "Getting started"],
   // A bare question, filler, code: nothing good, so nothing invented.
   ["What do you think?", ""],
@@ -104,5 +110,20 @@ describe("suggestPersonThreadName: compose fills the thread's chip with a short 
   test("never throws on anything", () => {
     expect(suggestPersonThreadName(undefined as unknown as string)).toBe("");
     expect(suggestPersonThreadName("‮" + "x".repeat(10_000))).toBe("");
+  });
+});
+
+describe("a Forgejo's issue link is named only on a host the person named (or codeberg.org)", () => {
+  afterEach(() => learnForgejoHosts([]));
+
+  test("an unnamed host's /issues/<n> keeps its page's own words; once named, it is Issue <n>", () => {
+    expect(suggestPersonThreadName("https://git.example.test/acme/widgets/issues/12")).toBe("Issues");
+    learnForgejoHosts(["git.example.test"]);
+    expect(suggestPersonThreadName("https://git.example.test/acme/widgets/issues/12")).toBe("Issue 12");
+  });
+
+  test("a /pulls/<n> link needs no naming, and a page of 2 parts is not one", () => {
+    expect(suggestPersonThreadName("https://git.example.test/acme/widgets/pulls/7")).toBe("PR 7");
+    expect(suggestPersonThreadName("https://example.com/pulls/7")).toBe("Pulls");
   });
 });
