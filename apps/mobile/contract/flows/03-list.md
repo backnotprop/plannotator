@@ -8,7 +8,7 @@ What the person can do:
 
 - **Tap** a row: the thread.
 - **Swipe right**: Mark read (a full swipe does it); on a read row, Mark unread. **Swipe left**: Archive. These are the window's directions.
-- **Press and hold**: the row menu, the window's, as a sheet: Star thread, Add to Priority, Copy thread, Copy link, Copy thread ID, Snooze, Mark read or Mark unread, Move back, Hide pull request, Archive.
+- **Press and hold**: the row menu, the window's items in the window's order, in the system's own menu: Select, Star thread, Add to Priority, Copy thread, Copy link, Copy thread ID, Snooze, Mark read or Mark unread, Move back, Hide pull request, Archive.
 - **Pull down**: read again.
 - **Filter**: the window's list filter: projects, when the thread last changed, agents, pull request states, Not seen, tags and routines.
 - After Mark read, Archive or Snooze, an Undo toast stays 7 seconds. Delete is in Settings, not on a row. Mark read that sets questions aside warns first, with the window's words.
@@ -26,7 +26,7 @@ Differs from the window: no sidebar; the count on the app icon is the window's t
 - [list-05] Coming back from a thread settles the person's own reads and actions; an agent's news still waits behind "N new". (packages/inbox/held.ts:4; packages/inbox/settle.ts:5)
 - [list-06] A tap on a row opens the thread. (packages/inbox/components/InboxList.tsx:1055)
 - [list-07] Swipe right marks read (a long swipe or a flick does it at once); on a read row it marks unread. Swipe left archives. (packages/inbox/rowSwipe.ts:2; packages/inbox/rowSwipe.ts:9)
-- [list-08] Press and hold opens the row menu as a sheet, in the window's order: Star thread, Add to Priority, Copy thread, Copy link, Copy thread ID, Snooze, Mark read or Mark unread, Move back, Hide pull request, Archive. (packages/inbox/rowMenu.ts:50; packages/inbox/components/RowMenu.tsx:105; packages/inbox/components/RowMenu.tsx:70)
+- [list-08] Press and hold opens the row menu, in the window's order: Select, Star thread, Add to Priority, Copy thread, Copy link, Copy thread ID, Snooze, Mark read or Mark unread, Move back, Hide pull request, Archive. phone differs: the system's own menu over the row, where the window draws a sheet from the bottom edge (packages/inbox/rowMenu.ts:50; packages/inbox/components/RowMenu.tsx:105; packages/inbox/components/RowMenu.tsx:70)
 - [list-09] Pull down reads the list again. (packages/inbox/pullRefresh.ts:2; packages/inbox/pullRefresh.ts:70)
 - [list-10] The list's filter is the window's: projects, when the thread last changed (Today, the last 3, 7 or 30 days, a range), agents, pull request states, Not seen, tags and routines. (packages/inbox/listFilter.ts:2; packages/inbox/listFilter.ts:14)
 - [list-11] After Mark read, Archive or Snooze, an Undo toast stays for 7 seconds. (packages/inbox/markRead.ts:16; packages/inbox/App.tsx:2647; packages/inbox/App.tsx:3100; packages/inbox/snoozeWrites.ts:58)

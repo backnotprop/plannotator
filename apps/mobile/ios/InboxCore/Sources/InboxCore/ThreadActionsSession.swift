@@ -156,6 +156,13 @@ extension InboxSession {
   public func archivedRows() -> [InboxListRow] {
     let acts = drawnActs
     var rows = book.archived?.threads ?? ListView.of(list ?? ListModel(serverSession: "", version: "", cursor: 0, projects: [], sections: [])).archived
+    // The list is read more often than the Archived group: a thread it carries is as the list last said it (one
+    // unarchived since the group was read is no longer here; one archived since is).
+    if book.archived != nil, let model = list {
+      let listed = Dictionary(model.everyRow.map { ($0.threadId, $0) }, uniquingKeysWith: { first, _ in first })
+      rows = rows.map { listed[$0.threadId] ?? $0 }
+      for row in listed.values where ListRules.archived(row) && !rows.contains(where: { $0.threadId == row.threadId }) { rows.append(row) }
+    }
     rows = rows.map { row in acts.filter { $0.thread == row.threadId.rawValue }.reduce(row) { $1.act!.drawn($0, at: SnoozeRules.iso($1.madeAt)) } }
     // A thread archived here and not read back yet joins the group.
     for write in acts where write.act == .archive && !rows.contains(where: { $0.threadId.rawValue == write.thread }) {

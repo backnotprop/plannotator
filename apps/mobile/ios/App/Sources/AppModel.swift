@@ -47,6 +47,8 @@ final class AppModel {
   func boot() async {
     defer { booted = true }
     let launch = LaunchOptions()
+    // A test starts with every group of the list at its default.
+    if launch.resetFolds { defaults.removeObject(forKey: "listFolds") }
     computers = (try? credentials.all()) ?? []
     // A removal that was cut short leaves no copy behind.
     if let known = try? credentials.all() { LocalCopy.sweep(root: copyRoot, keeping: known.map(\.id)) }
@@ -232,6 +234,7 @@ struct LaunchOptions {
   var standInFloor: Int? { debug && defaults.object(forKey: "standInFloor") != nil ? defaults.integer(forKey: "standInFloor") : nil }
   var standInRemoved: Bool { debug && defaults.bool(forKey: "standInRemoved") }
   var open: ThreadID? { debug ? defaults.string(forKey: "open").map { ThreadID($0) } : nil }
+  var resetFolds: Bool { debug && defaults.bool(forKey: "resetFolds") }
   var stageName: String? { debug ? defaults.string(forKey: "stage") : nil }
 
   private var debug: Bool {
@@ -333,6 +336,26 @@ struct LaunchOptions {
               thread.messages[at].questions?[0].supersededBy = InboxSupersededBy(messageId: written, key: "q_rollout2")
             }
           }
+        case "worst":
+          // Rows that try to break the list (the break pass).
+          for thread in StandInData.worstThreads(now: Date()) { await door.add(thread) }
+          await session.refresh()
+        case "thousand":
+          for thread in StandInData.manyThreads(now: Date()) { await door.add(thread) }
+          await session.refresh()
+        case "starred":
+          for thread in [StandInData.retry, StandInData.checkout, StandInData.docs] { await session.act(.star, on: thread, undo: false) }
+        case "snoozedrow":
+          if let tomorrow = SnoozeRules().choices().first(where: { $0.id == .tomorrow }) {
+            await session.act(.snooze(until: tomorrow.untilISO, at: nil), on: StandInData.billing, undo: false)
+            await session.act(.snooze(until: tomorrow.untilISO, at: nil), on: StandInData.upload, undo: false)
+          }
+        case "priorityrow":
+          await session.act(.priority(true), on: StandInData.checkout, undo: false)
+        case "archivedrow":
+          for thread in [StandInData.bumps, StandInData.docs] { await session.act(.archive, on: thread, undo: false) }
+        case "readrow":
+          await session.act(.read, on: StandInData.upload, undo: false)
         case "outdated":
           // The computer was updated past this app after the phone last read it: the copy stays readable.
           await door.setOptions { $0.minAppContract = 99; $0.contract = 99 }

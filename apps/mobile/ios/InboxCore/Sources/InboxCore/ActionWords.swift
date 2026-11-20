@@ -64,8 +64,9 @@ public enum ActionWords {
   /// `plural`: "1 thread", "1,284 threads".
   static func plural(_ n: Int, _ one: String) -> String { "\(count(n)) \(n == 1 ? one : "\(one)s")" }
 
-  /// A row's subject as a toast names it: `“${row.subject ?? '(no subject)'}”`.
-  public static func subject(_ row: InboxListRow?) -> String { row?.subject ?? "(no subject)" }
+  /// A row's subject as a toast names it: `“${row.subject ?? '(no subject)'}”`. A row with a name and no subject
+  /// is named by its name, as the list draws it: the toast never says "(no subject)" of a row that shows one.
+  public static func subject(_ row: InboxListRow?) -> String { row?.subject ?? row?.threadName ?? "(no subject)" }
   static func quoted(_ row: InboxListRow?) -> String { "“\(subject(row))”" }
 
   /// `agentName` (packages/core/inbox-types.ts `inboxAgentName`).

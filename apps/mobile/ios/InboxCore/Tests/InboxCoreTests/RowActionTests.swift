@@ -267,3 +267,24 @@ final class RowActionTests: XCTestCase {
     XCTAssertNil(folds.blocker(try group(.quiet)))
   }
 }
+
+extension RowActionTests {
+  /// The Archived group is read less often than the list: a thread unarchived since is gone from it at once and
+  /// stays gone, and one archived since joins it.
+  func testTheArchivedGroupFollowsTheListBetweenItsOwnReads() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.act(.archive, on: StandInData.docs)
+    await session.readArchived()
+    XCTAssertEqual(session.archivedRows().map(\.threadId), [StandInData.docs])
+
+    await session.act(.unarchive, on: StandInData.docs)
+    await session.refresh()
+    XCTAssertTrue(session.archivedRows().isEmpty, "unarchived: not in the group, though the group was not read again")
+
+    await session.act(.archive, on: StandInData.bumps)
+    await session.refresh()
+    XCTAssertEqual(session.archivedRows().map(\.threadId), [StandInData.bumps])
+  }
+}

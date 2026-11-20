@@ -2,27 +2,87 @@ import InboxCore
 import InboxWire
 import SwiftUI
 
-/// The Inbox: the computer's sections in the computer's order (FLOWS 3, mock 2).
+/// Where the list leads.
+enum ListRoute: Hashable {
+  case thread(ThreadID)
+  case archived
+}
+
+/// The Inbox: the window's groups in the window's order (FLOWS 3, mock 2). A row is touched to open it, swiped to
+/// mark it read or archive it, and held for its menu; Select picks several.
 struct InboxScreen: View {
   let session: InboxSession
   @Environment(AppModel.self) private var model
-  @State private var path: [ThreadID] = []
+  @State private var path: [ListRoute] = []
+  @State private var actions: RowActions
+  /// Which groups are closed: this phone's own choice, kept in the window's form.
+  @AppStorage("listFolds") private var foldsRaw = ""
+  @State private var loaded = Date()
   @Environment(\.openURL) private var openURL
+  @Environment(\.accessibilityReduceMotion) private var still
+
+  init(session: InboxSession) {
+    self.session = session
+    _actions = State(initialValue: RowActions(session: session))
+  }
+
+  private var folds: ListFolds { ListFolds(foldsRaw, loaded: loaded) }
+  private var selecting: Bool { actions.selecting }
 
   var body: some View {
     NavigationStack(path: $path) {
       content
         .background(Token.background.ignoresSafeArea())
-        .navigationTitle(PhoneWords.inbox)
-        .toolbar { ToolbarItem(placement: .topBarLeading) { ComputerMenu(session: session) } }
+        .navigationTitle(selecting ? "" : PhoneWords.inbox)
+        .navigationBarTitleDisplayMode(selecting ? .inline : .automatic)
+        .toolbar { bar }
+        .toolbar(selecting ? .visible : .hidden, for: .bottomBar)
         .scrollEdgeEffectStyle(.hard, for: .top)
-        .navigationDestination(for: ThreadID.self) { id in ThreadScreen(session: session, id: id) }
+        .toastHost(actions)
+        .navigationDestination(for: ListRoute.self) { route in
+          switch route {
+          case .thread(let id): ThreadScreen(session: session, id: id, actions: actions)
+          case .archived: ArchivedScreen(session: session, actions: actions)
+          }
+        }
     }
+    .rowActionSheets(actions)
     .onChange(of: model.opening, initial: true) { _, id in
       if let id {
-        path = [id]
+        path = [.thread(id)]
         model.opening = nil
       }
+    }
+    // An act that waited on the phone and was not taken is said once, when the computer is back.
+    .onChange(of: session.actionNotices) { _, _ in actions.told() }
+  }
+
+  @ToolbarContentBuilder private var bar: some ToolbarContent {
+    if selecting {
+      let every = shown.filter { folds.isOpen($0.id) }.flatMap(\.threads).map(\.threadId)
+      let all = !every.isEmpty && every.allSatisfy(actions.picked.contains)
+      ToolbarItem(placement: .topBarLeading) {
+        Button {
+          actions.picked = all ? actions.picked.subtracting(every) : actions.picked.union(every)
+        } label: {
+          Image(systemName: all ? "checkmark.circle.fill" : "circle")
+        }
+        .accessibilityLabel(PhoneWords.selectAll)
+        .accessibilityAddTraits(all ? .isSelected : [])
+      }
+      ToolbarItem(placement: .principal) {
+        Text(actions.picked.isEmpty ? PhoneWords.tapToSelect : PhoneWords.selected(actions.picked.count))
+          .font(TextRole.heading)
+          .foregroundStyle(actions.picked.isEmpty ? Token.mutedForeground : Token.foreground)
+          .monospacedDigit()
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
+          .barSized()
+      }
+      ToolbarItem(placement: .confirmationAction) { Button(PhoneWords.done) { actions.stopSelecting() } }
+      ToolbarItemGroup(placement: .bottomBar) { PickBar(actions: actions) }
+    } else {
+      ToolbarItem(placement: .topBarLeading) { ComputerMenu(session: session) }
     }
   }
 
@@ -40,7 +100,14 @@ struct InboxScreen: View {
     }
   }
 
-  private var sections: [InboxListSection] { (session.list?.sections ?? []).filter { !$0.threads.isEmpty } }
+  /// The groups with rows: Priority, the sections, then the Snoozed band.
+  private var shown: [InboxListSection] { (session.listView()?.groups ?? []).filter { !$0.threads.isEmpty } }
+
+  private func toggle(_ id: InboxListGroupId) {
+    var next = folds
+    next.toggle(id)
+    withAnimation(Motion.fade.animation(still: still)) { foldsRaw = next.raw }
+  }
 
   @ViewBuilder private var list: some View {
     if !session.listLoaded {
@@ -50,58 +117,91 @@ struct InboxScreen: View {
         Waiting()
       }
     } else {
-      List {
+      let view = session.listView()
+      let groups = (view?.groups ?? []).filter { !$0.threads.isEmpty }
+      let pins = view?.pins ?? []
+      let starred = Set(pins.map(\.threadId))
+      let held = Set(session.held.filter { $0.kind != .seen }.map(\.thread))
+      let archived = session.archivedRows().count
+      let folds = folds
+      List(selection: $actions.picked) {
         if session.standing == .appNeedsUpdate {
-          UpdateNotice { openURL(AppLinks.update) }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: Space.tight, leading: Self.edge, bottom: Space.tight, trailing: Self.edge))
+          UpdateNotice { openURL(AppLinks.update) }.listPlain()
         } else if session.reach == .away {
-          AwayNotice(session: session)
+          AwayNotice(session: session).listPlain()
+        }
+        if !pins.isEmpty, !selecting {
+          StarredPills(pins: pins, actions: actions) { path.append(.thread($0)) }
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: Space.tight, leading: Self.edge, bottom: Space.tight, trailing: Self.edge))
+            .listRowInsets(EdgeInsets(top: Space.tight, leading: 0, bottom: Space.tight, trailing: 0))
+            .selectionDisabled()
         }
-        ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+          let open = folds.isOpen(group.id)
           Section {
-            ForEach(section.threads, id: \.threadId) { row in
-              ZStack {
-                NavigationLink(value: row.threadId) { EmptyView() }.opacity(0)
-                ThreadRow(row: row, held: session.held.contains { $0.thread == row.threadId.rawValue && $0.kind != .seen })
+            if open {
+              ForEach(group.threads, id: \.threadId) { row in
+                ListRow(row: row, drawn: group.id, held: held.contains(row.threadId.rawValue), starred: starred.contains(row.threadId), actions: actions)
               }
-              .listRowBackground(Token.background)
-              // One rhythm: every row has the same air and the same height, and no row has a line another lacks.
-              .listRowInsets(EdgeInsets(top: Space.near, leading: Self.edge, bottom: Space.near, trailing: Self.edge))
-              .listRowSeparator(.hidden)
             }
           } header: {
-            // The header and its count read as one line: the product's own name, then how many, quieter.
-            // A section this app does not know keeps the computer's label.
-            // A hairline parts a section from the one over it; the name sits close to its own rows, far from the
-            // rows above, so the list reads as groups and not as one run of lines.
-            VStack(alignment: .leading, spacing: Space.step) {
-              if index > 0 { Hairline() }
-              run(Text(Words.sections[section.id.rawValue] ?? section.label).fontWeight(.semibold).foregroundStyle(Token.foreground),
-                Text("  \(section.threads.count)").monospacedDigit().foregroundStyle(Token.mutedForeground))
-                .font(TextRole.meta)
-                .textCase(nil)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel("\(Words.sections[section.id.rawValue] ?? section.label), \(section.threads.count)")
-                .accessibilityAddTraits(.isHeader)
-            }
-            .listRowInsets(EdgeInsets(top: index > 0 ? Space.close : Space.tight, leading: Self.edge, bottom: 0, trailing: Self.edge))
+            GroupHeader(group: group, first: index == 0, open: open, news: folds.hasNews(group), blocker: folds.blocker(group)) { toggle(group.id) }
+              .listRowInsets(EdgeInsets(top: index > 0 ? Space.close : Space.tight, leading: Self.edge, bottom: 0, trailing: Self.edge))
           }
           .listSectionSeparator(.hidden)
+        }
+        if archived > 0, !selecting {
+          // The way to the archived threads, under the list (the window keeps them in Settings and in a group of
+          // the list).
+          ZStack {
+            NavigationLink(value: ListRoute.archived) { EmptyView() }.opacity(0)
+            VStack(alignment: .leading, spacing: Space.step) {
+              Hairline()
+              HStack(spacing: Space.close) {
+                Text(PhoneWords.archived).font(TextRole.metaStrong).foregroundStyle(Token.foreground)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(TextRole.glyph).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+              }
+              .frame(minHeight: Space.touch - Space.step)
+            }
+            .contentShape(Rectangle())
+          }
+          .accessibilityElement(children: .combine)
+          .accessibilityAddTraits(.isButton)
+          .listRowBackground(Token.background)
+          .listRowSeparator(.hidden)
+          .listRowInsets(EdgeInsets(top: Space.close, leading: Self.edge, bottom: Space.near, trailing: Self.edge))
+          .selectionDisabled()
         }
       }
       .listStyle(.plain)
       .listSectionSpacing(0)
       .scrollContentBackground(.hidden)
+      .environment(\.editMode, .constant(selecting ? .active : .inactive))
       .refreshable { await session.refresh() }
+      // The last rows can be brought over the toast while it is up.
+      .contentMargins(.bottom, actions.toast == nil ? 0 : Size.wideButton + Space.card, for: .scrollContent)
+      // A row that leaves or moves slides; nothing else on the page does.
+      .animation(Motion.fade.animation(still: still), value: groups.map { [$0.id.rawValue] + $0.threads.map(\.threadId.rawValue) })
+      .animation(Motion.fade.animation(still: still), value: selecting)
       .overlay {
-        if sections.isEmpty {
+        if groups.isEmpty, pins.isEmpty {
           ContentUnavailableView(PhoneWords.listEmpty, systemImage: "tray")
         }
+      }
+      // The Snoozed band comes back folded each time it shows.
+      .onChange(of: groups.contains { $0.id == .snoozed }) { _, has in
+        guard !has else { return }
+        var next = folds
+        next.reset(.snoozed)
+        foldsRaw = next.raw
+      }
+      // A pick that left the list drops out.
+      .onChange(of: groups.flatMap(\.threads).count) { _, _ in
+        guard selecting else { return }
+        let listed = Set(groups.flatMap(\.threads).map(\.threadId))
+        actions.picked.formIntersection(listed)
       }
     }
   }
@@ -114,6 +214,232 @@ struct InboxScreen: View {
       if case .wifi = $0 { return PhoneWords.pairNeedsWifi }
       return PhoneWords.pairNeedsTailnet
     }
+  }
+}
+
+private extension View {
+  /// A notice over the list: no ground, no line, the page's edge.
+  func listPlain() -> some View {
+    listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+      .listRowInsets(EdgeInsets(top: Space.tight, leading: InboxScreen.edge, bottom: Space.tight, trailing: InboxScreen.edge))
+      .selectionDisabled()
+  }
+}
+
+/// A group's header: its name and how many, read as one line. A touch closes or opens the group (the window's
+/// groups do the same; Quiet and Snoozed start closed). Closed, its count goes bold when something new came in,
+/// and a blocker inside keeps a warning mark.
+struct GroupHeader: View {
+  let group: InboxListSection
+  let first: Bool
+  let open: Bool
+  let news: Bool
+  let blocker: String?
+  let toggle: () -> Void
+  @Environment(\.accessibilityReduceMotion) private var still
+
+  private var name: String { group.id == .priority ? Words.groupPriority : group.id == .snoozed ? Words.groupSnoozed : Words.sections[group.id.rawValue] ?? group.label }
+
+  var body: some View {
+    // A hairline parts a group from the one over it; the name sits close to its own rows, far from the rows above,
+    // so the list reads as groups and not as one run of lines.
+    VStack(alignment: .leading, spacing: Space.step) {
+      if !first { Hairline() }
+      Button(action: toggle) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.trim) {
+          run(Text(name).fontWeight(.semibold).foregroundStyle(Token.foreground),
+            Text("  \(group.threads.count.formatted(.number.locale(Locale(identifier: "en_US"))))").monospacedDigit().fontWeight(news ? .semibold : .regular).foregroundStyle(news ? Token.foreground : Token.mutedForeground))
+          if blocker != nil {
+            // A mark only: the header's own label says it in words.
+            Image(systemName: "exclamationmark.triangle.fill")
+              .font(TextRole.caption)
+              .foregroundStyle((group.threads.contains { $0.section == .stopped } ? Role.stop : Role.hold).ink)
+              .accessibilityHidden(true)
+          }
+          Spacer(minLength: Space.close)
+          Image(systemName: "chevron.right")
+            .font(Font.caption2.weight(.semibold))
+            .foregroundStyle(Token.mutedForeground.opacity(0.7))
+            // A small mark at any text size: the name beside it is what grows.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityHidden(true)
+            .rotationEffect(.degrees(open ? 90 : 0))
+            .animation(Motion.fade.animation(still: still), value: open)
+        }
+        .font(TextRole.meta)
+        .textCase(nil)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(PressStyle(gives: false))
+      .accessibilityLabel([name, group.threads.count.formatted(.number.locale(Locale(identifier: "en_US"))), news ? PhoneWords.newSinceClosed : nil, blocker].compactMap { $0 }.joined(separator: ", "))
+      .accessibilityValue(open ? "" : PhoneWords.closed)
+      .accessibilityAddTraits(.isHeader)
+    }
+  }
+}
+
+/// One thread's row in the list, with what a finger can do to it: a touch opens it, a swipe to the right marks it
+/// read (Quiet) or unread, a swipe to the left archives it, and a hold opens its menu. While picking, a touch picks.
+struct ListRow: View {
+  let row: InboxListRow
+  let drawn: InboxListGroupId
+  let held: Bool
+  let starred: Bool
+  let actions: RowActions
+
+  private var swipe: (lead: RowOffers.Action?, trail: RowOffers.Action?) {
+    RowOffers.swipe(row, drawn: drawn, canMarkRead: actions.session.canAct(.read), canMarkUnread: actions.session.canAct(.markUnread))
+  }
+
+  var body: some View {
+    let picking = actions.selecting
+    ZStack {
+      NavigationLink(value: ListRoute.thread(row.threadId)) { EmptyView() }.opacity(0)
+      ThreadRow(row: row, held: held, starred: starred, unstar: picking ? nil : { actions.perform(.unpin, on: row) })
+    }
+    .listRowBackground(picking && actions.picked.contains(row.threadId) ? Token.muted : Token.background)
+    // One rhythm: every row has the same air and the same height, and no row has a line another lacks.
+    .listRowInsets(EdgeInsets(top: Space.near, leading: InboxScreen.edge, bottom: Space.near, trailing: InboxScreen.edge))
+    .listRowSeparator(.hidden)
+    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+      if !picking, let lead = swipe.lead {
+        Button {
+          actions.perform(lead, on: row)
+        } label: {
+          Label(lead == .markUnread ? PhoneWords.markUnread : PhoneWords.swipeQuiet, systemImage: lead == .markUnread ? "envelope.badge" : "checkmark.circle")
+        }
+        .tint(RowAction.quiet.tint)
+        .accessibilityLabel(lead == .markUnread ? PhoneWords.markUnread : PhoneWords.swipeQuietName)
+      }
+    }
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      if !picking, swipe.trail == .archive, actions.session.canAct(.archive) {
+        Button {
+          actions.perform(.archive, on: row)
+        } label: {
+          Label(PhoneWords.archive, systemImage: "archivebox")
+        }
+        .tint(RowAction.act.tint)
+      }
+    }
+    .contextMenu {
+      if !picking { ThreadMenuItems(row: row, drawn: drawn, actions: actions) }
+    }
+  }
+}
+
+/// The picks' actions, in the bar at the screen's foot (the window's phone sheet): Archive, Snooze, and More with
+/// the rest. Each takes the picked rows it can; one that takes none is off or left out.
+struct PickBar: View {
+  let actions: RowActions
+
+  private static let more: [(BulkAction, String, String)] = [
+    (.read, PhoneWords.markRead, "checkmark.circle"),
+    (.unread, PhoneWords.markUnread, "envelope"),
+    (.star, PhoneWords.starThreads, "star"),
+    (.unstar, PhoneWords.unstarThreads, "star.slash"),
+    (.priorityAdd, PhoneWords.addToPriority, "arrow.up.to.line"),
+    (.priorityRemove, PhoneWords.removeFromPriority, "arrow.down.to.line"),
+  ]
+
+  private func offers(_ action: BulkAction) -> Bool {
+    let session = actions.session
+    switch action {
+    case .archive: return session.canAct(.archive)
+    case .snooze: return session.canAct(.unsnooze)
+    case .read: return session.canAct(.read)
+    case .unread: return session.canAct(.markUnread)
+    case .star, .unstar: return session.canAct(.star)
+    case .priorityAdd, .priorityRemove: return session.canAct(.priority(true))
+    }
+  }
+
+  private func takes(_ action: BulkAction) -> Bool { offers(action) && !actions.targets(action).isEmpty }
+
+  var body: some View {
+    let rest = Self.more.filter { takes($0.0) }
+    Button {
+      actions.bulk(.archive)
+    } label: {
+      Label(PhoneWords.archive, systemImage: "archivebox")
+    }
+    .disabled(!takes(.archive))
+    Spacer()
+    if takes(.snooze) || actions.picked.isEmpty {
+      Menu {
+        SnoozeTimes { actions.bulk(.snooze, until: $0) } pickATime: { actions.picking = .picked }
+      } label: {
+        Label(PhoneWords.snooze, systemImage: "clock")
+      }
+      .disabled(!takes(.snooze))
+      Spacer()
+    }
+    Menu {
+      ForEach(rest, id: \.0) { item in
+        Button(item.1, systemImage: item.2) { actions.bulk(item.0) }
+      }
+    } label: {
+      Label(PhoneWords.more, systemImage: "ellipsis.circle")
+    }
+    .disabled(rest.isEmpty)
+  }
+}
+
+/// The starred threads, above the list: the window's "Keep starred above the list", always on here since the
+/// phone has no sidebar for its Starred section. A touch opens one; a hold offers Unstar, Move up, Move down and
+/// Copy link, the starred row's own menu in the window.
+struct StarredPills: View {
+  let pins: [InboxListRow]
+  let actions: RowActions
+  let open: (ThreadID) -> Void
+
+  private func role(_ row: InboxListRow) -> Role? {
+    switch ListRules.pinnedState(row) {
+    case .stop: return .stop
+    case .hold: return .hold
+    case .wait, .new: return .act
+    default: return nil
+    }
+  }
+
+  var body: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: Space.close) {
+        ForEach(Array(pins.enumerated()), id: \.element.threadId) { index, row in
+          let name = row.threadName ?? row.subject ?? row.project.name
+          Button {
+            open(row.threadId)
+          } label: {
+            HStack(spacing: Space.trim) {
+              Image(systemName: ListRules.archived(row) ? "archivebox" : "star.fill")
+                .font(TextRole.caption)
+                .foregroundStyle(role(row)?.ink ?? Token.mutedForeground)
+              Text(name).font(TextRole.link).foregroundStyle(Token.foreground).lineLimit(1)
+            }
+            .padding(.horizontal, Space.step)
+            .frame(minHeight: Size.capsule)
+            .frame(maxWidth: 240)
+            .background(Token.muted, in: Capsule())
+            .frame(minHeight: Space.touch)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(PressStyle())
+          // A row of small things to touch, as a bar is: it grows with the text as far as a bar does.
+          .barSized()
+          .accessibilityLabel("\(PhoneWords.starred), \(name)")
+          .contextMenu {
+            Button(PhoneWords.unstarThread, systemImage: "star.slash") { actions.perform(.unpin, on: row) }
+            Button(PhoneWords.moveUp, systemImage: "arrow.left") { actions.move(row.threadId, by: -1) }.disabled(index == 0)
+            Button(PhoneWords.moveDown, systemImage: "arrow.right") { actions.move(row.threadId, by: 1) }.disabled(index == pins.count - 1)
+            Button(PhoneWords.copyLink, systemImage: "link") { actions.perform(.copyLink, on: row) }
+          }
+        }
+      }
+      .padding(.horizontal, InboxScreen.edge)
+    }
+    .scrollClipDisabled()
   }
 }
 
@@ -239,6 +565,9 @@ enum AppLinks {
 struct ThreadRow: View {
   let row: InboxListRow
   let held: Bool
+  var starred = false
+  /// A touch on the row's star unstars it (the window's row does the same). Nil: the star is only a mark.
+  var unstar: (() -> Void)?
 
   @Environment(\.dynamicTypeSize) private var typeSize
   private var large: Bool { typeSize.isAccessibilitySize }
@@ -255,6 +584,9 @@ struct ThreadRow: View {
     let words = PhoneWords.markWords(marks)
     return words.isEmpty ? nil : words.joined(separator: ", ")
   }
+  /// When a snoozed row comes back ("Fri 8:00 AM"), as the window words it.
+  private var snoozedWhen: String? { row.snoozed.map { SnoozeRules().when($0.until) } }
+  private var hasTail: Bool { held || starred || snoozedWhen != nil || marks.actions + marks.questions > 0 }
 
   var body: some View {
     HStack(alignment: .top, spacing: Space.step) {
@@ -269,11 +601,11 @@ struct ThreadRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Space.close) {
               timeText.fixedSize()
               Spacer(minLength: Space.tight)
-              counts
+              tail
             }
             VStack(alignment: .leading, spacing: Space.tight) {
               timeText
-              counts
+              if hasTail { tail }
             }
           }
         } else {
@@ -286,7 +618,7 @@ struct ThreadRow: View {
           HStack(alignment: .center, spacing: Space.close) {
             leadText
             Spacer(minLength: 4)
-            counts.layoutPriority(1)
+            tail.layoutPriority(1)
           }
           // The line is as tall with a count as without one.
           .frame(minHeight: Size.mark)
@@ -303,8 +635,47 @@ struct ThreadRow: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
-    .accessibilityLabel([row.unread ? PhoneWords.unreadMark : nil, title, "\(Names.agent(row.author)) · \(row.project.name)", spoken, row.latestPreview, time].compactMap { $0 }.joined(separator: ", "))
+    .accessibilityLabel(
+      [
+        row.unread ? PhoneWords.unreadMark : nil, title, "\(Names.agent(row.author)) · \(row.project.name)", starred ? PhoneWords.starred : nil, snoozedWhen.map(PhoneWords.snoozedUntil), spoken, row.latestPreview,
+        row.snoozeBack != nil ? PhoneWords.backFromSnooze : nil, time,
+      ].compactMap { $0 }.joined(separator: ", ")
+    )
     .accessibilityAddTraits(.isButton)
+    .accessibilityActions {
+      if starred, let unstar { Button(PhoneWords.unstarThread, action: unstar) }
+    }
+  }
+
+  /// What stands at the end of the row's second line, as the window's row has it: the star, a snooze's return,
+  /// then what waits.
+  private var tail: some View {
+    HStack(spacing: Space.trim) {
+      if starred {
+        if let unstar {
+          // For a screen reader the row itself offers Unstar thread (its actions, and its menu).
+          Button(action: unstar) { star.frame(minWidth: Size.copy, minHeight: Size.mark).contentShape(Rectangle()) }
+            .buttonStyle(.borderless)
+            .accessibilityHidden(true)
+        } else {
+          star
+        }
+      }
+      if let snoozedWhen {
+        HStack(spacing: Space.tight) {
+          Image(systemName: "clock").font(Font.caption2.weight(.semibold))
+          Text(snoozedWhen).font(TextRole.meta).monospacedDigit()
+        }
+        .foregroundStyle(Token.mutedForeground)
+        .fixedSize()
+      }
+      counts
+    }
+  }
+
+  private var star: some View {
+    // The window's star has a gold of its own (`--ib-star`); amber is the contract's nearest colour.
+    Image(systemName: "star.fill").font(TextRole.caption).foregroundStyle(Token.warning).accessibilityHidden(true)
   }
 
   private var titleText: some View {
@@ -316,8 +687,10 @@ struct ThreadRow: View {
   }
 
   private var timeText: some View {
-    // New since the person looked: the time takes the accent, as the window's row has it.
-    Text(time).font(row.unread ? TextRole.metaStrong : TextRole.meta).monospacedDigit().foregroundStyle(row.unread ? Token.primary : Token.mutedForeground).lineLimit(1)
+    // New since the person looked: the time takes the accent, as the window's row has it. A thread back from a
+    // snooze shows a small clock before its time until the person reads it.
+    let clock = row.snoozeBack != nil ? Text("\(Image(systemName: "clock")) ").font(Font.caption2.weight(.semibold)) : Text(verbatim: "")
+    return run(clock, Text(time)).font(row.unread ? TextRole.metaStrong : TextRole.meta).monospacedDigit().foregroundStyle(row.unread ? Token.primary : Token.mutedForeground).lineLimit(1)
   }
 
   private var leadText: some View {

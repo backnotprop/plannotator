@@ -45,6 +45,11 @@ final class ScrollBox {
 struct ThreadScreen: View {
   let session: InboxSession
   let id: ThreadID
+  /// What the person does to the thread itself (its More menu, the lines over it), and the toast that answers.
+  let actions: RowActions
+  @Environment(\.dismiss) private var dismiss
+  /// How tall the foot is: the toast stands over it.
+  @State private var foot: CGFloat = 0
   @State private var words = ""
   @State private var drafts = ThreadDrafts()
   @State private var tail: CGFloat = 0
@@ -107,8 +112,27 @@ struct ThreadScreen: View {
         // The bar does not grow with the text: a long press shows the title large, as the system's own does.
         .accessibilityShowsLargeContentViewer { Text(title) }
       }
+      // More: what a row's menu offers, for the open thread (the window's ⋯ sheet).
+      if let row = session.row(id) {
+        ToolbarItem(placement: .topBarTrailing) {
+          Menu {
+            ThreadMenuItems(row: row, drawn: session.listView()?.group(of: id), actions: actions, place: .thread)
+          } label: {
+            Image(systemName: "ellipsis")
+          }
+          .accessibilityLabel(PhoneWords.more)
+        }
+      }
     }
+    .toastHost(actions, lift: foot)
+    // Mark unread closes the thread: left open, its next look would read it again.
+    .onChange(of: actions.closes) { _, _ in dismiss() }
     .task { await session.open(id) }
+  }
+
+  /// The agent the thread's lines name: the last one to write in it.
+  private func agentName(_ thread: InboxThread) -> String {
+    thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) } ?? PhoneWords.anAgent
   }
 
   /// The cards the person can still act on, in thread order: what the thread lands on and what the jump visits.
@@ -318,7 +342,20 @@ struct ThreadScreen: View {
     }
     .scrollDismissesKeyboard(.interactively)
     .refreshable { await session.refresh() }
+    // Where the thread stands, said over its messages: snoozed, read, back from a snooze.
+    .safeAreaInset(edge: .top, spacing: 0) {
+      if let row = session.row(id) {
+        ThreadLines(row: row, agent: agentName(thread), actions: actions)
+          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in stay() }
+      }
+    }
+    // The foot changed its kind (the reply field, or an archived thread's line): the page stays where it rested.
+    .onChange(of: session.row(id).map(ListRules.archived)) { _, _ in stay() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
+      if let row = session.row(id), ListRules.archived(row) {
+        ArchivedFoot(row: row, agent: agentName(thread), actions: actions)
+          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
+      } else {
       Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items, inCard: keyboard && !composing) { card in
         scroll.rest = nil
         scroll.landed = true
@@ -332,6 +369,8 @@ struct ThreadScreen: View {
         let next = jumped.flatMap { open.firstIndex(of: $0) }.map { open[($0 + 1) % open.count] } ?? open[0]
         jumped = next
         withAnimation { show(next, proxy) }
+      }
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       }
     }
     // A Send the computer refused: the person's words come back to the box, never lost.
@@ -378,6 +417,14 @@ struct ThreadScreen: View {
         if abs(scroll.top - y) > 0.5 { settle(at: y, end: block.maxY + Self.clear) }
       }
     }
+  }
+
+  /// A line over the messages came or went, or the foot changed its kind: the room the page has changed, not the
+  /// page. It stays on the message it rested on.
+  private func stay() {
+    guard scroll.rest != nil else { return }
+    scroll.keptAt = Date()
+    keepPlace()
   }
 
   /// Rest the page's top at `y`. A thread that ends too soon for that is given the room it lacks first, so the
