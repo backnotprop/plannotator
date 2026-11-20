@@ -192,30 +192,59 @@ test.skipIf(!hasDom)('after a calm moment on Reviews it asks with the count and 
   expect(asking()!.querySelector('p')!.textContent).toBe('You turned on guided reviews for High. Make one now?');
 });
 
-test.skipIf(!hasDom)('a held Escape does nothing; a failed Not now (the backdrop) says so once, and the next Escape lets the person out without the server; it does not come back that visit', async () => {
+test.skipIf(!hasDom)('a held Escape does nothing; a refused Make them now says why and Not now still asks the server; a failed Not now says so once and the next Escape lets the person out without the server; it does not come back that visit', async () => {
   spy('pullRisk', async () => ANSWER);
   const sent: unknown[] = [];
+  let down = false;
   spy('savePullRisk', async (input) => {
     sent.push(input);
-    throw 'make_now' in input ? new InboxApiError(409, 'launch_off', 'Starting agents from the Inbox is off in Settings → Agents.') : 'down';
+    if ('make_now' in input) throw new InboxApiError(409, 'launch_off', 'Starting agents from the Inbox is off in Settings → Agents.');
+    if (down) throw 'down';
+    return { ...ANSWER, auto_dismissed: [key(1), key(2)] };
   });
   await mount();
   await opened();
   await armed();
-  const dialog = asking()!;
-  await keyOn(dialog, 'Escape', true);
+  await keyOn(asking()!, 'Escape', true);
   expect(sent).toEqual([]);
-  await press(dialog);
-  expect(sent).toEqual([{ not_now: true, keys: [key(1), key(2)] }]);
-  expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('That could not be saved.');
   await press(button('make-now'));
-  expect(sent.at(-1)).toEqual({ make_now: true, keys: [key(1), key(2)] });
+  expect(sent).toEqual([{ make_now: true, keys: [key(1), key(2)] }]);
   expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('Starting agents from the Inbox is off in Settings → Agents.');
   await keyOn(asking()!, 'Escape');
+  expect(sent.at(-1)).toEqual({ not_now: true, keys: [key(1), key(2)] });
   expect(asking()).toBeNull();
-  expect(sent).toHaveLength(2);
+
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+  down = true;
+  await mount();
+  await opened();
+  await armed();
+  await press(asking()!);
+  expect(sent.at(-1)).toEqual({ not_now: true, keys: [key(1), key(2)] });
+  expect(asking()!.querySelector('[role="alert"]')!.textContent).toBe('That could not be saved.');
+  const before = sent.length;
+  await keyOn(asking()!, 'Escape');
+  expect(asking()).toBeNull();
+  expect(sent).toHaveLength(before);
   await wait(SETTLED * 2);
   expect(asking()).toBeNull();
+});
+
+test.skipIf(!hasDom)('an answer that briefly names no agent keeps an open dialog; one with the pick off closes it', async () => {
+  let answer: InboxPullRiskAnswer = ANSWER;
+  spy('pullRisk', async () => answer);
+  const sent: unknown[] = [];
+  sentTo(sent);
+  await mount();
+  await opened();
+  answer = { ...ANSWER, auto_agent: null };
+  await rerender(pullsStateOf(listOf([...LIST.pulls])));
+  expect(asking()).not.toBeNull();
+  answer = { ...ANSWER, auto: null };
+  await rerender(pullsStateOf(listOf([...LIST.pulls])));
+  expect(asking()).toBeNull();
+  expect(sent).toEqual([]);
 });
 
 test.skipIf(!hasDom)('a bare click (a screen reader sends only that) acts once the first moment has passed, never inside it', async () => {

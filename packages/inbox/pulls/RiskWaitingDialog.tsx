@@ -48,7 +48,7 @@ export function RiskWaitingDialog({
     for (const key of waiting) asked.add(key);
     setShown({ keys: waiting, auto: answer.auto });
   }, [settled, waitingId]);
-  const off = !answer?.auto || !answer.auto_agent;
+  const off = !answer?.auto;
   useEffect(() => {
     if (off) setShown(null);
   }, [off]);
@@ -65,18 +65,20 @@ function RiskWaitingAsk({ shown, pulls, onAnswer, onClose }: { shown: Shown; pul
     onClose();
   });
   const [stuck, setStuck] = useState(false);
-  const after = (result: { failed: unknown } | null) => {
-    if (!result) return;
-    if (result.failed instanceof InboxApiError && result.failed.code === 'code_review_off') onClose();
-    else setStuck(true);
-  };
+  const reviewOff = (result: { failed: unknown } | null) => result?.failed instanceof InboxApiError && result.failed.code === 'code_review_off';
   const notNow = () => {
     if (choice.busy || !gate.ok()) return;
-    if (stuck) onClose();
-    else void choice.notNow().then(after);
+    if (stuck) return onClose();
+    void choice.notNow().then((result) => {
+      if (reviewOff(result)) onClose();
+      else if (result) setStuck(true);
+    });
   };
   const makeNow = () => {
-    if (!choice.busy && gate.ok()) void choice.makeNow().then(after);
+    if (choice.busy || !gate.ok()) return;
+    void choice.makeNow().then((result) => {
+      if (reviewOff(result)) onClose();
+    });
   };
   const count = shown.keys.length;
   const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
