@@ -1,3 +1,5 @@
+@font-face{font-family:"Hand2";src:url(/fonts/kalam/Kalam-Regular.ttf) format("truetype");font-display:swap}
+@font-face{font-family:"Hand";src:url(/fonts/reenie-beanie/ReenieBeanie.ttf) format("truetype");font-display:swap}
 :root{
   --ground:#f0f3fa; --wash:radial-gradient(800px 600px at 76% 45%,#fff 0,rgba(255,255,255,.88) 30%,rgba(255,255,255,0) 72%);
   --ink:#14162b; --soft:#5b607a;
