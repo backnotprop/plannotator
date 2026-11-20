@@ -179,6 +179,8 @@ export function installFakeOpenCodeLaunch(root: string, state: FakeOpenCodeLaunc
     existsSync(file("calls.jsonl"))
       ? readFileSync(file("calls.jsonl"), "utf8")
           .split("\n")
+          // A line is whole only once its newline is written: the last piece is "" or a line still being appended.
+          .slice(0, -1)
           .filter(Boolean)
           .map((line) => JSON.parse(line) as FakeOpenCodeLaunchCall)
       : [];
