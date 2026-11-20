@@ -823,7 +823,6 @@ test.skipIf(!hasDom)('an old reading or an expired login is no warning: the row 
   act(() => root?.unmount());
   host?.remove();
   await call('/api/inbox/accounts'); // The peek's click started a read; the next window's would join it (see beforeEach).
-
   answer({ stdout: listOf({ alias: 'gone', active: true, usageStatus: 'relogin_required', usage: { fiveHour: limit(95) } }) });
   const expired = await openInbox();
   await openPeek(expired);
