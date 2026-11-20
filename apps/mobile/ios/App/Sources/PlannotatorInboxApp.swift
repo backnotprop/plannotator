@@ -38,13 +38,20 @@ struct RootView: View {
       if !model.booted {
         Token.background.ignoresSafeArea()
       } else if let session = model.session {
+        // A new session is a new screen, with its own row actions: the same computer paired again too.
         InboxScreen(session: session)
-          .id(session.computer.id)
+          .id(ObjectIdentifier(session))
       } else {
         PairingScreen()
       }
     }
     .background(Token.background.ignoresSafeArea())
+    #if DEBUG
+      // The UI tests' look into the accessibility tree (AccessibilityProbe.swift); never in a release build.
+      .overlay(alignment: .bottomLeading) {
+        if let target = UserDefaults.standard.string(forKey: "a11yProbe") { AccessibilityProbe(target: target) }
+      }
+    #endif
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rootWidth = $0 }
     .animation(.default, value: model.session?.computer.id)
     // A link offered is measured off screen first, at the sheet's width, so the sheet opens at its own height.

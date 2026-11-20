@@ -15,13 +15,13 @@
  */
 import { readFileSync } from "node:fs";
 import { isPlanId, planApprovalsOn, planPictureTypeOf, PLAN_PERSON } from "@plannotator/core/plans";
-import { newSpaceId, newSpaceShareRecord, planSpaceShare, type LocalSpace, type SpaceShareMode, type SpaceShareRecord, type SpaceShareStatus } from "@plannotator/core/space-share";
+import { newSpaceId, newSpaceShareRecord, planSpaceShare, spaceKeepApproval, type LocalSpace, type SpaceShareMode, type SpaceShareRecord, type SpaceShareStatus } from "@plannotator/core/space-share";
 import type { PlanStore } from "../plans/store";
 import { createSpacesClient, spaceKeptByAnother, spacesTokenRefused, SpacesError } from "./client";
 import { clearSpacesCredential, readSpacesCredential, saveSpacesCredential } from "./credential";
 import { runSpaceShare, SPACE_SHARE_SHUTDOWN, type SpaceShareProgress, type SpaceShareSource } from "./engine";
 import { dropSpaceShareRecord, readSpaceShareRecord, saveSpaceShareRecord } from "./record";
-import { startSpacesSignIn, type SpacesSignIn } from "./signin";
+import { startSpacesSignIn, type SpacesApprovalOutcome, type SpacesSignIn } from "./signin";
 
 const PICTURE_EXTENSION: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/avif": "avif", "image/svg+xml": "svg" };
 
@@ -272,16 +272,35 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     return status(id);
   }
 
+  /** An approval the sign-in page was sent with Keep, the space that page named, and what it did with it. */
+  type KeepApproval = { space: string; ask: NonNullable<ReturnType<typeof spaceKeepApproval>>; outcome: SpacesApprovalOutcome };
+
+  /** A run going without the sign-in (waiting on a busy space, say) is stopped first: it would write over the record. */
+  async function stopRun(live: Live): Promise<void> {
+    if (!live.running) return;
+    live.abort?.abort("stop");
+    await live.running;
+  }
+
+  /**
+   * Kept with the record whatever the claim answers: the page already did it. Recorded is an approval that is up. Only
+   * for the space the page named: a record replaced meanwhile (Share as new) never takes another space's outcome.
+   */
+  function noteKeepApproval(record: SpaceShareRecord, approval: KeepApproval): boolean {
+    const { ask, outcome } = approval;
+    if (record.space_id !== approval.space) return false;
+    record.keep_approval = { outcome, document_id: ask.document_id, version_number: ask.version_number, version: ask.remote_version, at: new Date(now()).toISOString() };
+    if (outcome === "recorded") record.approval = { document_id: ask.document_id, version_number: ask.version_number };
+    return true;
+  }
+
   /** Signed in: make the space the person's own when it is up and not theirs yet. */
-  async function claim(id: string): Promise<void> {
+  async function claim(id: string, approval: KeepApproval | null = null): Promise<void> {
     const live = liveOf(id);
-    // A run going without the sign-in (waiting on a busy space, say) is stopped first: it goes on signed in.
-    if (live.running) {
-      live.abort?.abort("stop");
-      await live.running;
-    }
+    await stopRun(live);
     const record = readSpaceShareRecord(options.dataDir, id);
     if (!record || !record.created || record.refused) return;
+    const noted = approval !== null && noteKeepApproval(record, approval);
     try {
       // Claiming a space that is already the person's own answers the same again. This call alone says whose it is.
       const space = await clientOf(record.host).claim(record.space_id);
@@ -295,17 +314,43 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       else {
         // The space refused the credential itself: it is forgotten. Anything else: nothing changed.
         if (spacesTokenRefused(error)) clearSpacesCredential(options.dataDir, record.host);
+        if (noted) saveSpaceShareRecord(options.dataDir, id, record);
         return;
       }
     }
     saveSpaceShareRecord(options.dataDir, id, record);
   }
 
-  /** One claim per plan at a time (a second Keep joins the first), then what waits is sent. */
-  async function claimAndGoOn(id: string): Promise<void> {
+  /**
+   * A sign-in that came back while a claim was already going: its approval outcome is still kept. Written once nothing
+   * else is writing the record (the claim, and the run it started, are let finish rather than stopped).
+   */
+  async function keepApprovalAfter(id: string, approval: KeepApproval): Promise<void> {
     const live = liveOf(id);
-    if (live.claiming) return live.claiming;
-    const mine = claim(id);
+    while (live.claiming || live.running) await (live.claiming ?? live.running);
+    const record = readSpaceShareRecord(options.dataDir, id);
+    if (!record || !record.created || !noteKeepApproval(record, approval)) return;
+    saveSpaceShareRecord(options.dataDir, id, record);
+  }
+
+  /** The sign-in page's claim lost (no token came): someone else kept the space first, as a refused claim says. */
+  async function lostClaim(id: string, spaceId: string): Promise<void> {
+    await stopRun(liveOf(id));
+    const record = readSpaceShareRecord(options.dataDir, id);
+    if (!record || record.space_id !== spaceId || record.refused) return;
+    record.refused = true;
+    saveSpaceShareRecord(options.dataDir, id, record);
+  }
+
+  /** One claim per plan at a time (a second Keep joins the first), then what waits is sent. */
+  async function claimAndGoOn(id: string, approval: KeepApproval | null = null): Promise<void> {
+    const live = liveOf(id);
+    if (live.claiming) {
+      await live.claiming;
+      if (approval) await keepApprovalAfter(id, approval);
+      return;
+    }
+    const mine = claim(id, approval);
     live.claiming = mine;
     try {
       await mine;
@@ -316,7 +361,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const record = readSpaceShareRecord(options.dataDir, id);
     if (!record || record.refused || !credentialOf(record.host)) return;
     const source = spaceShareSource(options.store(), id);
-    // What waits: a run that did not finish, or the approval, which goes only into a kept space.
+    // What waits: a run that did not finish, or something new to send (never an approval: that goes only with Keep).
     if (source && (record.job || planSpaceShare(source.local, record, { mode: record.mode, signedIn: true }).steps.length > 0)) start(id, record);
   }
 
@@ -336,16 +381,23 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     }
     // Open again: the same sign-in, the same page.
     if (!live.signIn) {
-      const signIn = await startSpacesSignIn({ host, fetch: options.fetch, timeoutMs: options.signInTimeoutMs });
+      // A space that is up is named, and the page claims it; the person's approval of the version it holds goes with it.
+      const space = record?.created && !record.refused ? record.space_id : null;
+      const source = space ? spaceShareSource(options.store(), id) : null;
+      const ask = source ? spaceKeepApproval(source.local, record) : null;
+      const signIn = await startSpacesSignIn({ host, fetch: options.fetch, timeoutMs: options.signInTimeoutMs, keep: { space, approve: ask ? { document: ask.remote_document, version: ask.remote_version } : null } });
       live.signIn = signIn;
       live.keep = "waiting";
-      void signIn.done.then(async (credential) => {
+      void signIn.done.then(async (result) => {
         if (live.signIn !== signIn) return;
         live.signIn = null;
-        if (credential) {
-          saveSpacesCredential(options.dataDir, host, credential);
-          await claimAndGoOn(id).catch(() => {});
+        if (result.kind === "signed_in") {
+          saveSpacesCredential(options.dataDir, host, result.credential);
+          await claimAndGoOn(id, space && ask && result.approval ? { space, ask, outcome: result.approval } : null).catch(() => {});
+        } else if (result.kind === "claim_conflict" && space) {
+          await lostClaim(id, space).catch(() => {});
         }
+        // Cancelled on the page, or it did not finish: back to where it was before Keep.
         live.keep = null;
         options.changed?.(id);
       });
