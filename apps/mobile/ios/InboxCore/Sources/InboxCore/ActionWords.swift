@@ -246,8 +246,23 @@ public enum ActionWords {
     }
   }
 
+  /// What a phone says of the rows of a bulk action that were refused: "1 not archived", with no reason.
+  static func bulkNot(_ action: BulkAction, _ n: Int) -> String {
+    switch action {
+    case .archive: return "\(n) not archived"
+    case .snooze: return "\(n) not snoozed"
+    case .read: return "\(n) not marked read"
+    case .unread: return "\(n) not marked unread"
+    case .star: return "\(n) not starred"
+    case .unstar: return "\(n) not unstarred"
+    case .priorityAdd: return "\(n) not added"
+    case .priorityRemove: return "\(n) not removed"
+    }
+  }
+
   /// `bulkToast`: "Archived 3 threads" ("Archived 3" on a phone), "Archived 2 of 3 threads" when some were refused
   /// with the first refusal's words, and how many wait for a computer that is away. Nil when nothing was made.
+  /// A phone says the refused ones without the reason: "Archived 2 · 1 not archived".
   /// `heldOn`: the computers the held ones wait for. `refusal`: the first refusal's own words, if it has any.
   public static func bulk(_ action: BulkAction, made: Int, held: Int = 0, heldOn: [String] = [], refused: Int = 0, refusal: String? = nil, detail: String? = nil) -> ToastWords? {
     guard made > 0 else { return nil }
@@ -259,9 +274,16 @@ public enum ActionWords {
       let names = Set(heldOn)
       parts.append(names.count == 1 ? "\(held) when \(heldOn[0]) is back" : "\(held) when their machines are back")
     }
+    let shared = parts
     if refused > 0 { parts.append("\(refused) did not change: \(refusal.flatMap { $0.isEmpty ? nil : $0 } ?? "It didn’t go.")") }
     let mark: ToastWords.Mark = refused > 0 ? .warn : action == .archive ? .archive : action == .snooze ? .clock : action == .unread ? .unread : .check
-    return ToastWords(mark: mark, lead: bulkLead(action, counted), phoneLead: bulkLead(action, String(made)), detail: parts.isEmpty ? nil : parts.joined(separator: " · "), wraps: refused > 0)
+    var words = ToastWords(mark: mark, lead: bulkLead(action, counted), phoneLead: bulkLead(action, String(made)), detail: parts.isEmpty ? nil : parts.joined(separator: " · "), wraps: refused > 0)
+    if refused > 0 {
+      let phone = shared + [bulkNot(action, refused)]
+      words.phoneDetail = phone.joined(separator: " · ")
+      words.speech = ([bulkLead(action, plural(made, "thread"))] + phone).joined(separator: ". ") + "."
+    }
+    return words
   }
 
   // MARK: Copy link (packages/inbox/rowMenu.ts `threadLink`)

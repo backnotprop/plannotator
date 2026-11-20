@@ -84,7 +84,8 @@ final class RowActionMoreUITests: XCTestCase {
     XCTAssertTrue(app.navigationBars.staticTexts["3 selected"].waitForExistence(timeout: 5))
     app.buttons["Archive"].tap()
     XCTAssertTrue(text(app, "Archived 2").waitForExistence(timeout: 5), "the toast counts what was taken")
-    XCTAssertTrue(text(app, "1 did not change").exists)
+    XCTAssertTrue(text(app, "1 not archived").exists)
+    XCTAssertFalse(text(app, "did not change").exists, "one line: the count, never the reason")
     XCTAssertTrue(app.buttons["Undo"].exists, "the Undo stays")
     shot("44-bulk-archive-one-refused")
     // The refused row is back in the list; the two taken are not.

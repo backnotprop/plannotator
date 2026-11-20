@@ -263,7 +263,7 @@ enum PhoneWords {
     }
   }
   /// The phone's own: an act that waited on the phone while the thread changed on another device is not sent.
-  static let actGaveWay = "Not changed. This thread changed on another device while your phone was away."
+  static let actGaveWay = "Not changed: it changed on another device"
 
   // MARK: Answering (FLOWS 5, mock 4; contract flow checks answer-01 to answer-14)
   /// FLOWS 5: the kind, above the prompt.

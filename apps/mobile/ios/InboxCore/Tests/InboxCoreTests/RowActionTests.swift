@@ -64,10 +64,43 @@ final class RowActionTests: XCTestCase {
         continue
       }
       let toast = try XCTUnwrap(mine, "\(expected)")
-      check(toast, theirs, "\(action.rawValue)")
+      // The window's words; a phone's own words for refused rows are below.
+      XCTAssertEqual(toast.lead, theirs["lead"]?.text, "lead, \(action.rawValue)")
+      XCTAssertEqual(toast.phoneLead, theirs["phoneLead"]?.text, "phone lead, \(action.rawValue)")
+      XCTAssertEqual(toast.detail, theirs["detail"]?.text, "detail, \(action.rawValue)")
+      if try expected.at("refused").int() == 0 { XCTAssertNil(toast.phoneDetail, "\(action.rawValue)") }
       XCTAssertEqual(toast.mark.rawValue, try theirs.at("icon").str(), "\(action.rawValue)")
       XCTAssertEqual(toast.wraps, theirs["wrap"]?.flag ?? false)
     }
+  }
+
+  /// A phone counts the refused rows of a bulk action in the action's own word, with no reason: one short line
+  /// beside its Undo, and VoiceOver hears the same.
+  func testABulkActionOnAPhoneCountsRefusedRowsWithoutTheReason() throws {
+    let archived = try XCTUnwrap(ActionWords.bulk(.archive, made: 2, refused: 1, refusal: ActionWords.unreachable))
+    XCTAssertEqual("\(archived.shownLead) · \(archived.shownDetail ?? "")", "Archived 2 · 1 not archived")
+    XCTAssertEqual(archived.spoken, "Archived 2 threads. 1 not archived.")
+    let expected: [(BulkAction, String)] = [
+      (.archive, "Archived 2 · 1 not archived"),
+      (.snooze, "Snoozed 2 · 1 not snoozed"),
+      (.read, "Marked 2 read · 1 not marked read"),
+      (.unread, "Marked 2 unread · 1 not marked unread"),
+      (.star, "Starred 2 · 1 not starred"),
+      (.unstar, "Unstarred 2 · 1 not unstarred"),
+      (.priorityAdd, "Added 2 to Priority · 1 not added"),
+      (.priorityRemove, "Removed 2 from Priority · 1 not removed"),
+    ]
+    for (action, line) in expected {
+      let toast = try XCTUnwrap(ActionWords.bulk(action, made: 2, refused: 1, refusal: "This thread is archived."))
+      XCTAssertEqual("\(toast.shownLead) · \(toast.shownDetail ?? "")", line, action.rawValue)
+      XCTAssertFalse(toast.spoken.contains("This thread") || toast.spoken.contains("did not change"), "no reason, \(action.rawValue)")
+    }
+    // What a snooze says first and what waits for a computer stay before the refused count.
+    let snoozed = try XCTUnwrap(ActionWords.bulk(.snooze, made: 2, held: 1, heldOn: ["Work Mac"], refused: 1, refusal: ActionWords.timePassed, detail: "Wed 8:00 AM"))
+    XCTAssertEqual(snoozed.shownDetail, "Wed 8:00 AM · 1 when Work Mac is back · 1 not snoozed")
+    XCTAssertEqual(snoozed.spoken, "Snoozed 2 threads. Wed 8:00 AM. 1 when Work Mac is back. 1 not snoozed.")
+    // Nothing made: no bulk toast (the single action's error toast says it).
+    XCTAssertNil(ActionWords.bulk(.archive, made: 0, refused: 2, refusal: ActionWords.unreachable))
   }
 
   func testAgentNamesAreCutAsTheWindowCutsThemAndLinksAreTheWindows() throws {
