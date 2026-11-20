@@ -118,7 +118,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   const plan = (): SpaceSharePlan => planSpaceShare(local, record, { mode: record.mode, signedIn: client.signedIn });
   const tell = (waitingUntil: number | null = null) => run.progress?.({ done: record.job?.done ?? 0, total: record.job?.total ?? 0, waiting_until: waitingUntil, link: record.share_url });
   const end = (ended: "failed" | "stopped" | "over_limit", result: Omit<SpaceShareResult, "end"> = {}): SpaceShareResult => {
-    record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended };
+    record.job = { done: record.job?.done ?? 0, total: record.job?.total ?? 0, ended, ...(ended === "over_limit" ? { bytes: plan().file_bytes } : {}) };
     keep();
     return { end: ended, ...result };
   };
@@ -127,9 +127,11 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
   const first = plan();
   // What a run that did not finish had done still counts: "13 of 40" after "12 of 40".
   const base = record.job ? record.job.done : 0;
+  const waitedForKeep = record.job?.keep === true;
   record.job = { done: base, total: base + first.steps.length, ended: null };
-  // A space nobody owns holds 100 MB of files: what the space is (or, not made yet, how the share was started).
-  if ((record.created ? !record.kept : !record.signed) && first.file_bytes > SPACE_OPEN_FILES_MAX) return end("over_limit");
+  // A space nobody owns holds 100 MB of files. Not counted for a space that is the person's own, nor for a share
+  // started signed in until a claim has said the space is someone else's (`job.keep`).
+  if (!record.kept && !(record.signed && !waitedForKeep) && first.file_bytes > SPACE_OPEN_FILES_MAX) return end("over_limit");
   keep();
   tell();
 
@@ -191,7 +193,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
           const made = await client.createSpace({ id: spaceId, name: record.name, document }, doc && seed.version ? originOf(doc.id, seed.version) : {});
           await adopt(made.space);
           if (doc && bytes && path) {
-            if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, url: made.document.url, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
+            if (made.document) record.pages[doc.id] = { lane: "page", remote_id: made.document.id, doc_path: path, pushed: [{ local: seed.version!, remote: made.document.version, hash: localHash(doc.id, seed.version!) }], stopped: null };
             else {
               const there = made.space.documents.find((d) => d.doc_path === path) ?? (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === path);
               if (!there) throw new SpacesError(0, "no_first_page", "The space answered without its first page.");
@@ -215,7 +217,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const path = paths[doc.id]!;
         try {
           const made = await client.addPage(spaceId, { doc_path: path, kind: doc.kind, title: doc.title, body: textOf(bytes) }, originOf(doc.id, step.version));
-          record.pages[doc.id] = { lane: "page", remote_id: made.id, doc_path: path, url: made.url, pushed: [{ local: step.version, remote: made.version, hash: localHash(doc.id, step.version) }], stopped: null };
+          record.pages[doc.id] = { lane: "page", remote_id: made.id, doc_path: path, pushed: [{ local: step.version, remote: made.version, hash: localHash(doc.id, step.version) }], stopped: null };
         } catch (error) {
           if (!(error instanceof SpacesError) || error.code !== "path_conflict") throw error;
           const there = (await client.getSpace(spaceId)).documents.find((d) => d.doc_path === path);
@@ -232,9 +234,7 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
         const bytes = bytesOf(doc.id, step.version);
         const pushed = (remote: string) => page.pushed.push({ local: step.version, remote, hash: localHash(doc.id, step.version) });
         try {
-          const saved = await client.savePage(spaceId, page.remote_id, bytes, doc.kind, last.remote, originOf(doc.id, step.version));
-          pushed(saved.version);
-          page.url = saved.url ?? page.url;
+          pushed((await client.savePage(spaceId, page.remote_id, bytes, doc.kind, last.remote, originOf(doc.id, step.version))).version);
         } catch (error) {
           if (!(error instanceof SpacesError)) throw error;
           if (error.code === "version_conflict") {
@@ -356,6 +356,21 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
     keep();
     return { end: "keep" };
   };
+  // Started signed in, made, and never confirmed as the person's own (the claim after the create did not get an
+  // answer): the claim is made now, before anything more is sent.
+  if (record.created && !record.kept && record.signed && client.signedIn && !record.refused) {
+    try {
+      const mine = await client.claim(record.space_id);
+      record.kept = true;
+      record.owner = mine.owner_name ?? record.owner;
+      record.visibility = mine.visibility ?? record.visibility ?? null;
+      keep();
+    } catch (error) {
+      if (run.signal?.aborted) return aborted();
+      if (spaceKeptByAnother(error)) return needsKeep();
+      return end("failed", error instanceof SpacesError ? { error, signedOut: spacesTokenRefused(error) } : {});
+    }
+  }
   for (;;) {
     if (run.signal?.aborted) return aborted();
     const next = plan();

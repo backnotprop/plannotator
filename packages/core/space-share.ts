@@ -123,8 +123,6 @@ export interface SpaceSharePage {
   /** The hosted page's (or file's) id; null until the call that makes it answered. */
   remote_id: string | null;
   doc_path: string;
-  /** The page's address, as the space last returned it (`file_url`), when it did. */
-  url?: string | null;
   pushed: SpaceSharePushed[];
   /** The page changed in the space since the last push: it is left alone. `current`: the version the space holds. */
   stopped: { current: string | null } | null;
@@ -183,6 +181,8 @@ export interface SpaceShareRecord {
     gone?: boolean;
     /** A write was not allowed: the space has an owner now. Keep this space finds out whether it is this person. */
     keep?: boolean;
+    /** Over the limit: the file bytes the share held then (it is not run again until that changes). */
+    bytes?: number;
   } | null;
 }
 
@@ -525,8 +525,8 @@ export interface SpaceShareStatus {
   versions: number;
   /** Pages, files and comments new since the last share. */
   changes: number;
-  /** Pages left alone because they changed in the space, each with its address there (the link and its path). */
-  stopped_pages: { title: string; url?: string | null }[];
+  /** Pages left alone because they changed in the space. */
+  stopped_pages: { title: string }[];
   /** The claim is going: Keep waits for it. */
   busy?: boolean;
   /**
@@ -535,6 +535,10 @@ export interface SpaceShareStatus {
    * Keep this space is offered; Update waits for it.
    */
   needs_keep?: boolean;
+  /** The space is the person's own (kept, signed in here or not): with `needs_keep`, only signing in again is asked. */
+  own?: boolean;
+  /** Over the limit of a space that is the person's own (or was started signed in): no sign-in can help. */
+  limit_own?: boolean;
   details: Record<SpaceShareMode, SpaceShareDetails>;
 }
 

@@ -160,8 +160,13 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const running = live.running !== null;
     const needsKeep = needsKeepOf(record, signedIn);
     const gone = record?.job?.gone === true;
+    const own = !!record && (record.kept || record.signed === true);
+    // Over the limit of the person's own space: not run again until what it holds changes; then it is a share to go on with.
+    const overOwn = !!record && record.job?.ended === "over_limit" && own;
+    const overStill = overOwn && record!.job!.bytes === plan.file_bytes;
+    const ended = record?.job ? (overOwn && !overStill ? (record.shared_at ? null : "stopped") : (record.job.ended ?? "failed")) : null;
     // A space that is up and waits for Keep shows as the result, with Keep this space; one that is gone has no link.
-    const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : gone ? "gone" : needsKeep && record.created && record.share_url ? "shared" : record.job ? (record.job.ended ?? "failed") : record.shared_at ? "shared" : "none";
+    const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : gone ? "gone" : needsKeep && record.created && record.share_url ? "shared" : ended ? ended : record.shared_at ? "shared" : "none";
     const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" && phase !== "gone" ? { done: record.job.done, total: record.job.total } : null;
     const until = running ? (live.progress?.waiting_until ?? null) : null;
     const link = phase === "gone" ? null : (record?.share_url ?? null);
@@ -174,17 +179,18 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       kept: !!record?.kept && signedIn,
       // Said as the space is: only a space the space itself calls private is "only you"; one a write was refused by
       // has an owner, and its link still reads and comments.
-      access: !record ? (signedIn ? "private" : "edit") : record.kept ? (record.visibility === "private" ? "private" : "comment") : record.job?.keep ? "comment" : record.created ? "edit" : signedIn || record.signed ? "private" : "edit",
+      access: !record ? (signedIn ? "private" : "edit") : record.kept ? (record.visibility === "private" ? "private" : "comment") : record.job?.keep ? "comment" : record.signed ? "private" : record.created ? "edit" : signedIn ? "private" : "edit",
       signed_in: signedIn,
       who: signedIn ? (credential.name ?? (record?.kept ? record.owner : null)) : null,
       keep: live.keep,
       busy: live.claiming !== null,
       needs_keep: needsKeep && !running,
+      own: !!record?.kept,
+      limit_own: phase === "over_limit" && overOwn,
       mode: record?.mode ?? "all",
       versions: Math.max(0, ...source.local.documents.map((d) => d.versions.length)),
       changes: phase === "shared" ? plan.changes : 0,
-      // A page's address is the one the space returned for it; without one, the space's own link.
-      stopped_pages: record ? source.local.documents.filter((d) => record.pages[d.id]?.stopped).map((d) => ({ title: d.title, url: record.pages[d.id]!.url ?? link })) : [],
+      stopped_pages: record ? source.local.documents.filter((d) => record.pages[d.id]?.stopped).map((d) => ({ title: d.title })) : [],
       details: { all: planOf("all").details, newest: planOf("newest").details },
     };
   }
@@ -254,6 +260,8 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     // Waiting for Keep (the sign-in is gone, or a write was not allowed), or the space is gone: nothing is sent,
     // and no browser is opened by an Update. The panel's Keep signs in; Share as new starts over.
     if (needsKeepOf(record, credentialOf(record.host) !== null) || record.job?.gone) return status(id);
+    // Over the limit of the person's own space: sending it again would only be refused again.
+    if (status(id)?.limit_own) return status(id);
     start(id, record);
     return status(id);
   }

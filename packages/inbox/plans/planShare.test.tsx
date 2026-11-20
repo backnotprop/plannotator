@@ -86,7 +86,7 @@ const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; inf
   ['keep, from a remote window', shared({ keep: 'remote' }), 'main', ['keep-close'], {}],
   ['update, not signed in', shared({ changes: 2 }), 'main', ['copy', 'open', 'update'], {}],
   ['update, signed in', shared({ changes: 1, kept: true, access: 'comment', signed_in: true }), 'main', ['copy', 'open', 'invite', 'update'], {}],
-  ['update stopped for a page', shared({ stopped_pages: [{ title: 'Rollout checklist', url: `${LINK}/Rollout%20checklist.md` }] }), 'main', ['copy', 'open', 'open-page'], {}],
+  ['update stopped for a page', shared({ stopped_pages: [{ title: 'Rollout checklist' }] }), 'main', ['copy', 'open', 'open-page'], {}],
   ['someone else kept it', status({ phase: 'refused', link: LINK, shared_once: true }), 'main', ['open-space', 'share-new'], {}],
   ['over the limit', status({ phase: 'over_limit', progress: { done: 3, total: 9 } }), 'main', ['sign-in'], {}],
   ['did not finish', status({ phase: 'failed', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
@@ -94,7 +94,9 @@ const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; inf
   ['started signed in, the sign-in gone', status({ phase: 'failed', needs_keep: true, access: 'private', progress: { done: 0, total: 9 } }), 'main', ['keep'], {}],
   ['the space is gone', status({ phase: 'gone', shared_once: true }), 'main', ['share-new'], {}],
   ['waiting for Keep, with changes', shared({ needs_keep: true, access: 'comment', changes: 2 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
-  ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'private' }), 'main', ['copy', 'open', 'keep'], { details: true }],
+  ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'comment' }), 'main', ['copy', 'open', 'keep'], { details: true }],
+  ['the person\'s own space, signed out here', shared({ needs_keep: true, own: true, access: 'private', changes: 1 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
+  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['copy', 'open'], {}],
   ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], {}],
   ['details', shared(), 'details', [], {}],
@@ -173,6 +175,17 @@ describe.if(hasDom)('the panel, state by state', () => {
     expect(gone.sent).toEqual([['share', { mode: 'all', fresh: true }]]);
   });
 
+  test('the person\'s own space, signed out here: only the access line and Keep, never beside a "make it yours" row; someone else\'s by now keeps that row', () => {
+    const marks = (s: SpaceShareStatus) => [...panel(s).host.querySelectorAll<HTMLElement>('.ib-shr-arow')].map((row) => `${row.dataset.shareRowMark}${row.querySelector('[data-share-act="keep"]') ? '+keep' : ''}`);
+    expect(marks(shared({ needs_keep: true, own: true, access: 'private' }))).toEqual(['lock+keep']);
+    expect(marks(shared({ needs_keep: true, own: true, access: 'comment', changes: 1 }))).toEqual(['globe+keep', 'doc']);
+    expect(marks(shared({ needs_keep: true, access: 'comment', changes: 1 }))).toEqual(['globe', 'user+keep', 'doc']);
+    // Over the limit of the person's own space: nothing to press but the link.
+    const over = panel(status({ phase: 'over_limit', limit_own: true, link: LINK }));
+    expect(over.host.querySelector('[data-share-act="sign-in"], [data-share-act="try-again"]')).toBeNull();
+    expect(panel(status({ phase: 'over_limit' })).host.querySelector('[data-share-act="sign-in"]')).not.toBeNull();
+  });
+
   test('Keep waits while a claim is going', () => {
     expect(panel(shared({ busy: true })).host.querySelector<HTMLButtonElement>('[data-share-act="keep"]')!.disabled).toBe(true);
     expect(panel(shared()).host.querySelector<HTMLButtonElement>('[data-share-act="keep"]')!.disabled).toBe(false);
@@ -234,8 +247,9 @@ describe.if(hasDom)('what a press sends', () => {
     expect([open.getAttribute('href'), open.target, open.rel]).toEqual([LINK, '_blank', 'noopener noreferrer']);
     expect(p.host.querySelector<HTMLInputElement>('input')!.value).toBe(LINK);
     // A stopped page opens at its own address there.
-    const stopped = panel(shared({ stopped_pages: [{ title: 'Rollout checklist', url: `${LINK}/Rollout%20checklist.md` }] }));
-    expect(stopped.host.querySelector<HTMLAnchorElement>('[data-share-act="open-page"]')!.getAttribute('href')).toBe(`${LINK}/Rollout%20checklist.md`);
+    // A stopped page opens the space itself: never an address built here.
+    const stopped = panel(shared({ stopped_pages: [{ title: 'Rollout checklist' }] }));
+    expect(stopped.host.querySelector<HTMLAnchorElement>('[data-share-act="open-page"]')!.getAttribute('href')).toBe(LINK);
     const odd = panel(shared({ link: 'javascript:alert(1)' }));
     expect(odd.host.querySelector('a')).toBeNull();
     expect(odd.host.querySelector('input')).toBeNull();

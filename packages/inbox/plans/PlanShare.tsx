@@ -48,6 +48,7 @@ export const SHARE_WORDS = {
   stillComment: 'You can still comment there.',
   shareAsNew: 'Share as new',
   overLimit: 'Over 100 MB without sign-in.',
+  overLimitOwn: 'Over the limit',
   signIn: 'Sign in',
   failed: 'Couldn’t reach Spaces.',
   tryAgain: 'Try again',
@@ -63,7 +64,6 @@ export const SHARE_WORDS = {
 
 const changesWords = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'} here`;
 const busyWords = (seconds: number) => `Spaces is busy. Trying again in ${seconds} s.`;
-const pageLink = (url: string | null | undefined) => (url && /^https?:\/\//i.test(url) ? url : null);
 /** Only an http(s) address is ever a link on the page. */
 const linkOf = (status: SpaceShareStatus) => (status.link && /^https?:\/\//i.test(status.link) ? status.link : null);
 
@@ -388,13 +388,13 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
   // The access line says what is true of the space: private only when it was made signed in; a space kept after
   // it was shared still lets holders of its link read and comment.
   const invite = status.kept && status.phase !== 'none' && link ? <LinkBtn href={link} name="invite">{SHARE_WORDS.invite}</LinkBtn> : undefined;
-  const access = (right?: ReactNode) =>
+  const access = (right?: ReactNode, own?: ReactNode) =>
     status.access === 'private' ? (
-      <Row mark="lock" right={invite}>
+      <Row mark="lock" right={own ?? invite}>
         {SHARE_WORDS.onlyYou}
       </Row>
     ) : status.access === 'comment' ? (
-      <Row mark="globe" right={invite} oneLine>
+      <Row mark="globe" right={own ?? invite} oneLine={!own}>
         {SHARE_WORDS.anyoneComment}
       </Row>
     ) : (
@@ -470,17 +470,24 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
       // Waiting for Keep (a write was not allowed, or the sign-in is gone): Keep is offered, and Update waits for it.
       const waits = status.needs_keep === true;
       const offerKeep = waits || (!stopped && !update && !status.kept);
+      // The person's own space, signed out here: only signing in again is asked, on the access line itself.
+      const keepButton = (
+        <Btn onClick={actions.keep} name="keep" disabled={status.busy === true}>
+          {SHARE_WORDS.keep}
+        </Btn>
+      );
+      const ownWaits = waits && status.own === true;
       return (
         <>
           {link && <LinkRow link={link} primary={!stopped && !update && !waits} />}
           {stopped
             ? status.stopped_pages.map((page) => (
-                <Row key={page.title} mark="excl" warn right={pageLink(page.url) ?? link ? <LinkBtn href={(pageLink(page.url) ?? link)!} name="open-page">{SHARE_WORDS.openInSpaces}</LinkBtn> : undefined}>
+                <Row key={page.title} mark="excl" warn right={link ? <LinkBtn href={link} name="open-page">{SHARE_WORDS.openInSpaces}</LinkBtn> : undefined}>
                   {page.title} changed
                 </Row>
               ))
-            : access(!update && !waits ? <InfoMark /> : undefined)}
-          {offerKeep && (
+            : access(!update && !waits ? <InfoMark /> : undefined, ownWaits ? keepButton : undefined)}
+          {offerKeep && !ownWaits && (
             <Row
               mark="user"
               right={
@@ -538,6 +545,17 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
         </>
       );
     case 'over_limit':
+      // The person's own space: no sign-in can help and sending it again would only be refused again.
+      if (status.limit_own) {
+        return (
+          <>
+            <Msg mark="excl" tone="warn" first>
+              {SHARE_WORDS.overLimitOwn}
+            </Msg>
+            {link && <LinkRow link={link} primary={false} />}
+          </>
+        );
+      }
       return (
         <>
           <Msg mark="excl" tone="warn" first>

@@ -113,15 +113,13 @@ describe("the status", () => {
     s.jobs.share(id, {});
     await s.settle();
     const link = s.jobs.status(id)!.link!;
-    // Its address is the one the space returned for the page, never one built here.
-    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", stopped_pages: [{ title: "Rollout checklist", url: s.record().pages[s.world.pages.rollout]!.url }], changes: 0 });
-    expect(s.record().pages[s.world.pages.rollout]!.url!.startsWith(`${link}/`)).toBe(true);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", link, stopped_pages: [{ title: "Rollout checklist" }], changes: 0 });
     s.spaces.keptBy(first, "Someone Else");
     s.world.store.addVersion(id, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
     s.jobs.share(id, {});
     await s.settle();
     // The write was not allowed: Keep is offered, the changes still wait, and nothing says whose the space is.
-    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", needs_keep: true, access: "comment", kept: false });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", needs_keep: true, own: false, access: "comment", kept: false });
     expect(s.jobs.status(id)!.changes).toBeGreaterThan(0);
     const waiting = s.spaces.calls.length;
     s.jobs.share(id, {});
@@ -196,6 +194,35 @@ describe("started signed in", () => {
     await s.settle();
     expect(readSpacesCredential(s.dataDir, HOST)).not.toBeNull();
     expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "failed", signed_in: true, needs_keep: false });
+  });
+});
+
+describe("over the limit", () => {
+  test("the person's own space: its own state, the link kept, and never sent again until what it holds changes", async () => {
+    const s = setup({ seed: { extras: false } });
+    const id = s.world.plan;
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.world.store.addArtifact(id, { asset_path: "a.bin", content_type: "application/octet-stream", created_at: new Date().toISOString(), bytes: new Uint8Array([1, 2, 3]) });
+    s.spaces.failNext(/assets\//, 413, "quota_exceeded", { times: 2 });
+    s.jobs.share(id, {});
+    await s.settle();
+    const over = s.jobs.status(id)!;
+    expect(over).toMatchObject({ phase: "over_limit", limit_own: true, kept: true });
+    expect(over.link).not.toBeNull();
+    const calls = s.spaces.calls.length;
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.spaces.calls.length).toBe(calls);
+    // What it holds changed: it is a share to go on with again.
+    s.world.store.addArtifact(id, { asset_path: "a.bin", content_type: "application/octet-stream", created_at: new Date().toISOString(), bytes: new Uint8Array([1]) });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "stopped", limit_own: false });
+  });
+
+  test("a space nobody kept: the sign-in state, as before", async () => {
+    const s = setup({ spaces: { openQuota: 80 } });
+    s.jobs.share(s.world.plan, {});
+    await s.settle();
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "over_limit", limit_own: false });
   });
 });
 
@@ -327,7 +354,7 @@ describe("Keep this space", () => {
     expect(readSpacesCredential(s.dataDir, HOST)).toBeNull();
     // Signed out: the result panel with Keep, which signs in. No Update is offered that could only fail, an Update
     // pressed anyway sends nothing, and no browser is ever opened by it.
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: false, kept: false, needs_keep: true, changes: 1, keep: null, access: "private" });
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "shared", signed_in: false, kept: false, needs_keep: true, own: true, changes: 1, keep: null, access: "private" });
     const calls = s.spaces.calls.length;
     expect(s.jobs.share(s.world.plan, {})).toMatchObject({ phase: "shared", keep: null });
     await s.settle();

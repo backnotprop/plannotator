@@ -237,11 +237,26 @@ describe("the sign-in and the limit", () => {
     expect((await s.run()).end).toBe("over_limit");
   });
 
-  test("a stopped page keeps the address the space gave for it", async () => {
-    const s = setup();
-    await s.run();
-    const url = s.record.pages[s.world.pages.rollout]!.url!;
-    expect(url.startsWith(`${s.record.share_url}/Rollout%20checklist.md@`)).toBe(true);
+  test("started signed in, made, and the claim after the create got no answer: the claim is made first on the next run, and the 100 MB count for a space nobody owns is not applied meanwhile", async () => {
+    const s = setup({ token: true, seed: { extras: false } });
+    s.record.signed = true;
+    s.spaces.failNext(/claim$/, 502, "bad_gateway");
+    expect((await s.run()).end).toBe("failed");
+    expect([s.record.created, s.record.kept, s.record.refused]).toEqual([true, false, false]);
+    // Files that a space nobody owns could not hold together: not refused here, since this space is taken as the person's own.
+    const source = spaceShareSource(s.world.store, s.world.plan)!;
+    for (const [path, hash] of [["big-1.bin", "e"], ["big.bin", "f"]]) source.local.artifacts.push({ asset_path: path!, content_hash: hash!.repeat(64), content_type: "application/octet-stream", size: 60_000_000, title: null, created_at: new Date().toISOString() });
+    const again = await runSpaceShare({ source: { ...source, artifactBytes: () => new Uint8Array([1]) }, record: s.record, save: () => {}, client: createSpacesClient({ host: HOST, token: s.token, fetch: s.spaces.fetch }) });
+    expect(again.end).toBe("done");
+    expect(s.record.kept).toBe(true);
+    const order = s.spaces.calls.filter((c) => c.method !== "GET").map((c) => c.path.split("/").pop());
+    expect(order.indexOf("claim")).toBeLessThan(order.lastIndexOf("big.bin"));
+    // The same file into a space nobody owns is over the limit before anything is sent.
+    const open = setup({ seed: { extras: false } });
+    const openSource = spaceShareSource(open.world.store, open.world.plan)!;
+    for (const [path, hash] of [["big-1.bin", "e"], ["big.bin", "f"]]) openSource.local.artifacts.push({ asset_path: path!, content_hash: hash!.repeat(64), content_type: "application/octet-stream", size: 60_000_000, title: null, created_at: new Date().toISOString() });
+    expect((await runSpaceShare({ source: openSource, record: open.record, save: () => {}, client: createSpacesClient({ host: HOST, fetch: open.spaces.fetch }) })).end).toBe("over_limit");
+    expect(open.spaces.calls).toHaveLength(0);
   });
 });
 
