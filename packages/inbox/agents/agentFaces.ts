@@ -153,6 +153,10 @@ function machineOfAgent(id: string): string | null {
 /** Every id of an agent on a linked machine from before tiles (its group has no `face_tiles`): no tile is kept there. */
 let noTiles = new Set<string>();
 
+// `agentFaceChains` changes (the list's Agents view joins an unlisted agent's sessions by them).
+let chainsSeen = '';
+let chainsRev = 0;
+const chainsListeners = new Set<() => void>();
 function rebuild(): void {
   const next = new Map<string, Shown>();
   const wasNoTiles = noTiles;
@@ -199,6 +203,22 @@ function rebuild(): void {
   for (const id of noTiles) if (!wasNoTiles.has(id)) changed.add(id);
   for (const id of wasNoTiles) if (!noTiles.has(id)) changed.add(id);
   for (const id of changed) for (const listener of [...(listeners.get(id) ?? [])]) listener();
+  const chains = JSON.stringify([entries(), ...linkedGroups().map(linkedFaces)].map((kept) => Object.entries(kept).map(([key, entry]) => [key, entry.sessions])));
+  if (chains !== chainsSeen) {
+    chainsSeen = chains;
+    chainsRev += 1;
+    for (const listener of [...chainsListeners]) listener();
+  }
+}
+
+/** A number that moves whenever `agentFaceChains` would answer differently. */
+export function useAgentFaceChainsRev(): number {
+  const subscribe = useCallback((listener: () => void) => {
+    boot();
+    chainsListeners.add(listener);
+    return () => void chainsListeners.delete(listener);
+  }, []);
+  return useSyncExternalStore(subscribe, () => chainsRev, () => 0);
 }
 
 /** The paint copy: the server's faces with this page's changes on them, so a reload shows a choice even before it is saved. */

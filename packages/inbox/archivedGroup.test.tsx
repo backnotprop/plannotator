@@ -513,3 +513,23 @@ test.skipIf(!hasDom)('picking: an archived row is never picked, and opening the 
   expect(events.filter((e) => e === `open:${id}`)).toHaveLength(2);
   expect(archivedEl.getAttribute('aria-pressed')).not.toBe('true');
 });
+
+test.skipIf(!hasDom)("in the Agents view an archived row is the group's own row: Unarchive, not Mark unread", async () => {
+  const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+  const { LIST_VIEW_COOKIE, resetListViewForTests } = await import('./listView');
+  const kept = new Map<string, string>([[LIST_VIEW_COOKIE, 'agents']]);
+  setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  resetListViewForTests();
+  try {
+    render();
+    await switchOn();
+    await openGroup();
+    const wrap = group()!.querySelector<HTMLElement>('[data-row="arc_0"]')!;
+    expect(wrap.querySelector('[data-row-unarchive]')?.getAttribute('aria-label')).toBe('Unarchive: Thread arc_0');
+    expect(wrap.querySelector('.ib-lrow')).toBeNull();
+    expect(wrap.textContent).not.toContain('Mark unread');
+  } finally {
+    resetStorageBackend();
+    resetListViewForTests();
+  }
+});

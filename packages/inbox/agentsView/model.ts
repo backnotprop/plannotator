@@ -18,14 +18,15 @@
  * it names none of (an older Inbox), its state is not known.
  *
  * The order: agents with something for the person first (the list's urgency order: Priority, Stopped on you, Holding
- * up work, Waiting on you, New), then the latest activity; inside an agent, the same urgency order, then newest.
+ * up work, Waiting on you, New), then the others alike, each run by the latest activity; inside an agent, the same
+ * urgency order, then newest.
  * Ended agents sit under their own band. An agent with something for the person starts open.
  *
  * Held order (held.ts, as List keeps its places, listView.ts `flatRows`): everything above is worked out when the list
  * is sorted whole (`ListSort`: Show, a close, a refresh, another folder). Between two sorts each row keeps its agent and
  * its place while it keeps its group, and each agent keeps its place, its band and whether it starts open: an agent
  * that ends changes only its state words until the list settles. A row or an agent that is new takes its place by
- * the rule.
+ * the rule. The open thread (`ListSort.keep`) keeps its place through a sort, and so does the agent it is under.
  */
 import type { InboxAgent, InboxAgentsGroup, InboxListGroupId, InboxListRow, InboxListSection, InboxParticipant } from '@plannotator/core/inbox-types';
 import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
@@ -36,11 +37,14 @@ import type { ListSort } from '../listView';
 /** The list's urgency order: a row's group, most urgent first; anything else after. */
 export const AGENT_ROW_ORDER: readonly InboxListGroupId[] = ['priority', 'stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'];
 /** Up to here a row is for the person: its agent comes first and starts open. */
-const FOR_YOU = AGENT_ROW_ORDER.indexOf('new');
+export const FOR_YOU = AGENT_ROW_ORDER.indexOf('new');
+/** Up to here a row waits on the person (Priority, Stopped, Holding up work, Waiting on you): it opens a folded agent. */
+export const WAITS = AGENT_ROW_ORDER.indexOf('waiting');
 const rankOf = (group: InboxListGroupId): number => {
   const at = AGENT_ROW_ORDER.indexOf(group);
   return at < 0 ? AGENT_ROW_ORDER.length : at;
 };
+export const rowWaits = (group: InboxListGroupId): boolean => rankOf(group) <= WAITS;
 
 /** One agent as the view draws it. */
 export interface ViewAgent {
@@ -232,8 +236,10 @@ export function agentsLayout(inputs: AgentsInputs, places: AgentPlaces | null, s
     const agent = found.get(key) ?? old?.agent;
     if (!agent) continue;
     const last = list.reduce((max, r) => (r.row.last_at > max ? r.row.last_at : max), '');
-    const keep = old !== undefined && !sorted;
-    const place = keep ? { ...old, agent } : { ended: agent.state === 'ended', rank: list[0]!.rank, at: last, open: agent.state !== 'ended' && list[0]!.rank <= FOR_YOU, agent };
+    const keep = old !== undefined && (!sorted || (sort.keep !== null && list.some((r) => r.row.thread_id === sort.keep)));
+    // Agents with nothing for the person rank alike, so they go by their newest thread (an old Sent never tops a fresh Quiet).
+    const rank = Math.min(list[0]!.rank, FOR_YOU + 1);
+    const place = keep ? { ...old, agent } : { ended: agent.state === 'ended', rank, at: last, open: agent.state !== 'ended' && rank <= FOR_YOU, agent };
     agentPlaces.set(key, place);
     (place.ended ? ended : live).push({ agent, rows: list.map(({ row, drawn }) => ({ row, drawn })), open: place.open, last, rank: place.rank, at: place.at });
   }

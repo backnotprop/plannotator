@@ -753,8 +753,8 @@ export function InboxList(props: InboxListProps) {
   // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
   const [view, setView] = useListView(props.rememberLook !== false);
   const asList = view === 'list';
-  // Agents (agentsView/): every agent with its threads under it; the Snoozed band and Archived as in List.
-  const asAgents = view === 'agents';
+  // Agents (agentsView/): its drawn rows (Select all picks only those), its Shows (each opens the agents rows land under).
+  const asAgents = view === 'agents', [agentRows, setAgentRows] = useState<readonly string[] | null>(null), [shows, setShows] = useState(0);
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   const showArchived = useShowArchived();
@@ -763,7 +763,7 @@ export function InboxList(props: InboxListProps) {
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
-  const pick = useListPicks({ sections: props.sections, isOpen: (id) => ((asList || asAgents) && id !== 'snoozed') || groups.state(id).open, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
+  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || ((!asAgents || id === 'snoozed') && groups.state(id).open), drawn: asAgents ? agentRows : null, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -933,7 +933,7 @@ export function InboxList(props: InboxListProps) {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
-    if (lands && view === 'grouped') groups.open(lands);
+    if (lands && view === 'grouped') groups.open(lands); else if (asAgents) setShows((n) => n + 1);
     props.onShowNew();
   };
   // The row whose right-click menu is open: a muted background, as the project row's.
@@ -998,7 +998,7 @@ export function InboxList(props: InboxListProps) {
       away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
       drawn={drawn}
       // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
-      shape={asAgents ? (props.phone ? 'phone-line' : 'line') : props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
+      shape={asAgents && drawn !== 'archived' ? (props.phone ? 'phone-line' : 'line') : props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
       full={fullWords}
       filtered={noProject}
       selected={row.thread_id === props.selectedThreadId}
@@ -1214,7 +1214,7 @@ export function InboxList(props: InboxListProps) {
               {flat.rows.map(({ row, drawn }) => renderRow(row, drawn))}
             </div>
           )}
-          {asAgents && <AgentsList sections={props.sections} sort={props.sort} machines={props.machines} selectedThreadId={props.selectedThreadId} phone={props.phone === true} remember={props.rememberLook !== false} renderRow={renderRow} />}
+          {asAgents && <AgentsList sections={props.sections} sort={props.sort} machines={props.machines} selectedThreadId={props.selectedThreadId} phone={props.phone === true} remember={props.rememberLook !== false} renderRow={renderRow} shows={shows} onDrawn={setAgentRows} />}
           {/* List and Agents draw only the Snoozed band, folded under the rows as the groups draw it. */}
           {(asList || asAgents ? (listBand ? [listBand] : []) : visible).map((section) => {
             const state = groups.state(section.id);

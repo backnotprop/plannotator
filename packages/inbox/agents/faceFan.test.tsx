@@ -402,3 +402,30 @@ test.skipIf(!hasDom)("a 44 px face (the list's Agents view) draws at 44, and its
   const near = (spots: { x: number; y: number }[][]) => Math.min(...spots[0]!.map((s) => Math.hypot(s.x, s.y)));
   expect(near(fan.fanArcs(30, 384, 1024, 768, false, true, false, 8).spots)).toBeGreaterThan(near(fan.fanArcs(30, 384, 1024, 768).spots) + 7);
 });
+
+test.skipIf(!hasDom)("a face in the list keeps its fan inside the list's pane: the first agent at the pane's top left spills nothing over the sidebar", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="ib-listcol"><div className="ib-agh"><AgentMark id="ses_top" host="claude-code" name="Ops" size={44} /></div></div>));
+  const pane = document.querySelector<HTMLElement>('.ib-listcol')!;
+  // A 1024 × 768 window, the list's pane from x 240 to 620; the face 18 px in from its left and 72 px down.
+  pane.getBoundingClientRect = () => ({ left: 240, top: 0, width: 380, height: 768, right: 620, bottom: 768, x: 240, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const icon = document.querySelector<HTMLButtonElement>('[data-agent-icon="ses_top"]')!;
+  icon.getBoundingClientRect = () => ({ left: 258, top: 72, width: 44, height: 44, right: 302, bottom: 116, x: 258, y: 72, toJSON: () => ({}) }) as DOMRect;
+  pointer(icon, 'pointerdown', { x: 280, y: 94 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the face to open its picker');
+  const spots = [...document.querySelectorAll<HTMLElement>('.am-fan-i')].map((el) => ({ x: 280 + parseFloat(el.style.getPropertyValue('--x')), y: 94 + parseFloat(el.style.getPropertyValue('--y')) }));
+  expect(spots.length).toBeGreaterThan(10);
+  const pad = FAN_OPTIONS.margin + FAN_OPTIONS.item / 2 - 0.5;
+  for (const s of spots) {
+    expect(s.x).toBeGreaterThanOrEqual(240 + pad);
+    expect(s.x).toBeLessThanOrEqual(620 - pad);
+    expect(s.y).toBeGreaterThanOrEqual(pad);
+  }
+  // No choice on the face itself, and the plate is cut at the pane's edges (its box sits on the face's centre).
+  for (const s of spots) expect(Math.hypot(s.x - 280, s.y - 94)).toBeGreaterThan(22 + FAN_OPTIONS.item / 2);
+  expect(document.querySelector<HTMLElement>('.am-fan')!.style.clipPath).toBe('inset(-94px -340px -674px -40px)');
+});

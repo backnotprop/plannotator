@@ -76,14 +76,15 @@ describe('whose thread', () => {
 });
 
 describe('the order', () => {
-  test('agents with something for the person first, open; then the latest activity; inside, urgency then newest', () => {
+  test('agents with something for the person first, open; then the others by their newest thread; inside, urgency then newest', () => {
     const s = sections({
       waiting: [row('a-wait', 2, 'waiting', by('ses_a'))],
       quiet: [row('a-quiet-new', 9, 'quiet', by('ses_a')), row('b-quiet', 8, 'quiet', by('ses_b')), row('a-quiet-old', 1, 'quiet', by('ses_a'))],
       sent: [row('c-sent', 7, 'sent', by('ses_c'))],
     });
     const layout = agentsLayout(inputs(s, groups(agent('ses_a', 'waiting'), agent('ses_b', 'idle'), agent('ses_c', 'working'))), null, { epoch: 1, keep: null });
-    expect(layout.live.map((b) => b.agent.id)).toEqual(['ses_a', 'ses_c', 'ses_b']);
+    // An older Sent (ses_c) does not top a fresher Quiet (ses_b).
+    expect(layout.live.map((b) => b.agent.id)).toEqual(['ses_a', 'ses_b', 'ses_c']);
     expect(ids(layout.live[0]!.rows)).toEqual(['a-wait', 'a-quiet-new', 'a-quiet-old']);
     expect(layout.live.map((b) => b.open)).toEqual([true, false, false]);
   });
@@ -147,6 +148,16 @@ describe('held order between two sorts', () => {
     expect(held.ended).toEqual([]);
     const settled = agentsLayout(inputs(first, now), held.places, { epoch: 2, keep: null });
     expect(settled.ended.map((b) => b.agent.id)).toEqual(['ses_a']);
+  });
+
+  test('the open thread keeps its place through a sort, and so does the agent it is under', () => {
+    const before = sections({ quiet: [row('b', 6, 'quiet', by('ses_b')), row('a', 5, 'quiet', by('ses_a'))] });
+    const one = agentsLayout(inputs(before, live), null, { epoch: 1, keep: null });
+    expect(one.live.map((b) => b.agent.id)).toEqual(['ses_b', 'ses_a']);
+    // The person wrote in the open thread "a": a sort that keeps it does not move it, nor its agent, to the top.
+    const wrote = sections({ quiet: [row('a', 9, 'quiet', by('ses_a')), row('b', 6, 'quiet', by('ses_b'))] });
+    expect(agentsLayout(inputs(wrote, live), one.places, { epoch: 2, keep: 'a' }).live.map((b) => b.agent.id)).toEqual(['ses_b', 'ses_a']);
+    expect(agentsLayout(inputs(wrote, live), one.places, { epoch: 2, keep: null }).live.map((b) => b.agent.id)).toEqual(['ses_a', 'ses_b']);
   });
 
   test('an agent the list stops naming keeps its threads and its name until the list settles', () => {

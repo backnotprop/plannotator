@@ -10,11 +10,13 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server, no fetch.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { TidyController } from '../components/Tidy';
+import type { BulkWrites } from '../bulkWrites';
+import * as format from '../format';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('../components/InboxList') : {}) as typeof import('../components/InboxList');
@@ -55,7 +57,9 @@ function unmount() {
 }
 
 const TIDY: TidyController = { surface: 'list', scope: null, plan: null, run: null, start: async () => null, refresh: () => {} };
-const T = (minute: number) => `2026-11-19T10:${String(minute).padStart(2, '0')}:00Z`;
+// In the past, so a fold made now (folds.ts keeps when) comes after every thread of the fixture.
+const T = (minute: number) => `2026-01-05T10:${String(minute).padStart(2, '0')}:00Z`;
+const SOON = () => new Date(Date.now() + 60_000).toISOString();
 
 function row(id: string, minute: number, section: InboxListRow['section'], session: string | null, extra: Partial<InboxListRow> = {}): InboxListRow {
   return {
@@ -104,7 +108,16 @@ const LIST = sections({
   ],
 });
 
-function render(options: { sections?: InboxListSection[]; epoch?: number; onOpen?: (id: string) => void } = {}): HTMLElement {
+interface Options {
+  sections?: InboxListSection[];
+  epoch?: number;
+  onOpen?: (id: string) => void;
+  bulk?: BulkWrites;
+  notice?: { count: number; project?: string | null } | null;
+  onShowNew?: () => void;
+}
+
+function render(options: Options = {}): HTMLElement {
   if (!host) {
     host = document.createElement('div');
     host.className = 'pn-inbox';
@@ -123,10 +136,11 @@ function render(options: { sections?: InboxListSection[]; epoch?: number; onOpen
           narrow={false}
           phone={false}
           selectedThreadId={null}
-          notice={null}
-          onShowNew={() => {}}
+          notice={options.notice ?? null}
+          onShowNew={options.onShowNew ?? (() => {})}
           onOpen={(row: InboxListRow) => options.onOpen?.(row.thread_id)}
           tidy={TIDY}
+          bulk={options.bulk}
         />
       </SidebarProvider>,
     );
@@ -213,4 +227,104 @@ describe.skipIf(!hasDom)('the Agents view', () => {
     render({ sections: moved, epoch: 2 });
     expect(rowsOf(el, 'Ops')).toEqual(['ops-wait', 'ops-4', 'ops-1', 'ops-2', 'ops-3']);
   });
+
+  test('"N more" moves focus to the first row it shows', () => {
+    const el = render();
+    const more = el.querySelector<HTMLButtonElement>('[data-agent-more]')!;
+    more.focus();
+    act(() => more.click());
+    expect(document.activeElement?.getAttribute('data-thread-id')).toBe('ops-5');
+  });
+
+  test('the Ended band owns the ended agents for a screen reader', () => {
+    const el = render();
+    const band = el.querySelector<HTMLElement>('[data-section-id="agents-ended"]')!;
+    const owned = el.querySelector<HTMLElement>('[data-agent][data-agent-ended]')!;
+    expect(owned.id).toBeTruthy();
+    expect(band.getAttribute('aria-owns')!.split(' ')).toContain(owned.id);
+  });
 });
+
+describe.skipIf(!hasDom)('what the Agents view hides stays out of reach', () => {
+  const bulk = { archive: async () => {}, snooze: async () => {}, markRead: async () => {}, markUnread: async () => {}, star: async () => {}, priority: async () => {} } as unknown as BulkWrites;
+  const click = (el: Element, init: MouseEventInit = {}) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init })));
+  const count = () => document.querySelector('[data-pick-bar] [role="status"]')?.textContent ?? null;
+
+  test('Select all picks the rows on screen only: not a folded agent, not the rows behind "N more", not a folded band', () => {
+    const el = render({ bulk });
+    click(el.querySelector('[data-thread-id="ops-wait"]')!, { metaKey: true });
+    expect(count()).toBe('1 selected');
+    click(document.querySelector('[data-pick-bar] [data-pick-box]')!);
+    // Ops shows five of its seven; Docs pass and Search index are folded; No agent is folded.
+    expect(count()).toBe('5 selected');
+    // Folding Ops and opening Docs pass: Select all now means Docs pass's one thread.
+    click(document.querySelector('[data-pick-bar] [data-pick-box]')!);
+    act(() => head(el, 'Ops').click());
+    act(() => head(el, 'Docs pass').click());
+    expect(count()).toBe('Click threads to select them');
+    click(document.querySelector('[data-pick-bar] [data-pick-box]')!);
+    expect(count()).toBe('1 selected');
+    expect(el.querySelector('[data-thread-id="docs-1"]')!.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe.skipIf(!hasDom)('a fold gives way to new work', () => {
+  const withRow = (extra: InboxListRow, group: 'waiting' | 'quiet') =>
+    sections(Object.fromEntries(LIST.map((s) => [s.id, s.id === group ? [extra, ...s.threads] : s.threads])));
+
+  test('Show opens the agents its rows land under, and they are on screen', () => {
+    let shown = 0;
+    const el = render({ notice: { count: 1 }, onShowNew: () => void (shown += 1) });
+    expect(rowsOf(el, 'Docs pass')).toEqual([]);
+    act(() => el.querySelector<HTMLButtonElement>('[data-inbox-notice]')!.click());
+    expect(shown).toBe(1);
+    const fresh = row('docs-new', 59, 'quiet', 'ses_docs', { last_agent_at: SOON(), last_at: SOON() } as Partial<InboxListRow>);
+    render({ sections: withRow(fresh, 'quiet'), epoch: 2, notice: null });
+    expect(head(el, 'Docs pass').getAttribute('aria-expanded')).toBe('true');
+    expect(rowsOf(el, 'Docs pass')).toContain('docs-new');
+  });
+
+  test('a folded agent opens again when a thread that waits on the person comes after the fold; an older one does not', () => {
+    const el = render();
+    act(() => head(el, 'Ops').click());
+    expect(head(el, 'Ops').getAttribute('aria-expanded')).toBe('false');
+    // A newer message in a thread that does not wait on the person: still folded.
+    const quiet = row('ops-quiet', 58, 'quiet', 'ses_ops', { last_agent_at: SOON(), last_at: SOON() } as Partial<InboxListRow>);
+    render({ sections: withRow(quiet, 'quiet') });
+    expect(head(el, 'Ops').getAttribute('aria-expanded')).toBe('false');
+    const asks = row('ops-asks', 57, 'waiting', 'ses_ops', { last_agent_at: SOON(), last_at: SOON() } as Partial<InboxListRow>);
+    render({ sections: withRow(asks, 'waiting') });
+    expect(head(el, 'Ops').getAttribute('aria-expanded')).toBe('true');
+    expect(rowsOf(el, 'Ops')).toContain('ops-asks');
+  });
+});
+
+describe.skipIf(!hasDom)('a list read draws only what changed', () => {
+  test('one thread changed: that row and its agent row draw again, nothing else', () => {
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.append(host);
+    root = createRoot(host);
+    const copy = () => LIST.map((s) => ({ ...s, threads: s.threads.map((r) => ({ ...r, questions: { ...r.questions } })) })) as InboxListSection[];
+    const shortTime = spyOn(format, 'shortTime');
+    try {
+      const el = render({ sections: copy() });
+      expect(shortTime.mock.calls.length).toBeGreaterThan(0);
+      shortTime.mockClear();
+      render({ sections: copy() });
+      // Same content in new objects: no row and no agent row draws again.
+      expect(shortTime.mock.calls.length).toBe(0);
+      shortTime.mockClear();
+      const changed = copy();
+      const quiet = changed.find((s) => s.id === 'quiet')!;
+      quiet.threads = quiet.threads.map((r) => (r.thread_id === 'ops-2' ? { ...r, subject: 'Thread ops-2, revised', last_at: T(45) } : r));
+      render({ sections: changed });
+      // The row's time, and its agent's newest time.
+      expect(shortTime.mock.calls.length).toBe(2);
+      expect(el.textContent).toContain('Thread ops-2, revised');
+    } finally {
+      shortTime.mockRestore();
+    }
+  });
+});
+
