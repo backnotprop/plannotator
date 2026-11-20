@@ -357,7 +357,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const record = readSpaceShareRecord(options.dataDir, id);
     if (!record || record.refused || !credentialOf(record.host)) return;
     const source = spaceShareSource(options.store(), id);
-    // What waits: a run that did not finish, or the approval, which goes only into a kept space.
+    // What waits: a run that did not finish, or something new to send (never an approval: that goes only with Keep).
     if (source && (record.job || planSpaceShare(source.local, record, { mode: record.mode, signedIn: true }).steps.length > 0)) start(id, record);
   }
 

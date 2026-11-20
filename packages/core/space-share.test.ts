@@ -3,7 +3,7 @@
  * - a path a hosted space refuses (`#`, `%`, `.git`, `..`) is taken here, or two pages get one path;
  * - a page or file over the hosted limit, a comment over 8 KiB, a comment the agent already has or a reply whose
  *   comment is not in the space is planned to go up;
- * - a space nobody kept is planned an approval, or a kept one is not;
+ * - an approval call is ever planned (a tool's is always refused), or Details lists an approval that is not up;
  * - the button reads the wrong word for where the share stands.
  */
 import { describe, expect, test } from "bun:test";
@@ -136,20 +136,36 @@ describe("the steps", () => {
     expect(plan.file_bytes).toBe(SPACE_OPEN_FILES_MAX + 1);
   });
 
-  test("the approval: planned last and only for a kept space; listed in Details only where it goes; never again once refused", () => {
+  test("the approval: never a step; listed in Details only while it is up (recorded, the page not saved or changed since)", () => {
     const approved = local({ approval: { document_id: DOC, version_number: 2 } });
-    const open = planSpaceShare(approved, null, { mode: "all", signedIn: false });
-    expect(open.steps.some((s) => s.kind === "approval")).toBe(false);
-    expect(open.details.approval).toBeNull();
-    // Signed in, but the space is up and nobody's: not the person's own, so no approval.
-    const unkept = { ...record(), created: true };
-    expect(planSpaceShare(approved, unkept, { mode: "all", signedIn: true }).details.approval).toBeNull();
-    const kept = planSpaceShare(approved, null, { mode: "all", signedIn: true });
-    expect(kept.steps[kept.steps.length - 1]).toEqual({ kind: "approval", doc: DOC, version: 2 });
-    const refused = { ...record(), created: true, kept: true, approval_refused: true };
-    const after = planSpaceShare(approved, refused, { mode: "all", signedIn: true });
-    expect(after.steps.some((s) => s.kind === "approval")).toBe(false);
-    expect(after.details.approval).toBeNull();
+    const kinds = (plan: ReturnType<typeof planSpaceShare>) => plan.steps.map((s) => s.kind as string);
+    // Not up: a share signed in to the person's own space plans no approval and lists none.
+    const fresh = planSpaceShare(approved, null, { mode: "all", signedIn: true });
+    expect(kinds(fresh)).not.toContain("approval");
+    expect(fresh.details.approval).toBeNull();
+    const upKept = () => {
+      const r = { ...record(), created: true, kept: true };
+      r.pages[DOC] = { lane: "page", remote_id: "doc_remote", doc_path: "Plan.md", pushed: [{ local: 1, remote: "r1", hash: hash(1) }, { local: 2, remote: "r2", hash: hash(2) }], stopped: null };
+      return r;
+    };
+    const notRecorded = planSpaceShare(approved, upKept(), { mode: "all", signedIn: true });
+    expect(notRecorded.steps).toEqual([]);
+    expect(notRecorded.details.approval).toBeNull();
+    // Recorded with Keep: listed, and still nothing to send.
+    const recorded = { ...upKept(), approval: { document_id: DOC, version_number: 2 } };
+    const listed = planSpaceShare(approved, recorded, { mode: "all", signedIn: true });
+    expect(listed.details.approval).toBe(2);
+    expect(listed.steps).toEqual([]);
+    // A newer version approved here is not the one recorded there; a page changed there is not either.
+    const newer = local({ approval: { document_id: DOC, version_number: 3 } });
+    newer.documents[0]!.versions.push({ version_number: 3, version: hash(3), size: 14 });
+    expect(planSpaceShare(newer, recorded, { mode: "all", signedIn: true }).details.approval).toBeNull();
+    const changedThere = { ...upKept(), approval: { document_id: DOC, version_number: 2 } };
+    changedThere.pages[DOC]!.stopped = { current: "r9" };
+    expect(planSpaceShare(approved, changedThere, { mode: "all", signedIn: true }).details.approval).toBeNull();
+    // A space nobody kept lists none; an old record that says the tool's approval was refused locks nothing out.
+    expect(planSpaceShare(approved, { ...recorded, kept: false }, { mode: "all", signedIn: true }).details.approval).toBeNull();
+    expect(planSpaceShare(approved, { ...recorded, approval_refused: true }, { mode: "all", signedIn: true }).details.approval).toBe(2);
   });
 
   test("an Update plans only what is new, and leaves a stopped page alone", () => {

@@ -12,11 +12,12 @@
  * - the address resolver takes plain http to another machine, or the switch is on by default.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakeSpaces } from "../../../tests/helpers/fake-spaces";
-import { seedSpaceShareWorld } from "../../../tests/helpers/space-share-world";
+import { seedSpaceShareWorld, type SpaceShareWorld } from "../../../tests/helpers/space-share-world";
+import { NO_ACTOR } from "@plannotator/core/plans";
 import { clearSpacesCredential, readSpacesCredential, saveSpacesCredential, spacesCredentialPath } from "./credential";
 import { readSpaceShareRecord } from "./record";
 import { createSpaceShareJobs, handleSpaceShareRoute, type SpaceShareJobsOptions } from "./share-job";
@@ -31,6 +32,13 @@ afterEach(() => {
 
 const HOST = "http://127.0.0.1:1";
 const enc = (text: string) => new TextEncoder().encode(text);
+
+/** The person approves version `n` of the main page here, as plan review records it. */
+function approveHere(s: { world: { store: SpaceShareWorld["store"]; plan: string; main: string } }, n: number) {
+  const at = new Date().toISOString();
+  const version = s.world.store.versions(s.world.plan, s.world.main).find((v) => v.version_number === n)!.version;
+  s.world.store.addEvent(s.world.plan, { ...NO_ACTOR, author_via: "person", kind: "decision", at, subject: { document_id: s.world.main, version_number: n }, decision: { document_id: s.world.main, version, version_number: n, decision: "approved", at, feedback: null, feedback_record: null, snapshot: null }, legacy: null });
+}
 
 function setup(options: { spaces?: Parameters<typeof createFakeSpaces>[0]; jobs?: Partial<SpaceShareJobsOptions>; seed?: Parameters<typeof seedSpaceShareWorld>[1] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "space-share-job-"));
@@ -319,6 +327,8 @@ describe("Keep this space", () => {
     s.jobs.share(id, {});
     await s.settle();
     expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
+    // Approved here, not up there yet: Details lists no approval before Keep.
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
     const waiting = await s.jobs.keep(id);
     await s.settle();
     // The page the browser opened: the challenge and the way back to this computer, nothing secret.
@@ -349,8 +359,77 @@ describe("Keep this space", () => {
     // What the page did is kept with the share, and the approval counts as up: no approval call follows.
     expect(s.record().keep_approval).toMatchObject({ outcome: "recorded", document_id: s.world.main, version_number: 4, version: held });
     expect(s.record().approval).toEqual({ document_id: s.world.main, version_number: 4 });
+    expect(s.jobs.status(id)!.details.all.approval).toBe(4);
+    // Nothing else waited: no run followed the claim (no "Sharing" from the approval), and no approval call.
+    expect(s.spaces.calls[s.spaces.calls.length - 1]).toMatchObject({ method: "POST", path: `/v1/workspaces/${space.id}/claim` });
     expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
-    expect(s.record().approval_refused).toBe(false);
+    expect(s.record().approval_refused).toBeUndefined();
+
+    // A new version saved there clears it there: approved here again, it is not up until a Keep records it.
+    s.world.store.addVersion(id, s.world.main, { bytes: enc("# Rate limiting\n\nv5\n"), committed_at: new Date().toISOString(), source: "plan-review" });
+    approveHere(s, 5);
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", changes: 0 });
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
+    expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
+  });
+
+  test("signed in before the share: an approval here is never sent by a run and never listed until a Keep records it", async () => {
+    const s = setup();
+    const id = s.world.plan;
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, changes: 0 });
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
+    expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
+    // Keep while signed in claims again with no sign-in page: still not up, and nothing is sent for it.
+    const calls = s.spaces.calls.length;
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.spaces.calls.slice(calls).map((c) => `${c.method} ${c.path.split("/").pop()}`)).toEqual(["POST claim"]);
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
+  });
+
+  test("the page said none: no approval listed, nothing sent for it", async () => {
+    const s = setup({
+      jobs: {
+        // The browser lands back with the approval as `none`.
+        openBrowser: async (url) => {
+          const login = await s.spaces.fetch(url, { redirect: "manual" });
+          const back = new URL(login.headers.get("location")!);
+          back.searchParams.set("approval", "none");
+          await fetch(back);
+          return "opened";
+        },
+      },
+    });
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.record().keep_approval).toMatchObject({ outcome: "none", version_number: 4 });
+    expect(s.record().approval).toBeNull();
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
+    expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
+  });
+
+  test("an old record that says the tool's approval was refused still loads, and a Keep records the approval", async () => {
+    const s = setup();
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    const file = join(s.dataDir, "plan-library", id, "share.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), approval_refused: true }));
+    expect(readSpaceShareRecord(s.dataDir, id)).toMatchObject({ approval_refused: true });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared" });
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.record().keep_approval).toMatchObject({ outcome: "recorded" });
+    expect(s.jobs.status(id)!.details.all.approval).toBe(4);
   });
 
   test("the page moved on there since the last push: the approval is not recorded, and the outcome says so", async () => {
@@ -363,6 +442,8 @@ describe("Keep this space", () => {
     await s.settle();
     expect(s.record().keep_approval).toMatchObject({ outcome: "moved", document_id: s.world.main, version_number: 4 });
     expect(s.spaces.spaces.get(s.record().space_id)!.approvals).toEqual([]);
+    expect(s.jobs.status(id)!.details.all.approval).toBeNull();
+    expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
     expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, signed_in: true });
   });
 
