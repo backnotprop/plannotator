@@ -21,7 +21,7 @@ afterEach(() => {
 
 const pull = { key: "github.com/n/b#1", number: 1, title: "PR 1", state: "open", head_sha: "head-1", base: "main", host: "github.com", repo: "n/b" } as InboxPull;
 let head = "head-1";
-const engine = (onJudged?: (pull: InboxPull, level: string, again?: boolean) => void) =>
+const engine = (onJudged?: (pull: InboxPull, level: string, earlier: string) => void) =>
   createPullRisk({
     dataDir,
     isOn: () => true,
@@ -52,12 +52,12 @@ test("a judgment stored for a listed PR is handed on with its level, so the auto
   expect(seen).toEqual([[pull.key, "high"]]);
 });
 
-test("a ranking made again at the same head, for new rules or after a lost judgments file, says so; a new head or a new PR does not", async () => {
+test("a ranking says what came before it: none, the same head (new rules), or a new head; a lost judgments file is none", async () => {
   saveConfig({ inboxPullRisk: { rules: "Billing.", provider: "pi-sdk", model: null } });
   const settle = async () => {
     for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   };
-  const seen: [string, string, boolean | undefined][] = [];
+  const seen: [string, string, string][] = [];
   const risk = engine((judged, _level, again) => seen.push([judged.key, judged.head_sha!, again]));
   risk.assess([pull]);
   await settle();
@@ -72,15 +72,15 @@ test("a ranking made again at the same head, for new rules or after a lost judgm
   await settle();
   head = "head-1";
   expect(seen).toEqual([
-    [pull.key, "head-1", false],
-    [pull.key, "head-1", true],
-    [pull.key, "head-2", false],
-    [other.key, "head-2", false],
+    [pull.key, "head-1", "none"],
+    [pull.key, "head-1", "same_head"],
+    [pull.key, "head-2", "new_head"],
+    [other.key, "head-2", "none"],
   ]);
   mkdirSync(inboxDir(dataDir), { recursive: true });
   writeFileSync(join(inboxDir(dataDir), INBOX_PULL_RISK_FILE), "not json");
-  const after: (boolean | undefined)[] = [];
+  const after: string[] = [];
   engine((_judged, _level, again) => after.push(again)).assess([pull]);
   await settle();
-  expect(after).toEqual([true]);
+  expect(after).toEqual(["none"]);
 });

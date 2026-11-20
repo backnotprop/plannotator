@@ -6,7 +6,7 @@ import { riskFilterWords } from './risk';
 const MADE: Record<InboxPullRiskAuto['make'], string> = { guide: 'a guided review', picture_it: 'a Picture page' };
 
 export function riskAlreadyRanked(answer: InboxPullRiskAnswer): number {
-  return answer.auto ? (answer.auto_would_start?.[answer.auto.level] ?? 0) : 0;
+  return answer.auto ? (answer.auto_waiting?.length ?? answer.auto_would_start?.[answer.auto.level] ?? 0) : 0;
 }
 
 export function RiskAlreadyRanked({ titleId, saved, onDone }: { titleId: string; saved: InboxPullRiskAnswer; onDone: (next: InboxPullRiskAnswer) => void }) {
@@ -20,7 +20,7 @@ export function RiskAlreadyRanked({ titleId, saved, onDone }: { titleId: string;
     setBusy(true);
     setError(null);
     try {
-      onDone(await inboxApi.savePullRisk({ make_now: true }));
+      onDone(await inboxApi.savePullRisk({ make_now: true, keys: saved.auto_waiting ?? [] }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Nothing was started.');
       setBusy(false);

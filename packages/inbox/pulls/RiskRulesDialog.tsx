@@ -20,7 +20,7 @@ const AUTO_MAKES = [
 ];
 const RULES_INFO = 'Every open pull request is ranked against these rules: not touched is Low, maybe is Medium, definitely is High.';
 const AGENT_INFO = 'This agent reads the whole diff of each pull request to rank it. Sonnet, Luna or similar works well.';
-const autoInfo = (level: 'high' | 'medium') => `When a new pull request or a new push ranks ${level === 'high' ? 'High' : 'Medium or High'} after you save, that agent makes one on its own, one at a time. The rest wait until you ask.`;
+const AUTO_INFO = "Your team's pull requests opened or pushed after you save get one automatically, once. The rest wait until you ask.";
 
 export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make: string): InboxPullRiskAuto | null | undefined {
   if (make === (saved?.make ?? '')) return undefined;
@@ -185,7 +185,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
                 )}
               </span>
             )}
-            <RiskInfo name="auto" label="What this makes" text={autoInfo(answer.auto?.level ?? 'high')} />
+            <RiskInfo name="auto" label="What this makes" text={AUTO_INFO} />
           </span>
         </div>
         {error && (

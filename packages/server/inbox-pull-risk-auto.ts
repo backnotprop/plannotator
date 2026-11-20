@@ -12,6 +12,7 @@ import {
   type InboxPullRiskLevel,
 } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import type { PullRiskEarlier } from "./inbox-pull-risk";
 
 export const INBOX_PULL_RISK_AUTO_FILE = "pull-risk-auto.json";
 export const PULL_RISK_AUTO_QUEUE_MAX = 3;
@@ -40,11 +41,12 @@ export interface PullRiskAutoOptions {
 }
 
 export interface PullRiskAuto {
-  judged(pull: InboxPull, level: InboxPullRiskLevel, again?: boolean): void;
+  judged(pull: InboxPull, level: InboxPullRiskLevel, earlier?: PullRiskEarlier): void;
   runs(): Record<string, InboxPullRiskAutoRun>;
   resume(): void;
   wouldStart(): Promise<Record<InboxPullRiskAuto["level"], number>>;
-  makeNow(): Promise<void>;
+  waiting(): Promise<Record<InboxPullRiskAuto["level"], string[]>>;
+  makeNow(keys?: readonly string[]): Promise<void>;
   idle(): Promise<void>;
   stop(): void;
 }
@@ -62,15 +64,17 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
   const file = join(dir, INBOX_PULL_RISK_AUTO_FILE);
   const runs = new Map<string, InboxPullRiskAutoRun>();
   const fresh = new Set<string>();
+  const seen = new Map<string, number>();
   if (existsSync(file)) {
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; runs?: Record<string, InboxPullRiskAutoRun>; fresh?: unknown };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; runs?: Record<string, InboxPullRiskAutoRun>; fresh?: unknown; seen?: unknown };
       if (parsed.v !== 1 || !parsed.runs || typeof parsed.runs !== "object") throw new Error("not a pull risk auto file");
       const knowsFresh = Array.isArray(parsed.fresh);
       for (const [key, run] of Object.entries(parsed.runs)) {
         if (run && typeof run.at === "string" && ((knowsFresh && run.state === "queued") || run.state === "started" || run.state === "failed")) runs.set(key, run);
       }
       if (Array.isArray(parsed.fresh)) for (const key of parsed.fresh) if (typeof key === "string") fresh.add(key);
+      if (parsed.seen && typeof parsed.seen === "object") for (const [repo, number] of Object.entries(parsed.seen)) if (typeof number === "number") seen.set(repo, number);
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -81,7 +85,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs), fresh: [...fresh] })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs), fresh: [...fresh], seen: Object.fromEntries(seen) })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {}
   };
@@ -113,9 +117,20 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     dropQueued(() => false);
     const failed = [...runs].filter(([, run]) => run.state === "failed");
     for (const [key] of failed) runs.delete(key);
-    if (failed.length === 0 && fresh.size === 0) return;
+    if (failed.length === 0 && fresh.size === 0 && seen.size === 0) return;
     fresh.clear();
+    seen.clear();
     save();
+  };
+  const repoOf = (pull: Pick<InboxPull, "host" | "repo">) => `${pull.host}/${pull.repo}`.toLowerCase();
+  const watch = (pulls: readonly InboxPull[]) => {
+    const highest = new Map<string, number>();
+    for (const pull of pulls) {
+      const repo = repoOf(pull);
+      if (!seen.has(repo)) highest.set(repo, Math.max(highest.get(repo) ?? 0, pull.number));
+    }
+    for (const [repo, number] of highest) seen.set(repo, number);
+    if (highest.size > 0) save();
   };
 
   const busy = (): boolean => {
@@ -231,12 +246,28 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     return found;
   };
 
+  const waitingStacks = async () => {
+    const stacks = new Map<string, { key: string; level: InboxPullRiskLevel; pulls: InboxPull[] }>();
+    for (const { pull, level } of await waitingBefore()) {
+      const id = options.stackOf(pull.key)?.id ?? pull.key;
+      const group = stacks.get(id);
+      if (!group) stacks.set(id, { key: pull.key, level, pulls: [pull] });
+      else {
+        group.pulls.push(pull);
+        if (group.level !== "high" && level === "high") Object.assign(group, { key: pull.key, level });
+      }
+    }
+    return [...stacks.values()];
+  };
+
   const api: PullRiskAuto = {
-    judged(pull, level, again) {
+    judged(pull, level, earlier = "none") {
       if (stopped) return;
       const auto = options.settings();
       const reaches = !!auto && inboxPullRiskReaches(level, auto);
-      const marked = reaches && !again && !runs.has(pull.key);
+      if (reaches) watch([...options.listed(), pull]);
+      const isNew = earlier === "new_head" || (earlier === "none" && pull.number > (seen.get(repoOf(pull)) ?? Infinity));
+      const marked = reaches && isNew && !runs.has(pull.key);
       if (marked && !fresh.has(pull.key)) {
         fresh.add(pull.key);
         save();
@@ -256,6 +287,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
         turnedOff();
         return;
       }
+      watch(listed);
       const waiting = listed
         .filter((pull) => pull.state === "open" && (runs.has(pull.key) ? retryable(runs.get(pull.key)!) : fresh.has(pull.key)))
         .map((pull) => ({ pull, level: options.levelOf(pull) }))
@@ -265,20 +297,20 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
       pump(auto);
     },
     async wouldStart() {
-      const stacks = new Map<string, InboxPullRiskLevel>();
-      for (const { pull, level } of await waitingBefore()) {
-        const id = options.stackOf(pull.key)?.id ?? pull.key;
-        if (stacks.get(id) !== "high") stacks.set(id, level);
-      }
-      const levels = [...stacks.values()];
-      return { high: levels.filter((level) => level === "high").length, medium: levels.length };
+      const keys = await api.waiting();
+      return { high: keys.high.length, medium: keys.medium.length };
     },
-    async makeNow() {
+    async waiting() {
+      const groups = await waitingStacks();
+      return { high: groups.filter((group) => group.level === "high").map((group) => group.key), medium: groups.map((group) => group.key) };
+    },
+    async makeNow(keys) {
       const auto = options.settings();
       if (stopped || !auto) return;
-      const before = (await waitingBefore()).filter(({ level }) => inboxPullRiskReaches(level, auto));
-      if (before.length === 0) return;
-      for (const { pull } of before) fresh.add(pull.key);
+      const wanted = keys ? new Set(keys) : null;
+      const chosen = (await waitingStacks()).filter((group) => inboxPullRiskReaches(group.level, auto) && (!wanted || wanted.has(group.key)));
+      if (chosen.length === 0) return;
+      for (const group of chosen) for (const pull of group.pulls) fresh.add(pull.key);
       save();
       api.resume();
     },

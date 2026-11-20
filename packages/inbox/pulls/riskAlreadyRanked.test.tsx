@@ -60,7 +60,7 @@ afterEach(async () => {
   for (const restore of restores.splice(0)) restore();
 });
 
-test.skipIf(!hasDom)('Save with a pick asks about the PRs that already rank there: Not now starts nothing, Make them now asks the server once', async () => {
+test.skipIf(!hasDom)('Save with a pick asks about the PRs that already rank there: Not now starts nothing, Make them now asks the server once for exactly the PRs it counted', async () => {
   spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
   const made: unknown[] = [];
   spy('savePullRisk', async (input) => {
@@ -68,7 +68,7 @@ test.skipIf(!hasDom)('Save with a pick asks about the PRs that already rank ther
       made.push(input);
       return { ...SAVED, auto_would_start: { high: 0, medium: 1 } };
     }
-    return { ...SAVED, auto_would_start: { high: 2, medium: 3 } };
+    return { ...SAVED, auto_would_start: { high: 2, medium: 3 }, auto_waiting: ['github.com/n/b#1', 'github.com/n/b#2'] };
   });
   const done: InboxPullRiskAnswer[] = [];
   await mount(<RiskRulesDialog answer={SAVED} onSaved={(next) => done.push(next)} onClose={() => {}} />);
@@ -84,7 +84,7 @@ test.skipIf(!hasDom)('Save with a pick asks about the PRs that already rank ther
   await mount(<RiskRulesDialog answer={SAVED} onSaved={(next) => done.push(next)} onClose={() => {}} />);
   await submit();
   await click('[data-pull-risk-make-now]');
-  expect(made).toEqual([{ make_now: true }]);
+  expect(made).toEqual([{ make_now: true, keys: ['github.com/n/b#1', 'github.com/n/b#2'] }]);
   expect(done.at(-1)!.auto_would_start).toEqual({ high: 0, medium: 1 });
 });
 

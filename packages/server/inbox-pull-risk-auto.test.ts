@@ -1,10 +1,11 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxPullStacks, type InboxPull, type InboxPullRiskAuto, type InboxPullRiskLevel } from "@plannotator/core/inbox-types";
 import { createPullRiskAuto, INBOX_PULL_RISK_AUTO_FILE, PULL_RISK_AUTO_RETRY_MS, PULL_RISK_AUTO_RUN_TIMEOUT_MS, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
 import { pullRiskAutoBody, pullRiskAutoStart } from "./inbox-pull-risk-auto-start";
+import type { PullRiskEarlier } from "./inbox-pull-risk";
 import { inboxSkillsBlockFor } from "./inbox-skills";
 import { inboxReviewSkill } from "@plannotator/core/inbox-review";
 import { PICTURE_IT_SKILL } from "@plannotator/core/picture-it-skill";
@@ -43,7 +44,8 @@ const pr = (number: number, fields: Partial<InboxPull> = {}): InboxPull => ({
   ...fields,
 });
 
-function world(initial: InboxPullRiskAuto | null = { level: "high", make: "picture_it" }, dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"))) {
+function world(initial: InboxPullRiskAuto | null = { level: "high", make: "picture_it" }, given?: string) {
+  const dataDir = given ?? mkdtempSync(join(tmpdir(), "pull-risk-auto-"));
   dirs.push(dataDir);
   let settings = initial;
   const started: PullRiskAutoJob[] = [];
@@ -76,11 +78,16 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "pictu
       return { thread_id: thread };
     },
   });
-  const judged = (pull: InboxPull, level: InboxPullRiskLevel, again?: boolean) => {
+  const judged = (pull: InboxPull, level: InboxPullRiskLevel, earlier: PullRiskEarlier = "none") => {
     listed.set(pull.key, pull);
     levels.set(pull.key, level);
-    auto.judged(pull, level, again);
+    auto.judged(pull, level, earlier);
   };
+  if (initial && !existsSync(join(dataDir, "inbox", INBOX_PULL_RISK_AUTO_FILE))) {
+    listed.set(pr(0).key, pr(0));
+    auto.resume();
+    listed.delete(pr(0).key);
+  }
   const list = (pull: InboxPull, level: InboxPullRiskLevel) => {
     listed.set(pull.key, pull);
     levels.set(pull.key, level);
@@ -459,7 +466,7 @@ test("PRs ranked before the pick was saved start by no later pass, nor after a r
   again.auto.resume();
   await again.auto.idle();
   expect(again.started).toEqual([]);
-  again.judged(pr(2, { head_sha: "b".repeat(40) }), "high");
+  again.judged(pr(2, { head_sha: "b".repeat(40) }), "high", "new_head");
   await again.auto.idle();
   expect(numbers(again.started)).toEqual([2]);
   await again.auto.makeNow();
@@ -508,10 +515,10 @@ test("the hand-off pastes the skills the window would: the person's own picture-
 
 test("ranked again at the same head (new rules, a new base) is no new ranking: it waits for Make them now and is counted, a stack once", async () => {
   const w = world();
-  w.judged(pr(1), "high", true);
+  w.judged(pr(1), "high", "same_head");
   w.list(pr(10, { head: "feat/10" }), "high");
-  w.judged(pr(11, { base: "feat/10", head: "feat/11" }), "high", true);
-  w.judged(pr(12, { state: "closed" }), "high", true);
+  w.judged(pr(11, { base: "feat/10", head: "feat/11" }), "high", "same_head");
+  w.judged(pr(12, { state: "closed" }), "high", "same_head");
   for (let i = 0; i < 2; i++) {
     w.auto.resume();
     await w.auto.idle();
@@ -554,4 +561,50 @@ test("a runs file from before fresh PRs were kept starts none of its queued runs
   await w.auto.idle();
   expect(w.started).toEqual([]);
   expect(Object.keys(w.auto.runs())).toEqual([pr(2).key]);
+});
+
+test("set up for the first time: the open PRs ranked then wait and are counted; a PR opened later starts; a restart keeps the line", async () => {
+  const w = world(null);
+  for (const n of [1, 2, 3]) w.list(pr(n), "medium");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  for (const n of [1, 2, 3]) w.judged(pr(n), "high");
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 3, medium: 3 });
+  const again = world({ level: "high", make: "guide" }, w.dataDir);
+  for (const n of [1, 2, 3]) again.list(pr(n), "high");
+  again.judged(pr(2), "high");
+  again.judged(pr(4), "high");
+  await again.auto.idle();
+  expect(numbers(again.started)).toEqual([4]);
+});
+
+test("a repository first listed while the pick is on starts nothing for its PRs, and one opened there later starts", async () => {
+  const w = world();
+  const other = (number: number) => pr(number, { key: `github.com/northwind/api#${number}`, repo: "northwind/api", url: `https://github.com/northwind/api/pull/${number}`, head: `api/${number}` });
+  for (const n of [40, 41]) w.list(other(n), "high");
+  w.auto.resume();
+  for (const n of [40, 41]) w.judged(other(n), "high");
+  await w.auto.idle();
+  expect(w.started).toEqual([]);
+  w.judged(other(42), "high");
+  await w.auto.idle();
+  expect(numbers(w.started)).toEqual([42]);
+});
+
+test("Make them now makes only the PRs the count it answered came from", async () => {
+  const w = world(null);
+  for (const n of [1, 2, 3]) w.list(pr(n), "high");
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  const shown = (await w.auto.waiting()).high;
+  expect(shown.sort()).toEqual([pr(1).key, pr(2).key, pr(3).key].sort());
+  w.list(pr(4), "high");
+  await w.auto.makeNow([pr(1).key, pr(3).key]);
+  await w.auto.idle();
+  w.auto.resume();
+  await w.auto.idle();
+  expect(numbers(w.started).sort()).toEqual([1, 3]);
+  expect(await w.auto.waiting()).toEqual({ high: [pr(2).key, pr(4).key], medium: [pr(2).key, pr(4).key] });
 });
