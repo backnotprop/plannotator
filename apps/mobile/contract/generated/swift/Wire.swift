@@ -1689,15 +1689,17 @@ public enum InboxActionResultBy: Codable, Hashable, Sendable, RawRepresentable {
 public enum InboxActionResultOutcome: Codable, Hashable, Sendable, RawRepresentable {
   case cant
   case done
+  case skip
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxActionResultOutcome] = [.cant, .done]
+  public static let known: [InboxActionResultOutcome] = [.cant, .done, .skip]
 
   public init(rawValue: String) {
     switch rawValue {
     case "cant": self = .cant
     case "done": self = .done
+    case "skip": self = .skip
     default: self = .unknown(rawValue)
     }
   }
@@ -1706,6 +1708,7 @@ public enum InboxActionResultOutcome: Codable, Hashable, Sendable, RawRepresenta
     switch self {
     case .cant: return "cant"
     case .done: return "done"
+    case .skip: return "skip"
     case .unknown(let value): return value
     }
   }
@@ -1750,15 +1753,17 @@ public struct InboxActionResultPerson: Codable, Hashable, Sendable {
 public enum InboxActionResultPersonOutcome: Codable, Hashable, Sendable, RawRepresentable {
   case cant
   case done
+  case skip
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [InboxActionResultPersonOutcome] = [.cant, .done]
+  public static let known: [InboxActionResultPersonOutcome] = [.cant, .done, .skip]
 
   public init(rawValue: String) {
     switch rawValue {
     case "cant": self = .cant
     case "done": self = .done
+    case "skip": self = .skip
     default: self = .unknown(rawValue)
     }
   }
@@ -1767,6 +1772,7 @@ public enum InboxActionResultPersonOutcome: Codable, Hashable, Sendable, RawRepr
     switch self {
     case .cant: return "cant"
     case .done: return "done"
+    case .skip: return "skip"
     case .unknown(let value): return value
     }
   }
@@ -7398,17 +7404,19 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
   public var comments: Double
   public var done: Double?
   public var cant: Double?
+  public var skipped: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["reply_at", "picks", "comments", "done", "cant"]
+  static let knownKeys: Set<String> = ["reply_at", "picks", "comments", "done", "cant", "skipped"]
 
-  public init(replyAt: String? = nil, picks: Double, comments: Double, done: Double? = nil, cant: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(replyAt: String? = nil, picks: Double, comments: Double, done: Double? = nil, cant: Double? = nil, skipped: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.replyAt = replyAt
     self.picks = picks
     self.comments = comments
     self.done = done
     self.cant = cant
+    self.skipped = skipped
     self.unknownFields = unknownFields
   }
 
@@ -7419,6 +7427,7 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
     self.comments = try c.decode(Double.self, forKey: WireKey("comments"))
     self.done = try c.decodeIfPresent(Double.self, forKey: WireKey("done"))
     self.cant = try c.decodeIfPresent(Double.self, forKey: WireKey("cant"))
+    self.skipped = try c.decodeIfPresent(Double.self, forKey: WireKey("skipped"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -7429,6 +7438,7 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
     try c.encode(self.comments, forKey: WireKey("comments"))
     try c.encodeIfPresent(self.done, forKey: WireKey("done"))
     try c.encodeIfPresent(self.cant, forKey: WireKey("cant"))
+    try c.encodeIfPresent(self.skipped, forKey: WireKey("skipped"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

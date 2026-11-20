@@ -3037,7 +3037,7 @@ function Inbox() {
   };
 
   /**
-   * An action item's Done or Can't do it (approval "inbox-action-items-in-reply"):
+   * An action item's Done, Can't do it or Skip (approval "inbox-action-items-in-reply"):
    * into the reply draft, like a pick, sent only with the person's Send. No
    * toast and no timer; `null` takes it back out of the draft. A note typed
    * under the marked row saves quietly. Resolves the message's action items as
@@ -3055,7 +3055,7 @@ function Inbox() {
     }
     await afterWrite();
     if (!mark) say('Taken out of your draft.');
-    else if (!mark.quiet) say(mark.outcome === 'done' ? 'Done. It goes with your reply.' : "Can't do it. It goes with your reply.");
+    else if (!mark.quiet) say(`${mark.outcome === 'done' ? 'Done' : mark.outcome === 'skip' ? 'Skipped' : "Can't do it"}. It goes with your reply.`);
     return actions;
   };
 
@@ -5138,8 +5138,8 @@ function Inbox() {
         writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace });
       }}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
-      onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}
+      onNewReview={(pick, opener, ask) => openCompose({ review: ask ? { pick, ask } : { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
+      onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })} onOpenPicture={(id, attachmentId, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, ...(attachmentId ? { file: { id: attachmentId, version: 'current', focus: null, view: 'side' } } : { msg: messageId }) })}
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}

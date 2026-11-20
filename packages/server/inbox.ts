@@ -396,7 +396,7 @@ import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
-import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities } from "./inbox-capability";
+import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, stopInboxCapabilities } from "./inbox-capability";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -1207,6 +1207,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
+  // The tailnet's requests this computer opened itself (a browser here on the tailnet address: inbox-tailscale.ts
+  // `ownNode`). Still the tailnet for every guard; only Show in Rex reads it, as this computer's own window.
+  const fromOwnTailnetNode = new WeakSet<Request>();
+  /** This computer's own window (Show in Rex's `here`): its loopback port, or its tailnet address opened here; never the door. */
+  const thisComputersWindow = (req: Request, via: RequestVia): boolean => !fromDeviceDoor.has(req) && (via === "local" || fromOwnTailnetNode.has(req));
   // The person's Send of /create-routine: a one-time grant on its thread, so the routine it asks for is made on
   // (inbox-routine-grants.ts). Only the person's own call mints one, by the bar a permission prompt's answer has: a
   // window's (its Origin, this Host and serverSession), a paired phone's, or a linked machine's for a press in a window
@@ -6043,7 +6048,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const phone = door !== undefined && !fromMachine;
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
         // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex by where the window is.
-        const agents = withRexPlaces(listed, phone ? null : via === "local" && door === undefined ? "here" : "away");
+        const agents = withRexPlaces(listed, phone ? null : thisComputersWindow(req, via) ? "here" : "away");
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -6067,13 +6072,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const session = typeof body.session === "string" ? body.session : "";
         const place = session ? rexHints([session]).get(session) : undefined;
         if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);
-        return json(await rex.show(place, via === "local" && !fromDeviceDoor.has(req) ? "here" : "away"));
+        return json(await rex.show(place, thisComputersWindow(req, via) ? "here" : "away"));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
         // A linked machine's Rex showed a pane for this computer's own window: this computer's Rex app comes to the front (inbox-rex-far.ts).
-        if (answer) return via === "local" && !fromDeviceDoor.has(req) ? await inboxRaiseAfterFarShow(path, answer, rex) : answer;
+        if (answer) return thisComputersWindow(req, via) ? await inboxRaiseAfterFarShow(path, answer, rex) : answer;
       }
       if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(url.searchParams.get("machines") === "1" ? await mergedArchivedModel(url) : archivedModel(url));
       // Decision mode (experimental, approval "inbox-decision-mode"): a read-only projection of every
@@ -8174,7 +8179,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
+    dispatch: async (req, from) => {
+      if (from?.ownNode) fromOwnTailnetNode.add(req);
+      return markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet")));
+    },
     tailscale: options.tailscale,
     timers: options.tailscaleTimers,
     // Published by itself after Tailscale came back: every window's Settings row follows at once.
@@ -8343,6 +8351,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    stopInboxCapabilities(capabilities);
     clearTimeout(lazyAssetWarm);
     stopLoopWatch?.();
     releasePerfPhases?.();

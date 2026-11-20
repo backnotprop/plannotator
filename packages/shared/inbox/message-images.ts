@@ -177,6 +177,10 @@ export function inboxMessageImageRefsInOrder(body: string): string[] {
   return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src) && inboxInlineMediaKind(src) === null);
 }
 
+export function inboxMessageMediaRefsInOrder(body: string): string[] {
+  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src) && inboxInlineMediaKind(src) !== null);
+}
+
 /**
  * The remote images the body shows (`http:`, `https:`, protocol-relative
  * `//host/…`), each once, in text order, outside code. The window never loads

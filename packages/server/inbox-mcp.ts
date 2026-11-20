@@ -30,6 +30,8 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
+import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
@@ -761,7 +763,7 @@ function imagesNotShown(body: string, failures: readonly InlineImageFailure[]): 
     const reason = IMAGE_NOT_SHOWN_REASONS[code];
     if (reason) out.push({ ref, reason });
   }
-  for (const ref of inboxMessageRemoteImageRefsInOrder(body)) out.push({ ref, reason: IMAGE_REMOTE_REASON });
+  for (const ref of inboxMessageRemoteImageRefsInOrder(body)) if (!inboxInlineMediaKind(ref)) out.push({ ref, reason: IMAGE_REMOTE_REASON });
   return out;
 }
 
@@ -874,7 +876,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -959,6 +961,7 @@ export async function sendAgentMessage(
   const superseded = store.supersededBy(message.id);
   const markedDone = result.done ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
+  const notPlayed = await mediaNotShown(input.body, { root: project.root, base: basePath });
   // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
   // the result advises the next message; the send and what the person sees are unchanged.
   // The message is already stored: advice that fails is left out, never an error for a sent message.
@@ -998,6 +1001,7 @@ export async function sendAgentMessage(
   return {
     notFramed,
     imagesNotShown: notShown,
+    mediaNotShown: notPlayed,
     attachedImagesNotInBody: attachedOnly,
     questionOpenersWithText: openers,
     noStakes: noStakes.length,
@@ -1039,6 +1043,8 @@ export async function sendAgentMessage(
       /** Images the body shows that the window will not (missing, not an image, too large, hidden, remote). */
       ...(notShown.length > 0 ? { images_not_shown: notShown.slice(0, IMAGES_NOT_SHOWN_MAX) } : {}),
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
+      ...(notPlayed.length > 0 ? { media_not_shown: notPlayed.slice(0, MEDIA_NOT_SHOWN_MAX) } : {}),
+      ...(notPlayed.length > MEDIA_NOT_SHOWN_MAX ? { media_not_shown_more: notPlayed.length - MEDIA_NOT_SHOWN_MAX } : {}),
       /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */
       ...(attachedOnly.length > 0 ? { attached_images_not_in_body: attachedOnly } : {}),
       /** Lines that start with a question directive and text after it, so they opened no block (a warning; the message was sent). */
@@ -1322,6 +1328,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // follow them, each a line of its own (so no hint is glued onto a warning).
         const hints = [
           imagesNotShownText(sent.imagesNotShown),
+          mediaNotShownText(sent.mediaNotShown),
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),

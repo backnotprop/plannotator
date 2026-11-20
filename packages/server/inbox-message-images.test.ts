@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { inboxHomeDotFolder, inboxMessageImageRefs, readInboxMessageImage } from "@plannotator/shared/inbox/message-images";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES } from "@plannotator/shared/diff-paths";
+import { INBOX_INLINE_MEDIA_MAX_BYTES } from "@plannotator/core/inbox-inline-media";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -633,4 +634,41 @@ test("a sound or a video the message shows serves by Range from the same route a
   writeFileSync(join(project, "other.wav"), wav);
   expect((await image(server, id, "other.wav")).status).toBe(403);
   expect((await image(server, id, ".walkthrough/voice.wav", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+});
+
+test("send_message says which sounds and videos will not play, by the route's own rules, and names a remote video once", async () => {
+  const { root, project, dataDir } = world();
+  const wav = new Uint8Array(44);
+  wav.set(new TextEncoder().encode("RIFF"), 0);
+  wav.set(new TextEncoder().encode("WAVEfmt "), 8);
+  wav.set(new TextEncoder().encode("data"), 36);
+  writeFileSync(join(project, ".walkthrough", "voice.wav"), wav);
+  writeFileSync(join(project, ".walkthrough", "fake.mp4"), "not a film");
+  writeFileSync(join(root, ".secrets", "call.wav"), wav);
+  const big = join(project, ".walkthrough", "big.mp4");
+  writeFileSync(big, "");
+  truncateSync(big, INBOX_INLINE_MEDIA_MAX_BYTES + 1);
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const body = "![voice](.walkthrough/voice.wav) ![hidden](../.secrets/call.wav) ![big](.walkthrough/big.mp4) ![fake](.walkthrough/fake.mp4) ![later](.walkthrough/later.mov) ![web](https://example.com/demo.mp4)";
+  const { text, structured } = await sendResult(client, { project_path: project, body });
+  expect(structured.images_not_shown).toBeUndefined();
+  expect(structured.media_not_shown).toEqual([
+    { ref: "../.secrets/call.wav", reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
+    { ref: ".walkthrough/big.mp4", reason: "over 2 GB" },
+    { ref: ".walkthrough/fake.mp4", reason: "not a sound or video file" },
+    { ref: ".walkthrough/later.mov", reason: "does not exist yet; it plays once written there", not_yet: true },
+    { ref: "https://example.com/demo.mp4", reason: "remote sounds and videos never play in the Inbox" },
+  ]);
+  expect(text).toContain(" 4 sounds or videos will not play: ../.secrets/call.wav (a .env file, or in a hidden folder of the home folder such as ~/.ssh); .walkthrough/big.mp4 (over 2 GB); ");
+  expect(text).toContain(" This sound or video does not exist yet: .walkthrough/later.mov; it plays once written there.");
+  expect(text).not.toMatch(/images? will not show/);
+  expect((await image(server, structured.message_id, ".walkthrough/big.mp4")).status).toBe(413);
+
+  const one = await sendResult(client, { project_path: project, body: "![big](.walkthrough/big.mp4)" });
+  expect(one.text).toContain(" This sound or video will not play: .walkthrough/big.mp4 (over 2 GB). Put it in a plain folder");
+
+  const clean = await sendResult(client, { project_path: project, body: "![voice](.walkthrough/voice.wav)" });
+  expect(clean.structured.media_not_shown).toBeUndefined();
+  expect(clean.text).not.toContain("will not play");
 });
