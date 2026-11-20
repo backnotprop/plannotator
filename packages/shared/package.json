@@ -75,6 +75,7 @@
     "./config": "./config.ts",
     "./advertised-url": "./advertised-url.ts",
     "./data-dir": "./data-dir.ts",
+    "./theme-files": "./theme-files.ts",
     "./update-check": "./update-check.ts",
     "./daily-ping": "./daily-ping.ts",
     "./star-ask": "./star-ask.ts",

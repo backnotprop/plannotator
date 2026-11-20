@@ -45,13 +45,15 @@ afterEach(async () => {
 
 const MAGIC = "inbox-host.tail0000.ts.net";
 const OWNER = "owner@example.com";
+/** This computer's own tailnet address (`Self.TailscaleIPs`): serve's X-Forwarded-For for a browser here on the tailnet address. */
+const SELF_IP = "100.100.1.1";
 
 /** A scripted tailscale that publishes the Inbox (as inbox-agent-icons.test.ts): no real tailscale runs. */
 function scriptedTailscale(): TailscaleRunner {
   const serve = new Map<number, string>();
   return (args) => {
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
-    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER } } }));
+    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, TailscaleIPs: [SELF_IP] }, User: { "42": { ID: 42, LoginName: OWNER } } }));
     if (args[1] === "status") {
       if (serve.size === 0) return ok("{}");
       return ok(
@@ -215,10 +217,10 @@ describe("the Agents list and Rex", () => {
       expect(agents.find((a) => a.session === background)?.place).toBeUndefined();
       await Bun.sleep(1_100);
     }
-    // Routines are on with Launch: their clock asks whether Launch is on, never Rex.
+    // Routines are on with Launch: their clock asks whether Launch is on, never Rex. (Settings → Agents' own read is
+    // the one that asks, from any window: inbox-launch-rex.test.ts.)
     const far = w.tailnet();
-    const settings = (await (await fetch(`${far.at}/api/inbox/launch/settings`, { headers: far.headers })).json()) as { launch: Record<string, unknown> };
-    expect(settings.launch.rex_here).toBeUndefined();
+    expect((await w.agentsOf(far.headers, far.at)).find((a) => a.session === "ses-by-hand")?.place).toBeUndefined();
     expect(w.fake.calls).toEqual([]);
     expect(w.fake.connections().opened).toBe(0);
   });
@@ -410,6 +412,21 @@ describe("POST /api/inbox/rex/show", () => {
     expect((await w.show("ses-nowhere")).status).toBe(404);
     expect(w.fake.calls.slice(before).filter((c) => c.method === "client.perform" || c.method === "session.focus_block" || c.method === "session.attach")).toEqual([]);
   });
+});
+
+describe("Show in Rex from a window on this computer's own tailnet address", () => {
+  test("serve says it came from this computer's own node: offered and shown through this Mac's own app, as this computer's window; another computer's tailnet window is not", async () => {
+    const w = await world({ remote: true, startIn: "rex" });
+    const { session, ids } = await w.inRex();
+    const far = w.tailnet();
+    const here = { ...far.headers, "X-Forwarded-For": SELF_IP };
+    const elsewhere = { ...far.headers, "X-Forwarded-For": "100.100.2.2" };
+    await until(async () => (await w.agentsOf(here, far.at)).find((a) => a.session === session)?.place?.show === true);
+    expect((await w.agentsOf(elsewhere, far.at)).find((a) => a.session === session)?.place?.show).toBeUndefined();
+    const response = await w.show(session, here, far.at);
+    expect(await response.json()).toEqual({ shown: true });
+    expect(w.fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
+  }, 20_000);
 });
 
 describe("a Rex with no app on its computer, and Show in Rex from another computer", () => {

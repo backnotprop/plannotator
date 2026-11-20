@@ -17,6 +17,9 @@ import { createInboxTailscale, INBOX_TAILSCALE_REPUBLISH, type InboxTailscale, t
 const MAGIC = "laptop.example.ts.net";
 const OWNER = "owner@example.com";
 const PORT = 47123;
+/** This machine's own tailnet addresses, as `tailscale status --json` gives them. */
+const SELF_V4 = "100.101.102.103";
+const SELF_V6 = "fd7a:115c:a1e0::1234:5678";
 
 const roots: string[] = [];
 const modules: InboxTailscale[] = [];
@@ -99,7 +102,7 @@ function fakeTailscale() {
       return ok(
         JSON.stringify({
           BackendState: tailscale.backend,
-          Self: { DNSName: `${MAGIC}.`, UserID: 7 },
+          Self: { DNSName: `${MAGIC}.`, UserID: 7, TailscaleIPs: [SELF_V4, SELF_V6] },
           User: running ? { "7": { ID: 7, LoginName: OWNER } } : {},
         }),
       );
@@ -124,7 +127,13 @@ function fakeTailscale() {
   return { serve, tailscale, calls, serveCalls, run };
 }
 
-function create(dataDir: string, run: TailscaleRunner, clock: ReturnType<typeof fakeClock>, kept?: InboxRegistryEntry["tailscale"]) {
+function create(
+  dataDir: string,
+  run: TailscaleRunner,
+  clock: ReturnType<typeof fakeClock>,
+  kept?: InboxRegistryEntry["tailscale"],
+  dispatch: (req: Request, from?: { ownNode: boolean }) => Promise<Response> = async () => new Response("ok"),
+) {
   const registry: InboxRegistryEntry = {
     v: 1,
     pid: process.pid,
@@ -141,7 +150,7 @@ function create(dataDir: string, run: TailscaleRunner, clock: ReturnType<typeof 
     dataDir,
     port: () => PORT,
     registry: () => registry,
-    dispatch: async () => new Response("ok"),
+    dispatch,
     tailscale: run,
     timers: clock.timers,
     onRepublished: () => void republished.push(Date.now()),
@@ -499,5 +508,30 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
     module.stop();
     expect(clock.waits()).toEqual([]);
     expect(module.retrying()).toBe(false);
+  });
+});
+
+describe("the tailnet listener tells this computer's own window from another computer's", () => {
+  test("serve's X-Forwarded-For naming one of this machine's own tailnet addresses is this computer's window; a peer's address, none or several is not", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const seen: (boolean | undefined)[] = [];
+    const { module } = create(dataDir, ts.run, fakeClock(), undefined, async (_req, from) => (seen.push(from?.ownNode), new Response("ok")));
+    module.start();
+    expect(module.state().url).toBe(`https://${MAGIC}:${PORT}/`);
+    const ask = async (forwardedFor?: string) => {
+      const headers: Record<string, string> = { Host: `${MAGIC}:${PORT}`, "Tailscale-User-Login": OWNER };
+      if (forwardedFor !== undefined) headers["X-Forwarded-For"] = forwardedFor;
+      const response = await fetch(`http://127.0.0.1:${module.listenerPort()}/api/inbox/threads`, { headers });
+      expect(response.status).toBe(200);
+      return seen.at(-1);
+    };
+    expect(await ask(SELF_V4)).toBe(true);
+    expect(await ask(SELF_V6)).toBe(true);
+    expect(await ask(`::ffff:${SELF_V4}`)).toBe(true);
+    expect(await ask("100.64.0.9")).toBe(false);
+    expect(await ask()).toBe(false);
+    expect(await ask(`100.64.0.9, ${SELF_V4}`)).toBe(false);
   });
 });
