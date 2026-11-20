@@ -7,8 +7,8 @@
  * - the button reads the wrong word for where the share stands.
  */
 import { describe, expect, test } from "bun:test";
-import { isPlanAssetPath, type PlanComment } from "./plans";
-import { spaceCommentAnchor, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
+import { isPlanAssetPath, planId, type PlanComment } from "./plans";
+import { isSpaceShareRecord, spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
 
 const DOC = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ1";
 const DOC2 = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ2";
@@ -103,6 +103,14 @@ describe("the steps", () => {
     expect(plan.steps.map((s) => s.kind)).toEqual(["create", "page-save", "file", "comment", "reply"]);
     // The anchor says where and what, never who or when.
     expect(spaceCommentAnchor(comment("Z", { text: "x", originalText: "q", author: "swift-otter", mentions: ["@maya"], createdA: 1, images: [{ path: "/p.png", name: "p" }] }))).toEqual({ id: "Z", text: "x", originalText: "q" });
+    // An allow-list: a tool, page, PR and artifact addresses, an element's description and anything unknown stay; the
+    // id and an answer to a question go, as the space's parsers read them.
+    const leaky = spaceCommentAnchor(comment("L", { type: "COMMENT", text: "x", originalText: "q", source: "eslint", pageUrl: "/p", prUrl: "https://github.com/a/b/pull/1", artifact: { artifactUrl: "https://x/a", sourceUrl: "https://x/s" }, elementContext: { tag: "div" }, futureField: "?", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } }));
+    expect(leaky).toEqual({ id: "L", type: "COMMENT", text: "x", originalText: "q", imageRegion: { v: 1, src: "https://example.com/i.png", sourceLine: null, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } });
+    // A picture's reference: relative inside the plan or on the web goes (the parser needs one); one naming this computer stays.
+    const srcOf = (src: string) => (spaceCommentAnchor(comment("I", { imageRegion: { v: 1, src, sourceLine: 1, box: { x: 0, y: 0, w: 1, h: 1 }, naturalWidth: 2, naturalHeight: 2 } })).imageRegion as Record<string, unknown>).src;
+    for (const src of ["figures/x.png", "./shot.png", "a/../b.png", "https://example.com/i.png"]) expect(srcOf(src)).toBe(src);
+    for (const src of ["/Users/me/shot.png", "~/shot.png", "file:///tmp/a.png", "C:\\a.png", "C:/a.png", "\\\\server\\share\\a.png", "../outside.png", "a/../../outside.png", "data:image/png;base64,AA"]) expect(srcOf(src)).toBeUndefined();
     expect(plan.details).toEqual({ pages: 1, files: 1, comments: 2, approval: null, not: { sent_comments: 1, pictures: 1, original_dates: true, files_over: 1, pages_over: 1, long_comments: 1, older_approvals: 1 } });
     expect(plan.changes).toBe(4);
   });
@@ -171,4 +179,31 @@ describe("the button", () => {
     expect(spaceShareButton(status({ phase: "failed" }))).toEqual({ label: "Share", state: "failed" });
     expect(spaceShareButton(status({ phase: "failed", shared_once: true }))).toEqual({ label: "Shared", state: "look" });
   });
+});
+
+describe("what a call says of where a thing came from", () => {
+  test("only the share's time goes: never the author, the agent or the thing's own time", () => {
+    const origin = { author_label: "Maya Chen", agent_host: "claude-code", agent_session: "s-1", agent_name: "Claude", at: "2026-11-02T09:15:00.000Z" };
+    expect(spaceImportedFields(origin, "2026-11-20T10:00:00.000Z")).toEqual({ actor: { kind: "imported", at: "2026-11-20T10:00:00.000Z" } });
+  });
+
+  test("the plan's id is the key only signed in, and only when the service takes it as one", () => {
+    const id = planId("pln");
+    expect(spaceExternalKey(id, true)).toBe(id);
+    expect(spaceExternalKey(id, false)).toBeNull();
+    // Share as new: a key of its own, from the new space's id, never one an older space had.
+    const space = newSpaceId();
+    expect(spaceExternalKey(id, true, space)).toBe(`${id}:${space.slice(3)}`);
+    expect(spaceExternalKey(id, false, space)).toBeNull();
+    expect(spaceExternalKey("x".repeat(110), true, space)).toBeNull();
+    for (const bad of ["", "pln 1", "x".repeat(129), "pln/1", null]) expect(spaceExternalKey(bad, true)).toBeNull();
+  });
+});
+
+test("a record read back with a share time or Share as new mark of the wrong kind is no record", () => {
+  const record = newSpaceShareRecord({ host: "https://spaces.invalid", space_id: newSpaceId(), name: "P", mode: "all", kept: false, as_new: true, at: "2026-11-20T10:00:00.000Z" });
+  expect(isSpaceShareRecord(record)).toBe(true);
+  expect(isSpaceShareRecord({ ...record, seed: { doc: null, version: null, at: "2026-11-20T10:00:00.000Z" } })).toBe(true);
+  expect(isSpaceShareRecord({ ...record, seed: { doc: null, version: null, at: 5 } })).toBe(false);
+  expect(isSpaceShareRecord({ ...record, as_new: "yes" })).toBe(false);
 });
