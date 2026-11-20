@@ -1,24 +1,25 @@
 /**
- * The List view's one-time choice in a DOM (approval "inbox-list-view-dialog"), registered with the Inbox's schedule
- * of one-time dialogs (approval "inbox-one-time-dialogs", the change): the line's hook (reveal.ts `useLineReveal`)
- * with List view's own moment and need, driving `ListViewIntro`, as App wires them.
+ * "Which view do you prefer?" in a DOM (reveals.ts `view_choice`), registered with the Inbox's schedule of one-time
+ * dialogs: the line's hook (reveal.ts `useLineReveal`) with the view choice's own moment and need, driving
+ * `ListViewIntro`, as App wires them.
  *
- * What regresses: the dialog arming without the line (settings `reveal.next` is not `list_view` and `reveal.ahead`
- * does not name it, or an older Inbox reports no line); opening without the line's claim (`POST /api/inbox/reveal`
- * `list_view`) or after the Inbox refused it; showing on load, or with any one blocker present (the list not taller
- * than the screen, the list already Simple, another one-time dialog this load, a toast, something typed or open, a
- * thread left for another thread while the page is not idle); the page going idle not being its moment in a split
- * view, where a thread stays open beside the list and the person goes thread to thread, never back to the list (the
- * owner, 2026-11-08: "Some people may never see them"), or an idle page claiming before the page's age; "Simple list"
- * not switching the list at once or not remembering it as the ⋮ menu
- * does; Escape or a click outside not counting as the line's Not now, or a pick counting as one.
+ * What regresses: the dialog arming without the line (settings `reveal.next` is not `view_choice` and `reveal.ahead`
+ * does not name it, or an older Inbox reports no line) or after the Inbox refused it; showing on load, or with any one
+ * blocker present (another one-time dialog this load, a toast, something typed or open, a thread left for another
+ * thread while the page is not idle); the page going idle not being its moment in a split view (the owner, 2026-11-08:
+ * "Some people may never see them"), or an idle page claiming before the page's age; the dialog not opening for
+ * someone on Simple list, or opening for someone already on Agents (`viewChoiceWanted`); the view in use not being the
+ * one tagged "In use" with the filled button; Smart groups still tagged for someone on Simple list
+ * (`RECOMMEND_SMART_ON_SIMPLE`); a pick not switching the list at once or not remembering it as the ⋮ menu does;
+ * Escape or a click outside changing the view or not counting as the line's Not now, or a pick counting as one; the
+ * Agents picture not drawing the person's own agents, or drawing an empty frame for one agent or none.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { InboxRevealId } from './api';
 import type { ListView } from './listView';
 
@@ -26,7 +27,9 @@ const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
 const idleClock = (hasDom ? await import('./idleClock') : {}) as typeof import('./idleClock');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
-const { ListViewIntro } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
+const { ListViewIntro, RECOMMEND_SMART_ON_SIMPLE } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
+const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
+const { resetAgentFoldsForTests } = await import('./agentsView/folds');
 const listView = await import('./listView');
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
 const { readListLook } = await import('./listLook');
@@ -52,7 +55,9 @@ beforeEach(() => {
     removeItem: (key) => void stored.delete(key),
   });
   listView.resetListViewForTests();
+  resetAgentFoldsForTests();
   if (!hasDom) return;
+  setInboxAgents(null);
   savedTimes = { ...reveal.REVEAL_TIMES };
   Object.assign(reveal.REVEAL_TIMES, TIMES);
   savedIdleMs = idleClock.IDLE_CLOCK.idleMs;
@@ -77,8 +82,10 @@ beforeEach(() => {
 afterEach(() => {
   resetStorageBackend();
   listView.resetListViewForTests();
+  resetAgentFoldsForTests();
   if (!hasDom) return;
   act(() => root?.unmount());
+  setInboxAgents(null);
   host?.remove();
   root = null;
   host = null;
@@ -99,18 +106,18 @@ const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dial
 const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal') && p.body.answer === undefined);
 const notNows = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal') && p.body.answer === 'not_now');
 
-function row(id: string, n: number): InboxListRow {
+function row(id: string, n: number, session: string | null = 'ses_1', section: InboxListGroupId = 'new'): InboxListRow {
   const at = `2026-11-05T09:0${n}:00.000Z`;
   return {
     thread_id: id,
     project: { id: 'prj_a', name: 'billing-svc' },
     subject: `Thread ${id}`,
     thread_name: null,
-    author: { kind: 'agent', host: 'claude-code', session: 'ses_1', name: 'Claude Code' },
+    author: session ? { kind: 'agent', host: 'claude-code', session, name: 'Claude Code' } : { kind: 'person' },
     last_at: at,
     last_agent_at: at,
     last_author: 'agent',
-    section: 'new',
+    section,
     unread: true,
     unseen: 0,
     questions: { open: 0, picked: 0, stopped: false, holds_up: [] },
@@ -118,60 +125,67 @@ function row(id: string, n: number): InboxListRow {
     resolved_at: null,
   } as unknown as InboxListRow;
 }
-const FIVE = ['a', 'b', 'c', 'd', 'e'].map(row);
+const FIVE = ['a', 'b', 'c', 'd', 'e'].map((id, n) => row(id, n));
+
+function sectionsOf(byGroup: Partial<Record<InboxListGroupId, InboxListRow[]>>): InboxListSection[] {
+  const ids: InboxListGroupId[] = ['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet', 'snoozed'];
+  return ids.map((id) => ({ id, label: id, threads: byGroup[id] ?? [] })) as InboxListSection[];
+}
+
+function agent(id: string, label: string, state: InboxAgent['state']): InboxAgent {
+  return { id, session: id, host: 'claude-code', label, project: { id: 'prj_a', name: 'billing-svc' }, state, waiting: state === 'waiting' ? 1 : 0, live: state !== 'ended', started_at: null, last_seen_at: '2026-11-05T09:00:00.000Z' } as InboxAgent;
+}
 
 /** The settings' line for this load: `reveal` as the Inbox reports it (none: an older Inbox). */
 type Line = { next: InboxRevealId | null; ahead?: InboxRevealId[] } | undefined;
 
 interface State {
   blocked: boolean;
-  /** The list is taller than the screen (App: `listTallerThanScreen` of the list's body). */
-  taller: boolean;
   toast: boolean;
   thread: string | null;
   held: boolean;
 }
-const BASE: State = { blocked: false, taller: true, toast: false, thread: null, held: false };
+const BASE: State = { blocked: false, toast: false, thread: null, held: false };
 
 /** The view the list would draw (App reads the same hook). */
 let drawn: ListView = 'grouped';
 
-/** App's wiring (App.tsx): armed from the load's latch of `reveal`, the line's claim, Not now from Escape. */
+/** App's wiring (App.tsx): armed from the load's latch of `reveal`, the line's claim, a pick through the ⋮ menu's setter, Not now from Escape. */
 function Harness({ state, line }: { state: State; line: Line }) {
   const [view, setView] = listView.useListView();
   drawn = view;
   const armed = reveal.revealArmed({ reveal: line });
   const idle = idleClock.useIdleClock({ enabled: true });
   const r = reveal.useLineReveal({
-    id: 'list_view',
-    due: armed.next === 'list_view' || armed.ahead.includes('list_view'),
+    id: 'view_choice',
+    due: armed.next === 'view_choice' || armed.ahead.includes('view_choice'),
     blocked: state.blocked,
     rows: FIVE,
     toast: state.toast,
     thread: state.thread,
-    clear: reveal.listViewRevealClear(true, state.thread, idle),
+    clear: reveal.viewChoiceRevealClear(true, state.thread, idle),
     place: state.thread ?? '',
     heldBack: () => state.held,
-    leaveCounts: (_visit, _now, _row, next) => reveal.listViewRevealLeaveCounts(next),
+    leaveCounts: (_visit, _now, _row, next) => reveal.viewChoiceRevealLeaveCounts(next),
     idle,
-    mayClaim: (pageAge) => reveal.listViewRevealMayClaim({ listLoaded: true, firstRun: false, grouped: view === 'grouped', taller: state.taller }, pageAge),
-    holds: () => view === 'grouped',
+    mayClaim: (pageAge) => reveal.viewChoiceRevealMayClaim({ listLoaded: true, firstRun: false, view }, pageAge),
+    holds: () => reveal.viewChoiceWanted(view),
   });
   return r.stage === 'open' ? (
     <ThemeProvider>
       <ListViewIntro
         groups={[{ id: 'new', label: 'New since you looked', count: FIVE.length, rows: FIVE }]}
         flat={FIVE.map((row) => ({ row, drawn: 'new' as const }))}
+        sections={sectionsOf({ new: FIVE })}
         look={readListLook()}
         phone={false}
         current={view}
-        onSmart={r.close}
-        onDismiss={() => {
-          void inboxApi.revealNotNow('list_view');
+        onPick={(next) => {
+          setView(next);
           r.close();
         }}
-        onSimple={() => {
-          setView('list');
+        onDismiss={() => {
+          void inboxApi.revealNotNow('view_choice');
           r.close();
         }}
       />
@@ -193,7 +207,14 @@ function mount(state: State, line: Line) {
   };
 }
 
-const NEXT: Line = { next: 'list_view', ahead: [] };
+const NEXT: Line = { next: 'view_choice', ahead: [] };
+
+const col = (key: string) => dialog()!.querySelector(`[data-list-view-choice="${key}"]`)!.closest('.ib-lvc-col')!;
+/** The choices tagged "In use", and the ones whose button is the filled one. */
+const inUse = () => [...dialog()!.querySelectorAll('[data-list-view-in-use]')].map((tag) => tag.closest('.ib-lvc-col')!.querySelector('[data-list-view-choice]')!.getAttribute('data-list-view-choice'));
+const filled = () => [...dialog()!.querySelectorAll('[data-list-view-choice].ib-pri')].map((b) => b.getAttribute('data-list-view-choice'));
+/** The tags beside a choice's name other than "In use" (Agents' New, Smart groups' Recommended). */
+const tags = (key: string) => col(key).querySelectorAll('.ib-lvc-name .ib-lvc-tag:not(.ib-lvc-inuse)').length;
 
 /** The calm moment: the page past its age, a thread opened, then back to the list (or on to `to`). */
 async function leave(line: Line, state: Partial<State> = {}, to: string | null = null) {
@@ -206,44 +227,85 @@ async function leave(line: Line, state: Partial<State> = {}, to: string | null =
   return set;
 }
 
-describe.skipIf(!hasDom)('the List view choice, through the line', () => {
-  test('never on load; next in the line, back on the list it claims list_view, opens, and "Simple list" switches the list at once, remembered', async () => {
+describe.skipIf(!hasDom)('the view choice, through the line', () => {
+  test('never on load; next in the line, back on the list it claims view_choice and opens on Smart groups: three choices, the groups in use; "Use Agents" switches the list at once, remembered', async () => {
     const set = mount({ ...BASE, thread: 'a' }, NEXT);
     await wait(TIMES.pageAgeMs + 100);
     expect(dialog()).toBeNull();
     set({ thread: null });
     await until(() => dialog() !== null);
     // The line's claim, with the page's key: the Inbox stamps it and decides the day.
-    expect(claims().map((c) => c.body)).toEqual([{ id: 'list_view', key: expect.any(String) }]);
-    // Named and described for a screen reader; focus on the question, so neither choice looks picked.
+    expect(claims().map((c) => c.body)).toEqual([{ id: 'view_choice', key: expect.any(String) }]);
+    // Named and described for a screen reader; focus on the question, so no choice looks picked.
     expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('Which view do you prefer?');
     expect(document.getElementById(dialog()!.getAttribute('aria-describedby')!)?.textContent).toBe('You can change this any time in the ⋮ menu.');
     expect(document.activeElement?.id).toBe('ib-lvc-title');
-    // Two equals, each with the person's own rows in its picture: the groups with their band, the list without.
-    const col = (key: string) => dialog()!.querySelector(`[data-list-view-choice="${key}"]`)!.closest('.ib-lvc-col')!;
-    expect(dialog()!.querySelectorAll('.ib-lvc-col [data-list-intro-preview]').length).toBe(2);
+    // Agents first (the larger picture), then Smart groups, then Simple list, each with the person's own rows.
+    expect([...dialog()!.querySelectorAll('[data-list-view-choice]')].map((b) => b.getAttribute('data-list-view-choice'))).toEqual(['agents', 'smart', 'simple']);
+    expect(col('agents').classList.contains('ib-lvc-lead')).toBe(true);
+    expect(dialog()!.querySelectorAll('.ib-lvc-col [data-list-intro-preview]').length).toBe(3);
+    expect(col('agents').querySelectorAll('.ib-ag').length).toBe(1);
+    expect(col('agents').querySelectorAll('[data-thread-id]').length).toBe(FIVE.length);
     expect(col('smart').querySelector('.ib-band')).not.toBeNull();
     expect(col('simple').querySelector('.ib-band')).toBeNull();
     expect(col('simple').querySelectorAll('[data-thread-id]').length).toBe(FIVE.length);
-    // Smart groups' button is the primary one (the owner's pick); Simple list's is plain.
-    expect(dialog()!.querySelector('[data-list-view-choice="smart"]')!.classList.contains('ib-pri')).toBe(true);
-    expect(dialog()!.querySelector('[data-list-view-choice="simple"]')!.classList.contains('ib-pri')).toBe(false);
-    // What the list draws now is marked "In use": the groups.
-    expect([...dialog()!.querySelectorAll('[data-list-view-in-use]')].map((tag) => tag.closest('.ib-lvc-col')?.querySelector('[data-list-view-choice]')?.getAttribute('data-list-view-choice'))).toEqual(['smart']);
+    // The view in use, the groups, is tagged and its button is the filled one; Agents is tagged New, Smart groups Recommended.
+    expect(inUse()).toEqual(['smart']);
+    expect(filled()).toEqual(['smart']);
+    expect(tags('agents')).toBe(1);
+    expect(tags('smart')).toBe(1);
+    expect(tags('simple')).toBe(0);
     expect(drawn).toBe('grouped');
-    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="simple"]')!.click());
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="agents"]')!.click());
     expect(dialog()).toBeNull();
-    expect(drawn).toBe('list');
-    expect(stored.get(listView.LIST_VIEW_COOKIE)).toBe('list');
+    expect(drawn).toBe('agents');
+    expect(stored.get(listView.LIST_VIEW_COOKIE)).toBe('agents');
     // A pick is an answer, not a Not now.
     await wait(50);
     expect(notNows()).toHaveLength(0);
   });
 
-  test('ahead at its moment: armed while another offer is next, when the line names it in `ahead`', async () => {
-    await leave({ next: 'board', ahead: ['list_view'] });
+  test('on Simple list it opens too, following that view: Simple list in use with the filled button, Smart groups untagged, and "Use Simple list" keeps it', async () => {
+    stored.set(listView.LIST_VIEW_COOKIE, 'list');
+    await leave(NEXT);
     await until(() => dialog() !== null);
-    expect(claims().map((c) => c.body.id)).toEqual(['list_view']);
+    expect(claims()).toHaveLength(1);
+    expect(inUse()).toEqual(['simple']);
+    expect(filled()).toEqual(['simple']);
+    // The switch: Smart groups keeps "Recommended" for someone on Simple list only while RECOMMEND_SMART_ON_SIMPLE is on.
+    expect(tags('smart')).toBe(RECOMMEND_SMART_ON_SIMPLE ? 1 : 0);
+    expect(tags('agents')).toBe(1);
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="simple"]')!.click());
+    expect(dialog()).toBeNull();
+    expect(drawn).toBe('list');
+    expect(stored.get(listView.LIST_VIEW_COOKIE)).toBe('list');
+    await wait(50);
+    expect(notNows()).toHaveLength(0);
+  });
+
+  test('on Simple list, "Use Smart groups" switches to the groups (the cookie goes)', async () => {
+    stored.set(listView.LIST_VIEW_COOKIE, 'list');
+    await leave(NEXT);
+    await until(() => dialog() !== null);
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="smart"]')!.click());
+    expect(dialog()).toBeNull();
+    expect(drawn).toBe('grouped');
+    expect(stored.has(listView.LIST_VIEW_COOKIE)).toBe(false);
+  });
+
+  test('someone already on Agents is not offered it (viewChoiceWanted): no claim at its moment, no dialog', async () => {
+    expect(reveal.viewChoiceWanted('agents')).toBe(false);
+    stored.set(listView.LIST_VIEW_COOKIE, 'agents');
+    await leave(NEXT);
+    await wait(400);
+    expect(claims()).toHaveLength(0);
+    expect(dialog()).toBeNull();
+  });
+
+  test('ahead at its moment: armed while another offer is next, when the line names it in `ahead`', async () => {
+    await leave({ next: 'board', ahead: ['view_choice'] });
+    await until(() => dialog() !== null);
+    expect(claims().map((c) => c.body.id)).toEqual(['view_choice']);
   });
 
   const unarmed: [string, Line][] = [
@@ -268,30 +330,27 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
     expect(dialog()).toBeNull();
   });
 
-  test('"Smart groups" leaves the groups and is no Not now; Escape keeps the view and is the line\'s Not now', async () => {
-    await leave(NEXT);
-    await until(() => dialog() !== null);
-    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="smart"]')!.click());
-    expect(dialog()).toBeNull();
-    expect(drawn).toBe('grouped');
-    await wait(50);
-    expect(notNows()).toHaveLength(0);
-    act(() => root?.unmount());
-    host?.remove();
-    listView.resetListViewForTests();
-    await leave(NEXT);
-    await until(() => dialog() !== null);
-    act(() => {
-      dialog()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    });
-    await until(() => dialog() === null);
-    expect(drawn).toBe('grouped');
-    await until(() => notNows().length === 1);
-    expect(notNows().map((p) => p.body)).toEqual([{ id: 'list_view', answer: 'not_now' }]);
+  test('Escape keeps the view in use and is the line\'s Not now', async () => {
+    for (const view of ['grouped', 'list'] as const) {
+      act(() => root?.unmount());
+      host?.remove();
+      posts = [];
+      stored.clear();
+      if (view === 'list') stored.set(listView.LIST_VIEW_COOKIE, 'list');
+      listView.resetListViewForTests();
+      await leave(NEXT);
+      await until(() => dialog() !== null);
+      act(() => {
+        dialog()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      });
+      await until(() => dialog() === null);
+      expect(drawn).toBe(view);
+      await until(() => notNows().length === 1);
+      expect(notNows().map((p) => p.body)).toEqual([{ id: 'view_choice', answer: 'not_now' }]);
+    }
   });
 
   const blockers: [string, Partial<State>, string | null][] = [
-    ['the list no taller than the screen', { taller: false }, null],
     ['another one-time dialog this load', { blocked: true }, null],
     ['a toast up', { toast: true }, null],
     ['something typed or open', { held: true }, null],
@@ -319,7 +378,7 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
     expect(claims()).toHaveLength(0);
     // Then the page rests on thread d: the moment, the line's claim, and the dialog over the open thread.
     await until(() => dialog() !== null);
-    expect(claims().map((c) => c.body)).toEqual([{ id: 'list_view', key: expect.any(String) }]);
+    expect(claims().map((c) => c.body)).toEqual([{ id: 'view_choice', key: expect.any(String) }]);
   });
 
   test('an idle page waits for the page\'s age before it claims', async () => {
@@ -352,70 +411,83 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
     expect(claims()).toHaveLength(0);
   });
 
-  test("App's clock runs only while a reveal that takes idle is armed (next, List view ahead, the grill-me tip beside the line, or the list options due)", () => {
+  test("App's clock runs only while a reveal that takes idle is armed (next, the view choice ahead, the grill-me tip beside the line, or the list options due)", () => {
     expect(reveal.idleClockArmed(null, true)).toBe(false);
-    for (const next of ['list_view', 'board', 'steps', 'bro'] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(true);
+    for (const next of ['view_choice', 'board', 'steps', 'bro'] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(true);
     expect(reveal.idleClockArmed({ next: null, ahead: [], aside: ['grill_me_tip'] }, false)).toBe(true);
     expect(reveal.idleClockArmed({ next: null, ahead: [], aside: ['star'] }, false)).toBe(false);
-    expect(reveal.idleClockArmed({ next: 'snooze', ahead: ['list_view'] }, false)).toBe(true);
+    expect(reveal.idleClockArmed({ next: 'snooze', ahead: ['view_choice'] }, false)).toBe(true);
     expect(reveal.idleClockArmed({ next: null, ahead: [] }, true)).toBe(true);
     for (const next of ['snooze', 'code_review', 'voice', 'sound', null] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(false);
   });
 
-    test('idle with a blocker present (the list no taller than the screen, something open): no claim', async () => {
+  test('idle with something open: no claim', async () => {
     idleClock.IDLE_CLOCK.idleMs = 100;
-    mount({ ...BASE, thread: 'a', taller: false }, NEXT);
-    await wait(TIMES.pageAgeMs + 400);
-    expect(claims()).toHaveLength(0);
-    act(() => root?.unmount());
-    host?.remove();
     mount({ ...BASE, thread: 'a', held: true }, NEXT);
     await wait(TIMES.pageAgeMs + 400);
     expect(claims()).toHaveLength(0);
     expect(dialog()).toBeNull();
   });
+});
 
-  test('not once the list is Simple: the choice is for the groups', async () => {
-    stored.set(listView.LIST_VIEW_COOKIE, 'list');
-    await leave(NEXT);
-    await wait(400);
-    expect(dialog()).toBeNull();
-    expect(claims()).toHaveLength(0);
-  });
+describe.skipIf(!hasDom)('the view choice dialog', () => {
+  function draw(sections: InboxListSection[], current: ListView = 'grouped') {
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(
+        <ThemeProvider>
+          <ListViewIntro groups={[]} flat={[]} sections={sections} look={readListLook()} phone={false} current={current} onPick={() => {}} onDismiss={() => {}} />
+        </ThemeProvider>,
+      );
+    });
+  }
+  function clear() {
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+  }
+  const picture = () => col('agents').querySelector('[data-view-picture="agents"]')!;
 
-  test('"In use" follows the view the list draws: Simple list when the list is List', () => {
-    for (const current of ['grouped', 'list'] as const) {
-      host = document.createElement('div');
-      host.className = 'pn-inbox';
-      document.body.appendChild(host);
-      act(() => {
-        root = createRoot(host!);
-        root.render(
-          <ThemeProvider>
-            <ListViewIntro groups={[]} flat={[]} look={readListLook()} phone={false} current={current} onSmart={() => {}} onSimple={() => {}} />
-          </ThemeProvider>,
-        );
-      });
-      const marked = [...dialog()!.querySelectorAll('[data-list-view-in-use]')];
-      expect(marked.map((tag) => tag.textContent)).toEqual(['In use']);
-      const choice = marked[0]!.closest('.ib-lvc-col')?.querySelector('[data-list-view-choice]');
-      expect(choice?.getAttribute('data-list-view-choice')).toBe(current === 'grouped' ? 'smart' : 'simple');
-      act(() => root?.unmount());
-      host.remove();
-      root = null;
-      host = null;
+  test('"In use" and the filled button follow the view the list draws', () => {
+    for (const current of ['grouped', 'list', 'agents'] as const) {
+      draw([], current);
+      const key = current === 'grouped' ? 'smart' : current === 'list' ? 'simple' : 'agents';
+      expect(inUse()).toEqual([key]);
+      expect(filled()).toEqual([key]);
+      clear();
     }
   });
 
-  test('taller than the screen: the list body holds more than it shows', () => {
-    const body = (scroll: number, client: number) => {
-      const el = document.createElement('div');
-      Object.defineProperty(el, 'scrollHeight', { value: scroll });
-      Object.defineProperty(el, 'clientHeight', { value: client });
-      return el;
-    };
-    expect(reveal.listTallerThanScreen(body(900, 600))).toBe(true);
-    expect(reveal.listTallerThanScreen(body(600, 600))).toBe(false);
-    expect(reveal.listTallerThanScreen(null)).toBe(false);
+  test("the Agents picture is the person's own agents, each with its threads, as the Agents view starts them", () => {
+    setInboxAgents([{ agents: [agent('ses_ops', 'Ops', 'waiting'), agent('ses_rev', 'Review', 'working'), agent('ses_tide', 'Tide', 'idle')], total: 3, ended_today: 0 }]);
+    draw(
+      sectionsOf({
+        waiting: [row('w1', 9, 'ses_ops', 'waiting')],
+        new: [row('n1', 8, 'ses_rev'), row('n2', 7, 'ses_rev')],
+        quiet: [row('q1', 6, 'ses_tide', 'quiet'), row('q2', 5, 'ses_tide', 'quiet'), row('q3', 4, 'ses_tide', 'quiet')],
+      }),
+    );
+    // The agents the list names, in the view's order (something for the person first).
+    expect([...picture().querySelectorAll('.ib-ag')].map((group) => group.getAttribute('aria-label'))).toEqual(['Ops', 'Review', 'Tide']);
+    // Ops and Review start open (something for the person); Tide, with only quiet threads, starts folded.
+    expect([...picture().querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id'))).toEqual(['w1', 'n1', 'n2']);
+  });
+
+  test('one agent with nothing for the person (folded as it starts): the picture opens it, never an empty frame', () => {
+    setInboxAgents([{ agents: [agent('ses_tide', 'Tide', 'idle')], total: 1, ended_today: 0 }]);
+    draw(sectionsOf({ quiet: [row('q1', 6, 'ses_tide', 'quiet'), row('q2', 5, 'ses_tide', 'quiet'), row('q3', 4, 'ses_tide', 'quiet')] }));
+    expect(picture().querySelectorAll('.ib-ag').length).toBe(1);
+    expect(picture().querySelectorAll('[data-thread-id]').length).toBe(3);
+  });
+
+  test('no agent at all (every thread under "No agent", folded as it starts): the picture opens the band and shows the threads', () => {
+    setInboxAgents([{ agents: [], total: 0, ended_today: 0 }]);
+    draw(sectionsOf({ quiet: [row('q1', 6, null, 'quiet'), row('q2', 5, null, 'quiet')], new: [row('n1', 8, null)] }));
+    expect(picture().querySelectorAll('.ib-ag').length).toBe(0);
+    expect(picture().querySelectorAll('[data-thread-id]').length).toBe(3);
   });
 });

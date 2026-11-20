@@ -158,7 +158,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { useLineLatch, claimRevealOnce, viewChoiceRevealClear, viewChoiceRevealLeaveCounts, viewChoiceRevealMayClaim, viewChoiceWanted, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
@@ -3818,10 +3818,10 @@ function Inbox() {
   });
   // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
   const listOptionsClear = listIntroClear && (!route.thread || pageIdle);
-  // Grouping before Rows (the owner's order, 2026-11-10): the Inbox arms List view beside the Rows dialog (`reveal.ahead`,
-  // it never holds the line); while List view's own need holds on this page (Smart groups, the list taller than the
-  // screen), Rows waits for it. When it does not hold, Rows goes as before.
-  const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('list_view') && readListView() === 'grouped' && listTallerThanScreen(listBody(rootRef.current));
+  // The view choice before Rows (the owner's order, 2026-11-10): the Inbox arms it beside the Rows dialog (`reveal.ahead`,
+  // it never holds the line); while it is for this page's view (any but Agents, `viewChoiceWanted`), Rows waits for it.
+  // When it is not, Rows goes as before.
+  const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('view_choice') && viewChoiceWanted(readListView());
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true && !groupingFirst,
     listLoaded: listIntroAtLoad !== null,
@@ -4014,37 +4014,29 @@ function Inbox() {
     mayClaim: (pageAge) => personalAgentsBanner !== null && lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => true,
   });
-  // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
-  // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
-  // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
-  // screen, on Smart groups.
+  // "Which view do you prefer?", registered with the line (reveals.ts `view_choice`; reveal.ts `useLineReveal`): armed
+  // while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the other offers), back on the
+  // list with no thread open or the page idle (any layout), on any view but Agents (`viewChoiceWanted`).
   const [listView, setListView] = useListView();
   const listViewThread = route.page === 'inbox' ? (route.thread ?? null) : null;
   const listViewReveal = useLineReveal({
-    id: 'list_view',
-    due: lineLatch?.next === 'list_view' || (lineLatch?.ahead.includes('list_view') ?? false),
+    id: 'view_choice',
+    due: lineLatch?.next === 'view_choice' || (lineLatch?.ahead.includes('view_choice') ?? false),
     ...revealAt,
     thread: listViewThread,
-    clear: listViewRevealClear(listIntroClear, listViewThread, pageIdle),
-    leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
+    clear: viewChoiceRevealClear(listIntroClear, listViewThread, pageIdle),
+    leaveCounts: (_visit, _now, _row, next) => viewChoiceRevealLeaveCounts(next),
     idle: pageIdle,
-    mayClaim: (pageAge) =>
-      listViewRevealMayClaim(
-        {
-          listLoaded: lineLatch !== null,
-          firstRun,
-          grouped: listView === 'grouped',
-          taller: listTallerThanScreen(listBody(rootRef.current)),
-        },
-        pageAge,
-      ),
-    holds: () => listView === 'grouped',
+    mayClaim: (pageAge) => viewChoiceRevealMayClaim({ listLoaded: lineLatch !== null, firstRun, view: listView }, pageAge),
+    holds: () => viewChoiceWanted(listView),
   });
   const listViewIntroOpen = listViewReveal.stage === 'open';
   const listViewChoiceOpen = listViewIntroOpen && shown !== null;
-  // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
-  const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
-  const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The choice's three pictures: the person's own list under their agents (the sections; the agents are agentsList.ts's,
+  // which every list read fills), as the groups draw it, and as the Simple list draws it.
+  const listViewChoiceSections = listViewChoiceOpen && shown ? filterList(shown) : [];
+  const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceSections.flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : []));
+  const listViewChoiceFlat = listViewChoiceOpen ? flatRows(listViewChoiceSections, null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
   const { reveal: priorityReveal, dialog: priorityDialog } = usePriorityReveal({
     due: lineLatch?.next === 'priority',
     revealAt,
@@ -6102,19 +6094,21 @@ function Inbox() {
         <ListViewIntro
           groups={listViewChoiceGroups}
           flat={listViewChoiceFlat}
+          sections={listViewChoiceSections}
+          machines={machines}
           look={readListLook()}
           awayMachines={machines.away}
           projectNames={projectNames}
           phone={phone}
           current={listView}
-          onSmart={listViewReveal.close}
-          onDismiss={() => {
-            // Escape or a click outside: Not now for the line (the next dialog waits three days).
-            void inboxApi.revealNotNow('list_view');
+          onPick={(view) => {
+            // The ⋮ menu's own setter: the list switches at once, remembered in this browser.
+            setListView(view);
             listViewReveal.close();
           }}
-          onSimple={() => {
-            setListView('list');
+          onDismiss={() => {
+            // Escape or a click outside: the view stays; Not now for the line (the next dialog waits three days).
+            void inboxApi.revealNotNow('view_choice');
             listViewReveal.close();
           }}
         />

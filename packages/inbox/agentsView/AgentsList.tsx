@@ -41,7 +41,16 @@ export interface AgentsListProps {
   shows?: number;
   /** The rows drawn, in order, whenever they change (Select all picks only these). */
   onDrawn?: (ids: readonly string[]) => void;
+  /**
+   * A picture of the view (the view choice dialog, ListViewIntro.tsx): when the agents as they start would show fewer
+   * than `PICTURE_ROWS` threads (one agent, every agent folded, none but "No agent"), every agent and band opens, so
+   * the picture is never an empty frame.
+   */
+  picture?: boolean;
 }
+
+/** A picture (`picture`) opens everything when the view as it starts would show fewer threads than this. */
+export const PICTURE_ROWS = 3;
 
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
 
@@ -72,11 +81,18 @@ function keepSessions(layout: AgentsLayout, kept: Map<string, readonly string[]>
   return { ...layout, live: layout.live.map(keep), ended: layout.ended.map(keep) };
 }
 
+/** The threads the view would show as it starts (each open agent's first few, "No agent" while open): fewer than `PICTURE_ROWS`. */
+function pictureSparse(layout: AgentsLayout, open: (block: AgentBlock) => boolean, endedOpen: boolean, noneOpen: boolean): boolean {
+  let rows = noneOpen ? layout.none.length : 0;
+  for (const block of [...layout.live, ...(endedOpen ? layout.ended : [])]) if (open(block)) rows += Math.min(block.rows.length, AGENT_ROWS_SHOWN);
+  return rows < PICTURE_ROWS;
+}
+
 /** What the rows looked like before a Show: each row's time of its latest agent message, No agent's rows included. */
 const timesOf = (layout: AgentsLayout | null) =>
   new Map((layout ? [...[...layout.live, ...layout.ended].flatMap((b) => b.rows), ...layout.none] : []).map(({ row }) => [row.thread_id, row.last_agent_at ?? row.last_at]));
 
-export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn }: AgentsListProps) {
+export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn, picture = false }: AgentsListProps) {
   const groups = useInboxAgents();
   const labels = useSessionLabels();
   const chainsRev = useAgentFaceChainsRev();
@@ -93,9 +109,11 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
     [sections, groups, machines, labels, epoch, keep, chainsRev],
   );
   const foldKey = (agent: ViewAgent) => agentFoldKey(agent, machines.self);
-  const openOf = (block: AgentBlock) => folds.open(foldKey(block.agent), block.open, waitsSince(block.rows));
-  const endedOpen = folds.open(ENDED_BAND, true);
-  const noneOpen = folds.open(NONE_BAND, false);
+  const startsOpen = (block: AgentBlock) => folds.open(foldKey(block.agent), block.open, waitsSince(block.rows));
+  const fill = picture && pictureSparse(layout, startsOpen, folds.open(ENDED_BAND, true), folds.open(NONE_BAND, false));
+  const openOf = (block: AgentBlock) => fill || startsOpen(block);
+  const endedOpen = fill || folds.open(ENDED_BAND, true);
+  const noneOpen = fill || folds.open(NONE_BAND, false);
 
   // Show: the agents (and bands) its rows land under open, and "N more" opens where a row lands past it.
   const seen = useRef<{ layout: AgentsLayout | null; shows: number; before: Map<string, string> | null; epoch: number }>({ layout: null, shows, before: null, epoch: 0 });

@@ -28,10 +28,10 @@ const shots = resolve(process.env.PLANNOTATOR_LIST_VIEW_SHOTS ?? join(repo, '.lo
 
 test.describe.configure({ mode: 'serial' });
 test.skip(!binary, 'set PLANNOTATOR_E2E_RELEASE_BINARY to a release build');
-// The choice now goes through the Inbox's schedule (packages/shared/inbox/reveals.ts `list_view`): this world needs
-// a seeded line (first use two days back, 15 threads or more, a list taller than the window) before it runs again.
+// The choice now goes through the Inbox's schedule (packages/shared/inbox/reveals.ts `view_choice`, three views):
+// this world needs a seeded line and its steps redone for three choices before it runs again.
 // packages/inbox/listViewReveal.test.tsx guards the wiring meanwhile.
-test.skip(true, 'needs a world seeded for the dialog schedule (list_view next or ahead)');
+test.skip(true, 'needs a world seeded for the dialog schedule (view_choice next or ahead)');
 
 let url = '';
 let first = '';

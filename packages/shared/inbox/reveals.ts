@@ -6,7 +6,7 @@
  * every claim against it.
  *
  * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, never shown: `CODE_REVIEW_OFFER_SHOWN`), the
- * same-day group (the tab icon, themes, List view "Grouping", list options "Rows", the sound, voice: no tenure, the
+ * same-day group (the tab icon, themes, the view choice, list options "Rows", the sound, voice: no tenure, the
  * gap apart), then the later group, later only by tenure (Snooze, personal agents, Priority, the Board, the Checklist, Bro mode,
  * "Set the rules"). The agent note is a setup dialog: never in the queue, but it keeps the gap
  * (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
@@ -16,7 +16,7 @@
  *    (`CODE_REVIEW_OFFER`, the owner, 2026-11-06: "show up like immediately"), which takes day 0's one dialog.
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
- *  - Ahead at its moment: an offer marked `ahead` (List view: approval "inbox-one-time-dialogs", "the change") may also
+ *  - Ahead at its moment: an offer marked `ahead` (the view choice, whose "who" only the page can see) may also
  *    be armed while another offer is next, and goes as soon as its own moment comes, still inside the
  *    spacing rules (`revealAhead`). It never goes before an update-day dialog.
  *  - No one-a-day rule (the owner, 2026-11-09: "I don't wanna wait a whole day now ... at 40 minutes, give him the new
@@ -40,14 +40,14 @@
  *  - No active-days counter (the owner, 2026-11-02): "different days" for heavy use come from the dates of the agent
  *    messages the person has read.
  *
- * Registering a dialog (a branch's Bro mode or List view): add its entry to `INBOX_REVEALS` at its place, with its own
+ * Registering a dialog (a branch's Bro mode or the view choice): add its entry to `INBOX_REVEALS` at its place, with its own
  * need (`tenureMs`, `minThreads`, `heavyUse`, `ahead`); in packages/server/inbox.ts, add its "undecided" to `lineOffers` (the
  * claim, the stamp, Not now and retirement then come from the line); on the page, arm it from `reveal.next` with
  * `useLineReveal` (packages/inbox/reveal.ts) and its own moment (also from `reveal.ahead` when it is `ahead`). docs/agent-guides/inbox-window.md has the steps.
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "list_view" | "personal_agents" | "priority" | "routines";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "view_choice" | "personal_agents" | "priority" | "routines";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -69,8 +69,8 @@ export interface RevealEntry {
   /** Heavy use must hold (`revealHeavyUse`): for offers that only a heavy user needs (Bro mode). */
   heavyUse?: boolean;
   /**
-   * An offer that goes ahead of the offers before it once its moment comes (`revealAhead`): List view, whose moment
-   * (the list taller than the screen) is itself the heavy use. Only for `offer`.
+   * An offer that goes ahead of the offers before it once its moment comes (`revealAhead`), and never holds the line:
+   * the view choice, whose "who" (the view in use, a cookie of each browser) only the page can see. Only for `offer`.
    */
   ahead?: boolean;
   /** First use must be on an earlier local calendar day (`revealDay`): from the second day of use. */
@@ -132,11 +132,13 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // while that one is still due (the server keeps it closed meanwhile, so patience cannot let it pass), the line's own
   // gap after it, and 15 s into the page (packages/inbox/themeChooser.ts). It never retires and has no Not now.
   { id: "theme_chooser", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  // 3. List view's choice, "Grouping" (approval "inbox-list-view-dialog"; its moment, approval "inbox-one-time-dialogs":
-  // once the list is taller than the screen, on Grouped, at the next calm moment; the page checks the screen). No
-  // tenure since 2026-11-10 (it was 2 days). `minThreads: 15` is the server's stand-in for "taller than the screen",
-  // which only the page can see. Still `ahead`: once it qualifies it also goes ahead of whichever offer is next.
-  { id: "list_view", kind: "offer", tenureMs: 0, minThreads: 15, ahead: true, enabled: true },
+  // 3. "Which view do you prefer?" (`view_choice`): Agents, Smart groups or Simple list, one pick. It replaced List
+  // view's two-choice dialog (`list_view`, retired: its old `inboxReveals.list_view` stamps stay in config.json, unread,
+  // so everyone who saw that one is offered this one once). For everyone with five threads (as list options "Rows"),
+  // on any view but Agents (the page checks: the view is each browser's own, packages/inbox/reveal.ts
+  // `viewChoiceWanted`). `ahead` because only the page knows that view: a person on Agents never claims it, and an
+  // `ahead` entry never holds the line, so the others go on without it.
+  { id: "view_choice", kind: "offer", tenureMs: 0, minThreads: 5, ahead: true, enabled: true },
   // 4. "Choose how your list looks", "Rows" (approval "inbox-rows-dialog"; q-2c590791: "It's when they have more
   // threads, that's the point"): due for everyone, fresh installs too, once the machine holds five threads.
   { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
@@ -316,8 +318,8 @@ export function revealNext(state: RevealState, now: Date, table: readonly Reveal
     }
     return longest?.id ?? null;
   };
-  // An `ahead` entry (List view) never holds the line: only the page can see its moment (the list taller than the
-  // screen, on Grouped), so while another entry qualifies that one is next and the `ahead` entry is armed beside it
+  // An `ahead` entry (the view choice) never holds the line: only the page can see whether it is for this person (any
+  // view but Agents), so while another entry qualifies that one is next and the `ahead` entry is armed beside it
   // (`revealAhead`). It is next itself only when nothing else is.
   return pick(false) ?? pick(true);
 }
@@ -336,9 +338,9 @@ export function revealLastShown(stamps: readonly (string | null | undefined)[]):
 }
 
 /**
- * The `ahead` offers a page may arm besides `next` (approval "inbox-one-time-dialogs": List view goes at its moment,
- * ahead of the other offers): each one that qualifies, while the line is free and `next` is not an update-day dialog
- * that stands before it in the order.
+ * The `ahead` offers a page may arm besides `next` (the view choice goes at its moment, ahead of the other offers):
+ * each one that qualifies, while the line is free and `next` is not an update-day dialog that stands before it in the
+ * order.
  */
 export function revealAhead(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): RevealId[] {
   const next = revealNext(state, now, table);
@@ -346,8 +348,8 @@ export function revealAhead(state: RevealState, now: Date, table: readonly Revea
   const nextAt = table.findIndex((entry) => entry.id === next);
   const nextEntry = nextAt < 0 ? null : table[nextAt]!;
   // Armed beside an offer wherever that offer stands, and beside an update-day dialog only when that one comes after
-  // it in the order (the owner's order, 2026-11-10: the tab icon and the themes dialogs go before Grouping; Rows, the
-  // sound and voice after it).
+  // it in the order (the owner's order, 2026-11-10: the tab icon and the themes dialogs go before the view choice;
+  // Rows, the sound and voice after it).
   return table
     .filter((entry, at) => entry.ahead === true && entry.kind === "offer" && entry.id !== next && (nextEntry === null || nextEntry.kind === "offer" || at < nextAt) && revealQualifies(entry, state, now))
     .map((entry) => entry.id);

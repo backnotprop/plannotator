@@ -3602,7 +3602,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
-   * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
+   * on" writes the switch. A registered offer (Bro mode, the view choice) adds its own here, and its id to `INBOX_REVEALS`.
    */
   /**
    * The "Star the repo" ask (approval "star-ask"; packages/shared/star-ask.ts): open while no surface showed or answered
@@ -3633,9 +3633,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // read in `revealState`, only while it is unshown and could go today.
     grill_me_tip: () => true,
     star: starUndecided,
-    // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
-    // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
-    list_view: () => true,
+    // "Which view do you prefer?" (reveals.ts `view_choice`): the view is each browser's own (packages/inbox/listView.ts),
+    // so the Inbox never sees it decided; the page holds it back on Agents (reveal.ts `viewChoiceWanted`). Only its own
+    // stamp closes it: List view's retired `list_view` stamp is not read, so whoever saw that dialog is offered this one.
+    view_choice: () => true,
     // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
     // pick in Settings (here, plan review or code review) before its moment drops it.
     tab_icon: tabIconUndecided,
