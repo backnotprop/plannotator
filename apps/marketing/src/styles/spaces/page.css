@@ -139,7 +139,7 @@ mark.g{--mk:var(--green)}
 }
 /* The page's own variable Inter, under its own name, so weights such as 550 and 650 render as designed.
    The rest of the site keeps the Inter it loads from Google Fonts. */
-@font-face{font-family:"Spaces Inter";src:url(/fonts/inter-variable/inter-latin-wght-normal.woff2) format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"Spaces Inter";src:url(/fonts/inter-variable/inter-latin-wght-normal.woff2) format("woff2");font-weight:100 900;font-display:swap}
 @font-face{font-family:"Geist Mono Variable";src:url(/fonts/geist-mono/geist-mono-latin-wght-normal.woff2) format("woff2");font-weight:100 900;font-display:block}
 :root{
   --ground:#f0f3fa;--ink:#14162b;--soft:#5b607a;
@@ -333,7 +333,8 @@ html:not(.light) .shf-thumb .shf-d{display:block}
   .shf-card[data-card="flow"] .shf-thumb img{object-position:left center}
 }
 
-:root{--panel:#e6eaf5;--F:clamp(850px,round(down,100vh,50px),1000px);--wv:rgba(177,143,255,.3);--face:0 1px 2px rgba(24,30,70,.08),0 24px 48px -20px rgba(24,30,70,.28)}
+:root{--panel:#e6eaf5;--F:clamp(850px,100vh,1000px);--wv:rgba(177,143,255,.3);--face:0 1px 2px rgba(24,30,70,.08),0 24px 48px -20px rgba(24,30,70,.28)}
+@supports (height:round(down,100vh,50px)){:root{--F:clamp(850px,round(down,100vh,50px),1000px)}}
 html:not(.light){--panel:#171d4b;--wv:rgba(110,86,240,.5);--face:0 2px 4px rgba(0,0,20,.25),0 30px 60px -20px rgba(0,0,16,.8)}
 body::after{background:
   linear-gradient(var(--line),var(--line)) calc(50% - var(--rail)) 0/1px 100% no-repeat,
@@ -401,7 +402,7 @@ html.pfc .pf-rail{top:1px;height:49px;display:flex;align-items:center;-webkit-ma
 html.pfc .pf-at{position:static;flex:none;margin-right:28px;opacity:1}
 .pf-track{display:flex;align-items:flex-start;width:max-content}
 html.pfr .pf-track{animation:pf-scroll 80s linear infinite;will-change:transform}
-html.pfr .pf-track:hover{animation-play-state:paused}
+html.pfr .pf-track:hover,html.pfr .pf-track:focus-within,html.pfr .pf-track.pf-held{animation-play-state:paused}
 html.pfc .pf-track{flex:1 1 0;width:auto;min-width:0;align-items:center;justify-content:space-between}
 @keyframes pf-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){html.pfr .pf-track{animation:none;will-change:auto}.proof,.proof *{transition:none!important}}
