@@ -67,13 +67,14 @@ extension StandInDoor {
   }
   public func draft(_ id: ThreadID) -> InboxReplyDraft? { state.drafts[id] }
 
-  /// A file on a message: in the message's record, and its bytes on the computer.
-  public func addFile(thread id: ThreadID, name: String, kind: InboxAttachmentKind, bytes: Data, mediaType: String? = nil) -> InboxAttachment {
+  /// A file on a message (the thread's newest from an agent, when none is named): in the message's record, and its
+  /// bytes on the computer.
+  public func addFile(thread id: ThreadID, message: MessageID? = nil, name: String, kind: InboxAttachmentKind, bytes: Data, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil) -> InboxAttachment {
     counter += 1
     let attachment = InboxAttachment(
       id: "att_STANDIN\(counter)", path: "/work/\(name)", name: name, kind: kind, sentSha256: Self.sha(bytes), size: Int64(bytes.count), sentAt: StandInData.iso(Date()),
-      sentMtime: StandInData.iso(Date()), mediaType: mediaType)
-    guard let t = threads.firstIndex(where: { $0.threadId == id }), let m = threads[t].messages.lastIndex(where: { $0.author.kind == .agent }) else { return attachment }
+      sentMtime: StandInData.iso(Date()), mediaType: mediaType, width: width, height: height, durationMs: durationMs)
+    guard let t = threads.firstIndex(where: { $0.threadId == id }), let m = threads[t].messages.lastIndex(where: { candidate in message.map { $0 == candidate.id } ?? (candidate.author.kind == .agent) }) else { return attachment }
     threads[t].messages[m].attachments = (threads[t].messages[m].attachments ?? []) + [attachment]
     state.files[attachment.id] = StandInFile(record: attachment, message: threads[t].messages[m].id, thread: id, sent: bytes, current: bytes)
     return attachment
@@ -158,7 +159,7 @@ extension StandInDoor {
     return InboxAttachmentState(
       messageId: file.message, current: current, changedSinceSent: current.map { $0.sha256 != r.sentSha256 } ?? false,
       unavailable: file.current == nil ? InboxAttachmentStateUnavailable(code: .attachmentMissing, message: "\(r.name) is no longer on the computer.") : nil,
-      id: r.id, path: r.path, name: r.name, kind: r.kind, sentSha256: r.sentSha256, size: r.size, sentAt: r.sentAt, sentMtime: r.sentMtime, mediaType: r.mediaType)
+      id: r.id, path: r.path, name: r.name, kind: r.kind, sentSha256: r.sentSha256, size: r.size, sentAt: r.sentAt, sentMtime: r.sentMtime, mediaType: r.mediaType, width: r.width, height: r.height, durationMs: r.durationMs)
   }
 
   /// The byte routes: the version asked for, whole, or the part a Range names (at most `partCap`), as

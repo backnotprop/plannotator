@@ -43,6 +43,18 @@ extension InboxSession {
     return AttachmentItem.list(model.thread, states: files.states[thread])
   }
 
+  /// The files attached to one message (not the pictures its words show), each with what the computer said of it
+  /// when last asked: the tiles under the message.
+  public func attachments(of message: InboxMessageWire, in thread: ThreadID) -> [AttachmentItem] {
+    guard let records = message.attachments, !records.isEmpty else { return [] }
+    let states = files.states[thread] ?? []
+    return records.map { record in
+      var item = AttachmentItem(record: record, message: message.id, inline: false)
+      if let state = states.first(where: { $0.id == record.id }) { item.take(state) }
+      return item
+    }
+  }
+
   /// Ask the computer how each of a thread's files stands now (changed since sent, missing).
   public func readAttachments(_ thread: ThreadID) async {
     if client == nil { _ = await connect() }

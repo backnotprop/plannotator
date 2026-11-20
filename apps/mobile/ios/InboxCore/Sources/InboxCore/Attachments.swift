@@ -15,6 +15,10 @@ public struct AttachmentItem: Hashable, Sendable, Identifiable {
   public var sentSha256: String
   public var sentAt: String
   public var mediaType: String?
+  /// A picture's or a video's own size in pixels, and a video's or a recording's length, when the computer read them.
+  public var width: Double?
+  public var height: Double?
+  public var durationMs: Int64?
   /// A picture the message's words show (`ref`), not a file attached beside them.
   public var inline: Bool
   /// The file on the computer now differs from what was sent. Nil until the computer was asked.
@@ -44,6 +48,9 @@ public struct AttachmentItem: Hashable, Sendable, Identifiable {
     sentSha256 = record.sentSha256
     sentAt = record.sentAt
     mediaType = record.mediaType
+    width = record.width
+    height = record.height
+    durationMs = record.durationMs
     self.inline = inline
   }
 
@@ -56,6 +63,9 @@ public struct AttachmentItem: Hashable, Sendable, Identifiable {
     sentSha256 = state.sentSha256
     sentAt = state.sentAt
     mediaType = state.mediaType
+    width = state.width
+    height = state.height
+    durationMs = state.durationMs
     inline = state.ref != nil
     take(state)
   }

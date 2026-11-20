@@ -51,7 +51,11 @@ final class AppModel {
     if launch.resetFolds { defaults.removeObject(forKey: "listFolds") }
     computers = (try? credentials.all()) ?? []
     // A removal that was cut short leaves no copy behind.
-    if let known = try? credentials.all() { LocalCopy.sweep(root: copyRoot, keeping: known.map(\.id)) }
+    if let known = try? credentials.all() {
+      LocalCopy.sweep(root: copyRoot, keeping: known.map(\.id))
+      // The files of computers this phone no longer has go with them.
+      AttachmentCache.sweep(caches: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0], keeping: known.map(\.id))
+    }
     if launch.standIn || (defaults.bool(forKey: Self.demoKey) && computers.isEmpty) {
       await startDemo(launch)
       if let link = launch.pairLink { offer(link: link) }
@@ -66,7 +70,9 @@ final class AppModel {
   func use(_ computer: PairedComputer) {
     session?.stop()
     let copy = LocalCopy(folder: LocalCopy.folder(root: copyRoot, computer: computer.id))
-    let session = InboxSession(computer: computer, app: app, copy: copy) { computer in computer.addresses.compactMap { HTTPTransport(address: $0) } }
+    let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    let bytes = AttachmentCache(folder: AttachmentCache.folder(caches: caches, computer: computer.id))
+    let session = InboxSession(computer: computer, app: app, copy: copy, bytes: bytes) { computer in computer.addresses.compactMap { HTTPTransport(address: $0) } }
     self.session = session
     isDemo = false
     standIn = nil
@@ -196,7 +202,9 @@ final class AppModel {
     let issued = await door.issueToken()
     let computer = PairedComputer(id: issued.device.rawValue, name: options.computerName, token: launch.standInRemoved ? "tok_removed" : issued.token, secret: options.secret, addresses: [])
     session?.stop()
-    let session = InboxSession(computer: computer, app: app) { _ in [StandInTransport(door: door)] }
+    // The stand-in's files are kept for this run only, apart from any real computer's.
+    let bytes = AttachmentCache(folder: FileManager.default.temporaryDirectory.appendingPathComponent("stand-in-files-\(UUID().uuidString)", isDirectory: true))
+    let session = InboxSession(computer: computer, app: app, bytes: bytes) { _ in [StandInTransport(door: door)] }
     self.session = session
     isDemo = true
     if !launch.standIn { defaults.set(true, forKey: Self.demoKey) }
@@ -335,6 +343,20 @@ struct LaunchOptions {
               thread.messages[at].questions?[0].state = .superseded
               thread.messages[at].questions?[0].supersededBy = InboxSupersededBy(messageId: written, key: "q_rollout2")
             }
+          }
+        case "files":
+          // A thread whose messages carry files of every kind.
+          await StandInMedia.seat(on: door)
+          await session.refresh()
+        case "fileskept":
+          // The person read the thread and opened the plan earlier: both are on the phone.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          if let plan = session.attachments(StandInData.files).first, (try? await session.openAttachment(plan)) != nil { session.attachmentClosed(plan) }
+        case "filechanged", "filegone":
+          // The plan changes on the computer after it was sent, or is deleted there.
+          if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
+            await door.changeFile(plan.id, to: step == "filegone" ? nil : Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
           }
         case "worst":
           // Rows that try to break the list (the break pass).
