@@ -375,13 +375,13 @@ test.skipIf(!hasDom)('a raw <img> naming a sound or a video draws the player in 
   expect(host!.textContent).toContain('end there.');
 });
 
-test.skipIf(!hasDom)('two copies of one raw clip both stay the same players across a redraw, and an element only carrying the player attribute is ignored', async () => {
+test.skipIf(!hasDom)('two copies of one raw clip both stay the same players across a redraw, and an element carrying the player attributes is ignored', async () => {
   const url = `/api/inbox/messages/${ID}/image?path=${encodeURIComponent('rec/clip.mp4')}`;
-  const body = (alt: string) => `<p><span data-inline-media-src="${url}">decoy</span> <img src="rec/clip.mp4" alt="${alt}"> and <img src="rec/clip.mp4" alt="Second"></p>\n\n![B](design/b.png)`;
+  const body = (alt: string) => `<p><span data-inline-media="video" data-inline-media-src="${url}">decoy</span> <img src="rec/clip.mp4" alt="${alt}"> and <img src="rec/clip.mp4" alt="Second"></p>\n\n![B](design/b.png)`;
   await render(body('Clip'), [B], []);
   const videos = [...host!.querySelectorAll<HTMLVideoElement>('video[data-inline-media]')];
   expect(videos).toHaveLength(2);
-  expect(host!.querySelector('span[data-inline-media-src]')!.hasAttribute('src')).toBe(false);
+  expect(host!.querySelector('span[data-inline-media][data-inline-media-src]')!.hasAttribute('src')).toBe(false);
   await redraw(body('Clip'), [{ ...B, width: 3200 }], []);
   expect([...host!.querySelectorAll('video[data-inline-media]')]).toEqual(videos);
   expect(host!.querySelector('span[data-inline-media-src]')!.textContent).toBe('decoy');
