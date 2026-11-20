@@ -97,7 +97,8 @@ extension InboxSession {
   /// Every reason an act was not taken that the person has not been told yet, by thread.
   public var actionNotices: [ThreadID: Notice] { book.notices }
 
-  /// How many threads' writes go to the computer at a time (the window's `AT_ONCE`).
+  /// How many threads' writes go to the computer at a time. The window sends six at once (`AT_ONCE`,
+  /// packages/inbox/bulkWrites.ts); the phone sends four.
   static let atOnce = 4
 
   /// Hold one action on several rows: every row drawn at once, every write in the outbox with one save, and one

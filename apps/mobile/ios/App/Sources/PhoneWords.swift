@@ -236,7 +236,9 @@ enum PhoneWords {
   /// The picks' bar and sheet (packages/inbox/components/PickBar.tsx).
   static let selectAll = "Select all"
   static func selected(_ n: Int) -> String { "\(n.formatted(.number.locale(Locale(identifier: "en_US")))) selected" }
-  static let tapToSelect = "Tap threads to select them"
+  /// The large title while picking with nothing picked: short enough to stand whole (the window's hint, "Tap
+  /// threads to select them", is cut off at a large title's size).
+  static let tapToSelect = "Select threads"
   static let starThreads = "Star threads"
   static let unstarThreads = "Unstar threads"
   /// The toast's way out (packages/inbox/components/Toast.tsx).
