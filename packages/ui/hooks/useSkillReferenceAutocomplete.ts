@@ -11,6 +11,7 @@ import {
   uniqueSkillReferences,
 } from '../utils/skillReferences';
 import { fetchSkillCatalog, getCachedSkillCatalog, onSkillCatalogReload } from '../utils/skillCatalog';
+import { replaceUndoably } from '../utils/undoableEdit';
 
 export interface SkillReferenceMenuState {
   items: SkillCatalogEntry[];
@@ -230,7 +231,8 @@ export function useSkillReferenceAutocomplete(options: {
       if (commands?.includes(item)) {
         // A command: the typed trigger goes, nothing is inserted, and focus is the host's to place.
         const rest = text.slice(0, trigger.start) + text.slice(el.selectionStart);
-        setText(rest);
+        // As the browser's own edit, so ⌘Z stays true (utils/undoableEdit.ts); else written as before.
+        if (!replaceUndoably(el, trigger.start, el.selectionStart, '')) setText(rest);
         setCaret(trigger.start);
         setActiveIndex(null);
         setDismissedStart(trigger.start);
@@ -238,7 +240,9 @@ export function useSkillReferenceAutocomplete(options: {
         return;
       }
       const result = insertSkillReference(text, el.selectionStart, trigger, item);
-      setText(result.text);
+      // The pick is the browser's own edit, one ⌘Z step of its own (utils/undoableEdit.ts): a write of the value
+      // left Chrome's undo replaying old steps onto the new words. Else (not focused, no execCommand) as before.
+      if (!replaceUndoably(el, trigger.start, el.selectionStart, result.text.slice(trigger.start, result.caret))) setText(result.text);
       setCaret(result.caret);
       setActiveIndex(null);
       // Close deterministically. The DOM caret only moves in the 0ms timer

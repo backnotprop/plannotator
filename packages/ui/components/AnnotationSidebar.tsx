@@ -55,7 +55,7 @@ export const AnnotationSidebar: React.FC<SidebarProps> = ({
                 <span className={`
                   text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded
                   ${ann.type === AnnotationType.DELETION ? 'bg-destructive/20 text-destructive' :
-                    'bg-accent/20 text-accent'}
+                    'bg-accent/20 text-accent-text'}
                 `}>
                   {ann.type}
                 </span>

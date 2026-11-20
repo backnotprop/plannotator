@@ -7,6 +7,7 @@ import { katexWoff2Only } from '../../build/katex-woff2-only';
 import { packedInboxApp } from '../../build/pack-inbox';
 import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 import { inboxPageMarks } from '../../build/inbox-page-marks';
+import { webTreeSitterServedWasm } from '../../build/web-tree-sitter-served-wasm';
 
 /**
  * What the window, the phone's surface (vite.surface.config.ts) and the Shape
@@ -88,5 +89,7 @@ export default mergeConfig(
     esbuild: { charset: 'ascii' },
     // The window's sheet keys on page marks, not on :has() anchored on the page (build/inbox-page-marks.ts).
     plugins: [packedInboxApp(), inboxPageMarks()],
+    resolve: { alias: { '@pierre/diffs': '@pierre/diffs-sem' } },
+    worker: { plugins: () => [webTreeSitterServedWasm()] },
   }),
 );

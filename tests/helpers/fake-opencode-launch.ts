@@ -5,8 +5,12 @@ export interface FakeOpenCodeLaunchState {
   version?: string;
   plugin?: { version: string; status?: "active" | "failed"; error?: string } | null;
   models?: { providerID: string; id: string; variants: string[] }[];
+  /** OpenCode's own agents (`GET /api/agent`); absent, that read fails, as an OpenCode that can't list them. */
+  agents?: { id: string; mode: "primary" | "subagent" | "all"; hidden: boolean }[];
   failTurn?: string | null;
   turnMs?: number;
+  /** How long making a session takes (`POST /api/session`). */
+  sessionMs?: number;
 }
 
 export type FakeOpenCodeLaunchCall =
@@ -43,6 +47,7 @@ const models = () => (state().models || [
 if (args[0] === "--standalone" && args[1] === "api") {
   log({ event: "cli", argv: args });
   if (args[2] === "GET" && args[3] === "/api/model") { process.stdout.write(JSON.stringify({ location: { directory: process.cwd() }, data: models() })); process.exit(0); }
+  if (args[2] === "GET" && args[3] === "/api/agent" && s0.agents) { process.stdout.write(JSON.stringify({ location: { directory: process.cwd() }, data: s0.agents })); process.exit(0); }
   process.exit(1);
 }
 if (args[0] !== "serve") { log({ event: "cli", argv: args }); process.exit(0); }
@@ -135,6 +140,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/model/default") { const m = models()[0]; return send(200, { data: m }); }
   if (url.pathname === "/api/session" && req.method === "POST") {
+    if (now.sessionMs) await new Promise((r) => setTimeout(r, now.sessionMs));
     const id = "ses_" + Math.random().toString(36).slice(2, 14);
     sessions.set(id, { busy: false, model: body && body.model });
     emit("session.created", { sessionID: id, location: body && body.location });
@@ -173,6 +179,8 @@ export function installFakeOpenCodeLaunch(root: string, state: FakeOpenCodeLaunc
     existsSync(file("calls.jsonl"))
       ? readFileSync(file("calls.jsonl"), "utf8")
           .split("\n")
+          // A line is whole only once its newline is written: the last piece is "" or a line still being appended.
+          .slice(0, -1)
           .filter(Boolean)
           .map((line) => JSON.parse(line) as FakeOpenCodeLaunchCall)
       : [];

@@ -28,6 +28,8 @@ export interface InboxCapability {
   settingsWire?(): Record<string, unknown>;
   /** The Inbox is up (it runs any background work it needs while on). */
   started?(): void;
+  /** The Inbox is going down: it ends what it has going (runs, listeners, watches). */
+  stopped?(): void;
 }
 
 /** What a capability may use of the Inbox core: only this. */
@@ -126,6 +128,17 @@ export function answerInboxCapabilities(list: readonly InboxCapability[], body: 
     Object.assign(answer, c.settingsWire?.() ?? {}, body[c.key] !== undefined ? { [c.key]: { on: c.on() } } : {});
   }
   return answer;
+}
+
+/** The Inbox is going down: each capability ends what it has going. */
+export function stopInboxCapabilities(list: readonly InboxCapability[]): void {
+  for (const c of list) {
+    try {
+      c.stopped?.();
+    } catch {
+      // A capability that cannot end cleanly never holds the Inbox's own stop.
+    }
+  }
 }
 
 /** The Inbox is up: each capability that is on starts its background work. */

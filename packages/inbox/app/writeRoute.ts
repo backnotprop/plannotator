@@ -37,6 +37,7 @@ export function hashOf(route: Route): string {
   else if (route.page === 'prs')
     hash =
       'prs' +
+      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
       (route.prsView === 'merged' ? '&state=merged' : '') +
       sheetLayoutHash(route.prsLayout) +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +

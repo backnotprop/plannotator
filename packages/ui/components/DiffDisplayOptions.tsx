@@ -151,6 +151,7 @@ export interface DiffDisplayOptionsPopoverProps {
   actions?: React.ReactNode;
   /** The Minimap switch, for a host that draws the diff overview strip. Default: hidden. */
   minimapOption?: boolean;
+  semanticOption?: boolean;
 }
 
 const GEAR = (
@@ -165,7 +166,8 @@ export const DiffDisplayOptionsBody: React.FC<{
   onChange?: DiffDisplayChange;
   actions?: React.ReactNode;
   minimapOption?: boolean;
-}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false }) => {
+  semanticOption?: boolean;
+}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false, semanticOption = false }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
   const indicators = useConfigValue('diffIndicators');
@@ -224,6 +226,12 @@ export const DiffDisplayOptionsBody: React.FC<{
           {semanticDiffEnabled && <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />}
         </>
       )}
+      {!repositoryOptions && semanticOption && semanticDiffEnabled && (
+        <>
+          <div className="border-t border-border/60 my-2 -mx-2" />
+          <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />
+        </>
+      )}
     </>
   );
 };
@@ -237,6 +245,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   triggerTitleSide = 'top',
   actions,
   minimapOption = false,
+  semanticOption = false,
 }) => {
   return (
     <Popover.Root>
@@ -266,7 +275,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-transparent rounded-lg shadow-[var(--float-shadow)] origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
             <div className="p-2">
-              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} />
+              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} semanticOption={semanticOption} />
             </div>
           </Popover.Popup>
         </Popover.Positioner>

@@ -148,6 +148,11 @@ export interface Route {
   experimental?: boolean;
 }
 
+/** The project the Inbox list is filtered to: Reviews' and the PR board's (`#reviews&project=`, `#prs&project=`) are theirs, never the list's. */
+export function listProjectOf(route: Pick<Route, 'page' | 'project'>): string | null {
+  return route.page === 'reviews' || route.page === 'prs' ? null : (route.project ?? null);
+}
+
 export function readRoute(): Route {
   return routeOf(window.location.hash);
 }
@@ -173,7 +178,8 @@ export function routeOf(fullHash: string): Route {
     const layer = stack ? params.get('layer') || null : null;
     return {
       page: 'prs',
-      project: null,
+      // Reviews' project filter, which the board follows (`boardInProject`).
+      project: params.get('project') || null,
       thread: null,
       prsView: params.get('state') === 'merged' ? 'merged' : 'open',
       prsLayout: sheetLayoutOf(params.get('layout')),

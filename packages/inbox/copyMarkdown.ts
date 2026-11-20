@@ -97,7 +97,8 @@ function actionLines(number: number, parsed: ReturnType<typeof parseInboxActionB
   const result = record?.action_result;
   if (result && !result.staged) {
     const note = result.note?.trim();
-    out.push('', result.outcome === 'done' ? `Result: Done${note ? ` · ${note}` : ''}` : `Result: Can't do it${note ? ` · ${note}` : ''}`);
+    const word = result.outcome === 'done' ? 'Done' : result.outcome === 'skip' ? 'Skipped' : "Can't do it";
+    out.push('', `Result: ${word}${note ? ` · ${note}` : ''}`);
   } else if (record?.state === 'superseded') {
     out.push('', 'Replaced by a later action item.');
   }

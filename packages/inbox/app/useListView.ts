@@ -10,7 +10,7 @@ import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/c
 import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from '../listFilter';
-import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
+import { filterSections, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
 import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
@@ -19,7 +19,8 @@ import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
-import type { Route } from './route';
+import { heldLines } from '../heldLines';
+import { listProjectOf, type Route } from './route';
 import type { RowWrites } from '../data/actions/rows';
 import type { ListModel, ProjectFolder } from '../api';
 import type { MachinesModel } from '../machines';
@@ -41,7 +42,7 @@ export interface ListViewInputs {
   openedHere: { readonly current: Set<string> };
   heldOpen: () => OpenThread | null;
   heldRead: ReadonlySet<string>;
-  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'openRow' | 'latestSections' | 'tagColours'>;
+  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'openRow' | 'latestSections' | 'tagColours' | 'projects'>;
 }
 
 export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags, combining }: ListViewInputs) {
@@ -86,7 +87,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
-  const { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags, listColours } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, openRow: threadRow, latestSections, tagColours: latest?.tag_colours ?? null });
+  const { tagsOfRow, filterTagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags, listColours } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, openRow: threadRow, latestSections, tagColours: latest?.tag_colours ?? null, projects });
   const [look] = useListLook();
   const projectNames = useMemo(
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine, look.hideMachineNames),
@@ -94,15 +95,16 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   );
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);
+  const listProject = listProjectOf(route);
   const filterList = useCallback(
     (sections: readonly InboxListSection[]) =>
-      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
-    [route.project, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, listProject), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
+    [listProject, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside, on a
   // tag's list its Tag picks. The day is in the keys so Today and the last N days move on at midnight.
   const [listFilterPicks, setListFilter] = useListFilter();
-  const listFilterScoped = route.project !== null;
+  const listFilterScoped = listProject !== null;
   const listFilterDay = localDay(Date.now());
   // Until the list is read its tags are not known: the Tag picks hold (no moment of unfiltered rows).
   const listTags = latest ? tags.listTags : undefined;
@@ -119,9 +121,10 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
     (sections: readonly InboxListSection[]) =>
-      listHeld ? filterList(sections).map((section) => ({ ...section, threads: [] })) : filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, tagsOfRow, routineTest),
+      // The Tag picks keep a thread tagged itself or in a tagged project (projectTags.ts).
+      listHeld ? filterList(sections).map((section) => ({ ...section, threads: [] })) : filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, filterTagsOfRow, routineTest),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead, tagsOfRow, routineTest, listHeld],
+    [filterList, listFilterApplied, listFilterDay, heldRead, filterTagsOfRow, routineTest, listHeld],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
@@ -143,15 +146,18 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   // The list's name: Inbox, or the project's window name (or the machine's, or the agent's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : filterTag ? filterTag.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
+  // What the line says (heldLines.ts): what came here, and in a project or filter view what came elsewhere.
+  const scoped = listProject !== null || !!filterMachine || !!filterAgent || !!shownTagId;
+  const lines = shown && latest ? heldLines({ shown, latest: latestGroups, view: filterShown, scope: scoped ? filterList : null, openedHere: openedHere.current, open: heldOpen(), names: projectNames }) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
-  // `news`: the same threads, for the pill at the list's edge while the line is out of view (ListNewPill.tsx).
   const notice =
-    heldNews?.text && shown
+    shown && ((heldNews?.text && lines?.here) || lines?.elsewhere)
       ? {
-          count: heldNews.count,
-          project: heldNews.project ?? null,
+          count: heldNews?.text ? heldNews.count : 0,
+          project: heldNews?.project ?? null,
           lands: showLandsIn(filterShown(shown), filterShown(latestGroups)),
-          news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),
+          here: heldNews?.text ? (lines?.here ?? null) : null,
+          elsewhere: lines?.elsewhere ?? null,
         }
       : null;
   return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };

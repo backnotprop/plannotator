@@ -18,6 +18,7 @@ import { THREAD_PANEL_LABEL } from '../threadPanel';
 import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
 import { STARRED_ABOVE_LABEL } from '../starredPills';
 import { SHOW_TAG_COLOURS_LABEL } from '../tagColours';
+import { AGENT_STATUS_LABEL, setAgentStatus, useAgentStatusOn } from '../agents/agentStatus';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -192,7 +193,16 @@ export function MenuCheckbox({
 }
 
 /**
- * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
+ * "Show agent status" (agents/agentStatus.ts, owner 2026-11-18): the same switch as Settings → General → Appearance's
+ * row, so the two always agree. Off by default.
+ */
+export function AgentStatusMenuItem() {
+  const on = useAgentStatusOn();
+  return <MenuCheckbox label={AGENT_STATUS_LABEL} checked={on} onChange={(next) => void setAgentStatus(next)} data-agent-status-option="" />;
+}
+
+/**
+ * The list's view (listView.ts): Grouped, List or Agents, one choice (`menuitemradio`, its state announced), drawn as
  * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
  * list at once and leaves the menu open, as a tick does.
  */
@@ -336,6 +346,13 @@ export function TidyMenu({
                   <MenuViewChoice view={view.value} onChange={view.onChange} />
                   {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
                   {showArchived && <MenuCheckbox label="Show archived" checked={showArchived.on} onChange={showArchived.onChange} data-show-archived-option="" />}
+                </>
+              )}
+              {/* About the sidebar's agents, not the list's rows: its own item after the View group (owner, 2026-11-18). */}
+              {view && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <AgentStatusMenuItem />
                 </>
               )}
               {look && onLook && (

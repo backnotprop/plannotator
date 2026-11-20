@@ -368,7 +368,7 @@ test('Settings shows the status, a test and the reach; after a port change "move
   // On by default, and allowed by the browser: the one notifications switch reads on.
   await expect(main).toHaveAttribute('aria-checked', 'true');
   await expect(block.getByRole('switch', { name: 'Desktop notifications' })).toHaveCount(1);
-  // The card's other switches are named: the question sound's and the Mark read warning's; no second notifications switch.
+  // The card's other switches are named: the sound's and the Mark read warning's; no second notifications switch.
   await expect(block.getByRole('switch', { name: 'Play a sound' })).toHaveCount(1);
   await expect(block.getByRole('switch', { name: 'Warn before Mark read sets questions aside' })).toHaveCount(1);
   await expect(block.getByRole('switch')).toHaveCount(3);

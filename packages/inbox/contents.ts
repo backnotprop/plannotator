@@ -10,13 +10,18 @@ import { storage } from '@plannotator/ui/utils/storage';
  * page's right gutter). Where the rail yields (a gutter under 68 px, a pane
  * under 480 px), until it has measured, and on a phone: a Contents button and
  * a sheet (ui's `DocumentContents`: the rail's headings and scroll math). A
- * Markdown file has Contents when the rail would: 4 or more headings of levels
- * 1 to 4 (`hasContentsRailHeadings`, over ui's `tocHeadings`); the sheet lists
- * those same headings.
+ * Markdown file has Contents when it has 2 or more headings of levels 1 to 4
+ * (`INBOX_CONTENTS_MIN_HEADINGS`, which the Inbox passes the rail as its
+ * `minHeadings`: ui's default of 4 left a short plan with none;
+ * `hasContentsRailHeadings`, over ui's `tocHeadings`). The sheet lists those
+ * same headings.
  */
 export function showsContents(blocks: readonly Block[]): boolean {
-  return hasContentsRailHeadings(blocks);
+  return hasContentsRailHeadings(blocks, INBOX_CONTENTS_MIN_HEADINGS);
 }
+
+/** The fewest headings an open document in the Inbox shows Contents for (the rail's `minHeadings`). */
+export const INBOX_CONTENTS_MIN_HEADINGS = 2;
 
 /** Whether the rail is shown or hidden, remembered across files and windows (the comments drawer's way). */
 export const CONTENTS_COOKIE = 'plannotator-inbox-contents';

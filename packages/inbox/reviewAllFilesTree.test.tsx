@@ -4,8 +4,9 @@
  *
  *  - the tree missing from All files, or showing in Walkthrough (which keeps no list);
  *  - a click on a file in the tree not going to that file (the reader's reveal and the top bar's "N of M" menu);
- *  - Viewed circles in the tree of a review that takes no ticks (a guide), or a circle that does not save the tick;
- *  - on a phone, the tree taking the diff's width instead of opening from the Files button as a sheet that a pick closes.
+ *  - a viewed file not dimmed in a review's tree, or dimmed in a guide's (which takes no ticks);
+ *  - on a phone, the tree taking the diff's width instead of opening from the Files button as a sheet that a pick
+ *    closes, or arrowing through its rows closing it.
  *
  * The diff reader is stubbed (it records what it was asked to show). DOM-gated: runs under DOM_TESTS=1 (happy-dom),
  * from tests/dom-test-list.txt.
@@ -19,12 +20,16 @@ import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
 
 const hasDom = typeof document !== 'undefined';
-/** What the stubbed reader was last asked: its mode and the file to bring into view. */
-let reader: { mode?: string; reveal?: { path: string } | null } = {};
+/** What the stubbed reader was last asked: its mode, the file to bring into view and its Viewed ticks. */
+type Viewed = { files: ReadonlySet<string>; onToggle: (path: string) => void };
+let reader: { mode?: string; reveal?: { path: string } | null; viewed?: Viewed } = {};
 if (hasDom) {
+  const seam: string = './guide/PullChangesTree.tsx';
+  const { PullChangesTree } = (await import(seam)) as Record<string, unknown>;
   mock.module('#guide-reader', () => ({
-    default: (props: { mode?: string; reveal?: { path: string } | null }) => {
-      reader = { mode: props.mode, reveal: props.reveal };
+    PullChangesTree,
+    default: (props: { mode?: string; reveal?: { path: string } | null; viewed?: Viewed }) => {
+      reader = { mode: props.mode, reveal: props.reveal, viewed: props.viewed };
       return null;
     },
   }));
@@ -107,7 +112,7 @@ afterEach(() => {
 });
 
 async function settle() {
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -138,7 +143,9 @@ async function click(el: Element | null) {
 
 const allFiles = () => click(document.querySelector('[data-review-mode-choice="files"] input'));
 const tree = () => document.querySelector<HTMLElement>('[data-review-message] [data-review-tree]');
-const treeFile = (path: string) => tree()?.querySelector<HTMLElement>(`[data-review-file="${path}"]`) ?? null;
+const treeRows = () => [...(tree()?.querySelector('[data-changes-tree]')?.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"]') ?? [])];
+const treeFile = (path: string) => treeRows().find((row) => row.dataset.itemType === 'file' && row.getAttribute('title') === path) ?? null;
+const trail = (row: HTMLElement | null) => [...(row?.querySelectorAll('[data-item-section="trail"] > span') ?? [])].map((cell) => cell.textContent);
 
 /** A phone: the window's phone query matches (restored after each test). */
 function asPhone() {
@@ -166,10 +173,10 @@ test.skipIf(!hasDom)('Walkthrough has no file list; All files has the tree on th
   expect(rail !== null).toBe(true);
   // Beside the diff, in the review's split.
   expect(rail!.parentElement?.classList.contains('ib-rsplit')).toBe(true);
-  expect([...rail!.querySelectorAll<HTMLElement>('[data-review-file]')].map((row) => row.dataset.reviewFile).sort()).toEqual(['docs/notes.md', 'src/auth/guard.ts', 'src/auth/token.ts']);
-  expect(rail!.querySelector('[data-review-folder="src/auth"]') !== null).toBe(true);
+  expect(treeRows().filter((row) => row.dataset.itemType === 'file').map((row) => row.getAttribute('title')).sort()).toEqual(['docs/notes.md', 'src/auth/guard.ts', 'src/auth/token.ts']);
+  expect(treeRows().some((row) => row.dataset.itemType === 'folder' && row.dataset.itemPath === 'src\u2215auth/')).toBe(true);
   expect(rail!.textContent).toContain('3 files');
-  expect(treeFile('src/auth/token.ts')!.textContent).toContain('+2');
+  expect(trail(treeFile('src/auth/token.ts'))).toEqual(['+2', '−1']);
   // The "1 of N" menu stays in the bar.
   expect(document.querySelector('[data-review-jump]')?.textContent).toContain('of 3');
 
@@ -189,23 +196,24 @@ test.skipIf(!hasDom)('a click on a file in the tree goes to it: the reader bring
   expect(document.querySelector('[data-review-jump]')?.textContent).toContain('notes.md');
 });
 
-test.skipIf(!hasDom)("a review's tree has Viewed circles that save the tick; a guide's has none", async () => {
+test.skipIf(!hasDom)("a review's tree dims a file ticked Viewed on its header; a guide's takes no ticks", async () => {
   await render();
   await allFiles();
-  const circle = treeFile('src/auth/guard.ts')!.querySelector('[role="checkbox"]');
-  expect(circle?.getAttribute('aria-checked')).toBe('false');
-  await click(circle);
+  expect(treeFile('src/auth/guard.ts')!.dataset.itemMuted).toBeUndefined();
+  await act(async () => reader.viewed!.onToggle('src/auth/guard.ts'));
+  await settle();
   expect(viewedPosts).toEqual([['src/auth/guard.ts']]);
-  expect(treeFile('src/auth/guard.ts')!.querySelector('[role="checkbox"]')?.getAttribute('aria-checked')).toBe('true');
-  // The circle marks the file; it does not go to it.
-  expect(reader.reveal ?? null).toBeNull();
+  expect(treeFile('src/auth/guard.ts')!.dataset.itemMuted).toBe('true');
+  expect(treeFile('src/auth/token.ts')!.dataset.itemMuted).toBeUndefined();
+  expect(tree()!.textContent).toContain('1 viewed');
+  expect(treeRows().some((row) => row.querySelector('[role="checkbox"]'))).toBe(false);
 
   act(() => root?.unmount());
   host?.remove();
   await render({ review: false });
   await allFiles();
   expect(treeFile('src/auth/guard.ts') !== null).toBe(true);
-  expect(tree()!.querySelector('[role="checkbox"]') !== null).toBe(false);
+  expect(reader.viewed).toBeUndefined();
 });
 
 test.skipIf(!hasDom)("a phone: no rail beside the diff; the bar's Files button opens the tree as a sheet, and a pick closes it on the file", async () => {
@@ -222,6 +230,14 @@ test.skipIf(!hasDom)("a phone: no rail beside the diff; the bar's Files button o
   expect(pane().classList.contains('ib-files-open')).toBe(false);
   await click(button);
   expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(pane().classList.contains('ib-files-open')).toBe(true);
+  const shadow = tree()!.querySelector('[data-changes-tree]')!.shadowRoot!;
+  expect((shadow.activeElement as HTMLElement | null)?.dataset.itemPath).toBe('docs/');
+  await act(async () => {
+    shadow.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true, cancelable: true }));
+  });
+  await settle();
+  expect(reader.reveal?.path).toBe('docs/notes.md');
   expect(pane().classList.contains('ib-files-open')).toBe(true);
   await click(treeFile('src/auth/token.ts'));
   expect(reader.reveal?.path).toBe('src/auth/token.ts');

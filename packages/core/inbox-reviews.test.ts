@@ -174,6 +174,16 @@ describe("inboxReviewRows", () => {
     expect(byId.get(theirs.key)).toMatchObject({ reviewed: false, move: "on_you", reason: "requested" });
   });
 
+  test("a thread started from the PR's page (ask `thread`) is no curating: the PR keeps the group its own state gives it; a guided review asked there moves it to the agents", () => {
+    const theirs = pr({ number: 880, mine: false, requested: true, author: "tomas" });
+    const own = pr({ number: 412 });
+    const owner = (ask: InboxPullLink["ask"], page?: true): InboxPullLink => ({ ...link("t_pr", "owner"), ask, ...(page ? { page } : {}) });
+    const rowFor = (pull: InboxPull, l: InboxPullLink) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([pull]), links: { [pull.key]: l } })[0];
+    expect(rowFor(theirs, owner("thread"))).toMatchObject({ reviewed: true, thread_id: "t_pr", move: "on_you", reason: "requested" });
+    expect(rowFor(own, owner("thread"))).toMatchObject({ reviewed: true, thread_id: "t_pr", move: "not_reviewed" });
+    expect(rowFor(theirs, owner("guide", true))).toMatchObject({ reviewed: true, move: "agents", reason: "curating" });
+  });
+
   test("a URL link to a thread with no review leaves the PR not reviewed, naming that thread", () => {
     const pull = pr({ number: 412 });
     const [row] = inboxReviewRows({ threads: [], stacks: inboxPullStacks([pull]), links: { [pull.key]: link("t_agent") } });
@@ -448,6 +458,7 @@ describe("New review on local changes", () => {
   test("a Send's review field is taken only when it says what it reviews; refs that aren't short strings are dropped, the ask defaults to a guided review", () => {
     expect(inboxReviewStartOf({ kind: "local", changes: "last", branch: "main", base: "main", ask: "custom" }, start)).toMatchObject({ changes: "last", branch: "main", ask: "custom", project_id: "prj_1" });
     expect(inboxReviewStartOf({ kind: "local", changes: "branch", branch: 7, base: "x".repeat(201) }, start)).toMatchObject({ branch: null, base: null, ask: "guide" });
+    expect(inboxReviewStartOf({ kind: "local", changes: "uncommitted", branch: null, base: null, ask: "picture_it" }, start)).toMatchObject({ ask: "picture_it" });
     for (const bad of [null, "local", {}, { kind: "pr", changes: "last" }, { kind: "local", changes: "everything" }]) expect(inboxReviewStartOf(bad, start)).toBeNull();
   });
 

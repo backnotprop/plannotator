@@ -845,10 +845,10 @@ describe('GuideView bare (the Inbox PR page)', () => {
 
   // Guards the opened lines being lost: the viewer holds them, so leaving the outer window closed the gap, the box
   // shrank under the reader, the file below jumped and the file was read again.
-  test.skipIf(!hasDom)('a file whose gap was opened stays mounted past the window, and the files near the viewport still mount', async () => {
+  for (const marker of ['data-expand-button', 'data-unmodified-lines']) test.skipIf(!hasDom)(`a file whose gap was opened (${marker}) stays mounted past the window, and the files near the viewport still mount`, async () => {
     await withCommentedFile(async ({ path, away }) => {
       const arrow = document.createElement('button');
-      arrow.setAttribute('data-expand-button', '');
+      arrow.setAttribute(marker, '');
       const view = host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)!;
       view.appendChild(arrow);
       await act(async () => arrow.click());

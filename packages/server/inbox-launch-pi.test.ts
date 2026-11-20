@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
@@ -186,6 +186,63 @@ describe("Pi's launch host, against the fake pi", () => {
     expect((await host.sessions())(session)).toEqual({ status: "idle", state: "running", waitingFor: null });
     expect((await host.sessions())("someone-else")).toBe("absent");
     expect(fake.sessionFiles()).toHaveLength(1);
+  });
+
+  test("Start in Rex: the command, run as a Rex tab runs it, is interactive Pi on a session id picked now, in the folder, with the Inbox tool and this Inbox's data dir; the Inbox runs nothing itself", async () => {
+    const { fake, host, folder, dataDir, env, runTerminal } = setup();
+    const launch: InboxLaunchRecord = { id: "lch_01J00000000000000000000REX", agent: "pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
+    const made = await host.rexCommand!(launch, { name: "Tidy the readme", login: env, resume: false });
+    if (!made.ok) throw new Error("no command");
+    expect(made.ref).toBe(made.session);
+    expect(fake.starts()).toEqual([]);
+    runTerminal(made.command);
+    await until("the tab's pi to start", () => fake.terminals().length === 1, 4_000);
+    const [call] = fake.terminals();
+    // Named for its thread, as a background start is: without it Pi names the session itself, and the list's row reads that name.
+    expect(call!.argv).toEqual(["--session-id", made.session, "--name", "Tidy the readme"]);
+    expect(call!.cwd).toBe(folder);
+    expect(call!.inboxTool).toBe("1");
+    expect(call!.dataDir).toBe(dataDir);
+    // A reply to it once it ended: the same session.
+    const again = await host.rexCommand!({ ...launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: env, resume: true });
+    expect(again.ok && again.command).toContain(made.session);
+    // Started again, it keeps the name it has (the person may have renamed it in Pi).
+    expect(again.ok && again.command).not.toContain("--name");
+    // One that never took a turn (stopped before it connected): its own id again, named as a first start is.
+    const fresh = await host.rexCommand!({ ...launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: env, resume: true, fresh: true });
+    expect(fresh.ok && fresh.command).toContain(`'--session-id' '${made.session}' '--name' 'Tidy'`);
+    // A Pi whose thread is named like another session's flag is never taken for that session's process.
+    const other = "99999999-2222-4333-8444-555555555555";
+    expect(piSessionProcesses(`  700     1 pi --mode rpc --session-id ${made.session} --name --session-id ${other}\n`, other)).toEqual([]);
+    expect(piSessionProcesses(`  700     1 pi --mode rpc --session-id ${made.session} --name --session-id ${other}\n`, made.session).map((p) => p.pid)).toEqual([700]);
+  });
+
+  test("Start in Rex: a Pi in its tab lists as `pi` alone, so the claim its extension wrote says which session it runs", async () => {
+    const { host, dataDir } = setup();
+    // A live process standing in for the tab's Pi (Pi sets process.title = "pi": ps shows `pi` and no argument).
+    const tab = Bun.spawn(["/bin/sleep", "30"], { stdout: "ignore", stderr: "ignore" });
+    try {
+      const session = randomUUID();
+      const listing = `  1     0 /sbin/launchd\n  ${tab.pid}     1 pi\n`;
+      expect(host.runsSession!(session, listing)).toBe(false);
+      writePiSessionClaim(dataDir, { session, pid: tab.pid, rpc: false, title: "pi", owner: "tab" });
+      expect(host.runsSession!(session, listing)).toBe(true);
+      // Stop of a Pi in a pane the Inbox did not open ends that process (its pid by the claim).
+      expect(await host.sessionPids!(session, listing)).toEqual([tab.pid]);
+      // A claim older than the process under its pid (a Pi that died left it; another process took the pid): the
+      // reply still waits (it may be that Pi), but Stop never signals that process.
+      const old = new Date(Date.now() - 60 * 60_000);
+      utimesSync(piSessionClaimFileOf(dataDir, session, tab.pid), old, old);
+      expect(host.runsSession!(session, listing)).toBe(true);
+      expect(await host.sessionPids!(session, listing)).toEqual([]);
+      expect(host.runsSession!(randomUUID(), listing)).toBe(false);
+      // Not listed, or its pid now another program: not that Pi.
+      expect(host.runsSession!(session, "  1     0 /sbin/launchd\n")).toBe(false);
+      expect(host.runsSession!(session, `  ${tab.pid}     1 /bin/sleep 30\n`)).toBe(false);
+    } finally {
+      tab.kill();
+      await tab.exited;
+    }
   });
 
   test("Stop ends the process (abort, then its stdin); a reply's resume reopens the same session file", async () => {
