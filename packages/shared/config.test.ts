@@ -42,6 +42,8 @@ import {
   saveConfig,
   getServerConfig,
   resolveGuideShareUrl,
+  forgejoHostName,
+  resolveForgejoHosts,
   resolveForgejoToken,
   resolveSharingEnabled,
   resolveDefaultDiffType,
@@ -1730,5 +1732,38 @@ describe("resolveForgejoToken (a token goes only to the origin it was configured
     expect(resolveForgejoToken({ forgejoTokens: ["x"] } as never, ORIGIN, {})).toBeNull();
     expect(resolveForgejoToken({ forgejoTokens: { [ORIGIN]: "t" } }, "ftp://forgejo.example.com", {})).toBeNull();
     expect(resolveForgejoToken({ forgejoTokens: { [ORIGIN]: "t" } }, "https://u:p@forgejo.example.com", {})).toBeNull();
+  });
+});
+
+describe("resolveForgejoHosts (the hosts the person named as Forgejo)", () => {
+  test("forgejoHostName reads a bare host or host:port, lower case, and nothing else", () => {
+    expect(forgejoHostName("Git.Acme.com")).toBe("git.acme.com");
+    expect(forgejoHostName(' "git.acme.com:8443" ')).toBe("git.acme.com:8443");
+    for (const bad of ["acme", "https://git.acme.com", "git.acme.com/path", "git.acme.com:99999x", "", "git acme.com", 7, null, undefined]) {
+      expect(forgejoHostName(bad)).toBeNull();
+    }
+  });
+
+  test("the list, each token's origin and the URL variable are all Forgejo hosts, once each", () => {
+    const config = {
+      forgejoHosts: ["git.acme.com", "GIT.acme.com", "not a host"],
+      forgejoTokens: { "https://forgejo.example.org": "t1", "http://forgejo.lan:3000": "t2", "https://Git.Acme.com:443": "t3" },
+    };
+    const hosts = resolveForgejoHosts(config, { PLANNOTATOR_FORGEJO_URL: "https://env.example.net:8443" });
+    expect([...hosts].sort()).toEqual(["env.example.net:8443", "forgejo.example.org", "forgejo.lan:3000", "git.acme.com"]);
+  });
+
+  test("a default port is dropped, as a browser writes a link; another port is kept", () => {
+    expect(resolveForgejoHosts({ forgejoTokens: { "https://git.acme.com:443": "t", "http://git.acme.io:80": "t", "https://git.acme.dev:8443": "t" } }, {}).sort()).toEqual(["git.acme.com", "git.acme.dev:8443", "git.acme.io"]);
+  });
+
+  test("nothing named is nothing (codeberg.org is not listed: it is always a Forgejo)", () => {
+    expect(resolveForgejoHosts({}, {})).toEqual([]);
+    expect(resolveForgejoHosts({ forgejoHosts: "git.acme.com" as never, forgejoTokens: ["x"] as never }, { PLANNOTATOR_FORGEJO_URL: "not a url" })).toEqual([]);
+  });
+
+  test("a token's origin names a host without the token leaving the config", () => {
+    const hosts = resolveForgejoHosts({ forgejoTokens: { "https://git.acme.com": "secret-token-value" } }, {});
+    expect(JSON.stringify(hosts)).not.toContain("secret-token-value");
   });
 });

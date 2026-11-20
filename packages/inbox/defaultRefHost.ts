@@ -12,7 +12,7 @@
  * and the thread's Links view reads it through `useDefaultRefHost`.
  */
 import { useSyncExternalStore } from 'react';
-import { forgeRefLinks, learnGitlabHosts, normalizeForgeHost } from '@plannotator/core/forge-refs';
+import { forgeRefLinks, learnForgejoHosts, learnGitlabHosts, normalizeForgeHost } from '@plannotator/core/forge-refs';
 import { setCrossRepoRefsWithoutRepo } from '@plannotator/ui/components/InlineMarkdown';
 
 const GITHUB = 'github.com';
@@ -37,10 +37,11 @@ let current = GITHUB;
 const listeners = new Set<() => void>();
 
 /** A list read's projects: the host again, only when the list changed, and ui told only when the host did. */
-export function learnDefaultRefHost(projects: readonly { repo_host?: string | null; repo_forge?: 'gitlab' }[]): void {
+export function learnDefaultRefHost(projects: readonly { repo_host?: string | null; repo_forge?: 'gitlab' | 'forgejo' }[]): void {
   if (projects === lastList) return;
   lastList = projects;
   learnGitlabHosts(projects.flatMap((project) => (project.repo_forge === 'gitlab' ? (normalizeForgeHost(project.repo_host) ?? []) : [])));
+  learnForgejoHosts(projects.flatMap((project) => (project.repo_forge === 'forgejo' ? (normalizeForgeHost(project.repo_host) ?? []) : [])));
   const host = defaultRefHost(projects);
   if (host === current) return;
   current = host;
@@ -52,6 +53,7 @@ export function learnDefaultRefHost(projects: readonly { repo_host?: string | nu
 export function resetDefaultRefHost(): void {
   lastList = null;
   learnGitlabHosts([]);
+  learnForgejoHosts([]);
   current = GITHUB;
   setCrossRepoRefsWithoutRepo({ host: GITHUB });
   for (const listener of listeners) listener();

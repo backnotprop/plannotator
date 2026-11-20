@@ -21,6 +21,7 @@
  * teammate or the forge is Waiting on others.
  */
 
+import { classifyForgeHost } from "./forge-refs";
 import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
 import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
@@ -281,10 +282,14 @@ export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart,
  * What the person pasted as a pull request link: a web address, or `owner/repo#123` on github.com. `unsupported`: a
  * forge's link the Inbox can't read yet; null: not a link to a pull request at all.
  */
-export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable<ReturnType<typeof inboxPullRefOfUrl>> } | { unsupported: "bitbucket" | "host" } | null {
+export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable<ReturnType<typeof inboxPullRefOfUrl>> } | { unsupported: "bitbucket" | "forgejo" | "host" } | null {
   const typed = text.trim();
   const short = /^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)#(\d+)$/.exec(typed);
   const url = short ? `https://github.com/${short[1]}/pull/${short[2]}` : typed;
+  // A Forgejo / Gitea names its pull request by `/pulls/N` (GitHub's own page is `/pull/N`): never read as a GitHub's,
+  // which rewrote it to a `/pull/N` page that is not there and blamed gh for not reading it.
+  const forgejoShaped = /^https:\/\/([A-Za-z0-9.-]+)\/[^/?#]+\/[^/?#]+\/pulls\/\d+(?:[/?#]|$)/.exec(url);
+  if (forgejoShaped && classifyForgeHost(forgejoShaped[1]!.toLowerCase()) !== "github") return { unsupported: "forgejo" };
   const ref = inboxPullRefOfUrl(url);
   // A host or owner that reads as a flag never goes near a CLI.
   if (ref?.host.startsWith("-") || ref?.repo.split("/").some((part) => part.startsWith("-"))) return null;
@@ -311,7 +316,7 @@ export type InboxReviewLinkAnswer =
       /** It already has a review thread (one not on the list too): Start opens that. */
       thread_id: string | null;
     }
-  | { ok: false; reason: "not_a_link" | "bitbucket" | "host" }
+  | { ok: false; reason: "not_a_link" | "bitbucket" | "forgejo" | "host" }
   /** The Inbox itself didn't answer: nothing is known about the link. */
   | { ok: false; reason: "failed" }
   | { ok: false; reason: "unreadable"; cli: "gh" | "glab"; host: string };

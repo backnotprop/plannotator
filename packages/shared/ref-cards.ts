@@ -592,7 +592,17 @@ export interface RefCardsSizes {
  */
 export type BitbucketRefReader = (ref: { workspace: string; repo: string; number: number }, signal?: AbortSignal) => Promise<ForgeRefCardData>;
 
-/** A Bitbucket reader's failure as a card error. */
+/**
+ * Reads one Forgejo / Gitea issue or pull request's card from the host a ref names (the caller's reader holds the
+ * credentials; `forgeHostTrusted` has already limited the host to one the person named). A thrown error's numeric
+ * `status` is the HTTP status. `signal` aborts when the read is given up on.
+ */
+export type ForgejoRefReader = (ref: { host: string; owner: string; repo: string; number: number }, signal?: AbortSignal) => Promise<ForgeRefCardData>;
+
+/** Bitbucket and Forgejo are read over REST by a reader the host passes; GitHub and GitLab through their CLIs. */
+const readsOverRest = (platform: ForgeRef["platform"]): boolean => platform === "bitbucket" || platform === "forgejo";
+
+/** A Bitbucket (or Forgejo) reader's failure as a card error. */
 export function bitbucketRefErrorOf(error: unknown): ForgeRefCardError {
   const status = typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : 0;
   if (status === 401) return "signed_out";
@@ -606,6 +616,8 @@ export function createRefCards(options: {
   run: RefRunner;
   /** Bitbucket Cloud pull requests (absent: they answer `unsupported`). */
   bitbucket?: BitbucketRefReader;
+  /** Forgejo / Gitea issues and pull requests, on the hosts the person named and codeberg.org (absent: `unsupported`). */
+  forgejo?: ForgejoRefReader;
   /**
    * A Bitbucket read is given up on after this (default `REF_TIMEOUT_MS`, a CLI's limit): its requests are aborted, its
    * slot is given back and the card says it couldn't load. Tests pass a short one.
@@ -703,6 +715,8 @@ export function createRefCards(options: {
    * Bitbucket Cloud pull requests when the host passed a reader.
    */
   const fetchesFrom = async (ref: ForgeRef): Promise<boolean> => {
+    // A Forgejo link names its forge by its path, so it can name any host: only the person's own (and codeberg.org).
+    if (ref.platform === "forgejo") return !!options.forgejo && forgeHostTrusted(ref, new Set());
     if (ref.platform === "bitbucket") return !!options.bitbucket && ref.host === "bitbucket.org" && ref.kind === "pull";
     if (forgeHostTrusted(ref, new Set())) return true;
     return forgeHostTrusted(ref, await signedInHosts(ref.platform === "github" ? "gh" : "glab"));
@@ -732,19 +746,19 @@ export function createRefCards(options: {
   };
 
   const bitbucketTimeoutMs = options.bitbucketTimeoutMs ?? REF_TIMEOUT_MS;
-  const fetchBitbucket = async (ref: ForgeRef, read: BitbucketRefReader): Promise<ForgeRefCardResult> => {
+  const fetchRest = async (ref: ForgeRef, name: string, read: (signal: AbortSignal) => Promise<ForgeRefCardData>): Promise<ForgeRefCardResult> => {
     // The same limit as a CLI's: past it the requests are aborted and the slot is free again. The race also covers a
     // wait the signal cannot stop (a token command still running answers its later reads from its own cache).
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        reject(new Error("Bitbucket did not answer in time"));
+        reject(new Error(`${name} did not answer in time`));
         controller.abort();
       }, bitbucketTimeoutMs);
     });
     try {
-      const data = await Promise.race([read({ workspace: ref.owner, repo: ref.repo, number: ref.number }, controller.signal), late]).finally(() => clearTimeout(timer));
+      const data = await Promise.race([read(controller.signal), late]).finally(() => clearTimeout(timer));
       await inlineAvatars(data);
       return { ok: true, data, fetchedAt: now() };
     } catch (error) {
@@ -754,11 +768,17 @@ export function createRefCards(options: {
     }
   };
 
+  const fetchBitbucket = (ref: ForgeRef, read: BitbucketRefReader) =>
+    fetchRest(ref, "Bitbucket", (signal) => read({ workspace: ref.owner, repo: ref.repo, number: ref.number }, signal));
+  const fetchForgejo = (ref: ForgeRef, read: ForgejoRefReader) =>
+    fetchRest(ref, "Forgejo", (signal) => read({ host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number }, signal));
+
   const fetchOnce = async (ref: ForgeRef): Promise<ForgeRefCardResult> => {
     if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) {
-      return ref.platform === "bitbucket" ? fail("rate_limited") : failRun("rate_limited", ref, { stdout: "", stderr: "", exitCode: 1 }, now(), "rate_limited");
+      return readsOverRest(ref.platform) ? fail("rate_limited") : failRun("rate_limited", ref, { stdout: "", stderr: "", exitCode: 1 }, now(), "rate_limited");
     }
     if (ref.platform === "bitbucket") return options.bitbucket ? fetchBitbucket(ref, options.bitbucket) : fail("unsupported");
+    if (ref.platform === "forgejo") return options.forgejo ? fetchForgejo(ref, options.forgejo) : fail("unsupported");
     const { cli, args } = queryArgs(ref);
     const startedAt = now();
     const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
@@ -846,14 +866,14 @@ export function createRefCards(options: {
       if (!ref) return null;
       // Try again after signing in or installing: what the CLI said about its hosts, and its status check for this
       // host, are read again now, not after their cache period.
-      if (retry && ref.platform !== "bitbucket") {
+      if (retry && !readsOverRest(ref.platform)) {
         const cli = ref.platform === "github" ? "gh" : "glab";
         authHosts.delete(cli);
         tools.forget(cli, ref.host);
       }
       if (!(await fetchesFrom(ref))) {
         // Not installed says so on any host (its words name no host); otherwise nothing runs for a host the CLI does not read.
-        if (ref.platform !== "bitbucket" && (await cliHosts(ref.platform === "github" ? "gh" : "glab")).missing) {
+        if (!readsOverRest(ref.platform) && (await cliHosts(ref.platform === "github" ? "gh" : "glab")).missing) {
           const problem = toolProblem("missing", { cli: ref.platform === "github" ? "gh" : "glab", host: ref.host, kind: ref.kind }, new Date(now()));
           return { ok: false, error: "cli_missing", problem, fetchedAt: now() };
         }

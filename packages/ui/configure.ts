@@ -25,7 +25,7 @@ import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
 import { setClickAWord } from './utils/clickAWordPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
-import { setRefCardBitbucket, setRefCardTransport, type RefCardTransport } from './utils/refCard';
+import { setRefCardBitbucket, setRefCardForgejo, setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
@@ -224,6 +224,8 @@ export interface PlannotatorUIConfig {
    * they stay plain links. The Inbox turns it on: its server reads them.
    */
   refCardBitbucket?: boolean;
+  /** Forgejo / Gitea links get a hover card: only a host whose server reads them (the Inbox) turns it on. */
+  refCardForgejo?: boolean;
   /**
    * Highlight a code fence only when it comes near the screen (a screen
    * above or below it), and the rest in idle time, nearest first
@@ -278,6 +280,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.clickAWord !== undefined) setClickAWord(config.clickAWord);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   if (config.refCardBitbucket !== undefined) setRefCardBitbucket(config.refCardBitbucket);
+  if (config.refCardForgejo !== undefined) setRefCardForgejo(config.refCardForgejo);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).

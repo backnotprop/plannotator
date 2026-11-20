@@ -185,6 +185,12 @@ describe('a pull request link', () => {
     }
   });
 
+  test("a Forgejo link's line says it is not supported here and what does read it, never a CLI or GitHub", () => {
+    const line = reviewLinkWords({ ok: false, reason: 'forgejo' });
+    expect(line).toContain('plannotator review');
+    expect(line).not.toMatch(/\b(gh|glab)\b|GitHub|GitLab|host yet/);
+  });
+
   test('its line names the tool and the host it was read from', () => {
     const line = reviewLinkWords({ ...read(8, { host: 'gitlab.example.com' }), cli: 'glab' });
     expect(line).toContain('glab');

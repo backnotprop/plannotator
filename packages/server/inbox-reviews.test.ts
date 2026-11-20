@@ -456,6 +456,8 @@ describe("a pull request link", () => {
     const before = w.forge.calls.length;
     expect((await read(w, "https://bitbucket.org/acme/mobile/pull-requests/88")).body).toMatchObject({ ok: false, reason: "bitbucket" });
     expect((await read(w, "retries")).body).toMatchObject({ ok: false, reason: "not_a_link" });
+    // A Forgejo link is no GitHub PR: no gh call asking github about its /pull/N page, and the answer names Forgejo.
+    expect((await read(w, "https://codeberg.org/acme/w/pulls/7")).body).toMatchObject({ ok: false, reason: "forgejo" });
     expect(w.forge.calls.length).toBe(before);
     expect((await read(w, "https://gitlab.example.com/g/app/-/merge_requests/9")).body).toMatchObject({ ok: false, reason: "unreadable", cli: "glab", host: "gitlab.example.com" });
   });

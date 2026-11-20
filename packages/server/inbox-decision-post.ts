@@ -70,6 +70,8 @@ function prRefOf(key: string, url: string): PRRef | null {
       return { platform: "gitlab", host: ref.host, projectPath: `${ref.owner}/${ref.repo}`, iid: ref.number };
     case "bitbucket":
       return { platform: "bitbucket", host: ref.host, workspace: ref.owner, repo: ref.repo, number: ref.number };
+    case "forgejo":
+      return { platform: "forgejo", host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number };
   }
 }
 

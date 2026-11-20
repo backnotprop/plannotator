@@ -499,6 +499,13 @@ describe("a pull request link", () => {
     for (const text of ["https://--hostname/o/r/pull/1", "https://github.com/-o/r/pull/1", "https://github.com/o/-r/pull/1", "-o/r#1"]) expect(inboxReviewLinkOf(text)).toBeNull();
     expect(inboxReviewLinkOf("https://bitbucket.org/acme/mobile/pull-requests/88")).toEqual({ unsupported: "bitbucket" });
     expect(inboxReviewLinkOf("https://dev.azure.com/o/p/_git/r/pullrequest/5")).toEqual({ unsupported: "host" });
+    // A Forgejo / Gitea link (`/pulls/N`) is its own answer, never read as GitHub's `/pull/N` (it was rewritten to one).
+    for (const text of ["https://codeberg.org/acme/w/pulls/7", "https://git.example.test/acme/w/pulls/7/files", "https://git.example.test/acme/w/pulls/7#issuecomment-3"]) {
+      expect(inboxReviewLinkOf(text)).toEqual({ unsupported: "forgejo" });
+    }
+    // GitHub's own page, and a Forgejo's issue page, are as before.
+    expect(inboxReviewLinkOf("https://github.com/acme/w/pulls/7")).toMatchObject({ url: "https://github.com/acme/w/pull/7", ref: { platform: "github" } });
+    expect(inboxReviewLinkOf("https://git.example.test/acme/w/issues/7")).toBeNull();
     for (const text of ["", "retries", "https://github.com/northwind/payments", "file:///etc/pull/1", "o/r#x"]) expect(inboxReviewLinkOf(text)).toBeNull();
   });
 

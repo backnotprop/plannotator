@@ -121,6 +121,7 @@ export function reviewLinkWords(link: InboxReviewLinkAnswer): string {
   if (link.ok) return `Read with ${link.cli}, signed in to ${link.pull.host}`;
   if (link.reason === 'unreadable') return `${link.cli} couldn't read it. Check the link, and that ${link.cli} is signed in to ${link.host}.`;
   if (link.reason === 'bitbucket') return "Bitbucket links aren't supported yet.";
+  if (link.reason === 'forgejo') return "Forgejo and Gitea links aren't supported here yet. In a terminal, plannotator review <link> reads them.";
   if (link.reason === 'failed') return "Couldn't check that link. Try again.";
   return link.reason === 'host' ? "Plannotator can't read that host yet." : "That isn't a pull request link.";
 }

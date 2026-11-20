@@ -891,6 +891,13 @@ export interface PlannotatorConfig {
    */
   forgejoTokens?: Record<string, string>;
   /**
+   * Forgejo / Gitea hosts, `forgejo.example.com` or `forgejo.example.com:8443`, for the Inbox's links and hover
+   * cards: a link names a Forgejo's pull requests by its path, but only a host named here (or one that has a token in
+   * `forgejoTokens`, or is PLANNOTATOR_FORGEJO_URL) is fetched from, and a token goes only to those. codeberg.org
+   * is always one. Same shape as `gitlabHosts`.
+   */
+  forgejoHosts?: string[];
+  /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
    * on as part of their read-only posture. Set to false on systems where
@@ -2929,6 +2936,43 @@ export function normalizeForgejoOrigin(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+const FORGEJO_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?$/;
+
+/** A Forgejo host as `forgejoHosts` writes it (`name` or `name:port`, lower case), or null. */
+export function forgejoHostName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const host = value.trim().replace(/^(["'])(.*)\1$/, "$2").toLowerCase();
+  return FORGEJO_HOST.test(host) ? host : null;
+}
+
+/**
+ * Every Forgejo host the person has named, as `name` or `name:port`: the `forgejoHosts` list, the host of each
+ * `forgejoTokens` origin, and the host of PLANNOTATOR_FORGEJO_URL. These are the hosts the Inbox may fetch hover
+ * cards from, and the only ones a token is sent to. codeberg.org is not listed here: it is always a Forgejo
+ * (`learnForgejoHosts` adds it).
+ */
+export function resolveForgejoHosts(
+  config: PlannotatorConfig,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const hosts = new Set<string>();
+  const add = (value: unknown) => {
+    const host = forgejoHostName(value);
+    if (host) hosts.add(host);
+  };
+  if (Array.isArray(config.forgejoHosts)) config.forgejoHosts.forEach(add);
+  const tokens = config.forgejoTokens;
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens)) {
+    for (const origin of Object.keys(tokens)) {
+      const normalized = normalizeForgejoOrigin(origin);
+      if (normalized) add(new URL(normalized).host);
+    }
+  }
+  const envUrl = normalizeForgejoOrigin(env.PLANNOTATOR_FORGEJO_URL ?? "");
+  if (envUrl) add(new URL(envUrl).host);
+  return [...hosts];
 }
 
 /**

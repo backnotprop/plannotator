@@ -150,6 +150,25 @@ describe("the marks reader", () => {
     expect(forge.calls).toEqual([]);
   });
 
+  test("Forgejo pull requests and issues through the hover cards' lookup, with no CLI run", async () => {
+    const asked: string[] = [];
+    const refCards: RefCards = {
+      async get(href) {
+        asked.push(href);
+        return { ok: true, fetchedAt: 0, data: { state: href.includes("/pulls/") ? "merged" : "closed", title: "Forgejo item" } as never };
+      },
+    };
+    const forge = scriptedGh({});
+    const marks = createCardMarks({ run: forge.run, refCards });
+    const pull: InboxCardRef = { kind: "pr", source: "forgejo", ref: "codeberg.org/acme/widgets#5", url: "https://codeberg.org/acme/widgets/pulls/5" };
+    const issue: InboxCardRef = { kind: "issue", source: "forgejo", ref: "codeberg.org/acme/widgets#6", url: "https://codeberg.org/acme/widgets/issues/6" };
+    const out = await marks.marks([pull, issue]);
+    expect(out.get(pull.url)).toMatchObject({ state: "merged", title: "Forgejo item" });
+    expect(out.get(issue.url)!.state).toBe("closed");
+    expect(asked).toEqual([pull.url, issue.url]);
+    expect(forge.calls).toEqual([]);
+  });
+
   test("the query asks only whole numbers, and only state and title", () => {
     expect(() => githubMarksQuery([1.5])).toThrow();
     expect(() => githubMarksQuery([0])).toThrow();

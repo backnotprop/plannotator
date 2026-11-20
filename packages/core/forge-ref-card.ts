@@ -10,7 +10,7 @@
  * shape before it runs anything.
  */
 
-import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import { classifyForgeHost, CODEBERG_HOST, forgejoHostsSnapshot, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
 import type { Problem } from "./problem";
 
 export type { ForgePlatform } from "./forge-refs";
@@ -39,6 +39,8 @@ const NUMBER = /^[1-9]\d{0,9}$/;
  * - GitHub: `https://<host>/<owner>/<repo>/(issues|pull|pulls)/<n>`
  * - GitLab: `https://<host>/<namespace>/<project>/-/(issues|work_items|merge_requests)/<n>`
  * - Bitbucket Cloud: `https://bitbucket.org/<workspace>/<repo>/(issues|pull-requests)/<n>`
+ * - Forgejo / Gitea: `https://<host>/<owner>/<repo>/(issues|pulls)/<n>`; a `/pulls/<n>` link names its forge on any
+ *   host, an `/issues/<n>` link only on a Forgejo the person named (or codeberg.org)
  * A trailing `/files`, `?query` or `#fragment` is ignored. Only https, no
  * credentials, no port on github.com, gitlab.com or bitbucket.org.
  */
@@ -88,7 +90,7 @@ export function webForgeHost(hostname: string): string | null {
   return h;
 }
 
-const PUBLIC_FORGE_HOSTS: Readonly<Record<ForgePlatform, string>> = { github: "github.com", gitlab: "gitlab.com", bitbucket: "bitbucket.org" };
+const PUBLIC_FORGE_HOSTS: Readonly<Record<ForgePlatform, string>> = { github: "github.com", gitlab: "gitlab.com", bitbucket: "bitbucket.org", forgejo: CODEBERG_HOST };
 const GITLAB_REF_PATHS = new Set(["merge_requests", "issues", "work_items"]);
 
 export function forgeOfUrl(url: URL): { host: string; platform: ForgePlatform } | null {
@@ -98,11 +100,21 @@ export function forgeOfUrl(url: URL): { host: string; platform: ForgePlatform } 
   const host = url.port ? `${name}:${url.port}` : name;
   const parts = url.pathname.split("/").filter(Boolean);
   const dash = parts.indexOf("-");
-  const platform = classifyForgeHost(host) ?? (dash >= 2 && GITLAB_REF_PATHS.has(parts[dash + 1] ?? "") ? "gitlab" : null);
+  const platform =
+    classifyForgeHost(host) ??
+    (dash >= 2 && GITLAB_REF_PATHS.has(parts[dash + 1] ?? "") ? "gitlab" : null) ??
+    // /<owner>/<repo>/pulls/<n> exists on no other forge: GitHub's is /pull/<n>, GitLab's has a `-`.
+    (parts.length >= 4 && parts[2] === "pulls" && NUMBER.test(parts[3] ?? "") ? "forgejo" : null);
   return platform ? { host, platform } : null;
 }
 
+/**
+ * Whether this computer may fetch from a ref's host. A link names its forge by its path, so a Forgejo link can name
+ * any host: only a Forgejo the person named (config, a token's origin) or codeberg.org is fetched from, and a token
+ * only ever goes to those. GitHub and GitLab: the public hosts, or a host the CLI is signed in to.
+ */
 export function forgeHostTrusted(ref: Pick<ForgeRef, "platform" | "host">, signedIn: ReadonlySet<string>): boolean {
+  if (ref.platform === "forgejo") return forgejoHostsSnapshot().has(ref.host);
   return ref.host === PUBLIC_FORGE_HOSTS[ref.platform] || signedIn.has(ref.host);
 }
 
@@ -114,6 +126,8 @@ function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | nu
       return part === "issues" || part === "work_items" ? "issue" : part === "merge_requests" ? "pull" : null;
     case "bitbucket":
       return part === "issues" ? "issue" : part === "pull-requests" ? "pull" : null;
+    case "forgejo":
+      return part === "issues" ? "issue" : part === "pulls" ? "pull" : null;
   }
 }
 

@@ -33,6 +33,7 @@ export * from "./pr-types";
 export { entryMissingContent as glEntryMissingContent, parsePaginatedArray, reconstructPatch as reconstructGitlabPatch, type GitLabDiffEntry } from "./pr-gitlab";
 export { entryMissingContent as ghEntryMissingContent, reconstructGhPatch, type GitHubFileEntry } from "./pr-github";
 export { fetchBbPRCard } from "./pr-bitbucket";
+export { fetchFjCard } from "./pr-forgejo";
 
 // --- Provider contract ---
 

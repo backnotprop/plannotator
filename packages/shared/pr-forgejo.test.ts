@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   checkFjAuth,
   fetchFjFileBytes,
+  fetchFjCard,
   fetchFjFileContent,
   fetchFjPR,
   fetchFjPRContext,
@@ -267,7 +268,8 @@ describe("errors name the cause and the fix", () => {
 
   test("403 with no token (an instance that requires sign-in) says to add a token, not to widen scopes", async () => {
     const error = await run(403, "Only signed in user is allowed to call APIs.");
-    expect(error?.status).toBe(403);
+    // A sign-in problem, so a hover card says to add a token (a 403 would read as "the repository is hidden").
+    expect(error?.status).toBe(401);
     expect(error?.message).toContain("Only signed in user is allowed to call APIs");
     expect(error?.message).toContain("forgejoTokens");
     expect(error?.message).not.toContain("The token needs the scopes");
@@ -625,5 +627,168 @@ describe("registered as the forgejo provider", () => {
     const { runtime, calls } = fake(() => ok({ id: 1 }), { [ORIGIN]: "secret" });
     await submitPRReview(runtime, ref, SHA_HEAD, "comment", "Overall fine", [], [{ path: "a.txt", body: "rename this file" }]);
     expect((calls[0]!.body as { body: string }).body).toBe("Overall fine\n\n**a.txt:** rename this file");
+  });
+});
+
+describe("fetchFjCard (the hover card of an issue or a pull request)", () => {
+  const cardRef = { host: "forgejo.example.com", owner: "acme", repo: "widgets", number: 5 };
+  const issue = (extra: Record<string, unknown> = {}) => ({
+    number: 5, title: "Add the thing", body: "Does the thing.", state: "open", comments: 0, created_at: "2026-11-01T10:00:00Z", updated_at: "2026-11-02T10:00:00Z", closed_at: null,
+    user: { login: "rivka", avatar_url: "https://forgejo.example.com/avatars/r" }, labels: [{ name: "bug", color: "#ee0701" }, { name: "" }],
+    assignees: [{ login: "ana", avatar_url: "https://forgejo.example.com/avatars/a" }], pull_request: null, ...extra,
+  });
+  const asPull = (meta: Record<string, unknown> = {}) => ({ pull_request: { merged: false, merged_at: null, draft: false, ...meta } });
+  const review = (id: number, user: string, state: string, extra: Record<string, unknown> = {}) =>
+    ({ id, state, body: "", submitted_at: `2026-11-0${id}T10:00:00Z`, dismissed: false, user: { login: user }, ...extra });
+
+  function routes(o: { issue?: unknown; pr?: unknown; reviews?: unknown; comments?: unknown; statuses?: unknown } = {}): Handler {
+    return ({ url }) => {
+      const path = url.replace(API, "").replace(/\?.*$/, "");
+      if (path === "/issues/5") return ok(o.issue ?? issue());
+      if (path === "/pulls/5") return ok(o.pr ?? pullRequest({ additions: 12, deletions: 3, changed_files: 2 }));
+      if (path === "/pulls/5/reviews") return ok(o.reviews ?? []);
+      if (path === "/issues/5/comments") return ok(o.comments ?? []);
+      if (path === `/commits/${SHA_HEAD}/statuses`) return ok(o.statuses ?? []);
+      return status(404, "not routed");
+    };
+  }
+
+  test("an issue is one read, with its last comment, and no pull request is asked for", async () => {
+    const { runtime, calls } = fake(routes({
+      issue: issue({ comments: 2 }),
+      comments: [{ id: 1, body: "first", created_at: "2026-11-01T11:00:00Z", user: { login: "bo" } }, { id: 2, body: "second", created_at: "2026-11-02T09:00:00Z", user: { login: "cy" } }],
+    }));
+    const data = await fetchFjCard(runtime, cardRef);
+    expect(data).toMatchObject({
+      platform: "forgejo", kind: "issue", repo: "acme/widgets", number: 5, url: `${ORIGIN}/acme/widgets/issues/5`, title: "Add the thing", state: "open",
+      author: { login: "rivka", avatarUrl: null }, createdAt: "2026-11-01T10:00:00Z", updatedAt: "2026-11-02T10:00:00Z", closedAt: null, comments: 2,
+      body: "Does the thing.", bodyCut: false, linked: [], lastComment: { author: { login: "cy", avatarUrl: null }, at: "2026-11-02T09:00:00Z", body: "second" },
+      labels: [{ name: "bug", color: "ee0701" }], assignees: [{ login: "ana", avatarUrl: null }],
+    });
+    expect("pull" in data).toBe(false);
+    expect(calls.some((c) => c.url.includes("/pulls/"))).toBe(false);
+  });
+
+  test("an issue with no comments does not ask for them", async () => {
+    const { runtime, calls } = fake(routes());
+    await fetchFjCard(runtime, cardRef);
+    expect(calls.map((c) => c.url)).toEqual([`${API}/issues/5`]);
+  });
+
+  test("a closed issue is closed, with its close date", async () => {
+    const { runtime } = fake(routes({ issue: issue({ state: "closed", closed_at: "2026-11-03T10:00:00Z" }) }));
+    expect(await fetchFjCard(runtime, cardRef)).toMatchObject({ state: "closed", closedAt: "2026-11-03T10:00:00Z" });
+  });
+
+  test("a pull request: its branches and size come from the pull request, and the item is the same number as the issue", async () => {
+    const { runtime } = fake(routes({ issue: issue(asPull()) }));
+    const data = await fetchFjCard(runtime, cardRef);
+    expect(data).toMatchObject({ kind: "pull", url: `${ORIGIN}/acme/widgets/pulls/5`, state: "open", pull: { base: "main", head: "feature/x", additions: 12, deletions: 3, files: 2 } });
+  });
+
+  test.each([
+    ["open", asPull(), "open", { state: "open" }],
+    ["a draft", asPull({ draft: true }), "draft", { state: "open" }],
+    ["merged", asPull({ merged: true, merged_at: "2026-11-04T10:00:00Z" }), "merged", { state: "closed", closed_at: "2026-11-04T10:05:00Z" }],
+    ["closed unmerged", asPull(), "closed", { state: "closed", closed_at: "2026-11-05T10:00:00Z" }],
+  ])("a pull request that is %s reads as %s", async (_label, meta, state, extra) => {
+    const { runtime } = fake(routes({ issue: issue({ ...meta, ...extra }) }));
+    expect((await fetchFjCard(runtime, cardRef)).state).toBe(state);
+  });
+
+  test("a merged pull request closed when it merged", async () => {
+    const { runtime } = fake(routes({ issue: issue({ ...asPull({ merged: true, merged_at: "2026-11-04T10:00:00Z" }), state: "closed", closed_at: "2026-11-04T10:05:00Z" }) }));
+    expect((await fetchFjCard(runtime, cardRef)).closedAt).toBe("2026-11-04T10:00:00Z");
+  });
+
+  test("the review is each person's latest decision; a request with no decision is review required", async () => {
+    const read = async (reviews: unknown[], requested: unknown[] = []) => {
+      const { runtime } = fake(routes({ issue: issue(asPull()), reviews, pr: pullRequest({ requested_reviewers: requested }) }));
+      return (await fetchFjCard(runtime, cardRef)).pull!.review;
+    };
+    expect(await read([review(1, "ana", "APPROVED")])).toBe("approved");
+    expect(await read([review(1, "ana", "APPROVED"), review(2, "bo", "REQUEST_CHANGES")])).toBe("changes_requested");
+    expect(await read([review(1, "ana", "REQUEST_CHANGES"), review(2, "ana", "APPROVED")])).toBe("approved");
+    expect(await read([review(1, "ana", "REQUEST_CHANGES"), review(2, "ana", "COMMENT", { dismissed: true })])).toBeNull();
+    expect(await read([review(1, "ana", "COMMENT")], [{ login: "bo" }])).toBe("review_required");
+    expect(await read([])).toBeNull();
+  });
+
+  test("checks count the head's statuses; a state this code does not know counts for nothing", async () => {
+    const read = async (statuses: unknown[]) => {
+      const { runtime } = fake(routes({ issue: issue(asPull()), statuses }));
+      return (await fetchFjCard(runtime, cardRef)).pull!.checks;
+    };
+    expect(await read([{ status: "success" }, { status: "success" }, { status: "failure" }, { status: "pending" }, { status: "warning" }, { status: "skipped" }]))
+      .toEqual({ state: "failure", passed: 2, failed: 1, pending: 1, total: 4 });
+    expect(await read([{ status: "success" }, { status: "pending" }])).toMatchObject({ state: "pending" });
+    expect(await read([{ status: "success" }])).toMatchObject({ state: "success", total: 1 });
+    expect(await read([{ status: "warning" }])).toBeNull();
+    expect(await read([])).toBeNull();
+  });
+
+  test("the extras are best effort: a failed review, status or comment read still gives the card", async () => {
+    const { runtime } = fake(({ url }) => {
+      if (/\/(reviews|statuses|comments)/.test(url)) return status(500, "boom");
+      return routes({ issue: issue({ ...asPull(), comments: 3 }) })({ method: "GET", url, authorization: null, body: undefined });
+    });
+    const data = await fetchFjCard(runtime, cardRef);
+    expect(data).toMatchObject({ title: "Add the thing", lastComment: null, pull: { review: null, checks: null } });
+  });
+
+  test("a long body is cut, and says so", async () => {
+    const { runtime } = fake(routes({ issue: issue({ body: "x".repeat(5000) }) }));
+    const data = await fetchFjCard(runtime, cardRef);
+    expect(data.body).toHaveLength(4000);
+    expect(data.bodyCut).toBe(true);
+  });
+
+  test("a pull request whose branch was deleted shows that, not Forgejo's own ref", async () => {
+    const gone = pullRequest({ head: { ref: "refs/pull/5/head", sha: SHA_HEAD, repo: { full_name: "acme/widgets" } } });
+    const { runtime } = fake(routes({ issue: issue(asPull()), pr: gone }));
+    expect((await fetchFjCard(runtime, cardRef)).pull).toMatchObject({ base: "main", head: "(branch deleted)" });
+    const { runtime: live } = fake(routes({ issue: issue(asPull()) }));
+    expect((await fetchFjCard(live, cardRef)).pull).toMatchObject({ head: "feature/x" });
+  });
+
+  test("a missing item is a 404 the caller can read, and a refused token a 401", async () => {
+    for (const code of [404, 401, 429]) {
+      const error = await fetchFjCard(fake(() => status(code, "no")).runtime, cardRef).then(() => null, (e: Error & { status?: number }) => e);
+      expect(error?.status).toBe(code);
+    }
+  });
+
+  test("the instance's avatars are never fetched: the card draws initials", async () => {
+    const { runtime, calls } = fake(routes({ issue: issue({ comments: 1 }), comments: [{ id: 1, body: "hi", created_at: "", user: { login: "bo", avatar_url: "https://forgejo.example.com/avatars/b" } }] }));
+    const data = await fetchFjCard(runtime, cardRef);
+    expect([data.author?.avatarUrl, data.lastComment?.author?.avatarUrl, ...data.assignees.map((a) => a.avatarUrl)]).toEqual([null, null, null]);
+    expect(calls.every((c) => c.url.startsWith(`${API}/`))).toBe(true);
+  });
+
+  test("a given-up read stops its requests: the abort signal reaches every one", async () => {
+    const controller = new AbortController();
+    let sawSignal = false;
+    const runtime: PRRuntime = {
+      async runCommand() { throw new Error("no CLI"); },
+      fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        sawSignal = init?.signal instanceof AbortSignal;
+        return new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+      }) as typeof fetch,
+    };
+    const read = fetchFjCard(runtime, cardRef, controller.signal);
+    controller.abort(new Error("gave up"));
+    await expect(read).rejects.toThrow("gave up");
+    expect(sawSignal).toBe(true);
+    // Already given up on: not even a first request.
+    await expect(fetchFjCard(runtime, cardRef, controller.signal)).rejects.toThrow("gave up");
+  });
+
+  test("the token configured for the host's https origin is sent there, and an unconfigured host gets none", async () => {
+    const mine = fake(routes(), { [ORIGIN]: "secret" });
+    await fetchFjCard(mine.runtime, cardRef);
+    expect(mine.calls.map((c) => c.authorization)).toEqual(["token secret"]);
+    const other = fake(() => ok(issue()), { "https://elsewhere.example.com": "not-for-this-host" });
+    await fetchFjCard(other.runtime, cardRef);
+    expect(other.calls.map((c) => c.authorization)).toEqual([null]);
   });
 });

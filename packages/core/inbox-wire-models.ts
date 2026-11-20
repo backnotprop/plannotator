@@ -46,7 +46,8 @@ export interface ProjectFolder extends InboxProject {
   picture?: number;
   /** Its git origin's host (null: none named, links as github.com); absent with no repo and from an older Inbox. */
   repo_host?: string | null;
-  repo_forge?: 'gitlab';
+  /** The forge its git origin's host is known to be, when the Inbox knows one by more than the name (a GitLab or Forgejo it was told of). */
+  repo_forge?: 'gitlab' | 'forgejo';
   /**
    * The live tags the person put on the project (project-tags.ts; merged: the merged tags' ids), read by the filters
    * only. Absent when none, and from an older Inbox.
