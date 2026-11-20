@@ -4,7 +4,7 @@ import { readThemePairCookies, writeThemePairCookies } from '../config/settings'
 import { useConfigValue } from '../config/useConfig';
 import { storage } from '../utils/storage';
 import {
-  BUILT_IN_THEMES,
+  getAllThemes,
   getUnsupportedMode,
   resolvePairTheme,
   resolveThemeMode,
@@ -58,7 +58,7 @@ const ThemeProviderContext = createContext<ThemeProviderState>({
   lightTheme: 'plannotator',
   darkTheme: 'plannotator',
   setHalfTheme: () => null,
-  availableThemes: BUILT_IN_THEMES,
+  availableThemes: getAllThemes(),
   manageFavicon: false,
 });
 
@@ -390,7 +390,8 @@ export function ThemeProvider({
     lightTheme: pair.light,
     darkTheme: pair.dark,
     setHalfTheme,
-    availableThemes: BUILT_IN_THEMES,
+    // The person's own themes (themeRegistry's custom themes) first, then the built-ins.
+    availableThemes: getAllThemes(),
     manageFavicon,
   }), [mode, preferredMode, resolvedMode, colorTheme, pair.light, pair.dark, setMode, setColorTheme, setHalfTheme, manageFavicon]);
 

@@ -27,9 +27,10 @@ export function pullThreadGuideWords(stack: NonNullable<ReviewView['pullLine']>[
 }
 
 /** Whether the thread already holds the request (the person's own message with its words): it is not sent again. */
-export function pullThreadGuideAsked(thread: InboxThread, stack: NonNullable<ReviewView['pullLine']>['stack']): boolean {
+export function pullThreadGuideAsked(thread: InboxThread, stack: NonNullable<ReviewView['pullLine']>['stack'], after: string | null = null): boolean {
   const words = pullThreadGuideWords(stack);
-  return thread.messages.some((message) => message.author.kind === 'person' && message.body.trimStart().startsWith(words));
+  const from = after ? thread.messages.findIndex((message) => message.id === after) + 1 : 0;
+  return thread.messages.slice(from).some((message) => message.author.kind === 'person' && message.body.trimStart().startsWith(words));
 }
 
 /** The request did not go. */
@@ -46,13 +47,15 @@ export function usePullThreadGuide(
   line: NonNullable<ReviewView['pullLine']>,
   thread: InboxThread,
   onOpenGuide: (messageId: string) => void,
+  again = false,
 ): { onGuide: (() => void) | null; onTheWay: boolean; error: string | null } {
   const busy = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [asked, setAsked] = useState(false);
+  const [askedOver, setAskedOver] = useState<string | null | undefined>(undefined);
   const guide = [...thread.messages].reverse().find((message) => !!message.guide);
-  if (guide) return { onGuide: () => onOpenGuide(guide.id), onTheWay: false, error: null };
-  const onTheWay = asked || ((line.link.ask === 'guide' || line.link.ask === 'custom') && !line.link.guide?.review);
+  if (guide && !again) return { onGuide: () => onOpenGuide(guide.id), onTheWay: false, error: null };
+  const over = guide?.id ?? null;
+  const onTheWay = askedOver === over || (guide ? pullThreadGuideAsked(thread, line.stack, over) : (line.link.ask === 'guide' || line.link.ask === 'custom') && !line.link.guide?.review);
   if (onTheWay) return { onGuide: null, onTheWay: true, error: null };
   const target = guideRequestTarget(thread);
   // The PR's link is this thread's (`reviewViewOf` gives no line otherwise); an archived thread, or a host that gets no
@@ -65,7 +68,7 @@ export function usePullThreadGuide(
     const request = requests.get(thread.thread_id) ?? { key: newUuid(), sent: false };
     requests.set(thread.thread_id, request);
     try {
-      if (!request.sent && !pullThreadGuideAsked(thread, line.stack)) {
+      if (!request.sent && !pullThreadGuideAsked(thread, line.stack, over)) {
         const words = pullThreadGuideWords(line.stack);
         const skills = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE);
         await inboxApi.reply(target.message.id, { idempotency_key: request.key, words: withSkillsBlock(words, skills), questions: [] });
@@ -79,7 +82,7 @@ export function usePullThreadGuide(
     try {
       await inboxApi.pullOwner(handoffKeys(line.stack), thread.thread_id, 'guide');
       requests.delete(thread.thread_id);
-      setAsked(true);
+      setAskedOver(over);
       line.onAsked();
     } catch {
       setError(PULL_GUIDE_UNTOLD);

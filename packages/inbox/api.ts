@@ -7,7 +7,7 @@
 
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk, InboxPullRiskAuto } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -1788,8 +1788,8 @@ export const inboxApi = {
   /** The rows again from what the forges last answered, with no forge read; `cold`: nothing read since the Inbox started. */
   reviewsCached: (signal?: AbortSignal) => get<InboxReviewsAnswer | { cold: true }>(inboxUrl('/reviews?cached=1'), signal),
   /** PR risk ranking: the rules, the risk agent and the judgments of the listed PRs (inbox-pull-risk.ts). */
-  pullRisk: (signal?: AbortSignal) => get<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), signal),
-  savePullRisk: (input: { rules: string; provider: string | null; model: string | null; branches?: boolean }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
+  pullRisk: (signal?: AbortSignal, withAutoAgent = false) => get<InboxPullRiskAnswer>(inboxUrl(withAutoAgent ? '/pulls/risk?auto_agent=1' : '/pulls/risk'), signal),
+  savePullRisk: (input: { rules: string; provider: string | null; model: string | null; branches?: boolean; auto?: InboxPullRiskAuto | null }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(pullUrl('/pulls/details', key), signal),
   pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(pullUrl('/pulls/media/sizes', key), signal),

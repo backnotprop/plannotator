@@ -424,6 +424,7 @@ packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.install.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.raw.test.tsx
 packages/review-editor/components/CallFlowFileBadge.interaction.test.tsx
+packages/review-editor/components/SemanticFileBadge.test.tsx
 packages/review-editor/components/CallFlowTreeView.interaction.test.tsx
 packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx
 packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx
@@ -847,6 +848,7 @@ packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
 packages/inbox/plans/spacesHome.test.tsx
+packages/inbox/plans/planShare.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx

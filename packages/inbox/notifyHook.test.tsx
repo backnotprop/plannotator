@@ -355,7 +355,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     // In front: the bell never rings here, so the notice keeps the system's sound.
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     away();
-    // Away, a new thread that asks nothing: the bell does not ring for it.
+    // Away, a new thread that asks nothing: the bell rings for it under either choice.
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
     // Away, a question: the bell's.
     await batch([message('t2', 't2'), question('t2', 'q-2')], list([{ id: 't2', section: 'waiting' }]));
@@ -369,7 +369,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     back();
     away();
     await batch([message('t4', 't4')], list([{ id: 't4', section: 'new' }]));
-    expect(raised.map((r) => r.silent)).toEqual([false, false, true, false, true]);
+    expect(raised.map((r) => r.silent)).toEqual([false, true, true, false, true]);
   });
 
   test('three agents ask seconds apart (three list reads): one ring, and every notice of that burst is silent (one sound, as before)', async () => {
