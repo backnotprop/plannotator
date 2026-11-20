@@ -719,7 +719,13 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     .toContain('"agent":"pi"');
   await openPulls();
   const waitingLine = page.locator('[data-pull-risk-waiting]');
-  await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
+  await expect(waitingLine)
+    .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
+    .catch(async (cause: Error) => {
+      const risk = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as Record<string, unknown>;
+      const { pending, judgments, auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs } = risk;
+      throw new Error(`${cause.message}\nrisk answer now: ${JSON.stringify({ pending, judgments: Object.keys((judgments ?? {}) as object), auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs })}`);
+    });
   await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High.');
   expect(await autoRuns()).toEqual({});
   expect(launches()).toBe(launchedBefore);
