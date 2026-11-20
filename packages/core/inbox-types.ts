@@ -1590,8 +1590,13 @@ export interface InboxActionFacts {
 
 /** What came of an action item (`InboxQuestionRecord.action_result`). */
 export interface InboxActionResult {
-  outcome: "done" | "cant";
-  /** The person's note with Done, or the reason with Can't do it; null for none. */
+  /**
+   * The person's mark: Done, Can't do it (with a reason), or Skip (they chose
+   * not to do it; approval "action-item-skip", option A). A record stored
+   * before Skip only ever holds "done" or "cant".
+   */
+  outcome: "done" | "cant" | "skip";
+  /** The person's note with Done or Skip, or the reason with Can't do it; null for none. */
   note: string | null;
   at: string;
   by: "person" | "agent";
@@ -1609,8 +1614,11 @@ export interface InboxActionResult {
    * (approval "inbox-action-items-in-reply", Q3). When it carries a note, the
    * note still goes with the person's next Send (`inboxActionInDraft`).
    */
-  person?: { outcome: "done" | "cant"; note: string | null; at: string } | null;
+  person?: { outcome: "done" | "cant" | "skip"; note: string | null; at: string } | null;
 }
+
+/** The person's mark on an action item (`InboxActionResult.outcome`). */
+export type InboxActionOutcome = InboxActionResult["outcome"];
 
 /**
  * An action item whose result waits in the person's reply draft (approval
@@ -1629,7 +1637,7 @@ export function inboxActionInDraft(
 }
 
 /** The person's own mark on an action item in their draft or sent: their staged mark, or the one the agent's done settled. */
-export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: "done" | "cant"; note: string | null; at: string } | null {
+export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: InboxActionOutcome; note: string | null; at: string } | null {
   if (!result) return null;
   if (result.by === "person") return { outcome: result.outcome, note: result.note, at: result.at };
   return result.person ?? null;
@@ -3360,6 +3368,8 @@ export interface InboxRowUnsent {
   done?: number;
   /** Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none. */
   cant?: number;
+  /** Action items skipped waiting in the reply draft ("Draft · 1 skipped"; approval "action-item-skip"). Absent: none. */
+  skipped?: number;
 }
 
 /**
@@ -3375,7 +3385,7 @@ export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_f
 
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
-  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0);
+  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0 || (unsent.skipped ?? 0) > 0);
 }
 
 /**

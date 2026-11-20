@@ -2696,7 +2696,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setStale([]);
     setGuard(false);
   };
-  // The action items whose Done or Can't do it waits in the draft (approval "inbox-action-items-in-reply"):
+  // The action items whose Done, Can't do it or Skip waits in the draft (approval "inbox-action-items-in-reply"):
   // listed in the reply box, counted beside Send ("Draft · 1 done"), carried by the Send.
   const draftActions: ActionRow[] = thread.messages.flatMap((m) =>
     m.author.kind !== 'agent'
@@ -2708,6 +2708,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }),
   );
   const draftCant = draftActions.filter((a) => a.outcome === 'cant' && !a.seen).length;
+  const draftSkipped = draftActions.filter((a) => a.outcome === 'skip' && !a.seen).length;
   /** Picks, annotations or action items wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
@@ -2718,7 +2719,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
-  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }, false);
+  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }, false);
 
   // The answers this reply carries, as the cards show them now: a saved pick, or one being
   // saved. The box lists them live (ReplyAnswers); they never go into the words, where a
@@ -5876,7 +5877,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}
-                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }}
                   onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
                   commentsOpen={commentsList !== null && !commentsList.card}
                 />

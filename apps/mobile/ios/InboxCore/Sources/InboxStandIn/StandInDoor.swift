@@ -340,7 +340,7 @@ public actor StandInDoor {
     }
   }
 
-  /// `markAction`: Done (with an optional note), Can't do it (with a reason), or null to take it back.
+  /// `markAction`: Done (with an optional note), Can't do it (with a reason), Skip (a note optional), or null to take it back.
   private func markAction(_ message: MessageID, _ key: String, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
     do {
       let at = try target(message)
@@ -353,7 +353,8 @@ public actor StandInDoor {
       case .null?: outcome = nil
       case .string("done")?: outcome = .done
       case .string("cant")?: outcome = .cant
-      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", or null to undo.", field: "outcome")
+      case .string("skip")?: outcome = .skip
+      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", \"skip\", or null to undo.", field: "outcome")
       }
       var note = ""
       if let raw = fields["note"], raw != .null {
