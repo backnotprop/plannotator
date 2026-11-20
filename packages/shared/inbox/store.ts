@@ -38,6 +38,7 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
+import type { InboxPictureItPage } from "@plannotator/core/picture-it-page";
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -102,6 +103,8 @@ import {
   type InboxTag,
   inboxAskingMessage,
   inboxDefaultSkip,
+  inboxSessionlessSend,
+  inboxWordsDefault,
   inboxDeliveryState,
   type InboxDeliveryConnection,
   type InboxDeliveryDecision,
@@ -258,6 +261,8 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
+  /** Server only (launch's notes, `writeLaunchNote`): one of the Inbox's own launch notes (`InboxMessage.launch_note`). */
+  launch_note?: boolean;
   /** Server only (packages/server/inbox-scheduled.ts): an agent's routine change (`InboxMessage.scheduled_change`). */
   scheduled_change?: InboxScheduledChange;
   body: string;
@@ -288,6 +293,7 @@ export interface InboxSendInput {
   inline_images?: InboxInlineImage[];
   /** Running apps the body's question choices name as prototypes, already checked and probed by the server (`packages/server/inbox-live.ts`). */
   live_sites?: Omit<InboxLiveSiteRef, "opened_at">[];
+  picture_it?: InboxPictureItPage | null;
   /** A guided review the message carries (submit_guide); its blob is written once the message lands. */
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
@@ -2463,12 +2469,16 @@ export class InboxStore {
         }
       : null;
     const statesOf = (message: InboxMessage) => askingStates?.get(message.id) ?? [];
-    const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf)) : null;
+    // The same "answers itself" test as the window's Send (`answersItself`): a saved pick, or an action item marked in the draft.
+    const answersItself = (message: InboxMessage) => this.questionsOf(message.id).some((q) => (q.kind !== "action" && q.state === "picked") || inboxActionInDraft(q));
+    const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf), answersItself) : null;
     const delivery = this.rowDelivery(root, lastReal, asking, sent, recipients, root.resolved_at !== null && !agentAfterArchive);
     // "Session ended" on the row: the session this thread would reach, by the rule the thread's note uses (a waking
     // connection, not heard from, with the grace). A person's reply with its own `to` is not owed to that session.
     const presence = this.deliveryPresence;
-    const reached = asking ?? (lastReal.author.kind === "agent" ? lastReal : null);
+    // An agent wrote last: the message the person's words would answer, by the Send's own rule (`inboxWordsDefault`).
+    const lastAgentReal = lastReal.author.kind === "agent" ? lastReal : null;
+    const reached = asking ?? (lastAgentReal ? (inboxWordsDefault(messages.slice(0, messages.indexOf(lastAgentReal) + 1), answersItself) ?? lastAgentReal) : null);
     const reachedSession = reached?.author.kind === "agent" ? reached.author.session : null;
     const movedAway = lastReal.author.kind === "person" && !!lastReal.to;
     const resumes = (session: string | null | undefined) => !!session && presence?.launchResumes?.(root.id, session) === true;
@@ -2499,6 +2509,7 @@ export class InboxStore {
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),
+      ...(participants.length > 1 && lastAgent?.author.kind === "agent" ? { last_agent: { host: lastAgent.author.host, ...(lastAgent.author.name ? { name: lastAgent.author.name } : {}) } } : {}),
       // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
       ...(waits.length > 0 ? { waits } : {}),
     };
@@ -2695,9 +2706,11 @@ export class InboxStore {
         ? (last.delivery?.at ?? recipients.find((r) => r.owner)?.delivered_at ?? null)
         : (sent?.checked_at ?? null);
       // The session that asked (the thread's own rule, with its defaults): called ended only when its message
-      // came through a waking connection and the Inbox has not heard from it (with the grace).
+      // came through a waking connection and the Inbox has not heard from it (with the grace). Never for a reply to a
+      // script's post (`inboxSessionlessSend`, its own question answered): that reply is the script's, not that session's.
       const askingAuthor = asking?.author.kind === "agent" ? asking.author : null;
-      const askerEnded = !resolved && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
+      const toScript = !!repliedTo && inboxSessionlessSend(repliedTo);
+      const askerEnded = !resolved && !toScript && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
@@ -4305,6 +4318,7 @@ export class InboxStore {
         : {}),
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
       ...(input.live_sites && input.live_sites.length > 0 ? { live_sites: input.live_sites.map((site) => ({ ...site, opened_at: at })) } : {}),
+      ...(input.picture_it && input.attachments?.some((attachment) => attachment.id === input.picture_it!.attachment_id) ? { picture_it: input.picture_it } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(basePath ? { base_path: basePath } : {}),
       // Only into another project's thread: a send that landed in its own project (or one combined with it) is from there.
@@ -4313,6 +4327,7 @@ export class InboxStore {
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
+      ...(input.launch_note === true ? { launch_note: true as const } : {}),
       ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),

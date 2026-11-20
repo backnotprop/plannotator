@@ -12,7 +12,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentFeedback, imageCommentAnnotation } from './attachments';
-import { splitReplyFeedback } from './replyFeedback';
+import { splitReplyFeedback, withoutElementDetails } from './replyFeedback';
 
 const hasDom = typeof document !== 'undefined';
 const { MessageBody } = (hasDom ? await import('./components/Thread') : { MessageBody: null }) as typeof import('./components/Thread');
@@ -38,6 +38,10 @@ const IMAGE = {
   unavailable: null,
 } as InboxAttachmentState;
 
+function RECORDS_BASE() {
+  return { project_id: 'prj_1', thread_id: AGENT_MSG, message_id: AGENT_MSG, version: 'current', created_at: '2026-10-29T18:10:00.000Z', updated_at: '2026-10-29T18:10:00.000Z', removed_at: null, sent_reply_id: null };
+}
+
 const RECORDS: InboxAnnotationRecord[] = [
   {
     id: 'a1',
@@ -55,6 +59,21 @@ const RECORDS: InboxAnnotationRecord[] = [
   } as InboxAnnotationRecord,
 ];
 const PEOPLE = new Set([REPLY]);
+
+// A pin on an HTML page: the export writes the element's outline and details after the comment, for the agent.
+const PAGE = { ...IMAGE, id: 'att_page', path: `${ROOT}/ui/canary.html`, name: 'canary.html', kind: 'html' } as InboxAttachmentState;
+const PIN: InboxAnnotationRecord = {
+  ...RECORDS_BASE(),
+  id: 'p1',
+  attachment_id: PAGE.id,
+  path: PAGE.path,
+  annotation: {
+    id: 'p1', blockId: 'html', startOffset: 0, endOffset: 0, type: 'COMMENT', text: 'Make the amber band explicit.', originalText: '412 ms', createdA: 0,
+    htmlAnchor: { selector: 'div.big.warn' },
+    elementContext: { tag: 'div', outline: '<div class="big warn">412 ms</div>', path: 'body > main > div.big', name: '412 ms', text: '412 ms', rect: { x: 32, y: 388, w: 329, h: 38, vw: 393, vh: 776 }, landmark: 'section.card', heading: 'h2 "p99 latency"' },
+  },
+} as unknown as InboxAnnotationRecord;
+const pinFeedback = () => attachmentFeedback([PIN], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
 const feedback = () => attachmentFeedback(RECORDS, [IMAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
 
 test("the split finds the export's section after the person's words, never one in a code block", () => {
@@ -116,4 +135,47 @@ test.skipIf(!hasDom)("an agent's message with the same headings has no feedback 
   const el = await draw(`Notes below.\n\n${feedback()}`, { kind: 'agent', session: 'ses_1', host: 'claude-code', name: 'Claude Code' } as unknown as InboxMessageWire['author']);
   expect(el.querySelector('[data-reply-feedback]')).toBeNull();
   expect(el.querySelector('h1')?.textContent).toBe('Feedback on the attached files');
+});
+
+test("a pin on an HTML page: the person's reply is drawn without the element's outline and selector lines; the stored text keeps them", () => {
+  const stored = `One change on the p99 card.\n\n${pinFeedback()}`;
+  // The export still writes them (what the agent reads).
+  expect(stored).toContain('````html');
+  expect(stored).toContain('- **selector** `div.big.warn`');
+  expect(stored).toContain('- **box** 32,388');
+  const shown = withoutElementDetails(stored);
+  expect(shown).not.toContain('````html');
+  for (const detail of ['selector', 'path', 'name', 'text', 'box', 'near']) expect(shown).not.toContain(`- **${detail}** `);
+  // The person's words, the file, the comment's heading and its words stay.
+  expect(shown).toContain('One change on the p99 card.');
+  expect(shown).toContain('## ui/canary.html');
+  expect(shown).toContain('### 1. Feedback on: "412 ms"');
+  expect(shown).toContain('> Make the amber band explicit.');
+  // Nothing to take: the same text back.
+  const plain = `Notes.\n\n${feedback()}`;
+  expect(withoutElementDetails(plain)).toBe(plain);
+});
+
+test("the person's own fences and lists are never taken, even ones that look like an element's", () => {
+  const own = 'Like this:\n\n````html\n<div>mine</div>\n````\n\nand\n\n- **path** first\n- **box** second';
+  // Outside the files' feedback: as written.
+  expect(withoutElementDetails(own)).toBe(own);
+  // A fenced example inside a comment, with no details after it: kept.
+  const fenced = `${pinFeedback()}\n\n\`\`\`\`html\n<p>an example</p>\n\`\`\`\`\n\nThanks.`;
+  const shown = withoutElementDetails(fenced);
+  expect(shown).toContain('<p>an example</p>');
+  expect(shown).not.toContain('<div class="big warn">');
+});
+
+test.skipIf(!hasDom)("a pin on an HTML page: the person's sent reply draws no outline page and no selector, an agent's message draws all of it", async () => {
+  const body = `One change.\n\n${pinFeedback()}`;
+  const mine = await draw(body, { kind: 'person' } as InboxMessageWire['author']);
+  expect(mine.textContent).toContain('Make the amber band explicit.');
+  expect(mine.textContent).not.toContain('div.big.warn');
+  expect(mine.textContent).not.toContain('viewport 393×776');
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  const theirs = await draw(body, { kind: 'agent', session: 'ses_1', host: 'claude-code', name: 'Claude Code' } as unknown as InboxMessageWire['author']);
+  expect(theirs.textContent).toContain('div.big.warn');
 });

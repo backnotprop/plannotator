@@ -41,6 +41,7 @@ import { open, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { isDotenvFileName } from "@plannotator/core/annotatable";
+import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS, isReviewImagePath } from "../diff-paths";
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "../review-image";
 
@@ -173,7 +174,7 @@ export function blankInlineCode(text: string): string {
  * captures (inline-images.ts), in the order the window steps through them.
  */
 export function inboxMessageImageRefsInOrder(body: string): string[] {
-  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src));
+  return imageSourcesInOrder(body).filter((src) => !NOT_LOCAL_SRC_RE.test(src) && inboxInlineMediaKind(src) === null);
 }
 
 /**
@@ -364,7 +365,7 @@ function spellings(folder: string): string[] {
  * refusal, or the file to read (its realpath, and the absolute path it was
  * named by). Never throws.
  */
-function locateInboxMessageImage(input: InboxMessageImageInput): Refusal | { ok: true; real: string; named: string } {
+export function locateInboxMessageImage(input: InboxMessageImageInput, accept: "image" | "media" = "image"): Refusal | { ok: true; real: string; named: string } {
   const src = input.path;
   if (typeof src !== "string" || src === "") return refuse(400, "validation_error", "path: required.") as Refusal;
   if (src.length > INBOX_MESSAGE_IMAGE_PATH_MAX || /[\u0000-\u001f\u007f]/.test(src)) {
@@ -384,7 +385,7 @@ function locateInboxMessageImage(input: InboxMessageImageInput): Refusal | { ok:
   const anchors = area.filter((folder) => exemptsHidden(folder, protectedHomes));
   const inArea = (path: string) => input.anywhere === true || area.some((folder) => isInside(path, folder));
 
-  const candidates = pathCandidates(src).filter((candidate) => isReviewImagePath(candidate));
+  const candidates = pathCandidates(src).filter((candidate) => (accept === "media" ? inboxInlineMediaKind(candidate) !== null : isReviewImagePath(candidate)));
   if (candidates.length === 0) return refuse(415, "not_an_image", "Only png, jpg, gif, webp, svg, avif, bmp and ico images are shown.") as Refusal;
 
   for (const candidate of candidates) {
@@ -521,7 +522,7 @@ function headRefusal(head: Buffer): Refusal | null {
 }
 
 /** The path must still lead to the file a descriptor read, so a parent folder swapped for a symlink in between is caught. */
-function stillSameFile(real: string, stat: { dev: number; ino: number }): boolean {
+export function stillSameFile(real: string, stat: { dev: number; ino: number }): boolean {
   try {
     if (realpathSync(real) !== real) return false;
     const again = statSync(real);

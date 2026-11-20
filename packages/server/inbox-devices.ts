@@ -236,6 +236,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // tags this Inbox's threads by a tag's name and changes the tag of that name here. Phones do not take tags.
   { method: "POST", route: /^threads\/([^/]+)\/tags$/, window: (m) => `/api/inbox/threads/${m[1]}/tags`, machineOnly: true },
   { method: "POST", route: /^initiatives\/([^/]+)$/, window: (m) => `/api/inbox/initiatives/${m[1]}`, machineOnly: true },
+  // A project's tags (project-tags.ts, mark `project-tags`): a linked machine's window tags this Inbox's projects by a
+  // tag's name, as it tags its threads. Phones do not take them.
+  { method: "POST", route: /^projects\/([^/]+)\/tags$/, window: (m) => `/api/inbox/projects/${m[1]}/tags`, machineOnly: true },
   // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
   // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).
   { method: "POST", route: /^tag-colours$/, window: () => "/api/inbox/tag-colours" },
@@ -341,6 +344,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
+  // Show in Rex for one of this Inbox's agents, from a linked machine's window (inbox-rex-far.ts): the Rex apps
+  // attached to this computer's Rex from elsewhere go to its pane.
+  { method: "POST", route: /^rex\/show$/, window: () => "/api/inbox/rex/show", machineOnly: true },
   // A file an agent's message names, read only (approval "inbox-file-refs-open-viewer"): its view and an image's or a
   // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
   // Not a phone's: a phone reads them through the tailnet as the owner.

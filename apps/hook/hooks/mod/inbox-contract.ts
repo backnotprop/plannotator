@@ -549,7 +549,15 @@ export const INBOX_OPTION_LINES_RULE =
   `Indented under a \`- [ ]\` choice (not a plain bullet), only when it helps the person pick: \`Pros: <item>; <item>\` and \`Cons: <item>; <item>\` (the card lines them up across options), and \`Prototype: <page>\`, a page they try before picking: an HTML file you also attach, an https:// address you serve, or the http://localhost address of an app you are running (the send is refused if it does not answer). ${INBOX_PROTOTYPE_TRY_RULE} One \`Prototype:\` line at the block's own indent is one page for all the options.`
 
 export const INBOX_PICTURES_RULE =
-  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. When the person picks between looks (designs, variants, today\'s screen against a redesign), write about the options inside the question, not above it: each option is a picture choice, `- [ ] A · Label — ![alt](path) what it means`, its own picture inside it and what you would say about it as its description; a choice with nothing to show (both, none yet) stays plain text. Above the question, one or two sentences at most; the label comes back. A mock that ends on a screen the product already has shows a real screenshot of that screen.'
+  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Sound and video files written the same way play in place. When the person picks between looks (designs, variants, today\'s screen against a redesign), write about the options inside the question, not above it: each option is a picture choice, `- [ ] A · Label — ![alt](path) what it means`, its own picture inside it and what you would say about it as its description; a choice with nothing to show (both, none yet) stays plain text. Above the question, one or two sentences at most; the label comes back. A mock that ends on a screen the product already has shows a real screenshot of that screen.'
+
+/**
+ * A question that proposes a change (approval "before-after", the Versions card; words approved by the owner,
+ * 2026-11-18): `Where:`, `Before:` and `After:`, per place and per choice. On every copy of send_message's body,
+ * after the pictures rule.
+ */
+export const INBOX_CHANGE_RULE =
+  'A question that proposes a change (words, a screen, code, a setting) shows it: `Where: <what it is and where the person sees it>`, then `Before:` and `After:`, each the whole sentence, paragraph or screenshot it sits in (the card marks the change; `Before: none` when nothing is there). Several places: repeat the three lines per place. A choice that is its own version or change gets its own `After:` (and `Before:`) under it. A new feature or a prototype skips these (send pictures), and so does a choice the person never sees, such as a library. More forms (several places, pictures, a version per choice): `plannotator inbox --help before-after`.'
 
 /**
  * Options another agent designs (the owner approved these words 2026-11-11, from the clean-room eval of picture
@@ -625,6 +633,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       '',
       INBOX_SHOWING_RULE,
       INBOX_PICTURES_RULE,
+      INBOX_CHANGE_RULE,
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
       INBOX_OPTION_LINES_RULE,
@@ -2141,3 +2150,87 @@ export const INBOX_SESSION_LIVE_MS = 30_000
  * reads it as stuck once that session is gone too.
  */
 export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+
+/**
+ * "Stuck on a prompt in its terminal" (owner, 2026-11-18): the poll and
+ * `state` field by which a connection says its session waits on the person
+ * in its own terminal right now, `{ kind: 'permission' | 'question' }`. The
+ * kind only: never the prompt's words, its command or its title. Sent by the
+ * Claude Code mod (`tool.check` answered `ask`, `AskUserQuestion`), the
+ * OpenCode 2 plugin (`permission.asked`/`replied`, `form.created`) and Pi /
+ * Oh My Pi (`ui_prompt_start`/`end`) on every poll and `state` event while
+ * the prompt is up, and left out once it is answered or the turn ends. The
+ * Inbox keeps the latest word (a poll or `state` event without it clears it)
+ * and drops one not said again within INBOX_BLOCKED_STALE_MS. Only the
+ * Agents list's status mark reads it. An older Inbox ignores it; an older
+ * connection never sends it.
+ *
+ * With it (or without it), a connection sends INBOX_BLOCKED_AT_FIELD: when,
+ * by its own clock, its word last changed. A body whose word is older than
+ * the one the Inbox holds (a poll built before the `state` event that
+ * cleared it, arriving after) changes nothing. A body without it (an older
+ * connection) is taken as the latest, as before.
+ */
+export const INBOX_BLOCKED_FIELD = 'blocked'
+
+/** When the connection's `blocked` word last changed, in ms by its own clock (see INBOX_BLOCKED_FIELD). */
+export const INBOX_BLOCKED_AT_FIELD = 'blocked_at'
+
+/** What a session waits on in its terminal (INBOX_BLOCKED_FIELD). */
+export type InboxBlockedKind = 'permission' | 'question'
+
+/** A `blocked` as a poll or `state` event carried it: a known kind, else null (none). */
+export function parseInboxBlocked(value: unknown): InboxBlockedKind | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const kind = (value as Record<string, unknown>).kind
+  return kind === 'permission' || kind === 'question' ? kind : null
+}
+
+/**
+ * The fields for a poll or `state` body: `{ blocked: { kind } }` while blocked, else nothing (which clears it), and
+ * `blocked_at`, when that word last changed (`at`, the connection's own clock), so an older body never undoes a newer one.
+ */
+export function inboxBlockedField(kind: InboxBlockedKind | null, at?: number): { blocked?: { kind: InboxBlockedKind }; blocked_at?: number } {
+  return { ...(kind ? { [INBOX_BLOCKED_FIELD]: { kind } } : {}), ...(typeof at === 'number' && Number.isFinite(at) ? { [INBOX_BLOCKED_AT_FIELD]: at } : {}) }
+}
+
+/**
+ * A `blocked` not said again for this long is dropped: a connection polls
+ * again at most 25 s after its last poll, and says a change at once.
+ */
+export const INBOX_BLOCKED_STALE_MS = 45_000
+
+/**
+ * Whether the person has turned the Inbox on on this computer: a mark in the
+ * Inbox folder (`inbox/turned-on`) that only a person's run of `plannotator
+ * inbox` writes (bare, `--no-open`, `--open`: the `/plannotator-inbox`
+ * commands run `--open`). Until it says on, no host registers the agents' tool
+ * or its reminder, and nothing Plannotator starts by itself (`--background`, a
+ * detached start, `restart`, the MCP server, `inbox call` and the other
+ * commands that start the Inbox) starts it. Where an
+ * Inbox already ran (`inbox/inbox.json`, from before the mark or from an older
+ * `plannotator`), the first reader writes the mark on. Its text is
+ * `{"on":true,"by":...,"at":...}`; only `"on":false` reads off, so a mark that
+ * cannot be read keeps the Inbox on.
+ */
+export const INBOX_TURNED_ON_FILE = 'turned-on'
+
+/**
+ * The command every setup text gives an agent as its first Inbox step: it
+ * turns the Inbox on, starts it detached, opens it, prints the URL and
+ * returns, with or without a screen. Swap it here only.
+ */
+export const INBOX_SETUP_COMMAND = 'plannotator inbox --open'
+
+/** What an agent gets when it reaches for the Inbox before the person turned it on. */
+export const INBOX_OFF_LINE = `The Plannotator Inbox is off on this computer. \`${INBOX_SETUP_COMMAND}\` turns it on. If you are an agent, ask the person in the chat instead, and turn it on only if they ask you to.`
+
+/** Whether a mark's text says on: anything but `"on": false` does (in doubt, on). */
+export function inboxMarkSaysOn(text: string): boolean {
+  try {
+    return (JSON.parse(text) as { on?: unknown } | null)?.on !== false
+  } catch {
+    return true
+  }
+}
+

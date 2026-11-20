@@ -5,7 +5,7 @@
  * open questions or action items; markRead.ts `confirmSetAside` decides. The Inbox's own modal (`Modal`, Updates.tsx):
  * focus starts on the Mark read button, Enter goes on (from the checkbox too), Escape and Cancel change nothing. No
  * new key. "Don't show this again" turns the warning off for this person (config.json `inboxMarkReadWarning`), and
- * Settings → General → When an agent asks you turns it back on.
+ * Settings → General → When an agent sends you something turns it back on.
  */
 import { useId, useState } from 'react';
 import { setAsideWarning, type SetAsideAnswer, type SetAsideCount } from '../markRead';

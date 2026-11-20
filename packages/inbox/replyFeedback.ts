@@ -45,3 +45,70 @@ export function splitReplyFeedback(text: string): { words: string; feedback: str
   }
   return null;
 }
+
+/** A line of a pinned element's details, as the export writes them after its comment (`elementContextExportBlock`). */
+const ELEMENT_DETAIL = /^- \*\*(?:selector|path|role|name|component|attrs|text|route|box|near)\*\* /;
+/** The fence that opens a pinned element's HTML outline there. */
+const ELEMENT_OUTLINE = /^````html\s*$/;
+
+/**
+ * The person's own reply as the window draws it, without the page details a
+ * pin on an HTML page carries for the agent (the owner's audit, 2026-11-19:
+ * the sent reply showed the element's outline, drawn as a little page, then
+ * its selector, path, box in pixels and the like). Under "# Feedback on the
+ * attached files", each pinned element's outline fence and the detail lines
+ * after it are left out of the drawing, so the comment reads as its heading
+ * (`Feedback on: "412 ms"`) and the person's words. The stored text, which is
+ * what the agent reads, keeps them all. Display only; any other fence and any
+ * other list stays as written.
+ */
+export function withoutElementDetails(markdown: string): string {
+  if (!markdown.includes(`# ${ATTACHMENT_FEEDBACK_HEADING.title}`) || !markdown.includes('- **')) return markdown;
+  const lines = markdown.split('\n');
+  const kept: string[] = [];
+  let inSection = false;
+  let changed = false;
+  /** How many detail lines start at `from`. */
+  const detailsAt = (from: number) => {
+    let end = from;
+    while (end < lines.length && ELEMENT_DETAIL.test(lines[end]!)) end++;
+    return end - from;
+  };
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (line === `# ${ATTACHMENT_FEEDBACK_HEADING.title}`) inSection = true;
+    else if (inSection && /^# /.test(line)) inSection = false;
+    if (inSection && ELEMENT_OUTLINE.test(line)) {
+      // The outline's fence and the details right after it: one pinned element.
+      let close = index + 1;
+      while (close < lines.length && lines[close]!.trimEnd() !== '````') close++;
+      if (close < lines.length && detailsAt(close + 1) > 0) {
+        index = close + detailsAt(close + 1);
+        changed = true;
+        continue;
+      }
+    }
+    const opener = FENCE.exec(line)?.[1];
+    if (opener) {
+      // Any other fence is the person's or the file's: kept whole.
+      kept.push(line);
+      let close = index + 1;
+      while (close < lines.length) {
+        const end = FENCE.exec(lines[close]!)?.[1];
+        kept.push(lines[close]!);
+        if (end && end[0] === opener[0] && end.length >= opener.length) break;
+        close++;
+      }
+      index = close;
+      continue;
+    }
+    // Details with no outline (a short export): two or more in a row, after a blank line.
+    if (inSection && ELEMENT_DETAIL.test(line) && (lines[index - 1] ?? '').trim() === '' && detailsAt(index) >= 2) {
+      index += detailsAt(index) - 1;
+      changed = true;
+      continue;
+    }
+    kept.push(line);
+  }
+  return changed ? kept.join('\n') : markdown;
+}

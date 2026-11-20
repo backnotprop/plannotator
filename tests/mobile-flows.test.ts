@@ -7,14 +7,13 @@
  *  - a check added or edited without saying where the window does it: every
  *    check line ends with ` (path:line)`, several joined by `; `, or with
  *    `(phone only)`, and a phone-only check says `phone differs:`;
- *  - a cited file moved or deleted, so the citation points at nothing.
  *
- * Only the file is checked, never the line: line numbers are a reader's
- * guide, and a window change that moves lines must never fail here. Reads
- * the flow files as text; no React, no server.
+ * Whether each cited file still exists is scripts/mobile/check.ts's (the
+ * mobile-contract workflow): a window change can move a file, and that must
+ * never fail an Inbox pull request. Reads the flow files as text only.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FLOW_FILES } from '../scripts/mobile/flows';
 
@@ -39,19 +38,6 @@ describe('the flow checks', () => {
     const bad = all
       .filter(({ text }) => !(CITED.test(text) || (text.endsWith('(phone only)') && text.includes('phone differs:'))))
       .map(({ file, id }) => `${file} [${id}]: end it with (path:line), or say "phone differs:" and end with (phone only)`);
-    expect(bad).toEqual([]);
-  });
-
-  test('every cited file exists', () => {
-    const bad: string[] = [];
-    for (const { file, id, text } of checks()) {
-      const cited = CITED.exec(text);
-      if (!cited) continue;
-      for (const ref of cited[1]!.split('; ')) {
-        const path = ref.slice(0, ref.lastIndexOf(':'));
-        if (!existsSync(join(ROOT, path))) bad.push(`${file} [${id}]: ${path} does not exist; cite where the window does it now`);
-      }
-    }
     expect(bad).toEqual([]);
   });
 });

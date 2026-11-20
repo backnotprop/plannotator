@@ -598,3 +598,39 @@ test("a cache validator: the ETag is the SHA-256 of the bytes served, If-None-Ma
   expect(changed.headers.get("etag")).not.toBe(etag);
   expect(new Uint8Array(await changed.arrayBuffer())).toEqual(gif());
 });
+
+test("a sound or a video the message shows serves by Range from the same route and rules; a picture still serves; what was refused stays refused", async () => {
+  const { root, project, dataDir } = world();
+  const wav = new Uint8Array(44);
+  wav.set(new TextEncoder().encode("RIFF"), 0);
+  wav.set(new TextEncoder().encode("WAVEfmt "), 8);
+  wav.set(new TextEncoder().encode("data"), 36);
+  writeFileSync(join(project, ".walkthrough", "voice.wav"), wav);
+  writeFileSync(join(project, ".walkthrough", "fake.mp4"), "not a film");
+  writeFileSync(join(root, ".secrets", "call.wav"), wav);
+  const server = await start(dataDir);
+  const body = "![voice](.walkthrough/voice.wav) ![fake](.walkthrough/fake.mp4) ![hidden](../.secrets/call.wav) ![after](.walkthrough/shots/after.png)";
+  const sent = await send(await agent(server), { project_path: project, body });
+  expect(sent.images_not_shown).toBeUndefined();
+  const id = sent.message_id as string;
+
+  const whole = await image(server, id, ".walkthrough/voice.wav", { "Sec-Fetch-Site": "same-origin" });
+  expect(whole.status).toBe(200);
+  expect(whole.headers.get("content-type")).toBe("audio/wav");
+  expect(whole.headers.get("accept-ranges")).toBe("bytes");
+  expectGuardHeaders(whole);
+  expect(new Uint8Array(await whole.arrayBuffer())).toEqual(wav);
+  const part = await image(server, id, ".walkthrough/voice.wav", { Range: "bytes=8-11" });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe("bytes 8-11/44");
+  expect(new TextDecoder().decode(await part.arrayBuffer())).toBe("WAVE");
+
+  expect((await image(server, id, ".walkthrough/shots/after.png")).headers.get("content-type")).toBe("image/png");
+  expect((await image(server, id, ".walkthrough/fake.mp4")).status).toBe(415);
+  const hidden = await image(server, id, "../.secrets/call.wav");
+  expect(hidden.status).toBe(403);
+  expect(((await hidden.json()) as { code: string }).code).toBe("image_hidden");
+  writeFileSync(join(project, "other.wav"), wav);
+  expect((await image(server, id, "other.wav")).status).toBe(403);
+  expect((await image(server, id, ".walkthrough/voice.wav", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+});
