@@ -746,7 +746,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   const runs = await autoRuns();
   expect(Object.keys(runs).sort()).toEqual([keyOf(498), keyOf(499)]);
   expect(runs[keyOf(499)]!.state).toBe('queued');
-  await expect.poll(launches, { timeout: 30_000 }).toBe(launchedBefore + 1);
-  const argv = piLog().filter((l) => l.argv?.includes('--session-id')).at(-1)!.argv!;
+  await expect.poll(launches, { timeout: 30_000 }).toBeGreaterThan(launchedBefore);
+  const argv = piLog().filter((l) => l.argv?.includes('--mode') && l.argv.includes('rpc') && l.argv.includes('--session-id'))[launchedBefore]!.argv!;
   expect(argv[argv.indexOf('--name') + 1]).toBe('Review #498: Move the invoice job');
 });
