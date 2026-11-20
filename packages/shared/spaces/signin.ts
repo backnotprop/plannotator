@@ -125,6 +125,9 @@ async function spacesAccountName(host: string, token: string, doFetch: typeof fe
 const DONE_PAGE = (words: string) =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plannotator</title><style>html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.5 system-ui,sans-serif}</style></head><body><p>${words}</p></body></html>`;
 
+/** How long the end of a sign-in waits for its page to be written before it ends anyway. */
+const AFTER_WRITE_MS = 2000;
+
 export interface SpacesSignIn {
   /** The page to open in the browser. */
   url: string;
@@ -145,7 +148,20 @@ export async function startSpacesSignIn(options: { host: string; fetch?: typeof 
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const answer = (status: number, words: string, after?: () => void) => {
       res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", Connection: "close" });
-      res.end(DONE_PAGE(words), after);
+      // The sign-in ends once the page is written, or soon after in any case: a browser that dropped the connection
+      // first may never let the write finish, and the panel must not wait the whole 10 minutes for it.
+      let ran = false;
+      const once = after
+        ? () => {
+            if (ran) return;
+            ran = true;
+            clearTimeout(fallback);
+            after();
+          }
+        : undefined;
+      const fallback = once ? setTimeout(once, AFTER_WRITE_MS) : undefined;
+      (fallback as { unref?: () => void } | undefined)?.unref?.();
+      res.end(DONE_PAGE(words), once);
     };
     if (req.method !== "GET" || url.pathname !== "/callback" || used || url.searchParams.get("state") !== pkce.state) return answer(404, "Not found.");
     used = true;

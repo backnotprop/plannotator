@@ -395,6 +395,48 @@ describe("Keep this space", () => {
     expect(s.spaces.exchanges).toHaveLength(0);
   });
 
+  test("a sign-in that comes back while a claim is already going: its approval outcome is still kept", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let hold = false;
+    const pages: string[] = [];
+    const via: { fetch: typeof fetch | null } = { fetch: null };
+    const s = setup({
+      jobs: {
+        // The browser is left on the sign-in page; the test presses Allow itself, later.
+        openBrowser: async (url) => {
+          pages.push(url);
+          return "opened";
+        },
+        // A claim made while `hold` is on waits until it is released.
+        fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+          const request = input instanceof Request ? input : new Request(String(input), init);
+          if (hold && request.method === "POST" && new URL(request.url).pathname.endsWith("/claim")) await held;
+          return via.fetch!(request);
+        }) as typeof fetch,
+      },
+    });
+    via.fetch = s.spaces.fetch;
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(await s.jobs.keep(id)).toMatchObject({ keep: "waiting" });
+    // Signed in meanwhile from elsewhere: Keep again claims at once, and that claim is slow.
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    hold = true;
+    void s.jobs.keep(id);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(s.jobs.claiming(id)).not.toBeNull();
+    // Allow is pressed on the first page now: the page records the approval, and the sign-in joins the claim going.
+    const login = await s.spaces.fetch(pages[0]!, { redirect: "manual" });
+    expect(new URL(login.headers.get("location")!).searchParams.get("approval")).toBe("recorded");
+    await fetch(login.headers.get("location")!);
+    release();
+    await s.settle();
+    expect(s.record().keep_approval).toMatchObject({ outcome: "recorded", document_id: s.world.main, version_number: 4 });
+    expect(s.record().approval).toEqual({ document_id: s.world.main, version_number: 4 });
+  });
+
   test("someone else kept it first: the claim on the sign-in page is lost, no token comes, and the panel is told", async () => {
     const s = setup();
     s.jobs.share(s.world.plan, {});

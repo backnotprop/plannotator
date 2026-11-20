@@ -182,6 +182,34 @@ describe("the connect page", () => {
   });
 });
 
+describe("a forged way back", () => {
+  test("a wrong state or none, with a Cancel, a lost claim or an approval, changes nothing; the real way back still works", async () => {
+    const spaces = createFakeSpaces({ origin: HOST });
+    const { space, doc, version } = await sharedSpace(spaces);
+    const signIn = await startSpacesSignIn({ host: HOST, fetch: spaces.fetch, keep: { space, approve: { document: doc, version } } });
+    open.push(signIn);
+    const redirect = new URL(signIn.url).searchParams.get("redirect_uri")!;
+    let ended = false;
+    void signIn.done.then(() => (ended = true));
+    for (const state of ["not-the-state", null]) {
+      for (const forged of [{ error: "claim_conflict" }, { error: "access_denied" }, { code: "forged", approval: "recorded" }]) {
+        const back = new URL(redirect);
+        for (const [key, value] of Object.entries(forged)) back.searchParams.set(key, value);
+        if (state) back.searchParams.set("state", state);
+        expect((await fetch(back)).status).toBe(404);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ended).toBe(false);
+    expect(spaces.exchanges).toHaveLength(0);
+    // The real one, after: signed in, with the approval the page recorded.
+    const login = await spaces.fetch(signIn.url, { redirect: "manual" });
+    expect((await fetch(login.headers.get("location")!)).status).toBe(200);
+    expect(await signIn.done).toMatchObject({ kind: "signed_in", approval: "recorded" });
+    expect(spaces.exchanges).toHaveLength(1);
+  });
+});
+
 describe("the stand-in's connect page answers as the service does", () => {
   test("a tool name it does not know is a 400; with no tool name a Cancel sends nothing back", async () => {
     const spaces = createFakeSpaces({ origin: HOST, consent: "cancel" });

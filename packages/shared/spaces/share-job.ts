@@ -316,6 +316,19 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     saveSpaceShareRecord(options.dataDir, id, record);
   }
 
+  /**
+   * A sign-in that came back while a claim was already going: its approval outcome is still kept. Written once nothing
+   * else is writing the record (the claim, and the run it started, are let finish rather than stopped).
+   */
+  async function keepApprovalAfter(id: string, approval: KeepApproval): Promise<void> {
+    const live = liveOf(id);
+    while (live.claiming || live.running) await (live.claiming ?? live.running);
+    const record = readSpaceShareRecord(options.dataDir, id);
+    if (!record || !record.created) return;
+    noteKeepApproval(record, approval);
+    saveSpaceShareRecord(options.dataDir, id, record);
+  }
+
   /** The sign-in page's claim lost (no token came): someone else kept the space first, as a refused claim says. */
   async function lostClaim(id: string, spaceId: string): Promise<void> {
     await stopRun(liveOf(id));
@@ -328,7 +341,11 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
   /** One claim per plan at a time (a second Keep joins the first), then what waits is sent. */
   async function claimAndGoOn(id: string, approval: KeepApproval | null = null): Promise<void> {
     const live = liveOf(id);
-    if (live.claiming) return live.claiming;
+    if (live.claiming) {
+      await live.claiming;
+      if (approval) await keepApprovalAfter(id, approval);
+      return;
+    }
     const mine = claim(id, approval);
     live.claiming = mine;
     try {
