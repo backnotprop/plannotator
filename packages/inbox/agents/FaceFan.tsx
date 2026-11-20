@@ -103,8 +103,9 @@ const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(pref
 
 export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
   const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : face;
-  // Measured once as it opens: the mark's box and the room the fan keeps inside, the window, or the list's pane for a
-  // mark in the list (the Agents view's faces: the fan never spills over the sidebar). Nothing is read while the pointer moves.
+  // Measured once as it opens: the mark's box and the room the choices keep inside, the window, or the list's pane for
+  // a mark in the list (the Agents view's faces: no choice over the sidebar). Nothing is read while the pointer moves.
+  // Nothing clips the fan or anything above its plate (agents.css: a clip, a filter or a mask there stops the blur).
   const [place, setPlace] = useState<{ rect: DOMRect; w: number; h: number; room: { left: number; top: number; width: number; height: number } } | null>(null);
   useLayoutEffect(() => {
     if (!open) return;
@@ -126,13 +127,6 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
     () => (place ? fanArcs(place.rect.left + place.rect.width / 2 - place.room.left, place.rect.top + place.rect.height / 2 - place.room.top, place.room.width, place.room.height, touch, own, project, grow) : null),
     [place, touch, own, project, grow],
   );
-  // The plate is cut where the room ends, as the window's edge cuts the sidebar's: the fan's box is the mark's centre.
-  const clip = place
-    ? (() => {
-        const cx = place.rect.left + place.rect.width / 2, cy = place.rect.top + place.rect.height / 2, r = place.room;
-        return `inset(${-(cy - r.top)}px ${-(r.left + r.width - cx)}px ${-(r.top + r.height - cy)}px ${-(cx - r.left)}px)`;
-      })()
-    : undefined;
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
@@ -290,7 +284,6 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
         >
           <Popover.Popup
             className="am-fan"
-            style={clip ? { clipPath: clip } : undefined}
             data-still={still ? '' : undefined}
             data-opening={opening ? '' : undefined}
             data-touch={touch ? '' : undefined}

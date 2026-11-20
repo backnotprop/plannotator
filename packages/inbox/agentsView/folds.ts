@@ -70,19 +70,23 @@ export function foldOpen(folds: Folds, key: string, byDefault: boolean, waitsSin
   return choice.open || waitsSince > choice.at;
 }
 
-/** The choices with `key` set `open`, kept as the newest choice, made at `now`. */
-function foldSet(folds: Folds, key: string, open: boolean, now: number): Map<string, FoldChoice> {
+/**
+ * The choices with `key` set `open`, kept as the newest choice, made at `now`, or at its newest waiting row if that is
+ * later (the server's clock, or a row that came just before the click): rounded up to the second the cookie keeps,
+ * so a fold always holds against the rows it was made over.
+ */
+function foldSet(folds: Folds, key: string, open: boolean, now: number, waitsSince = 0): Map<string, FoldChoice> {
   const next = new Map(folds);
   const name = nameOf(key);
   next.delete(name);
-  next.set(name, { open, at: now });
+  next.set(name, { open, at: Math.ceil(Math.max(now, waitsSince) / 1000) * 1000 });
   while (next.size > AGENT_FOLDS_KEPT) next.delete(next.keys().next().value!);
   return next;
 }
 
 /** The choices after a click on `key`'s row: the other state, kept as the newest choice. */
 export function foldToggled(folds: Folds, key: string, byDefault: boolean, waitsSince = 0, now = Date.now()): Map<string, FoldChoice> {
-  return foldSet(folds, key, !foldOpen(folds, key, byDefault, waitsSince), now);
+  return foldSet(folds, key, !foldOpen(folds, key, byDefault, waitsSince), now, waitsSince);
 }
 
 const listeners = new Set<() => void>();

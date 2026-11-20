@@ -72,9 +72,9 @@ function keepSessions(layout: AgentsLayout, kept: Map<string, readonly string[]>
   return { ...layout, live: layout.live.map(keep), ended: layout.ended.map(keep) };
 }
 
-/** What the rows looked like before a Show: each row's time of its latest agent message. */
+/** What the rows looked like before a Show: each row's time of its latest agent message, No agent's rows included. */
 const timesOf = (layout: AgentsLayout | null) =>
-  new Map((layout ? [...layout.live, ...layout.ended].flatMap((b) => b.rows) : []).map(({ row }) => [row.thread_id, row.last_agent_at ?? row.last_at]));
+  new Map((layout ? [...[...layout.live, ...layout.ended].flatMap((b) => b.rows), ...layout.none] : []).map(({ row }) => [row.thread_id, row.last_agent_at ?? row.last_at]));
 
 export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn }: AgentsListProps) {
   const groups = useInboxAgents();
@@ -102,9 +102,11 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
   useLayoutEffect(() => {
     const s = seen.current;
     if (shows !== s.shows) {
+      // A Show sorts the list whole in the same render (App.tsx settleList); one that did not has nothing to open,
+      // and never waits for a later, unrelated sort.
       s.shows = shows;
-      s.before = timesOf(s.layout);
       s.epoch = s.layout?.places.epoch ?? layout.places.epoch;
+      s.before = layout.places.epoch !== s.epoch ? timesOf(s.layout) : null;
     }
     if (s.before && layout.places.epoch !== s.epoch) {
       const before = s.before;
@@ -192,7 +194,6 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
           last={block.last}
           marks={open ? null : agentMarks(rows)}
           count={rows.length}
-          anyRow={rows[0]!.row}
           phone={phone}
           onToggle={onToggle}
         />

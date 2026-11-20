@@ -7,7 +7,6 @@
  * never the other agents' (40 of them, each with a moving face).
  */
 import { memo } from 'react';
-import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount, shortTime } from '../format';
 import { AgentMark, type AgentMarkPicks } from '../agents/AgentMark';
 import { ActionBadge, QuestionMark, rowMarks, type RowMarks, type WaitStep } from '../components/RowBadge';
@@ -61,13 +60,11 @@ export interface AgentHeadProps {
   /** Folded: the marks added up (`agentMarks`), else how many threads. */
   marks: RowMarks | null;
   count: number;
-  /** Any of its rows: the marks' component takes one (its own words are the summed marks; no row's card). */
-  anyRow: InboxListRow;
   phone: boolean;
   onToggle: (key: string) => void;
 }
 
-function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, marks, count, anyRow, phone, onToggle }: AgentHeadProps) {
+function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, marks, count, phone, onToggle }: AgentHeadProps) {
   const state = agentStateWords(agent);
   return (
     <div className="ib-agh">
@@ -101,10 +98,10 @@ function AgentHeadView({ agentKey, agent, project, machine, picks, open, last, m
           </span>
           {!open &&
             (marks ? (
-              // The summed marks with their own words as the tooltip: a folded agent has no one thread's card.
+              // The summed marks with their own words as the tooltip: no row, so no one thread's details or card.
               <span className="ib-agh-marks">
-                <ActionBadge row={anyRow} marks={marks} tip={!phone} />
-                <QuestionMark row={anyRow} marks={marks} tip={!phone} />
+                <ActionBadge marks={marks} tip={!phone} />
+                <QuestionMark marks={marks} tip={!phone} />
               </span>
             ) : (
               <span className="ib-agh-c" data-agent-threads={count}>
@@ -136,7 +133,6 @@ export const AgentHead = memo(
     a.last === b.last &&
     sameMarks(a.marks, b.marks) &&
     a.count === b.count &&
-    (a.open || a.anyRow.thread_id === b.anyRow.thread_id) &&
     a.phone === b.phone &&
     a.onToggle === b.onToggle,
 );

@@ -52,7 +52,10 @@
 .pn-inbox .ib-rw[data-menu] > .ib-lrow:not(.ib-sel) { background: var(--ib-hover); }
 .pn-inbox .ib-lrow[data-away] > * { opacity: 0.55; }
 /* The thread's other agents give way before the title is cut to a few letters. */
-.pn-inbox .ib-lrow > .ib-atiles { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* With no room, a tile goes whole, never cut: the tiles wrap onto a second line that is never shown (the empty first
+   item lets the first tile wrap too). */
+.pn-inbox .ib-lrow > .ib-atiles { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; overflow: hidden; }
+.pn-inbox .ib-lrow > .ib-atiles::before { content: ''; width: 0; height: 20px; }
 .pn-inbox .ib-lrow .ib-lend { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .pn-inbox .ib-lrow .ib-lend:empty { display: none; }
 .pn-inbox .ib-lrow .ib-badge { height: 20px; }

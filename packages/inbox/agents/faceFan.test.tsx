@@ -425,7 +425,28 @@ test.skipIf(!hasDom)("a face in the list keeps its fan inside the list's pane: t
     expect(s.x).toBeLessThanOrEqual(620 - pad);
     expect(s.y).toBeGreaterThanOrEqual(pad);
   }
-  // No choice on the face itself, and the plate is cut at the pane's edges (its box sits on the face's centre).
+  // No choice on the face itself.
   for (const s of spots) expect(Math.hypot(s.x - 280, s.y - 94)).toBeGreaterThan(22 + FAN_OPTIONS.item / 2);
-  expect(document.querySelector<HTMLElement>('.am-fan')!.style.clipPath).toBe('inset(-94px -340px -674px -40px)');
+  expectNothingStopsTheBlur();
+});
+
+/** Nothing from the fan up is clipped, filtered or masked: any of them would leave the plate's blur nothing to blur. */
+function expectNothingStopsTheBlur() {
+  const plate = document.querySelector<HTMLElement>('.am-fan-plate');
+  expect(plate).not.toBeNull();
+  for (let el: HTMLElement | null = document.querySelector<HTMLElement>('.am-fan'); el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    for (const prop of ['clip-path', 'filter', 'mask', 'mask-image', '-webkit-mask-image']) {
+      const value = el.style.getPropertyValue(prop) || style.getPropertyValue(prop);
+      expect(value === '' || value === 'none' ? '' : `${el.className} ${prop}: ${value}`).toBe('');
+    }
+  }
+}
+
+test.skipIf(!hasDom)("the sidebar's fan: nothing above its plate is clipped, filtered or masked while it shows", async () => {
+  const icon = mount();
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the mark to open its picker');
+  expectNothingStopsTheBlur();
 });

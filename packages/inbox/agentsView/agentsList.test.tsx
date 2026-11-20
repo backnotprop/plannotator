@@ -272,16 +272,33 @@ describe.skipIf(!hasDom)('a fold gives way to new work', () => {
   const withRow = (extra: InboxListRow, group: 'waiting' | 'quiet') =>
     sections(Object.fromEntries(LIST.map((s) => [s.id, s.id === group ? [extra, ...s.threads] : s.threads])));
 
-  test('Show opens the agents its rows land under, and they are on screen', () => {
-    let shown = 0;
-    const el = render({ notice: { count: 1 }, onShowNew: () => void (shown += 1) });
-    expect(rowsOf(el, 'Docs pass')).toEqual([]);
+  const fresh = () => row('docs-new', 59, 'quiet', 'ses_docs', { last_agent_at: SOON(), last_at: SOON() } as Partial<InboxListRow>);
+  const noneBand = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-section-id="agents-none"] button.ib-band')!;
+  // Show as the window does it: the list sorted whole in the same render as the press (App.tsx settleList).
+  const showWith = (next: InboxListSection[]) => {
+    const el = render({ notice: { count: 1 }, onShowNew: () => void render({ sections: next, epoch: 2, notice: null }) });
     act(() => el.querySelector<HTMLButtonElement>('[data-inbox-notice]')!.click());
-    expect(shown).toBe(1);
-    const fresh = row('docs-new', 59, 'quiet', 'ses_docs', { last_agent_at: SOON(), last_at: SOON() } as Partial<InboxListRow>);
-    render({ sections: withRow(fresh, 'quiet'), epoch: 2, notice: null });
+    return el;
+  };
+
+  test('Show opens the agents its rows land under, and they are on screen; a folded No agent band it brings nothing to stays folded', () => {
+    const el = render();
+    expect(rowsOf(el, 'Docs pass')).toEqual([]);
+    expect(noneBand(el).getAttribute('aria-expanded')).toBe('false');
+    showWith(withRow(fresh(), 'quiet'));
     expect(head(el, 'Docs pass').getAttribute('aria-expanded')).toBe('true');
     expect(rowsOf(el, 'Docs pass')).toContain('docs-new');
+    // No agent's thread was there before the Show: its band stays folded, and no choice is kept for it.
+    expect(noneBand(el).getAttribute('aria-expanded')).toBe('false');
+    expect(stored.get(AGENT_FOLDS_COOKIE) ?? '').not.toContain('~none');
+  });
+
+  test('a Show that sorted nothing opens nothing at a later, unrelated sort', () => {
+    const el = render({ notice: { count: 1 } });
+    act(() => el.querySelector<HTMLButtonElement>('[data-inbox-notice]')!.click());
+    // Later the list is sorted whole for another reason (a thread closed), with a new thread under Docs pass.
+    render({ sections: withRow(fresh(), 'quiet'), epoch: 2, notice: null });
+    expect(head(el, 'Docs pass').getAttribute('aria-expanded')).toBe('false');
   });
 
   test('a folded agent opens again when a thread that waits on the person comes after the fold; an older one does not', () => {
@@ -296,6 +313,15 @@ describe.skipIf(!hasDom)('a fold gives way to new work', () => {
     render({ sections: withRow(asks, 'waiting') });
     expect(head(el, 'Ops').getAttribute('aria-expanded')).toBe('true');
     expect(rowsOf(el, 'Ops')).toContain('ops-asks');
+  });
+
+  test('a fold made over a waiting row a moment ahead of this clock holds', () => {
+    const ahead = row('ops-ahead', 56, 'waiting', 'ses_ops', { last_agent_at: SOON(), last_at: SOON() } as Partial<InboxListRow>);
+    const el = render({ sections: withRow(ahead, 'waiting') });
+    act(() => head(el, 'Ops').click());
+    expect(head(el, 'Ops').getAttribute('aria-expanded')).toBe('false');
+    render({ sections: withRow(ahead, 'waiting') });
+    expect(head(el, 'Ops').getAttribute('aria-expanded')).toBe('false');
   });
 });
 

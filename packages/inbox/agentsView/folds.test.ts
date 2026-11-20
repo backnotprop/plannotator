@@ -52,6 +52,17 @@ describe('folds', () => {
     expect(foldOpen(again, 'a', true, at + 60_000)).toBe(false);
   });
 
+  test("a fold holds against the rows it was made over: one a moment newer than the browser's clock, and part of a second", () => {
+    const at = Date.parse('2026-11-19T10:00:00.400Z');
+    // The newest waiting row 3.7 s ahead of this browser's clock (the server's), folded now: it stays folded.
+    const ahead = parseAgentFolds(formatAgentFolds(foldToggled(parseAgentFolds(null), 'a', true, at + 3_700, at)));
+    expect(foldOpen(ahead, 'a', true, at + 3_700)).toBe(false);
+    // A row from earlier in the same second as the click, read back from the cookie's whole seconds: still folded.
+    const same = parseAgentFolds(formatAgentFolds(foldToggled(parseAgentFolds(null), 'a', true, at - 100, at)));
+    expect(foldOpen(same, 'a', true, at - 100)).toBe(false);
+    expect(foldOpen(same, 'a', true, at + 60_000)).toBe(true);
+  });
+
   test("this machine's agents keep their key when a first machine is linked; another machine's agent has its own", () => {
     expect(agentFoldKey({ id: 'ses_a', machine: null }, null)).toBe(agentFoldKey({ id: 'ses_a', machine: 'ibx_self' }, 'ibx_self'));
     expect(agentFoldKey({ id: 'ses_a', machine: 'ibx_mini' }, 'ibx_self')).not.toBe(agentFoldKey({ id: 'ses_a', machine: null }, 'ibx_self'));
