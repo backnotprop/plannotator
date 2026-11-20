@@ -6,11 +6,14 @@
  *   the login page got), so every sign-in ends "Sign-in did not finish";
  * - a code is traded twice (the service spends it on the first try, so a second load of the page or a retry fails);
  * - an account with no name, or a name that cannot be read, fails a sign-in that worked;
- * - the token leaks into a URL, or the exchange carries an Origin, a cookie or an Authorization header.
+ * - the token leaks into a URL, or the exchange carries an Origin, a cookie or an Authorization header;
+ * - the connect page is not told who asks (`client_name`, without which the space never sends a Cancel back), which
+ *   space it keeps, or which approval goes with it; or the way back is misread: a Cancel taken for a failure, a claim
+ *   someone else won taken for a sign-in, an approval outcome lost or made up.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createFakeSpaces } from "../../../tests/helpers/fake-spaces";
-import { startSpacesSignIn, type SpacesSignIn } from "./signin";
+import { startSpacesSignIn, type SpacesKeepAsk, type SpacesSignIn } from "./signin";
 
 const HOST = "http://127.0.0.1:1";
 const open: SpacesSignIn[] = [];
@@ -18,14 +21,23 @@ afterEach(() => {
   for (const signIn of open.splice(0)) signIn.cancel();
 });
 
-async function signInWith(spaces: ReturnType<typeof createFakeSpaces>, doFetch: typeof fetch = spaces.fetch) {
-  const signIn = await startSpacesSignIn({ host: HOST, fetch: doFetch });
+async function signInWith(spaces: ReturnType<typeof createFakeSpaces>, doFetch: typeof fetch = spaces.fetch, keep?: SpacesKeepAsk) {
+  const signIn = await startSpacesSignIn({ host: HOST, fetch: doFetch, keep });
   open.push(signIn);
   // The "browser": the login page sends it back to this computer's listener.
   const login = await spaces.fetch(signIn.url, { redirect: "manual" });
   const back = login.headers.get("location");
-  const landed = back ? await fetch(back) : null;
-  return { signIn, login, back, landed, credential: await signIn.done };
+  const landed = back?.includes("/callback") ? await fetch(back) : null;
+  if (!landed) signIn.cancel();
+  const result = await signIn.done;
+  return { signIn, login, back, landed, result, credential: result.kind === "signed_in" ? result.credential : null };
+}
+
+/** A space with one page, made with no account, as a share leaves it: its id, the page's id and version. */
+async function sharedSpace(spaces: ReturnType<typeof createFakeSpaces>) {
+  const made = await spaces.fetch(`${HOST}/v1/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "ws_01JZ0000000000000000000001", name: "Plan", document: { path: "plan.md", body: "# Plan\n" } }) });
+  const body = (await made.json()) as { workspace: { id: string }; document: { id: string; version: string } };
+  return { space: body.workspace.id, doc: body.document.id, version: body.document.version };
 }
 
 describe("the sign-in", () => {
@@ -92,5 +104,94 @@ describe("the sign-in", () => {
     const offline = createFakeSpaces({ origin: HOST });
     offline.failNext(/^GET \/v1\/me$/, 0, "offline");
     expect((await signInWith(offline)).credential).toMatchObject({ name: null, token: expect.stringMatching(/^wscli_live_/) });
+  });
+});
+
+describe("the connect page", () => {
+  test("always names the tool; names the space and the approval only when asked, and an approval only with its space", async () => {
+    const spaces = createFakeSpaces({ origin: HOST });
+    const plain = new URL((await signInWith(spaces)).signIn.url);
+    expect(plain.searchParams.get("client_name")).toBe("Plannotator");
+    expect(["space", "approve_document", "approve_version"].filter((k) => plain.searchParams.has(k))).toEqual([]);
+
+    const { space, doc, version } = await sharedSpace(spaces);
+    const kept = new URL((await signInWith(spaces, spaces.fetch, { space, approve: { document: doc, version } })).signIn.url);
+    expect([kept.searchParams.get("client_name"), kept.searchParams.get("space"), kept.searchParams.get("approve_document"), kept.searchParams.get("approve_version")]).toEqual(["Plannotator", space, doc, version]);
+
+    const loose = new URL((await signInWith(spaces, spaces.fetch, { approve: { document: doc, version } })).signIn.url);
+    expect(["space", "approve_document", "approve_version"].filter((k) => loose.searchParams.has(k))).toEqual([]);
+  });
+
+  test("Cancel on the page: cancelled, quietly, with nothing traded", async () => {
+    const spaces = createFakeSpaces({ origin: HOST, consent: "cancel" });
+    const { back, landed, result } = await signInWith(spaces);
+    expect(new URL(back!).searchParams.get("error")).toBe("access_denied");
+    expect(landed!.status).toBe(200);
+    expect(result).toEqual({ kind: "cancelled" });
+    expect(spaces.exchanges).toHaveLength(0);
+  });
+
+  test("a space someone else kept first: the claim is lost, no token and nothing traded", async () => {
+    const spaces = createFakeSpaces({ origin: HOST });
+    const { space, doc, version } = await sharedSpace(spaces);
+    spaces.keptBy(space, "Someone Else");
+    const { back, result } = await signInWith(spaces, spaces.fetch, { space, approve: { document: doc, version } });
+    expect(new URL(back!).searchParams.has("code")).toBe(false);
+    expect(result).toEqual({ kind: "claim_conflict" });
+    expect(spaces.exchanges).toHaveLength(0);
+    expect(spaces.spaces.get(space)!.owner).toBe("Someone Else");
+    expect(spaces.spaces.get(space)!.approvals).toHaveLength(0);
+  });
+
+  test("a named space is claimed on the page, and the approval's outcome comes back: recorded, moved, or none", async () => {
+    const spaces = createFakeSpaces({ origin: HOST });
+    const { space, doc, version } = await sharedSpace(spaces);
+    const recorded = await signInWith(spaces, spaces.fetch, { space, approve: { document: doc, version } });
+    expect(recorded.result).toMatchObject({ kind: "signed_in", approval: "recorded", credential: { name: "Maya Chen" } });
+    expect(spaces.spaces.get(space)!.owner).toBe("Maya Chen");
+    expect(spaces.spaces.get(space)!.approvals).toEqual([{ document_id: doc, version, by: "Maya Chen" }]);
+
+    // The page moved on there since: the approval is not recorded.
+    spaces.editPage(space, "plan.md", "# Plan\n\nEdited there.\n");
+    const moved = await signInWith(spaces, spaces.fetch, { space, approve: { document: doc, version } });
+    expect(moved.result).toMatchObject({ kind: "signed_in", approval: "moved" });
+    expect(spaces.spaces.get(space)!.approvals).toHaveLength(1);
+
+    // No approval asked: there is no outcome to keep, and the space says none.
+    const unasked = await signInWith(spaces, spaces.fetch, { space });
+    expect(new URL(unasked.back!).searchParams.has("approval")).toBe(false);
+    expect(unasked.result).toMatchObject({ kind: "signed_in", approval: null });
+  });
+
+  test("an approval asked and the way back silent on it reads as none", async () => {
+    const spaces = createFakeSpaces({ origin: HOST });
+    const { space, doc, version } = await sharedSpace(spaces);
+    const silent: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const answer = await spaces.fetch(input, init);
+      const location = answer.headers.get("location");
+      if (!location) return answer;
+      const back = new URL(location);
+      back.searchParams.delete("approval");
+      return new Response(null, { status: answer.status, headers: { Location: back.toString() } });
+    }) as typeof fetch;
+    const signIn = await startSpacesSignIn({ host: HOST, fetch: spaces.fetch, keep: { space, approve: { document: doc, version } } });
+    open.push(signIn);
+    const login = await silent(signIn.url, { redirect: "manual" });
+    await fetch(login.headers.get("location")!);
+    expect(await signIn.done).toMatchObject({ kind: "signed_in", approval: "none" });
+  });
+});
+
+describe("the stand-in's connect page answers as the service does", () => {
+  test("a tool name it does not know is a 400; with no tool name a Cancel sends nothing back", async () => {
+    const spaces = createFakeSpaces({ origin: HOST, consent: "cancel" });
+    const signIn = await startSpacesSignIn({ host: HOST, fetch: spaces.fetch });
+    open.push(signIn);
+    const named = new URL(signIn.url);
+    named.searchParams.set("client_name", "Not A Tool");
+    expect((await spaces.fetch(named.toString(), { redirect: "manual" })).status).toBe(400);
+    named.searchParams.delete("client_name");
+    const unnamed = await spaces.fetch(named.toString(), { redirect: "manual" });
+    expect(unnamed.headers.get("location")).toBe(`${HOST}/`);
   });
 });

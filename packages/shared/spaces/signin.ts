@@ -8,6 +8,12 @@
  *
  * The token is returned to the caller, which keeps it (credential.ts). It is never logged and never in a URL: the
  * login URL carries the challenge, never the verifier or a token.
+ *
+ * The page is the space's "connect a tool" page: `client_name` always (the space answers the person's Cancel only
+ * when it was sent), `space` when the sign-in keeps a known space (the claim is made on that page), and
+ * `approve_document` + `approve_version` when the person's approval goes with it. The way back says which: a `code`
+ * (with `approval=recorded|moved|none` when an approval was asked; absent is none), `error=access_denied` (Cancel)
+ * or `error=claim_conflict` (someone else kept the space first; no code).
  */
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -26,15 +32,51 @@ export function newSpacesPkce(): SpacesPkce {
   return { verifier, challenge: base64url(createHash("sha256").update(verifier).digest()), state: base64url(randomBytes(24)) };
 }
 
-/** The page the browser opens: the challenge and the way back, nothing secret. */
-export function spacesLoginUrl(host: string, input: { redirectUri: string; state: string; challenge: string }): string {
+/** The name the space shows for this tool on its connect page (it refuses a name it does not know). */
+export const SPACES_CLIENT_NAME = "Plannotator";
+
+/** What the sign-in page is asked besides the sign-in: the space it keeps, and the approval that goes with it. */
+export interface SpacesKeepAsk {
+  /** The hosted space's id: the page claims it for the person. */
+  space?: string | null;
+  /** The hosted page and the version the person approved: the page records the approval with the claim. */
+  approve?: { document: string; version: string } | null;
+}
+
+/** The page the browser opens: the challenge, the way back and what it keeps, nothing secret. */
+export function spacesLoginUrl(host: string, input: { redirectUri: string; state: string; challenge: string } & SpacesKeepAsk): string {
   const url = new URL("/cli/login", host);
   url.searchParams.set("redirect_uri", input.redirectUri);
   url.searchParams.set("state", input.state);
   url.searchParams.set("code_challenge", input.challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("client_name", SPACES_CLIENT_NAME);
+  if (input.space) {
+    url.searchParams.set("space", input.space);
+    // An approval goes only with the space it is in.
+    if (input.approve) {
+      url.searchParams.set("approve_document", input.approve.document);
+      url.searchParams.set("approve_version", input.approve.version);
+    }
+  }
   return url.toString();
 }
+
+/** What the page did with an approval sent along: recorded, the page had moved on (not recorded), or nothing. */
+export type SpacesApprovalOutcome = "recorded" | "moved" | "none";
+
+/**
+ * How a sign-in ended. `signed_in`: the token (and `approval`, only when one was asked). `cancelled`: the person pressed
+ * Cancel on the page. `claim_conflict`: someone else kept the space first; no token. `failed`: the code was refused, the
+ * wait ran out, or it was given up here.
+ */
+export type SpacesSignInResult =
+  | { kind: "signed_in"; credential: SpacesCredential; approval: SpacesApprovalOutcome | null }
+  | { kind: "cancelled" }
+  | { kind: "claim_conflict" }
+  | { kind: "failed" };
+
+const approvalOutcomeOf = (value: string | null): SpacesApprovalOutcome => (value === "recorded" || value === "moved" ? value : "none");
 
 /**
  * Trade the code for the token: one form-encoded `POST /cli/token` with `grant_type`, `code`, the `redirect_uri` that
@@ -86,16 +128,18 @@ const DONE_PAGE = (words: string) =>
 export interface SpacesSignIn {
   /** The page to open in the browser. */
   url: string;
-  /** The credential once the person allowed it; null when cancelled, refused or never finished. */
-  done: Promise<SpacesCredential | null>;
+  /** How it ended: the credential once the person allowed it, else why not. */
+  done: Promise<SpacesSignInResult>;
   cancel(): void;
 }
 
 /** Start the listener and say which page to open. The sign-in ends by itself after `timeoutMs` (10 minutes). */
-export async function startSpacesSignIn(options: { host: string; fetch?: typeof fetch; timeoutMs?: number }): Promise<SpacesSignIn> {
+export async function startSpacesSignIn(options: { host: string; fetch?: typeof fetch; timeoutMs?: number; keep?: SpacesKeepAsk }): Promise<SpacesSignIn> {
   const pkce = newSpacesPkce();
-  let settle: (credential: SpacesCredential | null) => void = () => {};
-  const done = new Promise<SpacesCredential | null>((resolve) => (settle = resolve));
+  const space = options.keep?.space ?? null;
+  const approveAsked = !!space && !!options.keep?.approve;
+  let settle: (result: SpacesSignInResult) => void = () => {};
+  const done = new Promise<SpacesSignInResult>((resolve) => (settle = resolve));
   let used = false;
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -105,10 +149,16 @@ export async function startSpacesSignIn(options: { host: string; fetch?: typeof 
     };
     if (req.method !== "GET" || url.pathname !== "/callback" || used || url.searchParams.get("state") !== pkce.state) return answer(404, "Not found.");
     used = true;
-    const code = url.searchParams.get("code");
+    const error = url.searchParams.get("error");
+    // The person pressed Cancel: back to where it was, nothing to say.
+    if (error === "access_denied") return answer(200, "You can close this tab.", () => finish({ kind: "cancelled" }));
+    // Someone else kept the space first (only a sign-in that named a space can lose a claim).
+    if (error === "claim_conflict" && space) return answer(409, "Sign-in did not finish. You can close this tab.", () => finish({ kind: "claim_conflict" }));
+    const code = error ? null : url.searchParams.get("code");
+    const approval = approveAsked ? approvalOutcomeOf(url.searchParams.get("approval")) : null;
     // Loaded once only (`used`): a second load of the page finds nothing here, and the code is never traded twice.
     void (code ? exchangeSpacesCode(options.host, { code, verifier: pkce.verifier, redirectUri }, options.fetch) : Promise.resolve(null)).then((credential) => {
-      answer(credential ? 200 : 400, credential ? "Signed in. You can close this tab." : "Sign-in did not finish. You can close this tab.", () => finish(credential));
+      answer(credential ? 200 : 400, credential ? "Signed in. You can close this tab." : "Sign-in did not finish. You can close this tab.", () => finish(credential ? { kind: "signed_in", credential, approval } : { kind: "failed" }));
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -120,17 +170,17 @@ export async function startSpacesSignIn(options: { host: string; fetch?: typeof 
   // The one way back, made once: the login page and the exchange get this same string (the space compares them).
   // `127.0.0.1` literally: the space refuses `localhost`.
   const redirectUri = `http://127.0.0.1:${port}/callback`;
-  const timer = setTimeout(() => finish(null), options.timeoutMs ?? 10 * 60_000);
+  const timer = setTimeout(() => finish({ kind: "failed" }), options.timeoutMs ?? 10 * 60_000);
   (timer as { unref?: () => void }).unref?.();
-  function finish(credential: SpacesCredential | null) {
+  function finish(result: SpacesSignInResult) {
     clearTimeout(timer);
     server.close();
     (server as { closeIdleConnections?: () => void }).closeIdleConnections?.();
-    settle(credential);
+    settle(result);
   }
   return {
-    url: spacesLoginUrl(options.host, { redirectUri, state: pkce.state, challenge: pkce.challenge }),
+    url: spacesLoginUrl(options.host, { redirectUri, state: pkce.state, challenge: pkce.challenge, space, approve: approveAsked ? options.keep!.approve : null }),
     done,
-    cancel: () => finish(null),
+    cancel: () => finish({ kind: "failed" }),
   };
 }

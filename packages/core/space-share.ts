@@ -174,6 +174,11 @@ export interface SpaceShareRecord {
   approval: { document_id: string; version_number: number } | null;
   /** The space did not take the approval: not asked again, and not shown. */
   approval_refused: boolean;
+  /**
+   * The approval sent with the last Keep (the space's sign-in page records it with the claim) and what the page did
+   * with it: `recorded`, `moved` (the page had moved on there: not recorded) or `none`. Kept for the panel; not shown yet.
+   */
+  keep_approval?: { outcome: "recorded" | "moved" | "none"; document_id: string; version_number: number; version: string; at: string };
   /** The first share that finished, and the last run that did. */
   shared_at: string | null;
   updated_at: string;
@@ -586,6 +591,21 @@ export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | nul
   }
 
   return { steps, details, changes: changed.size, file_bytes: fileBytes, paths, file_paths: filePaths };
+}
+
+/**
+ * The approval that goes with Keep this space, on the space's sign-in page: the person's approval of the main page's
+ * newest version, when that version is the one the space holds (the last that went up, the page not changed there).
+ * Null when there is none to send, or the space is not known yet (nothing made, or someone else kept it).
+ */
+export function spaceKeepApproval(local: LocalSpace, record: SpaceShareRecord | null): { document_id: string; version_number: number; remote_document: string; remote_version: string } | null {
+  const approval = local.approval;
+  if (!approval || !record || !record.created || record.refused) return null;
+  const page = record.pages[approval.document_id];
+  if (!page || page.lane !== "page" || !page.remote_id || page.stopped) return null;
+  const last = page.pushed[page.pushed.length - 1];
+  if (!last || last.local !== approval.version_number || !last.remote) return null;
+  return { document_id: approval.document_id, version_number: approval.version_number, remote_document: page.remote_id, remote_version: last.remote };
 }
 
 // ─────────────────────────────── What the page is told ───────────────────────────────

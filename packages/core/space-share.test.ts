@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { isPlanAssetPath, planId, type PlanComment } from "./plans";
-import { isSpaceShareRecord, spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
+import { isSpaceShareRecord, spaceCommentAnchor, spaceExternalKey, spaceImportedFields, spaceFilePath, isSpacePath, newSpaceId, newSpaceShareRecord, planSpaceShare, spaceKeepApproval, SPACE_FILE_MAX, SPACE_OPEN_FILES_MAX, SPACE_TEXT_MAX, spaceShareButton, spacePagePath, isSpaceId, type LocalSpace, type SpaceShareStatus } from "./space-share";
 
 const DOC = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ1";
 const DOC2 = "doc_01HZZZZZZZZZZZZZZZZZZZZZZ2";
@@ -162,6 +162,34 @@ describe("the steps", () => {
     expect(planSpaceShare(grown, r, { mode: "all", signedIn: false }).steps).toEqual([{ kind: "page-save", doc: DOC, version: 3 }]);
     r.pages[DOC]!.stopped = { current: hash(7) };
     expect(planSpaceShare(grown, r, { mode: "all", signedIn: false }).steps).toEqual([]);
+  });
+});
+
+describe("the approval Keep sends", () => {
+  test("only the person's approval of the version the space holds, of a space that is up and not someone else's", () => {
+    const approved = local({ approval: { document_id: DOC, version_number: 2 } });
+    const up = () => {
+      const r = record();
+      r.created = true;
+      r.pages[DOC] = { lane: "page", remote_id: "doc_remote", doc_path: "Plan.md", pushed: [{ local: 1, remote: "r1", hash: "h1" }, { local: 2, remote: "r2", hash: "h2" }], stopped: null };
+      return r;
+    };
+    expect(spaceKeepApproval(approved, up())).toEqual({ document_id: DOC, version_number: 2, remote_document: "doc_remote", remote_version: "r2" });
+    expect(spaceKeepApproval(local(), up())).toBeNull();
+    expect(spaceKeepApproval(approved, null)).toBeNull();
+    // The approved version is not the one the space holds (not up yet, or the page changed there).
+    const behind = up();
+    behind.pages[DOC]!.pushed.pop();
+    expect(spaceKeepApproval(approved, behind)).toBeNull();
+    const stopped = up();
+    stopped.pages[DOC]!.stopped = { current: "r9" };
+    expect(spaceKeepApproval(approved, stopped)).toBeNull();
+    const refused = up();
+    refused.refused = true;
+    expect(spaceKeepApproval(approved, refused)).toBeNull();
+    const unmade = up();
+    unmade.created = false;
+    expect(spaceKeepApproval(approved, unmade)).toBeNull();
   });
 });
 

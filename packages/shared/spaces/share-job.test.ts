@@ -5,6 +5,8 @@
  * - the status says the wrong thing (a link before there is one, "shared" while a run is going, changes after
  *   nothing changed), or carries the sign-in token to the page;
  * - Keep does not make the space the person's own, loses the race quietly, or sends the approval before the claim;
+ * - Keep's sign-in page is not told the space and the approval of the version it holds, a Cancel there changes
+ *   anything, a claim lost there is not "someone else kept it", or what the page did with the approval is not kept;
  * - the token lands in a file others can read, in a URL, or stays after the space refused it;
  * - Stop sharing forgets a space that was not deleted, or deletes one nobody kept;
  * - the address resolver takes plain http to another machine, or the switch is on by default.
@@ -187,6 +189,10 @@ describe("started signed in", () => {
     expect(s.opened).toEqual([]);
     await s.jobs.keep(id);
     await s.settle();
+    // Nothing was made yet: the sign-in page is told no space and no approval.
+    const login = new URL(s.opened[0]!);
+    expect(login.searchParams.get("client_name")).toBe("Plannotator");
+    expect(["space", "approve_document", "approve_version"].filter((k) => login.searchParams.has(k))).toEqual([]);
     expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, access: "private" });
     expect([...s.spaces.spaces.values()].map((space) => space.owner)).toEqual(["Maya Chen"]);
   });
@@ -306,8 +312,9 @@ describe("a space that is no longer there", () => {
 });
 
 describe("Keep this space", () => {
-  test("signs in through the browser, keeps the token in a 0600 file, claims the space, then sends the approval", async () => {
-    const s = setup({ spaces: { approvals: "accept" } });
+  test("signs in through the browser, keeps the token in a 0600 file; the page claims the space and records the approval", async () => {
+    // A tool's own approval call is refused: the approval goes only by the sign-in page.
+    const s = setup();
     const id = s.world.plan;
     s.jobs.share(id, {});
     await s.settle();
@@ -334,21 +341,71 @@ describe("Keep this space", () => {
     expect(s.opened.join(" ")).not.toContain(credential.token);
     const space = s.spaces.spaces.get(s.record().space_id)!;
     expect(space.owner).toBe("Maya Chen");
-    // The claim first, the approval after it and last.
-    const order = s.spaces.calls.map((c) => c.path.split("/").pop());
-    expect(order.indexOf("claim")).toBeGreaterThan(-1);
-    expect(order.lastIndexOf("approval")).toBe(order.length - 1);
-    expect(space.approvals).toHaveLength(1);
+    // The page was told the tool, the space, and the person's approval of the version the space holds.
+    const main = s.record().pages[s.world.main]!;
+    const held = main.pushed[main.pushed.length - 1]!.remote;
+    expect([login.searchParams.get("client_name"), login.searchParams.get("space"), login.searchParams.get("approve_document"), login.searchParams.get("approve_version")]).toEqual(["Plannotator", space.id, main.remote_id, held]);
+    expect(space.approvals).toEqual([{ document_id: main.remote_id!, version: held, by: "Maya Chen" }]);
+    // What the page did is kept with the share, and the approval counts as up: no approval call follows.
+    expect(s.record().keep_approval).toMatchObject({ outcome: "recorded", document_id: s.world.main, version_number: 4, version: held });
+    expect(s.record().approval).toEqual({ document_id: s.world.main, version_number: 4 });
+    expect(s.spaces.calls.some((c) => c.path.endsWith("/approval"))).toBe(false);
+    expect(s.record().approval_refused).toBe(false);
   });
 
-  test("someone else kept it first: the claim is refused and the panel is told", async () => {
+  test("the page moved on there since the last push: the approval is not recorded, and the outcome says so", async () => {
+    const s = setup();
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    s.spaces.editPage(s.record().space_id, s.record().pages[s.world.main]!.doc_path, "# Rate limiting\n\nEdited there.\n");
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.record().keep_approval).toMatchObject({ outcome: "moved", document_id: s.world.main, version_number: 4 });
+    expect(s.spaces.spaces.get(s.record().space_id)!.approvals).toEqual([]);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true, signed_in: true });
+  });
+
+  test("a plan not approved: the page is told the space and no approval, and no outcome is kept", async () => {
+    const s = setup({ seed: { approve: false } });
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    await s.jobs.keep(id);
+    await s.settle();
+    const login = new URL(s.opened[0]!);
+    expect(login.searchParams.get("space")).toBe(s.record().space_id);
+    expect(["approve_document", "approve_version"].filter((k) => login.searchParams.has(k))).toEqual([]);
+    expect(s.record().keep_approval).toBeUndefined();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true });
+  });
+
+  test("Cancel on the sign-in page: back to where it was before Keep, with nothing changed and no error", async () => {
+    const s = setup({ spaces: { consent: "cancel" } });
+    const id = s.world.plan;
+    s.jobs.share(id, {});
+    await s.settle();
+    const before = { status: s.jobs.status(id), record: readFileSync(join(s.dataDir, "plan-library", id, "share.json"), "utf8") };
+    await s.jobs.keep(id);
+    await s.settle();
+    expect(s.opened).toHaveLength(1);
+    expect(s.jobs.status(id)).toEqual(before.status!);
+    expect(readFileSync(join(s.dataDir, "plan-library", id, "share.json"), "utf8")).toBe(before.record);
+    expect(existsSync(spacesCredentialPath(s.dataDir))).toBe(false);
+    expect(s.spaces.exchanges).toHaveLength(0);
+  });
+
+  test("someone else kept it first: the claim on the sign-in page is lost, no token comes, and the panel is told", async () => {
     const s = setup();
     s.jobs.share(s.world.plan, {});
     await s.settle();
     s.spaces.keptBy(s.record().space_id, "Someone Else");
     await s.jobs.keep(s.world.plan);
     await s.settle();
-    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "refused", kept: false, signed_in: true });
+    expect(s.jobs.status(s.world.plan)).toMatchObject({ phase: "refused", kept: false, signed_in: false, keep: null });
+    expect(s.record().refused).toBe(true);
+    expect(s.spaces.exchanges).toHaveLength(0);
+    expect(s.spaces.spaces.get(s.record().space_id)!.owner).toBe("Someone Else");
   });
 
   test("a sign-in given up changes nothing; from a remote window there is no browser to come back", async () => {
