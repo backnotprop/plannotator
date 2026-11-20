@@ -178,7 +178,8 @@ describe("started signed in", () => {
     await s.settle();
     expect(s.spaces.calls.length).toBe(calls);
     expect(s.spaces.spaces.size).toBe(0);
-    expect(s.jobs.status(id)).toMatchObject({ phase: "failed", needs_keep: true, access: "private", signed_in: false });
+    // Started signed in: it counts as the person's own, so "Only you" never sits beside "Make it yours".
+    expect(s.jobs.status(id)).toMatchObject({ phase: "failed", needs_keep: true, own: true, access: "private", signed_in: false });
     expect(s.opened).toEqual([]);
     await s.jobs.keep(id);
     await s.settle();
@@ -209,13 +210,35 @@ describe("over the limit", () => {
     const over = s.jobs.status(id)!;
     expect(over).toMatchObject({ phase: "over_limit", limit_own: true, kept: true });
     expect(over.link).not.toBeNull();
+    // Try again sends once and, still over, lands on the same state: one call, no loop, nothing by itself.
     const calls = s.spaces.calls.length;
     s.jobs.share(id, {});
     await s.settle();
-    expect(s.spaces.calls.length).toBe(calls);
-    // What it holds changed: it is a share to go on with again.
+    expect(s.spaces.calls.length).toBe(calls + 1);
+    expect(s.jobs.status(id)).toMatchObject({ phase: "over_limit", limit_own: true });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect([s.spaces.calls.length, s.jobs.running(id)]).toEqual([calls + 1, null]);
+    // Room was made in the space: the next Try again finishes.
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", limit_own: false });
+  });
+
+  test("never finished, and what it holds here changed: the first share again, not a Stop the person never pressed", async () => {
+    const s = setup({ seed: { extras: false } });
+    const id = s.world.plan;
+    saveSpacesCredential(s.dataDir, HOST, { token: s.spaces.issueToken("Maya Chen"), name: "Maya Chen" });
+    s.world.store.addArtifact(id, { asset_path: "a.bin", content_type: "application/octet-stream", created_at: new Date().toISOString(), bytes: new Uint8Array([1, 2, 3]) });
+    s.spaces.failNext(/assets\//, 413, "quota_exceeded");
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "over_limit", limit_own: true });
     s.world.store.addArtifact(id, { asset_path: "a.bin", content_type: "application/octet-stream", created_at: new Date().toISOString(), bytes: new Uint8Array([1]) });
-    expect(s.jobs.status(id)).toMatchObject({ phase: "stopped", limit_own: false });
+    expect(s.jobs.status(id)).toMatchObject({ phase: "none", limit_own: false, progress: null, access: "private" });
+    s.jobs.share(id, {});
+    await s.settle();
+    expect(s.jobs.status(id)).toMatchObject({ phase: "shared", kept: true });
+    expect(s.spaces.spaces.size).toBe(1);
   });
 
   test("a space nobody kept: the sign-in state, as before", async () => {

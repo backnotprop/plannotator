@@ -487,7 +487,7 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
                 </Row>
               ))
             : access(!update && !waits ? <InfoMark /> : undefined, ownWaits ? keepButton : undefined)}
-          {offerKeep && !ownWaits && (
+          {offerKeep && !(ownWaits && !stopped) && (
             <Row
               mark="user"
               right={
@@ -545,7 +545,8 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
         </>
       );
     case 'over_limit':
-      // The person's own space: no sign-in can help and sending it again would only be refused again.
+      // The person's own space: no sign-in can help. Try again sends once more (room may have been made in the
+      // space) and comes back here when it is still over; nothing tries by itself.
       if (status.limit_own) {
         return (
           <>
@@ -553,6 +554,11 @@ export function SharePanel({ status, view, onView, mode, onMode, actions }: Shar
               {SHARE_WORDS.overLimitOwn}
             </Msg>
             {link && <LinkRow link={link} primary={false} />}
+            <Foot>
+              <Btn kind="pri" onClick={() => actions.share({})} name="try-again">
+                {SHARE_WORDS.tryAgain}
+              </Btn>
+            </Foot>
           </>
         );
       }

@@ -161,13 +161,14 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     const needsKeep = needsKeepOf(record, signedIn);
     const gone = record?.job?.gone === true;
     const own = !!record && (record.kept || record.signed === true);
-    // Over the limit of the person's own space: not run again until what it holds changes; then it is a share to go on with.
+    // Over the limit of the person's own space: nothing is sent again by itself. Once what it holds here changes it
+    // is a share to go on with: an Update, or, never finished, the first share again (the person pressed no Stop).
     const overOwn = !!record && record.job?.ended === "over_limit" && own;
     const overStill = overOwn && record!.job!.bytes === plan.file_bytes;
-    const ended = record?.job ? (overOwn && !overStill ? (record.shared_at ? null : "stopped") : (record.job.ended ?? "failed")) : null;
+    const ended = record?.job ? (overOwn && !overStill ? null : (record.job.ended ?? "failed")) : null;
     // A space that is up and waits for Keep shows as the result, with Keep this space; one that is gone has no link.
     const phase: SpaceShareStatus["phase"] = running ? "sharing" : !record ? "none" : record.refused ? "refused" : gone ? "gone" : needsKeep && record.created && record.share_url ? "shared" : ended ? ended : record.shared_at ? "shared" : "none";
-    const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" && phase !== "gone" ? { done: record.job.done, total: record.job.total } : null;
+    const progress = running && live.progress ? { done: live.progress.done, total: live.progress.total } : record?.job && phase !== "shared" && phase !== "gone" && phase !== "none" ? { done: record.job.done, total: record.job.total } : null;
     const until = running ? (live.progress?.waiting_until ?? null) : null;
     const link = phase === "gone" ? null : (record?.share_url ?? null);
     return {
@@ -185,7 +186,7 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
       keep: live.keep,
       busy: live.claiming !== null,
       needs_keep: needsKeep && !running,
-      own: !!record?.kept,
+      own,
       limit_own: phase === "over_limit" && overOwn,
       mode: record?.mode ?? "all",
       versions: Math.max(0, ...source.local.documents.map((d) => d.versions.length)),
@@ -260,8 +261,6 @@ export function createSpaceShareJobs(options: SpaceShareJobsOptions): SpaceShare
     // Waiting for Keep (the sign-in is gone, or a write was not allowed), or the space is gone: nothing is sent,
     // and no browser is opened by an Update. The panel's Keep signs in; Share as new starts over.
     if (needsKeepOf(record, credentialOf(record.host) !== null) || record.job?.gone) return status(id);
-    // Over the limit of the person's own space: sending it again would only be refused again.
-    if (status(id)?.limit_own) return status(id);
     start(id, record);
     return status(id);
   }

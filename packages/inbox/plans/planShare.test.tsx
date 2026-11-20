@@ -96,7 +96,7 @@ const STATES: [string, SpaceShareStatus, View, string[], { switch?: boolean; inf
   ['waiting for Keep, with changes', shared({ needs_keep: true, access: 'comment', changes: 2 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
   ['waiting for Keep, nothing new', shared({ needs_keep: true, access: 'comment' }), 'main', ['copy', 'open', 'keep'], { details: true }],
   ['the person\'s own space, signed out here', shared({ needs_keep: true, own: true, access: 'private', changes: 1 }), 'main', ['copy', 'open', 'keep', 'update'], {}],
-  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['copy', 'open'], {}],
+  ['over the limit, the person\'s own space', status({ phase: 'over_limit', limit_own: true, link: LINK, access: 'private', progress: { done: 3, total: 9 } }), 'main', ['copy', 'open', 'try-again'], {}],
   ['stopped', status({ phase: 'stopped', progress: { done: 3, total: 9 }, link: LINK }), 'main', ['copy', 'open', 'try-again'], {}],
   ['stop sharing', shared({ kept: true, signed_in: true }), 'stop', ['cancel', 'delete'], {}],
   ['details', shared(), 'details', [], {}],
@@ -180,9 +180,13 @@ describe.if(hasDom)('the panel, state by state', () => {
     expect(marks(shared({ needs_keep: true, own: true, access: 'private' }))).toEqual(['lock+keep']);
     expect(marks(shared({ needs_keep: true, own: true, access: 'comment', changes: 1 }))).toEqual(['globe+keep', 'doc']);
     expect(marks(shared({ needs_keep: true, access: 'comment', changes: 1 }))).toEqual(['globe', 'user+keep', 'doc']);
-    // Over the limit of the person's own space: nothing to press but the link.
+    // With a stopped page the access line gives way to the page's row, so Keep has its own row again: never no Keep.
+    expect(marks(shared({ needs_keep: true, own: true, access: 'private', stopped_pages: [{ title: 'Rollout' }] }))).toEqual(['excl', 'user+keep']);
+    // Over the limit of the person's own space: Try again, never Sign in.
     const over = panel(status({ phase: 'over_limit', limit_own: true, link: LINK }));
-    expect(over.host.querySelector('[data-share-act="sign-in"], [data-share-act="try-again"]')).toBeNull();
+    expect(over.host.querySelector('[data-share-act="sign-in"]')).toBeNull();
+    over.press('try-again');
+    expect(over.sent).toEqual([['share', {}]]);
     expect(panel(status({ phase: 'over_limit' })).host.querySelector('[data-share-act="sign-in"]')).not.toBeNull();
   });
 
