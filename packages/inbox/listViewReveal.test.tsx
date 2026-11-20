@@ -28,6 +28,8 @@ import type { ListView } from './listView';
 const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
 const idleClock = (hasDom ? await import('./idleClock') : {}) as typeof import('./idleClock');
+const { listIntroHeldBack } = (hasDom ? await import('./app/focus') : {}) as typeof import('./app/focus');
+const { attachRowSwipe } = (hasDom ? await import('./rowSwipe') : {}) as typeof import('./rowSwipe');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 const { ListViewIntro, LIST_VIEW_INTRO_WORDS } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
 const { FOLD_LOOP_MS } = await import('./components/viewChoiceFolds');
@@ -162,7 +164,8 @@ function Harness({ state, line }: { state: State; line: Line }) {
     thread: state.thread,
     clear: reveal.viewChoiceRevealClear(true, state.thread, idle),
     place: state.thread ?? '',
-    heldBack: () => state.held,
+    // App's hold (`oneTimeHeldBack`: listIntroHeldBack), with the test's own stand-in for the rest of it.
+    heldBack: () => state.held || listIntroHeldBack(),
     leaveCounts: (_visit, _now, _row, next) => reveal.viewChoiceRevealLeaveCounts(next),
     idle,
     mayClaim: (pageAge) => reveal.viewChoiceRevealMayClaim({ listLoaded: true, firstRun: false, view }, pageAge),
@@ -388,6 +391,55 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
       expect(claims()).toHaveLength(0);
     });
   }
+
+  test('never under a finger: while a row is swiped, or rests open on Archive, the moment waits; once the row is at rest the dialog opens', async () => {
+    // The list as rowSwipe.ts takes it: a phone's row in a group of the scroll box, and the action layer.
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div class="ib-lbody"><div class="ib-group"><div class="ib-mrow" data-thread-id="z">Thread z</div></div><div class="ib-swl" data-row-swipe-layer=""><button type="button" data-row-swipe="lead"><span class="ib-swa-in">Quiet</span></button><button type="button" data-row-swipe="trail"><span class="ib-swa-in">Archive</span></button></div></div>',
+    );
+    const body = document.querySelector<HTMLElement>('.ib-lbody')!;
+    const face = document.querySelector<HTMLElement>('.ib-mrow[data-thread-id="z"]')!;
+    const layer = document.querySelector<HTMLElement>('[data-row-swipe-layer]')!;
+    const actions: string[] = [];
+    const detach = attachRowSwipe(body, layer, { actionsOf: () => ({ lead: 'read', trail: 'archive', title: 'Thread z' }), onAction: (_id, action) => void actions.push(action), reduced: () => true });
+    const touch = (target: Element, type: string, x: number) => {
+      const point = { identifier: 1, clientX: x, clientY: 100, pageX: x, pageY: 100, target };
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+      Object.defineProperty(event, 'changedTouches', { value: [point] });
+      target.dispatchEvent(event);
+    };
+    try {
+      // A finger on the row, moving it left, still down while the moment comes and settles.
+      touch(face, 'touchstart', 200);
+      for (let i = 1; i <= 6; i++) {
+        await wait(15);
+        touch(face, 'touchmove', 200 - 15 * i);
+      }
+      expect(face.style.transform).not.toBe('');
+      await leave(NEXT);
+      await wait(150);
+      expect(claims()).toHaveLength(0);
+      expect(dialog()).toBeNull();
+      // Held, then lifted short of the commit: the row rests open on Archive, and the moment still waits.
+      await wait(120);
+      touch(face, 'touchend', 110);
+      await wait(150);
+      expect(layer.dataset.side).toBe('trail');
+      expect(actions).toEqual([]);
+      expect(claims()).toHaveLength(0);
+      expect(dialog()).toBeNull();
+      // A touch elsewhere closes the row; at rest, within the same moment, the line's claim and the dialog.
+      touch(document.body, 'touchstart', 20);
+      touch(document.body, 'touchend', 20);
+      await until(() => dialog() !== null);
+      expect(face.style.transform).toBe('');
+      expect(claims().map((c) => c.body.id)).toEqual(['view_choice']);
+    } finally {
+      detach();
+    }
+  });
 
   test('split view: a thread kept open beside the list, thread to thread, never back on the list: the page going idle is the moment', async () => {
     idleClock.IDLE_CLOCK.idleMs = 150;
