@@ -736,25 +736,16 @@ describe("whose the space is", () => {
 });
 
 describe("the approval", () => {
-  test("goes last, and only into a kept space", async () => {
+  test("a run never sends one, even signed in to the person's own space, and the next run calls nothing for it", async () => {
+    // A tool's approval call is always refused: the approval goes up only with Keep, on the sign-in page.
     const s = setup({ token: true, spaces: { approvals: "accept" } });
     expect((await s.run()).end).toBe("done");
-    const all = writes(s.spaces);
-    expect(all[all.length - 1]).toBe("PUT /v1/workspaces/ws/documents/doc/approval");
-    expect(all.filter((w) => w.endsWith("/approval"))).toHaveLength(1);
-    const space = spaceOf(s.spaces, s.record);
-    expect(space.owner).toBe("Maya Chen");
-    expect(space.approvals).toEqual([{ document_id: s.record.pages[s.world.main]!.remote_id!, version: mainOf(s).versions[3]!.version, by: "Maya Chen" }]);
-    expect(s.record.approval).toEqual({ document_id: s.world.main, version_number: 4 });
+    expect(writes(s.spaces).filter((w) => w.endsWith("/approval"))).toEqual([]);
+    expect(spaceOf(s.spaces, s.record).owner).toBe("Maya Chen");
+    expect(spaceOf(s.spaces, s.record).approvals).toEqual([]);
+    expect([s.record.approval, s.record.approval_refused]).toEqual([null, undefined]);
     // Every call carried the sign-in in its header, and none in its address.
     expect(s.spaces.calls.every((c) => c.signedIn && !`${c.path}${c.query}`.includes(s.token!))).toBe(true);
-  });
-
-  test("a space that does not take it: the share is done without it, and it is not asked again", async () => {
-    const s = setup({ token: true });
-    expect((await s.run()).end).toBe("done");
-    expect(s.record.approval).toBeNull();
-    expect(s.record.approval_refused).toBe(true);
     const before = s.spaces.calls.length;
     expect((await s.run()).end).toBe("done");
     expect(s.spaces.calls.length).toBe(before);

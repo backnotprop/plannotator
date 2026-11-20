@@ -18,7 +18,7 @@ export function readSpaceShareRecord(dataDir: string, planId: string): SpaceShar
   try {
     const value: unknown = JSON.parse(readFileSync(pathOf(dataDir, planId), "utf8"));
     if (!isSpaceShareRecord(value)) return null;
-    return { ...value, seed: value.seed ?? null, owner: value.owner ?? null, refused: value.refused === true, approval: value.approval ?? null, approval_refused: value.approval_refused === true, shared_at: value.shared_at ?? null, job: value.job ?? null };
+    return { ...value, seed: value.seed ?? null, owner: value.owner ?? null, refused: value.refused === true, approval: value.approval ?? null, shared_at: value.shared_at ?? null, job: value.job ?? null };
   } catch {
     return null;
   }
