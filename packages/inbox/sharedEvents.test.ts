@@ -287,7 +287,6 @@ class World {
   /** Timings every tab gets (the leader check, the catch-up retry). */
   timing: SharedEventsEnv['timing'] = { pingEveryMs: 40, hiddenPingEveryMs: 150, pongTimeoutMs: 30, retryMs: 20, retryMaxMs: 80 };
   tabs = new Map<number, Tab>();
-  /** Crashed tabs: nothing of them runs in the test; their subscriptions end after it, so none reaches the next test. */
   killed: Tab[] = [];
   gone: { by: number; window: string; unloading: boolean }[] = [];
   catchUps: { tab: number; cursor: number }[] = [];
@@ -380,7 +379,7 @@ class World {
     this.kill(tab);
   }
 
-  /** The tab crashes: nothing of it runs again. */
+  /** The tab crashes: nothing of it runs again (its subscription ends after the test, so none reaches the next one). */
   kill(tab: Tab): void {
     this.locks.kill(tab.id);
     this.hub.kill(tab.id);
@@ -1494,10 +1493,8 @@ test("a linked machine's steps line never reaches the window; its other records 
 test('a reconnect (the stream back, its hello again) has the run cards read again; the first connect does not', async () => {
   const heard: unknown[] = [];
   const stop = runEvents.subscribe((change) => heard.push(change));
-  await (world().open(), settle());
-  const first = heard.length;
+  const first = await (world().open(), settle()).then(() => heard.length);
   worlds[0]!.server.broadcast('hello', JSON.stringify({ serverSession: 's', cursor: worlds[0]!.server.seq }));
-  await settle();
-  stop();
+  await settle().finally(stop);
   expect([first, ...heard]).toEqual([0, { all: true }]);
 });
