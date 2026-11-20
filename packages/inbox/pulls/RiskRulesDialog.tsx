@@ -36,7 +36,7 @@ export function riskAutoToSave(saved: InboxPullRiskAuto | null | undefined, make
  * agent that ranks the open ones against them. Saved to the Inbox's config, never to a
  * repository. Empty rules turn the judging off.
  */
-export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPullRiskAnswer; onSaved: (next: InboxPullRiskAnswer) => void; onClose: () => void }) {
+export function RiskRulesDialog({ answer, onSaved, onClose, onAsked }: { answer: InboxPullRiskAnswer; onSaved: (next: InboxPullRiskAnswer) => void; onClose: () => void; onAsked?: (keys: readonly string[]) => void }) {
   const titleId = useId();
   const rulesId = useId();
   const [rules, setRules] = useState(answer.rules);
@@ -89,8 +89,10 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
     try {
       const auto = riskAutoToSave(answer.auto, make);
       const next = await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}), ...(auto !== undefined ? { auto } : {}) });
-      if (make && next.auto_agent && riskAlreadyRanked(next) > 0) setAsking(next);
-      else onSaved(next);
+      if (make && next.auto_agent && riskAlreadyRanked(next) > 0) {
+        onAsked?.(next.auto_waiting ?? []);
+        setAsking(next);
+      } else onSaved(next);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The rules could not be saved.');
       setSaving(false);

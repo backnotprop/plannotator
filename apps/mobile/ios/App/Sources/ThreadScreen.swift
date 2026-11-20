@@ -66,6 +66,8 @@ struct ThreadScreen: View {
   private var fade: CGFloat { Composer.fade(typeSize) }
   @FocusState private var composing: Bool
   @State private var pageWidth: CGFloat = 0
+  /// The file open over the thread.
+  @State private var opened: FileOpen?
 
   private var model: ThreadModel? { session.thread(id) }
   private var title: String {
@@ -126,10 +128,17 @@ struct ThreadScreen: View {
         }
       }
     }
+    // A file opens over the thread, full screen; closed, the thread is where it was.
+    .environment(\.openFile) { item in opened = FileOpen(thread: id, file: item.id) }
+    .fullScreenCover(item: $opened) { open in FileCover(session: session, thread: open.thread, start: open.file) }
     .toastHost(actions, lift: foot)
     // Mark unread closes the thread: left open, its next look would read it again.
     .onChange(of: actions.closes) { _, _ in dismiss() }
-    .task { await session.open(id) }
+    .task {
+      await session.open(id)
+      // How each of the thread's files stands on the computer now (changed since sent, gone).
+      if model?.thread.messages.contains(where: { !($0.attachments ?? []).isEmpty }) == true { await session.readAttachments(id) }
+    }
   }
 
   /// The agent the thread's lines name: the last one to write in it.
@@ -768,6 +777,9 @@ struct MessageView: View {
           MessageWords(block: block).blockEdge("\(message.id.rawValue)/\(index)")
         }
       }
+      // The files the message carries, under its words (flow check thread-08).
+      let files = session.attachments(of: message, in: thread.threadId)
+      if !files.isEmpty { FileTiles(session: session, items: files).blockEdge("\(message.id.rawValue)/files") }
       if showsDelivery, let line = deliveryLine {
         Text(line).font(TextRole.meta).foregroundStyle(Token.mutedForeground)
       }

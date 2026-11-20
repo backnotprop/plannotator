@@ -133,11 +133,11 @@ struct RowSpokenActions: View {
       Button(ThreadMenuItems.label(item, place: .row).0) { actions.perform(item, on: row) }
     }
     if offered.contains(.snooze) {
-      ForEach(SnoozeRules().choices(), id: \.id) { choice in
+      ForEach(SnoozeRules().choices(now: AppClock.now()), id: \.id) { choice in
         Button("\(PhoneWords.snooze), \(choice.label)") {
           // The time is worked out when the action is taken, not when the row was drawn: a row drawn at 5:59 PM
           // and snoozed "Later today" at 6:01 PM never goes to a time already past. Gone by then: Pick a time.
-          if let now = SnoozeRules().choices().first(where: { $0.id == choice.id }) {
+          if let now = SnoozeRules().choices(now: AppClock.now()).first(where: { $0.id == choice.id }) {
             actions.snooze(row, until: now.until)
           } else {
             actions.picking = .row(row, place: .list)

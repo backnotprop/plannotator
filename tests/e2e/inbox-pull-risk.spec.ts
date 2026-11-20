@@ -582,7 +582,7 @@ test('the automatic line: a pick names the agent it would start; Save starts not
     page.off('request', onRequest);
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    const left = (await page.request.get(`${url}api/inbox/pulls/risk`).then((r) => r.json()).catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
     if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }
@@ -697,7 +697,7 @@ test('empty rules turn it off again: the marks and the filter choices go, the ch
   await expect(page.locator('[data-pulls-risk-option]')).toHaveCount(0);
 });
 
-test('set up with nothing ranked: no agent starts; once ranking lands the line at the top of Reviews asks; Not now keeps it away; Make them now starts what it counted', async () => {
+test('set up with nothing ranked: no agent starts; once ranking lands a dialog on Reviews asks; Not now keeps it away; Make them now starts what it counted', async () => {
   await context.close();
   await stopScratchInbox(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
@@ -723,7 +723,8 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     await page.setViewportSize(VIEWPORTS[390]);
     await page.goto(`${url}#pulls`);
     await expect(page.locator('[data-pulls-list]')).toBeVisible();
-    const waitingLine = page.locator('[data-pull-risk-waiting]');
+    const asking = page.getByRole('dialog', { name: /already ranks? High$/ });
+    const waitingLine = asking.locator('[data-pull-risk-waiting]');
     await expect(waitingLine)
       .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
       .catch(async (cause: Error) => {
@@ -731,25 +732,32 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
         const { pending, judgments, auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs } = risk;
         throw new Error(`${cause.message}\nrisk answer now: ${JSON.stringify({ pending, judgments: Object.keys((judgments ?? {}) as object), auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs })}`);
       });
-    await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High. Make a guided review for each?');
+    await expect(asking.getByRole('heading')).toHaveText('2 already rank High');
+    await expect(asking.locator('p').first()).toHaveText('You turned on guided reviews for High. Make one for each now?');
+    await expect(asking.locator('li')).toHaveCount(2);
+    for (const [n, title] of [[base + 1, 'Refund to the card on file'], [base + 2, 'Waive the card fee for teams']] as const) await expect(asking.locator('li', { hasText: title })).toContainText(`#${n}`);
     expect(await autoRuns()).toEqual({});
     expect(launches()).toBe(launchedBefore);
-    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
-    for (const size of SHEETS) {
-      await page.setViewportSize(size);
-      await page.waitForTimeout(350);
-      await sheetFits(waitingLine, size.width);
-      await page.screenshot({ path: join(proofDir, `risk-line-${size.width}.png`) });
+    for (const scheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+      for (const size of SHEETS) {
+        await page.setViewportSize(size);
+        await page.waitForTimeout(350);
+        await sheetFits(asking, size.width);
+        await page.screenshot({ path: join(proofDir, `risk-ask-${size.width}-${scheme}.png`) });
+      }
     }
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 
-    const settled = (name: string) => waitingLine.locator(`[data-pull-risk-waiting-${name}]:not([aria-disabled])`);
-    await settled('not-now').click();
-    await expect(waitingLine).toHaveCount(0);
+    await expect(asking.locator('[data-pull-risk-waiting-armed]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(asking).toHaveCount(0);
+    await expect.poll(async () => ((await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { auto_dismissed?: string[] }).auto_dismissed?.sort()).toEqual([keyOf(base + 1), keyOf(base + 2)].sort());
     await openPulls();
     await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-    await expect(waitingLine).toHaveCount(0);
+    await page.waitForTimeout(1_500);
+    await expect(asking).toHaveCount(0);
     expect(await autoRuns()).toEqual({});
 
     writeGhPulls(LINE_LATER(base), LINE(base));
@@ -757,8 +765,9 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     await openPulls();
     await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
     expect(await autoRuns()).toEqual({});
-    await settled('make-now').click();
-    await expect(waitingLine).toHaveCount(0);
+    await expect(asking.locator('[data-pull-risk-waiting-armed]')).toBeVisible();
+    await asking.getByRole('button', { name: 'Make them now', exact: true }).click();
+    await expect(asking).toHaveCount(0);
     await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');
     const runs = await autoRuns();
     expect(Object.keys(runs).sort()).toEqual([keyOf(base - 2), keyOf(base - 1)]);
@@ -769,7 +778,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
   } finally {
     await page.setViewportSize(VIEWPORTS[1440]).catch(() => {});
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' }).catch(() => {});
-    const left = (await (await page.request.get(`${url}api/inbox/pulls/risk`)).json().catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
+    const left = (await page.request.get(`${url}api/inbox/pulls/risk`).then((r) => r.json()).catch(() => null)) as { rules: string; provider: string | null; model: string | null } | null;
     if (left) await page.request.post(`${url}api/inbox/pulls/risk`, { data: { rules: left.rules, provider: left.provider, model: left.model, auto: null } }).catch(() => {});
     await page.request.post(`${url}api/inbox/launch/settings`, { data: { enabled: false } }).catch(() => {});
   }

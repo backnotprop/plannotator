@@ -690,7 +690,7 @@ packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/riskAlreadyRanked.test.tsx
-packages/inbox/pulls/riskWaitingLine.test.tsx
+packages/inbox/pulls/riskWaitingDialog.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/inbox/pulls/pullReviewCommentsToggle.test.tsx
@@ -871,3 +871,4 @@ packages/inbox/projectTagMenu.test.tsx
 packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
 packages/inbox/runCardLive.test.tsx
+packages/ui/components/Viewer.footnotesAutolinks.test.tsx
