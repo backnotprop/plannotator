@@ -314,6 +314,7 @@ test("a file's sem chip keeps its popover open while its switch flips the file, 
     const popover = page.locator('[data-semantic-file-popover]');
     const toggle = popover.getByRole('switch', { name: 'Show in the diff' });
     await chip.scrollIntoViewIfNeeded();
+    await expect(chip).toHaveAttribute('data-semantic-note', 'semantic');
     expect(await outlined(chip)).toBe(false);
     await expect(chip.locator('svg')).toBeVisible();
     await expect(page.locator('[data-semantic-file-badge="0"]').first()).toBeVisible();
