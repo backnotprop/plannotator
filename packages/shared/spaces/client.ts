@@ -197,7 +197,8 @@ export function createSpacesClient(options: { host: string; token?: string | nul
       return { id: text(under(body, "reply").id) ?? "" };
     },
     async claim(spaceId) {
-      return spaceOf(under((await call("POST", `${ws(spaceId)}/claim`, { json: {} })).body, "workspace"));
+      // No body: the space wants none. A 200 alone says the space is the caller's now (its answer is the space).
+      return spaceOf(under((await call("POST", `${ws(spaceId)}/claim`)).body, "workspace"));
     },
     async approve(spaceId, docId, version) {
       await call("PUT", `${ws(spaceId)}/documents/${segment(docId)}/approval`, { json: { version } });
