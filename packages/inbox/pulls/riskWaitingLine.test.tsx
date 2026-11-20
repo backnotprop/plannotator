@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPullRiskAnswer } from '@plannotator/core/inbox-types';
@@ -29,7 +29,10 @@ afterEach(async () => {
   root = null;
   document.body.innerHTML = '';
   for (const restore of restores.splice(0)) restore();
+  setSystemTime();
 });
+const T0 = Date.parse('2026-11-19T09:00:00.000Z');
+const press = async (name: 'make-now' | 'not-now') => act(async () => document.querySelector<HTMLElement>(`[data-pull-risk-waiting-${name}]`)!.click());
 const mount = async (answer: InboxPullRiskAnswer, onAnswer: (next: InboxPullRiskAnswer) => void = () => {}) => {
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -46,12 +49,37 @@ test.skipIf(!hasDom)('the line counts what waits minus what was put off, and Mak
   }) as never);
   restores.push(() => made.mockRestore());
   const answers: InboxPullRiskAnswer[] = [];
+  setSystemTime(T0);
   await mount(ANSWER, (next) => answers.push(next));
   expect(line()!.getAttribute('data-pull-risk-waiting')).toBe('2');
   expect(line()!.querySelector('.ib-riskw-t')!.textContent).toBe('2 rank High. Make a guided review for each?');
-  await act(async () => document.querySelector<HTMLElement>('[data-pull-risk-waiting-make-now]')!.click());
+  setSystemTime(T0 + 600);
+  await press('make-now');
   expect(sent).toEqual([{ make_now: true, keys: ['a#1', 'a#3'] }]);
   expect(answers).toHaveLength(1);
+});
+
+test.skipIf(!hasDom)('a press in the first 500 ms after the line appears does nothing; focus stays on the button', async () => {
+  const sent: unknown[] = [];
+  const saved = spyOn(inboxApi, 'savePullRisk').mockImplementation((async (input: unknown) => {
+    sent.push(input);
+    return ANSWER;
+  }) as never);
+  restores.push(() => saved.mockRestore());
+  setSystemTime(T0);
+  await mount(ANSWER);
+  const notNow = document.querySelector<HTMLButtonElement>('[data-pull-risk-waiting-not-now]')!;
+  expect(notNow.getAttribute('aria-disabled')).toBe('true');
+  expect(notNow.disabled).toBe(false);
+  notNow.focus();
+  setSystemTime(T0 + 100);
+  await press('make-now');
+  await press('not-now');
+  expect(sent).toEqual([]);
+  expect(document.activeElement).toBe(notNow);
+  setSystemTime(T0 + 600);
+  await press('not-now');
+  expect(sent).toEqual([{ not_now: true, keys: ['a#1', 'a#3'] }]);
 });
 
 test.skipIf(!hasDom)('nothing left to ask about, or no agent that can start: no line', async () => {

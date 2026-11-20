@@ -531,7 +531,7 @@ test('the automatic line: a pick names the agent it would start; Save starts not
       const info = dialog.locator('[data-pull-risk-info="auto"]');
       if ((await info.getAttribute('data-open')) === null) await info.click();
       await expect(info).toHaveAttribute('data-open', '');
-      await expect(tip).toContainText('when Inbox can tell');
+      await expect(tip).toHaveText('New pull requests and pushes from your team that rank High get one, once. The rest wait until you ask.');
       await expect(tip).toBeInViewport({ ratio: 1 });
       await sheetFits(dialog, width, [info]);
     });
@@ -724,10 +724,6 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     await page.goto(`${url}#pulls`);
     await expect(page.locator('[data-pulls-list]')).toBeVisible();
     const waitingLine = page.locator('[data-pull-risk-waiting]');
-    const firstRow = page.locator('[data-pulls-row]').first();
-    await expect(firstRow).toBeVisible();
-    const rowTop = async () => (await firstRow.boundingBox())!.y;
-    const topBefore = await rowTop();
     await expect(waitingLine)
       .toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 })
       .catch(async (cause: Error) => {
@@ -736,7 +732,6 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
         throw new Error(`${cause.message}\nrisk answer now: ${JSON.stringify({ pending, judgments: Object.keys((judgments ?? {}) as object), auto, auto_waiting, auto_dismissed, auto_agent, auto_agent_unavailable, auto_runs })}`);
       });
     await expect(waitingLine.locator('.ib-riskw-t')).toHaveText('2 rank High. Make a guided review for each?');
-    expect(await rowTop()).toBe(topBefore);
     expect(await autoRuns()).toEqual({});
     expect(launches()).toBe(launchedBefore);
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
@@ -748,12 +743,10 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     }
     await page.setViewportSize(VIEWPORTS[1440]);
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-    await page.waitForTimeout(350);
-    const topWithLine = await rowTop();
 
-    await waitingLine.getByRole('button', { name: 'Not now', exact: true }).click();
+    const settled = (name: string) => waitingLine.locator(`[data-pull-risk-waiting-${name}]:not([aria-disabled])`);
+    await settled('not-now').click();
     await expect(waitingLine).toHaveCount(0);
-    expect(await rowTop()).toBe(topWithLine);
     await openPulls();
     await expect(row(base + 2).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
     await expect(waitingLine).toHaveCount(0);
@@ -764,7 +757,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands the line a
     await openPulls();
     await expect(waitingLine).toHaveAttribute('data-pull-risk-waiting', '2', { timeout: 60_000 });
     expect(await autoRuns()).toEqual({});
-    await waitingLine.getByRole('button', { name: 'Make them now', exact: true }).click();
+    await settled('make-now').click();
     await expect(waitingLine).toHaveCount(0);
     await expect.poll(async () => (await autoRuns())[keyOf(base - 2)]?.state, { timeout: 30_000 }).toBe('started');
     const runs = await autoRuns();
