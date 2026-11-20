@@ -75,7 +75,7 @@ import { RiskFilter } from './RiskFilter';
 import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { RiskRulesDialog } from './RiskRulesDialog';
 import { usePullRisk } from './usePullRisk';
-import { RiskWaitingLine } from './RiskWaitingLine';
+import { RiskWaitingDialog } from './RiskWaitingDialog';
 import { landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -161,6 +161,7 @@ export interface PullsPageProps {
 
 const NO_JUDGMENTS: RiskJudgments = {};
 const NO_ROWS: readonly InboxReviewRow[] = [];
+const NO_PULLS: readonly InboxPull[] = [];
 const NO_LINKS: InboxPullsAnswer['links'] = {};
 const NO_FAILURES: RiskFailures = {};
 
@@ -191,6 +192,7 @@ export function PullsPage(given: PullsPageProps) {
   const riskFailed: RiskFailures = risk.answer?.failed ?? NO_FAILURES;
   const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const riskAsked = useRef(new Set<string>());
   /** The Reviews row whose menu is open (ReviewsMenu). */
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const activeRisk = rulesSet ? riskFilter : 'all';
@@ -257,7 +259,6 @@ export function PullsPage(given: PullsPageProps) {
         </Tip>
       </div>
       {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
-      {risk.answer && <RiskWaitingLine answer={risk.answer} onAnswer={risk.setAnswer} />}
       <ReviewsMenu
         className="ib-lbody"
         busy={state.loading && !model}
@@ -328,6 +329,7 @@ export function PullsPage(given: PullsPageProps) {
         <RiskRulesDialog
           answer={risk.answer}
           onClose={() => setRulesOpen(false)}
+          onAsked={(keys) => keys.forEach((key) => riskAsked.current.add(key))}
           onSaved={(next) => {
             risk.setAnswer(next);
             setRulesOpen(false);
@@ -336,6 +338,7 @@ export function PullsPage(given: PullsPageProps) {
           }}
         />
       )}
+      <RiskWaitingDialog answer={risk.answer} pulls={model?.pulls ?? NO_PULLS} blocked={rulesOpen || !!props.threadId} asked={riskAsked.current} onAnswer={risk.setAnswer} />
     </section>
   );
 
