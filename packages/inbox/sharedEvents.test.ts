@@ -287,6 +287,8 @@ class World {
   /** Timings every tab gets (the leader check, the catch-up retry). */
   timing: SharedEventsEnv['timing'] = { pingEveryMs: 40, hiddenPingEveryMs: 150, pongTimeoutMs: 30, retryMs: 20, retryMaxMs: 80 };
   tabs = new Map<number, Tab>();
+  /** Crashed tabs: nothing of them runs in the test; their subscriptions end after it, so none reaches the next test. */
+  killed: Tab[] = [];
   gone: { by: number; window: string; unloading: boolean }[] = [];
   catchUps: { tab: number; cursor: number }[] = [];
   catchUpDelayMs = 0;
@@ -384,6 +386,7 @@ class World {
     this.hub.kill(tab.id);
     this.server.closeTab(tab.id);
     this.tabs.delete(tab.id);
+    this.killed.push(tab);
   }
 
   leader(): number | null {
@@ -403,7 +406,7 @@ class World {
 
 let worlds: World[] = [];
 afterEach(() => {
-  for (const world of worlds) for (const tab of world.tabs.values()) tab.unsubscribe();
+  for (const world of worlds) for (const tab of [...world.tabs.values(), ...world.killed]) tab.unsubscribe();
   worlds = [];
 });
 function world(): World {

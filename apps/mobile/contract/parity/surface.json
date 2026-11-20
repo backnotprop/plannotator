@@ -248,6 +248,8 @@
       "/api/inbox/messages/:id/reask",
       "/api/inbox/messages/:id/reply",
       "/api/inbox/messages/:id/resolve",
+      "/api/inbox/messages/:id/run",
+      "/api/inbox/messages/:id/secret",
       "/api/inbox/messages/:id/send-now",
       "/api/inbox/messages/:id/take-back",
       "/api/inbox/messages/:id/to",

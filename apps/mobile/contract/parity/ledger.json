@@ -21214,6 +21214,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-run",
+      "title": "window:/api/inbox/messages/:id/run",
+      "surface": [
+        "window:/api/inbox/messages/:id/run"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-secret",
+      "title": "window:/api/inbox/messages/:id/secret",
+      "surface": [
+        "window:/api/inbox/messages/:id/secret"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
