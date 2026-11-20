@@ -16,7 +16,8 @@ import { formatCount } from '../format';
 import type { AgentMarkPicks } from '../agents/AgentMark';
 import { agentFaceChains, useAgentFaceChainsRev } from '../agents/agentFaces';
 import { useInboxAgents } from '../agentsList';
-import { useSessionLabels } from '../sessionLabels';
+import { useSessionLabels, type SessionLabels } from '../sessionLabels';
+import { usePictureWorld } from '../pictureWorld';
 import { machineTakes, type MachinesModel } from '../machines';
 import { GroupBand } from '../components/GroupBand';
 import type { ListSort } from '../listView';
@@ -41,24 +42,11 @@ export interface AgentsListProps {
   shows?: number;
   /** The rows drawn, in order, whenever they change (Select all picks only these). */
   onDrawn?: (ids: readonly string[]) => void;
-  /**
-   * A picture of the view (the view choice dialog, ListViewIntro.tsx): when the agents as they start would show fewer
-   * than `PICTURE_ROWS` threads (one agent, every agent folded, none but "No agent"), every agent and band opens, so
-   * the picture is never an empty frame.
-   */
-  picture?: boolean;
 }
 
-/** A picture (`picture`) opens everything when the view as it starts would show fewer threads than this. */
-export const PICTURE_ROWS = 3;
-
-/**
- * A picture (`picture`) draws only the view's top: this many lines (an agent's head, a band, a thread), more than its
- * small frame shows, so a long list (150 ended agents, 400 threads) mounts a few faces and rows, never all of them.
- */
-export const PICTURE_LINES = 20;
-
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_LABELS: SessionLabels = {};
+const NO_CHAINS: ReturnType<typeof agentFaceChains> = new Map();
 
 /** The rows an agent shows: none folded; open, the first few (and the open thread past them), or all after "N more". */
 function shownRows(rows: readonly AgentRow[], open: boolean, more: boolean, selected: string | null): readonly AgentRow[] {
@@ -87,39 +75,16 @@ function keepSessions(layout: AgentsLayout, kept: Map<string, readonly string[]>
   return { ...layout, live: layout.live.map(keep), ended: layout.ended.map(keep) };
 }
 
-/** The threads the view would show as it starts (each open agent's first few, "No agent" while open): fewer than `PICTURE_ROWS`. */
-function pictureSparse(layout: AgentsLayout, open: (block: AgentBlock) => boolean, endedOpen: boolean, noneOpen: boolean): boolean {
-  let rows = noneOpen ? layout.none.length : 0;
-  for (const block of [...layout.live, ...(endedOpen ? layout.ended : [])]) if (open(block)) rows += Math.min(block.rows.length, AGENT_ROWS_SHOWN);
-  return rows < PICTURE_ROWS;
-}
-
-/** What a picture draws (`PICTURE_LINES`): the agents, ended agents and "No agent" threads from the top, until the lines are spent. */
-function pictureTop(layout: AgentsLayout, open: (block: AgentBlock) => boolean, endedOpen: boolean, noneOpen: boolean): Pick<AgentsLayout, 'live' | 'ended' | 'none'> {
-  let left = PICTURE_LINES;
-  const take = (blocks: readonly AgentBlock[]) => {
-    const out: AgentBlock[] = [];
-    for (const block of blocks) {
-      if (left <= 0) break;
-      out.push(block);
-      left -= 1 + (open(block) ? Math.min(block.rows.length, AGENT_ROWS_SHOWN) : 0);
-    }
-    return out;
-  };
-  const live = take(layout.live);
-  if (layout.ended.length > 0) left -= 1;
-  const ended = endedOpen ? take(layout.ended) : [];
-  if (layout.none.length > 0) left -= 1;
-  return { live, ended, none: noneOpen ? layout.none.slice(0, Math.max(0, left)) : [] };
-}
-
 /** What the rows looked like before a Show: each row's time of its latest agent message, No agent's rows included. */
 const timesOf = (layout: AgentsLayout | null) =>
   new Map((layout ? [...[...layout.live, ...layout.ended].flatMap((b) => b.rows), ...layout.none] : []).map(({ row }) => [row.thread_id, row.last_agent_at ?? row.last_at]));
 
-export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn, picture = false }: AgentsListProps) {
+export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThreadId, phone, remember, renderRow, shows = 0, onDrawn }: AgentsListProps) {
   const groups = useInboxAgents();
-  const labels = useSessionLabels();
+  // In a picture (pictureWorld.ts, the view choice's demo): its own agents, no name or face chain the person gave.
+  const world = usePictureWorld();
+  const givenLabels = useSessionLabels();
+  const labels = world ? NO_LABELS : givenLabels;
   const chainsRev = useAgentFaceChainsRev();
   const folds = useAgentFolds(remember);
   const [more, setMore] = useState<ReadonlySet<string>>(() => new Set());
@@ -129,18 +94,14 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
   const epoch = sort?.epoch;
   const keep = sort?.keep ?? null;
   const layout = useMemo(
-    () => keepSessions(agentsLayout({ sections, groups, machines, labels, chains: agentFaceChains() }, epoch === undefined ? null : places.current, { epoch: epoch ?? 0, keep }), sessions.current),
+    () => keepSessions(agentsLayout({ sections, groups, machines, labels, chains: world ? NO_CHAINS : agentFaceChains() }, epoch === undefined ? null : places.current, { epoch: epoch ?? 0, keep }), sessions.current),
     // `chainsRev`: a kept face's chain changed (agentFaceChains), read again.
-    [sections, groups, machines, labels, epoch, keep, chainsRev],
+    [sections, groups, machines, labels, epoch, keep, chainsRev, world],
   );
   const foldKey = (agent: ViewAgent) => agentFoldKey(agent, machines.self);
-  const startsOpen = (block: AgentBlock) => folds.open(foldKey(block.agent), block.open, waitsSince(block.rows));
-  const fill = picture && pictureSparse(layout, startsOpen, folds.open(ENDED_BAND, true), folds.open(NONE_BAND, false));
-  const openOf = (block: AgentBlock) => fill || startsOpen(block);
-  const endedOpen = fill || folds.open(ENDED_BAND, true);
-  const noneOpen = fill || folds.open(NONE_BAND, false);
-  // What is drawn: the whole view, or a picture's top only.
-  const top = picture ? pictureTop(layout, openOf, endedOpen, noneOpen) : layout;
+  const openOf = (block: AgentBlock) => folds.open(foldKey(block.agent), block.open, waitsSince(block.rows));
+  const endedOpen = folds.open(ENDED_BAND, true);
+  const noneOpen = folds.open(NONE_BAND, false);
 
   // Show: the agents (and bands) its rows land under open, and "N more" opens where a row lands past it.
   const seen = useRef<{ layout: AgentsLayout | null; shows: number; before: Map<string, string> | null; epoch: number }>({ layout: null, shows, before: null, epoch: 0 });
@@ -182,12 +143,12 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
   // The rows drawn, for Select all.
   const drawn: string[] = [];
   const shownOf = new Map<string, readonly AgentRow[]>();
-  for (const block of [...top.live, ...(endedOpen ? top.ended : [])]) {
+  for (const block of [...layout.live, ...(endedOpen ? layout.ended : [])]) {
     const rows = shownRows(block.rows, openOf(block), more.has(block.agent.key), selectedThreadId);
     shownOf.set(block.agent.key, rows);
     for (const { row } of rows) drawn.push(row.thread_id);
   }
-  if (noneOpen) for (const { row } of top.none) drawn.push(row.thread_id);
+  if (noneOpen) for (const { row } of layout.none) drawn.push(row.thread_id);
   const drawnKey = drawn.join('\n');
   useLayoutEffect(() => onDrawn?.(drawnKey ? drawnKey.split('\n') : []), [drawnKey, onDrawn]);
 
@@ -253,22 +214,22 @@ export function AgentsList({ sections, sort, machines = NO_MACHINES, selectedThr
   };
   return (
     <>
-      {top.live.map((block) => group(block, false))}
+      {layout.live.map((block) => group(block, false))}
       {layout.ended.length > 0 && (
         // The ended agents are their own groups straight in the body (the rows' place); the band's group owns them.
-        <div className="ib-group ib-agband" data-section-id="agents-ended" role="group" aria-label="Ended" aria-owns={endedOpen && top.ended.length > 0 ? top.ended.map(groupId).join(' ') : undefined}>
+        <div className="ib-group ib-agband" data-section-id="agents-ended" role="group" aria-label="Ended" aria-owns={endedOpen ? layout.ended.map(groupId).join(' ') : undefined}>
           <GroupBand open={endedOpen} onToggle={() => folds.toggle(ENDED_BAND, true)}>
             Ended <span className="ib-n">{formatCount(layout.ended.length)}</span>
           </GroupBand>
         </div>
       )}
-      {endedOpen && top.ended.map((block) => group(block, true))}
+      {endedOpen && layout.ended.map((block) => group(block, true))}
       {layout.none.length > 0 && (
         <div className="ib-group ib-agband" data-section-id="agents-none" role="group" aria-label="No agent">
           <GroupBand open={noneOpen} onToggle={() => folds.toggle(NONE_BAND, false)}>
             No agent <span className="ib-n">{formatCount(layout.none.length)}</span>
           </GroupBand>
-          {noneOpen && top.none.map((r) => renderRow(r.row, r.drawn))}
+          {noneOpen && layout.none.map((r) => renderRow(r.row, r.drawn))}
         </div>
       )}
     </>

@@ -12,15 +12,16 @@
  * one tagged "In use" with the filled button; Smart groups still tagged for someone on Simple list
  * (`RECOMMEND_SMART_ON_SIMPLE`); a pick not switching the list at once or not remembering it as the ⋮ menu does;
  * Escape or a click outside changing the view or not counting as the line's Not now, or a pick counting as one; the
- * Agents picture not drawing the person's own agents, drawing an empty frame for one agent or none, or mounting every
- * face and row of a long list.
+ * view in use's button not being the one that keeps it ("Keep", the others "Use"); the pictures not being the fixed
+ * demo the owner approved (the four demo agents, Blastoise among them) whatever the person's own list holds, reading
+ * or writing the person's agent folds, or asking the network for the demo's face.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAgent, InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxRevealId } from './api';
 import type { ListView } from './listView';
 
@@ -28,12 +29,11 @@ const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
 const idleClock = (hasDom ? await import('./idleClock') : {}) as typeof import('./idleClock');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
-const { ListViewIntro } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
+const { ListViewIntro, LIST_VIEW_INTRO_WORDS } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
 const { setInboxAgents } = (hasDom ? await import('./agentsList') : {}) as typeof import('./agentsList');
-const { resetAgentFoldsForTests } = await import('./agentsView/folds');
+const { resetAgentFoldsForTests, AGENT_FOLDS_COOKIE } = await import('./agentsView/folds');
 const listView = await import('./listView');
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
-const { readListLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const TIMES = { pageAgeMs: 300, readMs: 60, settledMs: 60, momentMs: 1500, recheckMs: 20, claimRetryMs: 30 };
@@ -128,11 +128,6 @@ function row(id: string, n: number, session: string | null = 'ses_1', section: I
 }
 const FIVE = ['a', 'b', 'c', 'd', 'e'].map((id, n) => row(id, n));
 
-function sectionsOf(byGroup: Partial<Record<InboxListGroupId, InboxListRow[]>>): InboxListSection[] {
-  const ids: InboxListGroupId[] = ['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet', 'snoozed'];
-  return ids.map((id) => ({ id, label: id, threads: byGroup[id] ?? [] })) as InboxListSection[];
-}
-
 function agent(id: string, label: string, state: InboxAgent['state']): InboxAgent {
   return { id, session: id, host: 'claude-code', label, project: { id: 'prj_a', name: 'billing-svc' }, state, waiting: state === 'waiting' ? 1 : 0, live: state !== 'ended', started_at: null, last_seen_at: '2026-11-05T09:00:00.000Z' } as InboxAgent;
 }
@@ -175,10 +170,6 @@ function Harness({ state, line }: { state: State; line: Line }) {
   return r.stage === 'open' ? (
     <ThemeProvider>
       <ListViewIntro
-        groups={[{ id: 'new', label: 'New since you looked', count: FIVE.length, rows: FIVE }]}
-        flat={FIVE.map((row) => ({ row, drawn: 'new' as const }))}
-        sections={sectionsOf({ new: FIVE })}
-        look={readListLook()}
         phone={false}
         current={view}
         onPick={(next) => {
@@ -214,6 +205,18 @@ const col = (key: string) => dialog()!.querySelector(`[data-list-view-choice="${
 /** The choices tagged "In use", and the ones whose button is the filled one. */
 const inUse = () => [...dialog()!.querySelectorAll('[data-list-view-in-use]')].map((tag) => tag.closest('.ib-lvc-col')!.querySelector('[data-list-view-choice]')!.getAttribute('data-list-view-choice'));
 const filled = () => [...dialog()!.querySelectorAll('[data-list-view-choice].ib-pri')].map((b) => b.getAttribute('data-list-view-choice'));
+/** The choices whose button keeps the view ("Keep …"); every other one reads "Use …". */
+const keeps = () => {
+  const words = LIST_VIEW_INTRO_WORDS;
+  const buttons = [...dialog()!.querySelectorAll<HTMLButtonElement>('[data-list-view-choice]')];
+  for (const b of buttons) expect(b.textContent!.startsWith(`${words.keep} `) || b.textContent!.startsWith(`${words.use} `)).toBe(true);
+  return buttons.filter((b) => b.textContent!.startsWith(`${words.keep} `)).map((b) => b.getAttribute('data-list-view-choice'));
+};
+/** A picture's agents (the Agents view's groups) and its threads, as drawn. */
+const agentNames = (el: Element) => [...el.querySelectorAll('.ib-ag')].map((group) => group.getAttribute('aria-label'));
+const threadIds = (el: Element) => [...el.querySelectorAll('[data-thread-id]')].map((row) => row.getAttribute('data-thread-id')!);
+/** The demo's agents in the Agents picture, as the owner approved it (C-r3). */
+const DEMO_AGENTS = ['Ops', 'Review', 'Tide', 'Search index'];
 /** The tags beside a choice's name other than "In use" (Agents' New, Smart groups' Recommended). */
 const tags = (key: string) => col(key).querySelectorAll('.ib-lvc-name .ib-lvc-tag:not(.ib-lvc-inuse)').length;
 
@@ -245,18 +248,22 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
       expect(by!.textContent!.trim()).not.toBe('');
     }
     expect(document.activeElement?.id).toBe('ib-lvc-title');
-    // Agents first (the larger picture), then Smart groups, then Simple list, each with the person's own rows.
+    // Agents first (the larger picture), then Smart groups, then Simple list, each a picture of the demo, none of the person's rows.
     expect([...dialog()!.querySelectorAll('[data-list-view-choice]')].map((b) => b.getAttribute('data-list-view-choice'))).toEqual(['agents', 'smart', 'simple']);
     expect(col('agents').classList.contains('ib-lvc-lead')).toBe(true);
     expect(dialog()!.querySelectorAll('.ib-lvc-col [data-list-intro-preview]').length).toBe(3);
-    expect(col('agents').querySelectorAll('.ib-ag').length).toBe(1);
-    expect(col('agents').querySelectorAll('[data-thread-id]').length).toBe(FIVE.length);
+    expect(agentNames(col('agents'))).toEqual(DEMO_AGENTS);
     expect(col('smart').querySelector('.ib-band')).not.toBeNull();
     expect(col('simple').querySelector('.ib-band')).toBeNull();
-    expect(col('simple').querySelectorAll('[data-thread-id]').length).toBe(FIVE.length);
-    // The view in use, the groups, is tagged and its button is the filled one; Agents is tagged New, Smart groups Recommended.
+    for (const key of ['agents', 'smart', 'simple']) {
+      const ids = threadIds(col(key));
+      expect(ids.length).toBeGreaterThan(0);
+      expect(ids.some((id) => FIVE.some((row) => row.thread_id === id))).toBe(false);
+    }
+    // The view in use, the groups, is tagged and its button, "Keep", is the filled one; Agents is tagged New, Smart groups Recommended.
     expect(inUse()).toEqual(['smart']);
     expect(filled()).toEqual(['smart']);
+    expect(keeps()).toEqual(['smart']);
     expect(tags('agents')).toBe(1);
     expect(tags('smart')).toBe(1);
     expect(tags('simple')).toBe(0);
@@ -270,13 +277,14 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
     expect(notNows()).toHaveLength(0);
   });
 
-  test('on Simple list it opens too, following that view: Simple list in use with the filled button, Smart groups untagged, and "Use Simple list" keeps it', async () => {
+  test('on Simple list it opens too, following that view: Simple list in use with the filled button, Smart groups untagged, and "Keep Simple list" keeps it', async () => {
     stored.set(listView.LIST_VIEW_COOKIE, 'list');
     await leave(NEXT);
     await until(() => dialog() !== null);
     expect(claims()).toHaveLength(1);
     expect(inUse()).toEqual(['simple']);
     expect(filled()).toEqual(['simple']);
+    expect(keeps()).toEqual(['simple']);
     // As shipped (`RECOMMEND_SMART_ON_SIMPLE` off), someone on Simple list sees no "Recommended" on Smart groups.
     expect(tags('smart')).toBe(0);
     expect(tags('agents')).toBe(1);
@@ -284,6 +292,17 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
     expect(dialog()).toBeNull();
     expect(drawn).toBe('list');
     expect(stored.get(listView.LIST_VIEW_COOKIE)).toBe('list');
+    await wait(50);
+    expect(notNows()).toHaveLength(0);
+  });
+
+  test('on Smart groups, "Keep Smart groups" leaves the view as it is and is an answer, not a Not now', async () => {
+    await leave(NEXT);
+    await until(() => dialog() !== null);
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="smart"]')!.click());
+    expect(dialog()).toBeNull();
+    expect(drawn).toBe('grouped');
+    expect(stored.has(listView.LIST_VIEW_COOKIE)).toBe(false);
     await wait(50);
     expect(notNows()).toHaveLength(0);
   });
@@ -435,7 +454,19 @@ describe.skipIf(!hasDom)('the view choice, through the line', () => {
 });
 
 describe.skipIf(!hasDom)('the view choice dialog', () => {
-  function draw(sections: InboxListSection[], current: ListView = 'grouped') {
+  // On happy-dom's blank page a picture's path is no address, and the picture fails at once (a set face then draws the
+  // agent's own mark): here the page has an address, as in a browser. happy-dom loads no picture either way.
+  type HappyDom = { setURL: (url: string) => void };
+  const happyDom = () => (window as unknown as { happyDOM: HappyDom }).happyDOM;
+  let savedUrl = '';
+  beforeEach(() => {
+    savedUrl = window.location.href;
+    happyDom().setURL('http://127.0.0.1:9/');
+  });
+  afterEach(() => {
+    happyDom().setURL(savedUrl);
+  });
+  function draw(current: ListView = 'grouped') {
     host = document.createElement('div');
     host.className = 'pn-inbox';
     document.body.appendChild(host);
@@ -443,7 +474,7 @@ describe.skipIf(!hasDom)('the view choice dialog', () => {
       root = createRoot(host!);
       root.render(
         <ThemeProvider>
-          <ListViewIntro groups={[]} flat={[]} sections={sections} look={readListLook()} phone={false} current={current} onPick={() => {}} onDismiss={() => {}} />
+          <ListViewIntro phone={false} current={current} onPick={() => {}} onDismiss={() => {}} />
         </ThemeProvider>,
       );
     });
@@ -454,63 +485,84 @@ describe.skipIf(!hasDom)('the view choice dialog', () => {
     root = null;
     host = null;
   }
-  const picture = () => col('agents').querySelector('[data-view-picture="agents"]')!;
+  const picture = (key: string) => col(key).querySelector(`[data-view-picture="${key}"]`)!;
+  /** What the three pictures show: the agents, each picture's threads and their titles, and every face drawn. */
+  const shown = () =>
+    JSON.stringify({
+      agents: agentNames(picture('agents')),
+      threads: ['agents', 'smart', 'simple'].map((key) => threadIds(picture(key))),
+      titles: ['agents', 'smart', 'simple'].map((key) => [...picture(key).querySelectorAll('[data-thread-id]')].map((row) => row.querySelector('.ib-lrow-t, .ib-title')?.textContent ?? '')),
+      bands: [...picture('smart').querySelectorAll('.ib-band')].map((band) => band.textContent),
+      faces: [...dialog()!.querySelectorAll('[data-agent-face], img[data-set]')].map((el) => el.getAttribute('data-agent-face') ?? el.getAttribute('data-set')),
+      marks: picture('agents').querySelectorAll('.am').length,
+    });
 
-  test('"In use" and the filled button follow the view the list draws', () => {
+  test('"In use", the filled button and "Keep" follow the view the list draws; the others read "Use"', () => {
     for (const current of ['grouped', 'list', 'agents'] as const) {
-      draw([], current);
+      draw(current);
       const key = current === 'grouped' ? 'smart' : current === 'list' ? 'simple' : 'agents';
       expect(inUse()).toEqual([key]);
       expect(filled()).toEqual([key]);
+      expect(keeps()).toEqual([key]);
       clear();
     }
   });
 
-  test("the Agents picture is the person's own agents, each with its threads, as the Agents view starts them", () => {
-    setInboxAgents([{ agents: [agent('ses_ops', 'Ops', 'waiting'), agent('ses_rev', 'Review', 'working'), agent('ses_tide', 'Tide', 'idle')], total: 3, ended_today: 0 }]);
-    draw(
-      sectionsOf({
-        waiting: [row('w1', 9, 'ses_ops', 'waiting')],
-        new: [row('n1', 8, 'ses_rev'), row('n2', 7, 'ses_rev')],
-        quiet: [row('q1', 6, 'ses_tide', 'quiet'), row('q2', 5, 'ses_tide', 'quiet'), row('q3', 4, 'ses_tide', 'quiet')],
-      }),
-    );
-    // The agents the list names, in the view's order (something for the person first).
-    expect([...picture().querySelectorAll('.ib-ag')].map((group) => group.getAttribute('aria-label'))).toEqual(['Ops', 'Review', 'Tide']);
-    // Ops and Review start open (something for the person); Tide, with only quiet threads, starts folded.
-    expect([...picture().querySelectorAll('[data-thread-id]')].map((el) => el.getAttribute('data-thread-id'))).toEqual(['w1', 'n1', 'n2']);
+  test('the pictures are the demo the owner approved: four agents (Blastoise on Tide, two threads under it, Search index last and folded), whatever the person has', () => {
+    draw();
+    expect(agentNames(picture('agents'))).toEqual(DEMO_AGENTS);
+    const tide = picture('agents').querySelector('.ib-ag[aria-label="Tide"]')!;
+    expect(tide.querySelectorAll('[data-thread-id]').length).toBe(2);
+    expect(tide.querySelector('img[data-set="set:view-choice/blastoise"]')).not.toBeNull();
+    expect(picture('agents').querySelector('.ib-ag[aria-label="Search index"]')!.querySelectorAll('[data-thread-id]').length).toBe(0);
+    // The groups: Waiting on you, New since you looked, then Quiet's band alone.
+    expect([...picture('smart').querySelectorAll('.ib-band')].map((band) => band.closest('[data-section-id]')!.getAttribute('data-section-id'))).toEqual(['waiting', 'new', 'quiet']);
+    // Blastoise on the groups' and the list's rows too.
+    for (const key of ['smart', 'simple']) expect(picture(key).querySelector('[data-agent-face="set:view-choice/blastoise"]')).not.toBeNull();
+    const demo = shown();
+    clear();
+
+    // The person's own list, whatever it is, changes nothing: none, one agent, 150 agents with faces kept.
+    const people: [string, unknown][] = [
+      ['no agents', [{ agents: [], total: 0, ended_today: 0 }]],
+      ['one agent', [{ agents: [agent('ses_tide', 'Tide', 'idle')], total: 1, ended_today: 0 }]],
+      ['150 agents', [{ agents: Array.from({ length: 150 }, (_, i) => agent(`ses_e${i}`, `Agent ${i}`, i % 3 === 0 ? 'waiting' : 'idle')), total: 150, ended_today: 0 }]],
+    ];
+    for (const [, groups] of people) {
+      setInboxAgents(groups);
+      draw();
+      expect(shown()).toBe(demo);
+      // Bounded: the demo's few faces and rows, never the person's 150.
+      expect(dialog()!.querySelectorAll('.am').length).toBeLessThanOrEqual(8);
+      expect(dialog()!.querySelectorAll('[data-thread-id]').length).toBeLessThanOrEqual(20);
+      clear();
+    }
   });
 
-  test('one agent with nothing for the person (folded as it starts): the picture opens it, never an empty frame', () => {
-    setInboxAgents([{ agents: [agent('ses_tide', 'Tide', 'idle')], total: 1, ended_today: 0 }]);
-    draw(sectionsOf({ quiet: [row('q1', 6, 'ses_tide', 'quiet'), row('q2', 5, 'ses_tide', 'quiet'), row('q3', 4, 'ses_tide', 'quiet')] }));
-    expect(picture().querySelectorAll('.ib-ag').length).toBe(1);
-    expect(picture().querySelectorAll('[data-thread-id]').length).toBe(3);
-  });
-
-  test('a long list (150 ended agents, 400 threads, every agent folded as it starts): the picture opens only the top, a few agents each with its first threads, never every face and row', () => {
-    setInboxAgents([{ agents: Array.from({ length: 150 }, (_, i) => agent(`ses_e${i}`, `Ended ${i}`, 'ended')), total: 150, ended_today: 0 }]);
-    const start = Date.parse('2026-11-05T09:00:00.000Z');
-    const quiet = Array.from({ length: 400 }, (_, i) => {
-      const at = new Date(start - i * 60_000).toISOString();
-      return { ...row(`t${i}`, 0, `ses_e${i % 150}`, 'quiet'), last_at: at, last_agent_at: at };
+  test("nothing in the dialog reads or writes the person's agent folds, even a click on a pictured agent", () => {
+    const touched: string[] = [];
+    setStorageBackend({
+      getItem: (key) => (touched.push(key), stored.get(key) ?? null),
+      setItem: (key, value) => (touched.push(key), void stored.set(key, value)),
+      removeItem: (key) => (touched.push(key), void stored.delete(key)),
     });
-    draw(sectionsOf({ quiet }));
-    const heads = picture().querySelectorAll('.ib-ag').length;
-    const rows = picture().querySelectorAll('[data-thread-id]').length;
-    // As the approved picture: four or five agents, each with threads under it, not empty heads.
-    expect(heads).toBeGreaterThanOrEqual(4);
-    expect(rows).toBeGreaterThanOrEqual(heads);
-    // Bounded: a frame's worth of faces and rows, not 150 faces and 400 rows.
-    expect(heads).toBeLessThanOrEqual(20);
-    expect(picture().querySelectorAll('.am').length).toBeLessThanOrEqual(20);
-    expect(rows).toBeLessThanOrEqual(20);
+    draw();
+    act(() => picture('agents').querySelector<HTMLButtonElement>('[data-agent-head]')!.click());
+    expect(touched.filter((key) => key === AGENT_FOLDS_COOKIE)).toEqual([]);
   });
 
-  test('no agent at all (every thread under "No agent", folded as it starts): the picture opens the band and shows the threads', () => {
-    setInboxAgents([{ agents: [], total: 0, ended_today: 0 }]);
-    draw(sectionsOf({ quiet: [row('q1', 6, null, 'quiet'), row('q2', 5, null, 'quiet')], new: [row('n1', 8, null)] }));
-    expect(picture().querySelectorAll('.ib-ag').length).toBe(0);
-    expect(picture().querySelectorAll('[data-thread-id]').length).toBe(3);
+  test("the demo's Blastoise is the window's own: no request for it, never the Inbox's icon address", async () => {
+    const asked: string[] = [];
+    const answer = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push(String(input instanceof Request ? input.url : input));
+      return answer(input, init);
+    }) as typeof fetch;
+    draw();
+    await wait(100);
+    const srcs = [...dialog()!.querySelectorAll<HTMLImageElement>('img[data-set="set:view-choice/blastoise"], [data-agent-face="set:view-choice/blastoise"] img')].map((img) => img.getAttribute('src') ?? '');
+    expect(srcs.length).toBeGreaterThan(1);
+    for (const src of srcs) expect(src).not.toContain('/icon-sets');
+    expect(asked.filter((url) => url.includes('/icon-sets'))).toEqual([]);
   });
 });
