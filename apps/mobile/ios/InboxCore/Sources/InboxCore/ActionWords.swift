@@ -222,6 +222,12 @@ public enum ActionWords {
     ok ? ToastWords(mark: .check, lead: link ? "Link copied" : "Thread ID copied", detail: quoted(row)) : ToastWords(mark: .warn, lead: "Couldn't copy")
   }
 
+  /// Several acts were not taken (acts that waited on the phone, sent together when the computer was back): how
+  /// many, with the first one's reason, in the words a bulk action's toast uses for its refusals.
+  public static func didNotChange(_ count: Int, why: String) -> ToastWords {
+    ToastWords(mark: .warn, lead: "\(self.count(count)) did not change: \(why)", wraps: true)
+  }
+
   /// An error's toast: the words wrap, and a screen reader hears them whole.
   public static func failed(_ words: String) -> ToastWords { ToastWords(mark: .warn, lead: words, wraps: true) }
 

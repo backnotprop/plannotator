@@ -79,6 +79,9 @@ struct ToastBanner: View {
     )
     .accessibilityElement(children: .contain)
     .accessibilityAction(.escape, close)
+    .accessibilityActions {
+      if toast.undo != nil { Button(PhoneWords.undo, action: undo) }
+    }
     // It floats over the page as a bar does: it grows with the text as far as a bar, never past the screen.
     .dynamicTypeSize(...Size.barText)
   }

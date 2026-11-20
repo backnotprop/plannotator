@@ -34,6 +34,8 @@ struct SnoozePickSheet: View {
   @State private var opened = Date()
   /// The wheels' height: five rows at the text's size.
   @ScaledMetric(relativeTo: .body) private var wheels: CGFloat = 180
+  /// The button's height as its words grow.
+  @ScaledMetric(relativeTo: .body) private var button: CGFloat = Size.wideButton
 
   private let rules = SnoozeRules()
   private var days: [SnoozeRules.Day] { rules.days(now: opened) }
@@ -70,8 +72,8 @@ struct SnoozePickSheet: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .cancellationAction) { Button(PhoneWords.cancel) { dismiss() } } }
     }
-    // Half the screen holds the wheels and the button; the largest text sizes can pull it up.
-    .presentationDetents([.medium, .large])
+    // As tall as its title, its wheels and its button, and no taller; the largest text sizes can pull it up.
+    .presentationDetents([.height(min(wheels, 280) + button + Space.card * 2 + Size.barSide), .large])
     .presentationDragIndicator(.visible)
     .presentationBackground(Surface.sheet)
     .onAppear {

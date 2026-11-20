@@ -47,27 +47,35 @@ final class RowActions {
   var warning: Warning?
   var picking: SnoozeTarget?
   /// Picking rows: the list is the picks' list, a tap picks.
-  var selecting = false
+  private(set) var selecting = false
   var picked: Set<ThreadID> = []
+  /// The row picking started from: the list empties its selection as it starts, and this row is picked again.
+  var firstPick: ThreadID?
   /// The open thread asks to be closed (its Mark unread).
   private(set) var closes = 0
   private var timer: Task<Void, Never>?
 
   /// How long a toast stays: an Undo's seven seconds (`MARK_READ_UNDO_MS`), a copy's 4.2 (packages/inbox/App.tsx).
+  /// While VoiceOver reads the screen a toast and its Undo stay half a minute: seven seconds is gone before it is
+  /// heard and reached.
   static let stays: TimeInterval = UndoOffer.seconds
   static let copyStays: TimeInterval = 4.2
+  static let readStays: TimeInterval = 30
+  private var heard: Bool { UIAccessibility.isVoiceOverRunning }
 
   init(session: InboxSession) { self.session = session }
 
   // MARK: The toast
 
-  private func show(_ words: ToastWords, undo: Undo? = nil, for seconds: TimeInterval = RowActions.stays) {
+  /// `until`: when its Undo ends; the toast goes with it, never before and never after.
+  private func show(_ words: ToastWords, undo: Undo? = nil, for seconds: TimeInterval = RowActions.stays, until: Date? = nil) {
     timer?.cancel()
     let next = Toast(words: words, undo: undo)
     toast = next
     AccessibilityNotification.Announcement(words.spoken).post()
+    let wait = until.map { max($0.timeIntervalSinceNow, 0) } ?? (heard ? max(seconds, Self.readStays) : seconds)
     timer = Task { [weak self] in
-      try? await Task.sleep(for: .milliseconds(Int(seconds * 1000)))
+      try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))
       guard !Task.isCancelled, let self, self.toast?.id == next.id else { return }
       self.toast = nil
     }
@@ -87,39 +95,45 @@ final class RowActions {
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     switch undo {
     case .one(let offer, let said):
-      if await session.undo(offer) { say(said) }
+      // An Undo that could not be taken (its time ran out, or the computer refused) is said, never silent.
+      if await session.undo(offer) { say(said) } else if session.actionNotices.isEmpty { show(ActionWords.failed(ActionWords.threadDidNotChange)) }
     case .many(let group):
-      if await session.undoMany(group) { say(ActionWords.movedBack) } else { show(ActionWords.failed(ActionWords.someDidNotMoveBack)) }
+      if await session.undoMany(group) { say(ActionWords.movedBack) } else if session.actionNotices.isEmpty { show(ActionWords.failed(ActionWords.someDidNotMoveBack)) }
     }
     told()
   }
 
-  /// A reason an act was not taken, said once: at once for an act the computer refused, later for one that waited
-  /// on the phone and gave way.
+  /// The reasons acts were not taken, said once: at once for an act the computer refused, later for acts that
+  /// waited on the phone and gave way. Several at once (a bulk action sent when the computer was back) are counted.
   func told() {
-    guard let notice = session.actionNotices.values.first else { return }
-    for id in session.actionNotices.keys { session.clearActionNotice(id) }
+    let notices = session.actionNotices
+    guard let first = notices.values.first else { return }
+    for id in notices.keys { session.clearActionNotice(id) }
     UINotificationFeedbackGenerator().notificationOccurred(.warning)
-    show(ActionWords.failed(PhoneWords.actNotice(notice, computer: session.computer.name)))
+    let why = PhoneWords.actNotice(first, computer: session.computer.name)
+    show(notices.count > 1 ? ActionWords.didNotChange(notices.count, why: why) : ActionWords.failed(why))
   }
 
   // MARK: One row
 
-  /// One act and its toast. `said`: what a screen reader hears after its Undo.
-  private func run(_ act: ThreadAct, on row: InboxListRow, toast words: ToastWords?, undone said: String = ActionWords.movedBack, quiet: String? = nil) async {
-    switch await session.act(act, on: row.threadId) {
-    case .done, .waits:
-      if let words {
-        let offer = session.undoOffer.flatMap { $0.thread == row.threadId ? $0 : nil }
-        show(words, undo: offer.map { .one($0, said: said) })
-      } else if let quiet {
-        say(quiet)
-      }
-    case .refused:
-      told()
-    case .notOffered:
+  /// One act and its toast. The act is held and its toast shown before anything is sent, so the toast and the
+  /// Undo it offers run on one clock; then it is sent. `said`: what a screen reader hears after its Undo.
+  @discardableResult
+  private func run(_ act: ThreadAct, on row: InboxListRow, toast words: ToastWords?, undone said: String = ActionWords.movedBack, quiet: String? = nil) async -> ActOutcome {
+    session.undoSeconds = heard ? Self.readStays : UndoOffer.seconds
+    guard let key = session.holdAct(act, on: row.threadId) else {
       show(ActionWords.failed(PhoneWords.actNotice(.notOffered, computer: session.computer.name)))
+      return .notOffered
     }
+    if let words {
+      let offer = session.undoOffer.flatMap { $0.id == key ? $0 : nil }
+      show(words, undo: offer.map { .one($0, said: said) }, until: offer?.expires)
+    } else if let quiet {
+      say(quiet)
+    }
+    let outcome = await session.deliverAct(key, on: row.threadId)
+    if outcome == .refused { told() }
+    return outcome
   }
 
   /// A row's menu item or swipe.
@@ -136,9 +150,9 @@ final class RowActions {
       case .read: markRead(row, place: place)
       case .markUnread:
         // The row is bold again; from Quiet it is back in New, and the open thread closes (its next look would
-        // read it again).
-        await run(.markUnread, on: row, toast: ActionWords.markedUnread(row, moved: place == .open || row.section == .quiet))
-        if place == .open { closes += 1 }
+        // read it again), unless the computer refused: then nothing changed, and the thread stays open.
+        let outcome = await run(.markUnread, on: row, toast: ActionWords.markedUnread(row, moved: place == .open || row.section == .quiet))
+        if place == .open, outcome != .refused, outcome != .notOffered { closes += 1 }
       case .unread: await run(.moveBack, on: row, toast: nil, quiet: ActionWords.movedBack)
       case .archive: await run(.archive, on: row, toast: ActionWords.archived(row, named: place != .open), undone: ActionWords.unarchivedSaid)
       case .unarchive: await run(.unarchive, on: row, toast: ActionWords.unarchived(row))
@@ -185,53 +199,50 @@ final class RowActions {
   // MARK: Several rows
 
   func startSelecting(_ thread: ThreadID? = nil) {
+    firstPick = thread
+    picked = thread.map { [$0] } ?? []
     selecting = true
-    picked = []
     UISelectionFeedbackGenerator().selectionChanged()
-    // The list empties its selection as it starts picking: the row is picked once it has.
-    guard let thread else { return }
-    Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(120))
-      if selecting { picked.insert(thread) }
-    }
   }
 
   func stopSelecting() {
     selecting = false
+    firstPick = nil
     picked = []
   }
 
-  /// The picked rows as the list draws them now (a pick that left the list drops out).
-  func pickedRows() -> [InboxListRow] {
-    guard let view = session.listView() else { return [] }
-    return view.groups.flatMap(\.threads).filter { picked.contains($0.threadId) }
+  /// The picked rows an action takes, from the list as drawn now.
+  func targets(_ action: BulkAction, in view: ListView?) -> [InboxListRow] {
+    guard let view else { return [] }
+    let rows = view.groups.flatMap(\.threads).filter { picked.contains($0.threadId) }
+    return BulkAction.targets(rows, action, drawn: { view.group(of: $0.threadId) }, starred: Set(view.pins.map(\.threadId)))
   }
 
-  /// The picked rows an action takes.
-  func targets(_ action: BulkAction) -> [InboxListRow] {
-    guard let view = session.listView() else { return [] }
-    return BulkAction.targets(pickedRows(), action, drawn: { view.group(of: $0.threadId) }, starred: Set(view.pins.map(\.threadId)))
-  }
-
-  /// One action on every picked row it takes: one toast, one Undo.
+  /// One action on every picked row it takes: every row drawn at once, one toast and one Undo at once, then sent.
   func bulk(_ action: BulkAction, until: Date? = nil) {
-    let rows = targets(action)
+    let rows = targets(action, in: session.listView())
     guard !rows.isEmpty else { return }
     let iso = until.map { SnoozeRules.iso($0) }
     let go: @MainActor () async -> Void = { [weak self] in
       guard let self else { return }
       self.stopSelecting()
-      let outcome = await self.session.actMany(action, until: iso, on: rows.map(\.threadId))
+      self.session.undoSeconds = self.heard ? Self.readStays : UndoOffer.seconds
+      let outcome = self.session.holdMany(action, until: iso, on: rows.map(\.threadId))
       let refusal = outcome.refusal.map { PhoneWords.actNotice($0, computer: self.session.computer.name) }
       guard
-        let words = ActionWords.bulk(
+        var words = ActionWords.bulk(
           action, made: outcome.made.count, held: outcome.held, heldOn: Array(repeating: self.session.computer.name, count: outcome.held), refused: outcome.refused.count, refusal: refusal,
           detail: iso.map { SnoozeRules().when($0) })
       else {
         // Every row refused: the window's error toast, as a single action's.
         return self.show(ActionWords.failed(refusal ?? ActionWords.threadsDidNotChange))
       }
-      self.show(words, undo: outcome.undo.map { .many($0) })
+      // How many wait for the computer is the news here: the words wrap, never cut before it.
+      if outcome.held > 0 { words.wraps = true }
+      self.show(words, undo: outcome.undo.map { .many($0) }, until: outcome.undo?.expires)
+      // Sent after the toast is up; what the computer refuses is said when it answers.
+      await self.session.sendMany(outcome.made)
+      self.told()
     }
     // Questions these would close unanswered: the warning asks once for all of them.
     let aside = ActionWords.SetAside(rows)

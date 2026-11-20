@@ -10,7 +10,7 @@ struct ArchivedScreen: View {
   @Environment(\.accessibilityReduceMotion) private var still
 
   var body: some View {
-    let rows = session.archivedRows()
+    let rows = session.archivedPage()
     List {
       ForEach(rows, id: \.threadId) { row in
         ZStack {
@@ -30,7 +30,8 @@ struct ArchivedScreen: View {
             .tint(RowAction.act.tint)
           }
         }
-        .contextMenu { ThreadMenuItems(row: row, drawn: .archived, actions: actions) }
+        .contextMenu { ThreadMenuItems(row: row, drawn: .archived, starred: row.pinnedAt != nil, actions: actions) }
+        .accessibilityActions { RowSpokenActions(row: row, drawn: .archived, starred: row.pinnedAt != nil, actions: actions) }
       }
       if session.archivedHasMore {
         Button {

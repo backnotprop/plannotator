@@ -24,8 +24,10 @@ struct ActionBook {
   /// A list read this pump already made for a waited act.
   var checked = false
   var needsListRead = false
-  /// An act on several rows is under way: the list is read once after all of them, not after each.
+  /// Several writes are being held together: the outbox is saved once after all of them.
   var batching = false
+  /// How long an Undo is on offer (longer while a screen reader reads the toast).
+  var undoSeconds = UndoOffer.seconds
   /// The Archived group as last read (`GET threads/archived`) and how many it asks for.
   var archived: ArchivedModel?
   var archivedLimit = UndoOffer.archivedFirst
@@ -186,10 +188,14 @@ extension InboxSession {
     return ListRules.archivedRows(rows)
   }
 
+  /// The Archived group as the screen shows it: twenty, then twenty more each time, up to a hundred, as the window
+  /// pages it (the read holds that many; threads the list carries or archived since are paged the same way).
+  public func archivedPage() -> [InboxListRow] { Array(archivedRows().prefix(book.archivedLimit)) }
+
   /// Whether the Archived group has more to show.
   public var archivedHasMore: Bool {
-    guard let read = book.archived else { return false }
-    return Int64(read.threads.count) < read.total && book.archivedLimit < UndoOffer.archivedMax
+    guard book.archivedLimit < UndoOffer.archivedMax else { return false }
+    return max(Int(book.archived?.total ?? 0), archivedRows().count) > book.archivedLimit
   }
 
   /// Read the Archived group (`GET threads/archived`): 20 first, then 20 more each time, up to 100, as the window.
@@ -209,11 +215,17 @@ extension InboxSession {
   /// Whether this Inbox offers the act (a route it does not list is never called).
   public func canAct(_ act: ThreadAct) -> Bool { standing == .ok && (skew == nil || offers(act.route)) }
 
-  /// Do one act on a thread: drawn at once, held while the computer is away, sent in order with the thread's other
-  /// writes. `undo`: offer the window's Undo for it.
+  /// How long an Undo is on offer: the window's seven seconds, or longer while a screen reader reads the toast.
+  public var undoSeconds: TimeInterval {
+    get { book.undoSeconds }
+    set { book.undoSeconds = max(newValue, UndoOffer.seconds) }
+  }
+
+  /// Hold one act on a thread: drawn at once and in the outbox before anything else can run, with its Undo on
+  /// offer. Nothing is sent yet (`deliverAct` does). Nil when this Inbox does not offer the act.
   @discardableResult
-  public func act(_ act: ThreadAct, on thread: ThreadID, undo: Bool = true) async -> ActOutcome {
-    guard canAct(act) else { return .notOffered }
+  public func holdAct(_ act: ThreadAct, on thread: ThreadID, undo: Bool = true) -> String? {
+    guard canAct(act) else { return nil }
     book.notices[thread] = nil
     let earlier = row(thread)
     let starIndex = list?.pins?.firstIndex { $0.threadId == thread }
@@ -221,11 +233,24 @@ extension InboxSession {
     let (request, body) = act.request(thread: thread, key: key)
     enqueue(kind: .state, thread: thread, message: nil, request: request, body: body, key: key, act: act, shown: shownState(thread, earlier))
     if undo, let kind = Self.undoKind(act, earlier: earlier) {
-      book.undo = UndoOffer(id: key, thread: thread, kind: kind, expires: clock.now().addingTimeInterval(UndoOffer.seconds), earlier: earlier, starIndex: starIndex)
+      book.undo = UndoOffer(id: key, thread: thread, kind: kind, expires: clock.now().addingTimeInterval(book.undoSeconds), earlier: earlier, starIndex: starIndex)
     }
+    return key
+  }
+
+  /// Send a held act, in order with its thread's other writes, and say what came of it.
+  public func deliverAct(_ key: String, on thread: ThreadID) async -> ActOutcome {
     await pump(thread.rawValue)
     if book.notices[thread] != nil { return .refused }
     return held.contains { $0.id == key } ? .waits : .done
+  }
+
+  /// Do one act on a thread: drawn at once, held while the computer is away, sent in order with the thread's other
+  /// writes. `undo`: offer the window's Undo for it.
+  @discardableResult
+  public func act(_ act: ThreadAct, on thread: ThreadID, undo: Bool = true) async -> ActOutcome {
+    guard let key = holdAct(act, on: thread, undo: undo) else { return .notOffered }
+    return await deliverAct(key, on: thread)
   }
 
   /// Which acts the window offers an Undo for (Star and a new order have none).

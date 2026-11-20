@@ -30,14 +30,18 @@ struct InboxScreen: View {
   private var selecting: Bool { actions.selecting }
 
   var body: some View {
-    NavigationStack(path: $path) {
-      content
+    // The list as drawn now, worked out once for the bar, the rows and the picks.
+    let view = session.listView()
+    return NavigationStack(path: $path) {
+      content(view)
         .background(Token.background.ignoresSafeArea())
+        // While picking only the title's words go: the bar keeps its kind, so the large title is back after Done.
         .navigationTitle(selecting ? "" : PhoneWords.inbox)
-        .navigationBarTitleDisplayMode(selecting ? .inline : .automatic)
-        .toolbar { bar }
+        .toolbar { bar(view) }
         .toolbar(selecting ? .visible : .hidden, for: .bottomBar)
         .scrollEdgeEffectStyle(.hard, for: .top)
+        // The picks' bar floats over the list: the rows end under a hard edge, never read between its buttons.
+        .scrollEdgeEffectStyle(selecting ? .hard : .automatic, for: .bottom)
         .toastHost(actions)
         .navigationDestination(for: ListRoute.self) { route in
           switch route {
@@ -57,17 +61,14 @@ struct InboxScreen: View {
     .onChange(of: session.actionNotices) { _, _ in actions.told() }
   }
 
-  @ToolbarContentBuilder private var bar: some ToolbarContent {
+  @ToolbarContentBuilder private func bar(_ view: ListView?) -> some ToolbarContent {
     if selecting {
-      let every = shown.filter { folds.isOpen($0.id) }.flatMap(\.threads).map(\.threadId)
+      let every = Self.shown(view).filter { folds.isOpen($0.id) }.flatMap(\.threads).map(\.threadId)
       let all = !every.isEmpty && every.allSatisfy(actions.picked.contains)
       ToolbarItem(placement: .topBarLeading) {
-        Button {
+        Button(PhoneWords.selectAll) {
           actions.picked = all ? actions.picked.subtracting(every) : actions.picked.union(every)
-        } label: {
-          Image(systemName: all ? "checkmark.circle.fill" : "circle")
         }
-        .accessibilityLabel(PhoneWords.selectAll)
         .accessibilityAddTraits(all ? .isSelected : [])
       }
       ToolbarItem(placement: .principal) {
@@ -80,36 +81,40 @@ struct InboxScreen: View {
           .barSized()
       }
       ToolbarItem(placement: .confirmationAction) { Button(PhoneWords.done) { actions.stopSelecting() } }
-      ToolbarItemGroup(placement: .bottomBar) { PickBar(actions: actions) }
+      ToolbarItemGroup(placement: .bottomBar) { PickBar(actions: actions, view: view) }
     } else {
       ToolbarItem(placement: .topBarLeading) { ComputerMenu(session: session) }
     }
   }
 
-  @ViewBuilder private var content: some View {
+  @ViewBuilder private func content(_ view: ListView?) -> some View {
     switch session.standing {
     case .appNeedsUpdate:
       // The copy this phone keeps stays readable; only answering needs the update.
-      if session.listLoaded { list } else { Standing(symbol: "arrow.down.app", words: PhoneWords.updatePhone, action: PhoneWords.update) { openURL(AppLinks.update) } }
+      if session.listLoaded { list(view) } else { Standing(symbol: "arrow.down.app", words: PhoneWords.updatePhone, action: PhoneWords.update) { openURL(AppLinks.update) } }
     case .inboxNeedsUpdate:
       Standing(symbol: "desktopcomputer.and.arrow.down", words: PhoneWords.updateComputer(session.computer.name))
     case .removed:
       Standing(symbol: "iphone.slash", words: PhoneWords.removedByComputer(session.computer.name), action: PhoneWords.pairAgain) { Task { await model.removeThisPhone() } }
     case .ok:
-      list
+      list(view)
     }
   }
 
   /// The groups with rows: Priority, the sections, then the Snoozed band.
-  private var shown: [InboxListSection] { (session.listView()?.groups ?? []).filter { !$0.threads.isEmpty } }
+  private static func shown(_ view: ListView?) -> [InboxListSection] { (view?.groups ?? []).filter { !$0.threads.isEmpty } }
 
-  private func toggle(_ id: InboxListGroupId) {
+  private func toggle(_ id: InboxListGroupId, in groups: [InboxListSection]) {
     var next = folds
     next.toggle(id)
+    // A group that closes lets its picks go: nothing is ever done to rows that cannot be seen.
+    if selecting, !next.isOpen(id), let group = groups.first(where: { $0.id == id }) {
+      actions.picked.subtract(group.threads.map(\.threadId))
+    }
     withAnimation(Motion.fade.animation(still: still)) { foldsRaw = next.raw }
   }
 
-  @ViewBuilder private var list: some View {
+  @ViewBuilder private func list(_ view: ListView?) -> some View {
     if !session.listLoaded {
       if session.reach == .away {
         Standing(symbol: "wifi.slash", words: PhoneWords.awayNoCopy(session.computer.name), details: awayNeeds, action: PhoneWords.tryAgain) { Task { await session.refresh() } }
@@ -117,8 +122,7 @@ struct InboxScreen: View {
         Waiting()
       }
     } else {
-      let view = session.listView()
-      let groups = (view?.groups ?? []).filter { !$0.threads.isEmpty }
+      let groups = Self.shown(view)
       let pins = view?.pins ?? []
       let starred = Set(pins.map(\.threadId))
       let held = Set(session.held.filter { $0.kind != .seen }.map(\.thread))
@@ -142,11 +146,11 @@ struct InboxScreen: View {
           Section {
             if open {
               ForEach(group.threads, id: \.threadId) { row in
-                ListRow(row: row, drawn: group.id, held: held.contains(row.threadId.rawValue), starred: starred.contains(row.threadId), actions: actions)
+                ListRow(row: row, drawn: group.id, held: held.contains(row.threadId.rawValue), starred: starred.contains(row.threadId), picked: selecting && actions.picked.contains(row.threadId), actions: actions)
               }
             }
           } header: {
-            GroupHeader(group: group, first: index == 0, open: open, news: folds.hasNews(group), blocker: folds.blocker(group)) { toggle(group.id) }
+            GroupHeader(group: group, first: index == 0, open: open, news: folds.hasNews(group), blocker: folds.blocker(group)) { toggle(group.id, in: groups) }
               .listRowInsets(EdgeInsets(top: index > 0 ? Space.close : Space.tight, leading: Self.edge, bottom: 0, trailing: Self.edge))
           }
           .listSectionSeparator(.hidden)
@@ -180,8 +184,8 @@ struct InboxScreen: View {
       .scrollContentBackground(.hidden)
       .environment(\.editMode, .constant(selecting ? .active : .inactive))
       .refreshable { await session.refresh() }
-      // The last rows can be brought over the toast while it is up.
-      .contentMargins(.bottom, actions.toast == nil ? 0 : Size.wideButton + Space.card, for: .scrollContent)
+      // The last rows can be brought over the toast while it is up, and over the picks' bar while picking.
+      .contentMargins(.bottom, selecting ? Size.wideButton + Space.section : actions.toast == nil ? 0 : Size.wideButton + Space.card, for: .scrollContent)
       // A row that leaves or moves slides; nothing else on the page does.
       .animation(Motion.fade.animation(still: still), value: groups.map { [$0.id.rawValue] + $0.threads.map(\.threadId.rawValue) })
       .animation(Motion.fade.animation(still: still), value: selecting)
@@ -197,11 +201,16 @@ struct InboxScreen: View {
         next.reset(.snoozed)
         foldsRaw = next.raw
       }
-      // A pick that left the list drops out.
-      .onChange(of: groups.flatMap(\.threads).count) { _, _ in
+      // A pick whose row left the list, or whose group closed, drops out: on any change of what is listed.
+      .onChange(of: groups.filter { folds.isOpen($0.id) }.flatMap(\.threads).map(\.threadId)) { _, listed in
         guard selecting else { return }
-        let listed = Set(groups.flatMap(\.threads).map(\.threadId))
         actions.picked.formIntersection(listed)
+      }
+      // Picking starts from a row: the list empties its selection as it starts, and that row is picked again.
+      .onChange(of: actions.picked) { _, now in
+        guard let first = actions.firstPick else { return }
+        actions.firstPick = nil
+        if selecting, !now.contains(first) { actions.picked.insert(first) }
       }
     }
   }
@@ -287,6 +296,8 @@ struct ListRow: View {
   let drawn: InboxListGroupId
   let held: Bool
   let starred: Bool
+  /// Picked, while picking.
+  var picked = false
   let actions: RowActions
 
   private var swipe: (lead: RowOffers.Action?, trail: RowOffers.Action?) {
@@ -297,9 +308,21 @@ struct ListRow: View {
     let picking = actions.selecting
     ZStack {
       NavigationLink(value: ListRoute.thread(row.threadId)) { EmptyView() }.opacity(0)
-      ThreadRow(row: row, held: held, starred: starred, unstar: picking ? nil : { actions.perform(.unpin, on: row) })
+      ThreadRow(row: row, held: held, starred: starred, picked: picked, unstar: picking ? nil : { actions.perform(.unpin, on: row) })
     }
-    .listRowBackground(picking && actions.picked.contains(row.threadId) ? Token.muted : Token.background)
+    // A picked row rests on a ground of its own: inside the page's edge, rounded, clear of the header over it.
+    .listRowBackground(
+      Token.background.overlay {
+        RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+          .fill(Token.muted)
+          .padding(.horizontal, Space.close)
+          .padding(.vertical, Space.hair)
+          .opacity(picked ? 1 : 0)
+      }
+    )
+    .accessibilityActions {
+      if !picking { RowSpokenActions(row: row, drawn: drawn, starred: starred, actions: actions) }
+    }
     // One rhythm: every row has the same air and the same height, and no row has a line another lacks.
     .listRowInsets(EdgeInsets(top: Space.near, leading: InboxScreen.edge, bottom: Space.near, trailing: InboxScreen.edge))
     .listRowSeparator(.hidden)
@@ -325,7 +348,7 @@ struct ListRow: View {
       }
     }
     .contextMenu {
-      if !picking { ThreadMenuItems(row: row, drawn: drawn, actions: actions) }
+      if !picking { ThreadMenuItems(row: row, drawn: drawn, starred: starred, actions: actions) }
     }
   }
 }
@@ -334,6 +357,8 @@ struct ListRow: View {
 /// the rest. Each takes the picked rows it can; one that takes none is off or left out.
 struct PickBar: View {
   let actions: RowActions
+  /// The list as drawn now, read once for the whole bar.
+  let view: ListView?
 
   private static let more: [(BulkAction, String, String)] = [
     (.read, PhoneWords.markRead, "checkmark.circle"),
@@ -356,9 +381,10 @@ struct PickBar: View {
     }
   }
 
-  private func takes(_ action: BulkAction) -> Bool { offers(action) && !actions.targets(action).isEmpty }
-
   var body: some View {
+    // Which actions take any picked row, worked out once.
+    let taking = Set(BulkAction.allCases.filter { offers($0) && !actions.targets($0, in: view).isEmpty })
+    let takes: (BulkAction) -> Bool = { taking.contains($0) }
     let rest = Self.more.filter { takes($0.0) }
     Button {
       actions.bulk(.archive)
@@ -566,6 +592,8 @@ struct ThreadRow: View {
   let row: InboxListRow
   let held: Bool
   var starred = false
+  /// Picked while picking: its mark keeps a ground of its own on the picked row's.
+  var picked = false
   /// A touch on the row's star unstars it (the window's row does the same). Nil: the star is only a mark.
   var unstar: (() -> Void)?
 
@@ -590,7 +618,7 @@ struct ThreadRow: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: Space.step) {
-      AgentMark(author: row.author, size: 32).padding(.top, Space.hair)
+      AgentMark(author: row.author, size: 32, ground: picked ? Token.background : Token.muted).padding(.top, Space.hair)
       VStack(alignment: .leading, spacing: Space.hair) {
         if large {
           // At the largest sizes the title keeps the whole line; the time and the count share the next one.
@@ -642,9 +670,6 @@ struct ThreadRow: View {
       ].compactMap { $0 }.joined(separator: ", ")
     )
     .accessibilityAddTraits(.isButton)
-    .accessibilityActions {
-      if starred, let unstar { Button(PhoneWords.unstarThread, action: unstar) }
-    }
   }
 
   /// What stands at the end of the row's second line, as the window's row has it: the star, a snooze's return,

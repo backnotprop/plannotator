@@ -38,8 +38,9 @@ struct RootView: View {
       if !model.booted {
         Token.background.ignoresSafeArea()
       } else if let session = model.session {
+        // A new session is a new screen, with its own row actions: the same computer paired again too.
         InboxScreen(session: session)
-          .id(session.computer.id)
+          .id(ObjectIdentifier(session))
       } else {
         PairingScreen()
       }

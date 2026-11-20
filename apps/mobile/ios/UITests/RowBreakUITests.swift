@@ -79,11 +79,14 @@ final class RowBreakUITests: XCTestCase {
     // A swipe to the left archives it.
     let again = reach(app, "Migrate every billing table, ")
     if menus { XCTAssertTrue(again.label.contains("Starred"), again.label) }
-    again.swipeLeft(velocity: .fast)
-    // A swipe that fell short rests open on the button.
+    // A swipe that fell short rests open on the button; one that missed the row is made again.
     let archive = app.buttons["Archive"]
-    if archive.waitForExistence(timeout: 2) { archive.tap() }
     let undo = app.buttons["Undo"]
+    for _ in 0..<3 where !undo.exists {
+      row(app, "Migrate every billing table, ").swipeLeft(velocity: .fast)
+      if archive.waitForExistence(timeout: 2) { archive.tap() }
+      _ = undo.waitForExistence(timeout: 2)
+    }
     XCTAssertTrue(undo.waitForExistence(timeout: 5))
     assertOnScreen(undo, "Undo", in: app)
     assertOnScreen(app.buttons["Dismiss"], "Dismiss", in: app)

@@ -419,8 +419,12 @@ public final class InboxSession {
 
   private func hold(_ write: HeldWrite) {
     held.append(write)
-    copy.saveOutbox(held)
+    // Several held at once (an act on many rows) are saved once, by the one that holds them.
+    if !book.batching { copy.saveOutbox(held) }
   }
+
+  /// Save the outbox as it stands (after several writes were held or taken back together).
+  func saveOutbox() { copy.saveOutbox(held) }
 
   func settle(_ id: String) {
     held.removeAll { $0.id == id }
@@ -713,7 +717,8 @@ public final class InboxSession {
 
   /// Send a thread's held writes in the order made, each after the one before it has its answer. One pump per
   /// thread: a write made while another is on its way joins the same run.
-  func pump(_ thread: String) async {
+  /// `readsList` false: the caller reads the list once itself, after pumping several threads.
+  func pump(_ thread: String, readsList: Bool = true) async {
     guard !pumping.contains(thread) else { return }
     pumping.insert(thread)
     defer { pumping.remove(thread) }
@@ -723,7 +728,7 @@ public final class InboxSession {
       if !(await deliver(next)) { break }
     }
     // A thread action landed: the list is read again, so its row comes from the computer.
-    if book.needsListRead, !book.batching, client != nil, !removed {
+    if readsList, book.needsListRead, client != nil, !removed {
       book.needsListRead = false
       await readList()
     }
@@ -741,7 +746,7 @@ public final class InboxSession {
   }
 
   /// While something waits and the computer does not answer, ask again now and then.
-  private func retryLater() {
+  func retryLater() {
     guard retry == nil else { return }
     retry = Task { [weak self] in
       while let self, !Task.isCancelled {

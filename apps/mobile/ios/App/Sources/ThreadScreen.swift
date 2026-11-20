@@ -80,9 +80,11 @@ struct ThreadScreen: View {
   }
 
   var body: some View {
-    Group {
+    // The thread's row, found once for everything this draw asks of it.
+    let row = session.row(id)
+    return Group {
       if let thread = model?.thread {
-        messages(thread)
+        messages(thread, row: row)
       } else if session.missingThreads.contains(id) {
         Standing(symbol: "tray", words: PhoneWords.threadGone)
       } else if session.reach == .away {
@@ -113,10 +115,10 @@ struct ThreadScreen: View {
         .accessibilityShowsLargeContentViewer { Text(title) }
       }
       // More: what a row's menu offers, for the open thread (the window's ⋯ sheet).
-      if let row = session.row(id) {
+      if let row {
         ToolbarItem(placement: .topBarTrailing) {
           Menu {
-            ThreadMenuItems(row: row, drawn: session.listView()?.group(of: id), actions: actions, place: .thread)
+            ThreadMenuItems(row: row, drawn: RowOffers.backIn(row), starred: row.pinnedAt != nil, actions: actions, place: .thread)
           } label: {
             Image(systemName: "ellipsis")
           }
@@ -159,7 +161,7 @@ struct ThreadScreen: View {
     }
   }
 
-  private func messages(_ thread: InboxThread) -> some View {
+  private func messages(_ thread: InboxThread, row: InboxListRow?) -> some View {
     // A reply that only carried a permission prompt's answer is said by the prompt's own card.
     let said = PermissionPrompt.saidByCards(in: thread)
     // A permission prompt's message with no question left draws nothing, as in the window.
@@ -344,13 +346,12 @@ struct ThreadScreen: View {
     .refreshable { await session.refresh() }
     // Where the thread stands, said under the title bar: snoozed, read, back from a snooze.
     .safeAreaInset(edge: .top, spacing: 0) {
-      if let row = session.row(id) { ThreadLines(row: row, agent: agentName(thread), actions: actions) }
+      // The scroll view keeps what is on screen in place under the taller top: nothing is covered when a line
+      // comes (a thread rests with its newest message's name row under the title bar, which says the same).
+      if let row { ThreadLines(row: row, agent: agentName(thread), actions: actions) }
     }
-    // A line comes or goes, or the foot changes its kind (the reply field, or an archived thread's line): the page
-    // stays where it rested. Said as the row changes, before the room does, so the move is known to be this view's.
-    .onChange(of: session.row(id).map { [$0.snoozed != nil, $0.readAt != nil, $0.snoozeBack != nil, ListRules.archived($0)] }) { _, _ in stay() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      if let row = session.row(id), ListRules.archived(row) {
+      if let row, ListRules.archived(row) {
         ArchivedFoot(row: row, agent: agentName(thread), actions: actions)
           .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foot = $0 }
       } else {
@@ -415,14 +416,6 @@ struct ThreadScreen: View {
         if abs(scroll.top - y) > 0.5 { settle(at: y, end: block.maxY + Self.clear) }
       }
     }
-  }
-
-  /// A line over the messages came or went, or the foot changed its kind: the room the page has changed, not the
-  /// page. It stays on the message it rested on.
-  private func stay() {
-    guard scroll.rest != nil else { return }
-    scroll.keptAt = Date()
-    keepPlace()
   }
 
   /// Rest the page's top at `y`. A thread that ends too soon for that is given the room it lacks first, so the

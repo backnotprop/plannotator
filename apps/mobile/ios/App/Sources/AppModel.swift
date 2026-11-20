@@ -354,6 +354,12 @@ struct LaunchOptions {
           await session.act(.priority(true), on: StandInData.checkout, undo: false)
         case "archivedrow":
           for thread in [StandInData.bumps, StandInData.docs] { await session.act(.archive, on: thread, undo: false) }
+        case "archivedmany":
+          // Twenty-five archived threads: more than one page of the Archived list.
+          let many = StandInData.manyThreads(now: Date(), count: 25)
+          for thread in many { await door.add(thread) }
+          await session.refresh()
+          await session.actMany(.archive, on: many.map(\.threadId))
         case "readrow":
           await session.act(.read, on: StandInData.upload, undo: false)
         case "outdated":

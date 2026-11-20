@@ -43,7 +43,7 @@ public enum BulkAction: String, Hashable, Sendable, CaseIterable {
 /// What came of an act on several rows: one toast says it (ActionWords.bulk).
 public struct BulkOutcome: Hashable, Sendable {
   public var action: BulkAction
-  /// Taken by the computer or waiting on the phone for it.
+  /// Held for the computer: drawn, and sent or waiting to be.
   public var made: [ThreadID] = []
   /// Of those, the ones that wait: the computer is away.
   public var held = 0
@@ -66,6 +66,19 @@ public struct BulkUndo: Hashable, Sendable, Identifiable {
   public var count: Int { offers.count + starred.count }
 }
 
+/// The threads still to send, shared by the few senders that work through them.
+@MainActor
+private final class SendLane {
+  private var queue: [String]
+  private var next = 0
+  init(_ queue: [String]) { self.queue = queue }
+  func take() -> String? {
+    guard next < queue.count else { return nil }
+    next += 1
+    return queue[next - 1]
+  }
+}
+
 extension InboxSession {
   /// The Undo on offer for the last act on several rows, if any.
   public var bulkUndoOffer: BulkUndo? { book.undoGroup }
@@ -73,72 +86,148 @@ extension InboxSession {
   /// Every reason an act was not taken that the person has not been told yet, by thread.
   public var actionNotices: [ThreadID: Notice] { book.notices }
 
-  /// Do one action on several rows: each drawn at once, held while the computer is away and sent in its thread's
-  /// order, exactly as a single act is. One Undo takes them all back.
+  /// How many threads' writes go to the computer at a time (the window's `AT_ONCE`).
+  static let atOnce = 4
+
+  /// Hold one action on several rows: every row drawn at once, every write in the outbox with one save, and one
+  /// Undo on offer for all of them, before anything else can run. Nothing is sent yet (`sendMany` does).
   @discardableResult
-  public func actMany(_ action: BulkAction, until: String? = nil, on threads: [ThreadID]) async -> BulkOutcome {
+  public func holdMany(_ action: BulkAction, until: String? = nil, on threads: [ThreadID]) -> BulkOutcome {
     var outcome = BulkOutcome(action: action)
     guard let act = action.act(until: until) else { return outcome }
-    book.undoGroup = nil
+    guard canAct(act) else {
+      outcome.refused = threads
+      outcome.refusal = .notOffered
+      return outcome
+    }
+    // The rows as drawn and as the computer last said them, found once for all of them.
+    let now = clock.now()
+    var drawn: [ThreadID: InboxListRow] = [:]
+    for row in shownList()?.everyRow ?? [] where drawn[row.threadId] == nil { drawn[row.threadId] = ListRules.asOf(row, now: now) }
+    var said: [ThreadID: InboxListRow] = [:]
+    for row in list?.everyRow ?? [] where said[row.threadId] == nil { said[row.threadId] = row }
+    let stars = (list?.pins ?? []).map(\.threadId)
+    let expires = now.addingTimeInterval(book.undoSeconds)
     var offers: [UndoOffer] = []
     var starred: [ThreadID] = []
     book.batching = true
     for thread in threads {
-      book.undo = nil
-      switch await self.act(act, on: thread, undo: true) {
-      case .done, .waits:
-        outcome.made.append(thread)
-        if held.contains(where: { $0.kind == .state && $0.thread == thread.rawValue && $0.act == act }) { outcome.held += 1 }
-        if let offer = book.undo, offer.thread == thread { offers.append(offer) } else if action == .star { starred.append(thread) }
-      case .refused:
-        outcome.refused.append(thread)
-        if outcome.refusal == nil { outcome.refusal = book.notices[thread] }
-        // The toast says it once for all of them.
-        book.notices[thread] = nil
-      case .notOffered:
-        outcome.refused.append(thread)
-        if outcome.refusal == nil { outcome.refusal = .notOffered }
+      book.notices[thread] = nil
+      let earlier = drawn[thread] ?? row(thread, now: now)
+      let key = UUID().uuidString
+      let (request, body) = act.request(thread: thread, key: key)
+      let shown = earlier.map { ShownState(shown: $0, computer: said[thread] ?? self.threads[thread]?.row) }
+      enqueue(kind: .state, thread: thread, message: nil, request: request, body: body, key: key, act: act, shown: shown)
+      outcome.made.append(thread)
+      if let kind = Self.undoKind(act, earlier: earlier) {
+        offers.append(UndoOffer(id: key, thread: thread, kind: kind, expires: expires, earlier: earlier, starIndex: stars.firstIndex(of: thread)))
+      } else if action == .star {
+        starred.append(thread)
       }
     }
+    book.batching = false
+    saveOutbox()
+    if reach == .away { outcome.held = outcome.made.count }
+    // One toast, one Undo: it takes the place of the last one, as any new act's does.
     book.undo = nil
-    await endBatch()
+    book.undoGroup = nil
     if !offers.isEmpty || !starred.isEmpty {
-      // One clock for all of them, started when the last one was made.
-      let expires = clock.now().addingTimeInterval(UndoOffer.seconds)
-      let group = BulkUndo(
-        id: UUID().uuidString, action: action, expires: expires,
-        offers: offers.map { UndoOffer(id: $0.id, thread: $0.thread, kind: $0.kind, expires: expires, earlier: $0.earlier, starIndex: $0.starIndex) }, starred: starred)
+      let group = BulkUndo(id: UUID().uuidString, action: action, expires: expires, offers: offers, starred: starred)
       book.undoGroup = group
       outcome.undo = group
     }
     return outcome
   }
 
-  /// Undo an act on several rows: each row's own Undo, in the order they were made. False when the offer is gone,
-  /// or any row could not be put back.
+  /// Send what was held for these threads, a few threads at a time, then read the list once. While the computer
+  /// does not answer nothing is tried here: what waits is sent when it is back, as every held write is.
+  public func sendMany(_ threads: [ThreadID]) async {
+    var seen: Set<String> = []
+    let queue = threads.map(\.rawValue).filter { seen.insert($0).inserted }
+    guard !queue.isEmpty else { return }
+    guard reach != .away else { return retryLater() }
+    let lane = SendLane(queue)
+    let lanes = (0..<min(Self.atOnce, queue.count)).map { _ in
+      Task { @MainActor [weak self] in
+        while let self, let thread = lane.take() { await self.pump(thread, readsList: false) }
+      }
+    }
+    for task in lanes { await task.value }
+    if book.needsListRead, client != nil {
+      book.needsListRead = false
+      await readList()
+    }
+  }
+
+  /// Do one action on several rows and send it: each drawn at once, held while the computer is away and sent in
+  /// its thread's order, exactly as a single act is. One Undo takes them all back.
+  @discardableResult
+  public func actMany(_ action: BulkAction, until: String? = nil, on threads: [ThreadID]) async -> BulkOutcome {
+    var outcome = holdMany(action, until: until, on: threads)
+    await sendMany(outcome.made)
+    // What the computer refused, said once for all of them.
+    let refused = outcome.made.filter { book.notices[$0] != nil }
+    if !refused.isEmpty {
+      outcome.refusal = book.notices[refused[0]]
+      outcome.refused += refused
+      outcome.made.removeAll { refused.contains($0) }
+      for thread in refused { book.notices[thread] = nil }
+    }
+    outcome.held = held.filter { write in write.kind == .state && outcome.made.contains { $0.rawValue == write.thread } }.count
+    return outcome
+  }
+
+  /// Undo an act on several rows. The rows go back at once: an act still on the phone is taken back and nothing is
+  /// sent for it; for one the computer took, its reverse is held, and all of them are saved once and then sent.
+  /// False when the offer is gone, or a row could not be put back.
   @discardableResult
   public func undoMany(_ group: BulkUndo, now: Date? = nil) async -> Bool {
     let now = now ?? clock.now()
     guard now < group.expires, book.undoGroup?.id == group.id else { return false }
     book.undoGroup = nil
     var all = true
+    var touched: [ThreadID] = []
+    var slow: [UndoOffer] = []
+    let waiting = Set(held.map(\.id))
+    var takenBack: Set<String> = []
     book.batching = true
     for offer in group.offers {
+      if book.inFlight.contains(offer.id) || book.inDoubt.contains(offer.id) {
+        // On its way, or sent with no answer: its own Undo waits for the answer and decides.
+        slow.append(offer)
+      } else if waiting.contains(offer.id) {
+        takenBack.insert(offer.id)
+      } else if book.notices[offer.thread] != nil, !book.landed.contains(where: { $0.write.id == offer.id }), book.answers[offer.id] == nil {
+        // Refused, so nothing to undo.
+        all = false
+      } else {
+        let shown = shownState(offer.thread, row(offer.thread, now: now))
+        for act in reverse(of: offer, now: now) {
+          let key = UUID().uuidString
+          let (request, body) = act.request(thread: offer.thread, key: key)
+          enqueue(kind: .state, thread: offer.thread, message: nil, request: request, body: body, key: key, act: act, shown: shown)
+        }
+        touched.append(offer.thread)
+      }
+    }
+    for thread in group.starred {
+      guard canAct(.unstar) else { all = false; continue }
+      let key = UUID().uuidString
+      let (request, body) = ThreadAct.unstar.request(thread: thread, key: key)
+      enqueue(kind: .state, thread: thread, message: nil, request: request, body: body, key: key, act: .unstar, shown: shownState(thread, row(thread, now: now)))
+      touched.append(thread)
+    }
+    if !takenBack.isEmpty { held.removeAll { takenBack.contains($0.id) } }
+    book.batching = false
+    saveOutbox()
+    await sendMany(touched)
+    for offer in slow {
       book.undo = offer
       if !(await undo(offer, now: now)) { all = false }
     }
-    for thread in group.starred where await self.act(.unstar, on: thread, undo: false) == .refused { all = false }
-    book.undo = nil
-    await endBatch()
+    if !slow.isEmpty { book.undo = nil }
+    if touched.contains(where: { book.notices[$0] != nil }) { all = false }
     return all
-  }
-
-  /// The acts on several rows are made: the list is read once, so each row comes from the computer.
-  private func endBatch() async {
-    book.batching = false
-    guard book.needsListRead, client != nil else { return }
-    book.needsListRead = false
-    await readList()
   }
 
   /// Forget the Undo on offer (its toast was dismissed, or another took its place).

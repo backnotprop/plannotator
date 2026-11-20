@@ -10,21 +10,20 @@ struct ThreadMenuItems: View {
   let row: InboxListRow
   /// The group the row is drawn in.
   let drawn: InboxListGroupId?
+  /// Starred now (the caller reads the list once for all its rows).
+  let starred: Bool
   let actions: RowActions
   var place: Place = .row
 
-  private var session: InboxSession { actions.session }
   private var where_: ActionWords.Place { place == .thread ? .open : .list }
 
-  private var offered: [RowOffers.Action] {
-    let starred = session.listView()?.pins.contains { $0.threadId == row.threadId } ?? (row.pinnedAt != nil)
-    return RowOffers.menu(
+  /// What this row offers, by the window's rules.
+  static func offered(_ row: InboxListRow, drawn: InboxListGroupId?, starred: Bool, session: InboxSession) -> [RowOffers.Action] {
+    RowOffers.menu(
       row, drawn: drawn, pinned: session.canAct(.star) ? starred : nil, canMarkRead: session.canAct(.read), canSnooze: session.canAct(.unsnooze), canPrioritize: session.canAct(.priority(true)))
   }
 
-  private func has(_ item: RowOffers.Action) -> Bool { offered.contains(item) }
-
-  private func label(_ item: RowOffers.Action) -> (String, String) {
+  static func label(_ item: RowOffers.Action, place: Place) -> (String, String) {
     switch item {
     case .pin: return (PhoneWords.starThread, "star")
     case .unpin: return (PhoneWords.unstarThread, "star.slash")
@@ -43,36 +42,38 @@ struct ThreadMenuItems: View {
     }
   }
 
-  @ViewBuilder private func item(_ action: RowOffers.Action) -> some View {
-    if has(action) {
-      let (words, symbol) = label(action)
+  @ViewBuilder private func item(_ action: RowOffers.Action, _ offered: [RowOffers.Action]) -> some View {
+    if offered.contains(action) {
+      let (words, symbol) = Self.label(action, place: place)
       Button(words, systemImage: symbol) { actions.perform(action, on: row, place: where_) }
     }
   }
 
-  @ViewBuilder private var snooze: some View {
-    if has(.snooze) {
+  @ViewBuilder private func snooze(_ offered: [RowOffers.Action]) -> some View {
+    if offered.contains(.snooze) {
       Menu {
         SnoozeTimes { actions.snooze(row, until: $0) } pickATime: { actions.picking = .row(row, place: where_) }
       } label: {
         Label(PhoneWords.snooze, systemImage: "clock")
       }
     }
-    item(.unsnooze)
+    item(.unsnooze, offered)
   }
 
-  @ViewBuilder private var reads: some View {
-    item(.read)
+  @ViewBuilder private func reads(_ offered: [RowOffers.Action]) -> some View {
+    item(.read, offered)
     if place == .thread {
-      item(.unread)
-      item(.markUnread)
+      item(.unread, offered)
+      item(.markUnread, offered)
     } else {
-      item(.markUnread)
-      item(.unread)
+      item(.markUnread, offered)
+      item(.unread, offered)
     }
   }
 
   var body: some View {
+    // Worked out once for the whole menu.
+    let offered = Self.offered(row, drawn: drawn, starred: starred, session: actions.session)
     if place == .row {
       // Select first, alone: picking starts with this row picked.
       if drawn != .archived {
@@ -80,41 +81,64 @@ struct ThreadMenuItems: View {
         Divider()
       }
       Section {
-        item(.pin)
-        item(.unpin)
-        item(.priorityAdd)
-        item(.priorityRemove)
+        item(.pin, offered)
+        item(.unpin, offered)
+        item(.priorityAdd, offered)
+        item(.priorityRemove, offered)
       }
       Section {
-        item(.copyLink)
-        item(.copyId)
+        item(.copyLink, offered)
+        item(.copyId, offered)
       }
       Section {
-        snooze
-        reads
-        item(.archive)
-        item(.unarchive)
+        snooze(offered)
+        reads(offered)
+        item(.archive, offered)
+        item(.unarchive, offered)
       }
     } else {
       Section {
-        reads
-        snooze
+        reads(offered)
+        snooze(offered)
       }
       Section {
-        item(.pin)
-        item(.unpin)
-        item(.priorityAdd)
-        item(.priorityRemove)
+        item(.pin, offered)
+        item(.unpin, offered)
+        item(.priorityAdd, offered)
+        item(.priorityRemove, offered)
       }
       Section {
-        item(.copyLink)
-        item(.copyId)
+        item(.copyLink, offered)
+        item(.copyId, offered)
       }
       Section {
-        item(.archive)
-        item(.unarchive)
+        item(.archive, offered)
+        item(.unarchive, offered)
       }
     }
+  }
+}
+
+/// What a row offers a screen reader as its actions, beyond its swipes: the star, Priority, the copies, and Snooze
+/// with each of its times, in the menu's words. The menu itself needs a press and hold.
+struct RowSpokenActions: View {
+  let row: InboxListRow
+  let drawn: InboxListGroupId?
+  let starred: Bool
+  let actions: RowActions
+
+  var body: some View {
+    let offered = ThreadMenuItems.offered(row, drawn: drawn, starred: starred, session: actions.session)
+    ForEach([RowOffers.Action.pin, .unpin, .priorityAdd, .priorityRemove, .copyLink, .copyId, .unsnooze].filter(offered.contains), id: \.self) { item in
+      Button(ThreadMenuItems.label(item, place: .row).0) { actions.perform(item, on: row) }
+    }
+    if offered.contains(.snooze) {
+      ForEach(SnoozeRules().choices(), id: \.id) { choice in
+        Button("\(PhoneWords.snooze), \(choice.label)") { actions.snooze(row, until: choice.until) }
+      }
+      Button("\(PhoneWords.snooze), \(PhoneWords.pickATimeTitle)") { actions.picking = .row(row, place: .list) }
+    }
+    if drawn != .archived { Button(PhoneWords.select) { actions.startSelecting(row.threadId) } }
   }
 }
 

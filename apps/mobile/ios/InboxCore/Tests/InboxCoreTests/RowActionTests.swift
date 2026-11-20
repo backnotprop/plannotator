@@ -311,3 +311,87 @@ extension RowActionTests {
     print("archived 1000 rows in \(took) s")
   }
 }
+
+extension RowActionTests {
+  /// Fifty rows archived while the computer is away: every row leaves at once and the Undo is there before
+  /// anything is sent; nothing is tried against a computer that does not answer; an act made meanwhile keeps its
+  /// own Undo.
+  func testFiftyRowsActedOnWhileAwayAreDrawnAtOnceAndNothingIsTried() async throws {
+    let door = StandInDoor()
+    let threads = StandInData.manyThreads(now: Date(), count: 50)
+    for thread in threads { await door.add(thread) }
+    let copy = LocalCopy(folder: FileManager.default.temporaryDirectory.appendingPathComponent("inbox-core-tests-\(UUID().uuidString)", isDirectory: true))
+    let session = await pairedSession(door: door, copy: copy)
+    await session.start()
+    await door.setOffline(true)
+    await session.refresh()
+    XCTAssertEqual(session.reach, .away)
+    await door.clearCalls()
+    let ids = threads.map(\.threadId)
+
+    // Held, not awaited: the rows are out of the list and the Undo is on offer when this returns.
+    let outcome = session.holdMany(.archive, on: ids)
+    XCTAssertEqual(outcome.made.count, 50)
+    XCTAssertEqual(outcome.held, 50, "all of them wait for the computer")
+    XCTAssertEqual(outcome.undo?.count, 50)
+    let view = try XCTUnwrap(session.listView())
+    XCTAssertFalse(view.groups.flatMap(\.threads).contains { ids.contains($0.threadId) }, "every row left at once")
+    XCTAssertEqual(session.held.filter { $0.kind == .state }.count, 50)
+    // In the outbox on disk, so a relaunch keeps them.
+    XCTAssertEqual(copy.outbox().filter { $0.kind == .state }.count, 50)
+
+    // A swipe made while the batch waits has its own Undo, and keeps it.
+    let key = try XCTUnwrap(session.holdAct(.archive, on: StandInData.docs))
+    let own = try XCTUnwrap(session.undoOffer)
+    XCTAssertEqual(own.id, key)
+    await session.sendMany(outcome.made)
+    XCTAssertEqual(session.undoOffer?.id, key, "the batch did not take the swipe's Undo")
+    let tried = await door.calls
+    XCTAssertTrue(tried.isEmpty, "nothing is tried while the computer does not answer: \(tried.map(\.path))")
+
+    // Undo takes all fifty back at once, and nothing was ever sent.
+    let undone = await session.undoMany(try XCTUnwrap(outcome.undo))
+    XCTAssertTrue(undone)
+    XCTAssertEqual(session.held.filter { $0.kind == .state }.map(\.id), [key], "only the swipe still waits")
+    XCTAssertEqual(copy.outbox().filter { $0.kind == .state }.count, 1)
+    let back = try XCTUnwrap(session.listView())
+    XCTAssertEqual(back.groups.flatMap(\.threads).filter { ids.contains($0.threadId) }.count, 50)
+  }
+
+  /// The Archived group pages as the window's does: twenty, then twenty more, however many the list carries.
+  func testTheArchivedGroupShowsTwentyThenTwentyMore() async throws {
+    let door = StandInDoor()
+    let threads = StandInData.manyThreads(now: Date(), count: 25)
+    for thread in threads { await door.add(thread) }
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.actMany(.archive, on: threads.map(\.threadId))
+    await session.readArchived()
+    XCTAssertEqual(session.archivedRows().count, 25)
+    XCTAssertEqual(session.archivedPage().count, 20)
+    XCTAssertTrue(session.archivedHasMore)
+    await session.readArchived(more: true)
+    XCTAssertEqual(session.archivedPage().count, 25)
+    XCTAssertFalse(session.archivedHasMore)
+  }
+
+  /// An act is held and its Undo is on offer before anything is sent: a toast shown then can never outlive it.
+  func testAnActIsHeldWithItsUndoBeforeItIsSent() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await door.clearCalls()
+    let key = try XCTUnwrap(session.holdAct(.archive, on: StandInData.docs))
+    XCTAssertEqual(session.undoOffer?.id, key)
+    XCTAssertEqual(session.listView()?.group(of: StandInData.docs), .archived, "drawn at once")
+    let sent = await door.posts("/resolve")
+    XCTAssertTrue(sent.isEmpty, "not sent yet")
+    let outcome = await session.deliverAct(key, on: StandInData.docs)
+    XCTAssertEqual(outcome, .done)
+    // A screen reader's toast stays longer, and so does its Undo.
+    session.undoSeconds = 30
+    session.holdAct(.unarchive, on: StandInData.docs)
+    let offer = try XCTUnwrap(session.undoOffer)
+    XCTAssertGreaterThan(offer.expires.timeIntervalSinceNow, 20)
+  }
+}

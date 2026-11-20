@@ -223,7 +223,7 @@ final class RowActionUITests: XCTestCase {
     row(app, "Docs search is slow").tap()
     XCTAssertTrue(app.staticTexts["3 selected"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.buttons["Select all"].exists)
-    shot("18-selecting")
+    shot("41-selecting")
 
     app.buttons["More"].tap()
     for item in ["Mark read", "Star threads", "Add to Priority"] { XCTAssertTrue(app.buttons[item].waitForExistence(timeout: 5), item) }
@@ -258,6 +258,57 @@ final class RowActionUITests: XCTestCase {
     app.buttons["Done"].tap()
     XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 5))
     XCTAssertTrue(row(app, "Retry logic for the relay client").exists)
+    // The large title is back, not a small one in the bar.
+    let title = app.navigationBars["Inbox"].staticTexts["Inbox"]
+    XCTAssertTrue(title.waitForExistence(timeout: 5))
+    XCTAssertGreaterThan(title.frame.height, 30, "the large title")
+    shot("40-after-done")
+  }
+
+  @MainActor
+  func testSeveralRowsArchivedWhileAwayLeaveAtOnceWithTheirToast() {
+    let app = launch(stage: "away")
+    let retry = row(app, "Retry logic for the relay client")
+    XCTAssertTrue(retry.waitForExistence(timeout: 10))
+    retry.press(forDuration: 1.0)
+    app.buttons["Select"].tap()
+    XCTAssertTrue(app.staticTexts["1 selected"].waitForExistence(timeout: 5))
+    row(app, "Checkout redesign").tap()
+    row(app, "Onboarding copy").tap()
+    XCTAssertTrue(app.staticTexts["3 selected"].waitForExistence(timeout: 5))
+    shot("39-selecting-away")
+    app.buttons["Archive"].tap()
+    // At once: no waiting on a computer that does not answer. The toast says how many wait for it.
+    XCTAssertTrue(text(app, "Archived 3").waitForExistence(timeout: 2))
+    XCTAssertTrue(text(app, "3 when Work Mac is back").exists)
+    XCTAssertFalse(row(app, "Checkout redesign").exists)
+    XCTAssertFalse(row(app, "Onboarding copy").exists)
+    shot("38-bulk-archive-away")
+    app.buttons["Undo"].tap()
+    XCTAssertTrue(row(app, "Checkout redesign").waitForExistence(timeout: 3))
+    XCTAssertTrue(row(app, "Onboarding copy").exists)
+    XCTAssertTrue(row(app, "Retry logic for the relay client").exists)
+  }
+
+  @MainActor
+  func testTheArchivedListShowsTwentyThenTwentyMore() {
+    let app = launch(stage: "archivedmany")
+    app.swipeUp()
+    let door = app.buttons["Archived"]
+    XCTAssertTrue(door.waitForExistence(timeout: 20))
+    door.tap()
+    XCTAssertTrue(app.navigationBars["Archived"].waitForExistence(timeout: 5))
+    shot("37-archived-25")
+    // Twenty rows, then the way to twenty more (the group's own tests count the rows).
+    for _ in 0..<12 where !app.buttons["Show 20 more"].exists { app.swipeUp(velocity: .fast) }
+    let more = app.buttons["Show 20 more"]
+    XCTAssertTrue(more.waitForExistence(timeout: 5))
+    shot("37-archived-25-show-more")
+    more.tap()
+    // All twenty-five are shown: nothing more to ask for, at the foot of the list too.
+    for _ in 0..<4 { app.swipeUp(velocity: .fast) }
+    XCTAssertFalse(app.buttons["Show 20 more"].waitForExistence(timeout: 2))
+    shot("37-archived-25-all")
   }
 
   // MARK: The thread's More menu
@@ -268,6 +319,12 @@ final class RowActionUITests: XCTestCase {
     row(app, "Retry logic for the relay client").tap()
     let more = app.buttons["More"]
     XCTAssertTrue(more.waitForExistence(timeout: 10))
+    // Where the thread rests before any line is over it: the same words stay first on the page after.
+    let first = text(app, "The client now retries a dropped socket")
+    XCTAssertTrue(first.waitForExistence(timeout: 5))
+    sleep(2)
+    let rested = first.frame.minY
+    shot("35-thread-before-line")
     more.tap()
     for item in ["Mark read", "Snooze", "Star thread", "Add to Priority", "Copy link", "Copy thread ID", "Archive thread"] { XCTAssertTrue(app.buttons[item].waitForExistence(timeout: 5), item) }
     shot("22-thread-menu")
@@ -275,7 +332,10 @@ final class RowActionUITests: XCTestCase {
     app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Tomorrow")).firstMatch.tap()
     let line = text(app, "Snoozed until")
     XCTAssertTrue(line.waitForExistence(timeout: 5))
-    shot("23-thread-snoozed")
+    shot("36-thread-snoozed-line")
+    // The line took room at the top: what was first on the page is still whole, just under the line.
+    XCTAssertGreaterThanOrEqual(first.frame.minY, line.frame.maxY - 1, "the line covers nothing that was on screen")
+    XCTAssertGreaterThan(first.frame.minY, rested, "the page moved down by the line")
     // The line's own Unsnooze (the toast's Undo is beside it; this is the line's).
     app.buttons["Unsnooze"].firstMatch.tap()
     XCTAssertTrue(text(app, "Unsnoozed").waitForExistence(timeout: 5))
