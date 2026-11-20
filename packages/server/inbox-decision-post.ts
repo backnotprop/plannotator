@@ -89,7 +89,7 @@ export async function postThreadDecisions(
   const doc = decisionExportForPost(built.doc);
   if (doc.decisions.length + doc.others.length === 0) return refused(409, "no_decisions", "This thread has no questions to post.");
   const ref = prRefOf(linked.pull, linked.url);
-  if (!ref || ref.platform === "bitbucket" || !canPostMarkedText(ref)) return refused(422, "forge_unsupported", "Posting decisions works on GitHub and GitLab only.");
+  if (!ref || ref.platform === "bitbucket" || ref.platform === "forgejo" || !canPostMarkedText(ref)) return refused(422, "forge_unsupported", "Posting decisions works on GitHub and GitLab only.");
   const platform: DecisionPostPlatform = ref.platform;
   const refText = inboxThreadPullText(linked);
   const host = { platform, host: ref.host };
