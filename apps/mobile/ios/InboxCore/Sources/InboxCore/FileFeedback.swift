@@ -48,7 +48,7 @@ public enum FileFeedback {
     guard let file, !file.inline, kinds.contains(file.kind) else { return false }
     let fields = comment.annotation
     for key in foreign where present(fields[key]) { return false }
-    guard case .string(let type)? = fields["type"], ["COMMENT", "DELETION"].contains(type) else { return false }
+    guard case .string(let type)? = fields["type"], ["COMMENT", "DELETION", "GLOBAL_COMMENT"].contains(type) else { return false }
     guard case .string? = fields["text"], case .string? = fields["originalText"], case .number? = fields["startOffset"] else { return false }
     if let images = fields["images"], present(images) {
       // A drawing kept on the computer goes by its path. A picture or a file added to a comment is an upload that
@@ -84,7 +84,7 @@ public enum FileFeedback {
   }
 
   /// `inboxCommentPicture` (packages/core/inbox-attachments.ts): a picture added to a comment, `upl_…/<file>`.
-  static func isCommentPicture(_ path: String) -> Bool { path.firstMatch(of: /^upl_[A-Za-z0-9]+\//) != nil }
+  static func isCommentPicture(_ path: String) -> Bool { path.firstMatch(of: /^upl_[A-Za-z0-9]+\//.matchingSemantics(.unicodeScalar)) != nil }
 
   /// `attachmentLabel` (packages/inbox/attachments.ts): the file's path in its project, else where it is.
   public static func label(_ file: FeedbackFile, projectRoot: String) -> String {
@@ -103,15 +103,17 @@ public enum FileFeedback {
   /// `blockEndLine` (packages/ui/utils/parser.ts): the last line a block covers.
   static func endLine(_ block: DocumentBlock) -> Int {
     if block.content.isEmpty { return block.startLine }
-    let lines = block.content.components(separatedBy: "\n").count
+    // Counted as JavaScript splits: at every line feed, a CRLF's too.
+    let lines = block.content.unicodeScalars.filter { $0 == "\n" }.count + 1
     if block.kind == .code || block.kind == .directive { return block.startLine + lines + 1 }
     if block.alertKind != nil { return block.startLine + lines }
     return block.startLine + lines - 1
   }
 
   /// The text for `comments` (in the order made), or "" when there are none. Every comment given must be one
-  /// `carries` accepts. `texts`: each file version's text, keyed by `textKey`.
-  public static func text(_ comments: [FileComment], files: [FeedbackFile], texts: [String: String], projectRoot: String) -> String {
+  /// `carries` accepts. `texts`: each file version's text, keyed by `textKey`. `prototypes`: what names a page a
+  /// question shows as a prototype, by file (`PrototypeNames`): its section is filed under it.
+  public static func text(_ comments: [FileComment], files: [FeedbackFile], texts: [String: String], projectRoot: String, prototypes: [String: String] = [:]) -> String {
     struct Group {
       var label: String
       var comments: [FileComment] = []
@@ -120,7 +122,8 @@ public enum FileFeedback {
     var groups: [Group] = []
     for comment in comments {
       guard let file = files.first(where: { $0.id == comment.attachment.rawValue }) else { continue }
-      let label = "\(label(file, projectRoot: projectRoot))\(comment.version == FileComment.current ? "" : Words.feedbackSentYours)"
+      let named = "\(label(file, projectRoot: projectRoot))\(comment.version == FileComment.current ? "" : Words.feedbackSentYours)"
+      let label = prototypes[file.id].map { "\($0): \(named)" } ?? named
       let at: Int
       if let found = groups.firstIndex(where: { $0.label == label }) {
         at = found
@@ -165,11 +168,14 @@ public enum FileFeedback {
   /// One comment (`renderAnnotationEntries`, at the level of a file's section).
   private static func entry(_ comment: FileComment, number: Int, blocks: [Block]) -> String {
     var out = "### \(number). "
-    if let id = comment.blockId, !id.isEmpty, let block = blocks.first(where: { $0.id == id }) {
+    if comment.type != "GLOBAL_COMMENT", let id = comment.blockId, !id.isEmpty, let block = blocks.first(where: { $0.id == id }) {
       out += block.endLine <= block.startLine ? "(line \(block.startLine)) " : "(lines \(block.startLine)–\(block.endLine)) "
     }
     if comment.type == "DELETION" {
       out += "Remove this\n```\n\(comment.quote)\n```\n> I don't want this in the document.\n"
+    } else if comment.type == "GLOBAL_COMMENT" {
+      // On the whole file (a document's Global comment, a page's own comment): no line, no quote.
+      out += "General feedback about the document\n> \(comment.words)\n"
     } else {
       out += "\(element(comment).map { "Feedback on \($0)" } ?? "Feedback on: \"\(comment.quote)\"")\n> \(comment.words)\n"
     }
@@ -186,7 +192,7 @@ public enum FileFeedback {
   static func safeInline(_ value: JSONValue?, _ max: Int = 200) -> String {
     guard case .string(let text)? = value else { return "" }
     let collapsed = collapse(text)
-    let defused = collapsed.replacing(/`+/, with: "'") as NSString
+    let defused = collapsed.replacing(/`+/.matchingSemantics(.unicodeScalar), with: "'") as NSString
     return defused.length > max ? "\(defused.substring(to: max))…" : defused as String
   }
 
@@ -230,7 +236,7 @@ public enum FileFeedback {
 
   /// "the <nav> element — "Primary"": an element with no words of its own, named by what it is (`elementSubject`).
   private static func element(_ comment: FileComment) -> String? {
-    guard let context = context(comment), trim(comment.quote).wholeMatch(of: /\[element: [^\]]*\]/) != nil else { return nil }
+    guard let context = context(comment), trim(comment.quote).wholeMatch(of: /\[element: [^\]]*\]/.matchingSemantics(.unicodeScalar)) != nil else { return nil }
     let tag = safeInline(context["tag"], 32)
     let name = truthy(context["name"]) ? safeInline(context["name"], 120) : ""
     let file = sourceFile(context)
@@ -251,12 +257,12 @@ public enum FileFeedback {
     for pair in attrs {
       guard case .array(let both) = pair, both.count >= 2, case .string("src") = both[0], case .string(let raw) = both[1] else { continue }
       let value = trim(raw)
-      if value.lowercased().hasPrefix("data:") {
-        let kind = value.dropFirst(5).split(omittingEmptySubsequences: false, whereSeparator: { $0 == ";" || $0 == "," }).first.map(String.init) ?? ""
+      if String(String.UnicodeScalarView(value.unicodeScalars.prefix(5))).lowercased() == "data:" {
+        let kind = String(String.UnicodeScalarView(value.unicodeScalars.dropFirst(5).prefix { $0 != ";" && $0 != "," }))
         return safeInline(.string("data:\(kind.isEmpty ? "unknown" : kind)"), 60)
       }
-      let path = value.replacing(/\?…$/, with: "").replacing(/\/+$/, with: "")
-      let name = path.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? path
+      let path = value.replacing(/\?…$/.matchingSemantics(.unicodeScalar), with: "").replacing(/\/+$/.matchingSemantics(.unicodeScalar), with: "")
+      let name = String(String.UnicodeScalarView(path.unicodeScalars.reversed().prefix { $0 != "/" }.reversed()))
       return safeInline(.string(name.isEmpty ? path : name), 60)
     }
     return ""
@@ -273,7 +279,7 @@ public enum FileFeedback {
     let fields = comment.annotation
     var block = ""
     if case .string(let raw)? = context["outline"], !trim(raw).isEmpty {
-      block += "\n````html\n\(trim(raw.replacing(/`{3,}/, with: "'''")))\n````\n"
+      block += "\n````html\n\(trim(raw.replacing(/`{3,}/.matchingSemantics(.unicodeScalar), with: "'''")))\n````\n"
     } else {
       block += "\n"
     }
@@ -289,7 +295,7 @@ public enum FileFeedback {
         guard case .array(let both) = pair, both.count == 2 else { return nil }
         return "\(safeInline(both[0], 40))=\"\(safeInline(both[1], 120))\""
       }.joined(separator: " ")
-      if !pairs.isEmpty { block += "- **attrs** `\(pairs.replacingOccurrences(of: "`", with: "'"))`\n" }
+      if !pairs.isEmpty { block += "- **attrs** `\(pairs.replacingOccurrences(of: "`", with: "'", options: .literal))`\n" }
     }
     if truthy(context["text"]) { block += "- **text** \"\(safeInline(context["text"], 300))\"\n" }
     if case .object(let rect)? = context["rect"] {

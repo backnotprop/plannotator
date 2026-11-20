@@ -686,6 +686,279 @@
           }
         }
       ]
+    },
+    {
+      "name": "alerts, CRLF, a drawing, hard marks and a prototype",
+      "note": "A DELETION on an alert, a comment on a directive, a document whose lines end in CRLF, a picture comment that carries its drawing, a page element whose words hold a backtick followed by a combining mark, a whole-file comment on a document and on a page, and a page an option shows as its prototype.",
+      "project_root": "/work/api",
+      "attachments": [
+        {
+          "id": "att_NOTES",
+          "path": "/work/api/docs/release.md",
+          "name": "release.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_CRLF",
+          "path": "/work/api/docs/windows.md",
+          "name": "windows.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_SHOT",
+          "path": "/work/api/shots/before.png",
+          "name": "before.png",
+          "kind": "image"
+        },
+        {
+          "id": "att_HARD",
+          "path": "/work/api/pages/hard.html",
+          "name": "hard.html",
+          "kind": "html"
+        },
+        {
+          "id": "att_PROTO",
+          "path": "/work/api/proto/b.html",
+          "name": "b.html",
+          "kind": "html",
+          "message_id": "msg_ASK"
+        }
+      ],
+      "texts": {
+        "att_NOTES|current": "# Release notes\n\n> [!WARNING]\n> The relay drops idle sockets.\n> Reconnect on wake.\n\n:::note\nThe canary runs for two days.\n:::\n\nShip it on Monday.\n",
+        "att_CRLF|current": "Plan\r\n\r\nFirst line of the notes.\r\nSecond line runs on.\r\n\r\nLast paragraph.\r\n"
+      },
+      "messages": [
+        {
+          "base_path": "/work/api",
+          "attachments": [
+            {
+              "id": "att_PROTO",
+              "path": "/work/api/proto/b.html",
+              "name": "b.html",
+              "kind": "html"
+            }
+          ],
+          "questions": [
+            {
+              "kind": "single",
+              "prompt": "Which checkout?",
+              "choices": [
+                {
+                  "label": "A · Cart first"
+                },
+                {
+                  "label": "B · Total first",
+                  "prototype": {
+                    "target": "proto/b.html"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "records": [
+        {
+          "id": "d1",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 30,
+            "type": "DELETION",
+            "text": "",
+            "originalText": "The relay drops idle sockets.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "d2",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d2",
+            "blockId": "block-2",
+            "startOffset": 4,
+            "endOffset": 10,
+            "type": "COMMENT",
+            "text": "Say which canary.",
+            "originalText": "canary",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "d3",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "GLOBAL_COMMENT",
+            "text": "Shorter, please.",
+            "originalText": "",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "w1",
+          "attachment_id": "att_CRLF",
+          "version": "current",
+          "annotation": {
+            "id": "w1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 24,
+            "type": "COMMENT",
+            "text": "Which notes?",
+            "originalText": "First line of the notes.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "w2",
+          "attachment_id": "att_CRLF",
+          "version": "current",
+          "annotation": {
+            "id": "w2",
+            "blockId": "block-2",
+            "startOffset": 0,
+            "endOffset": 15,
+            "type": "COMMENT",
+            "text": "Keep this.",
+            "originalText": "Last paragraph.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "s1",
+          "attachment_id": "att_SHOT",
+          "version": "current",
+          "annotation": {
+            "id": "s1",
+            "blockId": "image",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Crop the top.",
+            "originalText": "before.png",
+            "createdA": 1,
+            "images": [
+              {
+                "path": "/home/person/.plannotator/inbox/markups/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png",
+                "name": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png"
+              }
+            ]
+          }
+        },
+        {
+          "id": "k1",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Odd mark here.",
+            "originalText": "a`́b",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "span",
+              "path": "body > p > span.a`́b",
+              "text": "a`́b",
+              "name": "na`́b",
+              "attrs": [
+                [
+                  "title",
+                  "ta`́b"
+                ],
+                [
+                  "src",
+                  "/img/xa`́b.png"
+                ]
+              ],
+              "outline": "<span>```́</span>"
+            },
+            "htmlAnchor": {
+              "selector": "span[title=a`́b]",
+              "tagName": "SPAN"
+            }
+          }
+        },
+        {
+          "id": "k2",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k2",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Name it.",
+            "originalText": "[element: a]́]",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "img",
+              "name": "Logo",
+              "attrs": [
+                [
+                  "src",
+                  "data:image/svg+xml;base64,AAAA"
+                ]
+              ]
+            },
+            "htmlAnchor": {
+              "selector": "img",
+              "tagName": "IMG"
+            }
+          }
+        },
+        {
+          "id": "k3",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "GLOBAL_COMMENT",
+            "text": "The whole page is too dense.",
+            "originalText": "",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "r1",
+          "attachment_id": "att_PROTO",
+          "version": "current",
+          "annotation": {
+            "id": "r1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Total is clearer.",
+            "originalText": "Total",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "h2",
+              "text": "Total"
+            },
+            "htmlAnchor": {
+              "selector": "h2",
+              "tagName": "H2"
+            }
+          }
+        }
+      ]
     }
   ],
   "code_comments": [

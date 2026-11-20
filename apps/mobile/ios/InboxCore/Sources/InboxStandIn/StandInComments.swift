@@ -81,6 +81,7 @@ extension StandInDoor {
 
   /// `POST markups`: the drawing's own bytes, its key in the query. Kept once, by its hash.
   func keepDrawing(_ call: DoorCall) -> DoorAnswerBytes {
+    if let code = options.refusesMarkups { return refuse(413, code, code == "relay_upload_unavailable" ? "Files and drawings are sent over the Wi-Fi or the tailnet, not the relay." : "The drawing is too large.") }
     guard let key = call.query.first(where: { $0.name == "idempotency_key" })?.value, !key.isEmpty else {
       return refuse(422, "validation_error", "idempotency_key: a key is required.", field: "idempotency_key")
     }

@@ -63,20 +63,27 @@ extension InboxSession {
     }
   }
 
-  /// Ask the computer how each of a thread's files stands now (changed since sent, missing).
-  public func readAttachments(_ thread: ThreadID) async {
+  /// Ask the computer how each of a thread's files stands now (changed since sent, missing), and which comments
+  /// on them wait for a Send. Returns the ids of the comments it listed, when it listed them.
+  @discardableResult
+  public func readAttachments(_ thread: ThreadID) async -> Set<String>? {
     if client == nil { _ = await connect() }
-    guard let client, offers(DoorRoutes.getThreadAttachments) else { return }
-    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return }
+    guard let client, offers(DoorRoutes.getThreadAttachments) else { return nil }
+    // What the computer answers about a comment from here on is newer than this list.
+    let started = commentBook.landSeq
+    guard let answer = try? await client.call(Door.getThreadAttachments(thread: thread)) else { return nil }
     if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: answer.body) {
       files.states[thread] = read.attachments + (read.inlineImages ?? [])
       // The comments that wait for a Send, the window's among them (an older Inbox's door lists none).
-      if let waiting = read.annotations { takeComments(thread, from: waiting) }
+      guard let waiting = read.annotations else { return nil }
+      takeComments(thread, from: waiting, started: started)
+      return Set(waiting.map(\.id))
     } else if case .object(var fields)? = try? JSONDecoder().decode(JSONValue.self, from: answer.body) {
       // A comment this app cannot read never hides the files: they are read without the comments.
       fields["annotations"] = nil
       if let read = try? JSONDecoder().decode(DoorThreadAttachmentsAnswer.self, from: JSONEncoder().encode(JSONValue.object(fields))) { files.states[thread] = read.attachments + (read.inlineImages ?? []) }
     }
+    return nil
   }
 
   /// The route a file's bytes come from, and whether it takes a Range. A picture comes whole (its ETag is its
@@ -174,7 +181,7 @@ extension InboxSession {
     files.open[item.id] = opened.isEmpty ? nil : opened
   }
 
-  private func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
+  func fetchAttachment(_ item: AttachmentItem, version: AttachmentVersion, progress: @Sendable @escaping (Int64, Int64?) -> Void) async throws -> URL {
     // Opened: it goes last when room is made.
     if let key = keptKey(item, version: version), let kept = bytes?.file(key) { return kept }
     if version == .current, let unavailable = item.unavailable { throw AttachmentError.unavailable(unavailable.message) }

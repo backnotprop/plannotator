@@ -13,13 +13,15 @@
 import type { InboxAnnotationRecord, InboxAttachmentState } from '../../packages/core/inbox-attachments';
 import { attachmentFeedback, codeCommentAnnotation, codeHash, imageCommentAnnotation } from '../../packages/inbox/attachments';
 import { markupWords } from '../../packages/inbox/markup';
+import { prototypeNames, type PrototypeMessage, type PrototypeQuestion } from '../../packages/inbox/prototypes';
 import { readRepoText } from './lib';
 
 export const FEEDBACK_FIXTURE = 'apps/mobile/contract/fixtures/feedback.json';
 
 type FileCase = { id: string; path: string; name: string; kind: string; sent_sha256?: string; message_id?: string };
 type RecordCase = { id: string; attachment_id: string; version: string; annotation: Record<string, unknown> };
-type FeedbackCase = { name: string; note: string; project_root: string; attachments: FileCase[]; texts: Record<string, string>; records: RecordCase[] };
+/** `messages`: the thread's messages as the window reads prototypes from them (prototypes.ts `prototypeNames`). */
+type FeedbackCase = { name: string; note: string; project_root: string; attachments: FileCase[]; texts: Record<string, string>; records: RecordCase[]; messages?: (PrototypeMessage & { questions?: (PrototypeQuestion & { kind?: string })[] })[] };
 type Fixture = {
   cases: FeedbackCase[];
   code_comments: { line_start: number; line_end: number; code: string; text: string }[];
@@ -59,7 +61,12 @@ export function feedbackVectors(about: string): unknown {
     cases: fixture.cases.map((c) => {
       const texts = new Map(Object.entries(c.texts).map(([key, text]) => [key.replace('|', '\0'), text]));
       const records = c.records.map((record, index) => recordOf(record, c.attachments, index));
-      return { ...c, feedback: attachmentFeedback(records, c.attachments.map(stateOf), texts, c.project_root) };
+      const names = c.messages ? prototypeNames(c.messages, c.project_root) : undefined;
+      return {
+        ...c,
+        ...(names ? { prototype_names: Object.fromEntries(names.attachments) } : {}),
+        feedback: attachmentFeedback(records, c.attachments.map(stateOf), texts, c.project_root, names ? { prototypeNames: names } : {}),
+      };
     }),
     code_comments: code.map((c) => ({
       ...c,

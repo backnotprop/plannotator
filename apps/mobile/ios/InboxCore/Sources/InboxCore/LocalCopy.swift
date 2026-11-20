@@ -40,6 +40,12 @@ public struct LocalCopy: Sendable {
 
   func read(_ name: String) -> Data? { file(name).flatMap { try? Data(contentsOf: $0) } }
 
+  /// Let go of one file of the copy (a drawing the computer has now).
+  func remove(_ name: String) {
+    guard let file = file(name) else { return }
+    try? FileManager.default.removeItem(at: file)
+  }
+
   public func saveList(_ model: ListModel) { if let data = try? JSONEncoder().encode(model) { write(data, to: "list.json") } }
   public func list() -> ListModel? { read("list.json").flatMap { try? DoorClient.readList($0).model } }
 
@@ -52,7 +58,11 @@ public struct LocalCopy: Sendable {
   }
 
   public func saveOutbox(_ writes: [HeldWrite]) { if let data = try? JSONEncoder().encode(writes) { write(data, to: "outbox.json") } }
-  public func outbox() -> [HeldWrite] { read("outbox.json").flatMap { try? JSONDecoder().decode([HeldWrite].self, from: $0) } ?? [] }
+  /// The outbox, write by write: one this build cannot read (a kind a newer build made) is left out, never the rest.
+  public func outbox() -> [HeldWrite] {
+    guard let data = read("outbox.json"), let items = try? JSONDecoder().decode([Readable<HeldWrite>].self, from: data) else { return [] }
+    return items.compactMap(\.value)
+  }
 
   /// Words a refused Send gave back to the person, and why, by thread: kept until the composer takes them.
   public struct GivenBack: Codable, Hashable, Sendable {
@@ -77,6 +87,12 @@ public struct LocalCopy: Sendable {
     guard let folder else { return }
     try? FileManager.default.removeItem(at: folder)
   }
+}
+
+/// One item of a list, or nil where this build cannot read it.
+struct Readable<Value: Decodable>: Decodable {
+  let value: Value?
+  init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
 }
 
 /// A write the person made that has no definite answer yet. Its key never changes: across retries, paths and
@@ -116,4 +132,6 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var undoes: String?
   /// A comment's write: the comment's id. A drawing's: the hash that names it.
   public var subject: String?
+  /// True once this write was sent and no definite answer came back: the computer may have it.
+  public var mayHaveArrived: Bool?
 }

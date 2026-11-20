@@ -690,6 +690,283 @@
         }
       ],
       "feedback": "# Feedback on the attached files\n\nThe following feedback is on the files you attached, one section per file and version.\n\n## docs/math.md\n\nI've reviewed this document and have 3 pieces of feedback:\n\n### 1. Feedback on: \"Words \"before\".\nWords `after`\"\n> A quote on two lines, with \"quotes\" and `ticks`.\n\n### 2. Feedback on: \"before\"\n> First by where it is.\n\n# Not a heading\n```\nnot a fence\n\n### 3. Feedback on: \"after the math\"\n> Second by where it is.\n\n## canary.html\n\nI've reviewed this document and have 3 pieces of feedback:\n\n### 1. Feedback on: \"Stage ```2``` of 4\n\n# Ship it\"\n> Is this right?\n\n````html\n<p title=\"one\">\n  '''\n</p>\n````\n- **selector** `body > header > p`\n- **path** `body > header > p`\n- **role** paragraph · **name** \"A \"name\" with 'ticks'\" · **component** `data-component='Stage'`\n- **attrs** `title=\"one 'two'\" data-x=\"y\"`\n- **text** \"Stage '2' of 4 # Ship it\"\n- **box** 20.5,44 353×20 (viewport 393×700)\n- **near** header \"Top\"\n\n### 2. Feedback on the <img> element (team.jpg)\n> Swap this picture.\n\n- **path** `body > img`\n- **attrs** `src=\"https://cdn.example.test/img/team.jpg?…\" alt=\"\"`\n\n### 3. Feedback on the <img> element — \"Team\" (team.jpg)\n> And this one.\n\n- **selector** `img`\n- **path** `body > img`\n- **name** \"Team\"\n\n## src/client.ts\n\nI've reviewed this document and have 1 piece of feedback:\n\n### 1. (line 5) Feedback on: \"\"\n> An empty line.\n\n---"
+    },
+    {
+      "name": "alerts, CRLF, a drawing, hard marks and a prototype",
+      "note": "A DELETION on an alert, a comment on a directive, a document whose lines end in CRLF, a picture comment that carries its drawing, a page element whose words hold a backtick followed by a combining mark, a whole-file comment on a document and on a page, and a page an option shows as its prototype.",
+      "project_root": "/work/api",
+      "attachments": [
+        {
+          "id": "att_NOTES",
+          "path": "/work/api/docs/release.md",
+          "name": "release.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_CRLF",
+          "path": "/work/api/docs/windows.md",
+          "name": "windows.md",
+          "kind": "markdown"
+        },
+        {
+          "id": "att_SHOT",
+          "path": "/work/api/shots/before.png",
+          "name": "before.png",
+          "kind": "image"
+        },
+        {
+          "id": "att_HARD",
+          "path": "/work/api/pages/hard.html",
+          "name": "hard.html",
+          "kind": "html"
+        },
+        {
+          "id": "att_PROTO",
+          "path": "/work/api/proto/b.html",
+          "name": "b.html",
+          "kind": "html",
+          "message_id": "msg_ASK"
+        }
+      ],
+      "texts": {
+        "att_NOTES|current": "# Release notes\n\n> [!WARNING]\n> The relay drops idle sockets.\n> Reconnect on wake.\n\n:::note\nThe canary runs for two days.\n:::\n\nShip it on Monday.\n",
+        "att_CRLF|current": "Plan\r\n\r\nFirst line of the notes.\r\nSecond line runs on.\r\n\r\nLast paragraph.\r\n"
+      },
+      "messages": [
+        {
+          "base_path": "/work/api",
+          "attachments": [
+            {
+              "id": "att_PROTO",
+              "path": "/work/api/proto/b.html",
+              "name": "b.html",
+              "kind": "html"
+            }
+          ],
+          "questions": [
+            {
+              "kind": "single",
+              "prompt": "Which checkout?",
+              "choices": [
+                {
+                  "label": "A · Cart first"
+                },
+                {
+                  "label": "B · Total first",
+                  "prototype": {
+                    "target": "proto/b.html"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "records": [
+        {
+          "id": "d1",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 30,
+            "type": "DELETION",
+            "text": "",
+            "originalText": "The relay drops idle sockets.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "d2",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d2",
+            "blockId": "block-2",
+            "startOffset": 4,
+            "endOffset": 10,
+            "type": "COMMENT",
+            "text": "Say which canary.",
+            "originalText": "canary",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "d3",
+          "attachment_id": "att_NOTES",
+          "version": "current",
+          "annotation": {
+            "id": "d3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "GLOBAL_COMMENT",
+            "text": "Shorter, please.",
+            "originalText": "",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "w1",
+          "attachment_id": "att_CRLF",
+          "version": "current",
+          "annotation": {
+            "id": "w1",
+            "blockId": "block-1",
+            "startOffset": 0,
+            "endOffset": 24,
+            "type": "COMMENT",
+            "text": "Which notes?",
+            "originalText": "First line of the notes.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "w2",
+          "attachment_id": "att_CRLF",
+          "version": "current",
+          "annotation": {
+            "id": "w2",
+            "blockId": "block-2",
+            "startOffset": 0,
+            "endOffset": 15,
+            "type": "COMMENT",
+            "text": "Keep this.",
+            "originalText": "Last paragraph.",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "s1",
+          "attachment_id": "att_SHOT",
+          "version": "current",
+          "annotation": {
+            "id": "s1",
+            "blockId": "image",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Crop the top.",
+            "originalText": "before.png",
+            "createdA": 1,
+            "images": [
+              {
+                "path": "/home/person/.plannotator/inbox/markups/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png",
+                "name": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png"
+              }
+            ]
+          }
+        },
+        {
+          "id": "k1",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Odd mark here.",
+            "originalText": "a`́b",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "span",
+              "path": "body > p > span.a`́b",
+              "text": "a`́b",
+              "name": "na`́b",
+              "attrs": [
+                [
+                  "title",
+                  "ta`́b"
+                ],
+                [
+                  "src",
+                  "/img/xa`́b.png"
+                ]
+              ],
+              "outline": "<span>```́</span>"
+            },
+            "htmlAnchor": {
+              "selector": "span[title=a`́b]",
+              "tagName": "SPAN"
+            }
+          }
+        },
+        {
+          "id": "k2",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k2",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Name it.",
+            "originalText": "[element: a]́]",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "img",
+              "name": "Logo",
+              "attrs": [
+                [
+                  "src",
+                  "data:image/svg+xml;base64,AAAA"
+                ]
+              ]
+            },
+            "htmlAnchor": {
+              "selector": "img",
+              "tagName": "IMG"
+            }
+          }
+        },
+        {
+          "id": "k3",
+          "attachment_id": "att_HARD",
+          "version": "current",
+          "annotation": {
+            "id": "k3",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "GLOBAL_COMMENT",
+            "text": "The whole page is too dense.",
+            "originalText": "",
+            "createdA": 1
+          }
+        },
+        {
+          "id": "r1",
+          "attachment_id": "att_PROTO",
+          "version": "current",
+          "annotation": {
+            "id": "r1",
+            "blockId": "",
+            "startOffset": 0,
+            "endOffset": 0,
+            "type": "COMMENT",
+            "text": "Total is clearer.",
+            "originalText": "Total",
+            "createdA": 1,
+            "elementContext": {
+              "tag": "h2",
+              "text": "Total"
+            },
+            "htmlAnchor": {
+              "selector": "h2",
+              "tagName": "H2"
+            }
+          }
+        }
+      ],
+      "prototype_names": {
+        "att_PROTO": "Prototype of \"B · Total first\""
+      },
+      "feedback": "# Feedback on the attached files\n\nThe following feedback is on the files you attached, one section per file and version.\n\n## docs/release.md\n\nI've reviewed this document and have 3 pieces of feedback:\n\n### 1. General feedback about the document\n> Shorter, please.\n\n### 2. (lines 3–5) Remove this\n```\nThe relay drops idle sockets.\n```\n> I don't want this in the document.\n\n### 3. (lines 7–9) Feedback on: \"canary\"\n> Say which canary.\n\n## docs/windows.md\n\nI've reviewed this document and have 2 pieces of feedback:\n\n### 1. (lines 3–4) Feedback on: \"First line of the notes.\"\n> Which notes?\n\n### 2. (line 6) Feedback on: \"Last paragraph.\"\n> Keep this.\n\n## shots/before.png\n\nI've reviewed this document and have 1 piece of feedback:\n\n### 1. Feedback on: \"before.png\"\n> Crop the top.\n**Attached images:**\n- [eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png] `/home/person/.plannotator/inbox/markups/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.png`\n\n## pages/hard.html\n\nI've reviewed this document and have 3 pieces of feedback:\n\n### 1. Feedback on: \"a`́b\"\n> Odd mark here.\n\n````html\n<span>'''́</span>\n````\n- **selector** `span[title=a'́b]`\n- **path** `body > p > span.a'́b`\n- **name** \"na'́b\"\n- **attrs** `title=\"ta'́b\" src=\"/img/xa'́b.png\"`\n- **text** \"a'́b\"\n\n### 2. Feedback on: \"[element: a]́]\"\n> Name it.\n\n- **selector** `img`\n- **name** \"Logo\"\n- **attrs** `src=\"data:image/svg+xml;base64,AAAA\"`\n\n### 3. General feedback about the document\n> The whole page is too dense.\n\n## Prototype of \"B · Total first\": proto/b.html\n\nI've reviewed this document and have 1 piece of feedback:\n\n### 1. Feedback on: \"Total\"\n> Total is clearer.\n\n- **selector** `h2`\n- **text** \"Total\"\n\n---"
     }
   ],
   "code_comments": [

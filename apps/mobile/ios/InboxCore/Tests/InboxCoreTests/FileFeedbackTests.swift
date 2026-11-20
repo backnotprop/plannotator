@@ -29,7 +29,13 @@ final class FileFeedbackTests: XCTestCase {
       for comment in comments {
         XCTAssertTrue(FileFeedback.carries(comment, file: files.first { $0.id == comment.attachment.rawValue }, text: texts[FileFeedback.textKey(comment.attachment, comment.version)]), "\(name) \(comment.id)")
       }
-      XCTAssertEqual(FileFeedback.text(comments, files: files, texts: texts, projectRoot: try one.at("project_root").str()), try one.at("feedback").str(), name)
+      // A page a question shows as a prototype is filed under its option, by the window's own rule.
+      var prototypes: [String: String] = [:]
+      if let messages = one["messages"] {
+        prototypes = PrototypeNames.attachments(try messages.decoded([PrototypeNames.Message].self), root: try one.at("project_root").str())
+        XCTAssertEqual(prototypes, try one.at("prototype_names").decoded([String: String].self), name)
+      }
+      XCTAssertEqual(FileFeedback.text(comments, files: files, texts: texts, projectRoot: try one.at("project_root").str(), prototypes: prototypes), try one.at("feedback").str(), name)
     }
   }
 

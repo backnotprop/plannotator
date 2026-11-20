@@ -31,6 +31,8 @@ public actor StandInDoor {
     public var proxyRefusesArchive: Set<String> = []
     /// True: the Authorization header never reaches the door, as when something in between strips it.
     public var stripsToken = false
+    /// A code every drawing is refused with (`413 markup_too_large`, or the relay's `413 relay_upload_unavailable`).
+    public var refusesMarkups: String?
     public init() {}
   }
 
@@ -85,6 +87,8 @@ public actor StandInDoor {
   }
   public func setOptions(_ change: @Sendable (inout Options) -> Void) { change(&options) }
   public func clearCalls() { calls = [] }
+  /// The thread is gone from the computer (deleted there): every read of it is `404 thread_not_found`.
+  public func removeThread(_ id: ThreadID) { threads.removeAll { $0.threadId == id } }
   public func thread(_ id: ThreadID) -> InboxThread? { threads.first { $0.threadId == id } }
   /// Change a thread as the computer's own side would (an archive, a Mark read that set a question aside).
   public func change(_ id: ThreadID, _ edit: @Sendable (inout InboxThread) -> Void) {

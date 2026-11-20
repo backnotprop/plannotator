@@ -207,6 +207,12 @@ public enum FileComments {
     base(id: id, block: block, start: start, end: start + quote.utf16.count, words: comment, quote: quote, now: now)
   }
 
+  /// A comment on the whole file: a document's or a code file's Global comment, a page's own comment
+  /// (packages/ui/components/Viewer.tsx, packages/inbox/components/HtmlPageComment.tsx: `GLOBAL_COMMENT`).
+  public static func whole(id: String = newID(), comment: String, now: Date = Date()) -> [String: JSONValue] {
+    base(id: id, block: "", start: 0, end: 0, type: "GLOBAL_COMMENT", words: comment, quote: "", now: now)
+  }
+
   /// The run of lines a touch on `line` makes of the run being commented on: the line alone when there is none,
   /// the run stretched to the line when it is outside it, and the line alone again when it is inside (a way to
   /// start over without leaving the comment).
