@@ -196,6 +196,12 @@ body::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none}
 .nav{position:absolute;top:0}
 .ft{position:relative}
 .nav .home,.ft .home{padding-left:calc(var(--m) + var(--inset))}
+/* The light/dark switch: one quiet cell at the far right of the top bar, mirroring the name block on the left. */
+.thm{flex:none;display:flex;align-items:center;justify-content:center;width:50px;height:50px;margin:0;padding:0;border:0;border-radius:0;background:none;color:var(--soft);cursor:pointer;-webkit-appearance:none;appearance:none}
+.thm:hover{color:var(--ink);background:var(--stage)}
+.thm:focus-visible{outline:2px solid var(--iris);outline-offset:-4px;color:var(--ink)}
+.thm svg{display:block}
+html.light .thm-moon,html:not(.light) .thm-sun{display:none}
 
 .pg{position:relative;max-width:1440px;margin:0 auto}
 .sec{position:relative}
