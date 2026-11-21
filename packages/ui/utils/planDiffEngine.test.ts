@@ -37,6 +37,29 @@ describe("computePlanDiff — block-level behavior", () => {
     expect(mods[0].content).toContain("new");
     expect(stats.modifications).toBe(1);
   });
+
+  test("line endings alone are no change, and do not mask a real one", () => {
+    const lf = "# Plan\n\nStep one.\n\nStep two.\n";
+    const crlf = lf.replace(/\n/g, "\r\n");
+    const cr = lf.replace(/\n/g, "\r");
+
+    for (const [oldText, newText] of [
+      [crlf, lf],
+      [lf, crlf],
+      [cr, lf],
+    ] as const) {
+      const { blocks, stats } = computePlanDiff(oldText, newText);
+      expect(stats).toEqual({ additions: 0, deletions: 0, modifications: 0 });
+      expect(blocks.map((b) => b.type)).toEqual(["unchanged"]);
+    }
+
+    const edited = computePlanDiff(crlf, lf.replace("Step two.", "Step 2."));
+    expect(edited.stats).toEqual({ additions: 1, deletions: 1, modifications: 1 });
+    const mods = edited.blocks.filter((b) => b.type === "modified");
+    expect(mods).toHaveLength(1);
+    expect(mods[0].oldContent).toContain("Step two.");
+    expect(mods[0].content).toContain("Step 2.");
+  });
 });
 
 describe("computePlanDiff — a quote holding a code fence diffs as one unit", () => {
