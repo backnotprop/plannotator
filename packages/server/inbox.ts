@@ -4827,6 +4827,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           cliVersion: version,
           pluginsDir: claudePluginInstall.pluginsDir(),
           changedAt: claudePluginInstall.changedAt,
+          realPath: claudePluginInstall.realPath,
         });
       }
       if (host === "pi") return piSessionOutdated(plugin, version, { pinned: piPinned() });
