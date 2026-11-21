@@ -557,6 +557,24 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
     postToBridge({ type: 'plannotator-bridge-cancel-selection', token: bridgeToken });
   });
 
+  test('data-pinpoint-ignore opts an element and its descendants out of pinpoint', () => {
+    const ignored = bridgeDocument.createElement('div');
+    ignored.setAttribute('data-pinpoint-ignore', '');
+    const child = bridgeDocument.createElement('button');
+    child.textContent = 'Viewer chrome';
+    ignored.appendChild(child);
+    bridgeDocument.body.appendChild(ignored);
+
+    const ignoredProbe = clickProbe(child);
+    expect(ignoredProbe.prevented).toBe(false);
+    expect(ignoredProbe.selections).toBe(0);
+
+    const normalProbe = clickProbe(probeButton());
+    expect(normalProbe.prevented).toBe(true);
+    expect(normalProbe.selections).toBe(1);
+    postToBridge({ type: 'plannotator-bridge-cancel-selection', token: bridgeToken });
+  });
+
   test('an authenticated drag input-method request stays clamped to pinpoint (clicks still pin)', () => {
     postToBridge({ type: 'plannotator-bridge-set-input-method', method: 'drag', token: bridgeToken });
     expect(bridgeDocument.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(true);
