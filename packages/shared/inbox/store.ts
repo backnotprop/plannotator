@@ -590,6 +590,12 @@ function isMovedNote(message: InboxMessage): boolean {
   return message.author.kind === "person" && !!message.moved_note;
 }
 
+/**
+ * The host a moved note is marked delivered under when the Inbox withdrew it before any wake took it (its move no
+ * longer stands): the Inbox's own marker, as a withdrawn Tidy wake's (`INBOX_TIDY_WITHDRAWN_HOST`).
+ */
+const INBOX_MOVED_WITHDRAWN_HOST = "plannotator-inbox";
+
 /** A note a thread never lists: the 👍's note and the moved-questions note. */
 function isUnlistedNote(message: InboxMessage): boolean {
   return isAckNote(message) || isMovedNote(message);
@@ -4513,7 +4519,10 @@ export class InboxStore {
     // no longer applies (the archived foot would point away from what is now live). The archive line stays.
     if (threadId && input.author.kind === "agent") {
       const root = this.messages.get(threadId)!;
-      if (root.resolved_at !== null && root.moved_to) this.appendMessage({ ...root, moved_to: null }, at);
+      if (root.resolved_at !== null && root.moved_to) {
+        this.appendMessage({ ...root, moved_to: null }, at);
+        this.withdrawMovedNotes(threadId, null);
+      }
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
     return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
@@ -5666,7 +5675,8 @@ export class InboxStore {
     const isResolved = root.resolved_at !== null;
     if (moved && (!isResolved || JSON.stringify(root.moved_to ?? null) !== JSON.stringify(moved))) {
       // The archive line itself carries where the questions went (or, on an archived thread, one more root line).
-      // Who waits on them is read first: the archive closes them.
+      // A note not delivered yet that points elsewhere goes first (its session is told again, with this target).
+      this.withdrawMovedNotes(root.id, moved.thread_id);
       const waiting = this.movedNoteRecipients(root.id, movedTo!.session!.trim());
       const at = this.stamp();
       this.appendMessage({ ...root, resolved_at: root.resolved_at ?? at, moved_to: moved }, at);
@@ -5689,6 +5699,8 @@ export class InboxStore {
         },
         at,
       );
+      // And a note not delivered yet no longer holds ("don't wait on them here"): it is withdrawn, never handed.
+      if (!resolved) this.withdrawMovedNotes(root.id, null);
     }
     if (resolved && by === "person") this.endSnooze(root.id);
     if (resolved && !isResolved) this.endPriority(root.id);
@@ -5703,9 +5715,10 @@ export class InboxStore {
    */
   private movedNoteRecipients(threadId: string, caller: string): Map<string, { asking: InboxMessage; questions: string[] }> {
     const members = this.threadMessages(threadId);
+    // Told: a note that reached it, or one still waiting for its wake. A withdrawn one told it nothing.
     const told = new Set<string>();
     for (const m of members) {
-      if (!isMovedNote(m) || !m.reply_to) continue;
+      if (!isMovedNote(m) || !m.reply_to || m.delivery?.host === INBOX_MOVED_WITHDRAWN_HOST) continue;
       const asked = this.messages.get(m.reply_to);
       if (asked?.author.kind === "agent" && asked.author.session) told.add(asked.author.session);
     }
@@ -5713,12 +5726,32 @@ export class InboxStore {
     for (const m of members) {
       const session = m.author.kind === "agent" ? m.author.session : null;
       if (!session || session === caller || told.has(session)) continue;
-      const open = this.questionsOf(m.id).filter((q) => q.kind !== "action" && (q.state === "open" || q.state === "picked"));
+      // Open or picked as the person left it, the archive aside: on a thread already archived the archive closed
+      // them, and they still wait on the person all the same.
+      const open = this.questionRecords(m.id).filter((q) => {
+        const state = inboxQuestionState(q, false);
+        return q.kind !== "action" && (state === "open" || state === "picked");
+      });
       if (open.length === 0) continue;
       const entry = out.get(session);
       out.set(session, { asking: m, questions: [...(entry?.questions ?? []), ...open.map((q) => `${m.id}/${q.key}`)] });
     }
     return out;
+  }
+
+  /**
+   * The moved notes of a thread not delivered yet whose move no longer stands (`keep`: the target that still does;
+   * null: none does), marked delivered under the Inbox's own marker so no wake, poll or read hands them. Like
+   * `recordTidyWithdrawn`, it settles nothing else.
+   */
+  private withdrawMovedNotes(threadId: string, keep: string | null): void {
+    for (const note of this.threadMessages(threadId)) {
+      if (!isMovedNote(note) || note.delivery || note.moved_note!.thread_id === keep) continue;
+      const asked = note.reply_to ? this.messages.get(note.reply_to) : undefined;
+      const session = asked?.author.kind === "agent" ? (asked.author.session ?? "") : "";
+      const at = this.stamp();
+      this.appendMessage({ ...note, delivery: { state: "delivered", host: INBOX_MOVED_WITHDRAWN_HOST, session, at } }, at);
+    }
   }
 
   /**
@@ -6870,7 +6903,7 @@ export class InboxStore {
     // it, or an agent writes there again (both drop `moved_to`), "don't wait on them here" is no longer true.
     if (isMovedNote(message)) {
       const root = this.messages.get(message.thread_id);
-      if (!root || root.resolved_at === null || !root.moved_to) return false;
+      if (!root || root.resolved_at === null || root.moved_to?.thread_id !== message.moved_note!.thread_id) return false;
     }
     const seq = this.messageSeq.get(message.id) ?? 0;
     // A New message, or a reply the person sent to another session, is

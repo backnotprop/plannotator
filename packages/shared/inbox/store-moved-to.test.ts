@@ -313,15 +313,60 @@ describe("the Inbox tells the agents whose questions moved, quietly", () => {
     expect(store.pendingReplies(SUB.session!)).toHaveLength(1);
   });
 
-  test("once per session and thread: a second resolve, or Unarchive and moved_to again, sends nothing more", () => {
+  test("once per session and thread: a second resolve sends nothing more; a delivered note is never sent again", () => {
     const { store } = open();
     const { old, brief } = world(store);
     store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
     store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    const [note, ...more] = store.pendingReplies(SUB.session!);
+    expect(more).toEqual([]);
+    store.recordDelivery(note!.id, { host: "claude-code", session: SUB.session! });
     store.resolveThread(old.id, false, "person");
     store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
-    const notes = store.threadMessages(old.id).filter((m) => m.moved_note);
-    expect(notes).toHaveLength(1);
+    expect(store.threadMessages(old.id).filter((m) => m.moved_note)).toHaveLength(1);
+    expect(store.pendingReplies(SUB.session!)).toEqual([]);
+  });
+
+  test("a note not delivered yet never comes back with old words: a plain re-archive wakes nobody, a new move tells it afresh", () => {
+    const { store } = open();
+    const { project, old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    // The sub-agent was busy. The person unarchives, then archives the thread again themselves: nobody is woken.
+    store.resolveThread(old.id, false, "person");
+    store.resolveThread(old.id, true, "person");
+    expect(store.pendingReplies(SUB.session!)).toEqual([]);
+    // Unarchived again, and the orchestrator moves the question to a second brief: one note, with that brief's words.
+    store.resolveThread(old.id, false, "person");
+    const brief2 = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Evening brief", body: ASK("Retry failed charges?") }).message;
+    store.resolveThread(old.id, true, "agent", { to: brief2.id, session: ORCH.session });
+    const [note, ...more] = store.pendingReplies(SUB.session!);
+    expect(more).toEqual([]);
+    expect(note!.moved_note!.thread_id).toBe(brief2.id);
+    expect(note!.body).toContain(`"Evening brief" (${brief2.id})`);
+    expect(note!.body).not.toContain(brief.id);
+  });
+
+  test("moved again to another brief while still archived: the undelivered note is replaced by one naming the new brief", () => {
+    const { store } = open();
+    const { project, old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    const brief2 = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Evening brief", body: ASK("Retry failed charges?") }).message;
+    store.resolveThread(old.id, true, "agent", { to: brief2.id, session: ORCH.session });
+    const [note, ...more] = store.pendingReplies(SUB.session!);
+    expect(more).toEqual([]);
+    expect(note!.moved_note!.thread_id).toBe(brief2.id);
+    expect(note!.body).toContain(`"Evening brief" (${brief2.id})`);
+  });
+
+  test("the person answered in the old thread after Unarchive: a later move tells the sub-agent nothing", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    store.resolveThread(old.id, false, "person");
+    const [record] = store.questionsOf(old.id);
+    store.sendReply(old.id, { idempotency_key: "k-here", questions: [{ key: record!.key, revision: record!.revision, answer: ANSWER(record!) }] });
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.pendingReplies(SUB.session!).filter((m) => m.moved_note)).toEqual([]);
   });
 
   test("nothing later is sent for it: Unarchive or the agent writing again write no note", () => {
