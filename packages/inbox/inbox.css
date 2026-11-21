@@ -1085,6 +1085,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-group + .ib-group { margin-top: 12px; }
 .ib-band .ib-n { font-weight: 500; color: var(--muted-foreground); }
 .ib-band .ib-ic { margin-left: auto; color: var(--muted-foreground); }
+/* The Group tip's anchor (GroupBand.tsx): no size, the band's full height, so the tip is centred on the band. After
+   the name and count it takes back the flex gap it adds; at the right end it is out of the flow. */
+.ib-band-tipat { align-self: stretch; width: 0; margin-inline-start: -8px; flex: none; }
+.ib-band-tipat[data-end] { position: absolute; inset-block: 0; inset-inline-end: 12px; margin: 0; }
 /* The one-line row (approval "inbox-row-byline", 2026-10-29; its cells by approval "list-rows-mail-icons",
    2026-10-30): the agents' marks with the project after them, the title cell (the thread's name, then the grey
    subject), then right-aligned the count in words, the badge, the open counts and the time, each in a column of its

@@ -320,6 +320,11 @@ function tipWorld(busy = () => false) {
 // React's onPointerEnter listens for pointerover with where the pointer came from.
 const point = (el: Element, pointerType = 'mouse') => act(() => void el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType, relatedTarget: document.body })));
 const tipText = () => [...document.querySelectorAll('[data-pn-tooltip]')].map((el) => el.textContent).join('|');
+/** The band the shown tip hangs on, and where on it: covering no row, it sits on the band (GroupBand.tsx). */
+const tipAt = () => {
+  const anchor = document.querySelector('.ib-band-tipat[data-popup-open]');
+  return anchor ? { band: anchor.closest('[data-section-id]')?.getAttribute('data-section-id'), inBand: anchor.parentElement?.matches('button.ib-band'), end: anchor.hasAttribute('data-end') } : null;
+};
 
 test.skipIf(!hasDom)('the Group tip: the first hover of a band with a menu shows "Right-click for group actions" once; a press takes it away; never again', async () => {
   if (!hasDom) return;
@@ -333,6 +338,8 @@ test.skipIf(!hasDom)('the Group tip: the first hover of a band with a menu shows
   await settle();
   expect(claims).toHaveLength(1);
   expect(tipText()).toBe('Right-click for group actions');
+  // On the band, just after its name and count: never over the first row.
+  expect(tipAt()).toEqual({ band: 'new', inBand: true, end: false });
   act(() => void window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
   await settle();
   expect(tipText()).toBe('');
@@ -391,6 +398,8 @@ test.skipIf(!hasDom)('the Group tip on a phone: the list held still a while show
     await act(async () => void (await new Promise((r) => setTimeout(r, 120))));
     expect(claims).toHaveLength(1);
     expect(tipText()).toBe('Hold a group for actions');
+    // Inside the band at its right end.
+    expect(tipAt()).toEqual({ band: 'waiting', inBand: true, end: true });
     // A mouse never asks on a phone, and a touch takes it away.
     act(() => void window.dispatchEvent(new Event('touchstart')));
     await settle();

@@ -1266,6 +1266,7 @@ export function InboxList(props: InboxListProps) {
                   menu={menuRow === bandMenuId(section.id)}
                   keys={bands && bands.actionsOf(section.id).length > 0 ? rowKeys : undefined}
                   tip={bandTip.shown?.band === section.id ? bandTip.shown.words : null}
+                  tipEnd={props.phone === true}
                   onPointed={() => bandTip.pointed(section.id)}
                   onToggle={(band) => {
                     // Focus in a row of the group that closes goes to its header, not to the page.
