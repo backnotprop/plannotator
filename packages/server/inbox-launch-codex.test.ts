@@ -107,6 +107,23 @@ function setup(options: { state?: FakeCodexLaunchState; config?: string | null; 
 }
 
 describe("Codex through the launch engine, against the fake codex", () => {
+  test("a provider without OpenAI auth stays eligible despite a signed-out CLI status", async () => {
+    const t = setup({ state: { login: "none", requiresOpenaiAuth: false } });
+    const block = (await t.launch.composeBlock())!;
+    expect(block.agents.map((agent) => agent.agent)).toContain("codex");
+    expect(t.fake.rpc("account/read")).toHaveLength(1);
+    expect(t.fake.rpc("account/rateLimits/read")).toHaveLength(0);
+    expect(t.fake.rpc("thread/start")).toHaveLength(0);
+  });
+
+  test("a failed provider account read does not bypass a signed-out CLI status", async () => {
+    const t = setup({ state: { login: "none", requiresOpenaiAuth: false, failAccountRead: true } });
+    const block = (await t.launch.composeBlock())!;
+    expect(block.agents.map((agent) => agent.agent)).not.toContain("codex");
+    expect(block.not_ready).toContainEqual({ agent: "codex", name: "Codex", code: "signed_out" });
+    expect(t.fake.rpc("account/read")).toHaveLength(1);
+  });
+
   test("To offers Codex only once codex is there, signed in and connected to the Inbox", async () => {
     const ready = setup();
     expect((await ready.launch.composeBlock())!.agents.map((a) => a.agent)).toContain("codex");
