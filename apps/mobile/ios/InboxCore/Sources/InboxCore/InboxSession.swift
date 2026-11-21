@@ -157,6 +157,15 @@ public final class InboxSession {
   var copy: LocalCopy
   var removed = false
   var client: DoorClient?
+  /// The way to the door in use: its place in the connector's list (best first), or nil while away.
+  private(set) var pathIndex: Int?
+  /// Drawings a way refused to carry (the relay takes no uploads), by held write, with the way that refused. Such a
+  /// drawing is tried again only on another way; meanwhile it holds back only itself and its comment.
+  @ObservationIgnored var parkedDrawings: [String: Int] = [:]
+  /// Sends whose comments' texts are being read before they go (a short wait, never past `feedbackTextWait`).
+  @ObservationIgnored var resolving: Set<String> = []
+  /// How long a Send waits for the texts its comments' lines are read from; after that they go with no line.
+  var feedbackTextWait: Duration = .seconds(4)
   private var stream: Task<Void, Never>?
   private var reload: Task<Void, Never>?
   private var connecting: Task<Bool, Never>?
@@ -282,6 +291,7 @@ public final class InboxSession {
     switch probe {
     case .answered(let index, let read):
       client = candidates[index]
+      pathIndex = index
       skew = read.skew
       reach = .here
       switch read.skew {
@@ -298,6 +308,7 @@ public final class InboxSession {
       return false
     case .silent:
       client = nil
+      pathIndex = nil
       reach = .away
       markWaited()
       stopListening()
@@ -553,9 +564,11 @@ public final class InboxSession {
     case .state:
       noteRefusedAct(write, notice)
     case .annotation, .markup:
-      // The comment stays on the phone with the reason; a Send made after it does not go on without it.
+      // The comment stays on the phone with the reason, and rides no Send until it is saved; a Send made after it
+      // goes without it, and nothing else of the Send is held back.
+      let named = commentsNamed(by: write)
       commentRefused(write, notice)
-      pullBackSends(after: write, notice: notice)
+      releaseSends(after: write, without: named)
     case .annotationRemove:
       commentRefused(write, notice)
     }
@@ -689,6 +702,12 @@ public final class InboxSession {
     if write.kind == .state, await settleWaitedAct(write) { return true }
     // Taken back (Undo) while the computer's row was read: nothing goes.
     guard held.contains(where: { $0.id == write.id }) else { return true }
+    // A drawing no comment names any more (removed while it waited): it never goes, and nothing else is touched.
+    if write.kind == .markup, let hash = write.subject, !drawingNamed(hash) {
+      quietly(quiet) { settle(write.id) }
+      forgetDrawing(hash)
+      return true
+    }
     // A comment's save (or a Send) that names a drawing the computer has not kept, with nothing ahead to keep it,
     // never goes: it would name a picture that is not there.
     if namesMissingDrawing(write) {
@@ -697,6 +716,12 @@ public final class InboxSession {
         settle(write.id)
       }
       return true
+    }
+    // A comment's save is marked as possibly arrived before it leaves, and kept so: if the app ends while it is on its
+    // way, a removal made later still follows it.
+    if write.kind == .annotation, let index = held.firstIndex(where: { $0.id == write.id }), held[index].mayHaveArrived != true {
+      held[index].mayHaveArrived = true
+      copy.saveOutbox(held)
     }
     quietly(quiet) { _ = book.inFlight.insert(write.id) }
     defer { quietly(quiet) { _ = book.inFlight.remove(write.id) } }
@@ -721,7 +746,13 @@ public final class InboxSession {
       guard failure.isDefinite else {
         // Sent, and no definite answer: the computer may have taken it.
         var arrives = false
-        if case .unreachable(_, mayHaveArrived: false) = failure {} else {
+        if case .unreachable(_, mayHaveArrived: false) = failure {
+          // It never left: it is not on the computer.
+          if let index = held.firstIndex(where: { $0.id == write.id }), held[index].mayHaveArrived == true, !book.inDoubt.contains(write.id) {
+            held[index].mayHaveArrived = nil
+            copy.saveOutbox(held)
+          }
+        } else {
           book.inDoubt.insert(write.id)
           arrives = true
         }
@@ -733,14 +764,22 @@ public final class InboxSession {
         return false
       }
       if await settleConflict(write, failure) { return true }
-      // A drawing this path cannot carry (the relay takes no uploads): it waits, with its comment and any Send behind
-      // it, for a path that can. Nothing goes without it.
+      // A drawing removed while it was on its way: its refusal is no one's, and nothing else is touched.
+      if write.kind == .markup, let hash = write.subject, !drawingNamed(hash) {
+        quietly(quiet) { settle(write.id) }
+        forgetDrawing(hash)
+        return true
+      }
+      // A drawing this way cannot carry (the relay takes no uploads): it waits, with its comment's save, for another
+      // way, and is not tried again on this one. Everything else in the thread goes on; a Send that carried its
+      // comment goes without it (the comment stays, "Will send", for a later Send).
       if write.kind == .markup, case .refused(_, let error) = failure, error.code == WireErrorCode.relayUploadUnavailable.rawValue {
+        parkedDrawings[write.id] = pathIndex ?? -1
         if let index = held.firstIndex(where: { $0.id == write.id }), held[index].waited != true {
           held[index].waited = true
           copy.saveOutbox(held)
         }
-        return false
+        return true
       }
       // The race at Send itself: the agent replaced a picked question as the person sent. Nothing went.
       if write.kind == .reply, case .refused(_, let error) = failure, error.code == "question_superseded", let key = error.key,
@@ -855,7 +894,11 @@ public final class InboxSession {
     defer { pumping.remove(thread) }
     if client == nil { _ = await connect() }
     quietly(quiet) { book.checked = false }
-    while !removed, client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread }) {
+    while !removed, client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread && !heldBack($0) }) {
+      // A Send whose comments' texts are being read waits for them, briefly (`feedbackTextWait`).
+      if resolving.contains(next.id) { break }
+      // A Send that carries a comment held back with its drawing goes without it.
+      if next.kind == .reply, releaseHeldBackComments(next) { continue }
       if !(await deliver(next, quiet: quiet)) { break }
     }
     // A thread action landed: the list is read again, so its row comes from the computer.
@@ -996,17 +1039,17 @@ public final class InboxSession {
     guard !targets.isEmpty, !text.isEmpty || !commentsToSend(id).isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     sending.insert(id)
     defer { sending.remove(id) }
-    // The texts the comments' lines are read from, fetched now when the phone does not keep them (as the window
-    // reads them at Send).
-    await fetchFeedbackTexts(id)
     // The comments on files that wait: they ride the last reply, with the words (the window's `routeSendAnnotations`).
+    // The words are in the outbox before anything is awaited: the texts the comments' lines are read from come after.
     let riding = commentsToSend(id)
+    let needsTexts = needsFeedbackTexts(id, for: riding)
     guard !text.isEmpty || !riding.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     notices[id] = nil
     returned[id] = nil
     keepGivenBack()
     // A reply with neither an answer nor words is never made: the Inbox refuses one ("write a reply or send at
     // least one answer"). So with no words, the agent that wrote last and asked nothing gets no reply.
+    var carrier: String?
     let carrying = targets.enumerated().filter { index, target in !target.questions.isEmpty || !target.actions.isEmpty || (index == targets.count - 1 && (!text.isEmpty || !riding.isEmpty)) }.map(\.element)
     for (index, target) in carrying.enumerated() {
       let last = index == carrying.count - 1
@@ -1019,11 +1062,21 @@ public final class InboxSession {
       if last, !riding.isEmpty {
         body.feedback = feedback(riding, thread: id)
         body.annotationIds = riding.map(\.id)
+        carrier = key
       }
       enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: words.isEmpty ? nil : words)
     }
     // The words are in the outbox now: the thread's draft on the phone is spent.
     if !text.isEmpty { forgetDraft(id) }
+    // The texts the comments' lines are read from, fetched now when the phone does not keep them (as the window
+    // reads them at Send), for a short while at most; the feedback is then written again with them. A comment whose
+    // text did not come goes with its quote and no line.
+    if let carrier, needsTexts, client != nil {
+      resolving.insert(carrier)
+      await fetchFeedbackTexts(id, for: riding, within: feedbackTextWait)
+      resolving.remove(carrier)
+      rewriteFeedback(carrier, thread: id)
+    }
     await pump(id.rawValue)
     if client != nil { await readList() }
     return true
@@ -1116,9 +1169,17 @@ public final class InboxSession {
       guard !Task.isCancelled, let self else { return }
       await self.readList()
       for id in self.threads.keys { await self.readThread(id) }
-      let changed = self.commentsChanged
-      self.commentsChanged = []
-      for id in changed where self.threads[id] != nil || self.commentBook.kept[id] != nil { await self.readAttachments(id) }
+      // Each thread is crossed off only as its read starts, and put back when it did not land: a newer event that
+      // cancels this pass, or a read the computer did not answer, leaves it to the next one.
+      for id in self.commentsChanged {
+        guard !Task.isCancelled else { return }
+        guard self.threads[id] != nil || self.commentBook.kept[id] != nil else {
+          self.commentsChanged.remove(id)
+          continue
+        }
+        self.commentsChanged.remove(id)
+        if await self.readAttachments(id) == nil { self.commentsChanged.insert(id) }
+      }
     }
   }
 }

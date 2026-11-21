@@ -9,10 +9,13 @@ import Foundation
 /// (Return, Space) counts as a tap does. Each tap or key opens one link at most.
 ///
 /// With VoiceOver or Switch Control there is no touch on the page: the person moves the focus onto a link, then
-/// activates it. So under them a link opens only after the focus landed inside the page since the last link opened
-/// (each move of the focus opens one link at most), never in the page's first second, and never twice within a
-/// second. A page's script can still open one link after each move of the focus into the page; it cannot open them
-/// in a loop.
+/// activates it. So under them a link opens only within `reach` after the focus landed on a link in the page, one
+/// link per landing. A landing counts only when it is the person's move: not one in the second after the page
+/// loaded or the app came back to the front (VoiceOver puts its focus back by itself then), so after a link opened
+/// and the person returns, a new landing is needed. Never two links within a second.
+///
+/// What a page can still do under them: once the person lands on a link (any element the page calls a link, as
+/// `role="link"`), its script can open one link of its choosing, within `reach`, in place of the person.
 public struct PageGate: Sendable {
   /// How far a finger may move and still have tapped, in points.
   public static let slop = 12.0
@@ -22,6 +25,8 @@ public struct PageGate: Sendable {
   public static let window: TimeInterval = 0.5
   /// Under an assistive technology: nothing opens this soon after the page loads, nor this soon after a link opened.
   public static let settle: TimeInterval = 1
+  /// Under an assistive technology: how long after the focus landed on a link the person may activate it.
+  public static let reach: TimeInterval = 10
 
   private var down: (at: Date, x: Double, y: Double)?
   private var moved = false
@@ -29,6 +34,7 @@ public struct PageGate: Sendable {
   private var loadedAt = Date.distantPast
   private var focusedAt: Date?
   private var openedAt = Date.distantPast
+  private var frontAt = Date.distantPast
 
   public init() {}
 
@@ -60,14 +66,20 @@ public struct PageGate: Sendable {
   /// The page (re)loaded.
   public mutating func pageLoaded(at now: Date) { loadedAt = now }
 
-  /// VoiceOver's or Switch Control's focus landed on something inside the page.
-  public mutating func focusLanded(at now: Date) { focusedAt = now }
+  /// The app came (back) to the front.
+  public mutating func appActivated(at now: Date) { frontAt = now }
+
+  /// VoiceOver's or Switch Control's focus landed on something inside the page; `onLink`: on a link.
+  public mutating func focusLanded(at now: Date, onLink: Bool) {
+    guard onLink, now.timeIntervalSince(loadedAt) >= Self.settle, now.timeIntervalSince(frontAt) >= Self.settle else { return }
+    focusedAt = now
+  }
 
   /// Whether a link activated now is the person's doing.
   public func allows(at now: Date, assistive: Bool) -> Bool {
     if now >= armed && now.timeIntervalSince(armed) < Self.window { return true }
-    guard assistive, let focusedAt, focusedAt > openedAt else { return false }
-    return now.timeIntervalSince(loadedAt) >= Self.settle && now.timeIntervalSince(openedAt) >= Self.settle
+    guard assistive, let focusedAt, focusedAt > openedAt, focusedAt > loadedAt, focusedAt > frontAt, now >= focusedAt, now.timeIntervalSince(focusedAt) <= Self.reach else { return false }
+    return now.timeIntervalSince(openedAt) >= Self.settle
   }
 
   /// Ask to open a link now: true when it may, and then the tap, key or focus that allowed it is spent.

@@ -202,21 +202,28 @@ struct WebPage: UIViewRepresentable {
 
     private weak var page: UIView?
 
-    /// Ask to open a link the page activated now: true once per tap, key or move of the focus into the page.
+    /// Ask to open a link the page activated now: true once per tap, key or landing of the focus on a link.
     func open() -> Bool { gate.open(at: Date(), assistive: Self.assistive) }
 
     func pageLoaded() { gate.pageLoaded(at: Date()) }
 
-    /// Hear where VoiceOver's or Switch Control's focus lands; a landing inside `page` is the person going there.
+    /// Hear where VoiceOver's or Switch Control's focus lands; a landing on a link inside `page` is the person
+    /// going there. And when the app comes back to the front (VoiceOver then puts its focus back by itself).
     func watchFocus(in page: UIView) {
       self.page = page
       NotificationCenter.default.addObserver(self, selector: #selector(focused(_:)), name: UIAccessibility.elementFocusedNotification, object: nil)
+      NotificationCenter.default.addObserver(self, selector: #selector(front(_:)), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
     @objc private func focused(_ note: Notification) {
-      guard let page, let element = note.userInfo?[UIAccessibility.focusedElementUserInfoKey], Self.isInside(element as AnyObject, page) else { return }
-      gate.focusLanded(at: Date())
+      guard let page, let element = note.userInfo?[UIAccessibility.focusedElementUserInfoKey] as AnyObject?, Self.isInside(element, page) else { return }
+      gate.focusLanded(at: Date(), onLink: Self.isLink(element))
     }
+
+    @objc private func front(_ note: Notification) { gate.appActivated(at: Date()) }
+
+    /// Whether an accessibility element is a link (WebKit gives a page's links, and its `role="link"`, this trait).
+    static func isLink(_ element: AnyObject) -> Bool { (element as? NSObject)?.accessibilityTraits.contains(.link) ?? false }
 
     /// Whether an accessibility element is in a view: the view itself, under it, or one of WebKit's elements whose
     /// containers lead to a view under it.

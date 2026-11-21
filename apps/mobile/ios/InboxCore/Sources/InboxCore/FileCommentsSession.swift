@@ -14,6 +14,8 @@ struct CommentBook {
   var kept: [ThreadID: [FileComment]] = [:]
   /// Removed here; the computer has not answered the removal yet, so a read of its list does not bring them back.
   var removed: Set<String> = []
+  /// Comments a list read must not drop (a refused Send's own, until it is known which the computer has).
+  var keepThrough: Set<String> = []
   /// Why the computer would not keep a comment, by comment. Kept across closing the app: a refused comment never
   /// rides a Send the computer would refuse whole.
   var refused: [String: InboxSession.Notice] = [:]
@@ -242,13 +244,23 @@ extension InboxSession {
     commentBook.readKeys[id] = nil
     // A save that was sent and never answered may have arrived: the removal goes all the same, after it. Only a
     // save that never left at all is simply dropped.
-    let tried = held.contains { $0.kind == .annotation && $0.subject == id && (book.inFlight.contains($0.id) || book.inDoubt.contains($0.id) || $0.mayHaveArrived == true) }
-    held.removeAll { $0.kind == .annotation && $0.subject == id && !book.inFlight.contains($0.id) }
+    // A save that may have reached the computer (on its way, sent with no answer, or sent before the app last ended)
+    // is never dropped: it goes first, as it is (its key unchanged, so it cannot make a second comment), then the
+    // removal. Only a save that never left is simply dropped.
+    let mayHave = { (write: HeldWrite) in self.book.inFlight.contains(write.id) || self.book.inDoubt.contains(write.id) || write.mayHaveArrived == true }
+    let tried = held.contains { $0.kind == .annotation && $0.subject == id && mayHave($0) }
+    held.removeAll { $0.kind == .annotation && $0.subject == id && !mayHave($0) }
     let left = held.contains { $0.kind == .annotation && $0.subject == id }
+    let keptSaves = held.filter { $0.kind == .annotation && $0.subject == id }
     for image in comment.images {
-      guard let hash = PendingDrawing.hash(image.path), !(commentBook.kept[thread] ?? []).contains(where: { $0.images.contains(image) }) else { continue }
+      guard let hash = PendingDrawing.hash(image.path), !(commentBook.kept[thread] ?? []).contains(where: { $0.images.contains(image) }),
+        !keptSaves.contains(where: { PendingDrawing.hashes(in: $0.body).contains(hash) })
+      else { continue }
+      // Its own upload is retired, and only that: one on its way lets its bytes go when it ends.
+      let flying = held.contains { $0.kind == .markup && $0.subject == hash && book.inFlight.contains($0.id) }
+      for write in held where write.kind == .markup && write.subject == hash && !book.inFlight.contains(write.id) { parkedDrawings[write.id] = nil }
       held.removeAll { $0.kind == .markup && $0.subject == hash && !book.inFlight.contains($0.id) }
-      forgetDrawing(hash)
+      if !flying { forgetDrawing(hash) }
     }
     if comment.saved || left || tried {
       commentBook.removed.insert(id)
@@ -286,8 +298,82 @@ extension InboxSession {
     return comment
   }
 
+  /// Whether a comment on the phone, or a write that waits, still names this drawing.
+  func drawingNamed(_ hash: String) -> Bool {
+    let path = PendingDrawing.path(hash)
+    if commentBook.kept.values.joined().contains(where: { $0.images.contains { $0.path == path } }) { return true }
+    return held.contains { ($0.kind == .annotation || $0.kind == .reply) && PendingDrawing.hashes(in: $0.body).contains(hash) }
+  }
+
+  // MARK: A drawing a way cannot carry
+
+  /// A write held back by a drawing this way refused to carry: the drawing itself, and its comment's save.
+  func heldBack(_ write: HeldWrite) -> Bool {
+    switch write.kind {
+    // Still held back while away: which way comes next is not known yet.
+    case .markup: return parkedDrawings[write.id].map { parked in pathIndex == nil || parked == pathIndex } ?? false
+    case .annotation: return PendingDrawing.hashes(in: write.body).contains(where: drawingHeldBack)
+    default: return false
+    }
+  }
+
+  func drawingHeldBack(_ hash: String) -> Bool { held.contains { $0.kind == .markup && $0.subject == hash && heldBack($0) } }
+
+  /// Whether this comment waits for its drawing to find a way to the computer.
+  func commentHeldBack(_ comment: FileComment) -> Bool {
+    comment.images.contains { PendingDrawing.hash($0.path).map(drawingHeldBack) ?? false }
+      || held.contains { $0.kind == .annotation && $0.subject == comment.id && heldBack($0) }
+  }
+
+  /// A Send about to go that carries a comment held back with its drawing goes without it; true when it changed.
+  func releaseHeldBackComments(_ reply: HeldWrite) -> Bool {
+    guard let ids = (try? JSONDecoder().decode(DoorReplyBody.self, from: reply.body))?.annotationIds, !ids.isEmpty else { return false }
+    let kept = commentBook.kept[ThreadID(reply.thread)] ?? []
+    let blocked = Set(ids.filter { id in kept.first(where: { $0.id == id }).map(commentHeldBack) ?? false })
+    return !blocked.isEmpty && strip(reply.id, of: blocked)
+  }
+
+  /// The comments a refused save or drawing is about.
+  func commentsNamed(by write: HeldWrite) -> Set<String> {
+    switch write.kind {
+    case .annotation: return Set([write.subject].compactMap { $0 })
+    case .markup:
+      let path = write.subject.map(PendingDrawing.path) ?? ""
+      return Set((commentBook.kept[ThreadID(write.thread)] ?? []).filter { $0.images.contains { $0.path == path } }.map(\.id))
+    default: return []
+    }
+  }
+
+  /// The Sends made after `write` go without these comments (they stay for a later Send).
+  func releaseSends(after write: HeldWrite, without ids: Set<String>) {
+    guard !ids.isEmpty, let start = held.firstIndex(where: { $0.id == write.id }) else { return }
+    let later = held[(start + 1)...].filter { $0.thread == write.thread && $0.kind == .reply }.map(\.id)
+    for reply in later { strip(reply, of: ids) }
+  }
+
+  /// Take comments out of a Send that waits: its feedback is written again for the rest, and a Send left with no
+  /// words, no answer and no comment is not made at all. True when it changed.
+  @discardableResult
+  func strip(_ reply: String, of ids: Set<String>) -> Bool {
+    guard let index = held.firstIndex(where: { $0.id == reply }), !book.inFlight.contains(reply), var body = try? JSONDecoder().decode(DoorReplyBody.self, from: held[index].body),
+      let carried = body.annotationIds, carried.contains(where: ids.contains)
+    else { return false }
+    let thread = ThreadID(held[index].thread)
+    let left = carried.filter { !ids.contains($0) }
+    let kept = commentBook.kept[thread] ?? []
+    body.annotationIds = left.isEmpty ? nil : left
+    body.feedback = left.isEmpty ? nil : feedback(left.compactMap { id in kept.first { $0.id == id } }, thread: thread)
+    if left.isEmpty, (body.words ?? "").isEmpty, (body.questions ?? []).isEmpty, (body.actions ?? []).isEmpty {
+      held.remove(at: index)
+    } else {
+      held[index].body = (try? JSONEncoder().encode(body)) ?? held[index].body
+    }
+    saveOutbox()
+    return true
+  }
+
   /// A drawing no comment names any more, or one the computer has: its bytes leave the phone.
-  private func forgetDrawing(_ hash: String) {
+  func forgetDrawing(_ hash: String) {
     commentBook.drawings[hash] = nil
     copy.remove(LocalCopy.drawingName(hash))
   }
@@ -328,7 +414,7 @@ extension InboxSession {
     var kept = commentBook.kept[thread] ?? []
     let there = Set(onFiles.map(\.id))
     // Sent or removed elsewhere: a comment the computer had and no longer lists.
-    kept.removeAll { $0.saved && !there.contains($0.id) && !waiting.contains($0.id) && !riding.contains($0.id) && !newer($0.id) }
+    kept.removeAll { $0.saved && !there.contains($0.id) && !waiting.contains($0.id) && !riding.contains($0.id) && !newer($0.id) && !commentBook.keepThrough.contains($0.id) }
     for record in onFiles where !commentBook.removed.contains(record.id) && !newer(record.id) {
       var read = FileComment(id: record.id, thread: thread, attachment: record.attachmentId, version: record.version, annotation: record.annotation, createdAt: record.createdAt, saved: true)
       if let index = kept.firstIndex(where: { $0.id == record.id }) {
@@ -397,10 +483,9 @@ extension InboxSession {
   /// A drawing's bytes while it waits: for the upload, and for the comment's own picture on the phone.
   public func drawing(_ hash: String) -> Data? { commentBook.drawings[hash] ?? copy.read(LocalCopy.drawingName(hash)) }
 
-  /// Whether a comment's drawing still waits to reach the computer (it goes first, then the comment).
-  public func drawingWaits(_ comment: FileComment) -> Bool {
-    comment.images.contains { image in PendingDrawing.hash(image.path).map { hash in held.contains { $0.kind == .markup && $0.subject == hash } } ?? false }
-  }
+  /// Whether a comment waits for its drawing, which the way to the computer cannot carry now: it rides no Send until
+  /// the drawing has arrived.
+  public func drawingWaits(_ comment: FileComment) -> Bool { commentHeldBack(comment) }
 
   /// The computer will never keep this comment (or this drawing): it stays on the phone with the reason, and no
   /// Send goes on without it. A comment whose drawing the computer did not keep is not saved without it: the save
@@ -481,6 +566,11 @@ extension InboxSession {
   func rereadAfterRefusedSend(_ write: HeldWrite, notice: Notice) async {
     guard let ids = (try? JSONDecoder().decode(DoorReplyBody.self, from: write.body))?.annotationIds, !ids.isEmpty else { return }
     let thread = ThreadID(write.thread)
+    // The phone's own comments of that Send are kept through the read, whatever the list says: their words are not
+    // lost, and one the computer does not list is held back as not saved.
+    let own = Set(ids.filter { commentBook.readKeys[$0] != nil })
+    commentBook.keepThrough.formUnion(own)
+    defer { commentBook.keepThrough.subtract(own) }
     guard let listed = await readAttachments(thread) else { return }
     for id in ids where !listed.contains(id) {
       guard let index = commentBook.kept[thread]?.firstIndex(where: { $0.id == id }), !held.contains(where: { $0.kind == .annotation && $0.subject == id }) else { continue }

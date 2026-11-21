@@ -57,18 +57,40 @@ final class FileFollowUpTests: XCTestCase {
     var voice = PageGate()
     voice.pageLoaded(at: start)
     XCTAssertFalse(voice.allows(at: start.addingTimeInterval(5), assistive: true), "no focus in the page: a script's click")
-    voice.focusLanded(at: start.addingTimeInterval(4))
+    voice.focusLanded(at: start.addingTimeInterval(4), onLink: true)
     XCTAssertTrue(voice.open(at: start.addingTimeInterval(5), assistive: true))
     // A script clicking in a loop after it opens nothing more until the focus moves again.
     for step in 1...20 { XCTAssertFalse(voice.open(at: start.addingTimeInterval(5 + Double(step) * 0.2), assistive: true)) }
-    voice.focusLanded(at: start.addingTimeInterval(10))
+    voice.focusLanded(at: start.addingTimeInterval(10), onLink: true)
     XCTAssertTrue(voice.open(at: start.addingTimeInterval(10.5), assistive: true), "the next link the person goes to")
-    // Never in the page's first second, nor twice within a second.
+    // A landing on anything but a link arms nothing: a page clicking a link each second opens nothing as the person
+    // reads it with swipes.
+    var reading = PageGate()
+    reading.pageLoaded(at: start)
+    for step in 2...30 {
+      reading.focusLanded(at: start.addingTimeInterval(Double(step)), onLink: false)
+      XCTAssertFalse(reading.open(at: start.addingTimeInterval(Double(step) + 0.5), assistive: true), "a swipe onto words")
+    }
+    // A landing is good for a short while, not until whenever a script clicks.
+    var stale = PageGate()
+    stale.pageLoaded(at: start)
+    stale.focusLanded(at: start.addingTimeInterval(2), onLink: true)
+    XCTAssertFalse(stale.allows(at: start.addingTimeInterval(2 + PageGate.reach + 1), assistive: true))
+    // The focus VoiceOver puts back as the page loads, or as the app returns from the browser, is not a landing:
+    // after a link opened, the person lands again.
     var early = PageGate()
     early.pageLoaded(at: start)
-    early.focusLanded(at: start)
-    XCTAssertFalse(early.allows(at: start.addingTimeInterval(0.5), assistive: true))
-    XCTAssertTrue(early.allows(at: start.addingTimeInterval(1.1), assistive: true))
+    early.focusLanded(at: start.addingTimeInterval(0.3), onLink: true)
+    XCTAssertFalse(early.allows(at: start.addingTimeInterval(1.5), assistive: true))
+    var back = PageGate()
+    back.pageLoaded(at: start)
+    back.focusLanded(at: start.addingTimeInterval(2), onLink: true)
+    XCTAssertTrue(back.open(at: start.addingTimeInterval(3), assistive: true))
+    back.appActivated(at: start.addingTimeInterval(20))
+    back.focusLanded(at: start.addingTimeInterval(20.2), onLink: true)
+    XCTAssertFalse(back.allows(at: start.addingTimeInterval(21), assistive: true), "the focus restored on return")
+    back.focusLanded(at: start.addingTimeInterval(23), onLink: true)
+    XCTAssertTrue(back.allows(at: start.addingTimeInterval(23.5), assistive: true), "the person's next landing")
     // A tap opens one link, not every link a script clicks after it.
     var tap = PageGate()
     tap.touchBegan(at: start, x: 10, y: 10)

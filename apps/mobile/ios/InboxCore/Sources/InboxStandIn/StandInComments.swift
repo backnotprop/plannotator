@@ -29,6 +29,8 @@ extension StandInDoor {
   /// The window removes a comment, or sends it with a reply of its own.
   public func windowRemovesComment(_ id: String) { state.annotations[id]?.removedAt = StandInData.iso(Date()) }
   public func windowSendsComment(_ id: String) { state.annotations[id]?.sentReplyId = "msg_WINDOWREPLY" }
+  /// The computer no longer has a comment at all (its store was reset): a Send naming it is refused `annotation_not_found`.
+  public func forgetComment(_ id: String) { state.annotations[id] = nil }
 
   /// The file takes no comments (as a PDF does): a save is answered `422 annotation_not_allowed`.
   public func refuseComments(on attachment: String) { state.refusesComments.insert(attachment) }

@@ -55,8 +55,8 @@ final class CommentDesk {
   /// The picture on screen's viewer, to flatten what was drawn onto it as a PNG (only that one: a picture let go
   /// of its decoded pixels when the cover moved on).
   @ObservationIgnored var flatten: (file: AttachmentID, make: ([PictureMark]) async -> Data?)?
-  /// The page on screen's pin at the middle of the screen (VoiceOver's pin).
-  @ObservationIgnored var pinMiddle: (() -> Void)?
+  /// Each page's pin at the middle of the screen (VoiceOver's pin), by file.
+  @ObservationIgnored var pinMiddle: [AttachmentID: () -> Void] = [:]
   /// The cover's toast, with Undo.
   let toasts = CommentToast()
   /// A drawing is being flattened to keep: Comment waits for it.
@@ -162,7 +162,7 @@ final class CommentDesk {
           cancel()
           // The window's toast for a drawing added to the reply; Undo takes it back off and puts the marks and
           // words back on the picture.
-          toasts.show(ToastWords(mark: .check, lead: PhoneWords.markupAdded, phoneLead: PhoneWords.addedToReply, speech: PhoneWords.markupAddedSpoken), said: ActionWords.movedBack) { [weak self] in
+          toasts.show(ToastWords(mark: .check, lead: PhoneWords.markupAdded, phoneLead: PhoneWords.addedToReply, speech: PhoneWords.markupAddedSpoken), said: { CommentToast.told(session, thread) }) { [weak self] in
             session.removeComment(made.id, thread: thread)
             self?.marks[item.id] = drawn
             if self?.words.isEmpty == true { self?.words = made.isWordlessMarkup ? "" : made.words }
@@ -259,11 +259,23 @@ struct CommentFoot: View {
     .glassEffect(.regular, in: .rect(cornerRadius: Radius.foot))
     .barSized()
     .accessibilityIdentifier("page-mode")
-    // VoiceOver: with Comment on, the switch's action pins what is in the middle of the page on screen.
-    .accessibilityAction(named: PhoneWords.comment) {
-      if !desk.commenting { desk.commenting = true }
-      desk.pinMiddle?()
-    }
+    // VoiceOver: the switch's action turns Comment on and pins what is in the middle of the page on screen.
+    .accessibilityAction(named: PhoneWords.comment) { commentHere() }
+    #if DEBUG
+      // UI tests cannot perform an accessibility action: in debug builds launched with `-voiceActions`, a button
+      // runs the same one.
+      .overlay(alignment: .topLeading) {
+        if LaunchOptions().voiceActions {
+          Button { commentHere() } label: { Color.clear.frame(width: 44, height: 44) }.accessibilityIdentifier("voice-comment").accessibilityLabel(PhoneWords.comment)
+        }
+      }
+    #endif
+  }
+
+  /// The VoiceOver action: Comment on, and a pin at the middle of this file's page (not another page's).
+  private func commentHere() {
+    if !desk.commenting { desk.commenting = true }
+    desk.pinMiddle[item.id]?()
   }
 
   private var box: some View {

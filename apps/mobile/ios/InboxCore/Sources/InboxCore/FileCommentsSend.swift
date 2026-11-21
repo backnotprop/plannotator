@@ -8,7 +8,8 @@ public enum CommentStanding: Hashable, Sendable {
   /// It rides the next Send with its quote and no line: the file is not the text it was made on any more (or that
   /// text is not on the phone), so no line of it is named (the window's "Unanchored").
   case unanchored
-  /// It rides the next Send once its drawing has reached the computer, which goes first.
+  /// Its drawing waits for a way to the computer that can carry it: it rides no Send until the drawing has arrived,
+  /// then the next one.
   case drawingWaits
   /// The computer did not keep it (with its reason, when it gave one): no Send carries it until it is saved.
   case notSaved(InboxSession.Notice?)
@@ -18,8 +19,8 @@ public enum CommentStanding: Hashable, Sendable {
   /// Whether the next Send carries it.
   public var rides: Bool {
     switch self {
-    case .goes, .unanchored, .drawingWaits: return true
-    case .notSaved, .window: return false
+    case .goes, .unanchored: return true
+    case .drawingWaits, .notSaved, .window: return false
     }
   }
 }
@@ -112,13 +113,53 @@ extension InboxSession {
     return comments(thread).filter { commentStanding($0, items: items).rides }
   }
 
+  /// Whether one of these comments has its line read from a text the phone does not keep.
+  func needsFeedbackTexts(_ thread: ThreadID, for comments: [FileComment]) -> Bool {
+    let items = attachments(thread)
+    return comments.contains { comment in
+      guard let item = items.first(where: { $0.id == comment.attachment }) else { return false }
+      return FileFeedback.needsBlocks(file: feedbackFile(item), block: comment.blockId ?? "", comment: comment) && anchor(comment, item) == .fetch
+    }
+  }
+
+  /// Whether a comment the next Send carries has its line read from a text the phone does not keep.
+  func needsFeedbackTexts(_ thread: ThreadID) -> Bool { needsFeedbackTexts(thread, for: commentsToSend(thread)) }
+
+  /// The texts, for `limit` at most: what has not come by then is not waited for.
+  func fetchFeedbackTexts(_ thread: ThreadID, for comments: [FileComment], within limit: Duration) async {
+    // Not a task group: that would wait for a fetch the time ran out on. The fetch goes on alone, and keeps the text.
+    let first = FirstOf()
+    await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+      first.waiter = done
+      Task { @MainActor in
+        await self.fetchFeedbackTexts(thread, for: comments)
+        first.end()
+      }
+      Task { @MainActor in
+        try? await Task.sleep(for: limit)
+        first.end()
+      }
+    }
+  }
+
+  /// A Send that waits writes its feedback again, with the texts the phone has now (unless it is on its way).
+  func rewriteFeedback(_ reply: String, thread: ThreadID) {
+    guard let index = held.firstIndex(where: { $0.id == reply }), !book.inFlight.contains(reply),
+      var body = try? JSONDecoder().decode(DoorReplyBody.self, from: held[index].body), let ids = body.annotationIds, !ids.isEmpty
+    else { return }
+    let kept = commentBook.kept[thread] ?? []
+    body.feedback = feedback(ids.compactMap { id in kept.first { $0.id == id } }, thread: thread)
+    held[index].body = (try? JSONEncoder().encode(body)) ?? held[index].body
+    saveOutbox()
+  }
+
   /// Before a Send: the text of each version a comment's line is read from, when the phone does not keep it and the
   /// computer answers (the window reads them at Send too).
-  func fetchFeedbackTexts(_ thread: ThreadID) async {
+  func fetchFeedbackTexts(_ thread: ThreadID, for comments: [FileComment]) async {
     guard client != nil else { return }
     let items = attachments(thread)
     var asked: Set<String> = []
-    for comment in comments(thread) {
+    for comment in comments {
       guard let item = items.first(where: { $0.id == comment.attachment }), FileFeedback.needsBlocks(file: feedbackFile(item), block: comment.blockId ?? "", comment: comment),
         anchor(comment, item) == .fetch
       else { continue }
@@ -164,5 +205,15 @@ public enum CommentEvents {
       case .object(let record)? = fields["annotation"], case .string(let thread)? = record["thread_id"], !thread.isEmpty
     else { return nil }
     return ThreadID(thread)
+  }
+}
+
+/// Whichever of two ends first.
+@MainActor
+private final class FirstOf {
+  var waiter: CheckedContinuation<Void, Never>?
+  func end() {
+    waiter?.resume()
+    waiter = nil
   }
 }

@@ -9,14 +9,16 @@ import SwiftUI
 final class CommentToast {
   private(set) var toast: RowActions.Toast?
   @ObservationIgnored private var undoing: (@MainActor () -> Void)?
+  @ObservationIgnored private var telling: (@MainActor () -> String)?
   @ObservationIgnored private var timer: Task<Void, Never>?
 
-  /// Show `words`; Undo runs `undo`, and a screen reader is told `said` once it has.
-  func show(_ words: ToastWords, said: String, undo: @escaping @MainActor () -> Void) {
+  /// Show `words`; Undo runs `undo`, and a screen reader is then told `said()`, read once it has.
+  func show(_ words: ToastWords, said: @escaping @MainActor () -> String, undo: @escaping @MainActor () -> Void) {
     timer?.cancel()
-    let next = RowActions.Toast(words: words, undo: .local(said: said))
+    let next = RowActions.Toast(words: words, undo: .local(said: ""))
     toast = next
     undoing = undo
+    telling = said
     AccessibilityNotification.Announcement(words.spoken).post()
     let wait = UIAccessibility.isVoiceOverRunning ? max(RowActions.stays, RowActions.readStays) : RowActions.stays
     timer = Task { [weak self] in
@@ -27,23 +29,27 @@ final class CommentToast {
   }
 
   func undo() {
-    guard let undoing, case .local(let said)? = toast?.undo else { return }
+    guard let undoing, let telling, case .local? = toast?.undo else { return }
     dismiss()
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     undoing()
-    AccessibilityNotification.Announcement(said).post()
+    AccessibilityNotification.Announcement(telling()).post()
   }
 
   func dismiss() {
     timer?.cancel()
     toast = nil
     undoing = nil
+    telling = nil
   }
+
+  /// What a screen reader is told once a comment is back: how many comments wait now, as the list's title says it.
+  static func told(_ session: InboxSession, _ thread: ThreadID) -> String { CountWords.comments(session.comments(thread).count) }
 
   /// "Removed", with Undo bringing the comment back as it was.
   func removed(_ id: String, thread: ThreadID, session: InboxSession) {
     guard let removed = session.removeComment(id, thread: thread) else { return }
-    show(ToastWords(mark: .check, lead: PhoneWords.stateRemoved), said: ActionWords.movedBack) {
+    show(ToastWords(mark: .check, lead: PhoneWords.stateRemoved), said: { Self.told(session, thread) }) {
       session.restoreComment(removed)
     }
   }

@@ -57,6 +57,24 @@ final class FileSafetyUITests: XCTestCase {
   }
 
   @MainActor
+  func testCommentingOnAPageGivesItsFramesBackAsThePageMadeThem() {
+    let app = launch(stage: "files,framedpage")
+    tile(app, "framed.html", up: true).tap()
+    let page = app.webViews["file-page"]
+    XCTAssertTrue(page.waitForExistence(timeout: 20))
+    let under = page.buttons["Under the frame"]
+    XCTAssertTrue(under.waitForExistence(timeout: 10))
+    // Comment on, then off: the frame the page let touches through still lets them through.
+    let mode = app.segmentedControls["page-mode"]
+    mode.buttons["Comment"].tap()
+    usleep(500_000)
+    mode.buttons["Use the page"].tap()
+    usleep(500_000)
+    under.tap()
+    XCTAssertTrue(page.buttons["Pressed"].waitForExistence(timeout: 5), "the touch passed the frame to the button under it")
+  }
+
+  @MainActor
   func testAFileTheAgentChangedAfterThePhoneLastAskedOpensAsItIsNow() {
     // The plan was read on the phone; the agent changed it after the phone last asked how the thread's files stand.
     let app = launch(stage: "files,fileskept,filechangesnext")

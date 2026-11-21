@@ -244,6 +244,8 @@ struct LaunchOptions {
   var open: ThreadID? { debug ? defaults.string(forKey: "open").map { ThreadID($0) } : nil }
   var resetFolds: Bool { debug && defaults.bool(forKey: "resetFolds") }
   var stageName: String? { debug ? defaults.string(forKey: "stage") : nil }
+  /// UI tests: each VoiceOver action a test needs is also a button (`voice-comment`).
+  var voiceActions: Bool { debug && defaults.bool(forKey: "voiceActions") }
 
   private var debug: Bool {
     #if DEBUG
@@ -369,7 +371,7 @@ struct LaunchOptions {
           await session.deliverHeld(thread: StandInData.files)
         case "commentstanding":
           // Two drawings on the flame graph that have not reached the computer: one it refused as too large (that
-          // comment is not saved, and no Send carries it), one that waits for a way to send it (it goes first).
+          // comment is not saved, and no Send carries it), one that waits for a way that can carry it (it rides no Send until then).
           let files = session.attachments(StandInData.files)
           if let picture = files.first(where: { $0.name == "reconnect-flamegraph.png" }) {
             func drawing(_ shade: CGFloat) -> Data {
@@ -391,6 +393,10 @@ struct LaunchOptions {
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
             await door.changeFileAfterNextRead(plan.id, to: Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
           }
+        case "framedpage":
+          // A page with a frame that lets touches through to a button under it.
+          _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.framedPageName, kind: .html, bytes: Data(StandInData.framedPage.utf8))
+          await session.refresh()
         case "filespage":
           // A page that tries to leave: to the network, to a site, to the phone's dialer.
           _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.leavingPageName, kind: .html, bytes: Data(StandInData.leavingPage.utf8))

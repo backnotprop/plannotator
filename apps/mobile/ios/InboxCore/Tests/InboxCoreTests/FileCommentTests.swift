@@ -312,7 +312,7 @@ final class FileCommentTests: XCTestCase {
     XCTAssertEqual(read21.map(\.id), [made.id])
   }
 
-  func testACommentTheComputerRefusesStaysWithItsReasonAndNoSendGoesWithoutIt() async throws {
+  func testACommentTheComputerRefusesStaysWithItsReasonAndTheSendGoesWithoutIt() async throws {
     let (door, session) = try await seated()
     let plan = try file(session, StandInData.planName)
     await door.setOffline(true)
@@ -324,9 +324,12 @@ final class FileCommentTests: XCTestCase {
     await session.refresh()
     await delivered(session)
 
-    let read22 = await door.posts("/reply")
-    XCTAssertTrue(read22.isEmpty, "the Send did not go on without the comment")
-    XCTAssertEqual(session.takeReturnedWords(thread), "One note.", "the words are back in the reply field")
+    // The person's words go; the comment the computer would not keep stays here, and rides no Send until it is saved.
+    let read22 = await door.posts("/reply").map(body)
+    XCTAssertEqual(read22.count, 1)
+    XCTAssertEqual(read22.first?["words"]?.text, "One note.")
+    XCTAssertNil(read22.first?["annotation_ids"]?.items.first, "without the comment")
+    XCTAssertNil(session.takeReturnedWords(thread), "nothing came back to the reply field")
     XCTAssertEqual(session.comments(thread).map(\.id), [made.id], "the comment is still here")
     guard case .refused(_, let code)? = session.commentRefusal(made.id) else { return XCTFail("the reason is kept") }
     XCTAssertEqual(code, "annotation_not_allowed")

@@ -30,7 +30,8 @@ struct PinnedPage: View {
       sought: desk.sought?.comment.attachment == context.item.id ? desk.sought : nil,
       pinned: { context.begin(.pin($0)) },
       opened: { desk.edit($0) },
-      pinsMiddle: { desk.pinMiddle = $0 })
+      // Kept by file: the cover lays out the pages beside this one too, and the action is the page on screen's.
+      pinsMiddle: { desk.pinMiddle[context.item.id] = $0 })
   }
 }
 
@@ -97,10 +98,20 @@ final class PagePins: NSObject {
       // A frame is a document of its own, which this script's listeners do not reach: while commenting, a touch on
       // it lands on the frame's element here, in this document, and is a pin.
       const frames = () => call(queryAll, doc, "iframe, frame, object, embed");
+      // A frame's own inline pointer-events (and its priority) is kept while commenting and put back after.
+      const before = new WeakMap();
       const still = (on) => {
         for (const frame of frames()) {
           const s = call(style, frame);
-          if (s) { if (on) s.setProperty("pointer-events", "none", "important"); else s.removeProperty("pointer-events"); }
+          if (!s) continue;
+          if (on) {
+            if (!before.has(frame)) before.set(frame, [s.getPropertyValue("pointer-events"), s.getPropertyPriority("pointer-events")]);
+            s.setProperty("pointer-events", "none", "important");
+          } else if (before.has(frame)) {
+            const [value, priority] = before.get(frame);
+            before.delete(frame);
+            if (value) s.setProperty("pointer-events", value, priority); else s.removeProperty("pointer-events");
+          }
         }
       };
       new MutationObserver(() => { if (pins.on) still(true); }).observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
@@ -211,7 +222,10 @@ final class PagePins: NSObject {
 
   /// Pin the element at the middle of what is on screen: VoiceOver's way to pin, with no touch on the page.
   func pinMiddle() {
-    guard commenting, let page else { return }
+    guard let page else { return }
+    // Asked for with Comment just turned on: the page's script is told first (the calls run in order), so this one
+    // pin is not lost to the next redraw.
+    if !commenting { set(commenting: true, in: page) }
     page.callAsyncJavaScript("const p = window.__plannotatorPins; if (!p) return null; const m = p.middle(); return p.describe(m.x, m.y)", arguments: [:], in: nil, in: Self.world) { [weak self] result in
       guard case .success(let value) = result, JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value),
         let answer = try? JSONDecoder().decode(JSONValue.self, from: data), let element = PinnedElement(answer)

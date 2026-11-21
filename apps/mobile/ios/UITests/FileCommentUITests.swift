@@ -208,6 +208,22 @@ final class FileCommentUITests: XCTestCase {
   // MARK: A page
 
   @MainActor
+  func testVoiceOversCommentActionPinsTheMiddleOfThePageTheFirstTime() {
+    let app = launch(more: ["-voiceActions", "YES"])
+    // Another page is laid out beside this one first: the action is this page's.
+    tile(app, "canary.html").tap()
+    let page = app.webViews["file-page"]
+    XCTAssertTrue(page.waitForExistence(timeout: 20))
+    XCTAssertTrue(page.buttons["Refresh"].waitForExistence(timeout: 10))
+    XCTAssertEqual(app.segmentedControls["page-mode"].buttons["Use the page"].isSelected, true)
+    // Once, with Comment off: it turns Comment on and pins the middle of the page.
+    app.buttons["voice-comment"].tap()
+    let quote = app.staticTexts["comment-quote"]
+    XCTAssertTrue(quote.waitForExistence(timeout: 5), "the first activation pinned something")
+    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "page-pin").firstMatch.exists)
+  }
+
+  @MainActor
   func testAPageTakesAPinWhileCommentingAndItsOwnTouchesOtherwise() {
     let app = launch()
     tile(app, "canary.html").tap()
@@ -336,14 +352,14 @@ final class FileCommentUITests: XCTestCase {
   @MainActor
   func testACommentTheComputerDidNotKeepIsListedAndRidesNoSendAndARemovalIsUndone() {
     let app = launch(stage: "files,commented,commentstanding")
-    // The strip and the tiles count what the next Send carries: the three comments and the drawing that waits
-    // for its way to the computer, not the drawing the computer refused.
+    // The strip and the tiles count what the next Send carries: the three comments, not the drawing the computer
+    // refused, nor the one that waits for a way to the computer that can carry it.
     let strip = app.buttons["thread-comments"]
     XCTAssertTrue(strip.waitForExistence(timeout: 20))
-    XCTAssertEqual(strip.label, "4 comments")
+    XCTAssertEqual(strip.label, "3 comments")
     XCTAssertTrue(tile(app, "retry-plan.md").label.contains("2 comments"), tile(app, "retry-plan.md").label)
-    XCTAssertTrue(tile(app, "reconnect-flamegraph.png").label.contains("1 comment"), tile(app, "reconnect-flamegraph.png").label)
-    shot("r2-01-tiles-count-comments")
+    XCTAssertFalse(tile(app, "reconnect-flamegraph.png").label.contains("comment"), tile(app, "reconnect-flamegraph.png").label)
+    shot("r3-01-tiles-count-comments")
     strip.tap()
     // Every comment is listed; the ones that do not go say why, and the foot says what goes.
     XCTAssertTrue(app.staticTexts["reconnect-flamegraph.png"].waitForExistence(timeout: 5))
@@ -354,8 +370,8 @@ final class FileCommentUITests: XCTestCase {
     let foot = app.staticTexts["comments-ride"]
     if !foot.exists { app.swipeUp() }
     XCTAssertTrue(foot.waitForExistence(timeout: 5))
-    XCTAssertEqual(foot.label, "4 comments ride your next Send to Claude Code.")
-    shot("r2-02-list-not-saved-and-drawing-waits")
+    XCTAssertEqual(foot.label, "3 comments ride your next Send to Claude Code.")
+    shot("r3-02-list-drawing-waits-rides-no-send")
 
     // A long press offers Edit the comment and Remove; Remove says so, with Undo, and Undo brings it back.
     let onPlan = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch
@@ -363,24 +379,24 @@ final class FileCommentUITests: XCTestCase {
     onPlan.press(forDuration: 1.0)
     XCTAssertTrue(app.buttons["Edit the comment"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.buttons["Remove"].exists)
-    shot("r2-03-comment-row-long-press")
+    shot("r3-03-comment-row-long-press")
     app.buttons["Remove"].tap()
     XCTAssertTrue(app.staticTexts["Removed"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch.exists)
-    shot("r2-04-removed-with-undo")
+    shot("r3-04-removed-with-undo")
     toastUndo(app).tap()
     let back = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch
     XCTAssertTrue(back.waitForExistence(timeout: 5), "Undo brought the comment back")
     XCTAssertTrue(back.label.contains("client drops its socket"), "on the same words: \(back.label)")
     app.navigationBars["5 comments"].buttons["Done"].tap()
-    XCTAssertEqual(app.buttons["thread-comments"].label, "4 comments")
+    XCTAssertEqual(app.buttons["thread-comments"].label, "3 comments")
 
     // The drawing that waits is drawn on the picture.
     app.buttons["thread-comments"].tap()
     app.buttons.matching(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch.tap()
     let picture = app.images.matching(identifier: "file-picture").firstMatch
     XCTAssertTrue(picture.waitForExistence(timeout: 20))
-    shot("r2-05-picture-drawing-waits")
+    shot("r3-05-picture-drawing-waits")
   }
 
   @MainActor
