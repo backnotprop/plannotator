@@ -13,6 +13,7 @@ const jsonVersionPaths = [
   "apps/openclaw-plugin/package.json",
   "apps/pi-extension/package.json",
   "apps/hook/.claude-plugin/plugin.json",
+  "apps/skills/.codex-plugin/plugin.json",
   "apps/copilot/plugin.json",
   "packages/server/package.json",
 ] as const;

@@ -6,11 +6,23 @@ Plan review uses Codex's experimental `Stop` hook. This is a post-render review 
 
 ## Install
 
+### Codex plugin marketplace
+
+```bash
+codex plugin marketplace add backnotprop/plannotator
+codex plugin add plannotator@plannotator
+```
+
+Local checkout: `codex plugin marketplace add /path/to/plannotator`, then the same `codex plugin add` command. The Codex plugin root is [`apps/skills`](../skills) (`.codex-plugin` + Stop hook); skills are `apps/skills/core/` with no duplicated `SKILL.md` files. The plugin's Stop hook needs Codex hooks enabled and trusted; see below.
+
+### Installer
+
 **macOS / Linux / WSL:**
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash
 ```
+
 
 The installer adds the `plannotator` binary and, when Codex is installed or the Codex home already exists, enables Codex
 Stop hooks automatically. The Codex home is `$CODEX_HOME` when set, falling back to `~/.codex` — both the installer and the

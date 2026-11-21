@@ -1,0 +1,17 @@
+{
+  "name": "plannotator",
+  "plugins": [
+    {
+      "name": "plannotator",
+      "source": {
+        "source": "local",
+        "path": "./apps/skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
