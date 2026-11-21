@@ -245,7 +245,7 @@ export function createInboxScheduled(deps: {
   const folderWords = (folder: InboxScheduledFolder) => {
     if ("scratch" in folder) return "a new scratch folder";
     const words = "path" in folder ? deps.displayFolder(folder.path) : store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root);
-    return words ? routineLineText(words) : "a folder that is gone";
+    return words ? routineLineText(words, "path") : "a folder that is gone";
   };
   const agentWords = (agent: string) => INBOX_HOST_NAMES[agent] ?? agent;
   const scheduleSentence = (schedule: InboxScheduledSchedule) => (schedule ? inboxScheduleWords(schedule).replace(/^Every /, "every ").replace(/^Once /, "once ").replace(/^On the /, "on the ") : "only when someone runs it");

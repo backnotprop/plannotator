@@ -768,7 +768,11 @@ describe("a routine's name in a change line", () => {
     const line = w.store.message(told!)!;
     expect(firstWords(line.body)).toContain(`${w.home}/my-app_v2`);
     expect(line.body).toContain(`${w.home}/my-app_v2`);
-    expect(line.body).toContain("It now works in `");
+    // A plain path is written as it is, as on main (a temp folder holds no `.`); one a renderer could open as a file is code.
+    expect(line.body).toMatch(/It now works in \/\S*\/home\/my-app_v2 \(was \//);
+    mkdirSync(join(w.home, "next.js"), { recursive: true });
+    const { told: dotted } = await w.scheduled.update(record.id, { folder: { path: w.home + "/next.js" } }, { kind: "agent", host: FAKE, session: "s-maya", name: "Fake Agent", thread_id: null });
+    expect(w.store.message(dotted!)!.body).toMatch(/It now works in `\/\S*\/home\/next\.js` \(was \/\S*\/home\/my-app_v2\)\./);
     expect(routineLineText("a `b` c")).toBe("``a `b` c``");
     expect(routineLineText("`x`")).toBe("`` `x` ``");
   });

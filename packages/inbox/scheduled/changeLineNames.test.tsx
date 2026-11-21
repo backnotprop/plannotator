@@ -7,6 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { routineLineText } from '@plannotator/core/inbox-scheduled';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
+import { findBarePaths } from '../fileRefs';
 
 const NAMES = ["Maya's triage", 'Deps: weekly', "@maya's sweep", 'snake_case_name', '2 * 3 * 4', 'Scan <img src=scan.png>', 'Scan ![x](/p.png)', 'Fix #123 now', 'See https://e.co', 'a `tick` and ``two``', '`edge`'];
 
@@ -32,6 +33,24 @@ describe("a routine's name in a change line, in the window", () => {
         const words = line.startsWith('Made') ? name.replace(/[[\]]/g, '') : name;
         expect([name, textOf(html).includes(words)]).toEqual([name, true]);
       }
+    }
+  });
+
+  test('a plain name or folder, written as it is (as on main), draws as its words only: no code, emphasis, strikethrough, link or picture', () => {
+    const PLAIN = ['Morning triage', 'Dependency check', '.,’-–—()+?', 'Weekly sync v2.1', 'follow-up (daily)', 'What changed?', '🚀 Deploy check', 'Café crème', '毎朝のトリアージ', 'हिन्दी रिपोर्ट'];
+    const FOLDERS = ['~/acme-web', '~/code/my-app_v2', '~/projects/snake__case', '/srv/apps/acme web', '~/linear/ENG-42'];
+    const lines = [
+      ...PLAIN.flatMap((name) => linesOf(name).map((line) => ({ line, words: name }))),
+      ...FOLDERS.map((folder) => ({ line: `It now works in ${routineLineText(folder, 'path')} (was ${routineLineText('~/acme-api', 'path')}).`, words: folder })),
+    ];
+    for (const { line, words } of lines) {
+      expect([line, line.includes('`')]).toEqual([line, false]);
+      // No bare path the Inbox's window opens as a file (its BarePathContext).
+      expect([line, findBarePaths(line)]).toEqual([line, []]);
+      const html = renderToStaticMarkup(<InlineMarkdown text={line} githubRepo="acme/api" />);
+      const tags = html.match(/<(img|a|code|em|strong|del|script|iframe)\b[^>]*>/g) ?? [];
+      expect([line, tags.filter((tag) => !tag.includes('href="#routine=sch_1"'))]).toEqual([line, []]);
+      expect([line, textOf(html).includes(words)]).toEqual([line, true]);
     }
   });
 });
