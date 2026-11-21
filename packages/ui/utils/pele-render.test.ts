@@ -1,12 +1,22 @@
-// Guards the real Pele -> sanitizer -> viewer boundary, not just the npm API.
+// Guards the real Pele -> sanitizer -> viewer boundary, not just the npm API,
+// with the engine switch (`diagram-engine.ts`) sending fences to Pele.
+// DOM-gated (DOM_TESTS=1).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
+import { __setDiagramEngineModeForTests } from './diagram-engine';
 import { diagramFinder, diagramHitSource, renderDiagram } from './diagram-render';
 
 const hasDom = typeof document !== 'undefined';
 let restoreParser: (() => void) | undefined;
-beforeAll(() => { if (hasDom) restoreParser = installInertDiagramSvgParser(); });
-afterAll(() => restoreParser?.());
+beforeAll(() => {
+  if (!hasDom) return;
+  restoreParser = installInertDiagramSvgParser();
+  __setDiagramEngineModeForTests('pele');
+});
+afterAll(() => {
+  restoreParser?.();
+  __setDiagramEngineModeForTests(undefined);
+});
 const theme = { colorTheme: 'github', mode: 'dark' } as const;
 
 describe.if(hasDom)('Pele render integration', () => {
@@ -16,7 +26,6 @@ describe.if(hasDom)('Pele render integration', () => {
     if (result.ok === false) throw new Error(result.message);
     const svg = result.svgNode;
     expect(svg.querySelector('script, image, a[href]')).toBeNull();
-    expect(svg.style.getPropertyValue('--pele-fg')).toBe('var(--foreground)');
     const edges = svg.querySelectorAll('g.pele-edge > path:not(.pele-marker)');
     const hits = svg.querySelectorAll('[data-diagram-hit]');
     expect(edges.length).toBeGreaterThan(0);
@@ -36,7 +45,20 @@ describe.if(hasDom)('Pele render integration', () => {
     expect(finder.findTarget(svg, anchor, 'integration')).toBe(cluster);
   });
 
-  test('renders Mermaid-syntax fences with Pele by default and dispatches the matching finder', async () => {
+  test('an author style that paints is kept; one that would fetch never reaches the page', async () => {
+    const paints = await renderDiagram('mermaid', 'styles', 'flowchart TD\n A --> B\n style A fill:#ff0000', theme);
+    if (paints.ok === false) throw new Error(paints.message);
+    expect(Array.from(paints.svgNode.querySelectorAll('[style]'), (el) => el.getAttribute('style')).join(' ')).toContain('#ff0000');
+    // Pele 1.3.0 refuses the url() itself; the scrub in diagram-render is the belt if a later Pele accepts it.
+    const fetches = await renderDiagram('mermaid', 'fetches', 'flowchart TD\n A --> B\n style B fill:url(https://example.com/x.png)', theme);
+    if (fetches.ok === true) {
+      expect(Array.from(fetches.svgNode.querySelectorAll('[style]'), (el) => el.getAttribute('style')).join(' ')).not.toContain('example.com');
+    } else {
+      expect(fetches.runtimeUnavailable).toBe(false);
+    }
+  });
+
+  test('a fence the switch sends to Pele is drawn by Pele and its parts resolve through the matching finder', async () => {
     const result = await renderDiagram('mermaid', 'default', 'flowchart TD\n A[Start] --> B', theme);
     expect(result.ok).toBe(true);
     if (result.ok === false) throw new Error(result.message);

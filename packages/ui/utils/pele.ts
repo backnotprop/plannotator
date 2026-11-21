@@ -1,19 +1,47 @@
-import type { RenderOptions, RenderResult } from 'pele';
+/**
+ * The Pele runtime slot (https://pele.run, MIT, pinned 1.3.0): a second
+ * engine for Mermaid-syntax fences. Mermaid stays the engine for every fence
+ * unless `diagram-engine.ts` says otherwise; nothing imports Pele until a
+ * fence is actually drawn with it.
+ *
+ * Loaded through `pele/lazy`: the core (parser front, layout, svg writer)
+ * arrives on the first Pele render, and each diagram type's code arrives on
+ * that type's first render, as its own chunk. Pele renders synchronously
+ * once a type is loaded, with no DOM: the text measurer below is the only
+ * browser API it is handed.
+ */
+import type { RenderOptions, RenderResult, TextMeasurer } from 'pele';
+import { MERMAID_LABEL_WRAP_WIDTH } from './mermaid';
 
 export const PELE_SOURCE_LIMIT = 100_000;
 export const PELE_OUTPUT_LIMIT = 1_000_000;
 export const PELE_MAX_EDGES = 5_000;
 
-export type PeleRuntime = {
-  render(source: string, options?: RenderOptions): RenderResult;
-};
+export interface PeleRuntime {
+  /** Whether Pele has a renderer for the source's diagram type (loads that type's chunk when it has). */
+  supports(source: string): Promise<boolean>;
+  render(source: string, options: RenderOptions): Promise<RenderResult>;
+}
 
 let runtimePromise: Promise<PeleRuntime> | undefined;
+/** `pele/lazy`'s own `supports()` knows only the types already loaded, so
+ * the check is: a type is detected, and its chunk loads. */
+function importPele(): Promise<PeleRuntime> {
+  return import('pele/lazy').then((pele) => ({
+    async supports(source: string) {
+      const type = pele.detectType(source);
+      return type !== null && (await pele.load(type));
+    },
+    render: pele.renderAsync,
+  }));
+}
 
-/** The alternative renderer stays off the default Mermaid import path. */
+let loader: () => Promise<PeleRuntime> = importPele;
+
+/** The runtime, imported on first use; a failed import is forgotten so a Retry imports again. */
 export function loadPeleRuntime(): Promise<PeleRuntime> {
   if (runtimePromise === undefined) {
-    runtimePromise = import('pele').then((runtime) => ({ render: runtime.render }));
+    runtimePromise = loader();
     void runtimePromise.catch(() => {
       runtimePromise = undefined;
     });
@@ -21,14 +49,39 @@ export function loadPeleRuntime(): Promise<PeleRuntime> {
   return runtimePromise;
 }
 
-/** Stable, document-unique SVG prefix, including accessibility title/description IDs. */
+/** Test hook: stand in for the import (a failing chunk, a counting loader). */
+export function __setPeleRuntimeLoaderForTests(next: (() => Promise<PeleRuntime>) | undefined): void {
+  loader = next ?? importPele;
+  runtimePromise = undefined;
+}
+
+/** A document-unique id prefix for one render, accessibility title and description ids included. */
 export function peleSvgId(renderId: string): string {
   return `plannotator-pele-${renderId.replace(/[^a-zA-Z0-9_-]/gu, '-')}`;
 }
 
-/** Theme Pele's own CSS variables from the existing app tokens. */
-export function peleFontFamilies(): { sans: string; mono: string } {
-  if (typeof document === 'undefined') return { sans: 'sans-serif', mono: 'monospace' };
+/**
+ * The label wrap width Mermaid gets (`MERMAID_LABEL_WRAP_WIDTH`), for every
+ * type that reads one from its config section, so a label breaks where it
+ * breaks under Mermaid.
+ */
+const WRAP_CONFIG = Object.fromEntries(
+  ['flowchart', 'state', 'class', 'er', 'requirement', 'block', 'mindmap'].map((section) => [
+    section,
+    { wrappingWidth: MERMAID_LABEL_WRAP_WIDTH },
+  ]),
+);
+
+export interface PeleFonts {
+  readonly sans: string;
+  readonly mono: string;
+}
+
+/** The app's font stacks, read off the document; Pele's own defaults without one. */
+export function peleFonts(): PeleFonts {
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') {
+    return { sans: 'sans-serif', mono: 'monospace' };
+  }
   const style = getComputedStyle(document.documentElement);
   return {
     sans: style.getPropertyValue('--font-sans').trim() || 'sans-serif',
@@ -36,13 +89,13 @@ export function peleFontFamilies(): { sans: string; mono: string } {
   };
 }
 
-export function renderPeleSource(runtime: PeleRuntime, source: string, renderId: string): RenderResult {
-  const { sans, mono } = peleFontFamilies();
-  const measurer = peleCanvasMeasurer(sans, mono);
+/** Render one source: links and images off, the app's fonts, measured on a canvas when there is one. */
+export function renderPeleSource(runtime: PeleRuntime, source: string, renderId: string, fonts: PeleFonts = peleFonts()): Promise<RenderResult> {
+  const measurer = canvasMeasurer(fonts);
   return runtime.render(source, {
     idPrefix: peleSvgId(renderId),
-    fontFamily: sans,
-    fontFamilyMono: mono,
+    fontFamily: fonts.sans,
+    fontFamilyMono: fonts.mono,
     ...(measurer === undefined ? {} : { measurer }),
     links: false,
     images: false,
@@ -50,38 +103,27 @@ export function renderPeleSource(runtime: PeleRuntime, source: string, renderId:
     outputLimit: PELE_OUTPUT_LIMIT,
     maxEdges: PELE_MAX_EDGES,
     responsive: false,
+    config: WRAP_CONFIG,
   });
 }
 
-function peleCanvasMeasurer(
-  sans: string,
-  mono: string,
-): import('pele').TextMeasurer | undefined {
+function canvasMeasurer(fonts: PeleFonts): TextMeasurer | undefined {
   if (typeof document === 'undefined') return undefined;
-  const context = document.createElement('canvas').getContext('2d');
-  if (context === null) return undefined;
+  let context: CanvasRenderingContext2D | null = null;
+  try {
+    context = document.createElement('canvas').getContext('2d');
+  } catch {
+    return undefined;
+  }
+  if (context === null || typeof context.measureText !== 'function') return undefined;
+  const ctx = context;
   return {
     width(text, size, style) {
       const italic = (style & 2) !== 0 ? 'italic ' : '';
       const bold = (style & 1) !== 0 ? 'bold ' : '';
-      const family = (style & 4) !== 0 ? mono : sans;
-      context.font = `${italic}${bold}${size}px ${family}`;
-      return context.measureText(text).width;
+      const family = (style & 4) !== 0 ? fonts.mono : fonts.sans;
+      ctx.font = `${italic}${bold}${size}px ${family}`;
+      return ctx.measureText(text).width;
     },
   };
-}
-
-export function peleThemeStyle(): string {
-  return [
-    '--pele-bg:var(--background)',
-    '--pele-fg:var(--foreground)',
-    '--pele-muted:var(--muted-foreground)',
-    '--pele-line:var(--foreground)',
-    '--pele-surface:var(--card)',
-    '--pele-surface-alt:var(--muted)',
-    '--pele-border:var(--border)',
-    '--pele-accent:var(--primary)',
-    '--pele-font:var(--font-sans)',
-    '--pele-font-mono:var(--font-mono)',
-  ].join(';');
 }
