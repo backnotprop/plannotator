@@ -1,12 +1,13 @@
 /**
- * Mark all as read on the list (markAllRead.ts): the ⋮ takes every row the list shows that single Mark read is
- * offered on, the "New since you looked" band only its own; neither ever takes a snoozed row (the project menu's
- * rule). What it writes is each thread as it is now (`currentMarkAllRows`): a thread whose news waits behind
- * "N new · Show" is left out and stays new.
+ * Mark all as read and Archive all on the list (markAllRead.ts): the ⋮ takes every row the list shows that single Mark
+ * read is offered on, a band's menu only that band's rows; none ever takes a snoozed row (the project menu's rule). A
+ * band offers only the items that have something to take, and no menu at all when neither has. What each writes is
+ * each thread as it is now (`currentMarkAllRows`, `currentArchiveAllRows`): a thread whose news waits behind
+ * "N new · Show" is left out and stays as it is.
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { bandMarkAllRows, currentMarkAllRows, listMarkAllRows } from './markAllRead';
+import { bandArchiveAllRows, bandMarkAllRows, bandMenuActions, currentArchiveAllRows, currentMarkAllRows, listMarkAllRows } from './markAllRead';
 
 const NO_QUESTIONS = { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 };
 
@@ -76,20 +77,34 @@ describe('the list ⋮: every row the list shows that takes Mark read', () => {
   });
 });
 
-describe('the New band: only its own rows', () => {
-  test('the band’s rows, never another group’s, never a snoozed one', () => {
-    expect(ids(bandMarkAllRows(SECTIONS))).toEqual(['n1', 'n3']);
+const band = (id: InboxListSection['id']) => SECTIONS.find((s) => s.id === id)!;
+
+describe('a band’s menu: only that band’s rows', () => {
+  test('Mark all as read: the band’s rows, never another group’s, never a snoozed one', () => {
+    expect(ids(bandMarkAllRows(band('new')))).toEqual(['n1', 'n3']);
+    expect(ids(bandMarkAllRows(band('waiting')))).toEqual(['w1']);
   });
 
   test('a seen update the list still holds in New is taken there (its Mark read is still offered)', () => {
     const held = row('h1', { section: 'quiet', unseen: 0, unread: false, waiting_on_person: false });
-    expect(ids(bandMarkAllRows([{ id: 'new', label: 'New since you looked', threads: [held] }]))).toEqual(['h1']);
+    expect(ids(bandMarkAllRows({ id: 'new', label: 'New since you looked', threads: [held] }))).toEqual(['h1']);
     // The same row in Quiet is not.
-    expect(listMarkAllRows([{ id: 'quiet', label: 'Quiet', threads: [held] }])).toEqual([]);
+    expect(bandMarkAllRows({ id: 'quiet', label: 'Quiet', threads: [held] })).toEqual([]);
   });
 
-  test('no New band: nothing', () => {
-    expect(bandMarkAllRows(SECTIONS.filter((s) => s.id !== 'new'))).toEqual([]);
+  test('Archive all: every row of the band not archived and not snoozed; a thread back from the archive is taken', () => {
+    const back = row('b1', { resolved_at: '2026-11-20T06:00:00.000Z', back_from_archive: true } as Partial<InboxListRow>);
+    const gone = row('g1', { resolved_at: '2026-11-20T06:00:00.000Z' });
+    expect(ids(bandArchiveAllRows({ id: 'new', label: 'New since you looked', threads: [row('n1'), back, gone, row('n2', { snoozed: SNOOZED })] }))).toEqual(['n1', 'b1']);
+    expect(ids(bandArchiveAllRows(band('quiet')))).toEqual(['q1']);
+  });
+
+  test('the items each band offers: Quiet and Sent only Archive all; Snoozed nothing, so no menu', () => {
+    expect(bandMenuActions(band('new'))).toEqual(['read', 'archive']);
+    expect(bandMenuActions(band('waiting'))).toEqual(['read', 'archive']);
+    expect(bandMenuActions(band('quiet'))).toEqual(['archive']);
+    expect(bandMenuActions(band('sent'))).toEqual(['archive']);
+    expect(bandMenuActions(band('snoozed'))).toEqual([]);
   });
 });
 
@@ -109,5 +124,17 @@ describe('what it writes: each thread as it is now', () => {
     const drawn = [row('gone'), row('snoozed'), row('readElsewhere')];
     const latest = [row('snoozed', { snoozed: SNOOZED }), row('readElsewhere', { section: 'quiet', unread: false, unseen: 0, waiting_on_person: false, read_at: '2026-11-20T07:02:00.000Z' } as Partial<InboxListRow>)];
     expect(currentMarkAllRows(drawn, now(latest), inNew)).toEqual([]);
+  });
+
+  test('Archive all: a thread whose agent asked since is left out (never archived unseen); one archived or snoozed since too', () => {
+    const drawn = [row('asked'), row('plain'), row('archived'), row('snoozed')];
+    const plainNow = row('plain', { subject: 'renamed elsewhere' });
+    const latest = [
+      row('asked', { section: 'waiting', last_at: T2, last_agent_at: T2, unseen: 2, questions: { ...NO_QUESTIONS, open: 1 } }),
+      plainNow,
+      row('archived', { resolved_at: T2 }),
+      row('snoozed', { snoozed: SNOOZED }),
+    ];
+    expect(currentArchiveAllRows(drawn, now(latest))).toEqual([plainNow]);
   });
 });

@@ -1394,3 +1394,33 @@ describe("the Sidebar tip: outside the line, stamped once when shown, never for 
     expect((await tailnet.post("/api/inbox/reveal", { id: "sidebar_tip", answer: "not_now" })).status).toBe(422);
   });
 });
+
+describe("the Group tip: a band's one-time tooltip, outside the line, stamped once, never on a first-run day", () => {
+  const KEY = "band-tip-key-1";
+
+  test("due a day or more after first use; the claim stamps only inboxReveals.band_tip and starts no gap; another window gets no; the same key again yes", async () => {
+    const w = await world();
+    expect((await w.settings()).reveal.band_tip).toBe(true);
+    const lineBefore = (await w.settings()).reveal.next;
+    expect((await w.claim("band_tip", KEY)).show).toBe(true);
+    const saved = w.saved().inboxReveals;
+    expect(saved.band_tip).toEqual({ shownAt: expect.stringMatching(/^\d{4}-/), key: KEY });
+    // A tooltip the person's own pointer called up: none of the line's stamps move and the line's next stays next.
+    expect(saved.lastShownAt).toBeUndefined();
+    expect(saved.dayShownAt).toBeUndefined();
+    expect((await w.settings()).reveal.next).toBe(lineBefore);
+    expect((await w.settings()).reveal.band_tip).toBe(false);
+    expect((await w.claim("band_tip", "another-key-22")).show).toBe(false);
+    expect((await w.claim("band_tip", KEY)).show).toBe(true);
+    expect(w.saved().inboxReveals.band_tip.shownAt).toBe(saved.band_tip.shownAt);
+  });
+
+  test("not on a first-run day; not reported due within a dialog's gap", async () => {
+    const fresh = await world({ days: 0 });
+    expect((await fresh.settings()).reveal.band_tip).toBe(false);
+    expect((await fresh.claim("band_tip", KEY)).show).toBe(false);
+    const dialogFirst = await world();
+    expect((await dialogFirst.claim("board")).show).toBe(true);
+    expect((await dialogFirst.settings()).reveal.band_tip).toBe(false);
+  });
+});

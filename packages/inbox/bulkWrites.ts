@@ -14,7 +14,7 @@ import { InboxHeldError, inboxApi, type ListModel } from './api';
 import { drawnSection, listGroups, markHeldRowArchived, putRowBack, replaceHeldRow, settleThread } from './held';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { setAsideCount, type SetAsideCount } from './markRead';
-import { currentMarkAllRows } from './markAllRead';
+import { currentArchiveAllRows, currentMarkAllRows } from './markAllRead';
 import { batchToastWhy } from './projectMenu';
 import type { RowWrites, RowDrawing } from './data/actions/rows';
 import { errorToast } from './toastError';
@@ -113,14 +113,14 @@ export function bulkToast(action: BulkAction, outcomes: readonly Outcome<unknown
 }
 
 /**
- * Mark all as read's toast (the list's ⋮ and the New band, markAllRead.ts): the picks' Mark read toast with the project
- * menu's words after the count (projectMenu.ts `batchToastWhy`), read from the rows that changed, never one refused:
- * the warning icon when an agent was stopped or held up, a phone's words for it, and the agent's whole name for the
- * live region.
+ * Mark all as read's and Archive all's toast (the list's ⋮ and a band's menu, markAllRead.ts): the picks' toast with
+ * the project menu's words after the count (projectMenu.ts `batchToastWhy`), read from the rows that changed, never one
+ * refused: the warning icon when an agent was stopped or held up, a phone's words for it, and the agent's whole name
+ * for the live region.
  */
-export function markAllToast(outcomes: readonly Outcome<unknown>[]): Pick<InboxToastModel, 'icon' | 'lead' | 'phoneLead' | 'detail' | 'phoneDetail' | 'speech' | 'wrap'> | null {
+export function batchAllToast(action: 'read' | 'archive', outcomes: readonly Outcome<unknown>[]): Pick<InboxToastModel, 'icon' | 'lead' | 'phoneLead' | 'detail' | 'phoneDetail' | 'speech' | 'wrap'> | null {
   const { why, warn, said, phoneDetail } = batchToastWhy(outcomes.flatMap((o) => (o.ok ? [o.row] : [])));
-  const copy = bulkToast('read', outcomes, why || undefined);
+  const copy = bulkToast(action, outcomes, why || undefined);
   if (!copy) return null;
   const alone = copy.detail === why;
   return {
@@ -164,7 +164,7 @@ export function bulkWrites(host: BulkHost) {
     })();
   };
   const finish = (action: BulkAction, outcomes: readonly Outcome<unknown>[], onUndo: () => void, detail?: string, all = false) => {
-    const copy = all ? markAllToast(outcomes) : bulkToast(action, outcomes, detail);
+    const copy = all && (action === 'read' || action === 'archive') ? batchAllToast(action, outcomes) : bulkToast(action, outcomes, detail);
     if (!copy) return allRefused(outcomes);
     showToast({ ...copy, onUndo });
   };
@@ -190,12 +190,17 @@ export function bulkWrites(host: BulkHost) {
     );
   };
 
-  const archive = async (rows: readonly InboxListRow[]) => {
+  /**
+   * `all`: Archive all (a band's menu, `archiveAll`), with its toast (`batchAllToast`). A thread that came back from the
+   * archive is read instead, which archives it again (as the project menu's Archive all does; the picks never take one).
+   */
+  const archive = async (rows: readonly InboxListRow[], all = false) => {
     const at = new Date().toISOString();
     const drawings = new Map<string, { drawing: RowDrawing; drawn: InboxListRow | null }>();
     for (const row of rows) drawings.set(row.thread_id, { drawing: rowWrites.draw(row.thread_id, { patch: archivedRowPatch(row, at) }), drawn: shownRowOf(shownRef.current, row.thread_id) });
     setShown((current) => (current ? rows.reduce((sections, row) => markHeldRowArchived(sections, row.thread_id, at), current) : current));
-    const outcomes = await eachRow(rows, (row) => inboxApi.resolve(row.thread_id, true));
+    const cameBack = (row: InboxListRow) => !!row.resolved_at;
+    const outcomes = await eachRow(rows, (row) => (cameBack(row) ? inboxApi.markRead(row.thread_id, true) : inboxApi.resolve(row.thread_id, true)));
     for (const o of outcomes) {
       if (o.ok) continue;
       const { drawing, drawn } = drawings.get(o.row.thread_id)!;
@@ -205,18 +210,25 @@ export function bulkWrites(host: BulkHost) {
     void afterWrite(ids(outcomes)).finally(() => drawings.forEach(({ drawing }) => drawing.done()));
     // Archive ends a snooze and the person's Priority: Undo unarchives first, since an archived thread takes neither.
     // For a machine that is away each is held, in that order, so all three go when it is back.
-    finish('archive', outcomes, undoWith(outcomes, async ({ row }) => {
-      let held: InboxHeldError | null = null;
-      for (const write of [() => inboxApi.resolve(row.thread_id, false), () => host.restoreSnooze(row.thread_id, row.snoozed), () => host.restorePriority(row.thread_id, row.priority)]) {
-        try {
-          await write();
-        } catch (cause) {
-          if (!(cause instanceof InboxHeldError)) throw cause;
-          held ??= cause;
+    finish(
+      'archive',
+      outcomes,
+      undoWith(outcomes, async ({ row }) => {
+        if (cameBack(row)) return inboxApi.markRead(row.thread_id, false);
+        let held: InboxHeldError | null = null;
+        for (const write of [() => inboxApi.resolve(row.thread_id, false), () => host.restoreSnooze(row.thread_id, row.snoozed), () => host.restorePriority(row.thread_id, row.priority)]) {
+          try {
+            await write();
+          } catch (cause) {
+            if (!(cause instanceof InboxHeldError)) throw cause;
+            held ??= cause;
+          }
         }
-      }
-      if (held) throw held;
-    }));
+        if (held) throw held;
+      }),
+      undefined,
+      all,
+    );
   };
 
   const snooze = async (rows: readonly InboxListRow[], until: string) => {
@@ -235,7 +247,7 @@ export function bulkWrites(host: BulkHost) {
    * False when the warning was cancelled: nothing was written (a drop on Quiet keeps the picks then, listDrops.tsx).
    * Each thread is read as it is now (`rowOf`): the list holds still, so a picked row can be older than its thread
    * (news waiting behind "N new"), and the warning counts the questions the write really closes. A picked row is
-   * written whatever waits there (the person picked it). `all`: Mark all as read's toast (`markAllToast`).
+   * written whatever waits there (the person picked it). `all`: Mark all as read's toast (`batchAllToast`).
    */
   const markRead = async (picked: readonly InboxListRow[], all = false): Promise<boolean> => {
     const rows = picked.map((row) => rowOf(row.thread_id) ?? row);
@@ -269,7 +281,7 @@ export function bulkWrites(host: BulkHost) {
   };
 
   /**
-   * Mark all as read (the list's ⋮, the New band; markAllRead.ts): `drawn`, the rows it took off the list as drawn,
+   * Mark all as read (the list's ⋮, a band's menu; markAllRead.ts): `drawn`, the rows it took off the list as drawn,
    * each written as its thread is now; a thread whose news waits behind "N new · Show" is left out and stays new
    * (`currentMarkAllRows`). False when nothing was written.
    */
@@ -277,6 +289,18 @@ export function bulkWrites(host: BulkHost) {
     const rows = currentMarkAllRows(drawn, rowOf, (id) => drawnSection(shownRef.current, id));
     if (rows.length === 0) return (say('Nothing to mark read.'), false);
     return markRead(rows, true);
+  };
+
+  /**
+   * Archive all (a band's menu; markAllRead.ts): as Mark all as read, each thread as it is now, and a thread whose
+   * news waits behind "N new · Show" is left out (`currentArchiveAllRows`), so a question not seen yet is never
+   * archived away. No confirm, as the project menu's: the toast warns when an agent was stopped.
+   */
+  const archiveAll = async (drawn: readonly InboxListRow[]): Promise<boolean> => {
+    const rows = currentArchiveAllRows(drawn, rowOf);
+    if (rows.length === 0) return (say('Nothing to archive.'), false);
+    await archive(rows, true);
+    return true;
   };
 
   const markUnread = async (rows: readonly InboxListRow[]) => {
@@ -322,7 +346,7 @@ export function bulkWrites(host: BulkHost) {
   };
 
   // The window's toasts, live region and writes for the picks' other actions (Combine's tracker, useCombines.ts).
-  return { archive, snooze, markRead, markAllRead, markUnread, star, priority, hidePulls, host };
+  return { archive, archiveAll, snooze, markRead, markAllRead, markUnread, star, priority, hidePulls, host };
 }
 
 /** With the Combines the window follows (useCombines.ts), which the picks' Combine… starts. */

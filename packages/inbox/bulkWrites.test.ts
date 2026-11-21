@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi } from './api';
-import { bulkToast, bulkWrites, eachRow, markAllToast, tagsToast, type BulkHost } from './bulkWrites';
+import { bulkToast, bulkWrites, eachRow, batchAllToast, tagsToast, type BulkHost } from './bulkWrites';
 import { projectBatchToast } from './projectMenu';
 
 const row = (id: string) => ({ thread_id: id, subject: id }) as InboxListRow;
@@ -321,14 +321,64 @@ describe('Mark all as read and the picks’ Mark read read each thread as it is 
     expect(shownRow(state, 'a').unread).toBe(false);
     expect(state.toasts[0]).toMatchObject({ icon: 'warn', lead: 'Marked 2 of 3 threads read', detail: 'Closed 2 questions · 1 did not change: That thread is gone.' });
   });
+
+  test('Archive all: a thread whose agent asked since the list was drawn is left out (not archived away unseen), and so is one snoozed since', async () => {
+    const shown: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [full('asked'), full('plain'), full('later')] }];
+    const latest = [
+      full('asked', { section: 'waiting', last_at: T2, last_agent_at: T2, unseen: 2, message_count: 2, questions: { ...NO_QUESTIONS, open: 1 } }),
+      full('plain'),
+      full('later', { snoozed: { until: '2099-01-01T00:00:00.000Z', at: T2 } as InboxListRow['snoozed'] }),
+    ];
+    const { state, bulk } = listHost(shown, latest);
+    const calls: string[] = [];
+    const real = inboxApi.resolve;
+    inboxApi.resolve = (async (id: string, on: boolean) => void calls.push(`${on ? 'archive' : 'unarchive'} ${id}`)) as unknown as typeof inboxApi.resolve;
+    try {
+      expect(await bulk.archiveAll(shown[0]!.threads)).toBe(true);
+      expect(calls).toEqual(['archive plain']);
+      expect(state.toasts).toHaveLength(1);
+      expect(state.toasts[0]).toMatchObject({ lead: 'Archived 1 thread', icon: 'archive' });
+      expect(shownRow(state, 'asked').resolved_at).toBeNull();
+      expect(shownRow(state, 'plain').resolved_at).not.toBeNull();
+      // Only news waiting: nothing written, no toast.
+      expect(await bulk.archiveAll([full('asked')])).toBe(false);
+      expect(state.said).toEqual(['Nothing to archive.']);
+    } finally {
+      inboxApi.resolve = real;
+    }
+  });
+
+  test('Archive all reads a thread that came back from the archive (archiving it again), and its Undo makes it unread again', async () => {
+    const back = full('back', { resolved_at: T1, back_from_archive: true } as Partial<InboxListRow>);
+    const rows = [full('open'), back];
+    const shown: InboxListSection[] = [{ id: 'new', label: 'New since you looked', threads: rows }];
+    const { state, bulk } = listHost(shown, rows);
+    const calls: string[] = [];
+    const realResolve = inboxApi.resolve;
+    const realRead = inboxApi.markRead;
+    inboxApi.resolve = (async (id: string, on: boolean) => void calls.push(`${on ? 'archive' : 'unarchive'} ${id}`)) as unknown as typeof inboxApi.resolve;
+    inboxApi.markRead = (async (id: string, on: boolean) => void calls.push(`${on ? 'read' : 'unread'} ${id}`)) as unknown as typeof inboxApi.markRead;
+    try {
+      await bulk.archiveAll(rows);
+      expect(calls.sort()).toEqual(['archive open', 'read back']);
+      expect(state.toasts[0]).toMatchObject({ lead: 'Archived 2 threads' });
+      calls.length = 0;
+      (state.toasts[0]!.onUndo as () => void)();
+      await new Promise((done) => setTimeout(done, 10));
+      expect(calls.sort()).toEqual(['unarchive open', 'unread back']);
+    } finally {
+      inboxApi.resolve = realResolve;
+      inboxApi.markRead = realRead;
+    }
+  });
 });
 
-describe('Mark all as read’s toast is the project menu’s', () => {
+describe('Mark all as read’s and Archive all’s toast is the project menu’s', () => {
   const made = (r: InboxListRow) => ({ row: r, ok: true as const, value: undefined, held: null });
   test('a stopped agent: the warning icon, the phone’s words, and the whole name for the live region', () => {
     const long = 'Claude Code on the release machine in the back office';
     const stopped = full('s', { section: 'waiting', author: { kind: 'agent', host: 'claude-code', session: 'ses_s', name: long }, questions: { ...NO_QUESTIONS, open: 1, stopped: true } } as Partial<InboxListRow>);
-    const ours = markAllToast([made(stopped), made(full('n'))])!;
+    const ours = batchAllToast('read', [made(stopped), made(full('n'))])!;
     const project = projectBatchToast('read', 'alpha', 2, [stopped, full('n')]);
     expect(ours.icon).toBe('warn');
     expect(ours.icon).toBe(project.icon);
@@ -338,7 +388,14 @@ describe('Mark all as read’s toast is the project menu’s', () => {
     expect(ours.detail).not.toContain(long);
   });
   test('questions closed: the project menu’s words, the check icon', () => {
-    const ours = markAllToast([made(full('w', { section: 'waiting', questions: { ...NO_QUESTIONS, open: 2 } }))])!;
+    const ours = batchAllToast('read', [made(full('w', { section: 'waiting', questions: { ...NO_QUESTIONS, open: 2 } }))])!;
     expect(ours).toMatchObject({ icon: 'check', lead: 'Marked 1 thread read', detail: 'Closed 2 questions' });
+  });
+  test('Archive all: the project menu’s Archive all words and icon (a stopped agent warns)', () => {
+    const stopped = full('s', { section: 'waiting', questions: { ...NO_QUESTIONS, open: 1, stopped: true } });
+    const ours = batchAllToast('archive', [made(stopped), made(full('n'))])!;
+    const project = projectBatchToast('archive', 'alpha', 2, [stopped, full('n')]);
+    expect(ours).toMatchObject({ icon: 'warn', lead: 'Archived 2 threads', detail: project.detail });
+    expect(batchAllToast('archive', [made(full('n'))])).toMatchObject({ icon: 'archive', lead: 'Archived 1 thread' });
   });
 });

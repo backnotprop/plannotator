@@ -1343,7 +1343,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-band .ib-n, .ib-band .ib-ic { color: var(--ib-band-mfg-s, var(--muted-foreground)); }
 .ib-band .ib-n { font-weight: var(--ib-band-nw-s, 500); }
 button.ib-band { transition: var(--ib-fade-s, var(--ib-ui-fade)); }
-button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
+/* `data-menu`: its right-click (or long-press) menu is open (RowMenu.tsx `bands`), as a row keeps its look then. */
+button.ib-band:is(:hover, [data-menu]) { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* A closed group's header looks as an open one does (approval "inbox-list-groups-close", correction 2026-11-06):
    only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
@@ -1355,22 +1356,6 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .ib-band svg.ib-band-chev { margin-left: auto; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .pn-inbox .ib-band[data-chev] svg.ib-band-chev { opacity: 1; translate: 0 0; transition: opacity 200ms ease, translate 200ms cubic-bezier(0.23, 1, 0.32, 1), rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ib-band[aria-expanded="true"] .ib-band-chev { rotate: 90deg; }
-/* The "New since you looked" band's Mark all as read (GroupBand.tsx `BandAction`, markAllRead.ts): an icon button
-   over the header's right end, left of the chevron. The header is the toggle, so it is the header's sibling, pulled
-   up over it by its top margin; its margins take back its height, so the header, its count and the rows never move.
-   Shown with the chevron (the pointer on the header, keyboard focus on it) and while the pointer or focus is on it;
-   always on a touch screen. */
-.pn-inbox .ib-band-act { position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin: -30px 30px 4px auto; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ib-band-mfg-s, var(--muted-foreground)); cursor: pointer; opacity: 0; transition: opacity 100ms ease-out, background-color 100ms ease-out; }
-.pn-inbox .ib-band[data-chev] + .ib-band-act, .pn-inbox .ib-band-act:is(:hover, :focus-visible) { opacity: 1; transition: opacity 200ms ease, background-color 100ms ease-out; }
-.pn-inbox .ib-band-act:hover { background: color-mix(in oklch, var(--foreground) 8%, transparent); color: var(--foreground); }
-.pn-inbox .ib-band-act:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-/* The pointer on the button is still on the header: its fill and its chevron stay. */
-.pn-inbox .ib-group:has(> .ib-band-act:hover) > button.ib-band { background: var(--ib-band-hover-s, var(--ib-band)); }
-.pn-inbox .ib-group:has(> .ib-band-act:is(:hover, :focus-visible)) > .ib-band svg.ib-band-chev { opacity: 1; translate: 0 0; }
-/* A touch never shows the chevron: always shown, where the chevron would be. */
-@media (hover: none) {
-  .pn-inbox .ib-band-act { opacity: 1; margin-right: 5px; }
-}
 /* The Archived group's own lines (components/ArchivedGroup.tsx): "Show 20 more" and its quiet lines start where the
    header's words do. A phone's archived row slides left over "Unarchive" (SwipeToUnarchive.tsx); the list scrolls
    up and down through it (pan-y). */
@@ -1396,8 +1381,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-mrow[data-menu] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 50%, transparent)); }
 /* A finger held on a row opens its menu (RowMenu.tsx, `longPress`): no iOS callout and no text selection under it.
    Touch only: a touch screen, or iOS and iPadOS WebKit (a trackpad iPad's primary pointer is fine). */
-@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
-@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw, button.ib-band) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw, button.ib-band) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 /* Rows that wait on nobody (Sent, Quiet): the title steps back. Off, a wide row's title takes its row's colour and
    a three-line row's is quiet text. */
 .ib-row[data-section="quiet"] .ib-title { color: var(--ib-quiet-dim, currentcolor); }
@@ -3751,14 +3736,6 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-listcol:has(> .ib-relink) > .ib-lnew[data-edge="bottom"] > .ib-npill { bottom: calc(48px + env(safe-area-inset-bottom)); }
   .ib-lbody .ib-band { position: sticky; top: 0; z-index: 2; height: 34px; padding: 0 16px; border-radius: 0; font-size: var(--ib-fs-13, 13px); }
   .ib-lbody button.ib-band { height: 44px; }
-  /* The band's Mark all as read: always shown, sticky with its header, 44 px tall to hit. */
-  .pn-inbox .ib-lbody .ib-band-act { position: sticky; top: 0; width: 40px; height: 44px; margin: -44px 22px 0 auto; border-radius: 0; opacity: 1; }
-  .pn-inbox .ib-lbody .ib-band-act:hover { background: transparent; }
-  .pn-inbox .ib-lbody:has(.ib-notice-stick) .ib-band-act { top: var(--ib-held-h); }
-  /* A touch never shows the chevron: the icon lines up with the rows' times instead. */
-  @media (hover: none) {
-    .pn-inbox .ib-lbody .ib-band-act { margin-right: 4px; }
-  }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
   /* The bar's box on a phone: the line's 10 / 12 px margins are its padding, the line one 44 px row; the group

@@ -1,25 +1,49 @@
 import { useState, type ReactNode } from 'react';
-import { Icon, type IconName } from '../icons';
+import { Icon } from '../icons';
 import { Tip } from './Tip';
 
 /**
  * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron shows at once
  * while the pointer is on the header, as the sidebar's sections do (owner, 2026-11-08: no wait), or while keyboard
  * focus is on it. A touch never shows it, as before. `data-chev` shows it; inbox.css fades it in and out. Its own
- * state, so only this header redraws.
+ * state, so only this header redraws. `menu`: its right-click menu is open (RowMenu.tsx `bands`), the hover's fill;
+ * `keys`: that menu's keys, while the band has one. `tip`: the Group tip's words (bandTip.ts), shown as the band's
+ * tooltip while set; `onPointed`: the pointer came onto the band (a mouse, never a touch), for the tip. The band is
+ * always inside its Tip (empty, it never opens), so showing the tip never draws the band again.
  */
-export function GroupBand({ open, onToggle, children }: { open: boolean; onToggle: (band: HTMLButtonElement) => void; children: ReactNode }) {
+export function GroupBand({
+  open,
+  onToggle,
+  menu = false,
+  keys,
+  tip = null,
+  onPointed,
+  children,
+}: {
+  open: boolean;
+  onToggle: (band: HTMLButtonElement) => void;
+  menu?: boolean;
+  keys?: string;
+  tip?: string | null;
+  onPointed?: () => void;
+  children: ReactNode;
+}) {
   const [hovered, setHovered] = useState(false);
   const [focusShown, setFocusShown] = useState(false);
   return (
+    <Tip content={tip ?? ''} open={tip ? true : undefined} side="bottom" align="start">
     <button
       type="button"
       className="ib-band"
       aria-expanded={open}
       data-chev={hovered || focusShown ? '' : undefined}
+      data-menu={menu ? '' : undefined}
+      aria-keyshortcuts={keys}
       onClick={(event) => onToggle(event.currentTarget)}
       onPointerEnter={(event) => {
-        if (event.pointerType !== 'touch') setHovered(true);
+        if (event.pointerType === 'touch') return;
+        setHovered(true);
+        onPointed?.();
       }}
       onPointerLeave={() => setHovered(false)}
       onFocus={(event) => {
@@ -37,38 +61,6 @@ export function GroupBand({ open, onToggle, children }: { open: boolean; onToggl
       {children}
       <Icon name="chevR" className="ib-band-chev" />
     </button>
-  );
-}
-
-/**
- * A button over a group header's right end, beside its chevron (the "New since you looked" band's Mark all as read,
- * markAllRead.ts): the header is the group's toggle, so this is its sibling, after it. Icon only, its name the
- * tooltip. It takes no height of its own (inbox.css `.ib-band-act`), so the header and its count never move. On a
- * wider window it shows with the chevron (the pointer on the header, or keyboard focus on either); a phone always shows it.
- */
-export function BandAction({ label, icon, onClick, ...data }: { label: string; icon: IconName; onClick: () => Promise<unknown> | void } & Record<`data-${string}`, string>) {
-  return (
-    <Tip content={label}>
-      <button
-        type="button"
-        className="ib-band-act"
-        aria-label={label}
-        onClick={(event) => {
-          const button = event.currentTarget;
-          const header = button.previousElementSibling as HTMLElement | null;
-          // The button goes once its band has nothing left to take: focus that was on it moves to the header, never
-          // to the page.
-          void Promise.resolve(onClick()).finally(() => {
-            requestAnimationFrame(() => {
-              const lost = !document.activeElement || document.activeElement === document.body;
-              if (!button.isConnected && lost && header?.isConnected) header.focus();
-            });
-          });
-        }}
-        {...data}
-      >
-        <Icon name={icon} size={15} />
-      </button>
     </Tip>
   );
 }

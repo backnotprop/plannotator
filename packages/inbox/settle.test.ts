@@ -29,16 +29,6 @@ describe('planSettle', () => {
     const after = new Map([['row:wide', box(50, 380)], ['row:far', box(900)], ['row:in', box(450)]]);
     expect(planSettle(before, after, viewport).moves).toEqual([{ key: 'row:in', dx: 0, dy: 250 }]);
   });
-
-  test('the button drawn over a band (Mark all as read) only moves with it: it never fades in or out, so a settle never shows it', () => {
-    // The New band came in (the button with it), the old band left (its button too), and one band moved with its button.
-    const before = new Map([['band:waiting', box(0)], ['band-act:waiting', box(0, 26, 26)], ['band:quiet', box(100)], ['band-act:quiet', box(100, 26, 26)]]);
-    const after = new Map([['band:new', box(0)], ['band-act:new', box(0, 26, 26)], ['band:quiet', box(200)], ['band-act:quiet', box(200, 26, 26)]]);
-    const plan = planSettle(before, after, viewport);
-    expect(plan.enters).toEqual(['band:new']);
-    expect(plan.leaves).toEqual(['band:waiting']);
-    expect(plan.moves.map((m) => m.key)).toEqual(['band:quiet', 'band-act:quiet']);
-  });
 });
 
 describe('rowInSlot', () => {

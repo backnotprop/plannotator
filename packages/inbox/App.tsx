@@ -169,6 +169,7 @@ import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarC
 import { adoptShowArchived } from './showArchived';
 import { useArchivedGroup } from './data/actions/archivedGroup';
 import { sidebarTipDue, useSidebarTip } from './sidebarTip';
+import { bandTipClaimer, bandTipDue, type BandTipHost } from './bandTip';
 import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
 import { drawnSidebarItems } from './sidebarItems';
@@ -4254,6 +4255,12 @@ function Inbox() {
   // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
+  // The Group tip (bandTip.ts): a band's one-time tooltip about its menu. Held back as every one-time thing is: another
+  // dialog or tip of this load claimed or up, the page not clear, something typed or open, a menu, a toast or a dialog.
+  const bandTipClaim = useMemo(() => bandTipClaimer(), []);
+  const bandTipBusy = useRef<() => boolean>(() => false);
+  bandTipBusy.current = () => revealBlocked || lineBusy || !listIntroClear || revealHeldBack() || modalOpen();
+  const bandTipHost: BandTipHost = { due: bandTipDue(settings) && !tourOn && !firstRun && lineLatch !== null, busy: () => bandTipBusy.current(), claim: bandTipClaim };
   // Ask AI, on in every Inbox but the tour's (off, this reads nothing and draws nothing), and
   // only once the settings say which this page is. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
@@ -5620,6 +5627,7 @@ function Inbox() {
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
           bulk={bulk}
+          bandTip={bandTipHost}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
           snoozeBlockedOf={(row) => (pageOffersUpdates(settings) ? snoozeBlockedBy(row, machines) : null)}

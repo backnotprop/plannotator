@@ -92,14 +92,6 @@ export interface SettlePlan {
   leaves: string[];
 }
 
-/**
- * Elements that only ride along (the button drawn over a band, GroupBand.tsx `BandAction`): they move with their band
- * but never fade in or out, so a settle never shows one its own CSS keeps hidden (opacity 0 until the band is hovered).
- */
-export function movesOnly(key: string): boolean {
-  return key.startsWith('band-act:');
-}
-
 function visible(box: Box, viewport: { top: number; bottom: number }): boolean {
   return box.top + box.height > viewport.top && box.top < viewport.bottom;
 }
@@ -110,14 +102,14 @@ function visible(box: Box, viewport: { top: number; bottom: number }): boolean {
  * changed (the row was redrawn at another width: a FLIP would stretch it),
  * and when it is out of the list's viewport both before and after (nobody
  * sees it, so it costs nothing). Rows that enter or leave count only where
- * they can be seen; what only rides along (`movesOnly`) never enters or leaves.
+ * they can be seen.
  */
 export function planSettle(before: ReadonlyMap<string, Box>, after: ReadonlyMap<string, Box>, viewport: { top: number; bottom: number }): SettlePlan {
   const plan: SettlePlan = { moves: [], enters: [], leaves: [] };
   for (const [key, now] of after) {
     const was = before.get(key);
     if (!was) {
-      if (visible(now, viewport) && !movesOnly(key)) plan.enters.push(key);
+      if (visible(now, viewport)) plan.enters.push(key);
       continue;
     }
     if (Math.abs(was.width - now.width) > 2) continue;
@@ -127,7 +119,7 @@ export function planSettle(before: ReadonlyMap<string, Box>, after: ReadonlyMap<
     if (!visible(was, viewport) && !visible(now, viewport)) continue;
     plan.moves.push({ key, dx, dy });
   }
-  for (const [key, was] of before) if (!after.has(key) && visible(was, viewport) && !movesOnly(key)) plan.leaves.push(key);
+  for (const [key, was] of before) if (!after.has(key) && visible(was, viewport)) plan.leaves.push(key);
   return plan;
 }
 
@@ -140,16 +132,13 @@ export function listBody(root: ParentNode | null): HTMLElement | null {
   return root?.querySelector<HTMLElement>('.ib-listcol .ib-lbody') ?? null;
 }
 
-/**
- * The elements that move: each row (with its hover action), a phone's row, each section's band and the button drawn
- * over it (GroupBand.tsx `BandAction`; it only moves, `movesOnly`), and the Agents view's agent rows.
- */
-const MOVERS = ':scope > .ib-group > .ib-rw[data-row], :scope > .ib-group > .ib-mrow[data-thread-id], :scope > .ib-group > .ib-band, :scope > .ib-group > .ib-band-act, :scope > .ib-group > .ib-agh';
+/** The elements that move: each row (with its hover action), a phone's row, each section's band, and the Agents view's agent rows. */
+const MOVERS = ':scope > .ib-group > .ib-rw[data-row], :scope > .ib-group > .ib-mrow[data-thread-id], :scope > .ib-group > .ib-band, :scope > .ib-group > .ib-agh';
 
 function keyOf(el: HTMLElement): string {
   const row = el.getAttribute('data-row') ?? el.getAttribute('data-thread-id');
   if (row) return `row:${row}`;
-  return `${el.classList.contains('ib-band-act') ? 'band-act' : 'band'}:${el.closest('[data-section-id]')?.getAttribute('data-section-id') ?? ''}`;
+  return `band:${el.closest('[data-section-id]')?.getAttribute('data-section-id') ?? ''}`;
 }
 
 function movers(body: HTMLElement): Map<string, HTMLElement> {

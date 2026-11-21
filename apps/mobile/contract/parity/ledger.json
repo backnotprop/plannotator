@@ -6167,7 +6167,7 @@
     },
     {
       "id": "messages-262",
-      "title": "Mark all as read on the list: \"Mark all as read\" in the list ⋮ (after \"Select threads\") takes every row the list shows that takes Mark read; an icon-only \"Mark all as read\" button on the \"New since you looked\" band takes that band's rows; never a snoozed row; the set-aside warning, one toast \"Marked N threads read\" and one Undo",
+      "title": "Mark all as read and Archive all on the list: \"Mark all as read\" in the list ⋮ (after \"Select threads\") takes every row the list shows that takes Mark read; a group band's menu (right-click, Shift+F10, or a finger held on the band; a bottom sheet on a phone) offers \"Mark all as read\" and \"Archive all\" for that band's rows, each only where it applies, none on a band with nothing to take (the browser's own menu there) or while picking; neither toggles the band; never a snoozed row; a thread with news not yet shown is left out; the set-aside warning, one toast and one Undo; a one-time tooltip on the band (\"Right-click for group actions\", a phone's \"Hold a group for actions\") until shown once or the band's menu was opened",
       "surface": [],
       "flows": [],
       "mobile": "undecided",

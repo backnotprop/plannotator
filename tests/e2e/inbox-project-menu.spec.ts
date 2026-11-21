@@ -9,8 +9,9 @@
  *    an agent was stopped, and Z undoes the whole batch;
  *  - Archive all from the keyboard hides the project, focus lands on Inbox
  *    (never the page), and the agent's next reply brings the project back;
- *  - the list: the "New since you looked" band's button marks that band read,
- *    the list ⋮'s Mark all as read every row shown, and Z undoes each;
+ *  - the list: a group band's right-click menu marks that band read or
+ *    archives it (its rows only; the band does not toggle), the list ⋮'s
+ *    Mark all as read every row shown, and Z undoes each;
  *  - a phone: ⋯ always shown in the navigation sheet, the menu a sheet.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -183,41 +184,67 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   expect(world.errors).toEqual([]);
 });
 
-test('the list: the New band’s button marks that band read, the ⋮’s Mark all as read every row shown, Z undoes each', async () => {
+test('the list: a band’s right-click menu marks that band read or archives it, the ⋮’s Mark all as read every row shown, Z undoes each', async () => {
   const { page, threads } = world;
-  const band = page.locator('[data-section-id="new"] > .ib-band');
-  const button = page.locator('[data-section-id="new"] > [data-band-mark-all-read]');
-  await expect.poll(() => sectionOf(page, threads.search)).toBe('new');
-  // Icon only, shown with the chevron: the pointer on the band.
-  await expect(button).toHaveAccessibleName('Mark all as read');
-  await expect(button).toHaveCSS('opacity', '0');
-  const before = await band.boundingBox();
-  await band.hover();
-  await expect(button).toHaveCSS('opacity', '1');
-  // Nothing on the band moved for it.
-  expect(await band.boundingBox()).toEqual(before);
-  await button.click();
+  const band = (id: string) => page.locator(`[data-section-id="${id}"] > button.ib-band`);
+  const bandMenu = page.locator('[data-band-menu]');
   const toast = page.locator('[data-inbox-toast]');
+  const rowButton = (id: string) => page.locator(`.ib-lbody [data-thread-id="${id}"]`);
+  const archived = (id: string) => page.locator(`.ib-lbody [data-row="${id}"][data-archived]`);
+  const undo = async () => {
+    await page.locator('body').focus();
+    await page.keyboard.press('z');
+  };
+  await expect.poll(() => sectionOf(page, threads.search)).toBe('new');
+  // At rest the band is its header alone: no button beside it.
+  await expect(page.locator('[data-section-id="new"] > button:not(.ib-band)')).toHaveCount(0);
+  await page.screenshot({ path: join(proofDir, '05-band-at-rest.png') });
+  // A right-click opens the band's menu and never toggles the band.
+  await band('new').click({ button: 'right' });
+  await expect(bandMenu).toHaveAttribute('data-band-menu', 'new');
+  await expect(bandMenu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all']);
+  await expect(band('new')).toHaveAttribute('aria-expanded', 'true');
+  await page.screenshot({ path: join(proofDir, '06-band-menu.png') });
+  await bandMenu.locator('[data-band-action="read"]').click();
   await expect(toast).toContainText('Marked 1 thread read');
-  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.search}"]`)).not.toHaveClass(/\bib-u\b/);
+  await expect(rowButton(threads.search)).not.toHaveClass(/\bib-u\b/);
   // The other groups' rows are not the band's.
-  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.docs}"]`)).toHaveClass(/\bib-u\b/);
-  await page.locator('body').focus();
-  await page.keyboard.press('z');
-  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.search}"]`)).toHaveClass(/\bib-u\b/);
-  // The list's ⋮: right after Select threads, every row the list shows.
+  await expect(rowButton(threads.docs)).toHaveClass(/\bib-u\b/);
+  await undo();
+  await expect(rowButton(threads.search)).toHaveClass(/\bib-u\b/);
+  // The list's ⋮: right after Select threads, every row the list shows. (Its items are read once the menu is open:
+  // `allTextContents` does not wait, and read before the popup it found no item at all.)
   await page.locator('[data-tidy-menu]').click();
-  const items = page.locator('[data-tidy-menu-popup] [role="menuitem"]');
-  const labels = await items.allTextContents();
+  await expect(page.locator('[data-list-mark-all-read]')).toBeVisible();
+  const labels = await page.locator('[data-tidy-menu-popup] [role="menuitem"]').allTextContents();
+  expect(labels.findIndex((label) => label.startsWith('Select threads'))).toBeGreaterThanOrEqual(0);
   expect(labels.indexOf('Mark all as read')).toBe(labels.findIndex((label) => label.startsWith('Select threads')) + 1);
-  await page.screenshot({ path: join(proofDir, '05-list-menu.png') });
+  await page.screenshot({ path: join(proofDir, '07-list-menu.png') });
   await page.locator('[data-list-mark-all-read]').click();
   await expect(toast).toContainText('Marked 2 threads read');
   await expect(toast.locator('.ib-tdetail')).toHaveText('Closed 1 question');
-  for (const id of [threads.search, threads.docs]) await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).not.toHaveClass(/\bib-u\b/);
-  await page.locator('body').focus();
-  await page.keyboard.press('z');
-  for (const id of [threads.search, threads.docs]) await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).toHaveClass(/\bib-u\b/);
+  for (const id of [threads.search, threads.docs]) await expect(rowButton(id)).not.toHaveClass(/\bib-u\b/);
+  await undo();
+  for (const id of [threads.search, threads.docs]) await expect(rowButton(id)).toHaveClass(/\bib-u\b/);
+  // Archive all on Waiting: its one thread, shown archived in place until the list settles, its question counted.
+  await band('waiting').click({ button: 'right' });
+  await expect(bandMenu).toHaveAttribute('data-band-menu', 'waiting');
+  await bandMenu.locator('[data-band-action="archive"]').click();
+  await expect(toast).toContainText('Archived 1 thread');
+  await expect(toast.locator('.ib-tdetail')).toHaveText('Closed 1 question');
+  await expect(archived(threads.docs)).toHaveCount(1);
+  await expect(archived(threads.search)).toHaveCount(0);
+  await page.screenshot({ path: join(proofDir, '08-band-archive-all.png') });
+  await undo();
+  await expect(page.locator('[data-inbox-live]')).toContainText('Moved back.');
+  // The list's title tidies it: the thread is back in Waiting, not archived.
+  await expect
+    .poll(async () => {
+      await page.locator('[data-list-refresh]').click();
+      return sectionOf(page, threads.docs);
+    })
+    .toBe('waiting');
+  await expect(archived(threads.docs)).toHaveCount(0);
   expect(world.errors).toEqual([]);
 });
 
