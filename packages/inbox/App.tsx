@@ -6310,8 +6310,7 @@ function Inbox() {
         phone={phone}
         tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
-        projects={projects}
-        projectLabels={anyMachineLinked ? projectNames : undefined}
+        projects={projects} projectLabels={anyMachineLinked ? projectNames : undefined}
         onClose={closeSearch}
         onOpenResult={openSearchResult}
         actions={paletteActions}

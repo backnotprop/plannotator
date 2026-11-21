@@ -18,7 +18,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
-import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, rememberSearchMachines, selfMachineId, setSelfMachine } from './inboxUrl';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -1207,7 +1207,7 @@ export function uploadFile(
 
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
-  const query = new URLSearchParams({ q: request.q });
+  const query = new URLSearchParams({ q: request.q, ...(selfMachineId() ? { machines: '1' } : {}) });
   for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
   for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
@@ -1215,15 +1215,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
   if (request.sort === 'newest') query.set('sort', 'newest');
-  // The merged view (once the list named this Inbox): the linked machines' threads, messages, files and Recent too.
-  if (selfMachineId()) query.set('machines', '1');
-  const model = await readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
-  // Another machine's row says `project.machine`: its ids route there, as a merged list row's do.
-  for (const row of [...Object.values(model.groups ?? {}).flat(), ...(model.recent ?? [])]) {
-    if (!row?.project.machine) continue;
-    rememberMachine([row.id, row.project.id, 'thread_id' in row ? row.thread_id : '', 'message_id' in row ? row.message_id : ''], row.project.machine);
-  }
-  return model;
+  return rememberSearchMachines(await readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal })));
 }
 
 /** Remember a search the person opened a result from (the last 6), or forget them all. */
