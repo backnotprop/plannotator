@@ -84,7 +84,7 @@ export function PhoneReplyRecipient({
   return (
     <>
       {chip ? (
-        <RecipientChip rows={rows} chosen={chosen} open={open} onClick={() => onOpen(!open)} labels={labels} folderOf={folderOf} noun={noun} attrs={{ 'aria-haspopup': 'dialog' }} />
+        <RecipientChip rows={rows} chosen={chosen} open={open} onClick={() => onOpen(!open)} labels={labels} folderOf={folderOf} noun={noun} attrs={{ 'aria-haspopup': 'dialog' }} narrowAtFirst />
       ) : !first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (

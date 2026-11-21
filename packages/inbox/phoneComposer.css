@@ -168,9 +168,11 @@
   .pn-inbox .ib-pfoot .ib-rbox:has(> .ib-rquote) .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding-top: 8px; }
   .pn-inbox .ib-pfoot .ib-rline { padding: 0 10px 0 8px; }
   /* Who gets the reply in a thread with several agents: the chip at the start of the words (inbox.css), at the 16 px
-     words' size, with a 44 px tap area that moves nothing. */
+     words' size. Its tap area moves nothing and grows only up, into the field's top padding (FieldLead.tsx measures
+     it: 16 px, so 40 px tall; 8 px under a quote line) and sideways: never down, where a tap on the second line's
+     first words must move the caret. */
   .pn-inbox .ib-pfoot .ib-rto-chip { height: 25px; font-size: var(--ib-fs-13-5, 13.5px); }
-  .pn-inbox .ib-pfoot .ib-rto-chip::after { content: ''; position: absolute; inset: -10px -4px; }
+  .pn-inbox .ib-pfoot .ib-rto-chip::after { content: ''; position: absolute; top: calc(-1 * var(--ib-lead-up, 0px)); right: -6px; bottom: var(--ib-lead-down, 0px); left: -6px; }
   /* The row: every control 36 px and round, 44 px to the touch. */
   .pn-inbox .ib-rrow[data-phone] { gap: 8px; padding: 8px 10px 10px; }
   .pn-inbox .ib-rrow[data-phone] .ib-rmid { height: 36px; }

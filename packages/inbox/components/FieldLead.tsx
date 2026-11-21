@@ -59,8 +59,13 @@ export function FieldLead({ value, children }: { value: string; children: ReactN
     const line = px(style.lineHeight) || px(style.fontSize) * 1.2;
     const height = lead.offsetHeight;
     // On the first line's box, centred in it; with the field's own scroll (a field capped in height), up with the words.
-    const top = fieldBox.top - wrapBox.top + px(style.borderTopWidth) + px(style.paddingTop) + (line - height) / 2 - field.scrollTop;
+    const above = px(style.borderTopWidth) + px(style.paddingTop) + (line - height) / 2;
+    const top = fieldBox.top - wrapBox.top + above - field.scrollTop;
     lead.style.top = `${Math.round(top)}px`;
+    // How far a tap area may reach past the lead without leaving the first line: up into the field's top padding (a
+    // quote line, when shown, sits above it), never down into the second line (phoneComposer.css reads both).
+    lead.style.setProperty('--ib-lead-up', `${Math.max(0, above)}px`);
+    lead.style.setProperty('--ib-lead-down', `${Math.max(0, (height - line) / 2) + 0.5}px`);
     if (rtl) {
       const scrollbar = Math.max(0, field.offsetWidth - field.clientWidth - px(style.borderLeftWidth) - px(style.borderRightWidth));
       lead.style.left = 'auto';
@@ -69,7 +74,7 @@ export function FieldLead({ value, children }: { value: string; children: ReactN
       lead.style.right = 'auto';
       lead.style.left = `${Math.round(fieldBox.left - wrapBox.left + px(style.borderLeftWidth) + px(style.paddingLeft))}px`;
     }
-    wrap.style.setProperty('--ib-lead', `${Math.ceil(lead.offsetWidth) + LEAD_GAP}px`);
+    wrap.style.setProperty('--ib-lead', `${Math.ceil(lead.getBoundingClientRect().width) + LEAD_GAP}px`);
   }, [rtl]);
 
   useLayoutEffect(() => {

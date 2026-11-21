@@ -187,7 +187,9 @@ test.skipIf(!hasDom)('a phone, several agents: the chip with the name at the sta
   expect(chip.getAttribute('aria-haspopup')).toBe('dialog');
   act(() => setSessionLabels({ ses_pi: 'Copy pass on the order summary' }));
   await settle();
-  expect(control()!.getAttribute('aria-label')).toBe('To Copy pass on the order summary. Change who gets this reply');
+  // The chip shows the short name ("Pi"): its name starts with those words, then the session's title.
+  expect(control()!.querySelector('.ib-rto-short')!.textContent).toBe('Pi');
+  expect(control()!.getAttribute('aria-label')).toBe('To Pi · Copy pass on the order summary. Change who gets this reply');
 });
 
 test.skipIf(!hasDom)('a phone, two agents of one kind: the chip and the sheet tell them apart by the session\'s title', async () => {
@@ -196,7 +198,8 @@ test.skipIf(!hasDom)('a phone, two agents of one kind: the chip and the sheet te
   act(() => setSessionLabels({ ses_pi: 'Invoice PDF fonts' }));
   await settle();
   const chip = control()!;
-  expect(chip.getAttribute('aria-label')).toBe('To Invoice PDF fonts. Change who gets this reply');
+  expect(chip.querySelector('.ib-rto-short')!.textContent).toBe('Claude Code 2');
+  expect(chip.getAttribute('aria-label')).toBe('To Claude Code 2 · Invoice PDF fonts. Change who gets this reply');
   await click(chip);
   await until(() => sheet() !== null, 'the sheet');
   expect(q('[data-recipient-row="ses_pi"] .ib-sheet-t')!.textContent).toBe('Invoice PDF fonts');

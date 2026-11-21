@@ -112,6 +112,11 @@ function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean
     } as CSSProperties;
     setStyle((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
   }, [open, pillRef, wide, start]);
+  // The chip scrolls with the words: a list opened from code (Send for an ended asker, after a long reply) brings it
+  // into view first, so the list opens against a chip the person can see.
+  useLayoutEffect(() => {
+    if (open && start) pillRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [open, start, pillRef]);
   // Every commit (the box grows as the person types); the equality guard converges.
   useLayoutEffect(() => {
     measure();
@@ -163,10 +168,40 @@ function recipientFace(rows: readonly RecipientRow[], chosen: readonly Recipient
   return { one, named, nameOf, pillOf, names, ended, tile, words, partial };
 }
 
+/** `name` already says `words` as words of its own ("Claude Code (plannotator)" says "plannotator"; "Pipeline" never says "Pi"). */
+export function saysWords(name: string, words: string): boolean {
+  const edge = (char: string | undefined) => char === undefined || /[\s()·,]/.test(char);
+  for (let at = name.indexOf(words); at >= 0; at = name.indexOf(words, at + 1)) {
+    if (edge(name[at - 1]) && edge(name[at + words.length])) return true;
+  }
+  return false;
+}
+
+/** The field the chip leads is 480 px wide or less (inbox.css then shows the short name), as last measured. */
+const NARROW_FIELD = 480;
+function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, atFirst: boolean): boolean {
+  const [narrow, setNarrow] = useState(atFirst);
+  useLayoutEffect(() => {
+    const field = chipRef.current?.closest<HTMLElement>('.ib-cfield');
+    if (!field) return;
+    const measure = () => {
+      const width = field.clientWidth;
+      if (width > 0) setNarrow(width <= NARROW_FIELD);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'function') return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(field);
+    return () => watch.disconnect();
+  }, [chipRef]);
+  return narrow;
+}
+
 /**
  * The chip at the start of the words' first line (approval "inbox-reply-target-chip", option B): a filled token, "to
  * [tile] Pi ⌄", the same words and names as the pill. A long name gives way with "…" (inbox.css caps the chip), and
- * then, as when it shows a fallback name or "2 agents", the hover says who in full. Its name is the pill's own.
+ * then, as when it shows a fallback name, the short name or "2 agents", the hover says who in full. Its accessible
+ * name is the pill's, led by the words it shows when those differ ("To Pi · Copy pass on the order summary").
  */
 export function RecipientChip({
   rows,
@@ -178,6 +213,7 @@ export function RecipientChip({
   noun = 'reply',
   buttonRef,
   attrs,
+  narrowAtFirst = false,
 }: {
   rows: readonly RecipientRow[];
   chosen: readonly RecipientRow[];
@@ -189,19 +225,31 @@ export function RecipientChip({
   buttonRef?: RefObject<HTMLButtonElement | null>;
   /** `aria-*` and `data-*` attributes of the host (the list it controls, a sheet's popup kind). */
   attrs?: Record<string, string | undefined>;
+  /** Short names until the field is measured (a phone); a field that has no width yet keeps this. */
+  narrowAtFirst?: boolean;
 }) {
   const { one, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
+  const ownRef = useRef<HTMLButtonElement | null>(null);
+  const narrow = useNarrowField(ownRef, narrowAtFirst);
+  // The name starts with the words the chip shows (a narrow field's short name, a fallback name), then who that is,
+  // when those words are not already in it: "To Pi · Copy pass on the order summary".
+  const shown = one ? (narrow ? one.short : words) : null;
+  const spoken = shown && !saysWords(names, shown) ? `${shown} · ${names}` : names;
   return (
-    <Tip content={names} when={(trigger) => !open && (partial || isTextCut(trigger.querySelector('.ib-rto-n')))}>
+    <Tip content={names} when={(trigger) => !open && (partial || (narrow && one !== null && one.short !== names) || isTextCut(trigger.querySelector('.ib-rto-n')))}>
       <button
-        ref={buttonRef}
+        ref={(node) => {
+          ownRef.current = node;
+          if (buttonRef) buttonRef.current = node;
+        }}
         type="button"
         className="ib-rto-chip"
         data-recipient=""
         data-recipient-chip=""
         data-recipient-chosen={chosen.map((r) => r.session).join(' ')}
         data-ended={ended ? '' : undefined}
-        aria-label={`To ${names}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
+        data-narrow={narrow ? '' : undefined}
+        aria-label={`To ${spoken}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
         aria-expanded={open}
         // The press must not take focus from the words (a phone's sheet gives it back to them).
         onMouseDown={(event) => event.preventDefault()}

@@ -302,8 +302,19 @@ test.skipIf(!hasDom)('the pill does the old choice\'s job: Send opens its list o
   const el = await render(threadOf(asking()));
   const text = await writeReply(el);
   expect(pillList(el)).toBeNull();
-  act(() => button(el, 'Send').click());
-  await settle();
+  // The chip scrolls with the words: Send brings it into view before its list opens against it.
+  const scrolled: { node: Element; how: unknown }[] = [];
+  const scrollIntoView = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element, how?: boolean | ScrollIntoViewOptions) {
+    scrolled.push({ node: this, how });
+  };
+  try {
+    act(() => button(el, 'Send').click());
+    await settle();
+  } finally {
+    Element.prototype.scrollIntoView = scrollIntoView;
+  }
+  expect(scrolled.filter((s) => s.node === pill(el)).map((s) => s.how)).toEqual([{ block: 'nearest', inline: 'nearest' }]);
   expect(replies()).toEqual([]);
   // "Where should this reply go?" is gone (approval "inbox-reply-recipient").
   expect(el.querySelector('[data-route-choice]')).toBeNull();

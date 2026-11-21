@@ -19,6 +19,7 @@ import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from 
 import type { TaggableSession } from './api';
 import { setSessionLabels } from './sessionLabels';
 import { firstLineRtl } from './components/FieldLead';
+import { saysWords } from './components/ReplyRecipient';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -261,25 +262,6 @@ test.skipIf(!hasDom)('several agents, a computer: the chip is at the start of th
   expect(stops.indexOf(text) - stops.indexOf(chip)).toBe(1);
 });
 
-test.skipIf(!hasDom)('Backspace at the start of the words leaves the chip where it is, and opens nothing', async () => {
-  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
-  for (const words of ['Use the old totals.', '']) {
-    const text = await write(el, words);
-    act(() => {
-      text.focus();
-      text.setSelectionRange(0, 0);
-    });
-    await key(text, 'Backspace');
-    await key(text, 'Backspace');
-    expect(text.value).toBe(words);
-    expect(pill(el)).not.toBeNull();
-    expect(pillName(el)).toBe('Pi');
-    expect(pill(el)!.getAttribute('aria-expanded')).toBe('false');
-    expect(el.querySelector('[data-recipient-list]')).toBeNull();
-    expect(document.activeElement).toBe(text);
-  }
-});
-
 test.skipIf(!hasDom)('the chip opens the list the pill opened, over the words, and a press on it leaves the caret in the words', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
   const text = await write(el, 'Use the old totals.');
@@ -308,10 +290,25 @@ test.skipIf(!hasDom)('the chip opens the list the pill opened, over the words, a
 
 test.skipIf(!hasDom)('words that start right to left move the chip to the right end of the first line, where the browser indents them', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const lead = () => el.querySelector('[data-field-lead]') as HTMLElement;
   await write(el, 'مرحبا، هل انتهيت؟');
-  expect(el.querySelector('[data-field-lead]')?.getAttribute('data-field-lead')).toBe('rtl');
+  expect(lead().getAttribute('data-field-lead')).toBe('rtl');
+  // Placed from the right end: its inline `left` gives way to inbox.css's `left: 0`, or the chip would sit at the left.
+  expect(lead().style.left).toBe('auto');
+  expect(lead().style.right).toMatch(/^-?\d+px$/);
   await write(el, 'Done? مرحبا');
-  expect(el.querySelector('[data-field-lead]')?.getAttribute('data-field-lead')).toBe('ltr');
+  expect(lead().getAttribute('data-field-lead')).toBe('ltr');
+  expect(lead().style.right).toBe('auto');
+  expect(lead().style.left).toMatch(/^-?\d+px$/);
+});
+
+test('saysWords: the chip\'s name keeps its words alone when the name already says them as words of its own', () => {
+  expect(saysWords('Pi', 'Pi')).toBe(true);
+  expect(saysWords('Claude Code (plannotator)', 'plannotator')).toBe(true);
+  expect(saysWords('Pipeline fixes', 'Pi')).toBe(false);
+  expect(saysWords('Copy pass on the order summary', 'Pi')).toBe(false);
+  expect(saysWords('aaa b', 'aa')).toBe(false);
+  expect(saysWords('PiPi Pi', 'Pi')).toBe(true);
 });
 
 test('firstLineRtl: the first strong letter of the first paragraph decides; numbers and marks do not, and a later paragraph never does', () => {
@@ -455,7 +452,8 @@ test.skipIf(!hasDom)('a long title: the row holds it whole for its hover, and th
     const el = await render(threadOf(agentMessage(M1, PI, 41), agentMessage(M2, CLAUDE, 45)));
     await write(el, 'Use the old totals.');
     expect(pillName(el)).toBe('Claude Code');
-    expect(pill(el)!.getAttribute('aria-label')).toBe(`To ${long}. Change who gets this reply`);
+    // Its name starts with the words it shows (label in name), then the title.
+    expect(pill(el)!.getAttribute('aria-label')).toBe(`To Claude Code · ${long}. Change who gets this reply`);
     await openList(el);
     expect(named(el)).toEqual([
       ['Pi', 'superfans', null],

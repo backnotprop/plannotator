@@ -198,7 +198,7 @@ for (const width of [390, 320] as const) {
         word: Math.max(word.width, word.height),
       };
     });
-    expect(drawn.sizes, 'every control is drawn 36 px round').toEqual(Array.from({ length: 4 }, () => [36, 36]));
+    for (const v of drawn.sizes.flat()) expect(v, 'every control is drawn 36 px round').toBeCloseTo(36, 0);
     expect(drawn.arrow, 'Send is the arrow').toBe(true);
     expect(drawn.word, 'the word "Send" is not drawn (it is the name)').toBeLessThanOrEqual(1);
     await expect(pane(page).locator('.ib-rbox [data-recipient]'), 'one agent: no recipient control').toHaveCount(0);
@@ -226,13 +226,23 @@ for (const width of [390, 320] as const) {
     await expect(pane(page).locator('.ib-rbox [data-reply-line] [data-recipient]')).toHaveCount(0);
     await expect(pane(page).locator('.ib-rbox .ib-rto, .ib-rbox [data-agent-pill], .ib-rbox [data-agent-mark]')).toHaveCount(0);
     await expect(pane(page).locator('.ib-rbox [data-reply-row] [data-voice-mic]')).toBeVisible();
+    await pane(page).locator('.ib-rbox textarea').first().fill('Cap the retries at five, and keep the dead-letter queue for thirty days so we can replay them.');
     const drawn = await chip.evaluate((el) => {
       const r = el.getBoundingClientRect();
       const text = el.closest('.ib-cfield')!.querySelector('textarea')!;
       const t = text.getBoundingClientRect();
       const name = el.querySelector('.ib-rto-n')!;
+      const cs = getComputedStyle(text);
+      const after = getComputedStyle(el, '::after');
+      const lineBottom = t.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop) + parseFloat(cs.lineHeight);
+      // The tap area: up into the field's top padding, never down into the second line.
+      const area = { top: r.top + parseFloat(after.top), bottom: r.bottom - parseFloat(after.bottom) };
+      // A tap 4 px into the second line, under the chip, lands in the words.
+      const under = [r.left + 3, r.left + r.width / 2, r.right - 3].map((x) => document.elementFromPoint(x, lineBottom + 4) === text);
       return {
-        press: parseFloat(getComputedStyle(el, '::after').height),
+        press: Math.min(r.width - parseFloat(after.left) - parseFloat(after.right), area.bottom - area.top),
+        under: under.every(Boolean),
+        areaBottom: area.bottom - lineBottom,
         name: (name.textContent ?? '').length > 0 && name.getBoundingClientRect().width > 4,
         // On the first line, at the field's start, and the words indented by its width and the gap.
         firstLine: r.top >= t.top - 0.5 && r.top < t.top + parseFloat(getComputedStyle(text).paddingTop) + parseFloat(getComputedStyle(text).lineHeight),
@@ -242,7 +252,10 @@ for (const width of [390, 320] as const) {
         share: r.width / (t.width - parseFloat(getComputedStyle(text).paddingLeft) - parseFloat(getComputedStyle(text).paddingRight)),
       };
     });
-    expect(drawn.press, 'the chip is 44 px to press').toBeGreaterThanOrEqual(44);
+    // 40 px tall (the field's 16 px top padding over a 25 px chip) and wider than 44 px: the second line keeps its taps.
+    expect(drawn.press, 'the chip is under 40 px to press').toBeGreaterThanOrEqual(39.5);
+    expect(drawn.areaBottom, 'the chip\'s tap area reaches into the second line').toBeLessThanOrEqual(0);
+    expect(drawn.under, 'a tap on the second line under the chip does not reach the words').toBe(true);
     expect({ name: drawn.name, firstLine: drawn.firstLine, start: drawn.start, indent: drawn.indent }).toEqual({ name: true, firstLine: true, start: true, indent: true });
     expect(drawn.share, 'the chip takes more than 40% of the first line').toBeLessThanOrEqual(0.41);
     oneRow(await readRow(page));

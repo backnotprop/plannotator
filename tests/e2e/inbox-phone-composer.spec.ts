@@ -416,7 +416,9 @@ for (const engine of ENGINES) {
       // What a screen reader hears: the agent, and its session's title where it has one.
       const named = async (session: string) => {
         const heard = (await recipient(page).getAttribute('aria-label')) ?? '';
-        for (const part of session === TWO_A ? [LABEL_TWO.slice(0, 40)] : ['Pi']) expect(heard, `the chip's name leaves out "${part}"`).toContain(part);
+        // The words the chip shows first (the short name), then the session's title where it has one.
+        for (const part of session === TWO_A ? ['Claude Code · ', LABEL_TWO.slice(0, 40)] : ['Pi']) expect(heard, `the chip's name leaves out "${part}"`).toContain(part);
+        expect(heard.startsWith(`To ${(await recipient(page).locator('.ib-rto-short').textContent()) ?? ''}`), 'the chip\'s name does not start with the words it shows').toBe(true);
         expect(heard, 'the chip\'s name does not say what it is for').toMatch(/^To .*\. Change who gets this reply$/);
       };
       await named((await recipient(page).getAttribute('data-recipient-chosen'))!);
@@ -428,8 +430,12 @@ for (const engine of ENGINES) {
         const t = text.getBoundingClientRect();
         const cs = getComputedStyle(text);
         const inner = t.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-        return { indent: parseFloat(cs.textIndent) - (Math.ceil(r.width) + 8), top: r.top - t.top, line: parseFloat(cs.paddingTop) + parseFloat(cs.lineHeight), share: r.width / inner, label: text.getAttribute('aria-label') ?? '' };
+        const lineBottom = t.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop) + parseFloat(cs.lineHeight);
+        // A tap 4 px into the second line, under the chip, lands in the words, not on the chip's tap area.
+        const under = [r.left + 3, r.left + r.width / 2, r.right - 3].every((x) => document.elementFromPoint(x, lineBottom + 4) === text);
+        return { indent: parseFloat(cs.textIndent) - (Math.ceil(r.width) + 8), top: r.top - t.top, line: parseFloat(cs.paddingTop) + parseFloat(cs.lineHeight), share: r.width / inner, label: text.getAttribute('aria-label') ?? '', under };
       });
+      expect(lead.under, 'a tap on the second line under the chip opens the sheet').toBe(true);
       expect(Math.abs(lead.indent), 'the first line is not indented by the chip and the gap').toBeLessThanOrEqual(1);
       expect(lead.top, 'the chip is not on the first line').toBeLessThan(lead.line);
       expect(lead.share, 'the chip takes more than 40% of the line').toBeLessThanOrEqual(0.41);
