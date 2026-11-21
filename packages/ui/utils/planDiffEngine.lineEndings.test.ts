@@ -56,7 +56,11 @@ describe("computePlanDiff, line endings", () => {
     expect(stats.additions + stats.deletions + stats.modifications).toBeGreaterThan(0);
   });
 
-  test("a lone CR is a line break, as everywhere else plan text is compared", () => {
-    expect(computePlanDiff("a\rb\r", "a\nb\n").stats).toEqual(none);
+  test("a lone CR inside a code fence is content: changing it is a change, and it is kept as written", () => {
+    const fence = (sep: string) => "# Plan\n\n```\nprogress 10%" + sep + "progress 20%\n```\n";
+    expect(computePlanDiff(fence("\r"), fence("\n")).stats).not.toEqual(none);
+    const { blocks, stats } = computePlanDiff(fence("\r"), fence("\r"));
+    expect(stats).toEqual(none);
+    expect(blocks.map((b) => b.content).join("")).toContain("progress 10%\rprogress 20%");
   });
 });
