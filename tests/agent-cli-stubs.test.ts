@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 /** Tools the servers look up that are not agents: never stubbed (git, openssl and the rest must keep working). */
-const NOT_AGENTS = new Set(["node", "npm", "glimpseui", "dns-sd", "avahi-publish", "openssl", "git", "curl", "lsof", "rg", "pwsh", "pwsh.exe", "powershell.exe", "tailscale", "sh", "bash", "osascript"]);
+const NOT_AGENTS = new Set(["node", "npm", "glimpseui", "dns-sd", "avahi-publish", "openssl", "git", "curl", "lsof", "rg", "pwsh", "pwsh.exe", "powershell.exe", "tailscale", "sh", "bash", "osascript", "secret-tool", "wl-copy", "xclip", "xsel"]);
 
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

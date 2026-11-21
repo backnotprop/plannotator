@@ -57,13 +57,17 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	reviewDiagramEngineDirectory,
+	reviewSemDiffDirectory,
 } from "./plannotator-browser-runtime.ts";
 import { diagramEngineSourcesFromDir, type DiagramEngineSources } from "./generated/diagram-engine-assets.ts";
+import { semDiffSourcesFromDir, type SemDiffSources } from "./generated/sem-diff-assets.ts";
 
 /** The diagram engine files, read once per extension process (the first review that needs them). */
 let reviewDiagramEngineSources: Promise<DiagramEngineSources | null> | undefined;
 const readReviewDiagramEngine = () =>
 	(reviewDiagramEngineSources ??= diagramEngineSourcesFromDir(reviewDiagramEngineDirectory)());
+let reviewSemDiffSources: Promise<SemDiffSources | null> | undefined;
+const readReviewSemDiff = () => (reviewSemDiffSources ??= semDiffSourcesFromDir(reviewSemDiffDirectory)());
 export { getLastAssistantMessageText } from "./assistant-message.ts";
 export {
 	getStartupErrorMessage,
@@ -462,6 +466,11 @@ export async function openCodeReview(
 	return session.waitForDecision();
 }
 
+export function piLiveReviewAgent(ctx: unknown): { host: "pi"; session: string } | null {
+	const session = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | null)?.sessionManager?.getSessionId?.();
+	return typeof session === "string" && session ? { host: "pi", session } : null;
+}
+
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: CodeReviewOptions = {},
@@ -822,6 +831,7 @@ async function createCodeReviewBrowserSession(
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,
 		error: diffError,
@@ -843,6 +853,7 @@ async function createCodeReviewBrowserSession(
 		worktreePool,
 		htmlContent: reviewHtmlContent,
 		diagramEngine: readReviewDiagramEngine,
+		semDiff: readReviewSemDiff,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		// Pi's review consumer (index.ts) sends approve-time feedback after the
 		// approved prompt, so the advert is unconditional — same shape as the

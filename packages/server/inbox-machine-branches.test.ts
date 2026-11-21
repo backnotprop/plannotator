@@ -61,6 +61,30 @@ describe("a linked machine's reported branches", () => {
     expect(branches.start(() => null)().rows).toHaveLength(0);
   });
 
+  test("a branch read started before unlink cannot restore stale reports after re-link", async () => {
+    let release = () => {};
+    const held = new Promise<void>((done) => (release = done));
+    const old = peer(B, ["branches"], () => Response.json({ reports: [far] }), []);
+    const request = old.request.bind(old);
+    old.request = async (...args) => {
+      await held;
+      return request(...args);
+    };
+    const current = peer(B, ["branches"], () => Response.json({ reports: [{ ...far, branch: "fresh-branch" }] }), []);
+    let linked = [old];
+    const branches = createMachineBranches({ peers: () => linked });
+    branches.start(() => null);
+    const stale = branches.settled();
+    branches.forget(B);
+    linked = [current];
+    const snapshot = branches.start(() => null);
+
+    release();
+    await stale;
+    await branches.settled();
+    expect(snapshot().rows.map((row) => row.branch)).toEqual(["fresh-branch"]);
+  });
+
   test("a far row is taken by its shape only", () => {
     expect(farBranchRow(far)).toMatchObject({ branch: "retry-jitter", risk: { level: "medium" } });
     expect(farBranchRow({ ...far, place: "elsewhere" })).toBeNull();

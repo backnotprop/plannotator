@@ -47,6 +47,22 @@ export function parseTailscaleStatusDnsName(stdout: string): string | undefined 
   return host !== "" && isValidUrlHost(host) ? host : undefined;
 }
 
+/**
+ * This machine's own tailnet addresses from `tailscale status --json` (`Self.TailscaleIPs`, its IPv4 and IPv6),
+ * lowercased; empty when Tailscale does not say.
+ */
+export function parseTailscaleSelfAddresses(stdout: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  const ips = (parsed as { Self?: { TailscaleIPs?: unknown } } | null)?.Self?.TailscaleIPs;
+  if (!Array.isArray(ips)) return [];
+  return ips.filter((ip): ip is string => typeof ip === "string" && ip.trim() !== "").map((ip) => ip.trim().toLowerCase());
+}
+
 /** Strict CGNAT (100.64.0.0/10) IPv4 — the only range Tailscale assigns. */
 export function parseTailscaleIpv4(value: string): string | undefined {
   const parts = value.trim().split(".");

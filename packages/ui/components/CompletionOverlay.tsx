@@ -69,7 +69,7 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
           className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
             isApproved ? 'bg-success/20 text-success'
             : isDone ? 'bg-muted text-muted-foreground'
-            : 'bg-accent/20 text-accent'
+            : 'bg-accent/20 text-accent-text'
           }`}
         >
           {isApproved || isDone ? <CheckIcon /> : <ChatBubbleIcon />}

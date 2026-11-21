@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator from "./index.ts";
 import { setPiHost } from "./pi-host.ts";
+import { readPiSessionClaims } from "./generated/inbox/pi-session-claim.ts";
 import { INBOX_BRIDGE_POLL_PATH } from "./generated/inbox/connection.ts";
 
 const ENV_KEYS = ["HOME", "PI_CODING_AGENT_DIR", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_AGENT_TOOL", "PLANNOTATOR_INBOX_TOOL"] as const;
@@ -50,7 +51,7 @@ async function until(what: string, check: () => boolean): Promise<void> {
 }
 
 /** The real extension on a fake Pi whose session manager the test controls, polling a recorder. `isStale`: reading the ctx throws, as a stale Pi ctx does. */
-async function startPi(sessionManager: Record<string, unknown>, isStale: () => boolean = () => false) {
+async function startPi(sessionManager: Record<string, unknown>, isStale: () => boolean = () => false, omp = false) {
 	const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
 	mkdirSync(join(dataDir, "inbox"), { recursive: true });
 	const bodies: Record<string, unknown>[] = [];
@@ -88,6 +89,7 @@ async function startPi(sessionManager: Record<string, unknown>, isStale: () => b
 		ui: { notify: () => undefined, setStatus: () => undefined, setWidget: () => undefined, theme: { bold: (t: string) => t, fg: (_c: string, t: string) => t, strikethrough: (t: string) => t } },
 	};
 	const pi = {
+		...(omp ? { arktype: {}, pi: {} } : {}),
 		events: { on: () => () => undefined, emit: () => undefined },
 		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
 		registerFlag: () => undefined,
@@ -111,8 +113,23 @@ async function startPi(sessionManager: Record<string, unknown>, isStale: () => b
 		for (const handler of handlers.get("session_shutdown") ?? []) await handler({ reason: "quit" }, ctx);
 		await inbox.stop(true);
 	});
-	return { bodies };
+	return { bodies, switchSession: async (id: string) => {
+		const next = { ...ctx, sessionManager: { ...ctx.sessionManager, getSessionId: () => id } };
+		for (const handler of handlers.get("session_switch") ?? []) await handler({ reason: "new" }, next);
+	} };
 }
+
+test("Oh My Pi moves its claim and Inbox polling to the session started by /new", async () => {
+	const { bodies, switchSession } = await startPi({ getSessionName: () => undefined }, undefined, true);
+	const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
+	await until("the original session's poll", () => bodies.length > 0);
+	await switchSession("ses-omp-new");
+	expect(readPiSessionClaims(dataDir).map((claim) => claim.session)).toEqual(["ses-omp-new"]);
+	await until("the new session's poll", () => bodies.at(-1)?.session === "ses-omp-new");
+	const seen = bodies.length;
+	await until("another poll", () => bodies.length > seen);
+	expect(bodies.slice(seen).every((body) => body.session === "ses-omp-new")).toBe(true);
+}, 30_000);
 
 describe("Pi's session name", () => {
 	test("a named session sends its name; a later name replaces it on the next poll", async () => {

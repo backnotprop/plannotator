@@ -29,6 +29,7 @@ import { connect, createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
+import { INBOX_OFF_LINE } from "./connection";
 import { processMatchesEntry, proveInboxProcess, readProcessInfo, type ProcessInfo } from "./process-proof";
 import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
 import { directFetchInit } from "../loopback-proxy";
@@ -73,7 +74,12 @@ export interface InboxRegistryEntry {
    * `relay_port` (additive): the prototype relay's mapping (inbox-tailscale.ts), `tailscale serve --https=<relay_port>`
    * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  /**
+   * `made` (additive): the proxy ports this Inbox pointed its mapping on `https_port` at, newest last (at most 3), kept
+   * through take-downs and failed publishes until the switch goes off (inbox-tailscale.ts): a mapping on that port to
+   * one of them, where a connect is refused now, is the Inbox's own and is re-pointed rather than refused.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number; made?: { https_port: number; proxy_ports: number[] } };
   cloudflare_access?: {
     url: string | null;
     error: string | null;
@@ -392,6 +398,8 @@ export class InboxUnreachableError extends Error {
 /** What a command says when the Inbox it needs could not be had (its `ensureRunning` threw). */
 export function inboxEnsureFailedWords(error: unknown): string {
   if (error instanceof InboxUnreachableError) return error.message;
+  // Not turned on here (turned-on.ts): the one line, as it is.
+  if (error instanceof Error && error.message === INBOX_OFF_LINE) return error.message;
   return `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`;
 }
 

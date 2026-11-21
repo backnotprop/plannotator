@@ -294,10 +294,38 @@ describe('card layout rules in frame.css', () => {
     return blocks.join('\n');
   })();
 
+  test('a row keeps its title: at least 40% of the row (112 px at the least), the project gives way first, then the trailing text', () => {
+    expect(block('[data-frame-card-row]')).toContain('--frame-card-row-title-min: max(112px, 40%);');
+    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(block('[data-frame-card-row][data-frame-card-columns~="secondary"]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(20px, 160px) minmax(clamp(0px, 100% - 98px - var(--frame-card-row-title-min), 180px), 180px);');
+    const columns = [...css.matchAll(/([^{}]+)\{[^{}]*grid-template-columns: ([^;]+);[^{}]*\}/g)].filter(([, selector]) => selector!.includes('[data-frame-card-row]')).map(([, , value]) => value!);
+    for (const value of columns) expect(value).toMatch(/^36px minmax\((0|var\(--frame-card-row-title-min\)), 1fr\) /);
+    for (const value of columns) expect(value).not.toMatch(/ (160|180)px( |$)/);
+  });
+
+  test('a list shows a project whole or not at all: under the width where 160 px of project and the title at 40% fit, it drops the project and keeps the trailing text aligned', () => {
+    expect(block('[data-frame-card-rows]')).toContain('container: frame-card-rows / inline-size;');
+    const rowPadding = 6 + 10, thumb = 36, project = 160, trailing = 180, gaps = 3 * 14, titleShare = 0.4;
+    const threshold = Math.ceil(rowPadding + (thumb + project + trailing + gaps) / (1 - titleShare));
+    expect(threshold).toBe(713);
+    const at = css.indexOf(`@media (min-width: 768px) {\n  @container frame-card-rows (width < ${threshold}px) {`);
+    expect(at).toBeGreaterThan(-1);
+    const narrow = css.slice(at, css.indexOf('\n}\n', at));
+    expect(block('    [data-frame-card-row][data-frame-card-columns~="secondary"]', narrow)).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(narrow).not.toMatch(/fit-content|auto\b|min-content|max-content/);
+    expect(block('    [data-frame-card-row] [data-frame-card-secondary]', narrow)).toContain('display: none;');
+    expect(block('    [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2)', narrow)).toContain('padding-inline-end: 20px;');
+    expect(narrow).not.toMatch(/hover|focus|pinned|action-rest/);
+    expect(css.indexOf('@container')).toBeLessThan(css.indexOf('@media (max-width: 767px) {\n  [data-frame-card-row] {'));
+  });
+
   test('a row is 44 px tall and 52 on a phone; under 768 px the secondary text is hidden', () => {
     expect(block('[data-frame-card-row]')).toContain('height: 44px;');
     expect(block('[data-frame-card-row]', phone)).toContain('height: 52px;');
     expect(block('[data-frame-card-row] [data-frame-card-secondary]', phone)).toContain('display: none;');
+    expect(block('  [data-frame-card-row]', phone)).toContain('grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);');
+    expect(block('  [data-frame-card-row][data-frame-card-columns~="secondary"]', phone)).toContain('grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);');
     expect(css).not.toMatch(/max-width: 639px|max-width: 640px/);
   });
 
@@ -328,10 +356,170 @@ describe('card layout rules in frame.css', () => {
     expect(css).toMatch(ring);
     expect(css).not.toMatch(/\[data-frame-card\]:has\(:focus-visible\)/);
     expect(motionsCss).not.toMatch(/:has\(:focus-visible\)/);
-    expect(motionsCss).toMatch(/:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\)\) \.frame-card-fan/);
+    expect(motionsCss).toContain('\n[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) .frame-card-fan {');
   });
 
-  test('the updates pill shows a pointer', () => {
+  test('the updates pill shows a pointer and is 20 px tall, the heading line, with a 24 px hit area that takes no room', () => {
     expect(block('[data-frame-card-updates]')).toContain('cursor: pointer;');
+    expect(block('[data-frame-card-updates]')).toContain('height: 20px;');
+    expect(block('[data-frame-card-updates]')).toContain('position: relative;');
+    expect(block('[data-frame-card-updates]::after')).toContain('inset: -2px 0;');
+    expect(block('[data-frame-card-updates]::after')).toContain('position: absolute;');
+  });
+
+  test('the kind tints apply only to a ready face, so an empty card well or row thumbnail stays on the neutral ground', () => {
+    const tints = [...css.matchAll(/([^{}]*)\{[^{}]*--frame-card-ground: color-mix\(in (oklab|oklch), var\(--(primary|warning|success)|([^{}]*)\{[^{}]*--frame-card-ground: color-mix\(in oklch, var\(--foreground\) 5%/g)].map(([rule]) => rule!);
+    expect(tints.length).toBe(7);
+    for (const rule of tints) expect(rule).toContain('[data-frame-card-face="ready"]');
+    expect(block('[data-frame-card-well]')).toContain('--frame-card-ground: color-mix(in oklch, var(--foreground) 4%, var(--card));');
+  });
+
+  test('a row title is regular weight; a card title stays medium', () => {
+    expect(block('[data-frame-card-row] [data-frame-card-title]')).toContain('font-weight: 400;');
+    expect(block('[data-frame-card-title]')).toContain('font-weight: 500;');
+  });
+
+  test('a row thumbnail keeps the card well geometry, so a sheet, window or table runs off its bottom edge', () => {
+    expect(block('.frame-card-sheet')).toContain('inset: 10% 10% -14px;');
+    expect(block('.frame-card-window')).toContain('inset: 9% 8% -10px;');
+    expect(block('.frame-card-panel-rows')).toContain('bottom: -10px;');
+    expect(block('[data-frame-card-thumb] .frame-card-sheet')).toContain('bottom: -2px;');
+    expect(css).not.toMatch(/\[data-frame-card-thumb\][^{]*\{[^}]*\binset:/);
+  });
+
+  test('in rows the page window keeps its bar but hides the dots; on cards the bar and dots stay', () => {
+    expect(block('.frame-card-window-bar')).toContain('height: 16px;');
+    expect(block('.frame-card-window-bar > i')).toContain('width: 5px;');
+    expect(block('[data-frame-card-thumb] .frame-card-window-bar')).toContain('height: 3px;');
+    expect(block('[data-frame-card-thumb] .frame-card-window-bar > i')).toContain('display: none;');
+  });
+
+  test('a row never moves: no rule changes its columns for a pin, and the action shows just before the trailing text on hover or keyboard focus only', () => {
+    const columnRules = [...css.matchAll(/([^{}]+)\{([^{}]*grid-template-columns[^{}]*)\}/g)].map(([, selector]) => selector!).filter((selector) => selector.includes('[data-frame-card-row]'));
+    for (const selector of columnRules) {
+      expect(selector).not.toContain('pinned');
+      expect(selector).not.toContain('data-frame-card-columns~="action"');
+    }
+    expect(block('[data-frame-card-trail] > [data-frame-card-action]')).toContain('position: absolute;');
+    expect(block('[data-frame-card-trail] > [data-frame-card-action]')).toContain('right: calc(100% + 6px);');
+    expect(css).not.toMatch(/\[data-frame-card-(line|end|trail)\][^{]*\{[^}]*opacity: 0;/);
+    expect(block('[data-frame-card-row]:has(:focus-visible) [data-frame-card-action]')).toContain('opacity: 1;');
+    const hoverOnly = [...css.matchAll(/@media \(hover: hover\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!).join('\n');
+    expect(block('  [data-frame-card]:hover [data-frame-card-action],\n  [data-frame-card-row]:hover [data-frame-card-action]', hoverOnly)).toContain('opacity: 1;');
+    const actionRules = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map(([, selector]) => selector!).filter((selector) => selector.includes('[data-frame-card-action]') && selector.includes('[data-frame-card-row]'));
+    for (const selector of actionRules) expect(selector).not.toContain(':focus-within');
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"] [data-frame-card-secondary],\n[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-columns~="secondary"]) > :nth-child(2)')).toContain('padding-inline-end: 20px;');
+    expect(block('  [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2)', phone)).toContain('padding-inline-end: 20px;');
+    const clearance = [...css.matchAll(/([^{}]+)\{[^{}]*padding-inline-end: 20px[^{}]*\}/g)].map(([, selector]) => selector!);
+    for (const selector of clearance) expect(selector).not.toMatch(/hover|focus|pinned|action-rest/);
+  });
+
+  test('a host focus outline of ordinary weight does not draw a second ring on a card or row link', () => {
+    const rule = ':is([data-frame-card], [data-frame-card-row]) :focus-visible:not([data-frame-card-action] *)';
+    expect(block(rule)).toContain('outline: none;');
+    expect(frameCss).not.toMatch(/@layer/);
+    const weight = (selector: string): number => {
+      let rest = selector;
+      let total = 0;
+      for (;;) {
+        const at = rest.search(/:(is|not|has|where)\(/);
+        if (at < 0) break;
+        const open = rest.indexOf('(', at);
+        let depth = 1;
+        let end = open + 1;
+        while (depth > 0) {
+          if (rest[end] === '(') depth++;
+          if (rest[end] === ')') depth--;
+          end++;
+        }
+        const name = rest.slice(at + 1, open);
+        const inner = rest.slice(open + 1, end - 1).split(',').map((part) => weight(part.trim()));
+        if (name !== 'where') total += Math.max(...inner);
+        rest = rest.slice(0, at) + ' ' + rest.slice(end);
+      }
+      const ids = (rest.match(/#[\w-]+/g) ?? []).length;
+      const classes = (rest.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length;
+      const types = (rest.match(/(^|[\s>+~])[a-z][\w-]*/gi) ?? []).length;
+      return total + ids * 10000 + classes * 100 + types;
+    };
+    for (const host of [':focus-visible', '*:focus-visible', 'a:focus-visible', '.link:focus-visible', 'a.link:focus-visible', 'body a:focus-visible', '.app a:focus-visible']) {
+      expect(weight(rule)).toBeGreaterThan(weight(host));
+    }
+    expect(weight(rule)).toBe(300);
+  });
+
+  test('keyboard focus on a row fills it more than hover and underlines its title; hover is unchanged', () => {
+    const focused = '[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *))';
+    expect(block(focused)).toContain('background: color-mix(in oklch, var(--primary) 16%, transparent);');
+    const title = block(`${focused} [data-frame-card-title]`);
+    expect(title).toContain('text-decoration: underline;');
+    expect(title).toContain('text-underline-offset: 3px;');
+    expect(title).not.toContain('color:');
+    expect(css).toContain('@media (hover: hover) {\n  [data-frame-card-row]:hover {\n    background: var(--frame-surface-hover);\n  }\n}');
+  });
+
+  test('no row ever draws an edge: no shadow but the thumbnail ring, no border, outline, gradient or drawn pseudo-element on any part of a row, in frame.css, motions.css or the row code', () => {
+    const rules = (source: string) => [...source.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => [selector!.trim(), body!] as const);
+    const rowish = /\[data-frame-card-(row|rows|trail|end|line|title|secondary|dot|thumb|pinned-mark|action)\]/;
+    const checked = [...rules(frameCss), ...rules(motionsCss)].filter(([selector]) => rowish.test(selector) && !/(^|,\s*)\[data-frame-card\]/.test(selector));
+    expect(checked.length).toBeGreaterThan(20);
+    for (const [selector, body] of checked) {
+      for (const [, shadow] of body.matchAll(/\bbox-shadow:\s*([^;]*);/g)) {
+        let flat = shadow!;
+        while (/\([^()]*\)/.test(flat)) flat = flat.replace(/\([^()]*\)/g, '');
+        expect(flat).toMatch(/^inset 0 0 0 1px [^,]+$/);
+      }
+      expect(body).not.toMatch(/\b(border(?![a-z-]*radius)|outline)(-[a-z]+)?:(?!\s*none;)/);
+      expect(body).not.toMatch(/gradient\(/);
+      expect(selector).not.toMatch(/::?(before|after)/);
+    }
+    const tsx = readFileSync(join(folder, 'card', 'Card.tsx'), 'utf8');
+    const rowSource = ['export function CardRow(', 'export function CardRows(', 'function GreyLine(', 'function Dot(', 'function Thumb(', 'function Glyph(', 'function PinnedMark(', 'function Blank('].map((start) => {
+      const at = tsx.indexOf(start);
+      expect(at).toBeGreaterThan(-1);
+      return tsx.slice(at, tsx.indexOf('\n}\n', at));
+    });
+    expect(rowSource.join('\n')).toContain('before:absolute');
+    for (const source of rowSource) {
+      const literals = [...source.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map(([, plain, template]) => plain ?? template ?? '');
+      for (const classes of literals) {
+        for (const word of classes.split(/\s+/)) {
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*(border|ring|shadow|inset-shadow|outline-(?!none)|bg-(linear|radial|conic|gradient)|from-|via-|to-)/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*bg-\[[^\]]*gradient/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*\[(box-shadow|border|outline|background)/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*after:/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*before:(bg|border|shadow|ring|from|via|to|w-|h-|inset-y|left-|right-|\[)/);
+        }
+      }
+    }
+  });
+
+  test('hover styles of cards, rows and the pill apply only on screens with hover, so a tap leaves none behind', () => {
+    const outside = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@media \((hover: hover|prefers-reduced-motion: reduce)\) \{[\s\S]*?\n\}/g, '');
+    for (const source of [frameCss, motionsCss]) {
+      const hovered = [...outside(source).matchAll(/([^{}]+)\{/g)].map(([, selector]) => selector!.trim()).filter((selector) => selector.includes(':hover') && selector.includes('[data-frame-card'));
+      expect(hovered).toEqual([]);
+    }
+    expect(css).toContain('@media (hover: hover) {\n  [data-frame-card]:hover {');
+    expect(css).toContain('@media (hover: hover) {\n  [data-frame-card-updates]:hover {');
+    expect(motionsCss).toContain('@media (hover: hover) {\n  [data-frame-card]:hover .frame-card-fan {');
+  });
+
+  test('a row shows one pin at a time: the card\'s mark is hidden whenever the action shows, with hover or without', () => {
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]:has(:focus-visible) [data-frame-card-pinned-mark]')).toContain('visibility: hidden;');
+    const hoverOnly = [...css.matchAll(/@media \(hover: hover\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!).join('\n');
+    expect(block('  [data-frame-card-row][data-frame-card-columns~="action"]:hover [data-frame-card-pinned-mark]', hoverOnly)).toContain('visibility: hidden;');
+    const noHover = css.slice(css.indexOf('@media (hover: none) {\n  [data-frame-card-row]'));
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-rows][data-frame-card-action-rest=\"never\"] *) [data-frame-card-pinned-mark]', noHover)).toContain('visibility: hidden;');
+  });
+
+  test('without hover, actionAtRest touch (the default) shows each row action at rest with 20 px clear before it; never shows none until keyboard focus and keeps the pin', () => {
+    const never = '[data-frame-card-rows][data-frame-card-action-rest=\"never\"] *';
+    const noHover = [...css.matchAll(/@media \(hover: none\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!).join('\n');
+    expect(block(`  [data-frame-card] [data-frame-card-action],\n  [data-frame-card-row]:not(${never}) [data-frame-card-action]`, noHover)).toContain('opacity: 1;');
+    expect(block(`[data-frame-card-row]:is(${never}):not(:has(:focus-visible)) [data-frame-card-action]`, noHover)).toContain('pointer-events: none;');
+    expect(noHover).not.toMatch(/\[data-frame-card-row\]:is\(\[data-frame-card-rows\]\[data-frame-card-action-rest="never"\] \*\)[^{]*\{[^}]*(opacity: 1|visibility: hidden)/);
+    expect(block('\n[data-frame-card-action]')).toContain('opacity: 0;');
+    expect(block('[data-frame-card-row]:has(:focus-visible) [data-frame-card-action]')).toContain('opacity: 1;');
   });
 });

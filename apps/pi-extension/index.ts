@@ -513,6 +513,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	let sessionAlive = true;
 	/** The plan review waiting on the reviewer, if any (see PendingPlanReview). */
 	let pendingPlanReview: PendingPlanReview | null = null;
+	let planSessionGeneration = 0;
 	/** Resolved once per execution phase; undefined means widget-only. */
 	let todoProvider: TodoProvider | undefined;
 	/** Latch: no provider found, or one sync failed. Cleared on return to idle. */
@@ -2067,6 +2068,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
+			const openingGeneration = planSessionGeneration;
 			let session: PlanReviewBrowserSession;
 			try {
 				session = await startPlanReview(ctx, planContent, undefined, {
@@ -2086,7 +2088,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// Planning ended while this review was starting (an earlier review's
 			// approval settling during the await, or plan mode turned off): this
 			// review would be an orphan whose decision nobody delivers.
-			if (phase !== "planning") {
+			if (phase !== "planning" || openingGeneration !== planSessionGeneration) {
 				try {
 					// A tab that already loaded learns the review closed.
 					session.closeKeepingDraft?.();
@@ -2673,7 +2675,7 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		persistState();
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
+	function loadSessionConfig(ctx: ExtensionContext): void {
 		// Project trust gate (#1291). Capability absent = fail closed: the
 		// project-local config is skipped and the honest capability warning
 		// fires (see PROJECT_TRUST_CAPABILITY_WARNING). A host that provides
@@ -2694,6 +2696,10 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		for (const warning of loadedConfig.warnings) {
 			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
 		}
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		loadSessionConfig(ctx);
 		// A runtime without the Oct 2026 TLS fixes: one line per Pi start. It
 		// replaces the package's engines floor, which kept updates from installing (#902).
 		warnRuntimeTlsOnce((message) => ctx.ui.notify(message, "warning"));
@@ -2704,6 +2710,21 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		}
 
 		await resyncPhaseFromSession(ctx, { phaseWhenUnrecorded: phase, warnOnPlanning: true });
+	});
+
+	// Oh My Pi reuses the extension when replacing the active session. The
+	// new branch owns its own phase; an open decision belongs to its opener.
+	if (piHost === "oh-my-pi") pi.on("session_switch" as "session_start", async (_event, ctx) => {
+		planSessionGeneration++;
+		stopPendingPlanReview();
+		lastSubmittedPath = null;
+		approvedPlanContent = null;
+		checklistItems = [];
+		justApprovedPlan = false;
+		todoProvider = undefined;
+		todoProviderDisabled = false;
+		loadSessionConfig(ctx);
+		await resyncPhaseFromSession(ctx, { phaseWhenUnrecorded: "idle", warnOnPlanning: true });
 	});
 
 	// Compaction summarizes conversation history and can swallow the delivered
