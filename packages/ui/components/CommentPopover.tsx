@@ -164,6 +164,13 @@ interface CommentPopoverProps {
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
   placement?: 'below' | 'side';
+  /** Opt-in, for the comment card with `placement: 'side'`: the card ends above this element's foot (as much
+   *  of it as shows), so what the host draws under it is never covered (a live html block's caption and its
+   *  pen, under the block's frame). The card goes beside the anchor (right, else left), from the anchor's top
+   *  down when that fits above the foot and from the foot up when the anchor is low; with no room on either
+   *  side, over the anchor, else under it, else on it, always above the foot. A phone docks the card as
+   *  always. Absent → as always. */
+  keepAbove?: HTMLElement | null;
   /** Opt-in: the box the popover stays inside (Shape: the board, in a thread's pane), placed and clamped by its
    *  edges rather than only the window's; with no room above or below it there, a sheet at the box's foot rather
    *  than the window's dialog. Absent → the window, as always. */
@@ -282,6 +289,21 @@ export interface CommentCardGeometry { docked: boolean; above: boolean; style: R
 export const COMMENT_CARD_WIDTH = 352;
 /** The least room the card takes by the words; with less on both sides it docks. */
 const CARD_NEED = 132;
+/** With `keepAbove`: the room a card beside its anchor needs under the anchor's top to open downward. */
+const CARD_SIDE_ROOM = 200;
+/** With `keepAbove`: the space left between the card and the foot. */
+const CARD_FLOOR_GAP = 6;
+
+/** How much of `el` shows, at its foot: its own bottom edge, or that of an ancestor that clips it sooner. */
+export function visibleFootOf(el: HTMLElement): number {
+  let foot = el.getBoundingClientRect().bottom;
+  for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+    const style = getComputedStyle(up);
+    if (style.overflowY === 'visible' && style.overflowX === 'visible') continue;
+    foot = Math.min(foot, up.getBoundingClientRect().bottom);
+  }
+  return foot;
+}
 
 /**
  * The comment card's place. It never sits on the words it is about: a card beside them (under, else over; with
@@ -301,6 +323,8 @@ export function computeCommentCardGeometry(
     footTop?: number | null;
     aimX?: number | null;
     placement?: 'below' | 'side';
+    /** `keepAbove`'s foot: with `placement: 'side'`, the card ends above this line. */
+    floor?: number | null;
   },
 ): CommentCardGeometry {
   // The pane's foot is never covered: the card ends above it. A short window keeps the room instead.
@@ -318,6 +342,29 @@ export function computeCommentCardGeometry(
   };
   if (!anchor || opts.phone || opts.expanded) return dock();
   const width = Math.min(COMMENT_CARD_WIDTH, bounds.width);
+  if (opts.placement === 'side' && opts.floor != null) {
+    // Above the foot (`keepAbove`), inside the pane. The card's height is its words', so a card that opens
+    // upward is held by its bottom edge.
+    const foot = Math.min(bounds.bottom, opts.floor - CARD_FLOOR_GAP);
+    if (foot - bounds.top < CARD_NEED) return dock();
+    const minLeft = Math.max(bounds.left, opts.pane ? opts.pane.left + 8 : bounds.left);
+    const maxRight = Math.min(bounds.right, opts.pane ? opts.pane.right - 8 : bounds.right);
+    const up = (left: number, bottomEdge: number): CommentCardGeometry => ({ docked: false, above: true, style: { left, width, bottom: opts.viewportHeight - bottomEdge, maxHeight: bottomEdge - bounds.top } });
+    const right = anchor.right + GAP * 1.75;
+    const left = anchor.left - GAP * 1.75 - width;
+    const sideLeft = right + width <= maxRight ? right : left >= minLeft ? left : null;
+    if (sideLeft !== null) {
+      const top = Math.max(bounds.top, anchor.top);
+      if (foot - top >= CARD_SIDE_ROOM) return { docked: false, above: false, style: { left: sideLeft, width, top, maxHeight: foot - top } };
+      return up(sideLeft, foot);
+    }
+    const middle = Math.max(minLeft, Math.min(anchor.left + anchor.width / 2 - width / 2, maxRight - width));
+    const overTop = anchor.top - GAP;
+    if (overTop - bounds.top >= CARD_NEED) return up(middle, overTop);
+    const under = anchor.bottom + GAP;
+    if (foot - under >= CARD_NEED) return { docked: false, above: false, style: { left: middle, width, top: under, maxHeight: foot - under } };
+    return up(middle, foot);
+  }
   if (opts.placement === 'side') {
     const right = anchor.right + GAP * 1.75;
     const left = anchor.left - GAP * 1.75 - width;
@@ -398,6 +445,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   errorText,
   before,
   placement = 'below',
+  keepAbove,
   within,
   zIndex,
   autoFocus = true,
@@ -477,6 +525,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       const footTop = feet.length ? Math.min(...feet.map((r) => r.top)) - 4 : null;
       setCardGeo(computeCommentCardGeometry(rect, visibleBounds, {
         phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: layoutViewportHeight(window), footTop, aimX: cardAim.current, placement,
+        floor: keepAbove ? visibleFootOf(keepAbove) : null,
       }));
     };
     update();
@@ -486,7 +535,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [card, anchorEl, anchorRect, visibleBounds, cardPhone, cardExpanded, placement]);
+  }, [card, anchorEl, anchorRect, visibleBounds, cardPhone, cardExpanded, placement, keepAbove]);
   // Docked at the foot: the words the comment is about are scrolled up above the card, never left under it.
   const cardDocked = cardGeo?.docked ?? false;
   useEffect(() => {

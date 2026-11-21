@@ -29,6 +29,31 @@ export interface HtmlElementAnchor {
   tagName: string;
   text?: string;
   point?: HtmlAnchorPoint;
+  /**
+   * Only from a viewer whose host vouches that the document is the very one
+   * the comment was made on (`HtmlViewer` `structuralAnchors`; the Inbox's
+   * live html block, by its source hash). See `HtmlAnchorStructure`.
+   */
+  structure?: HtmlAnchorStructure;
+}
+
+/**
+ * Where an element with no text and no stable id sits in a document that has
+ * not changed by a byte, and what it must still look like there:
+ * - `path`: the child index at each level, from the document's root element
+ *   down to the element (element children only);
+ * - `ns`: the element's namespace;
+ * - `attrs`: its own attributes, sorted by name: `[name, value]`, or
+ *   `[name, digest, length]` for a value longer than
+ *   `MAX_HTML_STRUCTURE_ATTR_VALUE_LENGTH`.
+ * With `tagName` this is the element's signature. Restore follows the path
+ * and takes the element only when the signature is exactly the same; it never
+ * takes one nearby.
+ */
+export interface HtmlAnchorStructure {
+  path: number[];
+  ns: string;
+  attrs: Array<[string, string] | [string, string, number]>;
 }
 
 export interface HtmlAnnotationTarget {
@@ -82,6 +107,19 @@ export const MAX_HTML_ANCHOR_SELECTOR_LENGTH = 1024;
 export const MAX_HTML_ANCHOR_TAG_LENGTH = 64;
 /** Mirrors `MAX_ANCHOR_TEXT_LENGTH` in `@plannotator/ui` (the 400-char snapshot). */
 export const MAX_HTML_ANCHOR_TEXT_LENGTH = 400;
+/** A structural anchor's path: at most this many levels under the root element (mirrors the bridge). */
+export const MAX_HTML_STRUCTURE_PATH_DEPTH = 64;
+/** A structural anchor's path: the largest child index it may name. */
+export const MAX_HTML_STRUCTURE_CHILD_INDEX = 100_000;
+/** A structural anchor's namespace (the SVG and MathML ones are under 40). */
+export const MAX_HTML_STRUCTURE_NAMESPACE_LENGTH = 64;
+/** A structural anchor's signature: at most this many attributes (mirrors the bridge). */
+export const MAX_HTML_STRUCTURE_ATTRS = 24;
+export const MAX_HTML_STRUCTURE_ATTR_NAME_LENGTH = 64;
+/** A value up to this long is kept whole; a longer one as a digest and its length (mirrors the bridge). */
+export const MAX_HTML_STRUCTURE_ATTR_VALUE_LENGTH = 160;
+/** The longest attribute value a digest may stand for. */
+export const MAX_HTML_STRUCTURE_LONG_VALUE_LENGTH = 4 * 1024 * 1024;
 /** Mirrors `MAX_TARGET_LABEL_LENGTH` in `@plannotator/ui`. */
 export const MAX_HTML_TARGET_LABEL_LENGTH = 64;
 /**
@@ -162,6 +200,13 @@ function parseHtmlAnchorPoint(value: unknown): HtmlAnchorPoint | undefined {
 export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null {
   if (!isRecord(value)) return null;
   const { selector, tagName, text } = value;
+  // A structural anchor that is not one rejects the whole anchor: it has nothing else to be found by.
+  let structure: HtmlAnchorStructure | undefined;
+  if (value.structure !== undefined) {
+    const parsed = parseHtmlAnchorStructure(value.structure);
+    if (!parsed) return null;
+    structure = parsed;
+  }
   if (
     typeof selector !== "string"
     || selector.length === 0
@@ -173,9 +218,45 @@ export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null
     return null;
   }
   const point = parseHtmlAnchorPoint(value.point);
-  if (text === undefined) return { selector, tagName, ...(point ? { point } : {}) };
+  const more = { ...(point ? { point } : {}), ...(structure ? { structure } : {}) };
+  if (text === undefined) return { selector, tagName, ...more };
   if (typeof text !== "string" || text.length > MAX_HTML_ANCHOR_TEXT_LENGTH) return null;
-  return { selector, tagName, text, ...(point ? { point } : {}) };
+  return { selector, tagName, text, ...more };
+}
+
+/**
+ * Validate a structural anchor (`HtmlElementAnchor.structure`): null for
+ * anything that is not one, or that is past a cap. Nothing is cut to fit: a
+ * signature that was shortened here could no longer match its element.
+ */
+export function parseHtmlAnchorStructure(value: unknown): HtmlAnchorStructure | null {
+  if (!isRecord(value) || Array.isArray(value)) return null;
+  const { path, ns, attrs } = value;
+  if (!Array.isArray(path) || path.length === 0 || path.length > MAX_HTML_STRUCTURE_PATH_DEPTH) return null;
+  for (const index of path) {
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index > MAX_HTML_STRUCTURE_CHILD_INDEX) return null;
+  }
+  if (typeof ns !== "string" || ns.length > MAX_HTML_STRUCTURE_NAMESPACE_LENGTH) return null;
+  if (!Array.isArray(attrs) || attrs.length > MAX_HTML_STRUCTURE_ATTRS) return null;
+  const out: HtmlAnchorStructure["attrs"] = [];
+  let last: string | null = null;
+  for (const attr of attrs) {
+    if (!Array.isArray(attr) || (attr.length !== 2 && attr.length !== 3)) return null;
+    const [name, held, length] = attr as unknown[];
+    if (typeof name !== "string" || name.length === 0 || name.length > MAX_HTML_STRUCTURE_ATTR_NAME_LENGTH) return null;
+    // Sorted, each name once: one signature has one spelling.
+    if (last !== null && !(last < name)) return null;
+    last = name;
+    if (typeof held !== "string" || held.length > MAX_HTML_STRUCTURE_ATTR_VALUE_LENGTH) return null;
+    if (attr.length === 2) {
+      out.push([name, held]);
+      continue;
+    }
+    if (typeof length !== "number" || !Number.isInteger(length) || length <= MAX_HTML_STRUCTURE_ATTR_VALUE_LENGTH || length > MAX_HTML_STRUCTURE_LONG_VALUE_LENGTH) return null;
+    if (!/^[a-f0-9]{1,16}$/.test(held)) return null;
+    out.push([name, held, length]);
+  }
+  return { path: [...(path as number[])], ns, attrs: out };
 }
 
 /** Collapse control characters and whitespace runs, then cap. */

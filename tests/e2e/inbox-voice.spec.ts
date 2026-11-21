@@ -38,7 +38,7 @@ import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { savedConfig } from '../helpers/saved-config';
-import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/inbox-voice'));
@@ -112,6 +112,8 @@ async function startWorld(options: { version?: string; config?: Record<string, u
       favicon: 'glass',
       // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      // "Which view do you prefer?" (five threads, armed ahead of voice on a release build): settled.
+      inboxReveals: { ...E2E_GROUP_TIP_SEEN, view_choice: { shownAt: '2026-10-01T10:00:00.000Z' } },
       ...options.config,
     }),
   );

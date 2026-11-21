@@ -1,4 +1,5 @@
 import type { Block, Annotation } from '../types';
+import { footnoteKeysOf, withoutFootnoteRefs } from './footnotes';
 
 /**
  * Calculate annotation counts per section (grouped by headings)
@@ -96,6 +97,7 @@ export function buildTocHierarchy(
   maxLevel = 3
 ): TocItem[] {
   const headings = tocHeadings(blocks, maxLevel);
+  const notes = footnoteKeysOf(blocks);
   
   const root: TocItem[] = [];
   const stack: TocItem[] = [];
@@ -103,7 +105,7 @@ export function buildTocHierarchy(
   for (const heading of headings) {
     const item: TocItem = {
       id: heading.id,
-      content: heading.content,
+      content: withoutFootnoteRefs(heading.content, notes),
       level: heading.level ?? 1,
       order: heading.order,
       children: [],

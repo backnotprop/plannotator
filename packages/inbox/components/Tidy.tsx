@@ -239,6 +239,7 @@ export function TidyMenu({
   view,
   starredAbove,
   onSelect,
+  markAllRead,
   showArchived,
   tagColours,
 }: {
@@ -263,6 +264,11 @@ export function TidyMenu({
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
   /** "Select threads", after Tidy: the list starts picking rows (rowPicks.ts). Absent (the Board, the tour): no item. */
   onSelect?: () => void;
+  /**
+   * "Mark all as read", after Select threads (markAllRead.ts): every row the list shows that takes Mark read, as the
+   * project menu's item. Greyed while none does. Absent (the Board, the tour): no item.
+   */
+  markAllRead?: { disabled: boolean; onClick: () => void };
   /** "Show archived" (approval "inbox-archived-group"), after it: the Archived group under the list. Absent: no item. */
   showArchived?: { on: boolean; onChange: (on: boolean) => void };
   /**
@@ -333,6 +339,12 @@ export function TidyMenu({
                 <Menu.Item className="ib-pmi" label="Select threads" data-select-threads="" onClick={onSelect}>
                   <Icon name="todoOpen" size={15} />
                   Select threads
+                </Menu.Item>
+              )}
+              {markAllRead && (
+                <Menu.Item className="ib-pmi" label="Mark all as read" disabled={markAllRead.disabled} data-list-mark-all-read="" onClick={markAllRead.onClick}>
+                  <Icon name="checkCircle" size={15} />
+                  Mark all as read
                 </Menu.Item>
               )}
               <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh} aria-keyshortcuts={refreshKeys}>

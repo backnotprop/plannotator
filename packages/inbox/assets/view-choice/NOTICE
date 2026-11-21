@@ -1,0 +1,8 @@
+Picture in this folder
+
+blastoise.png is example art in the Inbox's one-time "Which view do you prefer?" dialog, the face of a made-up agent
+(components/viewChoiceDemo.ts). It is used nowhere else.
+
+blastoise.png: sprite from PokeAPI's sprites (https://github.com/PokeAPI/sprites, sprites/pokemon/9.png), the same
+picture the Inbox's fetchable Pokémon set gets, trimmed as the Inbox trims that set's icons. Pokémon and its
+characters are trademarks of their owners; the sprite is not covered by this repository's MIT license.

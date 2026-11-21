@@ -1267,8 +1267,9 @@ export interface InboxReplyCommand {
   /**
    * The title a wake shows, as the Inbox decided it (`InboxStore.agentTitle`):
    * on a plain reply the thread's short name, or null when it has none, which
-   * every connection words `a reply`; on everything else the thread's
-   * subject. An older Inbox always sends the subject here.
+   * every connection words `a reply`; on everything in a thread the person
+   * started and named, that name; on everything else the thread's subject.
+   * An older Inbox always sends the subject here.
    */
   subject: string | null
   /** The reply or message, markdown, verbatim. */
