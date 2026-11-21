@@ -275,8 +275,10 @@ async function selectText(page: Page, needle: string): Promise<void> {
       const range = document.createRange();
       range.setStart(node, at);
       range.setEnd(node, at + text.length);
+      if ((node.parentElement as HTMLElement).getClientRects().length === 0) continue;
       (node.parentElement as HTMLElement).scrollIntoView({ block: 'center' });
-      const rects = [...range.getClientRects()];
+      const rects = [...range.getClientRects()].filter((r) => r.width > 0);
+      if (rects.length === 0) continue;
       const first = rects[0]!;
       const last = rects[rects.length - 1]!;
       return { x1: first.left + 1, y1: first.top + first.height / 2, x2: last.right - 1, y2: last.top + last.height / 2 };
@@ -289,6 +291,14 @@ async function selectText(page: Page, needle: string): Promise<void> {
   await page.mouse.move(box.x2, box.y2, { steps: 10 });
   await page.mouse.up();
   await expect(page.locator('.annotation-toolbar')).toBeVisible();
+}
+
+async function toTop(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    for (const el of document.querySelectorAll('*')) if ((el as HTMLElement).scrollTop > 0) (el as HTMLElement).scrollTop = 0;
+  });
+  await page.waitForTimeout(300);
 }
 
 async function annotate(page: Page, v: Variant): Promise<void> {
@@ -319,10 +329,10 @@ async function annotate(page: Page, v: Variant): Promise<void> {
     [
       'global',
       async () => {
-        await page.getByRole('button', { name: 'Global comment', exact: true }).click();
+        await page.locator('button[aria-label="Add global comment"]:visible, button[title="Add global comment"]:visible').first().click();
         const composer = page.locator('[data-comment-popover]');
-        await composer.getByPlaceholder('Add a global comment...').fill('Good plan overall. Keep the flag for a release after step three.');
-        await composer.getByRole('button', { name: 'Add', exact: true }).click();
+        await composer.locator('textarea').last().fill('Good plan overall. Keep the flag for a release after step three.');
+        await composer.getByRole('button', { name: /^(Add|Comment)$/ }).last().click();
       },
     ],
   ];
@@ -348,18 +358,18 @@ async function planShots(browser: Browser, v: Variant): Promise<void> {
     await page.waitForTimeout(1200);
     if (v.shots.includes('plan')) {
       await annotate(page, v);
-      await page.evaluate(() => window.scrollTo(0, 0));
+      await toTop(page);
       await snap(page, v, 'plan-review');
       await page.getByText('Budget', { exact: true }).first().scrollIntoViewIfNeeded().catch(() => {});
       await snap(page, v, 'plan-review-lower');
     }
     if (v.shots.includes('plandiff') || v.shots.includes('warn')) {
       try {
-        await page.getByTitle('Show what changed from previous version').first().click();
+        await page.locator('button[title="Show what changed from previous version"]:visible').first().click();
         await expect(page.locator('.plan-diff-added, .plan-diff-removed, .plan-diff-modified').first()).toBeVisible();
         const counts = await page.evaluate(() => ['added', 'removed', 'modified'].map((k) => `${k}=${document.querySelectorAll(`.plan-diff-${k}`).length}`).join(' '));
         log(`${v.name} plan diff blocks: ${counts}`);
-        await page.evaluate(() => window.scrollTo(0, 0));
+        await toTop(page);
         if (v.shots.includes('plandiff')) await snap(page, v, 'plan-diff');
         if (v.shots.includes('warn')) {
           const target = page.locator('.plan-diff-modified').last();
@@ -376,7 +386,12 @@ async function planShots(browser: Browser, v: Variant): Promise<void> {
     }
     if (v.shots.includes('picker')) {
       try {
-        await page.getByTitle('Settings', { exact: true }).first().click();
+        const direct = page.locator('button[title="Settings"]:visible');
+        if (await direct.count()) await direct.first().click();
+        else {
+          await page.getByRole('button', { name: 'Options', exact: true }).first().click();
+          await page.getByText('Settings', { exact: true }).locator('visible=true').first().click();
+        }
         await page.getByRole('button', { name: 'Theme', exact: true }).first().click();
         const half = v.mode === 'dark' ? 'Dark' : 'Light';
         await page.getByRole('button', { name: `${half} theme`, exact: true }).first().click().catch(() => {});
@@ -528,7 +543,7 @@ async function reviewShots(browser: Browser, v: Variant): Promise<void> {
       await page.waitForTimeout(600);
       const area = page.locator('textarea:visible').last();
       await area.fill('Cap the wait: with ten attempts this sleeps for eight minutes.', { timeout: 5_000 });
-      const add = page.getByRole('button', { name: /^(Comment|Add comment|Add|Save)$/ }).last();
+      const add = page.getByRole('button', { name: /^(comment|add comment|add|save)$/i }).last();
       await add.click({ timeout: 5_000 });
       await page.waitForTimeout(600);
     } catch (err) {
