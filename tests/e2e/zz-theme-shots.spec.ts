@@ -322,7 +322,7 @@ async function annotate(page: Page, v: Variant): Promise<void> {
         await selectText(page, 'a cold cache costs two seconds');
         await toolbarPress(page, 'text-annotation-comment');
         await page.locator('[data-comment-popover] textarea').last().fill('Is that measured in production or on a laptop?');
-        await page.locator('[data-comment-popover]').getByRole('button', { name: /^(Comment|Add)$/ }).last().click();
+        await page.locator('[data-comment-popover]').getByRole('button', { name: /^(Comment|Add|Save)$/ }).last().click();
       },
     ],
     [
@@ -392,11 +392,18 @@ async function planShots(browser: Browser, v: Variant): Promise<void> {
         await toTop(page);
         if (v.shots.includes('plandiff')) await snap(page, v, 'plan-diff');
         if (v.shots.includes('warn')) {
-          const target = page.locator('.plan-diff-modified').last();
-          await target.scrollIntoViewIfNeeded();
           await page.evaluate(() => {
-            const el = [...document.querySelectorAll('.plan-diff-modified')].pop();
-            el?.scrollIntoView({ block: 'center' });
+            const b = [...document.querySelectorAll<HTMLButtonElement>('button')].find((e) => e.textContent?.trim().startsWith('Rendered') && e.getClientRects().length > 0);
+            b?.click();
+          });
+          await page.waitForTimeout(800);
+          const counts2 = await page.evaluate(() => ['added', 'removed', 'modified'].map((k) => `${k}=${document.querySelectorAll(`.plan-diff-${k}`).length}`).join(' '));
+          log(`${v.name} rendered diff blocks: ${counts2}`);
+          await page.evaluate(() => {
+            const el = document.querySelector('.plan-diff-modified');
+            el?.scrollIntoView({ block: 'start' });
+            const sc = (n: Element | null): HTMLElement | null => { let e = n?.parentElement ?? null; while (e && !(e.scrollHeight > e.clientHeight + 20 && /auto|scroll/.test(getComputedStyle(e).overflowY))) e = e.parentElement; return e; };
+            sc(el)?.scrollBy(0, -140);
           });
           await snap(page, v, 'warning-near-destructive');
         }
