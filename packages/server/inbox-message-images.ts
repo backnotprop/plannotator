@@ -21,8 +21,10 @@
 
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
-import { isInboxId } from "@plannotator/core/inbox-types";
-import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
+import { isInboxId, type InboxInlineImage } from "@plannotator/core/inbox-types";
+import { isInboxCloudAuthor } from "@plannotator/core/inbox-cloud";
+import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
+import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, readInboxPictureAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
 import { openInboxMessageMedia } from "@plannotator/shared/inbox/message-media";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
@@ -61,6 +63,10 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
   const project = store.project(message.project_id);
   if (!project) return refuse(404, "project_not_found", "The message's project is gone.");
 
+  // A cloud agent's message (isInboxCloudAuthor): only what was captured at send, from the Inbox's own copy. Nothing it
+  // names is ever read from this computer, a sound or video included (inbox-cloud-pictures.ts).
+  if (isInboxCloudAuthor(message.author)) return inboxImageResponse(req, await capturedPicture(store.dir, message.inline_images, url.searchParams.get("path")), inboxImageWidth(url));
+
   const input = {
     body: message.body,
     root: project.root,
@@ -82,6 +88,16 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
     }, { head: req.method === "HEAD" });
   }
   return inboxImageResponse(req, await readInboxMessageImageAsync(input), inboxImageWidth(url));
+}
+
+const NOT_ATTACHED = { ok: false as const, status: 404, code: "image_not_attached", error: "A cloud agent's picture shows only from a file it attached when it sent the message." };
+
+/** The picture a message's capture at send recorded for `src` (by the src as written), read from its blob; else a refusal. */
+async function capturedPicture(inboxDirPath: string, images: readonly InboxInlineImage[] | undefined, src: string | null): Promise<InboxMessageImageResult> {
+  const image = src ? images?.find((candidate) => candidate.ref === src) : undefined;
+  if (!image) return NOT_ATTACHED;
+  const read = await readInboxPictureAsync(inboxBlobPath(inboxDirPath, image.sent_sha256), () => false);
+  return read.ok ? { ...read, named: image.name } : read;
 }
 
 /** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
@@ -207,7 +223,8 @@ export function createInboxImageCapture(
 
   const captureThread = async (threadId: string, budget: { bytes: number }) => {
     const version = store.threadVersion(threadId);
-    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder));
+    // A cloud agent's message is never captured later: its pictures came with it, at send, or not at all.
+    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder)).filter(({ message }) => !isInboxCloudAuthor(message.author));
     if (gaps.length === 0) {
       settled.delete(threadId);
       settled.set(threadId, version);
@@ -224,7 +241,7 @@ export function createInboxImageCapture(
         const project = store.project(message.project_id);
         if (!project) continue;
         const latest = store.message(message.id);
-        if (!latest || stopped) continue;
+        if (!latest || stopped || isInboxCloudAuthor(latest.author)) continue;
         const captured = await captureInboxInlineImages(store.dir, {
           body: latest.body,
           root: project.root,

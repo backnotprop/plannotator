@@ -4,7 +4,9 @@
  * server: the door's own handler, a stub device and pairing. The failures these guard: a picture in the body refused
  * (or read from the person's disk), a card call aimed at the agent's own place instead of the card's project, a
  * repository's git address not finding its project (or making a new one), a routine refused, a walkthrough refused
- * or read from nowhere.
+ * or read from nowhere; a picture named anywhere in what it writes (a guide's intent in place of a body) read from the
+ * person's disk, or shown in the window from the project's file of the same name instead of the bytes it attached; a
+ * place on the person's computer handed back in a result.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -14,10 +16,16 @@ import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { INBOX_CARD_ACTION_ON, type InboxProject } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentDoor } from "./inbox-agent-door";
+import { inboxMessageImageRoute } from "./inbox-message-images";
 import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
 import type { InboxMcpContext } from "./inbox-mcp";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+const GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+const PATCH = "diff --git a/src/pay.ts b/src/pay.ts\n--- a/src/pay.ts\n+++ b/src/pay.ts\n@@ -1,2 +1,2 @@\n-export const pay = 0;\n+export const pay = 1;\n export const refund = 2;\n";
+const guideWith = (intent: string) => ({ title: "Pay", intent, sections: [{ title: "Pay", overview: "The constant.", diffs: [{ file: "src/pay.ts", summary: "Pay is one." }] }] });
+/** Every key at any depth of a result. */
+const keysOf = (value: unknown): string[] => (Array.isArray(value) ? value.flatMap(keysOf) : value && typeof value === "object" ? Object.entries(value).flatMap(([key, inner]) => [key, ...keysOf(inner)]) : []);
 const TOKEN = `tok_${"A".repeat(43)}`;
 type Result = { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, any> };
 
@@ -86,6 +94,50 @@ describe("pictures in a cloud agent's message", () => {
     expect(w.error(notPicture)).toStartWith("image_not_shown:");
     expect(w.store.listProjects().length).toBe(before);
     expect(w.store.listRows().length).toBe(0);
+  });
+});
+
+describe("a picture named anywhere in what a cloud agent writes", () => {
+  test("submit_guide with no body: a picture of the person's disk in the guide's intent (its body then) is refused and nothing is written", async () => {
+    const w = world();
+    const disk = join(w.ledger.root, "secret.png");
+    for (const intent of [`How pay works. ![scan](${disk})`, `How pay works. <img src="${disk}">`, "How pay works. ![scan](secret.png)"]) {
+      const refused = await w.call("submit_guide", { project: "ledger", guide: guideWith(intent), patch: PATCH });
+      expect(w.error(refused)).toStartWith("image_path_refused:");
+    }
+    expect(w.store.listRows().length).toBe(0);
+    const sent = await w.call("submit_guide", { project: "ledger", guide: guideWith("How pay works."), patch: PATCH });
+    expect(w.error(sent)).toBeNull();
+    expect(w.store.message(sent.structuredContent!.message_id as string)!).toMatchObject({ body: "How pay works." });
+  });
+
+  test("the window shows a cloud agent's picture from the bytes it attached, never the project's file of the same name", async () => {
+    const w = world();
+    const sent = await w.call("send_message", { project: "ledger", body: "![it](secret.png)", attachments: [{ name: "secret.png", data: GIF.toString("base64") }] });
+    expect(w.error(sent)).toBeNull();
+    const id = sent.structuredContent!.message_id as string;
+    const url = new URL(`http://127.0.0.1/api/inbox/messages/${id}/image?path=secret.png`);
+    const answer = (await inboxMessageImageRoute(new Request(url), url, w.store))!;
+    expect([answer.status, answer.headers.get("content-type")]).toEqual([200, "image/gif"]);
+    expect(Buffer.from(await answer.arrayBuffer())).toEqual(GIF);
+  });
+});
+
+describe("what a cloud agent is handed back", () => {
+  test("no file path or project folder on this computer in a send's result or a full read; names and ids stay", async () => {
+    const w = world();
+    const sent = await w.call("send_message", { project: "ledger", body: "Notes: ![c](chart.png)", attachments: [{ name: "chart.png", data: PNG.toString("base64") }, { name: "notes.md", data: Buffer.from("# n\n").toString("base64") }] });
+    expect(w.error(sent)).toBeNull();
+    const full = await w.call("read_thread", { thread_id: sent.structuredContent!.thread_id, format: "full" });
+    const windowed = await w.call("read_thread", { thread_id: sent.structuredContent!.thread_id });
+    for (const result of [sent, full, windowed]) {
+      const keys = keysOf(result.structuredContent);
+      for (const local of ["path", "named_path", "base_path", "root"]) expect(keys).not.toContain(local);
+      expect(JSON.stringify(result.structuredContent)).not.toContain(w.root);
+    }
+    expect(windowed.content[0]!.text).not.toContain(w.ledger.root);
+    expect(full.structuredContent!.thread.messages[0].attachments.map((a: { name: string }) => a.name)).toEqual(["notes.md"]);
+    expect(full.structuredContent!.thread.messages[0].inline_images.map((a: { name: string }) => a.name)).toEqual(["chart.png"]);
   });
 });
 

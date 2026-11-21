@@ -5,8 +5,9 @@
  * send, by that file's name (`![shot](shot.png)` with `{ "name": "shot.png", … }`), as a question's prototype names an
  * attached HTML page. That file shows in the body where it is written, not again below the message.
  *
- * - The agent door matches them (`matchAgentBodyPictures`, packages/server/inbox-agent-door.ts) by name only: nothing
- *   here or there reads a path, and a src that names no attached file refuses the send.
+ * - A cloud agent's send matches them (`matchAgentBodyPictures`, from `sendAgentMessage` in packages/server/inbox-mcp.ts,
+ *   on the body actually sent: its own, or a guide's intent in its place) by name only: nothing reads a path, and a src
+ *   that names no attached file refuses the send.
  * - `plannotator inbox call` with a pairing (`planAgentBodyPictures`, apps/hook/server/inbox-call-command.ts) lets the
  *   agent write the same `![alt](path)` a local agent writes: each picture's file on the agent's own disk is sent with
  *   the message, and the src renamed to that file's name where the name alone would not find it.
@@ -36,8 +37,8 @@ function namesOf(src: string): Set<string> {
  * The pictures `body` shows (outside code, each once, in text order), each with the one file of `attached` it names
  * (`pictures`), and the srcs that name none, or more than one (`unmatched`).
  */
-export function matchAgentBodyPictures(body: string, attached: readonly AgentAttachedFile[]): { pictures: Map<string, AgentAttachedFile>; unmatched: string[] } {
-  const pictures = new Map<string, AgentAttachedFile>();
+export function matchAgentBodyPictures<File extends AgentAttachedFile>(body: string, attached: readonly File[]): { pictures: Map<string, File>; unmatched: string[] } {
+  const pictures = new Map<string, File>();
   const unmatched: string[] = [];
   for (const src of inboxMessageImageRefsInOrder(body)) {
     const names = namesOf(src);

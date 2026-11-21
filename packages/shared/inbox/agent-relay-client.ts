@@ -8,7 +8,10 @@ const POLL_MS = 300;
 const REQUEST_MS = 10_000;
 const BYTES_PER_EXTRA_SECOND = 256 * 1024;
 
-export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps"];
+export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps", "routine"];
+
+/** The `routine` ops that only read; every other op (create, update, on, off, run, delete, or one the Inbox refuses) writes. */
+const ROUTINE_READ_OPS: readonly unknown[] = ["list", "get"];
 
 /** A field the call sets: anything but absent or an empty list (a malformed value is the Inbox's to refuse, so it counts). */
 const listed = (value: unknown): boolean => value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0);
@@ -16,11 +19,14 @@ const listed = (value: unknown): boolean => value !== undefined && value !== nul
 /**
  * Whether a call changes something, by what it does rather than its tool's name: a write waits at the relay while the
  * person's computer sleeps (applied once when it is back), a read answers at once that it is asleep. `card` with op
- * list and `thread_pulls` with nothing to add or remove only read, so their result reaches the agent.
+ * list, `routine` with op list or get, and `thread_pulls` with nothing to add or remove only read, so their result
+ * reaches the agent. A write that is not answered in time is said to be queued, never to be sent again: a routine run
+ * or create classed as a read would be applied late and doubled by the agent's retry.
  */
 export function isInboxAgentWrite(tool: string, args: Record<string, unknown>): boolean {
   if (!INBOX_AGENT_WRITE_ACTIONS.includes(tool)) return false;
   if (tool === "card") return args.op !== "list";
+  if (tool === "routine") return !ROUTINE_READ_OPS.includes(args.op);
   if (tool === "thread_pulls") return listed(args.add) || listed(args.remove);
   return true;
 }

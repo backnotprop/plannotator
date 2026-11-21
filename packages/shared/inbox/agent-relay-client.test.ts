@@ -2,7 +2,8 @@
  * A paired cloud agent's call through the relay (agent-relay-client.ts) while the person's computer is asleep: a call
  * that changes something waits at the relay, a read says at once that the computer is asleep. The failure this guards:
  * a read classed as a write by its tool's name (card list, a thread_pulls listing), so the agent gets "queued" and
- * never sees the result it asked for.
+ * never sees the result it asked for; a routine change classed as a read, so one not answered in time is applied later
+ * and the agent's retry makes or runs it twice.
  */
 import { describe, expect, test } from "bun:test";
 import { callInboxThroughRelay, isInboxAgentWrite } from "./agent-relay-client";
@@ -40,6 +41,19 @@ describe("a call while the person's computer is asleep", () => {
     expect(isInboxAgentWrite("send_message", { body: "Hi" })).toBe(true);
     expect(isInboxAgentWrite("read_thread", {})).toBe(false);
     expect(isInboxAgentWrite("search", { query: "x" })).toBe(false);
+  });
+
+  test("a routine's create, update, on, off, run and delete are writes; its list and get are reads", () => {
+    for (const op of ["create", "update", "on", "off", "run", "delete", undefined, "nonsense"]) expect([op, isInboxAgentWrite("routine", { op, id: "sch_1" })]).toEqual([op, true]);
+    for (const op of ["list", "get"]) expect([op, isInboxAgentWrite("routine", { op, id: "sch_1" })]).toEqual([op, false]);
+  });
+
+  test("a routine run waits at the relay while the computer is asleep; a routine list says it is asleep", async () => {
+    const run = asleepRelay();
+    expect([(await callInboxThroughRelay(pairing, "routine", { op: "run", id: "sch_1" }, { fetch: run.fetch })).kind, run.posted.length]).toEqual(["queued", 1]);
+    const list = asleepRelay();
+    const listed = await callInboxThroughRelay(pairing, "routine", { op: "list" }, { fetch: list.fetch });
+    expect([listed.kind, listed.kind === "refused" ? listed.code : null, list.posted.length]).toEqual(["refused", "computer_asleep", 0]);
   });
 
   test("card list and a thread_pulls listing say the computer is asleep and leave nothing waiting; a card move waits at the relay", async () => {

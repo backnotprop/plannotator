@@ -6,7 +6,9 @@
  * the store read back from disk after a restart keeps every routine and never runs one twice; a skip line is
  * delivered to no session, so it never wakes or restarts a run; a sleep is one late run or one skip line, never a pile
  * of runs; two starts at once are one run; an agent can neither turn one on first nor run it before the person did,
- * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off.
+ * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off; a paired
+ * cloud agent's change to what an approved routine does turns it off (`CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL`), its line
+ * in the routine's own thread; a routine's name never shows as a picture, a tag or a link in a change line.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -16,7 +18,9 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
-import { createInboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
+import { CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL, cloudRoutineChange, createInboxScheduled, routineLineText, type InboxScheduledBy } from "./inbox-scheduled";
+import { createInboxImageCapture } from "./inbox-message-images";
+import { inboxMessageImageRefs, inboxMessageImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
 const NY = "America/New_York";
@@ -39,7 +43,7 @@ async function until(check: () => boolean) {
   expect(check()).toBe(true);
 }
 
-function world(start = "2026-11-16T13:59:00.000Z", startIn: "rex" | null = null) {
+function world(start = "2026-11-16T13:59:00.000Z", startIn: "rex" | null = null, options: { cloudPromptChangeNeedsApproval?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-scheduled-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -95,6 +99,7 @@ function world(start = "2026-11-16T13:59:00.000Z", startIn: "rex" | null = null)
       recordAttachments: async () => [],
       displayFolder: (path) => path,
       now: () => clock.now,
+      ...options,
     });
     restore.push(() => scheduled.stop());
     return { launch: made, scheduled };
@@ -688,5 +693,81 @@ describe("the folder", () => {
     expect(message.scheduled_run!.failed).toMatch(/gone isn't there\. Pick another folder\.$/);
     expect(message.thread_id).toBe(message.id);
     expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!)).toMatchObject({ thread_id: message.id, last_run: { outcome: "didnt_start" } });
+  });
+});
+
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+
+describe("a paired cloud agent's change to a routine the person turned on", () => {
+  const cloud = (thread_id: string | null = null): InboxScheduledBy => ({ kind: "agent", host: "cloud-claude", session: "cloud.0123456789ab", name: "Nightly fixer", thread_id });
+  const local = (thread_id: string | null = null): InboxScheduledBy => ({ kind: "agent", host: FAKE, session: "s-maya", name: "Fake Agent", thread_id });
+
+  test("the switch's value now, and what it decides for each agent and field", () => {
+    expect(CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL).toBe(true);
+    for (const field of ["prompt", "schedule", "model", "effort"]) expect(cloudRoutineChange(cloud(), [field], true)).toEqual({ turnsOff: true, ownThread: true });
+    expect(cloudRoutineChange(cloud(), ["name"], true)).toEqual({ turnsOff: false, ownThread: true });
+    expect(cloudRoutineChange(local(), ["prompt"], true)).toEqual({ turnsOff: false, ownThread: false });
+    expect(cloudRoutineChange({ kind: "person" }, ["prompt"], true)).toEqual({ turnsOff: false, ownThread: false });
+    expect(cloudRoutineChange(cloud(), ["prompt"], false)).toEqual({ turnsOff: false, ownThread: false });
+  });
+
+  test("on (the default): a prompt, schedule, model or effort change turns it off, so it cannot be run, and its line is in the routine's own thread, not the one named", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const elsewhere = w.store.sendMessage({ project_id: w.project.id, author: { kind: "person" }, body: "Unrelated.", subject: "Unrelated" }).message;
+    for (const change of [{ prompt: "Triage, then close them all." }, { schedule: { cron: "0 10 * * *", tz: NY } }, { model: "big-model" }, { effort: "high" }]) {
+      await w.scheduled.setOn(record.id, true, { kind: "person" });
+      const { record: after, told } = await w.scheduled.update(record.id, change, cloud(elsewhere.thread_id));
+      expect(after).toMatchObject({ enabled: false, approved_at: null });
+      await expect(w.scheduled.runNow(record.id, cloud())).rejects.toMatchObject({ code: "routine_not_approved" });
+      await expect(w.scheduled.setOn(record.id, true, cloud())).rejects.toMatchObject({ code: "routine_not_approved" });
+      expect(w.store.message(told!)!.thread_id).toBe(w.store.scheduledThread(record.id)!.thread_id!);
+      expect(w.store.message(told!)!.body).toContain("It is off until you turn it on again.");
+    }
+    expect(w.store.threadMessageIds(elsewhere.thread_id)).toEqual([elsewhere.id]);
+    // An agent here is unchanged: its prompt edit stays on, said where it asked.
+    await w.scheduled.setOn(record.id, true, { kind: "person" });
+    const { record: kept, told } = await w.scheduled.update(record.id, { prompt: "Triage." }, local(elsewhere.thread_id));
+    expect(kept).toMatchObject({ enabled: true, prompt: "Triage." });
+    expect(w.store.message(told!)!.thread_id).toBe(elsewhere.thread_id);
+  });
+
+  test("off: a cloud agent's prompt edit applies at once, leaves it on, and is said where it asked", async () => {
+    const w = world(undefined, null, { cloudPromptChangeNeedsApproval: false });
+    const { record } = await w.make();
+    const elsewhere = w.store.sendMessage({ project_id: w.project.id, author: { kind: "person" }, body: "Unrelated.", subject: "Unrelated" }).message;
+    const { record: after, told } = await w.scheduled.update(record.id, { prompt: "Triage, then label." }, cloud(elsewhere.thread_id));
+    expect(after).toMatchObject({ enabled: true, prompt: "Triage, then label." });
+    expect(w.store.message(told!)!.thread_id).toBe(elsewhere.thread_id);
+    const { message } = await w.scheduled.runNow(record.id, cloud());
+    expect(message.scheduled_run).toMatchObject({ run: 1, by: "agent" });
+  });
+});
+
+describe("a routine's name in a change line", () => {
+  test("a name that writes a picture, a tag or a link shows as its words: nothing in the line is a picture, and nothing is read from disk for it", async () => {
+    const w = world();
+    // In the project's folder, where an agent's line would find it.
+    writeFileSync(join(w.project.root, "scan.png"), PNG);
+    const name = "Scan ![x](scan.png) <img src=scan.png> https://e.co @maya";
+    for (const by of [
+      { kind: "agent" as const, host: "cloud-claude", session: "cloud.0123456789ab", name: "Nightly fixer", thread_id: null },
+      { kind: "agent" as const, host: FAKE, session: "s-maya", name: "Fake Agent", thread_id: null },
+    ]) {
+      const { record, told: made } = await w.scheduled.create({ name, prompt: "Triage.", schedule: null, folder: { project_id: w.project.id }, agent: FAKE }, by);
+      const { told: renamed } = await w.scheduled.update(record.id, { name: "Plain" }, by);
+      const { told: deleted } = await w.scheduled.remove(record.id, by);
+      const capture = createInboxImageCapture(w.store, { pauseMs: 0 });
+      for (const id of [made, renamed, deleted]) {
+        const line = w.store.message(id!)!;
+        expect([inboxMessageImageRefsInOrder(line.body), [...inboxMessageImageRefs(line.body)]]).toEqual([[], []]);
+        expect(line.body).not.toMatch(/<img|!\[|https:\/\//);
+        capture.schedule(line.thread_id);
+      }
+      await capture.idle();
+      capture.stop();
+      for (const id of [made, renamed, deleted]) expect(w.store.message(id!)!.inline_images ?? []).toEqual([]);
+    }
+    expect(routineLineText("a ![b](c.png) <d> e&f")).toBe("a \\!\\[b\\]\\(c\\.png\\) &#60;d&#62; e&#38;f");
   });
 });
