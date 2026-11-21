@@ -39,22 +39,20 @@ describe("computePlanDiff — block-level behavior", () => {
   });
 
   test("line endings alone are no change, and do not mask a real one", () => {
-    // A plan read from disk on Windows keeps CRLF; the editor hands back LF.
-    // Compared raw, diffLines sees every line replaced: the whole plan shows
-    // as a delete-all/add-all, and a real edit inside it hides in that noise.
     const lf = "# Plan\n\nStep one.\n\nStep two.\n";
     const crlf = lf.replace(/\n/g, "\r\n");
+    const cr = lf.replace(/\n/g, "\r");
 
     for (const [oldText, newText] of [
       [crlf, lf],
       [lf, crlf],
+      [cr, lf],
     ] as const) {
       const { blocks, stats } = computePlanDiff(oldText, newText);
       expect(stats).toEqual({ additions: 0, deletions: 0, modifications: 0 });
       expect(blocks.map((b) => b.type)).toEqual(["unchanged"]);
     }
 
-    // The reworded line still shows as one one-line modification.
     const edited = computePlanDiff(crlf, lf.replace("Step two.", "Step 2."));
     expect(edited.stats).toEqual({ additions: 1, deletions: 1, modifications: 1 });
     const mods = edited.blocks.filter((b) => b.type === "modified");

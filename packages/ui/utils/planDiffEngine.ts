@@ -14,13 +14,6 @@ import { diffLines, diffWordsWithSpace, type Change } from "diff";
 import { parseMarkdownToBlocks } from "./parser";
 import type { Block } from "../types";
 
-/**
- * Text compared as a person reads it: `\r\n` and a lone `\r` read as `\n`,
- * because a plan read from disk keeps its line endings while the editor hands
- * back `\n`. Kept local rather than imported from `@plannotator/core/plans`:
- * this engine runs with Plans off, and reaching Plans' modules from here
- * violates the capability boundary `plans-capability.test.ts` enforces.
- */
 const normalizeLineEndings = (text: string): string => text.replace(/\r\n?/g, "\n");
 
 export interface InlineDiffToken {
@@ -628,9 +621,6 @@ export function computePlanDiff(
   oldText: string,
   newText: string
 ): { blocks: PlanDiffBlock[]; stats: PlanDiffStats } {
-  // A plan read from disk keeps whatever line endings it was written with, and
-  // the editor gives back `\n`; left alone, a plan whose only change is CRLF
-  // vs LF diffs as a whole-file replace. Compare as a person reads it.
   const oldLines = normalizeLineEndings(oldText);
   const newLines = normalizeLineEndings(newText);
 
