@@ -222,7 +222,7 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     }
     const answer = await answerOf(own);
     const online = machines.online();
-    if (project || answer.indexing || online.length === 0) return json(answer);
+    if (project || own.searchParams.has("tag") || answer.indexing || online.length === 0) return json(answer);
 
     if (answer.recent) {
       const shares = await Promise.all(online.map(async (machine) => ({ machine, share: await ask(machine, paramsWith({})) })));
