@@ -3,9 +3,12 @@
  *
  * ONE switch, `DIAGRAM_ENGINE_MODE`, decides for every fence. It is
  * `'mermaid'`, so every fence is drawn by Mermaid exactly as before Pele was
- * added (the Mermaid path in `diagram-render.ts` is untouched and nothing
- * imports Pele). The other modes exist so adopting Pele is a small change
- * here, not a rewrite:
+ * added, and no build carries any of Pele: `PELE_IN_BUILD` (`pele.ts`) is
+ * derived from this switch, and its one import of `pele/lazy` and the
+ * engine switch in `diagram-render.ts` sit behind it, so the bundler drops
+ * them (`tests/entry-assets.test.ts` reads the built files). Changing this
+ * constant is the one change that turns Pele on (`PELE.md`, "Turning Pele
+ * on"). The other modes:
  *   - `'pele-where-safe'`: Pele draws a fence unless doing so would lose
  *     something Plannotator offers under Mermaid (`diagramEngineFor` below);
  *     then Mermaid draws it, quietly. A fence Pele cannot draw at render time

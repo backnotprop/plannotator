@@ -1,10 +1,10 @@
 # Pele: a second engine for Mermaid fences (not on)
 
-[Pele](https://pele.run) (MIT, pinned 1.3.0) draws Mermaid syntax without Mermaid. It is in the package but **draws nothing today**: every Mermaid fence is drawn by Mermaid, as before. There is no setting and nothing a person can see.
+[Pele](https://pele.run) (MIT, pinned 1.3.0) draws Mermaid syntax without Mermaid. It is in the package but **draws nothing today and is in no build**: every Mermaid fence is drawn by Mermaid, as before, and no built file carries any of Pele's code. There is no setting and nothing a person can see.
 
 One constant decides: `DIAGRAM_ENGINE_MODE` in `utils/diagram-engine.ts`.
 
-- `'mermaid'` (shipped): Mermaid draws every fence; Pele is never imported.
+- `'mermaid'` (shipped): Mermaid draws every fence; Pele is in no build (below).
 - `'pele-where-safe'`: Pele draws a fence unless `diagramEngineFor` keeps it on Mermaid: the fence has a `$$` math label, or it is a type where Plannotator offers comments on single parts under Mermaid and not under Pele (none today: `PELE_CAPABILITIES` gives Pele part comments on every type Mermaid has them). A fence Pele cannot draw (its type is unsupported, or it throws) is drawn by Mermaid.
 - `'pele'`: Pele draws every fence; its errors are shown.
 
@@ -23,3 +23,19 @@ Two relations with the same ends (`User --> Order` twice) restore by their label
 Colours: `utils/peleTheme.ts` hands Pele the colours the Mermaid mapping already guards (`buildMermaidThemeVariables`) and re-fits the few pairs Pele draws differently; `utils/peleTheme.test.ts` checks every pair in every palette and mode. Labels wrap at `MERMAID_LABEL_WRAP_WIDTH` and use the app's fonts.
 
 Loading: through `pele/lazy`, so Pele's core and each diagram type are their own chunks, fetched on the first fence Pele draws.
+
+## Out of every build while the switch is `'mermaid'`
+
+`utils/pele.ts` is the only file that imports Pele's library (`tests/entry-assets.test.ts` checks every source file), and its `import('pele/lazy')` is behind `PELE_IN_BUILD`, a constant derived from `DIAGRAM_ENGINE_MODE`. The engine switch in `utils/diagram-render.ts` (the Pele renderer, the Pele finders, `peleTheme`) is behind the same constant. Rollup folds it, so a shipped build drops all of it, and the builds that inline every dynamic import (the Inbox surface, the Shape page, code review's diagram engine) have nothing of Pele to inline. A new build config needs nothing for this. What is left is two selector strings Plannotator's own Mermaid finder reads (`pele-edge`, the `pele` root class), about 250 bytes.
+
+The guards read the artifacts: `tests/entry-assets.test.ts` checks every built page and `diagram-engine/engine.js` for class names only Pele's svg writer prints (CI's build job runs it right after the build), and `apps/review/diagram-engine/build.ts`'s `guardBundle` fails the build when a Pele module is rendered into `engine.js`. Tests draw with Pele through `test-setup/pele.ts` (`setPeleInBuildForTests`), which puts the library and the engine switch back the way a build with Pele in it has them.
+
+## Turning Pele on
+
+The one change: set `DIAGRAM_ENGINE_MODE` in `utils/diagram-engine.ts` to `'pele-where-safe'` (or `'pele'`). `PELE_IN_BUILD` follows it; no build config, alias or guard needs an edit (the artifact checks above skip, and the Inbox window's check then requires Pele to be lazy). What it brings back, measured with Pele 1.3.0 on 2026-11-21:
+
+- **Packed apps** (plan review `index.html`, which OpenCode and Pi copy; the Inbox window `inbox.html`): Pele's core and diagram types are lazy chunks in the pack, about +684 KB in all (24.39 MB to 25.08 MB), none loaded up front; a page fetches the core and one type's chunk on the first fence Pele draws.
+- **The Inbox surface** (`surface.html`, the phone's single-file page): it inlines every dynamic import, so all of Pele is in the page, about +690 KB (20.42 MB to 21.11 MB). An inlined module is parsed and run when the page starts, so this is load-time work too, not only bytes.
+- **Code review's diagram engine** (`diagram-engine/engine.js`): it also inlines, about 240 KB to 913 KB. The review page itself carries none of it: it imports `engine.js` only when a Markdown preview or a guide overview holds a diagram fence. `guardBundle` allows Pele once the switch is on. To keep Pele out of `engine.js` too, serve it as a fourth runtime file the way `mermaid.js` is served.
+- The Shape page draws no diagrams and does not change.
+- The VS Code extension's Guide reader and the guides-show viewer are their own Vite builds: the same constant keeps Pele out of them while the switch is `'mermaid'`; what they gain when it is on was not measured.
