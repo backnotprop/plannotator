@@ -6,6 +6,7 @@ import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
 import { readAsk } from './askReads';
 import { askUnseen } from './askModel';
+import { useKeptState } from '../data/keptState';
 import { sideQuote } from './askWords';
 import { sideButtonFor, type SideButton } from './sideButton';
 import { SideChatCorner, takeSideFlight, type SideFlight } from './SideChatCorner';
@@ -120,7 +121,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     if (at instanceof HTMLElement && at !== document.body && !at.closest('[data-side-corner], [data-chat-window]')) opener.current = at;
   };
 
-  const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
+  const [read, keepRead, setRead] = useKeptState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   /** SideChatCorner draws the circle (not hidden for want of a pane to cut, or for something else's corner). */
@@ -146,7 +147,9 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     const seq = ++readSeq.current;
     readAsk(reading).then(
       (model) => {
-        if (seq === readSeq.current) setRead({ threadId: reading, model });
+        // The same answer keeps the held one: a `deliveries` frame (about once a second while agents work) reads
+        // every thread's Ask, and a new object each time drew the whole window again for nothing.
+        if (seq === readSeq.current) keepRead({ threadId: reading, model });
       },
       () => {
         // Nothing to show for this thread; the next event reads again.
