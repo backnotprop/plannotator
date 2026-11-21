@@ -428,6 +428,7 @@ import {
   type InboxNoteAgentId,
   type InboxStepsWire,
 } from "@plannotator/core/inbox-types";
+import { createInboxSessionLabels } from "./inbox-session-labels";
 
 /**
  * The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex,
@@ -1362,6 +1363,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const withIcons = { ...wire, icons: agentIconFiles.list() };
     for (const listener of agentFaceListeners) listener(withIcons);
   });
+  const sessionLabelStore = createInboxSessionLabels(inboxDir(dataDir));
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: lets the save of a held switch (Shape, heldSwitch) reach the windows. */
@@ -4852,6 +4854,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           .filter((agent) => agent.session === session)
           .map((agent) => agent.launch_id),
       ]),
+    onLabel: (session, label, title) => sessionLabelStore.note(session, label, title),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -6078,8 +6081,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const snoozedMode = snoozedModeOf(url);
         // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
-        const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
-        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
+        const liveNow = new Set(live.allLive().map((s) => s.session));
+        const remembered = (all: Record<string, string>) => {
+          const out: Record<string, string> = {};
+          for (const [session, text] of Object.entries(all)) if (!liveNow.has(session)) out[session] = text;
+          return out;
+        };
+        const labels = { ...remembered(sessionLabelStore.labels()), ...(merged ? machines.sessionNames().labels : {}), ...live.labels() };
+        const titles = { ...remembered(sessionLabelStore.titles()), ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
         const door = fromDeviceDoor.get(req);
