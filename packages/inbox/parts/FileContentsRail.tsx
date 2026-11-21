@@ -14,7 +14,7 @@ type Props = Omit<MarkdownContentsRailProps, 'minHeadings' | 'contentSelector' |
  * gutter, the panel opening left over the page. Loaded once the page is interactive; it measures itself and yields
  * where the gutter is short, then says so and the Contents button takes over. Hidden by choice, it still measures.
  * Given `annotations` and `onSelectAnnotation`, the file's comments show as dots beside the ticks; a dot selects its
- * comment as the comments panel does. Settings' "Comment dots" off (data/contentsDots.ts), the rail gets neither and
+ * comment as the comments panel does. Settings' "Annotation minimap" off (data/contentsDots.ts), the rail gets neither and
  * draws no dots; its ticks and panel stay. A Markdown plan on the Plans page (plans/PlanAnnotate.tsx, through AttachmentPane) and a plan's other pages (plans/PlanDocument.tsx) mount it too.
  */
 export function FileContentsRail({ onHide, annotations, onSelectAnnotation, ...rail }: Props) {

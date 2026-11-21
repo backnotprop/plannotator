@@ -1,5 +1,5 @@
 /**
- * Settings' "Comment dots" (data/contentsDots.ts, parts/ContentsDotsRow.tsx): on by default, the Inbox's contents rail
+ * Settings' "Annotation minimap" (data/contentsDots.ts, parts/ContentsDotsRow.tsx): on by default, the Inbox's contents rail
  * (parts/FileContentsRail.tsx, which a file beside a thread and a plan's page both mount) draws a file's comments as
  * dots beside its ticks; off, no dot, and the ticks stay. Settings' switch and a rail on screen agree at once, and
  * the choice is kept.

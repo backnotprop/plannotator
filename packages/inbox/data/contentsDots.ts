@@ -1,5 +1,5 @@
 /**
- * "Comment dots" (Settings → General → Appearance; on by default): whether a document's contents rail draws its
+ * "Annotation minimap" (Settings → General → Appearance; on by default): whether a document's contents rail draws its
  * comments as dots beside the heading ticks and at the end of the open panel's rows (ui's `MarkdownContentsRail`
  * marks). Off, the rail is drawn exactly as without marks: its ticks and its panel stay. Read by every rail the Inbox
  * mounts (parts/FileContentsRail.tsx: a file beside a thread or full screen, a Markdown plan on the Plans page, and a plan's other pages).
@@ -14,7 +14,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 export const CONTENTS_DOTS_COOKIE = 'plannotator-inbox-contents-dots';
 
 /** The switch's words (Settings' row). */
-export const CONTENTS_DOTS_LABEL = 'Comment dots';
+export const CONTENTS_DOTS_LABEL = 'Annotation minimap';
 export const CONTENTS_DOTS_DESC = 'Each comment as a dot beside its heading on the contents rail.';
 
 const listeners = new Set<() => void>();
