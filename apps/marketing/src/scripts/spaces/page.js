@@ -69,11 +69,6 @@
     tags.forEach(function(l,i){var b=l.getBoundingClientRect(),t="translate("+(twas[i].left-b.left)/z+"px,"+(twas[i].top-b.top)/z+"px)";l.animate([{transform:t,opacity:1},{transform:t,opacity:0}],{duration:200,easing:"ease"})});
   }
   addEventListener("scroll",on,{passive:true});on();
-  var track=document.querySelector(".pf-track");
-  if(track){
-    track.addEventListener("pointerdown",function(){track.classList.add("pf-held")});
-    ["pointerup","pointercancel","pointerleave"].forEach(function(t){track.addEventListener(t,function(){track.classList.remove("pf-held")})});
-  }
 })();
 (function(){
   if(!("IntersectionObserver" in window)||matchMedia("(prefers-reduced-motion: reduce)").matches)return;
@@ -108,3 +103,4 @@
   [].slice.call(document.querySelectorAll(".pg .gm")).forEach(function(s){io.observe(s)});
   document.addEventListener("animationend",function(e){if(e.animationName==="wg-reveal-u"){var s=e.target.closest(".gm");if(s)s.classList.add("done")}});
 })();
+(function(){var t=document.querySelector(".pf-track");if(!t)return;document.addEventListener("pointerdown",function(e){if(e.pointerType==="mouse")return;t.classList.toggle("hold",t.contains(e.target))},{passive:true})})();
