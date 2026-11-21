@@ -169,7 +169,7 @@ const FORGEJO_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
  * `/<owner>/<repo>/attachments/<uuid>`. The editor writes these as relative
  * links, so they carry no file extension of their own.
  */
-function isKnownForgejoAssetUrl(
+export function isKnownForgejoAssetUrl(
   url: URL,
   metadata: Extract<PRMetadata, { platform: 'forgejo' }>,
 ): boolean {
