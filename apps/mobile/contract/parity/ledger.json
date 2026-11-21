@@ -21407,6 +21407,48 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxmessagewire-moved-to",
+      "title": "field:InboxMessageWire.moved_to",
+      "surface": [
+        "field:InboxMessageWire.moved_to"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-subject",
+      "title": "field:InboxMovedTo.subject",
+      "surface": [
+        "field:InboxMovedTo.subject"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-thread-id",
+      "title": "field:InboxMovedTo.thread_id",
+      "surface": [
+        "field:InboxMovedTo.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

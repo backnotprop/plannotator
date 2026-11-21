@@ -511,6 +511,12 @@ export interface InboxReplyViewing {
   as_sent?: true;
 }
 
+/** Where an archived thread's questions went (`InboxMessage.moved_to`): the thread and its subject when they moved. */
+export interface InboxMovedTo {
+  thread_id: string;
+  subject: string | null;
+}
+
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
@@ -525,6 +531,12 @@ export interface InboxMessage {
   created_at: string;
   /** On a thread's root: when the thread was resolved, or null while open. */
   resolved_at: string | null;
+  /**
+   * On a resolved root: the thread an agent moved this thread's questions to when it archived it
+   * (resolve_message's `moved_to`), with that thread's subject as it was then. The window's archived foot
+   * links to it. Dropped by Unarchive. Absent otherwise and on older records. Additive.
+   */
+  moved_to?: InboxMovedTo | null;
   /** The sender's idempotency key, when one was given. */
   idempotency_key: string | null;
   /**
@@ -3280,9 +3292,16 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
  */
 /* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
-const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
+/*
+ * Closing out threads whose questions moved (resolve_message's `moved_to` and its filled `agent_session`,
+ * INBOX_MOVED_TO_RULE on `supersedes`, 4 characters on the resolve_message line, which makes the description 1,948):
+ * +525 bytes on the entry as the tool builds it from the default tool list (14,696 → 15,221), Board on the same +525.
+ * Estimated, not measured on Pi; added here so the skip sentence's 162 and this stay inside the 5%. Tokens scaled at
+ * the entry's bytes per token (3.7), +142.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 15047, tokens: 4048 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16976, tokens: 4634 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

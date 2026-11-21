@@ -504,7 +504,7 @@ export const INBOX_SEARCH_FIRST_RULE = 'Search before you say something was neve
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   send_message: "Message the person (markdown); with no reply_to or thread, it starts a new thread.",
-  resolve_message: "Archive a message's thread, only when nothing in it is left for the person to read or answer.",
+  resolve_message: "Archive a thread once nothing in it is left to read or answer, or its questions moved (moved_to).",
   // What a read shows lives on `thread_id` (a field description does not count toward the 2,048).
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
   search: 'Find messages by words, older ones too (read-only).',
@@ -529,6 +529,20 @@ export const INBOX_REREAD_RULE = 'Reread the body once before you send; check ea
  * 2,048-character cut would drop its `- [x]` rule; --help and llms.txt carry it after the guide.
  */
 export const INBOX_ASK_RECOGNISE_RULE = 'Ask only about things the person would recognise from using the product; decide the rest and say so in one line.'
+
+/**
+ * Closing out threads whose questions moved (the owner, 2026-11-20: "if it combines any previous threads, then it
+ * should like close out the previous threads on its own"; DRAFT words, awaiting the owner's OK): an agent that
+ * gathers questions from other threads into one archives each old thread with resolve_message's `moved_to`, which
+ * writes nothing in it, instead of a withdrawal message that makes every old thread "New since you looked". On
+ * every copy of send_message's `supersedes`, and in --help.
+ */
+export const INBOX_MOVED_TO_RULE =
+  'When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it.'
+
+/** resolve_message's `moved_to` (DRAFT words, with INBOX_MOVED_TO_RULE): the MCP field, so every host's copy, and --help. */
+export const INBOX_MOVED_TO_FIELD_DESCRIPTION =
+  "After you moved this thread's open questions into another thread (one that gathers several): that thread's id, or a message id in it, an open thread of this project that you wrote in. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new."
 
 /** The end of every copy of send_message's `thread` field (approved 2026-11-15): INBOX_THREAD_RULE says when, this says how. */
 export const INBOX_THREAD_NEW_ISSUE_RULE =
@@ -649,7 +663,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: `A short thread name, one line: the same name in this project is the same open thread, across sessions. With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once. ${INBOX_THREAD_NEW_ISSUE_RULE}`,
-    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
+    supersedes: `Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message's, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies". ${INBOX_MOVED_TO_RULE}`,
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread; ${INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE} Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },

@@ -3489,6 +3489,16 @@
             }
           ]
         },
+        "moved_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxMovedTo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "idempotency_key": {
           "anyOf": [
             {
@@ -4104,6 +4114,30 @@
         "created_at",
         "resolved_at",
         "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxMovedTo": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "thread_id",
+        "subject"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"

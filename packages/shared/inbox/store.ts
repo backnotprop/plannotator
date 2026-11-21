@@ -81,6 +81,7 @@ import {
   type InboxSupersededBy,
   type InboxListRow,
   type InboxListSection,
+  type InboxMovedTo,
   type InboxThread,
   type InboxThreadSummary,
   checkInboxProjectName,
@@ -5613,14 +5614,31 @@ export class InboxStore {
    * it is. Only the person's ends a snooze (approval "inbox-snooze": nothing an
    * agent writes ends it); an agent's `resolve_message` leaves the snooze, so
    * a thread the agent archives and then writes in again stays snoozed.
+   *
+   * `movedTo` (an agent's resolve_message `moved_to`): the thread, or a message
+   * of it, this thread's questions were moved to. Checked before anything is
+   * written: an open thread of the same project, not this one, that the
+   * calling `session` wrote in. The root then keeps it (`InboxMessage.moved_to`)
+   * so the archived foot says where they went; no message is written. A
+   * person's Unarchive drops it.
    */
-  resolveThread(messageId: string, resolved: boolean, by: "person" | "agent" = "agent"): InboxThreadSummary {
+  resolveThread(
+    messageId: string,
+    resolved: boolean,
+    by: "person" | "agent" = "agent",
+    movedTo?: { to: string; session: string | null },
+  ): InboxThreadSummary {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const root = this.messages.get(message.thread_id);
     if (!root) throw new InboxError("message_not_found", `No thread ${message.thread_id}.`);
+    const moved = movedTo ? this.movedToOf(root, resolved, movedTo) : null;
     const isResolved = root.resolved_at !== null;
-    if (isResolved !== resolved) {
+    if (moved && (!isResolved || JSON.stringify(root.moved_to ?? null) !== JSON.stringify(moved))) {
+      // The archive line itself carries where the questions went (or, on an archived thread, one more root line).
+      const at = this.stamp();
+      this.appendMessage({ ...root, resolved_at: root.resolved_at ?? at, moved_to: moved }, at);
+    } else if (isResolved !== resolved) {
       const at = this.stamp();
       // Unarchive drops a Mark read made while the thread was archived (on
       // what came back): it covered only the part after the archive line, and
@@ -5633,6 +5651,8 @@ export class InboxStore {
           ...root,
           resolved_at: resolved ? at : null,
           ...(readWhileArchived ? { person_read_seq: null, person_read_at: null, person_seen_before_read: undefined } : {}),
+          // Unarchive ends "moved to": the thread is the person's open thread again.
+          ...(!resolved && root.moved_to ? { moved_to: null } : {}),
         },
         at,
       );
@@ -5641,6 +5661,23 @@ export class InboxStore {
     if (resolved && !isResolved) this.endPriority(root.id);
     if (!resolved && isResolved) this.endLapsedSnooze(root.id);
     return this.threadSummary(root.id)!;
+  }
+
+  /** resolveThread's `movedTo`, checked: the thread it names and its subject, or a refusal (nothing written). */
+  private movedToOf(root: InboxMessage, resolved: boolean, movedTo: { to: string; session: string | null }): InboxMovedTo {
+    const refuse = (why: string, code: "validation_error" | "thread_resolved" = "validation_error") =>
+      new InboxError(code, `moved_to: ${why} Nothing was archived.`, { field: "moved_to" });
+    if (!resolved) throw refuse("only with resolved true (it archives this thread).");
+    const named = this.messages.get(movedTo.to.trim());
+    const target = named ? this.messages.get(named.thread_id) : undefined;
+    if (!target || target.taken_back_at) throw refuse(`no thread or message ${movedTo.to}.`);
+    if (target.id === root.id) throw refuse("names this same thread; give the thread its questions went to.");
+    if (target.project_id !== root.project_id) throw refuse(`thread ${target.id} is in another project; questions move only within a project.`);
+    if (target.resolved_at !== null) throw refuse(`thread ${target.id} is archived; move the questions to an open thread.`, "thread_resolved");
+    const session = movedTo.session?.trim() || null;
+    const wrote = session !== null && this.threadMessages(target.id).some((m) => m.author.kind === "agent" && m.author.session === session);
+    if (!wrote) throw refuse(`thread ${target.id} has no message from your session; name the thread you sent the questions in.`);
+    return { thread_id: target.id, subject: this.threadSubject(target.id) };
   }
 
   // ─────────────────────────── attachments and annotations ───────────────────────────

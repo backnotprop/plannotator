@@ -36,7 +36,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "supersedes": {
-          "description": "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message, as a list of strings, e.g. [\"msg_…/q-…\"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.",
+          "description": "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message, as a list of strings, e.g. [\"msg_…/q-…\"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it.",
           "type": "array",
           "items": {
             "type": "string"
@@ -206,7 +206,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
   },
   {
     "name": "resolve_message",
-    "description": "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
+    "description": "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer, or when you moved its questions to another thread (moved_to). resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
     "inputSchema": {
       "type": "object",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -218,6 +218,14 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
         "resolved": {
           "description": "Default true.",
           "type": "boolean"
+        },
+        "moved_to": {
+          "description": "After you moved this thread's open questions into another thread (one that gathers several): that thread's id, or a message id in it, an open thread of this project that you wrote in. The person then sees a link to it on the archived thread; nothing is written there, and it does not show as new.",
+          "type": "string"
+        },
+        "agent_session": {
+          "description": "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.",
+          "type": "string"
         }
       },
       "required": [
@@ -358,7 +366,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "supersedes": {
-          "description": "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message, as a list of strings, e.g. [\"msg_…/q-…\"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.",
+          "description": "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message, as a list of strings, e.g. [\"msg_…/q-…\"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it.",
           "type": "array",
           "items": {
             "type": "string"

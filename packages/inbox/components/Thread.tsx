@@ -5506,7 +5506,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {resolved ? (
           <div className="ib-acts">
-            <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
+            {/* An agent moved this thread's questions to another thread and archived it (resolve_message's moved_to). */}
+            {root.moved_to ? (
+              <span className="ib-st" data-moved-to={root.moved_to.thread_id}>
+                Archived. Its questions moved to{' '}
+                <a className="ib-lnk" href={`#thread=${encodeURIComponent(root.moved_to.thread_id)}`}>
+                  {root.moved_to.subject ?? 'another thread'}
+                </a>
+                .
+              </span>
+            ) : (
+              <span className="ib-st">Archived. The next message from {asker} starts a new thread.</span>
+            )}
             <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
               Unarchive
             </button>
