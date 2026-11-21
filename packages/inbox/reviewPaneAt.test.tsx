@@ -27,6 +27,7 @@ let reader: ReaderProps | null = null;
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
   mock.module('#guide-reader', () => ({
+    PullChangesTree: () => null,
     default: (props: ReaderProps) => {
       reader = props;
       // The painted row, as Pierre marks it, in its file's box.

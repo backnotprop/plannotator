@@ -141,20 +141,20 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
       git('switch', '-c', 'other');
       const b = await open();
       expect(b.view.rawPatch).toBe(a.view.rawPatch);
-      expect((await fetch(b.endpoint)).status).toBe(404);
+      expect((await fetch(b.endpoint)).status).toBe(204);
       await post(b.endpoint, { ...body(b.view, 40), codeAnnotations: [{ ...note, id: 'other-note' }] });
       git('switch', 'feature');
       expect((await (await fetch((await open()).endpoint)).json()).codeAnnotations[0].id).toBe('note');
       const comparison = await open('uncommitted');
-      expect((await fetch(comparison.endpoint)).status).toBe(404);
+      expect((await fetch(comparison.endpoint)).status).toBe(204);
       git('branch', 'baseline', 'main');
-      expect((await fetch((await open('since-base', 'baseline')).endpoint)).status).toBe(404);
+      expect((await fetch((await open('since-base', 'baseline')).endpoint)).status).toBe(204);
       const worktree = join(root, 'worktree');
       git('worktree', 'add', '-b', 'linked', worktree, 'main');
       const originalCwd = cwd;
       cwd = worktree;
       writeFileSync(join(cwd, 'a.txt'), 'after\n');
-      expect((await fetch((await open()).endpoint)).status).toBe(404);
+      expect((await fetch((await open()).endpoint)).status).toBe(204);
       cwd = originalCwd;
     });
 
@@ -170,8 +170,8 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
           : await post(`${b.server.url}/api/${decision}?draftGeneration=4`, { feedback: 'notes', draftGeneration: 4 });
         expect(response.status).toBe(200);
         expect((await post(a.endpoint, body(a.view, 4))).status).toBe(409);
-        expect((await fetch(a.endpoint)).status).toBe(404);
-        expect((await fetch((await open()).endpoint)).status).toBe(404);
+        expect((await fetch(a.endpoint)).status).toBe(204);
+        expect((await fetch((await open()).endpoint)).status).toBe(204);
       });
     }
 
@@ -191,8 +191,8 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
       await post(endpoint, { codeAnnotations: [...body(a.view).codeAnnotations, stagedNote], draftGeneration: 40 });
       expect((await (await fetch(endpoint)).json()).codeAnnotations.map((a: CodeAnnotation) => a.id)).toEqual(['staged-note']);
       expect((await post(`${a.server.url}/api/feedback?client=page-1`, { feedback: 'all notes', draftGeneration: 41 })).status).toBe(200);
-      expect((await fetch((await open()).endpoint)).status).toBe(404);
-      expect((await fetch((await open('staged')).endpoint)).status).toBe(404);
+      expect((await fetch((await open()).endpoint)).status).toBe(204);
+      expect((await fetch((await open('staged')).endpoint)).status).toBe(204);
     });
 
     for (const cleanup of ['discard', 'feedback', 'exit']) {
@@ -215,7 +215,7 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
           ? await fetch(`${endpoint}&client=page-2&generation=6`, { method: 'DELETE' })
           : await post(`${a.server.url}/api/${cleanup}?client=page-2&draftGeneration=6`, { feedback: 'B only', draftGeneration: 6 });
         expect(response.status).toBe(200);
-        expect((await fetch(endpoint)).status).toBe(404);
+        expect((await fetch(endpoint)).status).toBe(204);
         expect(await (await fetch(reopenedA.endpoint)).json()).toMatchObject({ codeAnnotations: [{ id: note.id }] });
       });
     }
@@ -260,7 +260,7 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
         expect((await (await fetch(restarted.endpoint)).json()).codeAnnotations[0].id).toBe(note.id);
         const explicit = await open('since-base', 'main', true);
         expect(explicit.view.localDraftTarget).not.toBe(upgraded.localDraftTarget);
-        expect((await fetch(explicit.endpoint)).status).toBe(404);
+        expect((await fetch(explicit.endpoint)).status).toBe(204);
         const picked = await (await post(`${early.server.url}/api/diff/switch`, { diffType: 'since-base', base: 'main', explicitBase: true })).json();
         expect(picked.localDraftTarget).toBe(explicit.view.localDraftTarget);
         process.env.PLANNOTATOR_GIT_REMOTE_CHECK = '0';
@@ -276,7 +276,7 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
       expect((await (await fetch(a.endpoint)).json()).codeAnnotations[0].id).toBe('note');
       await post(a.endpoint, body(a.view, 8));
       await fetch(`${a.endpoint}&generation=9`, { method: 'DELETE' });
-      expect((await fetch((await open()).endpoint)).status).toBe(404);
+      expect((await fetch((await open()).endpoint)).status).toBe(204);
     });
 
     test('a switch never auto-merges an old unscoped draft; only the restore banner offers it', async () => {
@@ -296,13 +296,13 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
       await post(branch.endpoint, body(branch.view));
       git('checkout', '--detach');
       const detached = await open();
-      expect((await fetch(detached.endpoint)).status).toBe(404);
+      expect((await fetch(detached.endpoint)).status).toBe(204);
       await post(detached.endpoint, body(detached.view));
       expect((await fetch((await open()).endpoint)).status).toBe(200);
       git('commit', '--allow-empty', '-m', 'new detached identity');
       const next = await open();
       expect(next.view.rawPatch).toBe(detached.view.rawPatch);
-      expect((await fetch(next.endpoint)).status).toBe(404);
+      expect((await fetch(next.endpoint)).status).toBe(204);
     });
   });
 }

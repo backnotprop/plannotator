@@ -518,16 +518,68 @@ for (const engine of ENGINES) {
 }
 
 test.describe('Chromium at 1440 x 900 (the desktop)', () => {
-  test('none of it applies: the recipient pill, Send with its word, the To line', async ({ page }) => {
+  test('none of the phone applies: the recipient chip with its full name, Send with its word, the To line', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const box = pane(page).locator('.ib-rbox');
     for (const thread of [world.oneThread, world.twoThread]) {
       await page.goto(`${world.url}#thread=${thread}`);
       await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       await expect(box.locator('[data-reply-send]')).toBeVisible();
-      if (thread === world.oneThread) await expect(box.locator('[data-recipient]'), 'a one-agent thread has a recipient pill on the desktop').toHaveCount(0);
+      if (thread === world.oneThread) {
+        await expect(box.locator('[data-recipient], [data-field-lead]'), 'a one-agent thread has a recipient control on the desktop').toHaveCount(0);
+        expect(await replyField(page).evaluate((el) => getComputedStyle(el).textIndent), 'a one-agent thread\'s words are indented').toBe('0px');
+      }
     }
-    await expect(box.locator('[data-recipient]'), 'the desktop lost its recipient pill').toHaveClass(/(^|\s)ib-rto(\s|$)/);
+    // Several agents: the chip at the start of the words (approval "inbox-reply-target-chip"), not the pill in the row.
+    await expect(box.locator('[data-field-lead] [data-recipient]'), 'the desktop lost its recipient chip').toHaveClass(/(^|\s)ib-rto-chip(\s|$)/);
+    await expect(box.locator('[data-reply-row] [data-recipient], .ib-rto'), 'the pill is still in the row').toHaveCount(0);
+    await replyField(page).fill('Keep the promo field closed.');
+    const first = await box.evaluate((el) => {
+      const chip = el.querySelector('[data-field-lead] [data-recipient]')!.getBoundingClientRect();
+      const text = el.querySelector('textarea')!;
+      const mirror = el.querySelector('.ib-rmirror')!;
+      const walk = document.createTreeWalker(mirror, NodeFilter.SHOW_TEXT);
+      const node = walk.nextNode()!;
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, 1);
+      const glyph = range.getBoundingClientRect();
+      return { after: glyph.left - chip.right, sameLine: Math.abs((glyph.top + glyph.bottom) / 2 - (chip.top + chip.bottom) / 2), indent: parseFloat(getComputedStyle(text).textIndent) - (Math.ceil(chip.width) + 8) };
+    });
+    expect(first.after, 'the first word does not start after the chip').toBeGreaterThanOrEqual(6);
+    expect(first.sameLine, 'the first word is not on the chip\'s line').toBeLessThanOrEqual(3);
+    expect(Math.abs(first.indent), 'the first line is not indented by the chip and the gap').toBeLessThanOrEqual(1);
+    // Backspace at the start of the words takes nothing, and opens nothing.
+    await replyField(page).evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+    await page.keyboard.press('Backspace');
+    await expect(replyField(page)).toHaveValue('Keep the promo field closed.');
+    await expect(box.locator('[data-field-lead] [data-recipient]')).toHaveAttribute('aria-expanded', 'false');
+    // The chip opens the list the pill opened.
+    await box.locator('[data-field-lead] [data-recipient]').click();
+    await expect(page.locator('.ib-rpick[data-recipient-list]'), 'the chip does not open the list').toBeVisible();
+    await page.keyboard.press('Escape');
+    // A quote line over the words changes only the field's top padding: the chip follows the first line both ways.
+    const fit = () =>
+      box.evaluate((el) => {
+        const chip = el.querySelector('[data-field-lead] [data-recipient]')!.getBoundingClientRect();
+        const text = el.querySelector('textarea')!;
+        const t = text.getBoundingClientRect();
+        const cs = getComputedStyle(text);
+        const lineTop = t.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop) - text.scrollTop;
+        const line = parseFloat(cs.lineHeight);
+        return { quote: el.querySelector('[data-reply-quote]') !== null, off: (chip.top + chip.bottom) / 2 - (lineTop + line / 2), below: chip.bottom - (lineTop + line) };
+      });
+    await pane(page).getByText('First, from Claude Code.').first().click();
+    await pane(page).locator('article button[aria-label="Reply"]').first().click();
+    await expect(box.locator('[data-reply-quote]'), 'the Reply arrow showed no quote line').toBeVisible();
+    for (const step of ['with the quote', 'with the quote removed']) {
+      const f = await fit();
+      expect(Math.abs(f.off), `the chip is off the first line ${step}`).toBeLessThanOrEqual(1);
+      expect(f.below, `the chip reaches into the second line ${step}`).toBeLessThanOrEqual(1);
+      if (f.quote) await box.locator('[data-reply-quote-remove]').click();
+      await expect(box.locator('[data-reply-quote]')).toHaveCount(0);
+    }
+    await replyField(page).fill('');
     await expect(pane(page).locator('.ib-rbox [data-agent-mark], .ib-rbox [data-agent-pill], .ib-sheet'), 'a phone part is drawn on the desktop').toHaveCount(0);
     expect((await box.locator('[data-reply-send] .ib-rsend-w').boundingBox())!.width, 'Send lost its word on the desktop').toBeGreaterThanOrEqual(20);
     await page.locator('[data-open-compose]').first().click();

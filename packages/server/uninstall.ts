@@ -463,7 +463,8 @@ export async function runPlannotatorUninstall(
       } else {
         const tailnet = takeDownInboxTailnet(state.dataDir);
         if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${door.https_port})`);
-        if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${door.https_port} off`);
+        // Tailscale not running ("later"): an uninstall cannot wait for it, so it says as for a failure.
+        if (tailnet === "failed" || tailnet === "later") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${door.https_port} off`);
       }
     }
     // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).

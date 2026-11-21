@@ -18,6 +18,7 @@ import { scheduledApi } from './client';
 import { useLaunchBlock } from './EditorParts';
 import { useEditorKey } from './editorKey';
 import { ScheduledEditor } from './ScheduledEditor';
+import type { RoutineTab } from './RoutineTabs';
 import { ScheduledTable, type RowActs } from './ScheduledTable';
 import { putScheduled, readScheduled, useScheduledPage } from './store';
 
@@ -42,6 +43,9 @@ export interface ScheduledPageProps {
   onSettings: (section: 'capabilities' | 'agents') => void;
   /** The window's one toast: a delete's Undo. */
   onToast?: Toast;
+  /** The open one's tab (`&runs`) and its switch; absent: the editor keeps its own. */
+  tab?: RoutineTab;
+  onTab?: (tab: RoutineTab) => void;
 }
 
 /** The page at its address, from the window's settings and route. */
@@ -55,7 +59,11 @@ export function ScheduledRoute(props: { route: Route; settings: Pick<SettingsMod
       rows={props.rows}
       phone={props.phone}
       stacked={props.stacked}
-      onOpen={(id, replace) => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: id }, { replace })}
+      // A new one taking its id keeps the tab it is on; another routine opens on Edit.
+      onOpen={(id, replace) => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: id, routineRuns: (replace && props.route.routineRuns) || undefined }, { replace })}
+      tab={props.route.routineRuns ? 'runs' : 'edit'}
+      // A tab is not a step back: the address changes in place.
+      onTab={(tab) => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: props.route.scheduled ?? null, routineRuns: tab === 'runs' || undefined }, { replace: true })}
       onOpenThread={(thread, msg) => writeRoute({ page: 'inbox', project: null, thread, msg: msg ?? null })}
       onSettings={(section) => writeRoute({ page: 'settings', project: null, thread: null, section })}
       onToast={props.onToast}
@@ -136,6 +144,8 @@ export function ScheduledPage(props: ScheduledPageProps) {
       }}
       onDelete={remove}
       onOpenThread={props.onOpenThread}
+      tab={props.tab}
+      onTab={props.onTab}
     />
   );
   if (openId && alone && on) return editor;

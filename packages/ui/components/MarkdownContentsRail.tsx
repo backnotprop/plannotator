@@ -30,10 +30,19 @@
 //   Escape sees it was used.
 // - The rules are the package's own stylesheet, contents-rail.css (import it
 //   outside any CSS layer), not part of theme.css.
+// - Annotation marks (owner-approved 2026-11, "dots beside each heading's
+//   tick"), drawn only when a host passes `annotations` and
+//   `onSelectAnnotation`: each row's section's dots beside its tick (three at
+//   most, else two and a "more"), at the end of its row in the open panel
+//   (seven, then "+N"), one dot per thread (a comment and its replies), a card
+//   on hover or focus (kept inside the scroll element; Escape dismisses it), a
+//   click selects through the host. Without them the rail's DOM is today's.
+//   The arithmetic is utils/contentsRailMarks.
 
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -43,7 +52,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { Block } from '../types';
+import { AnnotationType, type Annotation, type Block } from '../types';
 import { extractFrontmatter } from '../utils/parser';
 import { parseBlocksShared } from '../utils/blockParse';
 import {
@@ -59,9 +68,28 @@ import {
   topInsideViewport,
   type HeadingBinding,
 } from '../utils/headingScrollSpy';
+import { footnoteKeysOf, withoutFootnoteRefs } from '../utils/footnotes';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+import {
+  CONTENTS_RAIL_OPEN_MARK_WIDTH,
+  contentsRailMarkName,
+  contentsRailMoreWidth,
+  groupContentsRailMarks,
+  layoutContentsRailMarks,
+  placeContentsRailMarks,
+  type ContentsRailMarkPlace,
+  type ContentsRailMarkRow,
+  type ContentsRailRowMarks,
+} from '../utils/contentsRailMarks';
+import { isCurrentUser } from '../utils/identity';
+import {
+  ANNOTATION_QUOTE_CLASS,
+  ANNOTATION_TEXT_CLASS,
+  ANNOTATION_TYPE_COLOR,
+  ANNOTATION_TYPE_LABEL,
+  AnnotationCardByline,
+} from './AnnotationCardParts';
 
-const MIN_HEADING_COUNT = CONTENTS_RAIL_MIN_HEADINGS;
 const COLLAPSED_MARKER_LIMIT = 10;
 const PANEL_WIDTH = 256;
 const DOCK_WIDTH = 36;
@@ -73,6 +101,42 @@ const SMOOTH_SCROLL_SETTLE = 350;
 const SCROLL_CORRECTION_THRESHOLD = 24;
 /** The reading column, by default: the element Workspaces marks around its document. */
 const DEFAULT_CONTENT_SELECTOR = '[data-document-read-content]';
+const ROW_HEIGHT = 16;
+/**
+ * A closed-rail mark: a 5 px slot from 21 px into the dock (an H1 tick's line
+ * ends at 20; on a row with marks a grown line stops there too), three to the
+ * dock's edge. A row's marks take only their slots: the rest is the tick's.
+ */
+const CLOSED_MARK_START = 21;
+const CLOSED_MARK_WIDTH = 5;
+/** An open-panel mark: an 8 px slot; the row's marks end at the label's end, less its padding. */
+const OPEN_MARKS_END = DOCK_WIDTH + PANEL_GAP + 8 + 4;
+/** The mark card's gap from the open panel, and the narrowest it gets before it moves below (or above) its row. */
+const CARD_GAP = 8;
+const CARD_MIN_WIDTH = 192;
+/**
+ * The rendered highlights the marks are placed by: the highlighter's, the
+ * manual ones, and a highlight covered by a later one (the highlighter moves
+ * its id into `data-highlight-id-extra`, ids separated by `;`).
+ */
+const HIGHLIGHT_SELECTOR = '[data-bind-id], [data-highlight-id], [data-highlight-id-extra]';
+const NO_ROWS: readonly ContentsRailMarkRow[] = [];
+const NO_PLACES: ReadonlyMap<string, ContentsRailMarkPlace> = new Map();
+
+function samePlaces(a: ReadonlyMap<string, ContentsRailMarkPlace>, b: ReadonlyMap<string, ContentsRailMarkPlace>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, place] of a) {
+    const other = b.get(id);
+    if (other === undefined || other.itemIndex !== place.itemIndex || other.order !== place.order) return false;
+  }
+  return true;
+}
+
+/** A roving stop: a tick, one of its row's marks, or its row's "more". */
+type RailStop =
+  | { readonly kind: 'tick'; readonly key: string; readonly index: number }
+  | { readonly kind: 'mark'; readonly key: string; readonly index: number; readonly id: string }
+  | { readonly kind: 'more'; readonly key: string; readonly index: number };
 
 export interface MarkdownContentsItem {
   readonly key: string;
@@ -161,12 +225,13 @@ function buildContentsItems(blocks: readonly Block[]): readonly MarkdownContents
   const listed = new Set(tocHeadings(blocks, CONTENTS_RAIL_MAX_LEVEL));
   const parents: Array<{ level: number; label: string }> = [];
   const items: MarkdownContentsItem[] = [];
+  const notes = footnoteKeysOf(blocks);
 
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index];
     if (block.type !== 'heading' || !listed.has(block)) continue;
     const level = Math.min(6, Math.max(1, block.level ?? 1));
-    const label = plainText(block.content) || 'Untitled section';
+    const label = plainText(withoutFootnoteRefs(block.content, notes)) || 'Untitled section';
     while (parents.length > 0 && parents.at(-1)!.level >= level) parents.pop();
     const breadcrumb = [...parents.map((entry) => entry.label), label].join(' / ');
     items.push({
@@ -285,6 +350,29 @@ export interface MarkdownContentsRailProps {
    * after the headings. Default: none.
    */
   readonly panelAction?: ReactNode;
+  /**
+   * The fewest headings (levels 1 to 4) the rail shows for. Default
+   * `CONTENTS_RAIL_MIN_HEADINGS` (4); the Plannotator Inbox passes 2.
+   */
+  readonly minHeadings?: number;
+  /**
+   * The document's annotations, drawn as marks beside the ticks (and at the
+   * end of each open-panel row) when `onSelectAnnotation` is given too. Each
+   * is placed by its rendered highlight (`[data-bind-id]` /
+   * `[data-highlight-id]`, or `[data-highlight-id-extra]` when a later one
+   * covers it); a global comment goes on the first row; a comment and its
+   * replies are one mark, the comment's. Default: none (no marks: the rail is
+   * drawn as without the prop).
+   */
+  readonly annotations?: readonly Annotation[];
+  /** The selected annotation: its thread's mark is drawn selected (`aria-current`). Default none. */
+  readonly selectedAnnotationId?: string | null;
+  /**
+   * Called with an annotation's id when its mark is clicked or pressed (Enter,
+   * Space): the host selects it as its annotation panel does. The marks are
+   * drawn only when it is given. Default: none.
+   */
+  readonly onSelectAnnotation?: (id: string) => void;
 }
 
 export function MarkdownContentsRail({
@@ -295,6 +383,10 @@ export function MarkdownContentsRail({
   hidden = false,
   onAvailableChange,
   panelAction,
+  minHeadings = CONTENTS_RAIL_MIN_HEADINGS,
+  annotations,
+  selectedAnnotationId = null,
+  onSelectAnnotation,
 }: MarkdownContentsRailProps) {
   const items = useMemo(
     () => buildContentsItems(hostBlocks ?? markdownBlocks(markdown)),
@@ -341,6 +433,88 @@ export function MarkdownContentsRail({
   const onAvailableChangeRef = useRef(onAvailableChange);
   onAvailableChangeRef.current = onAvailableChange;
   const blockIds = useMemo(() => items.map((item) => item.blockId), [items]);
+  // Annotation marks: only when the host gives annotations and a way to select one.
+  const markAnnotations =
+    onSelectAnnotation !== undefined && annotations !== undefined && annotations.length > 0 ? annotations : null;
+  const markAnnotationsRef = useRef(markAnnotations);
+  markAnnotationsRef.current = markAnnotations;
+  const [markPlaces, setMarkPlaces] = useState<ReadonlyMap<string, ContentsRailMarkPlace>>(NO_PLACES);
+  const [hoveredMarkId, setHoveredMarkId] = useState<string | null>(null);
+  const [focusedMarkId, setFocusedMarkId] = useState<string | null>(null);
+  const stopRefs = useRef(new Map<string, HTMLElement>());
+  const stopRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
+  const marksLayerRef = useRef<HTMLDivElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  /** The marks by thread and section: once per measure (or annotations change), never on scroll. */
+  const markGroups = useMemo(
+    () => (markAnnotations === null ? null : groupContentsRailMarks(markAnnotations, markPlaces)),
+    [markAnnotations, markPlaces],
+  );
+  /** The rows' spans: the closed rail's sampled ones, or each item. Not the active heading's: a row's marks do not move with it. */
+  const markRows = useMemo<readonly ContentsRailMarkRow[]>(
+    () =>
+      markGroups === null
+        ? NO_ROWS
+        : titlesVisible
+          ? items.map((_, itemIndex) => ({ rangeStart: itemIndex, rangeEnd: itemIndex }))
+          : condensedMarkers,
+    [condensedMarkers, items, markGroups, titlesVisible],
+  );
+  /** Each rendered row's marks (null: none to draw, the rail as without them). */
+  const rowMarks = useMemo<readonly ContentsRailRowMarks[] | null>(() => {
+    if (markGroups === null) return null;
+    const laid = layoutContentsRailMarks(markRows, markGroups, titlesVisible);
+    return laid.some((row) => row.total > 0) ? laid : null;
+  }, [markGroups, markRows, titlesVisible]);
+  const shownMarks = useMemo(
+    () => new Map(rowMarks?.flatMap((row) => row.shown.map((annotation) => [annotation.id, annotation] as const)) ?? []),
+    [rowMarks],
+  );
+  const selectedMarkId =
+    selectedAnnotationId === null ? null : (markGroups?.rootOf.get(selectedAnnotationId) ?? selectedAnnotationId);
+  /** The roving order: each tick, then its row's marks and its "more". Ticks only without marks. */
+  const stops = useMemo<readonly RailStop[]>(
+    () =>
+      renderedItemIndexes.flatMap((index, position): RailStop[] => {
+        const tick: RailStop = { kind: 'tick', key: `tick:${index}`, index };
+        const marks = rowMarks?.[position];
+        if (marks === undefined || marks.total === 0) return [tick];
+        return [
+          tick,
+          ...marks.shown.map((annotation): RailStop => ({ kind: 'mark', key: `mark:${annotation.id}`, index, id: annotation.id })),
+          ...(marks.more > 0 ? [{ kind: 'more', key: `more:${index}`, index } as RailStop] : []),
+        ];
+      }),
+    [renderedItemIndexes, rowMarks],
+  );
+  /** One ref callback per stop, kept: a re-render (a row hovered) never detaches and re-attaches them. */
+  const stopRef = useCallback((key: string) => {
+    let callback = stopRefCallbacks.current.get(key);
+    if (callback === undefined) {
+      const tick = key.startsWith('tick:') ? Number(key.slice(5)) : null;
+      callback = (node: HTMLElement | null) => {
+        // A detach after the stop's new node attached (it moved) keeps the new one.
+        if (node === null && stopRefs.current.get(key)?.isConnected === true) return;
+        if (node === null) stopRefs.current.delete(key);
+        else stopRefs.current.set(key, node);
+        if (tick !== null) markerRefs.current[tick] = node as HTMLButtonElement | null;
+      };
+      stopRefCallbacks.current.set(key, callback);
+    }
+    return callback;
+  }, []);
+  // A focused dot that is no longer focused (removed without a blur, as when
+  // the panel opens and the dots move) is not one.
+  const liveFocusedMarkId =
+    focusedMarkId !== null &&
+    typeof document !== 'undefined' &&
+    document.activeElement instanceof HTMLElement &&
+    document.activeElement.dataset.markId === focusedMarkId
+      ? focusedMarkId
+      : null;
+  // The card: the hovered (else the focused) dot's annotation, while that dot is drawn.
+  const cardMarkId = hoveredMarkId ?? liveFocusedMarkId;
+  const cardAnnotation = cardMarkId === null ? undefined : shownMarks.get(cardMarkId);
 
   const commitActiveIndex = useCallback((next: number) => {
     if (activeIndexRef.current === next) return;
@@ -364,7 +538,7 @@ export function MarkdownContentsRail({
   }, [refreshActiveSection]);
 
   const measure = useCallback(() => {
-    if (scrollViewport === null || items.length < MIN_HEADING_COUNT) {
+    if (scrollViewport === null || items.length < minHeadings) {
       bindingsRef.current = [];
       setAvailable(false);
       return;
@@ -372,6 +546,28 @@ export function MarkdownContentsRail({
 
     const bindings = bindHeadings(scrollViewport, blockIds);
     bindingsRef.current = bindings;
+    // Each annotation's section, from its first rendered highlight (measured
+    // here, on the rail's own triggers; scrolling never measures).
+    const marked = markAnnotationsRef.current;
+    if (marked === null) {
+      setMarkPlaces((current) => (current.size === 0 ? current : NO_PLACES));
+    } else {
+      const highlights: Array<{ id: string; node: HTMLElement }> = [];
+      for (const node of scrollViewport.querySelectorAll<HTMLElement>(HIGHLIGHT_SELECTOR)) {
+        const id = node.dataset.bindId ?? node.dataset.highlightId;
+        if (id) highlights.push({ id, node });
+        for (const covered of node.dataset.highlightIdExtra?.split(';') ?? []) {
+          if (covered) highlights.push({ id: covered, node });
+        }
+      }
+      const places = placeContentsRailMarks(
+        bindings.map((binding) => binding.node),
+        bindings.map((binding) => binding.itemIndex),
+        highlights,
+        new Set(marked.map((annotation) => annotation.id)),
+      );
+      setMarkPlaces((current) => (samePlaces(current, places) ? current : places));
+    }
 
     const viewportRect = scrollViewport.getBoundingClientRect();
     // The scroll surface's own scrollbar sits in the right gutter: measure
@@ -398,9 +594,9 @@ export function MarkdownContentsRail({
     setRailGeometry((current) =>
       current.left === geometry.left && current.top === geometry.top ? current : geometry,
     );
-    setAvailable(bindings.length >= MIN_HEADING_COUNT && hasRailSpace);
+    setAvailable(bindings.length >= minHeadings && hasRailSpace);
     refreshActiveSection();
-  }, [blockIds, contentSelector, items.length, refreshActiveSection, scrollViewport]);
+  }, [blockIds, contentSelector, items.length, minHeadings, refreshActiveSection, scrollViewport]);
 
   const scheduleMeasure = useCallback(() => {
     if (measureFrameRef.current !== null) cancelAnimationFrame(measureFrameRef.current);
@@ -415,14 +611,22 @@ export function MarkdownContentsRail({
     setActiveIndex(0);
     setInteractionIndex(null);
     setTitlesVisible(false);
+    setHoveredMarkId(null);
+    setFocusedMarkId(null);
   }, [items]);
+
+  // New or changed annotations: place them again (their highlights' own DOM
+  // changes are caught by the mutation observer below).
+  useEffect(() => {
+    if (markAnnotations !== null) scheduleMeasure();
+  }, [markAnnotations, scheduleMeasure]);
 
   useEffect(() => {
     if (available !== null) onAvailableChangeRef.current?.(available);
   }, [available]);
 
   useEffect(() => {
-    if (scrollViewport === null || items.length < MIN_HEADING_COUNT) {
+    if (scrollViewport === null || items.length < minHeadings) {
       setAvailable(false);
       return;
     }
@@ -477,7 +681,7 @@ export function MarkdownContentsRail({
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     };
-  }, [contentSelector, items.length, measure, scheduleActiveRefresh, scheduleMeasure, scrollViewport]);
+  }, [contentSelector, items.length, measure, minHeadings, scheduleActiveRefresh, scheduleMeasure, scrollViewport]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -500,10 +704,39 @@ export function MarkdownContentsRail({
     [],
   );
 
+  // Opening or closing the panel moves the dots (a focused one is removed
+  // without a blur): neither a hovered nor a focused dot is kept.
   const closeTitles = useCallback(() => {
     setTitlesVisible(false);
     setInteractionIndex(null);
+    setHoveredMarkId(null);
+    setFocusedMarkId(null);
   }, []);
+
+  // The rail hidden or yielding: no dot is hovered or focused.
+  useEffect(() => {
+    if (visible) return;
+    setHoveredMarkId(null);
+    setFocusedMarkId(null);
+  }, [visible]);
+
+  // A hover card (the closed rail's; the open panel's Escape closes the whole
+  // panel) is dismissed by Escape without moving the pointer. Only while one
+  // is up, and not while focus outside the rail owns its Escape; preventDefault,
+  // never stopPropagation, as the panel's.
+  useEffect(() => {
+    if (titlesVisible || hoveredMarkId === null) return;
+    const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const focused = document.activeElement;
+      const inRail = focused instanceof Node && railRef.current?.contains(focused) === true;
+      if (!inRail && focused instanceof HTMLElement && ownsEscape(focused)) return;
+      event.preventDefault();
+      setHoveredMarkId(null);
+    };
+    window.addEventListener('keydown', dismissOnEscape, true);
+    return () => window.removeEventListener('keydown', dismissOnEscape, true);
+  }, [hoveredMarkId, titlesVisible]);
 
   useEffect(() => {
     if (!titlesVisible) return;
@@ -577,6 +810,8 @@ export function MarkdownContentsRail({
   const openTitles = useCallback((index: number) => {
     setInteractionIndex(index);
     setTitlesVisible(true);
+    setHoveredMarkId(null);
+    setFocusedMarkId(null);
   }, []);
 
   const scrubAtPoint = useCallback(
@@ -624,9 +859,9 @@ export function MarkdownContentsRail({
     scrubbedIndexRef.current = null;
   }, []);
 
-  const onMarkerKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-      const markerPosition = renderedItemIndexes.indexOf(index);
+  const onStopKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, stop: RailStop) => {
+      const position = stops.findIndex((entry) => entry.key === stop.key);
       let nextPosition: number | null = null;
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -634,29 +869,92 @@ export function MarkdownContentsRail({
         event.currentTarget.blur();
         return;
       } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-        nextPosition = Math.min(renderedItemIndexes.length - 1, markerPosition + 1);
+        nextPosition = Math.min(stops.length - 1, position + 1);
       } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-        nextPosition = Math.max(0, markerPosition - 1);
+        nextPosition = Math.max(0, position - 1);
       } else if (event.key === 'Home') {
         nextPosition = 0;
       } else if (event.key === 'End') {
-        nextPosition = renderedItemIndexes.length - 1;
-      } else if (event.key === 'Enter' || event.key === ' ') {
+        nextPosition = stops.length - 1;
+      } else if ((event.key === 'Enter' || event.key === ' ') && stop.kind === 'tick') {
         event.preventDefault();
         if (!titlesVisible) {
-          openTitles(index);
+          openTitles(stop.index);
           return;
         }
-        navigateTo(index, false);
+        navigateTo(stop.index, false);
         return;
       }
-      if (nextPosition === null || markerPosition < 0) return;
+      // A mark's or a "more"'s Enter and Space are its button's own click.
+      if (nextPosition === null || position < 0) return;
       event.preventDefault();
-      const nextIndex = renderedItemIndexes[nextPosition];
-      if (nextIndex !== undefined) markerRefs.current[nextIndex]?.focus();
+      const next = stops[nextPosition];
+      if (next !== undefined) stopRefs.current.get(next.key)?.focus();
     },
-    [closeTitles, navigateTo, openTitles, renderedItemIndexes, titlesVisible],
+    [closeTitles, navigateTo, openTitles, stops, titlesVisible],
   );
+
+  /** A closed row's "more": the panel opens at that row (and a keyboard user lands on its tick). */
+  const openAtRow = useCallback(
+    (index: number, fromKeyboard: boolean) => {
+      openTitles(index);
+      requestAnimationFrame(() => {
+        const list = listRef.current;
+        const marker = markerRefs.current[index];
+        if (list === null || marker === null || marker === undefined) return;
+        if (marker.offsetTop < list.scrollTop) list.scrollTop = marker.offsetTop;
+        else if (marker.offsetTop + marker.offsetHeight > list.scrollTop + list.clientHeight) {
+          list.scrollTop = marker.offsetTop + marker.offsetHeight - list.clientHeight;
+        }
+        if (fromKeyboard) marker.focus();
+      });
+    },
+    [openTitles],
+  );
+
+  // The mark card: level with its mark, where the closed panel would be (or
+  // left of the open panel), kept inside the scroll element. Short of room
+  // on the left, it narrows (to CARD_MIN_WIDTH, never past the scroll
+  // element's left edge); shorter still, it goes below its row (else above).
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const nav = railRef.current;
+    if (card === null || nav === null || cardMarkId === null) return;
+    const mark = stopRefs.current.get(`mark:${cardMarkId}`);
+    if (mark === undefined) return;
+    const navRect = nav.getBoundingClientRect();
+    const markRect = mark.getBoundingClientRect();
+    const bounds = scrollViewport?.getBoundingClientRect();
+    const boundsLeft = (bounds?.left ?? 0) + VIEWPORT_EDGE_INSET;
+    const boundsRight = (bounds?.right ?? window.innerWidth) - VIEWPORT_EDGE_INSET;
+    const minTop = (bounds?.top ?? 0) + VIEWPORT_EDGE_INSET;
+    const maxBottom = (bounds?.bottom ?? window.innerHeight) - VIEWPORT_EDGE_INSET;
+    // The card ends where the closed panel would end, or a gap left of the open one.
+    const end = titlesVisible ? navRect.left - CARD_GAP : navRect.left + PANEL_WIDTH;
+    const room = end - boundsLeft;
+    let left: number;
+    let width: number;
+    let top: number;
+    if (room >= CARD_MIN_WIDTH) {
+      width = Math.min(PANEL_WIDTH, room);
+      left = end - width;
+      card.style.width = width === PANEL_WIDTH ? '' : `${width}px`;
+      // The card's first line (its kind) level with the mark.
+      const wanted = markRect.top + markRect.height / 2 - 19;
+      top = Math.max(minTop, Math.min(maxBottom - card.offsetHeight, wanted));
+    } else {
+      width = Math.max(0, Math.min(PANEL_WIDTH, boundsRight - boundsLeft));
+      left = Math.max(boundsLeft, Math.min(boundsRight - width, markRect.right - width));
+      card.style.width = width === PANEL_WIDTH ? '' : `${width}px`;
+      const below = markRect.bottom + PANEL_GAP;
+      top =
+        below + card.offsetHeight <= maxBottom
+          ? below
+          : Math.max(minTop, markRect.top - PANEL_GAP - card.offsetHeight);
+    }
+    card.style.left = `${Math.round(left - navRect.left)}px`;
+    card.style.top = `${Math.round(top - navRect.top)}px`;
+  }, [cardMarkId, railGeometry, rowMarks, scrollViewport, titlesVisible]);
 
   /** Focus left the panel (its list, and the host's action): the panel closes. */
   const closeWhenFocusLeaves = useCallback(
@@ -664,6 +962,7 @@ export function MarkdownContentsRail({
       const inPanel =
         relatedTarget instanceof Node &&
         (listRef.current?.contains(relatedTarget) === true ||
+          marksLayerRef.current?.contains(relatedTarget) === true ||
           actionRef.current?.contains(relatedTarget) === true);
       if (!inPanel) closeTitles();
     },
@@ -682,6 +981,119 @@ export function MarkdownContentsRail({
     '--pn-contents-panel-width': `${PANEL_WIDTH}px`,
   } as CSSProperties;
 
+  // The marks: closed, in a layer over the dock beside each tick's line; open,
+  // inside the list (they scroll with their rows) at the end of each row. They
+  // come after every tick, so the ticks stay adjacent siblings (the lens rules).
+  const markButtons: ReactNode[] = [];
+  const labelPadding = new Map<number, number>();
+  if (rowMarks !== null) {
+    renderedItemIndexes.forEach((index, position) => {
+      const marks = rowMarks[position];
+      const item = items[index];
+      if (marks === undefined || marks.total === 0 || item === undefined) return;
+      const top = position * ROW_HEIGHT;
+      const openMoreWidth = marks.more > 0 ? contentsRailMoreWidth(marks.more) : 0;
+      // Closed: 5 px slots from 21 px into the dock (the rest of the row is the
+      // tick's). Open: 8 px slots, then the "+N" sized to its digits, at the
+      // row's end. Logical, as the label's padding that makes room for them.
+      const place = (slot: number): CSSProperties => {
+        if (titlesVisible) {
+          return slot < marks.shown.length
+            ? {
+                insetInlineEnd: OPEN_MARKS_END + openMoreWidth + (marks.shown.length - 1 - slot) * CONTENTS_RAIL_OPEN_MARK_WIDTH,
+                width: CONTENTS_RAIL_OPEN_MARK_WIDTH,
+              }
+            : { insetInlineEnd: OPEN_MARKS_END, width: openMoreWidth };
+        }
+        return { insetInlineEnd: DOCK_WIDTH - CLOSED_MARK_START - (slot + 1) * CLOSED_MARK_WIDTH, width: CLOSED_MARK_WIDTH };
+      };
+      if (titlesVisible) labelPadding.set(index, 4 + openMoreWidth + marks.shown.length * CONTENTS_RAIL_OPEN_MARK_WIDTH + 6);
+      marks.shown.forEach((annotation, slot) => {
+        const id = annotation.id;
+        const stop: RailStop = { kind: 'mark', key: `mark:${id}`, index, id };
+        const kind =
+          annotation.type === AnnotationType.DELETION
+            ? 'deletion'
+            : annotation.type === AnnotationType.GLOBAL_COMMENT
+              ? 'global'
+              : 'comment';
+        markButtons.push(
+          <button
+            key={stop.key}
+            ref={stopRef(stop.key)}
+            type="button"
+            className="pn-contents-rail-mark"
+            data-kind={kind}
+            data-mark-id={id}
+            data-row={index}
+            data-selected={id === selectedMarkId ? '' : undefined}
+            data-highlighted={id === cardMarkId ? '' : undefined}
+            aria-label={contentsRailMarkName(annotation)}
+            aria-current={id === selectedMarkId ? 'true' : undefined}
+            tabIndex={-1}
+            style={{ top, height: ROW_HEIGHT, ...place(slot) }}
+            onPointerEnter={(event) => {
+              if (event.pointerType === 'touch') return;
+              setHoveredMarkId(id);
+              if (titlesVisible) setInteractionIndex(index);
+            }}
+            onPointerLeave={() => setHoveredMarkId((current) => (current === id ? null : current))}
+            // A press never takes focus (as a tick's): the card follows the pointer.
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => {
+              setHoveredMarkId(null);
+              onSelectAnnotation?.(id);
+            }}
+            onFocus={() => {
+              setFocusedMarkId(id);
+              if (titlesVisible) setInteractionIndex(index);
+            }}
+            onBlur={(event) => {
+              setFocusedMarkId((current) => (current === id ? null : current));
+              if (titlesVisible) closeWhenFocusLeaves(event.relatedTarget);
+            }}
+            onKeyDown={(event) => onStopKeyDown(event, stop)}
+          />,
+        );
+      });
+      if (marks.more > 0) {
+        const stop: RailStop = { kind: 'more', key: `more:${index}`, index };
+        markButtons.push(
+          <button
+            key={stop.key}
+            ref={stopRef(stop.key)}
+            type="button"
+            className="pn-contents-rail-more"
+            data-row={index}
+            // Open, it goes to the row's heading: named as the row's tick is, with the count.
+            aria-label={
+              titlesVisible
+                ? `Go to ${item.breadcrumb}, ${marks.more} more ${marks.more === 1 ? 'annotation' : 'annotations'}`
+                : `${marks.more} more ${marks.more === 1 ? 'annotation' : 'annotations'} in ${item.label}`
+            }
+            tabIndex={-1}
+            style={{ top, height: ROW_HEIGHT, ...place(marks.shown.length) }}
+            onPointerEnter={(event) => {
+              if (titlesVisible && event.pointerType !== 'touch') setInteractionIndex(index);
+            }}
+            onPointerDown={(event) => event.preventDefault()}
+            // Closed: the panel opens at this row. Open: the row's heading, as a pick.
+            onClick={(event) => (titlesVisible ? navigateTo(index, false) : openAtRow(index, event.detail === 0))}
+            onFocus={() => {
+              if (titlesVisible) setInteractionIndex(index);
+            }}
+            onBlur={(event) => {
+              if (titlesVisible) closeWhenFocusLeaves(event.relatedTarget);
+            }}
+            onKeyDown={(event) => onStopKeyDown(event, stop)}
+          >
+            {titlesVisible ? `+${marks.more}` : null}
+          </button>,
+        );
+      }
+    });
+  }
+
   // Layering: the rail is document chrome and renders in place, inside the
   // document pane, not portalled to <body>. A host keeps the pane its own
   // stacking context (an `isolate` ancestor) at the document level, so the
@@ -695,7 +1107,10 @@ export function MarkdownContentsRail({
       aria-label="Document contents"
       data-revealed={titlesVisible ? '' : undefined}
       style={railStyle}
-      onPointerLeave={() => setInteractionIndex(null)}
+      onPointerLeave={() => {
+        setInteractionIndex(null);
+        if (hoveredMarkId !== null) setHoveredMarkId(null);
+      }}
     >
       <div className="pn-contents-rail-dock" aria-hidden="true" />
       <div className="pn-contents-rail-surface" aria-hidden="true" />
@@ -713,9 +1128,7 @@ export function MarkdownContentsRail({
           return (
             <button
               key={item.key}
-              ref={(node) => {
-                markerRefs.current[index] = node;
-              }}
+              ref={stopRef(`tick:${index}`)}
               type="button"
               className="pn-contents-rail-marker"
               data-contents-index={index}
@@ -723,6 +1136,8 @@ export function MarkdownContentsRail({
               data-highlighted={highlighted ? '' : undefined}
               data-level={item.level}
               data-depth={Math.min(3, Math.max(0, item.level - baseLevel))}
+              // A row with marks: its line stops before them (contents-rail.css).
+              data-marks={(rowMarks?.[markerPosition]?.total ?? 0) > 0 ? '' : undefined}
               aria-label={
                 titlesVisible
                   ? `Go to ${item.breadcrumb}`
@@ -751,18 +1166,48 @@ export function MarkdownContentsRail({
               onPointerMove={onPointerMove}
               onPointerUp={endScrub}
               onPointerCancel={endScrub}
-              onKeyDown={(event) => onMarkerKeyDown(event, index)}
+              onKeyDown={(event) => onStopKeyDown(event, { kind: 'tick', key: `tick:${index}`, index })}
             >
               <span className="pn-contents-rail-tick" aria-hidden="true">
                 <span className="pn-contents-rail-line" />
               </span>
-              <span className="pn-contents-rail-label" aria-hidden="true">
+              <span
+                className="pn-contents-rail-label"
+                aria-hidden="true"
+                style={labelPadding.has(index) ? { paddingInlineEnd: `${labelPadding.get(index)}px` } : undefined}
+              >
                 {item.label}
               </span>
             </button>
           );
         })}
+        {titlesVisible && markButtons}
       </div>
+      {!titlesVisible && markButtons.length > 0 && (
+        <div ref={marksLayerRef} className="pn-contents-rail-marks">
+          {markButtons}
+        </div>
+      )}
+      {cardAnnotation !== undefined && (
+        <div ref={cardRef} className="pn-contents-rail-card" role="tooltip">
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <span className={`text-[11px] font-medium ${ANNOTATION_TYPE_COLOR[cardAnnotation.type] ?? ''}`}>
+              {ANNOTATION_TYPE_LABEL[cardAnnotation.type] ?? 'Comment'}
+            </span>
+            <AnnotationCardByline
+              author={cardAnnotation.author}
+              isMe={isCurrentUser(cardAnnotation.author)}
+              timestamp={cardAnnotation.createdA}
+            />
+          </div>
+          {cardAnnotation.type !== AnnotationType.GLOBAL_COMMENT && cardAnnotation.originalText.trim() !== '' && (
+            <p className={ANNOTATION_QUOTE_CLASS}>"{cardAnnotation.originalText}"</p>
+          )}
+          {cardAnnotation.type !== AnnotationType.DELETION && (cardAnnotation.text ?? '').trim() !== '' && (
+            <p className={`${ANNOTATION_TEXT_CLASS} pn-contents-rail-card-text`}>{cardAnnotation.text}</p>
+          )}
+        </div>
+      )}
       {titlesVisible && panelAction !== undefined && (
         <div
           ref={actionRef}

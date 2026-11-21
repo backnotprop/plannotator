@@ -1,4 +1,7 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useMentionAutocomplete } from '@plannotator/ui/hooks/useMentionAutocomplete';
+import { MentionAutocompleteMenu, mentionActiveOptionId } from '@plannotator/ui/components/MentionAutocomplete';
+import { holdCommentTags, tagsFromIds, useLiveCommentSource } from '../live/commentTags';
 import { createPortal } from 'react-dom';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
@@ -10,7 +13,7 @@ import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { useDraggable } from '@plannotator/ui/hooks/useDraggable';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import {
   hasPrimaryCoarsePointer,
   useVisibleViewportBounds,
@@ -137,6 +140,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const toolbarWidth = Math.min(TOOLBAR_MAX_WIDTH, visibleBounds.width);
   const horizontalInset = toolbarWidth / 2;
   const suggestedCodeRef = useRef<HTMLTextAreaElement>(null);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+  const liveSource = useLiveCommentSource();
+  const mention = useMentionAutocomplete({ text: commentText, setText: setCommentText, textareaRef: commentRef, source: liveSource });
+  const mentionListbox = useId();
+  const submitWithTags = () => {
+    holdCommentTags(tagsFromIds(mention.mentionIds, liveSource));
+    onSubmit();
+  };
   const [toolbarHeight, setToolbarHeight] = useState<number | null>(null);
   const enterSavesComment = useConfigValue('enterSavesComment');
   const handleTabIndent = useTabIndent(setSuggestedCode);
@@ -286,30 +297,43 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           )}
 
           <textarea
+            ref={commentRef}
             data-pn-mobile-editable="true"
             value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            placeholder="Leave feedback..."
+            onChange={(e) => {
+              setCommentText(e.target.value);
+              mention.onSelect();
+            }}
+            onSelect={mention.onSelect}
+            aria-controls={mention.menu ? mentionListbox : undefined}
+            aria-activedescendant={mentionActiveOptionId(mentionListbox, mention.menu)}
+            placeholder={liveSource ? 'Leave feedback, or @ an agent to send it now' : 'Leave feedback...'}
             className="w-full min-h-[4.5rem] max-h-[calc(var(--pn-viewport-height,100vh)-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
             rows={3}
             autoFocus={!coarsePointer}
             onKeyDown={(e) => {
+              if (e.key === 'Escape' && isImeCompositionKey(e)) {
+                e.stopPropagation();
+                return;
+              }
+              if (mention.onKeyDown(e)) return;
               if (e.key === 'Escape') {
                 e.stopPropagation();
                 onDismiss();
               } else if (isCommentSubmitKey(e, enterSavesComment)) {
                 // Prevented so a plain Enter (the setting on) adds no newline.
                 e.preventDefault();
-                onSubmit();
+                submitWithTags();
               }
             }}
           />
+          <MentionAutocompleteMenu id={mentionListbox} menu={mention.menu} onSelect={mention.select} />
 
           {/* Optional suggested code section */}
           {showSuggestedCode ? (
             <div className="mt-2">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-muted-foreground">Suggested code</span>
+                <span className="text-xs text-muted-foreground">Suggested code</span>
                 <button
                   onClick={() => setShowCodeModal(true)}
                   className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -333,7 +357,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                   if (e.key === 'Tab') {
                     handleTabIndent(e);
                   } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                    onSubmit();
+                    submitWithTags();
                   }
                 }}
               />
@@ -376,7 +400,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 <SparklesIcon className="w-3 h-3" />
                 Ask AI
                 {aiHistoryMessages.length > 0 && (
-                  <span className="text-[9px] font-mono bg-muted px-1 py-0.5 rounded">
+                  <span className="text-xs font-mono bg-muted px-1 py-0.5 rounded">
                     {aiHistoryMessages.length}
                   </span>
                 )}
@@ -385,7 +409,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
             {/* Add Comment button — right side */}
             <button
-              onClick={onSubmit}
+              onClick={submitWithTags}
               disabled={!commentText.trim() && !suggestedCode.trim()}
               className="review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
             >

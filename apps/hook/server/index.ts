@@ -85,6 +85,7 @@
 
 // First import: loopback requests ignore a proxy from here on (loopback-no-proxy.ts).
 import "./loopback-no-proxy";
+import { postReviewLiveDecision, reviewLiveDecisionWords, reviewLiveSessionOf, reviewLiveTargetOf, reviewLiveTargetOfOpenCode } from "@plannotator/shared/review-live";
 import { childEnv, GIT_REPO_ENV, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -111,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -272,7 +273,9 @@ import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
-import { routineCallArgs, runInboxCallCommand } from "./inbox-call-command";
+import { inboxHelpTopic } from "./inbox-help-before-after";
+import { runInboxCallCommand } from "./inbox-call-command";
+import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
@@ -330,6 +333,7 @@ const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unk
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
+import { loadEmbeddedSemDiff } from "./sem-diff";
 
 // The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash
 // call of a Claude session that loads it. Only an Agent SDK session can be a
@@ -509,22 +513,20 @@ if (isReviewDrawCommand(rawArgs, () => {
     process.exit(await runInboxAntigravityCommand(args.slice(2), { env: process.env, dataDir: getPlannotatorDataDir() }));
   }
 }
-// `plannotator routine <op> ['<json>']`: sugar over `inbox call routine` (inbox-call-command.ts).
-if (rawArgs[0] === "routine") {
-  const routineArgs = routineCallArgs(rawArgs.slice(1));
-  if (!Array.isArray(routineArgs)) {
-    process.stderr.write(`${routineArgs.code}: ${routineArgs.error}\n`);
-    process.exit(2);
+// `plannotator routine <command> [options]`: sugar over `inbox call routine` (routine-command.ts). Its --help needs no Inbox.
+{
+  const args = rawArgs;
+  if (args[0] === "routine") {
+    const routineDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runRoutineCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(routineDataDir),
+      }),
+    );
   }
-  const routineDataDir = getPlannotatorDataDir();
-  process.exit(
-    await runInboxCallCommand(routineArgs, {
-      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-      env: process.env,
-      askAiChild: isAskAiChild(process.env),
-      ensureRunning: () => ensureInboxRunning(routineDataDir),
-    }),
-  );
 }
 // `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
 {
@@ -566,6 +568,25 @@ if (rawArgs[0] === "routine") {
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(stepsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator theme …`: the person's own theme files (theme-command.ts). Reads and writes the data dir
+// only, so it works with nothing running. Before the strict-annotate parse: it takes its own flags and --help.
+{
+  const args = rawArgs;
+  if (args[0] === "theme") {
+    const { runThemeCommand } = await import("./theme-command");
+    process.exit(
+      await runThemeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        loadTheme: () => {
+          const theme = loadConfig({ quiet: true }).theme;
+          return theme && typeof theme === "object" ? theme : undefined;
+        },
+        saveTheme: (theme) => saveConfig({ theme }),
       }),
     );
   }
@@ -958,11 +979,14 @@ if (isVersionInvocation(args)) {
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
 // Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
 const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned routines on (config.json `inboxScheduledThreads`; never on Windows): only then does either help name them. */
+// Read quietly: a broken config.json is routines off, and the help's other read already warns once.
+const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ quiet: true }).inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
-  console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
+  console.log(formatTopLevelHelp({ board: boardOnForHelp(), scheduled: scheduledOnForHelp() }));
   process.exit(0);
 }
 
@@ -970,12 +994,18 @@ if (isTopLevelHelpInvocation(args)) {
 // otherwise `plannotator review --help` (commonly run by agents probing the
 // CLI) falls through to local review mode and launches the browser UI,
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
+// `inbox --help before-after` (inbox-help-before-after.ts): one topic of the guide, printed alone.
+const inboxTopic = args[0] === "inbox" ? inboxHelpTopic(args.slice(1)) : null;
+if (inboxTopic) {
+  await writeWholeToStdout(`${inboxTopic}\n`);
+  process.exit(0);
+}
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: process.platform !== "win32" && loadConfig().inboxScheduledThreads === true, codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
       : formatSubcommandHelp(helpSubcommand);
   await writeWholeToStdout(`${help}\n`);
   process.exit(0);
@@ -1818,7 +1848,10 @@ if (args[0] === "sessions") {
   setServerReadyTarget(reviewTarget);
 
   // Start review server (even if empty - user can switch diff types in local mode)
+  const liveSession = reviewLiveSessionOf(process.env);
   const server = await startReviewServer({
+    liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
+    liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,
     gitRef,
     error: diffError,
@@ -1849,6 +1882,7 @@ if (args[0] === "sessions") {
     approvalNotesSupported: supportsReviewApprovalNotes(detectedOrigin),
     htmlContent: reviewHtmlContent(),
     diagramEngine: loadEmbeddedDiagramEngine,
+    semDiff: loadEmbeddedSemDiff,
     tailnetPublished: tailscaleFlag || cloudflareAccessFlag,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
@@ -1887,6 +1921,11 @@ if (args[0] === "sessions") {
 
   // Cleanup
   server.stop();
+
+  if (liveSession) {
+    const words = reviewLiveDecisionWords(result);
+    if (words) await postReviewLiveDecision(getPlannotatorDataDir(), liveSession, words);
+  }
 
   // Output feedback (captured by slash command)
   result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
@@ -2733,7 +2772,7 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown; inboxSession?: unknown }>(
     "opencode-review",
     inputJson,
   );
@@ -2893,6 +2932,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    liveReviewAgent: reviewLiveTargetOfOpenCode(input.inboxSession),
     project: reviewProject,
     includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
@@ -2922,6 +2962,7 @@ if (args[0] === "sessions") {
       supportsReviewApprovalNotes("opencode") && input.supportsApprovalNotes === true,
     htmlContent: reviewHtmlContent(),
     diagramEngine: loadEmbeddedDiagramEngine,
+    semDiff: loadEmbeddedSemDiff,
     opencodeClient: makeOpenCodeBridgeClient(input.agents),
     onReady: (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);

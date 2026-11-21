@@ -259,8 +259,76 @@ test('side by side at 1440: Hide then Show, focus following each; reloaded with 
   });
 });
 
+test('side by side at 1440: the file\'s comments are dots beside their sections\' ticks; a hover shows one, a click jumps to it', async ({ browser }) => {
+  await withPlan(browser, { width: 1440, height: 900 }, 'side', async (page, pane) => {
+    // Comments saved on the file (a global one, a comment in Design, a deletion and a comment in Rollout), then the page again.
+    const attachment = decodeURIComponent(/[#&]file=([^&]+)/.exec(page.url())![1]!);
+    const note = (id: string, type: string, originalText: string, text: string) => ({
+      id, type, originalText, text, blockId: '', startOffset: 0, endOffset: 0, createdA: Date.now() - 120_000,
+    });
+    const notes = [
+      note('g1', 'GLOBAL_COMMENT', '', 'Good direction overall.'),
+      note('c1', 'COMMENT', 'Design paragraph 2: a worker claims each job', 'Say how many workers. Four is a guess.'),
+      note('d1', 'DELETION', 'Rollout paragraph 4: a shadow week', ''),
+      note('c2', 'COMMENT', 'Rollout paragraph 6: a shadow week', 'Who is on call that week?'),
+    ];
+    await page.evaluate(async ({ attachment, notes }) => {
+      for (const annotation of notes) {
+        const res = await fetch('/api/inbox/annotations', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attachment_id: attachment, version: 'current', annotation }),
+        });
+        if (!res.ok) throw new Error(`save ${annotation.id}: ${res.status}`);
+      }
+    }, { attachment, notes });
+    await page.reload();
+    await expect(pane.locator('[data-doc-text-root] [data-highlight-id="c2"], [data-doc-text-root] [data-bind-id="c2"]').first()).toBeVisible();
+    const { rail, ticks } = await railParts(pane);
+    const dots = (row: number) => rail.locator(`.pn-contents-rail-mark[data-row="${row}"]`);
+
+    // Each section's dots on its tick's row, right of the tick's line: the global one on the title's row.
+    await expect.poll(() => rail.locator('.pn-contents-rail-mark').evaluateAll((marks) =>
+      marks.map((mark) => `${(mark as HTMLElement).dataset.row}:${(mark as HTMLElement).dataset.markId}:${(mark as HTMLElement).dataset.kind}`))).toEqual([
+      '0:g1:global', '2:c1:comment', '4:d1:deletion', '4:c2:comment',
+    ]);
+    for (const [row, count] of [[0, 1], [2, 1], [4, 2]] as const) {
+      const tick = (await ticks.nth(row).boundingBox())!;
+      for (let i = 0; i < count; i++) {
+        const dot = (await dots(row).nth(i).boundingBox())!;
+        expect(Math.abs(dot.y + dot.height / 2 - (tick.y + tick.height / 2))).toBeLessThan(1);
+        expect(dot.x).toBeGreaterThanOrEqual(tick.x + 21);
+        expect(dot.x + dot.width).toBeLessThanOrEqual(tick.x + tick.width + 0.5);
+      }
+    }
+    await expect(dots(2).first()).toHaveAccessibleName('Comment, "Design paragraph 2: a worker claims each job": Say how many workers…');
+
+    // A hover shows the comment's card.
+    await dots(2).first().hover();
+    const card = rail.locator('.pn-contents-rail-card');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Comment');
+    await expect(card).toContainText('"Design paragraph 2: a worker claims each job"');
+    await expect(card).toContainText('Say how many workers. Four is a guess.');
+    await shot(page, 'final-side-1440-marks-hover-light');
+
+    // A click selects it: the highlight scrolls to the middle of the page, focused, and the dot is the selected one.
+    await dots(4).nth(1).click();
+    const highlight = pane.locator('[data-doc-text-root] [data-highlight-id="c2"], [data-doc-text-root] [data-bind-id="c2"]').first();
+    await expect(highlight).toHaveClass(/\bfocused\b/);
+    const scroller = (await pane.locator('.ib-docscroll').boundingBox())!;
+    await expect.poll(async () => {
+      const box = (await highlight.boundingBox())!;
+      return Math.abs(box.y + box.height / 2 - (scroller.y + scroller.height / 2)) < 40;
+    }).toBe(true);
+    await expect(rail.locator('.pn-contents-rail-mark[data-mark-id="c2"]')).toHaveAttribute('data-selected', '');
+    await expect(pane.locator('.ib-apanel [data-annotation-id="c2"]')).toBeVisible();
+    await shot(page, 'final-side-1440-marks-jump-light');
+  });
+});
+
 test('side by side at 1440: a file without a rail keeps today\'s column', async ({ browser }) => {
-  const short = '# Refund worker plan\n\nMove refunds to a background worker.\n\n## Context\n\nInline today.\n\n## Design\n\nA worker.\n';
+  // One heading: no Contents (the Inbox shows them from 2).
+  const short = '# Refund worker plan\n\nMove refunds to a background worker.\n\nInline today; a worker next.\n';
   await withPlan(browser, { width: 1440, height: 900 }, 'side', async (page, pane) => {
     await page.waitForTimeout(1_000);
     await expect(pane.locator('nav[aria-label="Document contents"], [data-contents-open], [data-contents-show]')).toHaveCount(0);

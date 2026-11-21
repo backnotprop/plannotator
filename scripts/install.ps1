@@ -51,7 +51,7 @@ if ($Minimal -and $NoMinimal) {
 }
 
 # Binary-only mode. Installs just the plannotator binary and no persistent state
-# elsewhere - no sem sidecar, CallDiff or agent-terminal runtime, skills, hooks, or per-agent
+# elsewhere - no CallDiff or agent-terminal runtime, skills, hooks, or per-agent
 # config. Precedence: -Minimal / -NoMinimal switch > PLANNOTATOR_MINIMAL env var
 # > default (off). Mirrors install.sh's --minimal / --no-minimal.
 $minimal = $false
@@ -62,8 +62,6 @@ if ($Minimal) { $minimal = $true }
 if ($NoMinimal) { $minimal = $false }
 
 $repo = "backnotprop/plannotator"
-$semRepo = "Ataraxy-Labs/sem"
-$semVersion = "v0.8.0"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 $targetExe = "$installDir\plannotator.exe"
 
@@ -293,74 +291,6 @@ function Write-InstallFlags {
         Move-Item -Force -LiteralPath $tmp -Destination $path -ErrorAction Stop
     } catch {
         Remove-Item -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
-    }
-}
-
-function Install-SemSidecar {
-    if ($env:PLANNOTATOR_SKIP_SEM_INSTALL -match '^(1|true|yes)$') {
-        Write-Host "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
-        return
-    }
-
-    $semAsset = if ($platform -eq "win32-x64") { "sem-windows-x86_64.zip" } else { $null }
-    if (-not $semAsset) {
-        Write-Host "Skipping semantic diff sidecar install (sem does not publish $platform)"
-        return
-    }
-
-    $semDir = Join-Path $configDir "vendor\sem\$semVersion"
-    $semPath = Join-Path $semDir "sem.exe"
-    if (Test-Path $semPath) {
-        try {
-            $versionText = & $semPath --version 2>$null
-            if ($LASTEXITCODE -eq 0 -and $versionText -match '^sem ') {
-                Write-Host "Semantic diff sidecar already installed at $semPath"
-                return
-            }
-        } catch {
-            # Replace invalid stale sidecar below.
-        }
-    }
-
-    $tmpSemDir = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-sem-$([System.Guid]::NewGuid().ToString('N'))"
-    New-Item -ItemType Directory -Force -Path $tmpSemDir | Out-Null
-
-    try {
-        $semBaseUrl = "https://github.com/$semRepo/releases/download/$semVersion"
-        $semArchive = Join-Path $tmpSemDir $semAsset
-        # Bounded so a slow/hung download of this optional sidecar can't wedge an
-        # install where plannotator already landed; the catch below skips it.
-        Invoke-WebRequest -Uri "$semBaseUrl/$semAsset" -OutFile $semArchive -UseBasicParsing -TimeoutSec 120
-
-        # Pinned for $semVersion, not read from the release's checksums.txt
-        # (same connection as the archive). Keep in step with install.sh / install.cmd.
-        $semSha256 = @{ "sem-windows-x86_64.zip" = "2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06" }
-        $expected = $semSha256[$semAsset]
-        if (-not $expected) {
-            Write-Host "Skipping semantic diff sidecar install (checksum missing for $semAsset)"
-            return
-        }
-
-        $actual = (Get-FileHash -Path $semArchive -Algorithm SHA256).Hash.ToLower()
-        if ($actual -ne $expected.ToLower()) {
-            Write-Host "Skipping semantic diff sidecar install (checksum mismatch)"
-            return
-        }
-
-        Expand-Archive -Force -Path $semArchive -DestinationPath $tmpSemDir
-        $extracted = Get-ChildItem -Path $tmpSemDir -Filter "sem.exe" -Recurse | Select-Object -First 1
-        if (-not $extracted) {
-            Write-Host "Skipping semantic diff sidecar install (binary missing from archive)"
-            return
-        }
-
-        New-Item -ItemType Directory -Force -Path $semDir | Out-Null
-        Copy-Item -Force $extracted.FullName $semPath
-        Write-Host "Semantic diff sidecar installed to $semPath"
-    } catch {
-        Write-Host "Skipping semantic diff sidecar install ($($_.Exception.Message))"
-    } finally {
-        Remove-Item -Recurse -Force $tmpSemDir -ErrorAction SilentlyContinue
     }
 }
 
@@ -1007,7 +937,7 @@ function Show-PathAdvice {
 # binary is installed, so add it to PATH and exit before any sidecar download,
 # agent integration, skill checkout, config write, or cleanup runs. Only the
 # binary, its PATH entry, and install-flags.json (Write-InstallFlags, so a
-# later auto-update stays binary-only) are added - none of the sem sidecar, CallDiff, agent-terminal
+# later auto-update stays binary-only) are added - none of the CallDiff, agent-terminal
 # runtime, or per-agent skills, hooks, or config.
 if ($minimal) {
     Write-InstallFlags
@@ -1018,7 +948,6 @@ if ($minimal) {
     exit 0
 }
 
-Install-SemSidecar
 Install-AgentTerminalRuntime
 Install-CallFlowRuntime
 

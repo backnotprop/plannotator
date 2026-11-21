@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Check, Copy, MoreHorizontal } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronDown, Check, Copy, ExternalLink, MoreHorizontal } from 'lucide-react';
 import { AppIcon } from './icons/AppIcon';
 import { useOpenInApps, useRememberedOpenInApp } from '../hooks/useOpenInApps';
 import { copyTextToClipboard } from '../utils/clipboard';
@@ -40,13 +40,14 @@ interface OpenInAppButtonProps {
   /** When true, render the primary label text alongside the icon. */
   showLabel?: boolean;
   disabled?: boolean;
-  /**
-   * 1-based line to open at, when the catalog app's launcher takes one. A
-   * function is read at the moment of the click (the selection or the comment
-   * picked then), and may answer undefined: the file opens at its top.
-   */
+  extraItems?: readonly OpenInExtraItem[] | (() => readonly OpenInExtraItem[]);
+  quiet?: boolean;
+  menuOnly?: boolean;
+  menuHeader?: React.ReactNode;
   line?: number | (() => number | undefined);
 }
+
+type OpenInExtraItem = { label: string; onSelect: () => void; icon?: React.ReactNode };
 
 // The host app catalog is static for the session, but the all-files view
 // renders one OpenInAppButton per file — so /api/open-in/apps is fetched once
@@ -60,6 +61,10 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   canOpen = true,
   showLabel = false,
   disabled = false,
+  extraItems,
+  quiet = false,
+  menuOnly = false,
+  menuHeader,
   line,
 }) => {
   const detected = useOpenInApps(OPEN_IN_APPS_URL);
@@ -71,6 +76,14 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!armed || !refocus.current) return;
+    refocus.current = false;
+    triggerRef.current?.focus();
+  }, [armed]);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -89,7 +102,9 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   // "hide when unavailable" behavior for surfaces whose only copy action is the
   // path (annotate in a remote session) — show the standalone menu only when
   // there's a diff to copy.
-  if (!openable && !diffText) return null;
+  const hasExtras = typeof extraItems === 'function' || !!extraItems?.length;
+  if (!openable && !diffText && !hasExtras) return null;
+  const extras = typeof extraItems === 'function' ? (armed ? extraItems() : []) : extraItems ?? [];
 
   // Resolve the active app: last-used if still detected, else reveal, else first.
   const resolvedId = list.some((a) => a.id === currentId)
@@ -169,46 +184,75 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   );
 
   const isDisabled = disabled || busy;
+  const triggerClass = `pn-hit-target text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
+    menuOnly ? 'px-1.5 rounded justify-center' : openable ? 'px-1 rounded-r border-l border-border/50' : 'px-1.5 rounded'
+  }`;
+  const triggerTitle = openable && !menuOnly ? 'Open in…' : 'File actions';
+  const triggerLabel = openable && !menuOnly ? 'Choose app to open in' : 'File actions';
+  const triggerIcon = openable && !menuOnly ? <ChevronDown className="w-3 h-3" /> : <MoreHorizontal className="w-3.5 h-3.5" />;
 
   return (
-    <div className="flex items-center gap-1">
-      <div className="flex items-center rounded overflow-hidden">
+    <div className={`flex items-center gap-1 ${quiet ? 'opacity-0 group-hover/file-header:opacity-100 [@media(hover:none)]:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 transition-opacity' : ''}`} data-open-in-quiet={quiet ? '' : undefined}>
+      <div className="flex items-center">
         {/* Primary: open in the current app (only when launchable). */}
-        {openable && currentApp && (
+        {openable && currentApp && !menuOnly && (
           <button
             type="button"
             onClick={() => open(resolvedId)}
             disabled={isDisabled}
-            className={`text-xs flex items-center gap-1 py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`text-xs flex items-center gap-1 py-1 rounded-l transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
               showLabel ? 'pl-2 pr-1.5' : 'px-1.5'
             }`}
             title={error ?? currentApp.label}
             aria-label={`Open in ${currentApp.label}`}
           >
-            {busy ? Spinner : <AppIcon id={currentApp.icon} className="w-3.5 h-3.5" />}
+            {busy ? Spinner : quiet ? <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> : <AppIcon id={currentApp.icon} className="w-3.5 h-3.5" />}
             {showLabel && <span className="whitespace-nowrap">{currentApp.label}</span>}
           </button>
         )}
         {/* Chevron (with primary) or standalone overflow (copy-only). */}
+        {!armed ? (
+          <button
+            type="button"
+            disabled={isDisabled}
+            className={triggerClass}
+            title={triggerTitle}
+            aria-label={triggerLabel}
+            data-pn-touch-target={menuOnly ? '' : undefined}
+            data-pn-touch-target-icon={menuOnly ? '' : undefined}
+            aria-haspopup="menu"
+            aria-expanded={false}
+            data-open-in-trigger=""
+            onPointerEnter={() => setArmed(true)}
+            onFocus={() => {
+              refocus.current = true;
+              setArmed(true);
+            }}
+            onClick={() => {
+              setArmed(true);
+              setMenuOpen(true);
+            }}
+          >
+            {triggerIcon}
+          </button>
+        ) : (
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger
             render={
               <button
+                ref={triggerRef}
                 type="button"
                 disabled={isDisabled}
-                className={`text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
-                  openable ? 'px-1 border-l border-border/50' : 'px-1.5'
-                }`}
-                title={openable ? 'Open in…' : 'File actions'}
-                aria-label={openable ? 'Choose app to open in' : 'File actions'}
+                className={triggerClass}
+                title={triggerTitle}
+                aria-label={triggerLabel}
+                data-pn-touch-target={menuOnly ? '' : undefined}
+                data-pn-touch-target-icon={menuOnly ? '' : undefined}
+                data-open-in-trigger=""
               />
             }
           >
-            {openable ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <MoreHorizontal className="w-3.5 h-3.5" />
-            )}
+            {triggerIcon}
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
@@ -218,6 +262,15 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             // the menu closes — that left-edge bar reads as a stray artifact.
             finalFocus={false}
           >
+            {menuHeader}
+            {menuHeader != null && <DropdownMenuSeparator />}
+            {extras.map((item) => (
+              <DropdownMenuItem key={item.label} onClick={item.onSelect} className="text-[13px]" data-open-in-extra={item.label}>
+                {item.icon}
+                <span className="flex-1">{item.label}</span>
+              </DropdownMenuItem>
+            ))}
+            {extras.length > 0 && (openable || filePath || diffText) && <DropdownMenuSeparator />}
             {openable &&
               grouped.map((group, gi) => (
                 <React.Fragment key={group[0].kind}>
@@ -227,7 +280,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
                       key={app.id}
                       closeOnClick={false}
                       onClick={() => selectApp(app.id)}
-                      className="text-xs"
+                      className="text-[13px]"
                     >
                       <AppIcon id={app.icon} className="w-4 h-4" />
                       <span className="flex-1 truncate">{app.label}</span>
@@ -241,7 +294,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
               <DropdownMenuItem
                 closeOnClick={false}
                 onClick={() => void copyText(filePath)}
-                className="text-xs"
+                className="text-[13px]"
               >
                 <Copy className="w-4 h-4" />
                 <span className="flex-1">Copy path</span>
@@ -251,7 +304,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
               <DropdownMenuItem
                 closeOnClick={false}
                 onClick={() => void copyText(diffText)}
-                className="text-xs"
+                className="text-[13px]"
               >
                 <Copy className="w-4 h-4" />
                 <span className="flex-1">Copy file diff</span>
@@ -259,6 +312,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
       </div>
       {error && (
         <span

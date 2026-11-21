@@ -20,7 +20,10 @@
  * `installPath` is the folder the session loaded, then a project-scope record
  * whose `projectPath` holds the session's folder, then the user record. Only
  * `plannotator@plannotator` counts (a fork from another marketplace is
- * another plugin). Paths compare by their real paths (`realish`).
+ * another plugin). Paths compare by their real paths (`realish`), each path
+ * resolved once until the registry changes (`createClaudePluginInstallReader`):
+ * a session's folders may be another machine's, where every lookup is slow
+ * (`/home` on macOS is an automount, #3623).
  * A session that polls with no `plugin` field runs a mod older than the field
  * (`PLUGIN_REPORTS_LOADED_SINCE`); when the installed plugin is at least that
  * release, a restart loads a newer one, so it is outdated with its version
@@ -199,12 +202,12 @@ const userRecord = (records: readonly ClaudePluginInstall[]) => records.find((r)
  * difference, and a folder deleted since (an old version's cache) still
  * compares by where it was.
  */
-export function realish(path: string): string {
+export function realish(path: string, realpath: (path: string) => string = realpathSync): string {
   let head = resolve(path);
   const rest: string[] = [];
   for (;;) {
     try {
-      return rest.length ? join(realpathSync(head), ...rest.reverse()) : realpathSync(head);
+      return rest.length ? join(realpath(head), ...rest.reverse()) : realpath(head);
     } catch {
       const up = dirname(head);
       if (up === head) return resolve(path);
@@ -214,9 +217,9 @@ export function realish(path: string): string {
   }
 }
 
-const isUnder = (path: string, dir: string) => {
-  const a = realish(path);
-  const b = realish(dir);
+const isUnder = (path: string, dir: string, real: (path: string) => string) => {
+  const a = real(path);
+  const b = real(dir);
   return a === b || a.startsWith(b.endsWith(sep) ? b : b + sep);
 };
 
@@ -229,17 +232,18 @@ const isUnder = (path: string, dir: string) => {
 export function chooseClaudePluginInstall(
   records: readonly ClaudePluginInstall[],
   session: { loadedRoot: string | null; folder: string | null },
+  real: (path: string) => string = realish,
 ): ClaudePluginInstall | null {
   if (records.length === 0) return null;
   if (session.loadedRoot) {
-    const root = realish(session.loadedRoot);
-    const same = records.find((r) => r.installPath && realish(r.installPath) === root);
+    const root = real(session.loadedRoot);
+    const same = records.find((r) => r.installPath && real(r.installPath) === root);
     if (same) return same;
   }
   if (session.folder) {
     const holding = records
-      .filter((r) => r.projectPath && r.scope !== "user" && isUnder(session.folder!, r.projectPath))
-      .sort((a, b) => realish(b.projectPath!).length - realish(a.projectPath!).length)[0];
+      .filter((r) => r.projectPath && r.scope !== "user" && isUnder(session.folder!, r.projectPath, real))
+      .sort((a, b) => real(b.projectPath!).length - real(a.projectPath!).length)[0];
     if (holding) return holding;
   }
   return userRecord(records);
@@ -265,15 +269,38 @@ export function pluginFolderChangedAt(installPath: string): number | null {
   return null;
 }
 
-/** Reads Claude Code's plugin registry for Plannotator's records, at most once per `INSTALL_FRESH_MS`. */
-export function createClaudePluginInstallReader(environment: AgentEnvironment, now: () => number = Date.now) {
+/** At most this many real paths are kept (`createClaudePluginInstallReader`): two per live session, and the records'. */
+const REAL_PATHS_MAX = 1024;
+
+/**
+ * Reads Claude Code's plugin registry for Plannotator's records, at most once per `INSTALL_FRESH_MS`, and resolves
+ * the paths the judgment compares (`realPath`), each once until the registry's text changes. Every list read, the
+ * 5 s restart watch and every poll answer judge every live session again; a session's plugin folder and start
+ * folder are fixed for its life, and an install or update, which moves plugin folders, rewrites the registry.
+ * Resolving them each time cost 20-60 ms per lookup for a session started on another machine (`/home/...` on
+ * macOS goes through the automount), seconds per list read with a few such sessions (#3623).
+ */
+export function createClaudePluginInstallReader(environment: AgentEnvironment, now: () => number = Date.now, options: { realpath?: (path: string) => string } = {}) {
   let cached: { at: number; value: ClaudePluginInstall[] } | null = null;
+  let registryText: string | null = null;
   const changed = new Map<string, { at: number; value: number | null }>();
+  const reals = new Map<string, string>();
   const records = (): ClaudePluginInstall[] => {
     if (cached && now() - cached.at < INSTALL_FRESH_MS) return cached.value;
     const file = readAgentFile(join(claudeConfigDir(environment), "plugins", "installed_plugins.json"));
-    const value = file.kind === "file" ? parseClaudePluginInstalls(file.text) : [];
+    const text = file.kind === "file" ? file.text : null;
+    if (text !== registryText) reals.clear();
+    registryText = text;
+    const value = text !== null ? parseClaudePluginInstalls(text) : [];
     cached = { at: now(), value };
+    return value;
+  };
+  const realPath = (path: string): string => {
+    const hit = reals.get(path);
+    if (hit !== undefined) return hit;
+    const value = realish(path, options.realpath);
+    reals.set(path, value);
+    if (reals.size > REAL_PATHS_MAX) reals.delete(reals.keys().next().value!);
     return value;
   };
   const changedAt = (installPath: string): number | null => {
@@ -288,6 +315,7 @@ export function createClaudePluginInstallReader(environment: AgentEnvironment, n
     /** The user-scope record: what a restart in a folder with no project install of its own loads. */
     read: () => userRecord(records()),
     changedAt,
+    realPath,
     pluginsDir: () => join(claudeConfigDir(environment), "plugins"),
   };
 }
@@ -309,6 +337,8 @@ export interface ClaudeSessionJudgeInput {
   pluginsDir: string;
   /** When an install folder last changed (`pluginFolderChangedAt`). */
   changedAt?: (installPath: string) => number | null;
+  /** A path's real path (`realish`, or the reader's cached `realPath`). */
+  realPath?: (path: string) => string;
 }
 
 /**
@@ -323,7 +353,8 @@ export function claudeSessionOutdated(input: ClaudeSessionJudgeInput): InboxSess
 
 function judgeClaudeSession(input: ClaudeSessionJudgeInput): InboxSessionOutdated | null {
   const { loaded, cliVersion } = input;
-  const install = chooseClaudePluginInstall(input.records, { loadedRoot: loaded?.root ?? null, folder: input.folder });
+  const real = input.realPath ?? realish;
+  const install = chooseClaudePluginInstall(input.records, { loadedRoot: loaded?.root ?? null, folder: input.folder }, real);
   if (!install) return null;
   const installed = install.version;
   const installedBehindInbox = older(installed, cliVersion);
@@ -337,9 +368,9 @@ function judgeClaudeSession(input: ClaudeSessionJudgeInput): InboxSessionOutdate
   // A plugin loaded from outside Claude Code's plugin folder reloads that same folder when restarted, so the
   // registry says nothing about it: `claude --plugin-dir <dir>`, and a local (directory) marketplace, which
   // Claude Code loads in place. Never flagged.
-  if (loaded.root && !isUnder(loaded.root, input.pluginsDir)) return null;
+  if (loaded.root && !isUnder(loaded.root, input.pluginsDir, real)) return null;
   const versionDiffers = !!loaded.version && !!installed && loaded.version !== installed;
-  const folderDiffers = !!loaded.root && !!install.installPath && realish(loaded.root) !== realish(install.installPath);
+  const folderDiffers = !!loaded.root && !!install.installPath && real(loaded.root) !== real(install.installPath);
   // Reinstalled into the same folder with the same version after the session loaded it: only the load time
   // tells. The registry's `lastUpdated` alone is not enough (a project-scope install of the same folder bumps
   // it with no new code), so the folder itself must have changed since the session loaded it too.
@@ -506,7 +537,7 @@ export function openCodePluginSpec(text: string): string | null {
 }
 
 /** The config files to read, in order: `OPENCODE_CONFIG` (an explicit file) when set, then the global folder's. */
-function openCodeConfigFiles(environment: AgentEnvironment): string[] {
+export function openCodeConfigFiles(environment: AgentEnvironment): string[] {
   const explicit = environment.env.OPENCODE_CONFIG?.trim();
   const expanded = explicit?.startsWith("~/") ? join(environment.homeDir, explicit.slice(2)) : explicit;
   const dir = openCodeConfigDir(environment);

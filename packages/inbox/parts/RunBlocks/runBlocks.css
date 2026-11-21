@@ -1,0 +1,63 @@
+/* `:::run` and `:::secret` cards (packages/inbox/parts/RunBlocks): one flat raised card, as an action item's, with the
+   command, output and field drawn on it, hairlines between parts. No inset wells, no accent edges. */
+.pn-inbox .ib-rb { margin: 8px 0 6px; border-radius: var(--ib-lr-xl, 12px); background: var(--ib-raise); padding: 12px 14px 12px; min-width: 0; }
+.pn-inbox .ib-rb-head { display: flex; align-items: center; flex-wrap: wrap; column-gap: 8px; row-gap: 2px; }
+.pn-inbox .ib-rb-head > .ib-ic { width: 14px; height: 14px; color: var(--primary); flex: none; }
+.pn-inbox .ib-rb-title { font-weight: 600; font-size: var(--ib-fs-14, 14px); min-width: 0; }
+.pn-inbox .ib-rb-title p { display: inline; margin: 0; }
+.pn-inbox .ib-rb-status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-rb-status .ib-ic { width: 13px; height: 13px; }
+.pn-inbox .ib-rb-status.ib-live { color: var(--foreground); }
+.pn-inbox .ib-rb-status.ib-ok { color: color-mix(in oklab, var(--success) 70%, var(--foreground)); }
+.pn-inbox .ib-rb-status.ib-bad { color: color-mix(in oklab, var(--destructive) 75%, var(--foreground)); }
+.pn-inbox .ib-rb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+.pn-inbox .ib-rb-why { margin: 4px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
+.pn-inbox .ib-rb-cmdrow { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+/* A long command scrolls inside its box (all of it stays reachable); the card stays a card's height. */
+.pn-inbox .ib-rb-cmd { flex: 1; min-width: 0; margin: 0; max-height: 12.8em; overflow: auto; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); background: none; padding: 0; }
+.pn-inbox .ib-rb-cmd[data-more] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 31px), transparent calc(100% - 3px)); mask-image: linear-gradient(to bottom, #000 calc(100% - 31px), transparent calc(100% - 3px)); }
+.pn-inbox .ib-rb-hint[data-secret-kept] { text-wrap: pretty; }
+.pn-inbox .ib-rb-cmd[data-more]:focus-visible { -webkit-mask-image: none; mask-image: none; }
+.pn-inbox .ib-rb-cmd:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+.pn-inbox .ib-rb-copy { flex: none; margin: -4px -6px 0 0; }
+.pn-inbox .ib-rb-copy .ib-ic { width: 13px; height: 13px; }
+.pn-inbox .ib-rb-where { margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-rb-uses { display: flex; gap: 6px; align-items: center; margin: 4px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-rb-uses .ib-ic { width: 12px; height: 12px; flex: none; }
+.pn-inbox .ib-rb-out { margin-top: 10px; padding-top: 10px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); min-width: 0; }
+.pn-inbox .ib-rb-lines { margin: 0; max-height: 320px; overflow: auto; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); background: none; padding: 0; }
+.pn-inbox .ib-rb-more, .pn-inbox .ib-rb-none { margin: 0 0 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-rb-none { margin: 0; }
+.pn-inbox .ib-rb-warn { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: color-mix(in oklab, var(--warning) 60%, var(--foreground)); }
+.pn-inbox .ib-rb-warn .ib-ic { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.pn-inbox .ib-rb-refused { margin-top: 10px; padding-top: 2px; }
+.pn-inbox .ib-rb-refused .ib-rb-cmd { margin-top: 10px; padding-top: 10px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); color: var(--muted-foreground); }
+.pn-inbox .ib-rb-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pn-inbox .ib-rb-acts .ib-btn .ib-ic { width: 13px; height: 13px; }
+.pn-inbox .ib-rb-acts .ib-btn:disabled, .pn-inbox .ib-rb-acts .ib-btn[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.pn-inbox .ib-rb-hint { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-rb-note { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-rb-note:empty { display: none; }
+.pn-inbox .ib-rb-need { margin-top: 10px; padding-top: 10px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-rb-needs-l { display: flex; gap: 6px; align-items: center; margin: 0; font-size: var(--ib-fs-13, 13px); font-weight: 500; }
+.pn-inbox .ib-rb-needs-l .ib-ic { width: 13px; height: 13px; color: var(--muted-foreground); }
+.pn-inbox .ib-rb-needs-l .ib-btn { margin-left: auto; }
+.pn-inbox .ib-rb-link { display: inline-flex; gap: 6px; align-items: center; margin-top: 8px; font-size: var(--ib-fs-13, 13px); color: var(--primary); text-decoration: none; }
+.pn-inbox .ib-rb-link:hover { text-decoration: underline; }
+.pn-inbox .ib-rb-link .ib-ic { width: 12px; height: 12px; }
+.pn-inbox .ib-sec-name { font-family: var(--font-mono); font-weight: 600; font-size: var(--ib-fs-13-5, 13.5px); overflow-wrap: anywhere; }
+.pn-inbox .ib-sec-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+.pn-inbox .ib-sec-input { flex: 1 1 220px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-sec-input::placeholder { font-family: var(--font-sans); color: var(--muted-foreground); }
+.pn-inbox .ib-sec-input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-sec-err { flex-basis: 100%; margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: color-mix(in oklab, var(--destructive) 80%, var(--foreground)); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-rb { padding: 12px 12px 14px; }
+  .pn-inbox .ib-rb-acts .ib-btn, .pn-inbox .ib-sec-form .ib-btn { height: 44px; }
+  .pn-inbox .ib-rb-acts .ib-btn.ib-pri { flex: 1 1 auto; justify-content: center; }
+  .pn-inbox .ib-rb-copy { height: 44px; margin: -10px -8px 0 0; }
+  /* 16px: a phone's browser does not zoom into the field. */
+  .pn-inbox .ib-sec-input { height: 44px; font-size: 16px; flex-basis: 100%; }
+  .pn-inbox .ib-sec-form .ib-btn.ib-pri { flex: 1 1 auto; justify-content: center; }
+  .pn-inbox .ib-rb-link { min-height: 44px; }
+}

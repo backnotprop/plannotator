@@ -81,6 +81,9 @@
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
 .pn-inbox .am { --am: var(--ib-mark-24); position: relative; display: inline-grid; place-items: center; flex: none; width: var(--am); height: var(--am); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* The list's Agents view draws it at 44 (AgentMark's `size`): the same mark, its host's plain mark one step up. */
+.pn-inbox .am[data-size="44"] { --am: var(--ib-mark-44); }
+.pn-inbox .am[data-size="44"] :is(.am-plain, .am-tile) > :is(.ib-mk, .ib-mk > svg, .ib-mk > img) { width: var(--ib-mark-30); height: var(--ib-mark-30); }
 
 /* ---------- the face picker (FaceFan.tsx): a half-circle fan of faces round the mark, an overlay ---------- */
 /* The positioner sits at the mark's centre with no size; each choice is placed from there (fanLayout.ts). */
@@ -104,9 +107,10 @@
   --gl-hi: color-mix(in oklch, #fff 92%, transparent);
   --gl-rim: color-mix(in oklch, var(--foreground) 12%, transparent);
 }
-.am-fan-dial { --o: 18px; position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* `--grow`: half of what the mark is past the sidebar's 28 px button (a 44 px mark), so the plate's hole clears it. */
+.am-fan-dial { --o: calc(18px + var(--grow, 0px)); position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
 .am-fan-shade, .am-fan-edge { position: absolute; inset: 0; }
-.am-fan-plate { --hole: 21px; display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
+.am-fan-plate { --hole: calc(21px + var(--grow, 0px)); display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
 /* Its shadow: outside the plate only (a box-shadow is never drawn under its box), so none shows through the glass. */
 .am-fan-plate[data-shade] { box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 1px 3px color-mix(in oklch, #000 10%, transparent); }
 .am-fan-edge > .am-fan-plate {
@@ -155,8 +159,8 @@
 .am-fan[data-touch] .am-fan-i { left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 12px; }
 .am-fan[data-touch] .am-fan-i[aria-checked="true"]::after { bottom: 0; }
 .am-fan[data-touch] .am-fan-f, .am-fan[data-touch] .am-fan-f > img { width: 30px; height: 30px; }
-.am-fan[data-touch] .am-fan-dial { --o: 24px; }
-.am-fan[data-touch] .am-fan-plate { --hole: 25px; }
+.am-fan[data-touch] .am-fan-dial { --o: calc(24px + var(--grow, 0px)); }
+.am-fan[data-touch] .am-fan-plate { --hole: calc(25px + var(--grow, 0px)); }
 /* Reduced motion: no travel, a plain fade. */
 .am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear; }
 .am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }

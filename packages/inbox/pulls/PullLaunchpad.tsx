@@ -1,60 +1,26 @@
-/**
- * One PR's launchpad (approval "pr-launchpad"): what clicking a single open PR in Reviews opens, reviewed or not
- * (`reviewRowLaunchpad`). The bar (the PR's mark, number and repository; Open on GitHub, Close), the title and one line
- * of facts (author, branch into base, size, checks), the risk line when the PR was ranked, then the ways into it:
- * Guided review (wide, the primary), The diff, Review thread, Shape board (only while Shape is on) and System (coming,
- * from Workspaces, no button; only while System shows). Shape and System are both off in 0.29, so the page has three
- * doors there. Then the PR's Details (`PullDetails`, laid in the page), and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
- * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in. No keyboard
- * shortcuts of its own.
- */
 import { useId, useRef, type ReactNode, type RefObject } from 'react';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import type { InboxPull, InboxPullLink, InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import type { InboxShapeSummary } from '../api';
-import { HostMark, Icon } from '../icons';
+import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { Tip } from '../components/Tip';
-import { relativeWords } from '../relativeTime';
-import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { PullDetails, usePullDetails } from './PullDetails';
-import { checksWords, inboxPullLabel, linkAgentName } from './model';
+import { checksWords, inboxPullLabel } from './model';
 import { forgeName } from './labels';
+import { LaunchpadLines, type LaunchPicturePage } from './LaunchpadLines';
+import { LaunchpadLiveAsks, type LaunchAsks } from './LaunchpadLiveAsks';
+import { latestPictureItPage } from './usePictureItAsk';
+import { useLaunchpadThread } from './useLaunchpadThread';
 
-/**
- * The diff door's words, the approved sentence with the PR's file count: "All 70 files with your comments, Viewed and
- * Approve." One file reads "The one file …"; a count the forge did not give (0) reads "All files …".
- */
-export function diffWords(files: number): string {
-  const which = files > 1 ? `All ${formatCount(files)} files` : files === 1 ? 'The one file' : 'All files';
-  return `${which} with your comments, Viewed and Approve.`;
-}
-
-/** The Start button, as the stack page's hand-off gives it. Null: no review thread can start now (one at a time). */
 export interface LaunchpadStart {
-  /** `again`: the last review thread's agent ended. */
-  kind: 'review' | 'again';
-  /** The New review box, filled in with this PR; focus comes back to `opener` when it closes. */
   onStart: (opener: HTMLElement) => void;
+  onPictureIt: (opener: HTMLElement) => void;
 }
 
-function Door({ kind, icon, title, sub, soon, wide, thread, children }: { kind: string; icon: ReactNode; title: string; sub: ReactNode; soon?: boolean; wide?: boolean; thread?: string; children?: ReactNode }) {
-  return (
-    <div className="ib-lp-door" role="listitem" data-soon={soon ? '' : undefined} data-wide={wide ? '' : undefined} data-launch-door={kind} data-pulls-thread={thread}>
-      <div className="ib-lp-door-h">
-        <span className="ib-lp-ic" aria-hidden="true">
-          {icon}
-        </span>
-        <h3 className="ib-lp-door-t">{title}</h3>
-        {soon && <span className="ib-lp-soon">Coming</span>}
-      </div>
-      <div className="ib-lp-sub">{sub}</div>
-      {children}
-    </div>
-  );
-}
+export const START_THREAD = 'Start a thread';
 
 /**
  * The way back to the Reviews list where the PR's pane covers it: on a phone, and in a window too narrow for the list
@@ -90,6 +56,54 @@ export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stac
   );
 }
 
+/**
+ * The PR's bar: the way back (a phone, a covering pane), the PR's mark, number and repository, Open on GitHub, Close.
+ * The launchpad's, and an empty thread's for the PR (Start a thread, `PullThreadStart`). A phone's bar gives way as a
+ * thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the PR's number and repository (its
+ * subject) lose their room.
+ */
+export function PullBar({ stack, pr, phone, stacked, onClose, onHide }: { stack: InboxPullStack; pr: InboxPull; phone: boolean; stacked: boolean; onClose: () => void; onHide?: () => void }) {
+  const forge = forgeName(stack);
+  const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
+  return (
+    <div ref={bar} className="ib-pr-bar ib-lp-bar">
+      <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
+      <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
+        <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
+          <RefMarkIcon kind="pr" state={pr.state} size={15} />
+        </span>
+        <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
+        <Tip cut content={repo}>
+          <span className="ib-lp-repo" dir="auto">
+            {repo}
+          </span>
+        </Tip>
+      </span>
+      <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
+        <Icon name="external" size={15} />
+        {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
+      </a>
+      {onHide && (
+        <Tip content={`Hide from your lists. It stays open on ${forge}.`}>
+          <button type="button" className="ib-pr-ext" onClick={onHide} data-pulls-hide="">
+            <Icon name="eyeOff" size={15} />
+            {phone ? <span className="ib-sr">Hide</span> : 'Hide'}
+          </button>
+        </Tip>
+      )}
+      {!phone && !stacked && (
+        <Tip content="Close">
+          <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
+            <Icon name="x" />
+          </button>
+        </Tip>
+      )}
+    </div>
+  );
+}
+
 export function PullLaunchpad({
   stack,
   pr,
@@ -100,92 +114,110 @@ export function PullLaunchpad({
   now,
   heading,
   start,
+  startThread = null,
+  untiedThread = null,
   shapes,
-  system = false,
   risk = null,
   onClose,
   onDiff,
   onThread,
   onGuide,
+  onPicture,
   onShape,
+  onAsked,
+  onHide,
   foot,
 }: {
   stack: InboxPullStack;
   pr: InboxPull;
   link: InboxPullLink | null;
-  /** The thread only named the PR (the Reviews page's rule): no review thread yet; that thread is offered as it is. */
   mentioned?: boolean;
   phone: boolean;
-  /** The pane covers the list (stack.ts): it leads with `‹ Reviews` and has no Close, as a covering thread. */
   stacked?: boolean;
   now: number;
-  /** The title: it takes focus when the page opens on a phone. */
   heading: RefObject<HTMLHeadingElement | null>;
   start: LaunchpadStart | null;
-  /** Shape boards by thread; null while Shape is off (no Shape board door then). */
+  startThread?: (() => void) | null;
+  untiedThread?: string | null;
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
-  /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
-  system?: boolean;
-  /** The risk line(s) the stack page shows under its title (`PullsPage`), or null. */
   risk?: ReactNode;
   onClose: () => void;
   onDiff: () => void;
   onThread: (threadId: string) => void;
   onGuide: (threadId: string, messageId: string) => void;
+  onPicture: (threadId: string, page: LaunchPicturePage) => void;
   onShape: (shape: InboxShapeSummary) => void;
+  onAsked: () => void;
+  onHide?: () => void;
   foot: ReactNode;
 }) {
   const forge = forgeName(stack);
   const titleId = useId();
   const panel = useRef<HTMLElement>(null);
   const details = usePullDetails(pr.key, `${pr.head_sha ?? ''}\u0000${pr.updated_at}`);
-  // A thread that only named the PR is no review thread: the doors read as before one, and its own door offers it.
   const link = mentioned ? null : given;
-  const agent = linkAgentName(given) ?? 'the agent';
-  const ended = link?.agent?.ended === true;
-  // A guided review is there once the agent's arrives (the stack page's rule, `ThreadLine`).
-  const guide = link?.guide?.review ? link.guide : null;
-  // The person asked for it (the hand-off) and it has not arrived yet.
-  const onItsWay = !!link && !ended && !guide && link.via === 'owner' && !!link.ask;
-  const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
-  const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
-  const checks = checksWords(pr);
-  // The grid lays itself out by how many doors there are (inbox.css `data-doors`), so no slot is left empty.
-  const doors = 3 + (shapes ? 1 : 0) + (system ? 1 : 0);
-  const agentMark = <HostMark host={given?.agent?.host ?? null} />;
-  // The thread door's thread: the review thread, or the one that only named the PR.
   const named = mentioned ? given : null;
-  // A phone's bar gives way as a thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the
-  // PR's number and repository (its subject) lose their room.
-  const bar = useRef<HTMLDivElement>(null);
-  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
-  return (
-    <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
-      <div ref={bar} className="ib-pr-bar ib-lp-bar">
-        <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
-        <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
-          <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={pr.state} size={15} />
-          </span>
-          <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
-          <Tip cut content={repo}>
-            <span className="ib-lp-repo" dir="auto">
-              {repo}
-            </span>
-          </Tip>
-        </span>
-        <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
-          <Icon name="external" size={15} />
-          {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
-        </a>
-        {!phone && !stacked && (
-          <Tip content="Close">
-            <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
-              <Icon name="x" />
-            </button>
-          </Tip>
+  const live = link && !link.agent?.ended ? link : null;
+  const thread = useLaunchpadThread(link?.thread_id ?? null, [link?.last?.message_id, link?.ask, link?.guide?.message_id, link?.picture_it_asked_at, link?.picture_it_page?.message_id].join('|'));
+  const read = thread && thread !== 'failed' ? thread : null;
+  const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
+  const checks = checksWords(pr);
+  const inThread = read ? latestPictureItPage(read) : null;
+  const known = link?.picture_it_page ?? null;
+  const page: LaunchPicturePage | null = known
+    ? { message_id: known.message_id, title: known.title, at: known.at, attachment_id: inThread?.message_id === known.message_id ? inThread.attachment_id : null }
+    : inThread && read
+      ? { ...inThread, at: read.messages.find((m) => m.id === inThread.message_id)?.created_at ?? '' }
+      : null;
+  const openThread = () => live && onThread(live.thread_id);
+  const idle: LaunchAsks = start
+    ? { guide: { onPress: start.onStart, onTheWay: false, error: null }, picture: { onPress: start.onPictureIt, onTheWay: false, error: null } }
+    : { guide: { onPress: thread === 'failed' ? openThread : null, onTheWay: false, error: null }, picture: { onPress: thread === 'failed' ? openThread : null, onTheWay: false, error: null } };
+  const draw = (asks: LaunchAsks) => (
+    <>
+      <div className="ib-pr-actions ib-lp-row" data-launch-row="">
+        <button type="button" className="ib-btn ib-pri" onClick={onDiff} data-launch-go="diff" data-pulls-open-diff="">
+          Open the diff
+        </button>
+        <button type="button" className="ib-btn" disabled={!asks.guide.onPress} onClick={(event) => asks.guide.onPress?.(event.currentTarget)} data-launch-go="guide">
+          Guided review
+        </button>
+        <button type="button" className="ib-btn" disabled={!asks.picture.onPress} onClick={(event) => asks.picture.onPress?.(event.currentTarget)} data-launch-go="picture">
+          Picture it
+        </button>
+        {startThread && !link && !named && (
+          <button type="button" className="ib-btn" onClick={startThread} data-launch-go="start-thread">
+            {START_THREAD}
+          </button>
+        )}
+        {shape && (
+          <button type="button" className="ib-btn" onClick={() => onShape(shape)} data-launch-go="shape">
+            Shape board
+          </button>
         )}
       </div>
+      {(asks.guide.error || asks.picture.error) && (
+        <div className="ib-error" role="alert" data-launch-error="">
+          {asks.guide.error ?? asks.picture.error}
+        </div>
+      )}
+      <LaunchpadLines
+        link={link}
+        named={named}
+        untiedThread={link || named ? null : untiedThread}
+        page={page}
+        pictureOnTheWay={asks.picture.onTheWay}
+        guideOnTheWay={asks.guide.onTheWay}
+        now={now}
+        onPicture={onPicture}
+        onGuide={onGuide}
+        onThread={onThread}
+      />
+    </>
+  );
+  return (
+    <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
+      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} onHide={onHide} />
       <div className="ib-pr-body ib-lp-body">
         <div className="ib-lp-wrap">
           <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
@@ -215,159 +247,13 @@ export function PullLaunchpad({
             )}
           </div>
           {risk}
-
-          <div className="ib-lp-grid" role="list" aria-label={`What to do with ${inboxPullLabel(pr)}`} data-doors={doors}>
-            <Door
-              kind="guide"
-              wide
-              icon={<Icon name="map" size={18} />}
-              title="Guided review"
-              sub={
-                guide ? (
-                  <>
-                    <Tip cut content={guide.title}>
-                      <span className="ib-lp-strong ib-lp-name" dir="auto">
-                        {guide.title}
-                      </span>
-                    </Tip>
-                    {'\u00a0· '}
-                    {plural(guide.steps, 'chapter')} by {agentMark} {agent}
-                  </>
-                ) : onItsWay ? (
-                  <>
-                    {link!.ask === 'custom' ? 'Custom curation' : 'A guided review'} is on its way from {agentMark} {agent}.
-                  </>
-                ) : link && !ended ? (
-                  <>None yet. Ask {agent} for one in the review thread.</>
-                ) : (
-                  <>An agent walks you through the change, chapter by chapter, then you approve or send feedback.</>
-                )
-              }
-            >
-              {(guide && link) || start || (link && !ended) ? (
-                <div className="ib-lp-go">
-                  {guide && link && (
-                    <button type="button" className="ib-btn ib-pri" onClick={() => onGuide(link.thread_id, guide.message_id)} data-launch-go="guide">
-                      <Icon name="map" size={15} />
-                      Open the guided review
-                    </button>
-                  )}
-                  {start && (
-                    <button
-                      type="button"
-                      className={guide ? 'ib-btn' : 'ib-btn ib-pri'}
-                      onClick={(event) => start.onStart(event.currentTarget)}
-                      data-pulls-primary={start.kind}
-                      data-launch-go="start"
-                    >
-                      <Icon name="plus" size={15} />
-                      {guide ? 'Start a new guided review' : 'Start a guided review'}
-                    </button>
-                  )}
-                  {!guide && !start && link && (
-                    // A live thread with no guide yet (asked for, or not): its thread is where one comes. Starts nothing.
-                    <button type="button" className="ib-btn ib-pri" onClick={() => onThread(link.thread_id)} data-launch-go="guide-thread" data-pulls-primary="open">
-                      <Icon name="questionBubble" size={15} />
-                      Open review thread
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </Door>
-            <Door kind="diff" icon={<Icon name="code" size={18} />} title="The diff" sub={diffWords(pr.files)}>
-              <div className="ib-lp-go">
-                <button type="button" className="ib-btn" onClick={onDiff} data-launch-go="diff" data-pulls-open-diff="">
-                  Open the diff
-                </button>
-              </div>
-            </Door>
-            <Door
-              kind="thread"
-              thread={(link ?? named)?.thread_id}
-              icon={<Icon name="questionBubble" size={18} />}
-              title="Review thread"
-              sub={
-                named ? (
-                  <>
-                    <>Thread with {agentMark} {agent}</>
-                    {named.last ? (
-                      <span className="ib-lp-said" dir="auto">
-                        “{named.last.preview}”
-                      </span>
-                    ) : (
-                      <>{'\u00a0· '}No answer yet</>
-                    )}
-                  </>
-                ) : link ? (
-                  <>
-                    {ended ? (
-                      <>
-                        {agentMark} {agent} ended
-                      </>
-                    ) : (
-                      <>With {agentMark} {agent}</>
-                    )}
-                    {link.last ? (
-                      <span className="ib-lp-said" dir="auto">
-                        “{link.last.preview}”
-                      </span>
-                    ) : (
-                      !ended && <>{'\u00a0· '}No answer yet</>
-                    )}
-                  </>
-                ) : (
-                  <>None yet. Starting a guided review starts one.</>
-                )
-              }
-            >
-              {link && (
-                <div className="ib-lp-go">
-                  <button type="button" className="ib-btn" onClick={() => onThread(link.thread_id)} data-launch-go="thread">
-                    Open review thread
-                  </button>
-                </div>
-              )}
-              {named && (
-                <div className="ib-lp-go">
-                  <button type="button" className="ib-btn" onClick={() => onThread(named.thread_id)} data-launch-go="thread" data-pulls-open-thread="">
-                    Open thread
-                  </button>
-                </div>
-              )}
-            </Door>
-            {shapes && (
-              <Door
-                kind="shape"
-                icon={<Pebble alive={!!shape} size={18} />}
-                title="Shape board"
-                sub={
-                  shape ? (
-                    <>
-                      <Tip cut content={shape.title}>
-                        <span className="ib-lp-strong ib-lp-name" dir="auto">
-                          {shape.title}
-                        </span>
-                      </Tip>
-                      {'\u00a0· '}v{shape.latest}
-                      {'\u00a0· '}
-                      {relativeWords(shape.updated, now)}
-                    </>
-                  ) : (
-                    <>None yet. An agent draws one in the review thread.</>
-                  )
-                }
-              >
-                {shape && (
-                  <div className="ib-lp-go">
-                    <button type="button" className="ib-btn" onClick={() => onShape(shape)} data-launch-go="shape">
-                      Open the Shape board
-                    </button>
-                  </div>
-                )}
-              </Door>
-            )}
-            {system && <Door kind="system" soon icon={<Icon name="cube" size={18} />} title="System" sub={<>Where this change sits among the services, data and owners around it. From Workspaces.</>} />}
-          </div>
+          {live && read ? (
+            <LaunchpadLiveAsks thread={read} stack={stack} pr={pr} link={live} onDiff={onDiff} onAsked={onAsked} onThread={onThread}>
+              {draw}
+            </LaunchpadLiveAsks>
+          ) : (
+            draw(idle)
+          )}
 
           <h3 className="ib-lp-h">Details</h3>
           <div className="ib-lp-details">

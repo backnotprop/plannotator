@@ -1,11 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { CodeFileView, type CodeFileAnnotationInput, type CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { RepoRevisionInfo } from '@plannotator/shared/repo-files';
 import { useRepoFileText, repoFileEmptyMessage } from '../hooks/useRepoFileText';
 import { useScrollMemory } from '../hooks/useScrollMemory';
-import { findSymbolLine, type JumpCrumb as JumpCrumbData, type RevealTarget } from '../utils/explorerNavigation';
-import { JumpCrumb } from './JumpCrumb';
+import { findSymbolLine, type RevealTarget } from '../utils/explorerNavigation';
 
 /** Code navigation's tokens in a whole-file view (where F12 looks, Cmd+click). */
 export interface FileTokenHandlers {
@@ -74,9 +73,6 @@ export interface RepoFileViewProps {
   onSelectAnnotation: (id: string | null) => void;
   /** A jump to a line of this file. */
   revealTarget?: RevealTarget | null;
-  /** The jump that opened this file, shown with the way back. */
-  crumb?: JumpCrumbData | null;
-  onNavigateBack?: () => void;
   tokens?: FileTokenHandlers;
   /** How the file is read (default `fetch` of `/api/repo-file`); a host serving it elsewhere maps the URL. */
   fetchImpl?: typeof fetch;
@@ -99,12 +95,13 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   onDeleteAnnotation,
   onSelectAnnotation,
   revealTarget,
-  crumb,
-  onNavigateBack,
   tokens,
   fetchImpl,
 }) => {
   const text = useRepoFileText(filePath, snapshotId, fetchImpl);
+  const lastReady = useRef<{ path: string; content: string } | null>(null);
+  if (text.status === 'ready') lastReady.current = { path: filePath, content: text.content };
+  else if (text.status !== 'loading') lastReady.current = null;
   const { revealLine, missed } = useRevealedLine(filePath, text.status === 'ready' ? text.content : null, revealTarget);
   const fileAnnotations = useMemo(() => wholeFileAnnotations(annotations, filePath), [annotations, filePath]);
   const slash = filePath.lastIndexOf('/');
@@ -116,8 +113,8 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
 
   return (
     <div className="h-full flex flex-col" data-repo-file-view={filePath}>
-      <div className="flex-none flex items-center gap-2 px-3 border-b border-border/50 min-w-0" style={{ height: 'var(--panel-header-h, 36px)' }}>
-        <span className="truncate text-sm min-w-0" title={filePath}>
+      <div className="flex-none flex items-center gap-2 px-3 border-b border-border min-w-0" style={{ height: 'var(--panel-header-h, 36px)' }}>
+        <span className="truncate text-[13px] min-w-0" title={filePath}>
           <span className="text-muted-foreground">{dir}</span>
           <span className="font-medium text-foreground">{name}</span>
         </span>
@@ -135,19 +132,26 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
         )}
         <span className="ml-auto flex-none text-[11px] text-muted-foreground/80">
           {onAddAnnotation ? 'Select lines to comment' : null}
-          {preview && !crumb && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
+          {preview && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
         </span>
       </div>
-      {crumb && crumb.targetPath === filePath && (
-        <JumpCrumb
-          crumb={crumb}
-          onBack={onNavigateBack}
-          right={preview ? <span data-preview-hint>Double-click the tab to keep it</span> : undefined}
-        />
-      )}
       {missed && <RevealMissedNote missed={missed} />}
       <div className="flex-1 min-h-0 overflow-auto" ref={scroll.ref} onScroll={scroll.onScroll}>
-        {text.status === 'loading' ? (
+        {text.status === 'loading' && lastReady.current ? (
+          <div className="opacity-60 transition-opacity duration-150" aria-busy="true" data-stale-file={lastReady.current.path}>
+            <CodeFileView
+              filepath={lastReady.current.path}
+              contents={lastReady.current.content}
+              annotations={[]}
+              selectedAnnotationId={null}
+              onEditAnnotation={() => {}}
+              onDeleteAnnotation={() => {}}
+              onSelectAnnotation={() => {}}
+              className="min-h-full"
+              lang={lastReady.current.content.length > 500_000 ? 'text' : undefined}
+            />
+          </div>
+        ) : text.status === 'loading' ? (
           <FileTextState>Reading the file…</FileTextState>
         ) : text.status === 'error' ? (
           <FileTextState>{text.message}</FileTextState>
