@@ -25,6 +25,7 @@ import { AuthorMark } from '../icons';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
+import { SIDE_CORNER_HIT } from '../ask/scoop';
 import type { InboxToastModel } from '../components/Toast';
 import { Icon } from '../icons';
 import { machineOf } from '../inboxUrl';
@@ -53,6 +54,8 @@ export interface ReplyFloatersOptions {
 }
 
 const TILE = 44;
+/** A draft window's bottom offset while the minimized chat's circle is in the corner: clear of its 44 px box. */
+const CIRCLE_CLEAR = SIDE_CORNER_HIT + 8;
 /** How long a closed box's or a left thread's draft is looked at again while its save lands. */
 const SETTLE_WINDOW_MS = 5_000;
 
@@ -193,13 +196,22 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     });
   }, []);
 
-  /** Beside Ask's window when it is open (they never cover each other), else in the corner. */
+  /**
+   * Beside Ask's window when it is open (they never cover each other), else in the corner: above the minimized chat's
+   * circle while it shows (the same size, lifted clear of its 44 px corner).
+   */
   const placeWindow = useCallback(() => {
     if (ask.threadId !== null && !ask.store.minimized && !ask.store.fullscreen) {
       const at = ask.store.geometry();
       frame.setWindowOffsets(at.right + at.w + 12, at.bottom);
-    } else frame.setWindowOffsets(16, 16);
-  }, [ask.threadId, ask.store, frame]);
+    } else frame.setWindowOffsets(16, ask.circle ? CIRCLE_CLEAR : 16);
+  }, [ask.threadId, ask.store, ask.circle, frame]);
+  // The circle coming while a draft's window rests on the corner (Ask minimized, or another thread's chat): it moves up.
+  useEffect(() => {
+    if (!ask.circle || openId === null || phone) return;
+    const d = frame.geometry();
+    if (d.right < SIDE_CORNER_HIT && d.bottom < SIDE_CORNER_HIT) frame.setWindowOffsets(d.right, CIRCLE_CLEAR);
+  }, [ask.circle, openId, phone, frame]);
 
   const openBox = useCallback(
     (id: string) => {
@@ -380,7 +392,14 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   return {
     layer: (
-      <div ref={layerRef} className={`ib-rf-layer${phone && openRow ? ' ib-rf-over' : ''}`} data-rf-layer="" data-rf-phone={phone ? '' : undefined}>
+      <div
+        ref={layerRef}
+        className={`ib-rf-layer${phone && openRow ? ' ib-rf-over' : ''}`}
+        data-rf-layer=""
+        data-rf-phone={phone ? '' : undefined}
+        // A draft's window dragged onto the circle is above it: the circle never takes its clicks.
+        data-rf-over-circle={!phone && openRow && ask.circle ? '' : undefined}
+      >
         {showCorner &&
           (phone ? <PhoneCorner style={place} items={items} menu={menu} setMenu={setMenu} onAll={onAll} /> : <Stack style={place} items={items} menu={menu} setMenu={setMenu} onAll={onAll} />)}
         {openRow && (

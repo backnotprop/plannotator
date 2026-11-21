@@ -7,7 +7,12 @@
  * - a name that does not say a new answer came or the agent is answering, or a dot or an arc that does not follow
  *   the Inbox's `unseen` and `running`;
  * - a press that does not bring the chat back; minimizing that leaves focus on the page instead of on the circle;
- * - the window's × back (the owner: "Drop the ×, keep the chevron"), or a chevron that no longer minimizes.
+ * - the window's × back (the owner: "Drop the ×, keep the chevron"), or a chevron that no longer minimizes;
+ * - a circle drawn uncut where there is no pane to cut, over a whole-window layer (a full view, a guided review) or
+ *   over a placeholder pane, and focus left on the page when a minimize has no circle to land on;
+ * - the circle and the cut blinking off on a switch between two threads with chats while the new read is on its way;
+ * - a measure (a walk of the page) for every change inside a message's body, which code highlighting makes many
+ *   times a second on a long thread.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -23,6 +28,7 @@ const { emitAskChange } = (hasDom ? await import('./askEvents') : {}) as typeof 
 
 const THREAD = 'thr_retry';
 const BARE = 'thr_bare';
+const OTHER = 'thr_other';
 const T0 = '2026-11-20T10:00:00.000Z';
 
 interface Chat {
@@ -57,30 +63,88 @@ function model(threadId: string) {
   };
 }
 
+/** Reads held until `release()`: a thread switch before the new thread's read lands. */
+let held: Promise<void> | null = null;
+let release = () => {};
+function holdReads() {
+  held = new Promise<void>((resolve) => {
+    release = () => {
+      held = null;
+      resolve();
+    };
+  });
+}
+
+/** The window (1440 x 900) and its panes' boxes, as a browser lays them out (happy-dom lays out nothing). */
+const WINDOW = { left: 0, top: 0, right: 1440, bottom: 900 };
+let boxes: Array<[string, { left: number; top: number; right: number; bottom: number }]> = [];
+const realRect = HTMLElement.prototype.getBoundingClientRect;
+const realQueryAll = document?.querySelectorAll;
+let paneQueries = 0;
+let shell: HTMLElement | null = null;
+
+function rect(b: { left: number; top: number; right: number; bottom: number }): DOMRect {
+  return { ...b, x: b.left, y: b.top, width: b.right - b.left, height: b.bottom - b.top, toJSON: () => b } as DOMRect;
+}
+
+/** The thread's pane, 8 px in from the window's right and bottom edges, rounded, with the panes' shadow token. */
+function paneEl(className = 'ib-pane'): HTMLElement {
+  const pane = document.createElement('section');
+  pane.className = className;
+  pane.style.setProperty('border-radius', '12px');
+  pane.style.setProperty('border-top-right-radius', '12px');
+  pane.style.setProperty('--ib-pane-shadow', '0 0 0 1px rgb(0 0 0 / 0.1), 0 6px 18px -8px rgb(0 0 0 / 0.12)');
+  pane.innerHTML = '<div class="ib-pbody"><p class="msg">The retry budget is four calls.</p></div>';
+  return pane;
+}
+
 beforeEach(() => {
   if (!hasDom) return;
-  chats = { [THREAD]: { turns: 1, seen: true, running: null }, [BARE]: { turns: 0, seen: true, running: null } };
+  chats = { [THREAD]: { turns: 1, seen: true, running: null }, [BARE]: { turns: 0, seen: true, running: null }, [OTHER]: { turns: 1, seen: true, running: null } };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     const m = url.match(/\/threads\/([^/]+)\/ask$/);
-    if (m && method === 'GET') return Response.json(model(decodeURIComponent(m[1]!)));
+    if (m && method === 'GET') {
+      if (held) await held;
+      return Response.json(model(decodeURIComponent(m[1]!)));
+    }
     return Response.json({});
   }) as typeof fetch;
+  boxes = [['.ib-ask-layer', WINDOW], ['.ib-main > section.ib-pane', { left: 628, top: 8, right: 1432, bottom: 892 }]];
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    for (const [selector, b] of boxes) if (this.matches(selector)) return rect(b);
+    return realRect.call(this);
+  };
+  paneQueries = 0;
+  // Each measure starts by listing the panes: counted.
+  document.querySelectorAll = function (this: Document, selector: string) {
+    if (selector.includes('.ib-panedock')) paneQueries += 1;
+    return realQueryAll.call(this, selector);
+  } as typeof document.querySelectorAll;
+  // The shell as the Inbox lays it out: the panes, and the window's root where the Ask layer renders.
+  shell = document.createElement('div');
+  shell.className = 'pn-inbox';
+  shell.innerHTML = '<div class="ib-sb-wrapper"><main class="ib-main"></main></div>';
+  shell.querySelector('.ib-main')!.appendChild(paneEl());
   host = document.createElement('div');
-  host.className = 'pn-inbox';
-  document.body.appendChild(host);
+  shell.appendChild(host);
+  document.body.appendChild(shell);
   root = createRoot(host);
 });
 
 afterEach(async () => {
   if (!hasDom) return;
+  release();
   if (root) await act(async () => root?.unmount());
-  host?.remove();
+  shell?.remove();
   root = null;
   host = null;
+  shell = null;
   parts = null;
   globalThis.fetch = realFetch;
+  HTMLElement.prototype.getBoundingClientRect = realRect;
+  document.querySelectorAll = realQueryAll;
   document.body.replaceChildren();
 });
 
@@ -109,11 +173,20 @@ async function show(threadId: string | null, phone = false) {
 }
 
 const circle = () => document.querySelector<HTMLButtonElement>('[data-side-chat-corner]');
+/** The circle is on screen: rendered, and not hidden for want of a pane to cut. */
+const circleShown = () => {
+  const wrap = circle()?.closest<HTMLElement>('[data-side-corner]');
+  // React sets `hidden` as the property, which happy-dom does not reflect to the attribute.
+  return !!wrap && !wrap.hidden && !wrap.hasAttribute('hidden');
+};
+const cutPane = () => document.querySelector('section.ib-pane[data-side-scoop]');
 const askWindow = () => document.querySelector<HTMLElement>('[data-chat-window]');
 
 test.skipIf(!hasDom)("a minimized thread chat is a circle with the agent's mark; none while open, without a chat or on a phone", async () => {
   await show(THREAD);
   await until(() => circle() !== null, 'the circle');
+  expect(circleShown()).toBe(true);
+  expect(cutPane()).not.toBeNull();
   expect(circle()!.tagName).toBe('BUTTON');
   expect(circle()!.getAttribute('aria-label')).toBe('Side chat');
   expect(circle()!.querySelector('.ib-mk')!.outerHTML).toBe(renderToStaticMarkup(<HostMark host="claude-code" />));
@@ -122,6 +195,7 @@ test.skipIf(!hasDom)("a minimized thread chat is a circle with the agent's mark;
   await act(async () => parts!.corner.open());
   await until(() => askWindow() !== null, 'the window');
   expect(circle()).toBeNull();
+  expect(cutPane()).toBeNull();
   // A thread with no chat yet: nothing in the corner.
   await show(BARE);
   await wait(60);
@@ -174,4 +248,97 @@ test.skipIf(!hasDom)('a press brings the chat back; its header has the chevron a
   await until(() => circle() !== null, 'the circle again');
   // Focus was in the window, which went: it lands on the circle, not on the page.
   await until(() => document.activeElement === circle(), 'focus on the circle');
+});
+
+test.skipIf(!hasDom)('no pane at the corner to cut, or a whole-window layer there: no circle, and minimizing puts focus back where the chat was opened from', async () => {
+  // The pane out of the pocket's reach (a layout with no pane at the corner): nothing shows uncut over the page.
+  boxes[1] = ['.ib-main > section.ib-pane', { left: 628, top: 8, right: 1380, bottom: 840 }];
+  await show(THREAD);
+  await until(() => circle() !== null, 'the circle rendered');
+  expect(circleShown()).toBe(false);
+  expect(circle()!.hasAttribute('data-chat-launcher')).toBe(false);
+  expect(cutPane()).toBeNull();
+  // A file's full view filling the window: no circle over its own corner control.
+  const full = paneEl('ib-view ib-full ib-fullview ib-wlayer');
+  full.innerHTML = '<button type="button" class="full-close">Close full view</button>';
+  shell!.querySelector('.ib-main')!.appendChild(full);
+  boxes.unshift(['.ib-main > .ib-view', WINDOW]);
+  await wait(60);
+  expect(circleShown()).toBe(false);
+  // Opened from a button in the thread, minimized from inside: focus goes back to that button, not to the page.
+  const from = document.createElement('button');
+  from.textContent = 'Side';
+  shell!.querySelector('.ib-main > section.ib-pane')!.appendChild(from);
+  from.focus();
+  await act(async () => parts!.askWith('Why four?'));
+  await until(() => askWindow() !== null, 'the window');
+  const chevron = askWindow()!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!;
+  chevron.focus();
+  await act(async () => chevron.click());
+  await until(() => document.activeElement === from, 'focus back on the opener');
+});
+
+test.skipIf(!hasDom)('a switch between two threads with chats keeps the circle and the cut until the new read lands', async () => {
+  await show(THREAD);
+  await until(() => circleShown(), 'the circle on the first thread');
+  await show(OTHER);
+  await until(() => parts!.corner.threadId === OTHER && parts!.corner.hasChat, 'the second thread read');
+  // Back to the first: its read is held, and the circle and the cut stay as they were.
+  holdReads();
+  await act(async () => root!.render(<Harness threadId={THREAD} />));
+  expect(parts!.corner.hasChat).toBe(true);
+  expect(circleShown()).toBe(true);
+  expect(cutPane()).not.toBeNull();
+  // The read lands and says the chat is gone (another window cleared it): the circle goes.
+  chats[THREAD] = { turns: 0, seen: true, running: null };
+  release();
+  await until(() => circle() === null, 'the circle gone after the read');
+});
+
+test.skipIf(!hasDom)("a burst of changes inside a message's body measures nothing; a pane swapped is measured", async () => {
+  await show(THREAD);
+  await until(() => circleShown(), 'the circle');
+  await wait(60);
+  expect(paneQueries).toBeGreaterThan(0);
+  paneQueries = 0;
+  // A code highlight or a live message rewriting its body, many times over.
+  const body = shell!.querySelector('section.ib-pane .msg')!;
+  for (let i = 0; i < 60; i += 1) {
+    const span = document.createElement('span');
+    span.textContent = `token ${i}`;
+    body.appendChild(span);
+    if (i % 3 === 0) body.firstChild?.remove();
+  }
+  await wait(80);
+  expect(paneQueries).toBe(0);
+  // The thread's pane re-rendered (a thread switch): measured, and the new pane is cut.
+  const main = shell!.querySelector('.ib-main')!;
+  main.firstElementChild!.remove();
+  main.appendChild(paneEl());
+  await wait(80);
+  expect(paneQueries).toBeGreaterThan(0);
+  expect(cutPane()).toBe(main.firstElementChild);
+});
+
+test.skipIf(!hasDom)("a guided review over the window hides the circle and the cut; closed, they come back; a placeholder pane gets none", async () => {
+  await show(THREAD);
+  await until(() => circleShown(), 'the circle');
+  // A guided review (ReviewPane: a whole-window layer over the panes, outside .ib-main).
+  const guide = document.createElement('section');
+  guide.className = 'ib-viewer ib-wlayer ib-review';
+  boxes.unshift(['section.ib-viewer', WINDOW]);
+  shell!.appendChild(guide);
+  await until(() => !circleShown(), 'the circle hidden under the review');
+  expect(cutPane()).toBeNull();
+  guide.remove();
+  await until(() => circleShown(), 'the circle back');
+  expect(cutPane()).not.toBeNull();
+  // Reviews with code review off: an empty placeholder pane at the corner, no thread in it.
+  const main = shell!.querySelector('.ib-main')!;
+  const empty = document.createElement('div');
+  empty.className = 'ib-pane ib-pempty';
+  boxes.push(['.ib-main > .ib-pempty', { left: 628, top: 8, right: 1432, bottom: 892 }]);
+  main.replaceChildren(empty);
+  await until(() => !circleShown(), 'no circle over the placeholder');
+  expect(document.querySelector('[data-side-scoop]')).toBeNull();
 });

@@ -10,6 +10,22 @@ import { sideQuote } from './askWords';
 import { sideButtonFor, type SideButton } from './sideButton';
 import { SideChatCorner, takeSideFlight, type SideFlight } from './SideChatCorner';
 
+interface ChatState {
+  hasChat: boolean;
+  unseen: boolean;
+  answering: boolean;
+  host: string | null;
+}
+const NO_CHAT: ChatState = { hasChat: false, unseen: false, answering: false, host: null };
+
+/**
+ * The minimized chat's circle shows (the owner, 2026-11-20): Ask on, the open thread has a chat and its window is
+ * minimized, on a computer (no Ask on phones). SideChatCorner still hides it where there is no pane to cut.
+ */
+export function sideCircle(corner: Pick<AskCorner, 'on' | 'threadId' | 'hasChat' | 'minimized'>, phone: boolean): boolean {
+  return corner.on && corner.threadId !== null && corner.hasChat && corner.minimized && !phone;
+}
+
 export interface InboxAskOptions {
   /** The settings are read, and not the tour: while false nothing is read and nothing shows. */
   on: boolean;
@@ -71,6 +87,8 @@ export interface AskCorner {
   host: string | null;
   subject: string | null;
   minimized: boolean;
+  /** The minimized chat's circle is in the window's corner (sideCircle): a floating draft's window keeps clear of it. */
+  circle: boolean;
   store: ChatWindowStore;
   open: () => void;
   minimize: () => void;
@@ -91,6 +109,13 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   useChatFrameFocusReturn(store);
   const askFor = on ? threadId : null;
   const openChats = useRef(new Set<string>());
+  const known = useRef(new Map<string, ChatState>());
+  /** Where the chat was opened from (not the circle): a minimize with no circle on screen puts focus back there. */
+  const opener = useRef<HTMLElement | null>(null);
+  const noteOpener = () => {
+    const at = document.activeElement;
+    if (at instanceof HTMLElement && at !== document.body && !at.closest('[data-side-corner], [data-chat-window]')) opener.current = at;
+  };
 
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
@@ -169,6 +194,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     (words: string, source?: string, taken?: () => void) => {
       const thread = onScreen.current;
       if (!thread) return;
+      noteOpener();
       openChats.current.add(thread);
       store.setMinimized(false);
       // No words (a bare `/side`): the chat opens with its box as it was.
@@ -182,18 +208,25 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     [store],
   );
 
+  // What the corner last knew of each thread's chat: a switch keeps the circle and the cut as they were until the
+  // new thread's read lands (`model` is null until then), and the read corrects them.
+  const live: ChatState | null = model
+    ? { hasChat: (model.conversation?.turns.length ?? 0) > 0, unseen: askUnseen(model.conversation ?? null) !== null, answering: (model.running ?? null) !== null, host: model.agent?.host ?? null }
+    : null;
+  if (live && askFor) known.current.set(askFor, live);
+  const chat = live ?? (askFor ? known.current.get(askFor) : undefined) ?? NO_CHAT;
+
   const corner: AskCorner = {
     on,
     threadId: askFor,
-    hasChat: (model?.conversation?.turns.length ?? 0) > 0,
-    unseen: askUnseen(model?.conversation ?? null) !== null,
-    answering: (model?.running ?? null) !== null,
-    host: model?.agent?.host ?? null,
+    ...chat,
     subject: model?.subject ?? null,
     minimized,
+    circle: false,
     store,
     open: () => {
       if (!askFor) return;
+      noteOpener();
       openChats.current.add(askFor);
       store.setMinimized(false);
       askForFocus(askFor);
@@ -203,6 +236,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
       store.setMinimized(true);
     },
   };
+  corner.circle = sideCircle(corner, phone);
 
   const canAsk = model?.can_ask === true;
   const side = useCallback((selected: string, source?: string) => askWith(sideQuote(selected), source), [askWith]);
@@ -213,7 +247,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
 
   // The minimized chat's circle (the owner, 2026-11-20): this thread has a chat, on a computer (no Ask on phones).
   const flight = useRef<SideFlight | null>(null);
-  const showCircle = corner.on && corner.hasChat && !phone;
+  const showCircle = corner.circle;
 
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
@@ -253,7 +287,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
         {region.window}
         {showCircle && (
           <ChatFrameLauncher store={store}>
-            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} />
+            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} opener={opener} />
           </ChatFrameLauncher>
         )}
       </div>
