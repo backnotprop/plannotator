@@ -144,7 +144,7 @@ public final class InboxSession {
   /// Comments on files that wait for a Send (FileCommentsSession.swift).
   var commentBook = CommentBook()
   /// The comment whose words the person is changing in its editor (`setEditing`): one that goes by itself waits for it.
-  @ObservationIgnored var editingComment: String?
+  @ObservationIgnored public internal(set) var editingComment: String?
   /// Whether the phone splits a file's text into the window's blocks, by the bytes' cache key: read once, and never
   /// a reason to draw again.
   @ObservationIgnored var commentSplits: [String: Bool] = [:]

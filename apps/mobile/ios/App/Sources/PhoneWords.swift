@@ -409,6 +409,9 @@ enum PhoneWords {
   static let noComments = "No comments"
   /// packages/inbox/components/Thread.tsx: a comment the computer would not keep.
   static let commentNotSaved = "The comment was not saved."
+  /// The editor's line for a change to a comment that already went in a Send (the owner's words, 2026-11-21; the
+  /// window has no such race: its comments go with the Send pressed there).
+  static let commentAlreadySent = "Not saved. This comment was already sent."
   /// packages/inbox/components/AnnotationsChip.tsx: a comment whose place in the file is lost (it goes with its quote).
   static let unanchored = "Unanchored"
   /// A comment whose drawing can reach the computer only on its own network (the relay carries no drawing). The

@@ -40,6 +40,9 @@ final class CommentDesk {
   /// A kept comment whose words are being changed.
   var editing: FileComment?
   var words = ""
+  /// A change to the comment being edited was not kept: it already went in a Send. The editor says so until its words
+  /// change or it closes.
+  var alreadySent = false
   /// The picture takes the finger: a drag draws, a touch pins.
   var marking = false
   /// What is drawn on each picture and not yet part of a comment.
@@ -66,6 +69,7 @@ final class CommentDesk {
 
   func begin(_ draft: Draft) {
     editing = nil
+    alreadySent = false
     if self.draft == nil { words = "" }
     self.draft = draft
     wantsKeyboard += 1
@@ -73,6 +77,7 @@ final class CommentDesk {
 
   func edit(_ comment: FileComment) {
     draft = nil
+    alreadySent = false
     editing = comment
     words = comment.isWordlessMarkup ? "" : comment.words
     wantsKeyboard += 1
@@ -82,7 +87,11 @@ final class CommentDesk {
     draft = nil
     editing = nil
     words = ""
+    alreadySent = false
   }
+
+  /// The words in the field changed: a line about the last try no longer stands.
+  func wordsChanged() { alreadySent = false }
 
   func seek(_ comment: FileComment) { sought = Sought(comment: comment, turn: (sought?.turn ?? 0) + 1) }
 
@@ -91,6 +100,7 @@ final class CommentDesk {
   /// whose words are being changed, or the place being commented on.
   func step(from old: AttachmentID?, to now: AttachmentID) {
     if editing?.attachment == now || draft?.file == now { return }
+    alreadySent = false
     if let old, draft != nil || editing != nil || !words.isEmpty { parked[old] = (draft, editing, words) }
     if let back = parked.removeValue(forKey: now) {
       draft = back.draft
@@ -121,6 +131,7 @@ final class CommentDesk {
   func keep(session: InboxSession, thread: ThreadID, item: AttachmentItem, version: AttachmentVersion, picture: Bool, readKey: String? = nil) {
     guard ready(on: item, picture: picture), !keeping else { return }
     if let editing {
+      alreadySent = false
       switch session.editComment(editing.id, thread: thread, words: trimmed) {
       case .changed: break
       case .unchanged:
@@ -128,8 +139,10 @@ final class CommentDesk {
         cancel()
         return
       case .alreadyWent:
-        // The comment went before the change could: nothing is kept, and the words stay in the editor.
+        // The comment went before the change could: nothing is kept, the words stay in the editor, and it says why.
+        alreadySent = true
         UINotificationFeedbackGenerator().notificationOccurred(.error)
+        AccessibilityNotification.Announcement(PhoneWords.commentAlreadySent).post()
         return
       }
     } else {
@@ -253,6 +266,7 @@ struct CommentFoot: View {
     .padding(.horizontal, Space.step)
     .padding(.bottom, Space.close)
     .onChange(of: desk.wantsKeyboard) { _, _ in focused = true }
+    .onChange(of: desk.words) { _, _ in desk.wordsChanged() }
     .onChange(of: writing) { _, on in if !on, !picture { focused = false } }
   }
 
@@ -308,6 +322,18 @@ struct CommentFoot: View {
         .padding(.leading, Space.card)
         .barSized()
         Hairline().padding(.horizontal, Space.card)
+      }
+      // A change that was not kept, said as an action item's refusal is (ActionChecklist), over the words.
+      if desk.alreadySent, desk.editing != nil {
+        Label(PhoneWords.commentAlreadySent, systemImage: "exclamationmark.circle")
+          .font(TextRole.meta)
+          .foregroundStyle(Token.destructive)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, Space.card)
+          .padding(.top, Space.step)
+          .accessibilityElement(children: .combine)
+          .accessibilityIdentifier("comment-already-sent")
       }
       HStack(alignment: .bottom, spacing: 0) {
         if picture, desk.editing == nil { pencil.frame(minHeight: oneLine) }

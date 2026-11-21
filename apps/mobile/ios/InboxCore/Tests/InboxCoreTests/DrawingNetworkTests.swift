@@ -637,6 +637,30 @@ final class DrawingNetworkTests: XCTestCase {
     XCTAssertEqual(session.editComment(made.id, thread: retry, words: "Label both axes."), .alreadyWent)
   }
 
+  func testAChangeMadeInTheEditorAfterTheCommentWentChangesNothingAnywhere() async throws {
+    let ways = Ways()
+    let (door, session, picture) = try await relayed(ways)
+    let made = try XCTUnwrap(session.addComment(thread: retry, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Label the axis.", markup: nil)))
+    await settled(session)
+    // Its editor is open when a Send carries it (the person sent from another screen).
+    session.setEditing(made.id, thread: retry)
+    _ = await session.send(thread: retry, words: "")
+    await settled(session)
+    let sent = await calls(door, carrying: made.id)
+    XCTAssertEqual(sent.count, 1)
+    let outbox = session.held
+
+    XCTAssertEqual(session.editComment(made.id, thread: retry, words: "Label both axes."), .alreadyWent, "the editor is told it was not kept")
+    XCTAssertEqual(session.held, outbox, "nothing new is queued")
+    session.setEditing(nil, thread: retry)
+    await settled(session)
+    let after = await calls(door, carrying: made.id)
+    XCTAssertEqual(after.count, 1, "nothing goes again")
+    let there = await door.comment(made.id)
+    XCTAssertEqual(there?.annotation["text"]?.text, "Label the axis.", "the computer has the words that went")
+    XCTAssertTrue(session.comments(retry).isEmpty)
+  }
+
   func testADrawingThatLandsWhileTheThreadIsHandedOnMakesAPlainCommentThatNeverGoesByItself() async throws {
     let ways = Ways()
     let (door, session, made) = try await waiting(ways)

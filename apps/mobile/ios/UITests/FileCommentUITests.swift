@@ -320,6 +320,46 @@ final class FileCommentUITests: XCTestCase {
   }
 
   @MainActor
+  func testAChangeToACommentThatAlreadyWentIsNotKeptAndTheEditorSaysSo() {
+    // The comments go in a Send while the person changes one's words (`sentwhileediting`).
+    let app = launch(stage: "files,commented,sentwhileediting")
+    let strip = app.buttons["thread-comments"]
+    XCTAssertTrue(strip.waitForExistence(timeout: 20))
+    strip.tap()
+    let onPlan = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Say which client'")).firstMatch
+    XCTAssertTrue(onPlan.waitForExistence(timeout: 5))
+    onPlan.swipeLeft()
+    XCTAssertTrue(app.buttons["Edit the comment"].waitForExistence(timeout: 5))
+    app.buttons["Edit the comment"].tap()
+    let field = app.textViews["comment-field"].exists ? app.textViews["comment-field"] : app.textFields["comment-field"]
+    XCTAssertTrue(field.waitForExistence(timeout: 10))
+    // The Send went: no comment waits any more.
+    let listed = app.buttons["file-comments"]
+    let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: listed)
+    wait(for: [gone], timeout: 20)
+
+    field.tap()
+    field.typeText(" Both.")
+    app.buttons["comment-keep"].tap()
+    let line = app.descendants(matching: .any).matching(identifier: "comment-already-sent").firstMatch
+    XCTAssertTrue(line.waitForExistence(timeout: 5), "the editor says the change was not kept")
+    XCTAssertEqual(line.label, "Not saved. This comment was already sent.")
+    XCTAssertEqual(field.value as? String, "Say which client: the phone's or the desktop's. Both.", "the words stay")
+    XCTAssertTrue(app.staticTexts["comment-quote"].exists, "the editor stays open")
+    shot("r6-01-editor-already-sent")
+
+    // Changing the words again takes the line away.
+    field.tap()
+    field.typeText("!")
+    XCTAssertFalse(line.waitForExistence(timeout: 1))
+    // Kept again: still not kept, and said again; closing the editor takes it away.
+    app.buttons["comment-keep"].tap()
+    XCTAssertTrue(line.waitForExistence(timeout: 5))
+    app.buttons["Cancel"].firstMatch.tap()
+    XCTAssertFalse(line.waitForExistence(timeout: 1))
+  }
+
+  @MainActor
   func testACommentMadeWithTheComputerAwayIsKeptAndWaitsWithItsReply() {
     let app = launch(stage: "files,fileskept,away")
     tile(app, "retry-plan.md").tap()

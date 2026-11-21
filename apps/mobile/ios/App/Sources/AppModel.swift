@@ -388,6 +388,13 @@ struct LaunchOptions {
             session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing(0.6), marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
             await session.deliverHeld(thread: StandInData.files)
           }
+        case "sentwhileediting":
+          // The comments go in a Send (made on another screen, or by themselves) while the person changes one's words.
+          Task {
+            while session.editingComment == nil { try? await Task.sleep(for: .milliseconds(200)) }
+            try? await Task.sleep(for: .milliseconds(500))
+            _ = await session.send(thread: StandInData.files, words: "")
+          }
         case "drawingonly":
           // One drawing on the flame graph, made away from the computer's network: the relay cannot carry it, so it
           // waits for the direct way, and nothing else waits for a Send.
