@@ -333,12 +333,59 @@ describe('contrast guard', () => {
     ...Array.from({ length: 8 }, (_, i) => [`git${i}`, 'background'] as [string, string]),
   ];
 
+  /**
+   * A gantt label too wide for its bar is drawn beside it, on the page. The
+   * class lists are the ones Mermaid 12 writes on such a label, per task kind.
+   * Mermaid's own sheet paints active and active-critical text (inside OR
+   * outside the bar) with `taskTextDarkColor !important`; plain, done and
+   * done-critical outside labels get `taskTextOutsideColor`. A `themeCSS`
+   * rule with `fill: … !important` whose selector matches the label wins over
+   * both (it comes later, and the guard only counts a rule it can match).
+   */
+  const OUTSIDE_LABELS: Array<{ kind: string; classes: string[]; mermaidFill: string }> = [
+    { kind: 'plain', classes: ['taskTextOutsideRight', 'taskTextOutside1'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'done', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'doneText1'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'crit', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'critText1'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'done crit', classes: ['taskTextOutsideLeft', 'taskTextOutside0', 'doneCritText0'], mermaidFill: 'taskTextOutsideColor' },
+    { kind: 'active', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'activeText1'], mermaidFill: 'taskTextDarkColor' },
+    { kind: 'active (left)', classes: ['taskTextOutsideLeft', 'taskTextOutside0', 'activeText0'], mermaidFill: 'taskTextDarkColor' },
+    { kind: 'crit active', classes: ['taskTextOutsideRight', 'taskTextOutside1', 'activeCritText1', 'critText1'], mermaidFill: 'taskTextDarkColor' },
+  ];
+
+  /** The `fill … !important` of the last themeCSS rule whose selector (class compounds, `:not(.x)`) matches `classes`. */
+  function themeCssFill(themeCSS: string | undefined, classes: string[]): string | null {
+    let found: string | null = null;
+    for (const rule of (themeCSS ?? '').matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const fill = /fill\s*:\s*(#[0-9a-f]{6})\s*!important/i.exec(rule[2]!)?.[1];
+      if (!fill) continue;
+      const matches = rule[1]!.split(',').some((selector) => {
+        const sel = selector.trim();
+        const excluded = [...sel.matchAll(/:not\(\.([\w-]+)\)/g)].map((m) => m[1]!);
+        const required = [...sel.replace(/:not\([^)]*\)/g, '').matchAll(/\.([\w-]+)/g)].map((m) => m[1]!);
+        return required.length > 0 && required.every((c) => classes.includes(c)) && !excluded.some((c) => classes.includes(c));
+      });
+      if (matches) found = fill;
+    }
+    return found;
+  }
+
   for (const file of themeFiles) {
     const css = readFileSync(join(themesDir, file), 'utf8');
     const id = file.replace(/\.css$/, '');
     for (const mode of ['dark', 'light'] as MermaidThemeMode[]) {
       const selector = mode === 'dark' ? `.theme-${id}` : `.theme-${id}.light`;
       const tokens = tokensFromCss(css, selector);
+      test(`${id} / ${mode}: a gantt label outside its bar, of every task kind, >= ${MERMAID_TEXT_CONTRAST_MIN}:1 on the page`, () => {
+        const config = buildMermaidConfig(buildMermaidThemeVariables(tokens, mode));
+        const vars = config.themeVariables as Record<string, unknown>;
+        const failures: string[] = [];
+        for (const label of OUTSIDE_LABELS) {
+          const fill = themeCssFill(config.themeCSS, label.classes) ?? (vars[label.mermaidFill] as string);
+          const r = contrastRatio(rgb(fill), rgb(vars.background));
+          if (r < MERMAID_TEXT_CONTRAST_MIN) failures.push(`${label.kind} outside label on background: ${r.toFixed(2)}`);
+        }
+        expect(failures).toEqual([]);
+      });
       test(`${id} / ${mode}: every text pair >= ${MERMAID_TEXT_CONTRAST_MIN}:1, every line pair >= ${MERMAID_LINE_CONTRAST_MIN}:1`, () => {
         expect(tokens, `${selector} block in ${file}`).toBeDefined();
         const spec = buildMermaidThemeVariables(tokens, mode);

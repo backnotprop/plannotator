@@ -118,6 +118,8 @@ export type MermaidThemeTokens = Partial<Record<MermaidThemeTokenName, string>>;
 export interface MermaidThemeSpec {
   theme: 'dark' | 'default';
   themeVariables: Record<string, unknown>;
+  /** The few rules no theme variable reaches (see `ganttOutsideLabelCss`). */
+  themeCSS?: string;
   /** The node shadow amount baked into `themeVariables.dropShadow` (0..1). */
   shadowAmount: number;
 }
@@ -740,13 +742,37 @@ export function buildMermaidThemeVariables(
     vars[`fillType${i}`] = scaleHex[i];
     vars[`venn${i + 1}`] = scaleHex[i];
   }
-  return { theme: mode === 'dark' ? 'dark' : 'default', themeVariables: vars, shadowAmount };
+  return {
+    theme: mode === 'dark' ? 'dark' : 'default',
+    themeVariables: vars,
+    themeCSS: ganttOutsideLabelCss(h(fg)),
+    shadowAmount,
+  };
+}
+
+/**
+ * A gantt label that does not fit its bar is drawn beside it, on the page, so
+ * it must be the page's text colour (`taskTextOutsideColor`). Mermaid's own
+ * sheet gets that right for plain, done and done-critical tasks only: an
+ * active or active-critical label keeps `taskTextDarkColor !important` (the
+ * ink for INSIDE a bar, close to the page background) outside the bar too, and
+ * no theme variable separates the two. This rule paints every outside label,
+ * whatever its kind, in `fg`; a clickable one keeps Mermaid's link colour.
+ * Mermaid scopes it under the diagram's id like the rest of its sheet.
+ */
+function ganttOutsideLabelCss(fg: string): string {
+  return `.taskTextOutsideLeft:not(.clickable), .taskTextOutsideRight:not(.clickable) { fill: ${fg} !important; }`;
 }
 
 /** The full Mermaid config for a spec: `MERMAID_CONFIG` with the theme swapped. */
 export function buildMermaidConfig(spec: MermaidThemeSpec | null): MermaidConfig {
   if (!spec) return MERMAID_CONFIG;
-  return { ...MERMAID_CONFIG, theme: spec.theme, themeVariables: spec.themeVariables };
+  return {
+    ...MERMAID_CONFIG,
+    theme: spec.theme,
+    themeVariables: spec.themeVariables,
+    ...(spec.themeCSS ? { themeCSS: spec.themeCSS } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
