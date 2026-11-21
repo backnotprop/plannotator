@@ -17,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
 import { markFirstCodePainted } from '../utils/firstCodePaint';
 import { useReviewFileFilter } from '../hooks/useReviewFileFilter';
+import { compileReviewFileFilter } from '@plannotator/shared/review-file-filter';
 import type { DiffFile } from '../types';
 import type { RepoFiles, RepoFilesState } from '../hooks/useRepoFiles';
 import { key, searchInput, typeInSearch } from './treeKeys.testing';
@@ -212,6 +213,43 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     await act(async () => root?.render(<Harness treeScope="all" isSearchOpen />));
     expect(toggle().parentElement?.querySelector('[data-panel-search-field]')).not.toBeNull();
     expect(el.querySelectorAll('input[name="exclude"]')).toHaveLength(1);
+  });
+
+  test('an active filter says how many files it keeps with the boxes closed, and Clear brings every file back', async () => {
+    function Harness() {
+      const { applied, input } = useReviewFileFilter();
+      const matches = compileReviewFileFilter(applied);
+      return (
+        <Tree
+          header={{ view: 'tree', showCommits: false, onSelectView: () => {}, fileFilterInput: input, fileFilterActive: !!matches }}
+          treeScope="changes"
+          visiblePaths={matches ? new Set(changed.filter((f) => matches(f.path)).map((f) => f.path)) : undefined}
+        />
+      );
+    }
+
+    markFirstCodePainted();
+    const el = await mount(<Harness />);
+    const toggle = () => el.querySelector<HTMLButtonElement>('button[aria-label^="Filter files"]')!;
+    const summary = () => el.querySelector('[data-review-file-filter-summary]');
+    expect(summary()).toBeNull();
+    await act(async () => toggle().click());
+    const field = el.querySelector<HTMLInputElement>('input[name="include"]')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      setValue.call(field, 'explorerTree.ts');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await Bun.sleep(150); });
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(el.querySelector('input[name="include"]')).toBeNull();
+    expect(summary()?.textContent).toContain('1 of 3 files');
+
+    await act(async () => summary()!.querySelector('button')!.click());
+    await settle();
+    expect(summary()).toBeNull();
+    expect(toggle().getAttribute('aria-label')).toBe('Filter files');
   });
 
   test('no header without a model (a host that draws its own)', async () => {
