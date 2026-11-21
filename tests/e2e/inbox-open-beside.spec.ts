@@ -1,5 +1,5 @@
 /**
- * "Open to the side" (config.json `inboxSplitView`, a preview with no Settings row), in a real browser against the compiled
+ * "Open to the side" (config.json `inboxSplitView`, Settings → General → Appearance, off by default), in a real browser against the compiled
  * binary, with an agent writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
  * - On, at 1600 by 900 (the list and two 400 px threads fit beside the docked sidebar): a row's menu offers "Open
@@ -12,7 +12,7 @@
  *   the new pane shows, a toast names the pane that stepped aside, and its Undo brings that pane back.
  * - On, at 1920: a row dragged onto a pane's edge opens beside it; a pane dragged by its header goes to another's
  *   half; the ⋯ menu's Move pane up and Close pane do the same without a drag; the layout comes back after a reload.
- * - Off (another Inbox, no key): the item does not exist.
+ * - Off (another Inbox, no key): the item does not exist; Settings' "Threads side by side" turns it on, no reload.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-open-beside.spec.ts`.
@@ -258,11 +258,24 @@ test('a row dragged onto a pane opens there; a pane dragged by its header moves;
   await expect(page.locator('.ib-layout > .pierre-layout-separator')).toHaveCount(0);
 });
 
-test('with the switch off there is no Open to the side', async ({ page }) => {
+test('with the switch off there is no Open to the side; the Settings switch turns it on without a reload', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const [a, b] = off.threads as [string, string];
   await openThread(page, off, a);
   await row(page, b).click({ button: 'right' });
   await expect(page.locator('[data-row-menu]')).toBeVisible();
   await expect(besideItem(page)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Settings → General → Appearance: the switch, off by default. On, and back to the thread in the same page.
+  // This writes `inboxSplitView: true` into the "off" Inbox's config.json: a test added after this one on `off` finds
+  // the switch on (give it its own Inbox, or turn the switch off first).
+  await page.goto(`${off.url}#settings`);
+  const toggle = page.locator('[data-settings-split-view] button[role="switch"]');
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(page.locator('[data-settings-split-view="on"]')).toHaveCount(1);
+  await page.goto(`${off.url}#thread=${a}`);
+  await expect(pane(page, a).locator('h2.ib-subject')).toBeVisible({ timeout: 30_000 });
+  await row(page, b).click({ button: 'right' });
+  await expect(besideItem(page)).toHaveText('Open to the side');
 });

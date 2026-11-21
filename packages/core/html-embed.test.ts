@@ -11,7 +11,7 @@
  *   Escape, or an unbounded height.
  */
 import { describe, expect, test } from "bun:test";
-import { buildEmbedDocument, EMBED_BOOTSTRAP, EMBED_MAX_HEIGHT, EMBED_REMOTE_SOURCES, EMBED_RESPONSE_CSP, EMBED_SANDBOX, embedFragment, readEmbedMessage } from "./html-embed";
+import { buildEmbedDocument, EMBED_BOOTSTRAP, EMBED_MAX_HEIGHT, EMBED_REMOTE_SOURCES, EMBED_RESPONSE_CSP, EMBED_SANDBOX, embedFragment, embedIdFromUrl, readEmbedMessage } from "./html-embed";
 
 const directives = new Map(
   EMBED_RESPONSE_CSP.split(";").map((part) => {
@@ -207,5 +207,42 @@ describe("readEmbedMessage", () => {
     for (const data of [null, "height", { kind: "height", height: 10 }, { pnEmbed: 2, kind: "escape" }, { pnEmbed: 1, kind: "navigate", url: "https://x" }, { pnEmbed: 1, kind: "focus" }]) {
       expect(readEmbedMessage(data)).toBeNull();
     }
+  });
+});
+
+describe("the document a host adds its own script to (closeHead: an annotatable block)", () => {
+  test("without the option the document is the one it always was", () => {
+    expect(buildEmbedDocument("<p>hi</p>", {})).toBe(buildEmbedDocument("<p>hi</p>"));
+    expect(buildEmbedDocument("<p>hi</p>")).not.toContain("</head>");
+  });
+
+  test("our head ends before the page, so a script put before the first </head> runs ahead of everything the page wrote", () => {
+    const hostile = '<script>window.first = "page"</script></head><p>hi</p>';
+    const page = buildEmbedDocument(hostile, { closeHead: true });
+    expect(page.startsWith("<!doctype html>")).toBe(true);
+    const ours = page.indexOf("</head>");
+    expect(ours).toBeGreaterThan(page.indexOf(EMBED_BOOTSTRAP));
+    expect(ours).toBeLessThan(page.indexOf(hostile));
+    // Nothing of ours holds a </head> a page could not also hold: the first one is always ours.
+    expect(page.slice(0, ours)).not.toContain("</head>");
+  });
+
+  test("it is the same page otherwise: the same defaults and first script, then the agent's HTML as written", () => {
+    const plain = buildEmbedDocument("<p>hi</p>");
+    const closed = buildEmbedDocument("<p>hi</p>", { closeHead: true });
+    expect(closed).toBe(plain.replace("<p>hi</p>", "</head><p>hi</p>"));
+  });
+});
+
+describe("the embed's id, read from its document's URL", () => {
+  const id = "0123456789abcdef0123456789abcdef";
+  test("the last path segment, with or without a query and fragment", () => {
+    expect(embedIdFromUrl(`/api/inbox/embeds/${id}`)).toBe(id);
+    expect(embedIdFromUrl(`http://127.0.0.1:1/api/inbox/embeds/${id}?v=2#pn=x`)).toBe(id);
+  });
+  test("a URL that does not end in an id has none", () => {
+    expect(embedIdFromUrl("/api/inbox/embeds/abc")).toBeNull();
+    expect(embedIdFromUrl(`/api/inbox/embeds/${id}/more`)).toBeNull();
+    expect(embedIdFromUrl("")).toBeNull();
   });
 });

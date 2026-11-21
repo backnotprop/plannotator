@@ -26,6 +26,7 @@ export interface InboxDiffOptions {
   background: boolean | null;
   background_intensity: "subtle" | "normal" | "strong" | null;
   tab_size: number | null;
+  semantic: boolean | null;
 }
 
 type WireKey = keyof InboxDiffOptions;
@@ -50,6 +51,7 @@ export const INBOX_DIFF_OPTION_FIELDS: Record<WireKey, Field> = {
   background: { config: "showDiffBackground", read: bool, rule: "true or false" },
   background_intensity: { config: "lineBgIntensity", read: oneOf("subtle", "normal", "strong"), rule: "subtle, normal or strong" },
   tab_size: { config: "tabSize", read: (value) => (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 8 ? value : undefined), rule: "a whole number from 1 to 8" },
+  semantic: { config: "semantic", read: bool, rule: "true or false" },
 };
 
 const WIRE_KEYS = Object.keys(INBOX_DIFF_OPTION_FIELDS) as WireKey[];

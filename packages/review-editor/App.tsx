@@ -78,6 +78,7 @@ import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
 import { createSemDiffClient } from './semDiff/semDiffClient';
+import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
 import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
@@ -138,7 +139,7 @@ import {
   type NavLocation,
   type RevealTarget,
 } from './utils/explorerNavigation';
-import { changeRuns, stepChange, type ChangeStep } from './utils/explorerChangeNavigation';
+import { changeRuns, changeStepQueue, stepChange, type ChangeStep } from './utils/explorerChangeNavigation';
 import { GoToFile } from './components/GoToFile';
 import type { FileTokenHandlers } from './components/RepoFileView';
 import type { CodeNavLocation, CodeNavResponse } from '@plannotator/shared/code-nav';
@@ -278,8 +279,6 @@ import {
   type ReviewRecoveryStorage,
 } from './utils/reviewSubmissionRecovery';
 
-const loadSemDiffWorker = (): Promise<Worker> => import('./semDiff/createSemDiffWorker').then((m) => m.createSemDiffWorker());
-
 declare const __APP_VERSION__: string;
 
 // Plannotator's own code review: the selection toolbar's Copy copies rich
@@ -348,6 +347,9 @@ function orderFilesBySections(files: DiffFile[], sections?: SinceBaseSections | 
 
 /** Hint shown following the cursor while hovering a sidebar/panel resize handle. */
 const RESIZE_HANDLE_TOOLTIP = 'Click to close · Drag to resize';
+
+/** Keys that scroll a view: pressed while Next change waits to land, they skip the landing. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 type ReviewHistoryAction =
   | {
@@ -1994,10 +1996,14 @@ const ReviewApp: React.FC = () => {
   // Stitching lives here, not in the diff views: rebuilding a fragmented
   // identifier is app-only work, and both views are compiled into the portable
   // guide viewer, which must not carry it.
+  // Returns whether the token is a symbol at all, so the views paint the hover
+  // affordance only on tokens a card can open for.
   const handleTokenHoverEnter = useCallback(
-    (props: DiffTokenEventBaseProps, filePath: string) => {
+    (props: DiffTokenEventBaseProps, filePath: string): boolean => {
       const request = buildTokenHoverRequest(props, filePath);
-      if (request) startTokenHover(request, props.tokenElement);
+      if (!request) return false;
+      startTokenHover(request, props.tokenElement);
+      return true;
     },
     [startTokenHover],
   );
@@ -2297,7 +2303,7 @@ const ReviewApp: React.FC = () => {
       : lastMainPanelIdRef.current ? dockApi.getPanel(lastMainPanelIdRef.current) : undefined;
     return (panel?.group?.element as HTMLElement | undefined) ?? null;
   }, [dockApi]);
-  const stepToChange = useCallback(async (direction: ChangeStep) => {
+  const stepToChangeNow = useCallback(async (direction: ChangeStep) => {
     const container = codeGroupElement();
     if (!container) return;
     if ((await stepChange(container, direction)) === 'moved') return;
@@ -2310,23 +2316,47 @@ const ReviewApp: React.FC = () => {
     }
     openRepoFile(next.path, { pin: false });
     // Wait for the next file's rows to settle (the diff draws, then redraws
-    // with the full file), then land on its first (or last) run.
-    let previous = '';
-    let stable = 0;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      const nextContainer = codeGroupElement();
-      if (!nextContainer) return;
-      const runs = changeRuns(nextContainer);
-      const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
-      stable = shape && shape === previous ? stable + 1 : 0;
-      previous = shape;
-      if (stable >= 3) {
-        await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
-        return;
+    // with the full file), then land on its first (or last) run. A click, a
+    // touch or a scroll by hand or by keyboard meanwhile is the person's own
+    // move, and so is leaving the file: skip the landing.
+    let touched = false;
+    const touch = () => { touched = true; };
+    const scrollKey = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key)) touched = true;
+    };
+    const inputs = ['wheel', 'pointerdown', 'touchstart'] as const;
+    for (const type of inputs) window.addEventListener(type, touch, { capture: true, passive: true });
+    window.addEventListener('keydown', scrollKey, { capture: true });
+    try {
+      let previous = '';
+      let stable = 0;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (touched || currentNavLocation()?.path !== next.path) return;
+        const nextContainer = codeGroupElement();
+        if (!nextContainer) return;
+        const runs = changeRuns(nextContainer);
+        const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
+        stable = shape && shape === previous ? stable + 1 : 0;
+        previous = shape;
+        if (stable >= 3) {
+          await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
+          return;
+        }
       }
+    } finally {
+      for (const type of inputs) window.removeEventListener(type, touch, { capture: true });
+      window.removeEventListener('keydown', scrollKey, { capture: true });
     }
   }, [codeGroupElement, currentNavLocation, files, openRepoFile]);
+  // One press at a time, and a held key's repeats only while none is under
+  // way (changeStepQueue). The queue calls the latest stepToChangeNow.
+  const stepToChangeNowRef = useRef(stepToChangeNow);
+  stepToChangeNowRef.current = stepToChangeNow;
+  const [stepToChange] = useState(() => changeStepQueue(
+    (direction) => stepToChangeNowRef.current(direction),
+    (error) => console.error('Next change failed', error),
+  ));
 
   useEffect(() => {
     if (!dockApi) return;
@@ -5538,11 +5568,11 @@ const ReviewApp: React.FC = () => {
       },
       nextChange: {
         when: (event) => canHandleExplorerKey(event),
-        handle: () => { void stepToChange(1); },
+        handle: (event) => stepToChange(1, event.repeat),
       },
       previousChange: {
         when: (event) => canHandleExplorerKey(event),
-        handle: () => { void stepToChange(-1); },
+        handle: (event) => stepToChange(-1, event.repeat),
       },
     },
   });

@@ -1,0 +1,1 @@
+../../../../contract/generated/swift/Wire.swift

@@ -14,7 +14,7 @@ import { planPictureTypeOf, type PlanDocumentKind } from '@plannotator/core/plan
 import { PlanContentRules, PlanHtmlFrame, planBlocks, resolvePlanLink } from './planContent';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { diagramDocumentBlocks, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
 import { ContentsHide, ContentsPanel } from '../components/ContentsPanel';
 import { useVersionText } from './store';
 import { plansApi } from './client';
@@ -231,6 +231,7 @@ function PlanTextDocument({ id, version, doc = null, kind = 'markdown', title = 
           hidden={!contentsShown}
           onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
           panelAction={<ContentsHide onHide={() => setContentsShown(false)} />}
+          minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
         />
       )}
     </div>

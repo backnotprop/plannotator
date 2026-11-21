@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useTheme } from "@plannotator/ui/components/ThemeProvider";
-import { BUILT_IN_THEMES } from "@plannotator/ui/utils/themeRegistry";
+import { findTheme } from "@plannotator/ui/utils/themeRegistry";
 import type { CreateAgentTerminalSessionOptions } from "@plannotator/webtui/browser";
 
 type TerminalOptions = NonNullable<CreateAgentTerminalSessionOptions["terminalOptions"]>;
@@ -570,7 +570,7 @@ export function resolveAnnotateAgentTerminalMode(
   colorTheme: string,
   requestedMode: TerminalThemeMode,
 ): TerminalThemeMode {
-  const themeInfo = BUILT_IN_THEMES.find((theme) => theme.id === colorTheme);
+  const themeInfo = findTheme(colorTheme);
   if (themeInfo?.modeSupport === "dark-only") return "dark";
   if (themeInfo?.modeSupport === "light-only") return "light";
   return requestedMode;
@@ -740,8 +740,7 @@ function createFallbackTerminalPalette(
   colorTheme: string,
   mode: TerminalThemeMode,
 ): ResolvedTerminalPalette {
-  const themeInfo = BUILT_IN_THEMES.find((theme) => theme.id === colorTheme)
-    ?? BUILT_IN_THEMES.find((theme) => theme.id === "plannotator");
+  const themeInfo = findTheme(colorTheme) ?? findTheme("plannotator");
   const colors = themeInfo?.colors[mode] ?? themeInfo?.colors.dark;
   const defaultTheme = mode === "light"
     ? PLANNOTATOR_LIGHT_TERMINAL_THEME

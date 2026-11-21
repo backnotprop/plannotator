@@ -36,7 +36,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { diffRowBox } from './diff-row-box';
 
 const repo = resolve(__dirname, '../..');
@@ -213,11 +213,12 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // Code review's one-time offer (approval "code-review-offer-card") was already answered: with PREVIEW on a release
-  // build it would open on the first page, over this spec's flow. Its own test is packages/inbox/codeReviewOffer.test.tsx.
+  // Code review's one-time offer (approval "code-review-offer-card") was already answered: it is never shown for now
+  // (CODE_REVIEW_OFFER_SHOWN), and should that change it must not open over this spec's flow. Its own test is
+  // packages/inbox/codeReviewOffer.test.tsx.
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
+  writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { ...E2E_GROUP_TIP_SEEN, code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
   // The skill roots (review-skill-loader.ts) in scratch folders, like HOME.
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
@@ -231,9 +232,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_TEST_SANDBOX: '1',
-    // Held until the next big release (packages/server/inbox.ts heldSwitch): the Code review switch shows while off only with this.
-    // That release removes this line.
-    PLANNOTATOR_INBOX_PREVIEW: '1',
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
     XDG_CONFIG_HOME: join(root, 'xdg'),
@@ -636,7 +634,7 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
   // The gear: code review's popover, without Whole file and Hide whitespace.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
-  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds']);
+  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Show moved & renamed code']);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-diff-display-popup]')).toHaveCount(0);
   await expect(pane).toBeVisible();
