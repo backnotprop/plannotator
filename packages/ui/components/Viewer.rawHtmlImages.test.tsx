@@ -40,6 +40,11 @@ const viewerMod = hasDom ? await import('./Viewer') : null;
 const Viewer = viewerMod?.Viewer as typeof import('./Viewer')['Viewer'];
 const renderedMod = hasDom ? await import('./RenderedMarkdown') : null;
 const RenderedMarkdown = renderedMod?.RenderedMarkdown as typeof import('./RenderedMarkdown')['RenderedMarkdown'];
+const blockRendererMod = hasDom ? await import('./BlockRenderer') : null;
+const BlockRenderer = blockRendererMod?.BlockRenderer as typeof import('./BlockRenderer')['BlockRenderer'];
+const planDiffMod = hasDom ? await import('./plan-diff/PlanCleanDiffView') : null;
+const PlanCleanDiffView = planDiffMod?.PlanCleanDiffView as typeof import('./plan-diff/PlanCleanDiffView')['PlanCleanDiffView'];
+const planDiffEngine = hasDom ? await import('../utils/planDiffEngine') : null;
 
 type HappySettings = Record<string, unknown>;
 const settings = hasDom ? (window as unknown as { happyDOM: { settings: HappySettings } }).happyDOM.settings : ({} as HappySettings);
@@ -209,6 +214,59 @@ describe.if(hasDom)('raw HTML the sanitizer drops draws nothing, never its sourc
     const { article } = await mountViewer('## Setup\n<script>track()</script>\n\nRun it.');
     const paragraphs = Array.from(article.querySelectorAll<HTMLElement>('p[data-block-id]'));
     expect(paragraphs.map((p) => p.hidden)).toEqual([true, false]);
+    expect(visibleText(article)).toBe('Setup Run it.');
+    // An HTML comment draws nothing too (InlineMarkdown skips it): with one before the script, still no gap.
+    const commented = (await mountViewer('## Setup\n<!-- analytics --><script>track()</script>\n\nRun it.')).article;
+    expect(Array.from(commented.querySelectorAll<HTMLElement>('p[data-block-id]'), (p) => p.hidden)).toEqual([true, false]);
+    expect(visibleText(commented)).toBe('Setup Run it.');
+  });
+
+  test('code review\'s rendered Markdown diff (a view of the source) prints added dropped HTML as text, as it did before; the Viewer still hides it', async () => {
+    const added = [
+      '## Setup',
+      `<script src="${URL_BASE}/a.js"></script>`,
+      '',
+      `<script src="${URL_BASE}/b.js"></script>`,
+      '',
+      `<div><iframe src="${URL_BASE}/c"></iframe></div>`,
+      '',
+      'Run it.',
+    ].join('\n');
+    const { blocks } = planDiffEngine!.computePlanDiff('Intro.\n', `Intro.\n\n${added}\n`);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    // As MarkdownFilePreview draws it: the diff view, each block through the shared BlockRenderer.
+    await act(async () => {
+      const root = createRoot(host);
+      roots.push(root);
+      root.render(
+        <PlanCleanDiffView
+          blocks={blocks}
+          wordLevel={false}
+          renderBlock={(block, orderedIndex) => <BlockRenderer block={block} orderedIndex={orderedIndex} />}
+        />,
+      );
+    });
+    await settle();
+    expect(droppedIn(host)).toEqual([]);
+    // Both script lines print their source as a paragraph, as on origin/main (where neither was an HTML block):
+    // the same <p> and classes, the source as inert text, nothing hidden.
+    const scripts = Array.from(host.querySelectorAll<HTMLElement>('p[data-block-id]')).filter((p) => p.textContent!.includes('<script'));
+    // (Its quotes curl, as all text's do: typography, as on origin/main.)
+    expect(scripts.map((p) => [p.textContent!.replace(/[“”]/g, '"'), p.hidden, p.className])).toEqual(
+      ['a.js', 'b.js'].map((file) => [
+        `<script src="${URL_BASE}/${file}"></script>`,
+        false,
+        'relative mb-4 leading-relaxed text-foreground/90 text-[15px] [overflow-wrap:anywhere]',
+      ]),
+    );
+    // The emptied <div> was an HTML block on origin/main too, drawn (empty), not hidden.
+    expect(Array.from(host.querySelectorAll<HTMLElement>('[data-block-type="html"]'), (el) => el.hidden)).toEqual([false]);
+    expect(visibleText(host)).toContain('Run it.');
+
+    // Outside that view, the same document still hides them.
+    const { article } = await mountViewer(added);
+    expect(droppedIn(article)).toEqual([]);
     expect(visibleText(article)).toBe('Setup Run it.');
   });
 

@@ -16,7 +16,7 @@
 import { describe, expect, test } from 'bun:test';
 import { findQuestionBlocks } from '@plannotator/core/question-block';
 import { parseMarkdownToBlocks } from './parser';
-import { matchInlineHtml } from './inlineHtmlTags';
+import { inlineHtmlDrawsNothing, matchInlineHtml } from './inlineHtmlTags';
 
 const shape = (md: string) => parseMarkdownToBlocks(md).map((b) => [b.type, b.content]);
 
@@ -140,6 +140,17 @@ describe('raw HTML inside a line', () => {
     expect(matchInlineHtml('<sub>see the note. Run `make` first, then the rest.</sub> after')).toBeNull();
     // Backticks that open no code span (no closing run) are text, and do not stop the search.
     expect(matchInlineHtml('<kbd>`</kbd> is the backtick key')).toMatchObject({ kind: 'element', tag: 'kbd', inner: '`' });
+  });
+
+  test('a paragraph draws nothing when it holds only dropped HTML, HTML comments and white space', () => {
+    expect(inlineHtmlDrawsNothing('<script>track()</script>')).toBe(true);
+    expect(inlineHtmlDrawsNothing('<!-- analytics --><script>track()</script>')).toBe(true);
+    expect(inlineHtmlDrawsNothing('<script>a()</script>\n<!-- x -->')).toBe(true);
+    // A comment alone is not dropped HTML (the paragraph draws as before), and words still draw.
+    expect(inlineHtmlDrawsNothing('<!-- x -->')).toBe(false);
+    expect(inlineHtmlDrawsNothing('<!-- x --><script>a()</script> words')).toBe(false);
+    // An unclosed comment is not skipped by InlineMarkdown: it is text.
+    expect(inlineHtmlDrawsNothing('<!-- x <script>a()</script>')).toBe(false);
   });
 
   test('a bare mention, a look-alike word, a close tag alone and an autolink stay text', () => {

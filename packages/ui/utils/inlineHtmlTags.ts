@@ -23,7 +23,7 @@
  * unclosed tags stays bounded; same-name tags nest, and the search stops at a
  * code span, so a close tag shown in backticks never closes anything.
  */
-import { DROPPED_HTML_BLOCK_TAGS, isHtmlTagSpelling } from '@plannotator/core/markdown-structure';
+import { DROPPED_HTML_BLOCK_TAGS, HTML_BLOCK_OPEN_RE, isHtmlTagSpelling } from '@plannotator/core/markdown-structure';
 
 export type InlineHtmlElement = 'sub' | 'sup' | 'kbd' | 'mark';
 
@@ -123,6 +123,15 @@ export function matchInlineHtml(text: string): InlineHtmlMatch | null {
   return attributes!.trim() || selfClosing ? { kind: 'drop', length: whole!.length } : null;
 }
 
+/**
+ * Whether an HTML block opens with a tag the sanitizer drops (`<iframe …>`, `<script>`): before these were
+ * HTML blocks, the line printed as a paragraph of text.
+ */
+export function opensDroppedHtmlTag(content: string): boolean {
+  const tag = HTML_BLOCK_OPEN_RE.exec(content.trim())?.[1];
+  return tag !== undefined && DROPPED_HTML_BLOCK_TAGS.has(tag.toLowerCase()) && isHtmlTagSpelling(tag);
+}
+
 const TAG_OPEN_RE = /<([a-zA-Z][a-zA-Z0-9]*)(?=[\s/>])/g;
 
 /** Whether `source` holds a tag the sanitizer drops (`<iframe`, `<SCRIPT`), spelled as HTML spells it. */
@@ -144,6 +153,12 @@ export function inlineHtmlDrawsNothing(text: string): boolean {
   while (i < text.length) {
     if (/\s/.test(text[i]!)) {
       i++;
+      continue;
+    }
+    // A closed HTML comment draws nothing (InlineMarkdown skips it first); alone it is not dropped HTML.
+    const comment = text.startsWith('<!--', i) ? /^<!--[\s\S]*?-->/.exec(text.slice(i)) : null;
+    if (comment) {
+      i += comment[0].length;
       continue;
     }
     const match = text[i] === '<' ? matchInlineHtml(text.slice(i)) : null;

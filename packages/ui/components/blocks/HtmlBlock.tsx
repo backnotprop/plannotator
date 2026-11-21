@@ -2,8 +2,8 @@ import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml, sanitizedHtmlDrawsNothing } from "../../utils/sanitizeHtml";
-import { DROPPED_HTML_BLOCK_TAGS, HTML_BLOCK_OPEN_RE, isHtmlTagSpelling } from "@plannotator/core/markdown-structure";
-import { holdsDroppedHtmlTag } from "../../utils/inlineHtmlTags";
+import { holdsDroppedHtmlTag, opensDroppedHtmlTag } from "../../utils/inlineHtmlTags";
+import { SourceLikeInlineContext } from "../InlineMarkdown";
 import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
@@ -270,19 +270,18 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
   );
   // Hidden only when the sanitizer emptied it by dropping such a tag (`<iframe>`, `<div><script>…</div>`); a
   // spacer (`<p>&nbsp;</p>`, `<br>`) or an empty `<div></div>` draws as it always did.
+  // In a view of the source (the rendered diff) nothing is hidden: the block draws as it did before.
+  const sourceLike = useContext(SourceLikeInlineContext);
   const drawsNothing = React.useMemo(
-    () => holdsDroppedHtmlTag(block.content) && sanitizedHtmlDrawsNothing(sanitized),
-    [block.content, sanitized],
+    () => !sourceLike && holdsDroppedHtmlTag(block.content) && sanitizedHtmlDrawsNothing(sanitized),
+    [sourceLike, block.content, sanitized],
   );
   // Opened by a tag the sanitizer drops (`<iframe>`, `<script>`): before these
   // were HTML blocks the line printed as a paragraph of text, so the page has
   // one `<p>` fewer than when such a comment was saved (see
   // useAnnotationHighlighter's restore, which checks for this mark). Only
   // these are marked: a block that was HTML before (`<div>…</div>`) moved nothing.
-  const opensDropped = React.useMemo(() => {
-    const tag = HTML_BLOCK_OPEN_RE.exec(block.content.trim())?.[1];
-    return tag !== undefined && DROPPED_HTML_BLOCK_TAGS.has(tag.toLowerCase()) && isHtmlTagSpelling(tag);
-  }, [block.content]);
+  const opensDropped = React.useMemo(() => opensDroppedHtmlTag(block.content), [block.content]);
   useEffect(() => {
     if (!ref.current || drawsNothing) return;
     if (resolveImage) {
