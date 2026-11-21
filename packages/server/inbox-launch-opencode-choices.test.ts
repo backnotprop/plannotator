@@ -227,7 +227,7 @@ describe("OpenCode's model list reaches the picker", () => {
   test("the list read's env has no Plannotator name and no OpenCode server sign-in, from the login env or the Inbox's", async () => {
     const t = setup(zen, {
       ownEnv: { PLANNOTATOR_PORT: "19432", PLANNOTATOR_INBOX_TOOL: "1" },
-      loginEnv: { PLANNOTATOR_DATA_DIR: "/somewhere", PLANNOTATOR_INBOX_TOOL: "1", OPENCODE: "1", OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: "x", MY_GATEWAY_KEY: "k" },
+      loginEnv: { PLANNOTATOR_DATA_DIR: "/somewhere", PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_INBOX_TOOL: "1", OPENCODE: "1", OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: "x", MY_GATEWAY_KEY: "k" },
       noShellRead: true,
     });
     expect((await t.host.available()).ok).toBe(true);
