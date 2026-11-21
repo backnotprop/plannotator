@@ -875,3 +875,6 @@ packages/ui/components/Viewer.footnotesAutolinks.test.tsx
 packages/ui/hooks/useFenceTheme.page.test.tsx
 packages/ui/components/Viewer.rawHtmlImages.test.tsx
 packages/inbox/launchChoiceStates.test.tsx
+packages/ui/components/html-embed/HtmlEmbedBlock.annotate.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.inline.test.tsx
+packages/ui/components/html-viewer/bridgeStructuralAnchor.test.ts
