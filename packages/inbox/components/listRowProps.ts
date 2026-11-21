@@ -15,7 +15,8 @@ export interface ListRowProps extends RowTintFields {
   away: boolean;
   /** The group the row sits in on screen. */
   drawn: InboxListGroupId;
-  shape: 'wide' | 'narrow' | 'phone';
+  /** `line`, `phone-line`: the Agents view's one-line row (agentsView/LineRow.tsx), on a wider window or a phone. */
+  shape: 'wide' | 'narrow' | 'phone' | 'line' | 'phone-line';
   /** A wide row in a list at least FULL_WORDS_MIN_LIST_WIDTH wide: the full words and the badge's words. */
   full: boolean;
   filtered: boolean;

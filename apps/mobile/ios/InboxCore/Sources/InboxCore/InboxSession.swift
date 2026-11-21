@@ -29,12 +29,12 @@ public final class InboxSession {
   public private(set) var reach: Reach = .connecting
   public private(set) var standing: Standing = .ok
   public private(set) var skew: DoorSkew?
-  public private(set) var list: ListModel?
+  public internal(set) var list: ListModel?
   /// True once the list was read from the computer or from the copy.
   public private(set) var listLoaded = false
   public private(set) var threads: [ThreadID: ThreadModel] = [:]
   /// Threads the computer says are not there.
-  public private(set) var missingThreads: Set<ThreadID> = []
+  public internal(set) var missingThreads: Set<ThreadID> = []
   /// Why something the person did was not taken.
   public enum Notice: Hashable, Sendable, Codable {
     /// The Inbox's own words for its refusal, and its code.
@@ -67,17 +67,89 @@ public final class InboxSession {
   /// The field a refused pick's refusal names, by question (`DoorError.field`): what the app acts on, never the words.
   private var refusedFields: [String: String] = [:]
   /// The words of a refused Send, to go back into the composer.
-  public private(set) var returned: [ThreadID: String] = [:]
+  public internal(set) var returned: [ThreadID: String] = [:]
   /// Writes with no definite answer yet, oldest first.
-  public private(set) var held: [HeldWrite] = []
+  @ObservationIgnored public internal(set) var held: [HeldWrite] {
+    _read {
+      _ = drawMark
+      yield heldStore
+    }
+    set {
+      heldStore = newValue
+      changed()
+    }
+    _modify {
+      yield &heldStore
+      changed()
+    }
+  }
+  @ObservationIgnored private var heldStore: [HeldWrite] = []
+  /// Moves when `held` or `book` changes: what draws them reads it. The writes of an act on several rows land
+  /// quietly (`quietly`), and the batch moves it once at its end, so a thousand rows sent redraw the list once.
+  private var drawMark = 0
+  @ObservationIgnored private var quiet = 0
+  @ObservationIgnored private var quietChanged = false
+  @ObservationIgnored private var quietSave = false
+  /// The senders of each act on several rows now on its way (BulkActs.swift), so `stop()` can end them.
+  @ObservationIgnored var sendLanes: [String: [Task<Void, Never>]] = [:]
+
+  private func changed() {
+    if quiet > 0 { quietChanged = true } else { drawMark &+= 1 }
+  }
+
+  /// Run `body` with what it changes in `held` and `book` drawn later, and the outbox saved later (`endQuiet`):
+  /// one write of a batch landing. `on` false runs it as any other change.
+  func quietly<T>(_ on: Bool, _ body: () -> T) -> T {
+    guard on else { return body() }
+    quiet += 1
+    defer { quiet -= 1 }
+    return body()
+  }
+
+  /// A batch is over (sent, stopped or left waiting): what it changed is drawn once and the outbox saved once.
+  /// A write landed and not yet saved as gone is sent again after a crash under its own key: the door replays it.
+  func endQuiet() {
+    if quietSave {
+      quietSave = false
+      copy.saveOutbox(held)
+    }
+    if quietChanged {
+      quietChanged = false
+      drawMark &+= 1
+    }
+  }
   /// Threads with a Send on its way now.
   public private(set) var sending: Set<ThreadID> = []
 
+  /// Thread actions: what waits, what landed, the Undo on offer, why one was not taken (ThreadActionsSession.swift).
+  @ObservationIgnored var book: ActionBook {
+    _read {
+      _ = drawMark
+      yield bookStore
+    }
+    set {
+      bookStore = newValue
+      changed()
+    }
+    _modify {
+      yield &bookStore
+      changed()
+    }
+  }
+  @ObservationIgnored private var bookStore = ActionBook()
+  /// Reply drafts kept on the phone (ReplyDrafts.swift).
+  var draftBook = DraftBook()
+  /// Attachments: what the computer says of each, and the bytes kept on the phone (AttachmentsSession.swift).
+  var files = FileBook()
+  let bytes: AttachmentCache?
+  /// What time it is, and how the session waits for a time (a snooze's end).
+  let clock: SessionClock
+
   private let app: AppIdentity
   private let connector: DoorConnector
-  private var copy: LocalCopy
-  private var removed = false
-  private var client: DoorClient?
+  var copy: LocalCopy
+  var removed = false
+  var client: DoorClient?
   private var stream: Task<Void, Never>?
   private var reload: Task<Void, Never>?
   private var connecting: Task<Bool, Never>?
@@ -85,8 +157,10 @@ public final class InboxSession {
   private var pumping: Set<String> = []
   private let retryEvery: Duration
 
-  public init(computer: PairedComputer, app: AppIdentity, copy: LocalCopy = LocalCopy(folder: nil), retryEvery: Duration = .seconds(15), connector: @escaping DoorConnector) {
+  public init(computer: PairedComputer, app: AppIdentity, copy: LocalCopy = LocalCopy(folder: nil), retryEvery: Duration = .seconds(15), bytes: AttachmentCache? = nil, clock: SessionClock = .system, connector: @escaping DoorConnector) {
     self.retryEvery = retryEvery
+    self.clock = clock
+    self.bytes = bytes
     self.computer = computer
     self.app = app
     self.copy = copy
@@ -114,6 +188,8 @@ public final class InboxSession {
       returned[ThreadID(thread)] = back.words
       notices[ThreadID(thread)] = back.notice
     }
+    loadDrafts()
+    armWake()
     await refresh()
   }
 
@@ -133,8 +209,12 @@ public final class InboxSession {
 
   public func stop() {
     stopListening()
+    book.wake?.cancel()
+    book.wake = nil
     retry?.cancel()
     retry = nil
+    // An act on several rows on its way stops after the writes already sent: the rest wait in the outbox.
+    for lanes in sendLanes.values { for lane in lanes { lane.cancel() } }
   }
 
   private func stopListening() {
@@ -145,7 +225,7 @@ public final class InboxSession {
   }
 
   /// Ask every way for `health` at once, three seconds each: the first to answer carries the session.
-  private func connect() async -> Bool {
+  func connect() async -> Bool {
     if let connecting { return await connecting.value }
     let task = Task { await self.findPath() }
     connecting = task
@@ -239,9 +319,11 @@ public final class InboxSession {
       removed = true
       copy.erase()
       copy = LocalCopy(folder: nil)
+      bytes?.erase()
       list = nil
       threads = [:]
       held = []
+      draftBook = DraftBook()
     case .unreachable:
       reach = .away
       client = nil
@@ -251,15 +333,19 @@ public final class InboxSession {
     }
   }
 
-  private func offers(_ route: DoorRoute) -> Bool { skew?.offers(route) ?? false }
+  func offers(_ route: DoorRoute) -> Bool { skew?.offers(route) ?? false }
 
-  private func readList() async {
+  func readList() async {
     guard let client, offers(DoorRoutes.getThreads) else { return }
+    let started = book.landSeq
     do {
       let read = try await client.threads()
       list = read.model
       listLoaded = true
       copy.saveList(read.model)
+      // What landed before this read began is in it now: no longer drawn over it.
+      book.landed.removeAll { $0.seq <= started }
+      armWake()
     } catch let failure as DoorFailure {
       note(failure)
     } catch {}
@@ -273,7 +359,7 @@ public final class InboxSession {
     await markSeen(id)
   }
 
-  private func readThread(_ id: ThreadID) async {
+  func readThread(_ id: ThreadID) async {
     guard let client, offers(DoorRoutes.getThread) else { return }
     do {
       let model = try await client.thread(id)
@@ -389,7 +475,7 @@ public final class InboxSession {
     held.filter { $0.kind == .reply && $0.thread == id.rawValue && !($0.words ?? "").isEmpty }
   }
 
-  private func keepGivenBack() {
+  func keepGivenBack() {
     var kept: [String: LocalCopy.GivenBack] = [:]
     for (thread, words) in returned { kept[thread.rawValue] = LocalCopy.GivenBack(words: words, notice: notices[thread]) }
     copy.saveGivenBack(kept)
@@ -397,12 +483,17 @@ public final class InboxSession {
 
   private func hold(_ write: HeldWrite) {
     held.append(write)
-    copy.saveOutbox(held)
+    // Several held at once (an act on many rows) are saved once, by the one that holds them.
+    if !book.batching { copy.saveOutbox(held) }
   }
 
-  private func settle(_ id: String) {
+  /// Save the outbox as it stands (after several writes were held or taken back together).
+  func saveOutbox() { copy.saveOutbox(held) }
+
+  func settle(_ id: String) {
     held.removeAll { $0.id == id }
-    copy.saveOutbox(held)
+    // One write of a batch: the batch saves once at its end (`endQuiet`).
+    if quiet > 0 { quietSave = true } else { copy.saveOutbox(held) }
   }
 
   /// A write the computer will never take: say why where it was made, and never lose the person's words.
@@ -449,6 +540,8 @@ public final class InboxSession {
       keepGivenBack()
     case .seen:
       break
+    case .state:
+      noteRefusedAct(write, notice)
     }
   }
 
@@ -567,7 +660,8 @@ public final class InboxSession {
   }
 
   /// Send one held write. True when it has a definite answer (applied or refused) and left the outbox.
-  private func deliver(_ write: HeldWrite) async -> Bool {
+  /// `quiet`: one write of a batch, drawn and saved with the batch (`quietly`).
+  private func deliver(_ write: HeldWrite, quiet: Bool = false) async -> Bool {
     guard !removed, let client, let method = DoorMethod(rawValue: write.method) else { return false }
     // A route this Inbox does not list is never called, so no 404 is kept under the key.
     guard skew?.offers(write.route) ?? false else {
@@ -575,16 +669,26 @@ public final class InboxSession {
       giveBack(write, .notOffered)
       return true
     }
+    // A thread action that waited meets the computer's row first: it never goes over a newer change made elsewhere.
+    if write.kind == .state, await settleWaitedAct(write) { return true }
+    // Taken back (Undo) while the computer's row was read: nothing goes.
+    guard held.contains(where: { $0.id == write.id }) else { return true }
+    quietly(quiet) { _ = book.inFlight.insert(write.id) }
+    defer { quietly(quiet) { _ = book.inFlight.remove(write.id) } }
     do {
       let answer = try await client.resend(method: method, path: write.path, body: write.body)
       if removed { return false }
-      apply(write, answer)
-      settle(write.id)
+      quietly(quiet) {
+        apply(write, answer)
+        settle(write.id)
+      }
       return true
     } catch let failure as DoorFailure {
       if removed { return false }
       note(failure)
       guard failure.isDefinite else {
+        // Sent, and no definite answer: the computer may have taken it.
+        if case .unreachable(_, mayHaveArrived: false) = failure {} else { book.inDoubt.insert(write.id) }
         if let index = held.firstIndex(where: { $0.id == write.id }), held[index].waited != true {
           held[index].waited = true
           copy.saveOutbox(held)
@@ -600,21 +704,24 @@ public final class InboxSession {
         stopped.insert(ThreadID(write.thread))
       }
       // Words first, then the outbox: a refusal never leaves the phone with neither.
-      switch failure {
-      case .refused(_, let error):
-        if write.kind == .pick, let body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body) {
-          for question in body.questions { refusedFields[ref(write.message, question.key)] = error.field }
+      quietly(quiet) {
+        switch failure {
+        case .refused(_, let error):
+          if write.kind == .pick, let body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body) {
+            for question in body.questions { refusedFields[ref(write.message, question.key)] = error.field }
+          }
+          giveBack(write, .refused(error.error, code: error.code))
+        case .unreadable(let status): giveBack(write, .unreadable(status: status))
+        case .appNeedsUpdate: giveBack(write, .appNeedsUpdate)
+        default: giveBack(write, .notOffered)
         }
-        giveBack(write, .refused(error.error, code: error.code))
-      case .unreadable(let status): giveBack(write, .unreadable(status: status))
-      case .appNeedsUpdate: giveBack(write, .appNeedsUpdate)
-      default: giveBack(write, .notOffered)
+        settle(write.id)
       }
-      settle(write.id)
       // Show what the computer has now, beside the refusal.
-      if write.kind != .seen { await readThread(ThreadID(write.thread)) }
+      if write.kind != .seen, write.kind != .state { await readThread(ThreadID(write.thread)) }
       return true
     } catch {
+      book.inDoubt.insert(write.id)
       return false
     }
   }
@@ -650,6 +757,8 @@ public final class InboxSession {
       if let result = try? JSONDecoder().decode(ReplyResult.self, from: answer.body), let read = result.threadRead { take(read) }
     case .seen:
       break
+    case .state:
+      landAct(write, answer)
     }
   }
 
@@ -669,7 +778,7 @@ public final class InboxSession {
         }
         body.questions = questions
         held[index].body = encode(body)
-      case .seen, .action:
+      case .seen, .action, .state:
         break
       }
     }
@@ -678,13 +787,21 @@ public final class InboxSession {
 
   /// Send a thread's held writes in the order made, each after the one before it has its answer. One pump per
   /// thread: a write made while another is on its way joins the same run.
-  private func pump(_ thread: String) async {
+  /// `readsList` false: the caller reads the list once itself, after pumping several threads. `quiet`: a batch's
+  /// thread, drawn and saved with the batch.
+  func pump(_ thread: String, readsList: Bool = true, quiet: Bool = false) async {
     guard !pumping.contains(thread) else { return }
     pumping.insert(thread)
     defer { pumping.remove(thread) }
     if client == nil { _ = await connect() }
+    quietly(quiet) { book.checked = false }
     while !removed, client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread }) {
-      if !(await deliver(next)) { break }
+      if !(await deliver(next, quiet: quiet)) { break }
+    }
+    // A thread action landed: the list is read again, so its row comes from the computer.
+    if readsList, book.needsListRead, client != nil, !removed {
+      book.needsListRead = false
+      await readList()
     }
     // Left on the phone (the computer away, refused, or in need of an update): what is left has waited.
     if held.contains(where: { $0.thread == thread }) {
@@ -700,7 +817,7 @@ public final class InboxSession {
   }
 
   /// While something waits and the computer does not answer, ask again now and then.
-  private func retryLater() {
+  func retryLater() {
     guard retry == nil else { return }
     retry = Task { [weak self] in
       while let self, !Task.isCancelled {
@@ -716,12 +833,15 @@ public final class InboxSession {
 
   private func encode<Body: Encodable>(_ body: Body) -> Data { (try? JSONEncoder().encode(body)) ?? Data("{}".utf8) }
 
-  private func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false) {
+  func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false, act: ThreadAct? = nil, shown: ShownState? = nil, waited: Bool = false, undoes: String? = nil) {
     // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
     // Not while it is still connecting: a tap made as the app opens is sent the moment the computer answers, and
     // has waited if it turns out not to (markWaited).
-    let waits = reach == .away
-    hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil))
+    let waits = waited || reach == .away
+    var write = HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: clock.now(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil, act: act)
+    write.shown = shown
+    write.undoes = undoes
+    hold(write)
   }
 
   private func markSeen(_ id: ThreadID) async {
@@ -801,7 +921,7 @@ public final class InboxSession {
   /// Send: every saved pick in the thread, one reply per agent session, the words riding the last.
   /// False when there was nothing to send or nowhere to send it.
   @discardableResult
-  public func send(thread id: ThreadID, words: String, pastGuard: Bool = false) async -> Bool {
+  public func send(thread id: ThreadID, words: String, pastGuard: Bool = false, clearDraft: String? = nil) async -> Bool {
     // A pick of theirs was replaced before it went: nothing is sent until the person chooses.
     if !(stale[id] ?? []).isEmpty, !pastGuard {
       stopped.insert(id)
@@ -826,9 +946,13 @@ public final class InboxSession {
       let key = UUID().uuidString
       // The words ride the reply to the agent that wrote last, when that reply is made at all.
       let words = target.message == targets.last?.message ? text : ""
-      let body = DoorReplyBody(idempotencyKey: key, words: words, questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
+      var body = DoorReplyBody(idempotencyKey: key, words: words, questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
+      // The computer's draft these words came from goes when they are sent (the door forwards `clear_draft`).
+      if !words.isEmpty, let clearDraft { body.clearDraft = clearDraft }
       enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: words.isEmpty ? nil : words)
     }
+    // The words are in the outbox now: the thread's draft on the phone is spent.
+    if !text.isEmpty { forgetDraft(id) }
     await pump(id.rawValue)
     if client != nil { await readList() }
     return true
@@ -864,7 +988,9 @@ public final class InboxSession {
     let old = copy
     copy = LocalCopy(folder: nil)
     held = []
+    draftBook = DraftBook()
     old.erase()
+    bytes?.erase()
     if client == nil { _ = await connect() }
     try? await client?.revoke()
     old.erase()

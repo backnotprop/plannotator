@@ -60,12 +60,77 @@ extension JSONValue {
 
 let testApp = AppIdentity(version: "0.1.0")
 
-/// A paired phone and its stand-in computer.
+/// A paired phone and its stand-in computer. `gate`: every answer passes it, so a test can stop one on its way.
 @MainActor
-func pairedSession(door: StandInDoor, copy: LocalCopy = LocalCopy(folder: nil)) async -> InboxSession {
+func pairedSession(door: StandInDoor, copy: LocalCopy = LocalCopy(folder: nil), bytes: AttachmentCache? = nil, gate: Gate? = nil) async -> InboxSession {
   let issued = await door.issueToken()
   let computer = PairedComputer(id: issued.device.rawValue, name: "Work Mac", token: issued.token, secret: "s", addresses: [])
-  return InboxSession(computer: computer, app: testApp, copy: copy) { _ in [StandInTransport(door: door)] }
+  return InboxSession(computer: computer, app: testApp, copy: copy, bytes: bytes) { _ in
+    let inner = StandInTransport(door: door)
+    return [gate.map { GatedTransport(inner: inner, gate: $0) } ?? inner]
+  }
+}
+
+/// A slow network on demand: the answer to one chosen call waits until the test lets it go. Keeps the status of
+/// every answer that came back.
+actor Gate {
+  private var match: (@Sendable (DoorCall) -> Bool)?
+  private var stopped: [CheckedContinuation<Void, Never>] = []
+  private var arrivals: [CheckedContinuation<Void, Never>] = []
+  private(set) var answers: [(path: String, status: Int)] = []
+
+  private var losing: (match: @Sendable (DoorCall) -> Bool, arrives: Bool)?
+
+  /// Stop the answer to the next call that matches.
+  func stop(_ match: @escaping @Sendable (DoorCall) -> Bool) { self.match = match }
+
+  /// Lose the connection on the next call that matches: after the computer took it (`arrives`), or before.
+  func lose(_ match: @escaping @Sendable (DoorCall) -> Bool, arrives: Bool) { losing = (match, arrives) }
+
+  /// Whether this call is lost, and if so whether it reaches the computer first.
+  func loses(_ call: DoorCall) -> Bool? {
+    guard let losing, losing.match(call) else { return nil }
+    self.losing = nil
+    return losing.arrives
+  }
+
+  /// Wait until a call was stopped.
+  func reached() async {
+    guard stopped.isEmpty else { return }
+    await withCheckedContinuation { arrivals.append($0) }
+  }
+
+  /// Let the stopped answer go.
+  func open() {
+    match = nil
+    for waiter in stopped { waiter.resume() }
+    stopped = []
+  }
+
+  func pass(_ call: DoorCall, _ answer: DoorAnswerBytes) async {
+    answers.append((call.path, answer.status))
+    guard let match, match(call) else { return }
+    self.match = nil
+    await withCheckedContinuation { waiter in
+      stopped.append(waiter)
+      for arrival in arrivals { arrival.resume() }
+      arrivals = []
+    }
+  }
+}
+
+struct GatedTransport: DoorTransport {
+  let inner: StandInTransport
+  let gate: Gate
+  func send(_ call: DoorCall) async throws -> DoorAnswerBytes {
+    let lost = await gate.loses(call)
+    if lost == false { throw URLError(.networkConnectionLost) }
+    let answer = try await inner.send(call)
+    if lost == true { throw URLError(.networkConnectionLost) }
+    await gate.pass(call, answer)
+    return answer
+  }
+  func events(_ call: DoorCall) async throws -> AsyncThrowingStream<Data, Error>? { try await inner.events(call) }
 }
 
 func body(_ call: DoorCall) -> JSONValue { (try? JSONDecoder().decode(JSONValue.self, from: call.body ?? Data())) ?? .null }

@@ -12,6 +12,7 @@ import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout, ensureHighlig
 import { chunkSegments, codeSegmentsToHtml, wordDiffSegments } from "../../utils/codeDiffSegments";
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
+import { SourceLikeInlineContext } from "../InlineMarkdown";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
 import { parseTableContent } from "../blocks/TableBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
@@ -113,7 +114,18 @@ const DEFAULT_UNCHANGED_CLASS = "opacity-60 hover:opacity-100 transition-opacity
  */
 const STRIKE_CLASS = "line-through decoration-destructive/30";
 
-export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
+/**
+ * The diff is a view of the source: `[^1]`, character references and bare
+ * `www.` / e-mail addresses stay as written in every block it draws (its own
+ * inline renderer, the shared quote and list pieces, a host's `renderBlock`).
+ */
+export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = (props) => (
+  <SourceLikeInlineContext.Provider value={true}>
+    <PlanCleanDiffViewBody {...props} />
+  </SourceLikeInlineContext.Provider>
+);
+
+const PlanCleanDiffViewBody: React.FC<PlanCleanDiffViewProps> = ({
   blocks,
   annotations = [],
   onAddAnnotation,

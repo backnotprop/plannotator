@@ -3,9 +3,11 @@
  * scripts/mobile/check.ts checks each; scripts/mobile/all.ts runs them,
  * then the stream suite's generator (vectors-stream.ts), which reads the
  * window's stream reader and so is never imported from here. Of the window's
- * own code they read only the badge rule (packages/inbox/tabCount.ts, through
- * vectors.ts), whose module also holds a React hook: a change there re-checks
- * the contract.
+ * own code, vectors.ts reads the badge rule (packages/inbox/tabCount.ts, whose
+ * module also holds a React hook) and the list's pure rules for the rows suite
+ * (held.ts, markRead.ts, pins.ts, priority.ts, rowActions.ts, rowMenu.ts,
+ * rowSwipe.ts in packages/inbox). A change there is caught by the contract
+ * check on main and in its nightly run, not by a pull request's path filter.
  */
 import { generateDoor } from './door';
 import { generateLedger } from './ledger';

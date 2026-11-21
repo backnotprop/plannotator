@@ -6,14 +6,25 @@
     "ArchivedModel": "packages/core/inbox-wire-models.ts",
     "DoorError": "scripts/mobile/door-shapes.ts",
     "DoorHelloFrame": "scripts/mobile/door-shapes.ts",
+    "DoorKeyBody": "scripts/mobile/door-shapes.ts",
+    "DoorMarkUnreadAnswer": "scripts/mobile/door-shapes.ts",
     "DoorPairAnswer": "scripts/mobile/door-shapes.ts",
     "DoorPairRequest": "scripts/mobile/door-shapes.ts",
     "DoorPicksAnswer": "scripts/mobile/door-shapes.ts",
     "DoorPicksBody": "scripts/mobile/door-shapes.ts",
+    "DoorPinBody": "scripts/mobile/door-shapes.ts",
+    "DoorPinsBody": "scripts/mobile/door-shapes.ts",
+    "DoorPriorityAnswer": "scripts/mobile/door-shapes.ts",
+    "DoorPriorityBody": "scripts/mobile/door-shapes.ts",
     "DoorRecordFrame": "scripts/mobile/door-shapes.ts",
     "DoorReplyBody": "scripts/mobile/door-shapes.ts",
+    "DoorResolveBody": "scripts/mobile/door-shapes.ts",
     "DoorRevokeAnswer": "scripts/mobile/door-shapes.ts",
     "DoorSeenBody": "scripts/mobile/door-shapes.ts",
+    "DoorSnoozeAnswer": "scripts/mobile/door-shapes.ts",
+    "DoorSnoozeBody": "scripts/mobile/door-shapes.ts",
+    "DoorThreadAttachmentsAnswer": "scripts/mobile/door-shapes.ts",
+    "DoorThreadDraftAnswer": "scripts/mobile/door-shapes.ts",
     "InboxDelivery": "packages/core/inbox-types.ts",
     "InboxDevicePublic": "packages/shared/inbox/devices.ts",
     "InboxDoorHealth": "packages/core/inbox-door-version.ts",
@@ -165,6 +176,40 @@
       "required": [
         "serverSession",
         "cursor"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorKeyBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorMarkUnreadAnswer": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "$ref": "#/$defs/InboxListRow"
+        },
+        "wrote": {
+          "type": "boolean"
+        },
+        "through_seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thread",
+        "wrote",
+        "through_seq"
       ],
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"
@@ -363,6 +408,125 @@
       },
       "required": [
         "questions",
+        "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorPinBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "pinned"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorPinsBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "thread_id": {
+              "type": "string"
+            },
+            "index": {
+              "type": "number"
+            },
+            "pinned_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread_id",
+            "index",
+            "pinned_at"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorPriorityAnswer": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "$ref": "#/$defs/DoorPriorityBefore"
+        }
+      },
+      "required": [
+        "before"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorPriorityBefore": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "off_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "off_at"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorPriorityBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "boolean"
+        },
+        "restore": {
+          "$ref": "#/$defs/DoorPriorityBefore"
+        }
+      },
+      "required": [
         "idempotency_key"
       ],
       "additionalProperties": true,
@@ -582,6 +746,23 @@
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"
     },
+    "DoorResolveBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "resolved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "resolved"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
     "DoorRevokeAnswer": {
       "type": "object",
       "properties": {
@@ -614,6 +795,103 @@
       },
       "required": [
         "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorSnoozeAnswer": {
+      "type": "object",
+      "properties": {
+        "snoozed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxRowSnooze"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "snoozed"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorSnoozeBody": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "until"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorThreadAttachmentsAnswer": {
+      "type": "object",
+      "properties": {
+        "serverSession": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxAttachmentState"
+          }
+        },
+        "inline_images": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxAttachmentState"
+          }
+        }
+      },
+      "required": [
+        "serverSession",
+        "attachments"
+      ],
+      "additionalProperties": true,
+      "x-source": "scripts/mobile/door-shapes.ts"
+    },
+    "DoorThreadDraftAnswer": {
+      "type": "object",
+      "properties": {
+        "serverSession": {
+          "type": "string"
+        },
+        "draft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxReplyDraft"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "serverSession",
+        "draft"
       ],
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"
@@ -839,7 +1117,8 @@
           "type": "string",
           "enum": [
             "cant",
-            "done"
+            "done",
+            "skip"
           ],
           "x-open": true
         },
@@ -886,7 +1165,8 @@
                   "type": "string",
                   "enum": [
                     "cant",
-                    "done"
+                    "done",
+                    "skip"
                   ],
                   "x-open": true
                 },
@@ -1383,6 +1663,161 @@
         "video"
       ],
       "x-open": true,
+      "x-source": "packages/core/inbox-attachments.ts"
+    },
+    "InboxAttachmentState": {
+      "type": "object",
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "captured": {
+          "type": "string",
+          "enum": [
+            "on_open"
+          ],
+          "x-open": true
+        },
+        "captured_at": {
+          "type": "string"
+        },
+        "current": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "mtime": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sha256",
+                "size",
+                "mtime"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changed_since_sent": {
+          "type": "boolean"
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "const": "attachment_missing"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "const": "attachment_changed_type"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "named_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/InboxAttachmentKind"
+        },
+        "sent_sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "sent_at": {
+          "type": "string"
+        },
+        "sent_mtime": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        },
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message_id",
+        "current",
+        "changed_since_sent",
+        "unavailable",
+        "id",
+        "path",
+        "named_path",
+        "name",
+        "kind",
+        "sent_sha256",
+        "size",
+        "sent_at",
+        "sent_mtime"
+      ],
+      "additionalProperties": true,
       "x-source": "packages/core/inbox-attachments.ts"
     },
     "InboxAuthor": {
@@ -4313,6 +4748,91 @@
       "x-open": true,
       "x-source": "packages/core/inbox-types.ts"
     },
+    "InboxReplyDraft": {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxDraftFile"
+          }
+        },
+        "recipients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "quote": {
+          "$ref": "#/$defs/InboxReplyQuote"
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxReplyMention"
+          }
+        }
+      },
+      "required": [
+        "v",
+        "thread_id",
+        "body",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxReplyMention": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number"
+        },
+        "project": {
+          "type": "string"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "machine": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "title",
+        "label",
+        "at"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
     "InboxReplyQuote": {
       "type": "object",
       "properties": {
@@ -4812,6 +5332,9 @@
           "type": "number"
         },
         "cant": {
+          "type": "number"
+        },
+        "skipped": {
           "type": "number"
         }
       },

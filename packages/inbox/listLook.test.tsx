@@ -489,6 +489,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
       ['menuitem', 'Refresh', null],
       ['menuitemradio', 'Smart groups', 'true'],
       ['menuitemradio', 'Simple list', 'false'],
+      ['menuitemradio', 'Agents', 'false'],
       // The agent status switch (owner, 2026-11-18): its own item after the View group, off by default, the same as Settings' row.
       ['menuitemcheckbox', 'Show agent status', 'false'],
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
