@@ -339,6 +339,7 @@ import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/th
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
+import { forgejoLinkPull } from "./inbox-forgejo-link";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
@@ -6338,10 +6339,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!link) return json({ serverSession, ok: false, reason: "not_a_link" });
         if ("unsupported" in link) return json({ serverSession, ok: false, reason: link.unsupported });
         const { ref } = link;
-        const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
-        const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
-        if (pull) linkReads.set(ref.key, pull);
-        if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        let cli: "gh" | "glab" | "forgejo";
+        let pull: InboxPull | null;
+        if (ref.platform === "forgejo") {
+          // Read with the person's token for that host, through the hover card's reader (never gh or glab).
+          cli = "forgejo";
+          const card = await refCards.get(link.url).catch(() => null);
+          pull = card?.ok ? forgejoLinkPull(card.data, ref.key, ref.host) : null;
+          if (!pull) return json({ serverSession, ok: false, reason: "forgejo" });
+        } else {
+          cli = ref.platform === "gitlab" ? "glab" : "gh";
+          pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
+          if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        }
+        linkReads.set(ref.key, pull);
         const { projectsByRepo } = await pullProjects();
         const owner = pullOwners.get(ref.key);
         const row = owner ? store.listRow(owner.thread_id) : null;
@@ -6577,7 +6588,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
-        const result = await mergePull(options.refRunner ?? refCliRunner, pull, seen);
+        if (pull.platform === "forgejo") return json({ error: "A Forgejo pull request can't be merged from the Inbox yet.", code: "pull_unsupported" }, 409);
+        const result = await mergePull(options.refRunner ?? refCliRunner, pull as Parameters<typeof mergePull>[1], seen);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_merge_failed" ? 502 : 409);
         // The next list shows it merged at once, even from the read cache or a forge search that still says open.
         pulls.markMerged(key);
@@ -6607,7 +6619,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
-        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
+        if (pull.platform === "forgejo") return json({ error: "A Forgejo pull request can't be closed or reopened from the Inbox yet.", code: "pull_unsupported" }, 409);
+        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull as Parameters<typeof reopenPull>[1]) : await closePull(options.refRunner ?? refCliRunner, pull as Parameters<typeof closePull>[1]);
         if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409);
         if (reopen) {
           closedByInbox.delete(key);

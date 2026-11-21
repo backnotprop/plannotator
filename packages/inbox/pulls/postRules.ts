@@ -29,7 +29,8 @@ export function onPullDiff(comments: readonly CodeAnnotation[], guideFiles: read
 
 /** The PR as `#platform-post` posts it, or null when it can't be: closed, merged, or its head commit unknown. */
 export function postablePull(pull: InboxPull | null | undefined): PlatformPostPull | null {
-  if (!pull || !pull.head_sha || !inboxPullIsOpen(pull)) return null;
+  // A Forgejo PR is read here from a link only: the Inbox posts to GitHub and GitLab.
+  if (!pull || !pull.head_sha || !inboxPullIsOpen(pull) || pull.platform === 'forgejo') return null;
   return { key: pull.key, url: pull.url, number: pull.number, title: pull.title, repo: pull.repo, host: pull.host, platform: pull.platform, head_sha: pull.head_sha, mine: pull.mine };
 }
 
