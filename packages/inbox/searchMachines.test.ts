@@ -1,8 +1,3 @@
-/**
- * Cmd+K across linked machines, the window's half (docs/agent-guides/inbox-machines.md, "Search across machines"):
- * in the merged view `searchInbox` asks with `machines=1`, and a linked machine's row (a typed search's or Recent's)
- * routes its ids to that machine, so opening it reads from there. Before the list named this Inbox, search is its own.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { inboxApi, searchInbox } from './api';
 import { machineOf, resetMachineRoutes, setSelfMachine } from './inboxUrl';

@@ -12,10 +12,7 @@
  *   answering; a call that finds it still building waits a moment, then
  *   answers `indexing: true` with no groups, and the window asks again. An
  *   empty `q` with no filters answers `recent` (the threads the person looked
- *   at last) and `recent_searches`. With `machines=1` (the window's merged
- *   view) the search asks every linked machine online too; see
- *   `searchWithMachines` below and "Search across machines" in
- *   docs/agent-guides/inbox-machines.md.
+ *   at last) and `recent_searches`.
  * - `POST /api/inbox/search/recent`: the window's recent searches, written
  *   only when the person opens a result (`{ q }`) or clears them
  *   (`{ clear: true }`): the last 6 in `inbox/recent-searches.json`.
@@ -60,25 +57,17 @@ export const INBOX_RECENT_SEARCHES_MAX = 6;
 export const INBOX_RECENT_SEARCHES_FILE = "recent-searches.json";
 /** How long a search waits for a build in progress before answering `indexing: true`. */
 export const INBOX_SEARCH_BUILD_WAIT_MS = 250;
-/** How long a merged search (`machines=1`) waits for each linked machine; past it, the others' rows alone. */
 export const INBOX_SEARCH_MACHINE_WAIT_MS = 2_500;
 
-/** The linked machines a merged search (`machines=1`) asks too (inbox-machines.ts). */
 export interface InboxSearchMachines {
-  /** The linked machines online now, in link order. */
   online(): string[];
-  /** The linked machine that holds a project (the merged list's), or null. */
   projectOwner(projectId: string): string | null;
-  /** The forward's answer to `/api/inbox/m/<machine>/search?…` (the door's `GET search`). */
   forward(req: Request, url: URL): Promise<Response | null>;
 }
 
 export interface InboxSearchRoutes {
   index: InboxSearchIndex;
-  /**
-   * The route's answer, or null for a path that is not search's. `machines`: the linked machines a request with
-   * `machines=1` asks too; without it every search is this Inbox's own.
-   */
+  /** The route's answer, or null for a path that is not search's. */
   handle(req: Request, url: URL, machines?: InboxSearchMachines | null): Promise<Response | null>;
   dispose(): void;
 }
@@ -169,16 +158,6 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     return { serverSession, ...answer, ...recentSearches(answer) };
   };
 
-  /**
-   * The merged search (`machines=1`): this Inbox's answer and every linked machine's online, asked through the
-   * forward at once, each at most INBOX_SEARCH_MACHINE_WAIT_MS. A machine that is away, too slow, refuses or is
-   * still indexing adds nothing. Every row of another machine says `project.machine`.
-   *
-   * - A first answer: totals summed; each group's rows ranked together by `score`, up to the group's cap.
-   * - "Show all" (`group`): this Inbox's rows, then each machine's in link order; `offset` runs across them.
-   * - Recent (no words, no filters): every machine's looked-at threads, newest activity first.
-   * - Another machine's project as the filter: that machine alone answers (nothing while it is away).
-   */
   const searchWithMachines = async (req: Request, url: URL, machines: InboxSearchMachines): Promise<Response> => {
     const own = new URL(url);
     own.searchParams.delete("machines");
@@ -242,7 +221,6 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
 
     const group = own.searchParams.get("group") as InboxSearchGroupId | null;
     if (group) {
-      // "Show all": this Inbox's rows came first; each machine's follow in link order, the offset running across them.
       const limit = Number(own.searchParams.get("limit")) || INBOX_SEARCH_LIMIT_MAX;
       const rows = [...(groups[group] ?? [])];
       let skip = (Number(own.searchParams.get("offset")) || 0) - answer.totals[group];
@@ -255,7 +233,6 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
       }
       groups[group] = rows;
     } else {
-      // A first answer: each group's rows from every machine, ranked together by score.
       const shares = await Promise.all(online.map(async (machine) => ({ machine, share: await ask(machine, paramsWith({})) })));
       const limit = Number(own.searchParams.get("limit")) || null;
       for (const id of INBOX_SEARCH_GROUPS) {

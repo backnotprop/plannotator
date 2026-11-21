@@ -456,10 +456,6 @@ export interface InboxSearchProjectRef {
   id: string;
   /** The project's name, with its parent folder when two projects share one ('api · work'). */
   name: string;
-  /**
-   * The linked machine that holds it (its `ibx_` id), on another machine's row in the merged search
-   * (`machines=1`): the window routes the row's ids there. Absent for this Inbox's own rows. Additive.
-   */
   machine?: string;
 }
 
@@ -470,7 +466,6 @@ interface RowBase {
   archived: boolean;
   /** ISO time: a message's, or a thread's latest message's. */
   at: string;
-  /** The row's rank in its group, higher first; rows from linked machines merge by it. Absent on `recent`. Additive. */
   score?: number;
 }
 
@@ -529,7 +524,6 @@ export interface InboxSearchProjectRow {
   name_marks: [number, number][];
   root: string;
   at: string;
-  /** The row's rank in its group, higher first (as on the other rows). Additive. */
   score?: number;
 }
 
@@ -546,9 +540,6 @@ export interface InboxSearchAnswer {
   threads: number;
   totals: Record<InboxSearchGroupId, number> | null;
   groups: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> | null;
-  /**
-   * An empty query with no filters: the threads the person looked at last. In the merged search (`machines=1`),
-   * with a linked machine's threads among them, every machine's by latest activity instead.
-   */
+  /** An empty query with no filters: the threads the person looked at last. */
   recent: InboxSearchThreadRow[] | null;
 }

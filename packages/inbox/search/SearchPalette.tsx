@@ -83,10 +83,6 @@ export interface SearchPaletteProps {
   currentProject: string | null;
   /** The projects for the Project chip, with their names as the person reads them. */
   projects: readonly { id: string; name: string; root: string; display_name?: unknown }[];
-  /**
-   * The list's project names, given while machines are linked: another machine's project reads as the list reads it
-   * ("billing-svc · MacBook"), in its rows and the Project chip. Absent: the palette names the projects itself.
-   */
   projectLabels?: ReadonlyMap<string, string>;
   /** `opened`: a result opened here (focus goes to it); `dismissed`: focus goes back to what opened the palette. */
   onClose: (reason: 'dismissed' | 'opened') => void;
