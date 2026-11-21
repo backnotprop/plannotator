@@ -677,8 +677,11 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
       const home = homeEnv();
       const status = await e.run([path, "login", "status"], { timeoutMs: 10_000, ...(home ? { env: { CODEX_HOME: home } } : {}) });
       if (codexLoginStatusSignedOut(status)) {
+        // Codex's own account answer, for a provider that needs no OpenAI account: the same `codex` and home as the
+        // checks above. It starts an app-server each time this check runs (the engine's 30 s answer, again each time
+        // To opens while Codex is not ready), only while `codex login status` says signed out.
         const account = createInboxCodexAccount({
-          environment: () => createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...e.env, ...(home ? { CODEX_HOME: home } : {}) } }),
+          environment: () => ({ ...e, env: { ...e.env, ...(home ? { CODEX_HOME: home } : {}) }, which: (command) => (command === "codex" ? path : e.which(command)) }),
           dataDir: ctx.dataDir,
           extraClis: [],
         });
