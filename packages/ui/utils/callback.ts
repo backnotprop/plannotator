@@ -111,12 +111,24 @@ export function parseReturnLink(raw: unknown): ReturnLink | undefined {
  * answer (empty, not JSON, no field, a value `parseReturnLink` refuses)
  * gives undefined, so the decision still counts as sent.
  */
-async function readReturnLink(res: Response): Promise<ReturnLink | undefined> {
+/** How long the done screen waits for the bot's answer body before showing without a link. */
+export const RETURN_LINK_READ_TIMEOUT_MS = 3000;
+
+async function readReturnLink(res: Response, timeoutMs = RETURN_LINK_READ_TIMEOUT_MS): Promise<ReturnLink | undefined> {
   let body: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    body = await res.json();
+    // The decision is already sent. A body that never ends must not hold the done screen.
+    body = await Promise.race([
+      res.json(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]);
   } catch {
     return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
   if (!body || typeof body !== "object") return undefined;
   return parseReturnLink((body as { return_url?: unknown }).return_url);
@@ -136,6 +148,7 @@ export async function executeCallback(
   action: CallbackAction,
   config: CallbackConfig,
   annotatedUrl: string,
+  returnLinkTimeoutMs: number = RETURN_LINK_READ_TIMEOUT_MS,
 ): Promise<ToastPayload> {
   const successMsg = action === CallbackAction.Approve
     ? "Plan approved! The bot will proceed to implementation."
@@ -154,7 +167,7 @@ export async function executeCallback(
           : "Callback failed.",
       };
     }
-    const returnLink = await readReturnLink(res);
+    const returnLink = await readReturnLink(res, returnLinkTimeoutMs);
     return returnLink
       ? { type: "success", message: successMsg, returnLink }
       : { type: "success", message: successMsg };

@@ -97,6 +97,17 @@ beforeEach(() => { originalFetch = globalThis.fetch; });
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe("executeCallback", () => {
+  test("an answer whose body never ends still counts as sent, with no link", async () => {
+    // The decision reached the bot on the 200. A stalled body must not hold the done screen.
+    const stalled = new ReadableStream<Uint8Array>({ start() {} });
+    globalThis.fetch = mock(async () => new Response(stalled, { status: 200 })) as any;
+    const started = Date.now();
+    const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl, 50);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(result?.type).toBe("success");
+    expect((result as { returnLink?: unknown }).returnLink).toBeUndefined();
+  });
+
   test("approve: 200 response returns success toast", async () => {
     globalThis.fetch = mock(async () => new Response("{}", { status: 200 })) as any;
     const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
