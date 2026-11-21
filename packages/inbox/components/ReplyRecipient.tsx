@@ -26,6 +26,7 @@ import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
 import { skillMenuHost } from './ComposerField';
+import { leadMaxWidth } from './FieldLead';
 import { skillListRoom } from '../caretMenu';
 import { recipientNames } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
@@ -201,6 +202,50 @@ function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, phone: boo
   return phone || narrow;
 }
 
+/** The least of a name the chip shows beside "to" before it drops the word (about six letters). */
+const NAME_LEAST = 48;
+
+/**
+ * Whether the chip drops its "to" (`data-tight`): "to", the mark, the whole name and the chevron do not fit in the
+ * lead's widest (FieldLead.tsx `leadMaxWidth`, 40% of the first line), and without the word the whole name would fit
+ * (a short agent name at 320 px: "to Codex" is 108 px of a 236 px line), or beside it under `NAME_LEAST` of the name
+ * would show (a long name at 320 px). Otherwise the word stays and the name gives way with "…", as on a computer.
+ * Measured from what the chip would need with the word, so dropping it never brings it back.
+ */
+function useTightChip(chipRef: RefObject<HTMLButtonElement | null>): boolean {
+  const [tight, setTight] = useState(false);
+  /** The word and its gap, as last drawn (it is drawn on the first commit: `tight` starts false). */
+  const toWidth = useRef(0);
+  const measure = useCallback(() => {
+    const chip = chipRef.current;
+    const field = chip?.closest('.ib-cfield')?.querySelector('textarea');
+    const max = chip?.closest('.ib-flead') && field ? leadMaxWidth(field) : null;
+    if (!chip || max === null) return setTight(false);
+    const view = chip.ownerDocument.defaultView ?? window;
+    const to = chip.querySelector<HTMLElement>('.ib-rto-l');
+    const shown = !!to && view.getComputedStyle(to).display !== 'none';
+    if (shown) toWidth.current = to!.getBoundingClientRect().width + (parseFloat(view.getComputedStyle(chip).columnGap) || 0);
+    const name = [...chip.querySelectorAll<HTMLElement>('.ib-rto-full, .ib-rto-short')].find((n) => view.getComputedStyle(n).display !== 'none');
+    const cut = name ? Math.max(0, name.scrollWidth - name.clientWidth) : 0;
+    const needs = chip.getBoundingClientRect().width + cut + (shown ? 0 : toWidth.current);
+    const nameRoom = max - (needs - (name?.scrollWidth ?? 0));
+    setTight(needs > max + 0.5 && (needs - toWidth.current <= max + 0.5 || nameRoom < NAME_LEAST));
+  }, [chipRef]);
+  useLayoutEffect(() => {
+    measure();
+  });
+  useEffect(() => {
+    const chip = chipRef.current;
+    const field = chip?.closest('.ib-cfield')?.querySelector('textarea');
+    if (!chip || !field || typeof ResizeObserver !== 'function') return;
+    const watch = new ResizeObserver(() => measure());
+    watch.observe(chip);
+    watch.observe(field, { box: 'content-box' });
+    return () => watch.disconnect();
+  }, [chipRef, measure]);
+  return tight;
+}
+
 /**
  * The chip at the start of the words' first line (approval "inbox-reply-target-chip", option B): a filled token, "to
  * [tile] Pi ⌄", the same words and names as the pill. A long name gives way with "…" (inbox.css caps the chip), and
@@ -235,6 +280,7 @@ export function RecipientChip({
   const { one, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
   const ownRef = useRef<HTMLButtonElement | null>(null);
   const narrow = useNarrowField(ownRef, phone);
+  const tight = useTightChip(ownRef);
   // The name starts with the words the chip shows (a narrow field's short name, a fallback name), then who that is,
   // when those words are not already in it: "To Pi · Copy pass on the order summary".
   const shown = one ? (narrow ? one.short : words) : null;
@@ -253,6 +299,7 @@ export function RecipientChip({
         data-recipient-chosen={chosen.map((r) => r.session).join(' ')}
         data-ended={ended ? '' : undefined}
         data-narrow={narrow ? '' : undefined}
+        data-tight={tight ? '' : undefined}
         aria-label={`To ${spoken}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
         aria-expanded={open}
         // The press must not take focus from the words (a phone's sheet gives it back to them).

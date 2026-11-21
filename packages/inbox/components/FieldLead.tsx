@@ -16,6 +16,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 
 
 /** The space between the lead and the first word (the approved mock's 8 px). */
 const LEAD_GAP = 8;
+/** The most of the first line the lead takes, and its widest (inbox.css falls back to the same, of the field's box). */
+const LEAD_SHARE = 0.4;
+const LEAD_MAX = 240;
 
 // Strong right-to-left letters (Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic, and their presentation
 // forms), and any other letter as strong left-to-right: enough of the Unicode bidi rule P2 to find the first strong one.
@@ -36,6 +39,17 @@ const px = (value: string) => {
   const n = parseFloat(value);
   return Number.isFinite(n) ? n : 0;
 };
+
+/**
+ * The widest the lead may be, in px: 40% of the first line (the textarea's content box, between its paddings: a phone's
+ * box keeps 48 px at the right for its expand button, so 40% of the field's own box was nearer half the line), at most
+ * 240 px. Null while the field is not laid out.
+ */
+export function leadMaxWidth(field: HTMLTextAreaElement): number | null {
+  const style = (field.ownerDocument.defaultView ?? window).getComputedStyle(field);
+  const line = field.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
+  return line > 0 ? Math.floor(Math.min(LEAD_MAX, line * LEAD_SHARE)) : null;
+}
 
 /** Sets a style property only when it changes, so placing again after every render writes nothing new. */
 function put(el: HTMLElement, name: string, value: string): void {
@@ -79,6 +93,9 @@ export function FieldLead({ value, children }: { value: string; children: ReactN
       put(lead, 'right', 'auto');
       put(lead, 'left', `${Math.round(fieldBox.left - wrapBox.left + px(style.borderLeftWidth) + px(style.paddingLeft))}px`);
     }
+    const max = leadMaxWidth(field);
+    if (max === null) lead.style.removeProperty('--ib-lead-max');
+    else put(lead, '--ib-lead-max', `${max}px`);
     put(wrap, '--ib-lead', `${Math.ceil(lead.getBoundingClientRect().width) + LEAD_GAP}px`);
   }, [rtl]);
 

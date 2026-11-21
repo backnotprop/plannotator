@@ -9628,9 +9628,12 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
    thread with several agents, on a computer and a phone alike (the pill above stays for a PR's new thread). A filled
    token laid over the first line's indent: FieldLead.tsx places it and sets `--ib-lead`, which indents the field and
    its painted mirror alike, so the words, the caret and the placeholder start after it and later lines wrap under it.
-   Capped near 40% of the line so the first line always keeps room for the caret; a longer name gives way with "…". */
+   Capped at 40% of the first line (`--ib-lead-max`, FieldLead.tsx, from the textarea's content box) so the first line
+   always keeps room for the caret; a longer name gives way with "…". On the narrowest fields the chip drops "to" when
+   that lets the whole name fit, or when beside it too little of the name would show (`data-tight`, RecipientChip):
+   the mark and the chevron still say what it is, and its accessible name still starts "To". */
 .ib-cfield:has(> .ib-flead) :is(.ib-rtext, .ib-rmirror) { text-indent: var(--ib-lead, 0px); }
-.ib-flead { position: absolute; top: 0; left: 0; z-index: 1; display: flex; min-width: 0; max-width: min(240px, 40%); }
+.ib-flead { position: absolute; top: 0; left: 0; z-index: 1; display: flex; min-width: 0; max-width: var(--ib-lead-max, min(240px, 40%)); }
 .pn-inbox .ib-rto-chip { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 23px; min-width: 0; max-width: 100%; padding: 0 6px 0 7px; border: 0; border-radius: 7px; background: var(--ib-fill, color-mix(in oklch, var(--foreground) 7%, transparent)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1; white-space: nowrap; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; transition: background-color 120ms ease-out, color 120ms ease-out; }
 .pn-inbox .ib-rto-chip:hover, .pn-inbox .ib-rto-chip[aria-expanded="true"] { background: color-mix(in oklch, var(--foreground) 11%, transparent); color: var(--foreground); }
 .pn-inbox .ib-rto-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -9643,6 +9646,7 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
    agent as a narrow row did: the short name, the folder alone. */
 .ib-rto-chip[data-narrow] .ib-rto-full { display: none; }
 .ib-rto-chip[data-narrow] .ib-rto-short { display: block; }
+.ib-rto-chip[data-tight] .ib-rto-l { display: none; }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-rto-chip { transition: none; } }
 /* The list: the `@` list's box and tiles, over the pill's right end. */
 .ib-tg-menu.ib-rpick { left: auto; right: 0; bottom: calc(100% + 6px); margin: 0; width: 300px; max-width: calc(100vw - 24px); padding: 6px; }
