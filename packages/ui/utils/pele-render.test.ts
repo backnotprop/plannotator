@@ -3,6 +3,7 @@
 // DOM-gated (DOM_TESTS=1).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
+import { setPeleInBuildForTests } from '../test-setup/pele';
 import { __setDiagramEngineModeForTests } from './diagram-engine';
 import { diagramFinder, diagramHitSource, renderDiagram } from './diagram-render';
 
@@ -12,10 +13,12 @@ beforeAll(() => {
   if (!hasDom) return;
   restoreParser = installInertDiagramSvgParser();
   __setDiagramEngineModeForTests('pele');
+  setPeleInBuildForTests(true);
 });
 afterAll(() => {
   restoreParser?.();
   __setDiagramEngineModeForTests(undefined);
+  setPeleInBuildForTests(false);
 });
 const theme = { colorTheme: 'github', mode: 'dark' } as const;
 

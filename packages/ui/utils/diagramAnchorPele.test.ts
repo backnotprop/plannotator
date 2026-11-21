@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installInertDiagramSvgParser, parseInertSvg } from '../test-setup/diagramSvg';
+import { setPeleInBuildForTests } from '../test-setup/pele';
 import { diagramFamilyOf, diagramSourceLine, MERMAID_FINDER, type DiagramFinder, type DiagramTarget } from './diagram-anchor';
 import { PELE_COMPAT_FINDER, PELE_FINDER } from './diagram-anchor-pele';
 import { __setDiagramEngineModeForTests } from './diagram-engine';
@@ -94,10 +95,12 @@ describe.if(hasDom)('Pele finders make the anchors Mermaid makes', () => {
   beforeAll(() => {
     restoreParser = installInertDiagramSvgParser();
     __setDiagramEngineModeForTests('pele');
+    setPeleInBuildForTests(true);
   });
   afterAll(() => {
     restoreParser?.();
     __setDiagramEngineModeForTests(undefined);
+    setPeleInBuildForTests(false);
   });
 
   const PELE_ID = 'parts';

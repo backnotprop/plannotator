@@ -1,8 +1,16 @@
 /**
  * The Pele runtime slot (https://pele.run, MIT, pinned 1.3.0): a second
  * engine for Mermaid-syntax fences. Mermaid stays the engine for every fence
- * unless `diagram-engine.ts` says otherwise; nothing imports Pele until a
- * fence is actually drawn with it.
+ * unless `diagram-engine.ts` says otherwise.
+ *
+ * Pele's library is in a build only when `PELE_IN_BUILD` (below) is true,
+ * which is when `DIAGRAM_ENGINE_MODE` is not `'mermaid'`. While it is
+ * `'mermaid'` (shipped) the `import('pele/lazy')` sits in a branch every
+ * bundler sees is dead, so no build output carries any of Pele, the
+ * single-file builds that inline every dynamic import included
+ * (`tests/entry-assets.test.ts` reads the artifacts; the review diagram
+ * engine's `guardBundle` refuses it). Tests reach the library through
+ * `__setPeleRuntimeLoaderForTests(peleRuntimeFrom)` (`test-setup/pele.ts`).
  *
  * Loaded through `pele/lazy`: the core (parser front, layout, svg writer)
  * arrives on the first Pele render, and each diagram type's code arrives on
@@ -11,6 +19,8 @@
  * browser API it is handed.
  */
 import type { RenderOptions, RenderResult, TextMeasurer } from 'pele';
+import type * as PeleLazy from 'pele/lazy';
+import { DIAGRAM_ENGINE_MODE } from './diagram-engine';
 import { MERMAID_LABEL_WRAP_WIDTH } from './mermaid';
 
 export const PELE_SOURCE_LIMIT = 100_000;
@@ -26,14 +36,29 @@ export interface PeleRuntime {
 let runtimePromise: Promise<PeleRuntime> | undefined;
 /** `pele/lazy`'s own `supports()` knows only the types already loaded, so
  * the check is: a type is detected, and its chunk loads. */
-function importPele(): Promise<PeleRuntime> {
-  return import('pele/lazy').then((pele) => ({
+export function peleRuntimeFrom(pele: typeof PeleLazy): PeleRuntime {
+  return {
     async supports(source: string) {
       const type = pele.detectType(source);
       return type !== null && (await pele.load(type));
     },
     render: pele.renderAsync,
-  }));
+  };
+}
+
+/**
+ * Whether Pele's library is part of the build: false while
+ * `DIAGRAM_ENGINE_MODE` is `'mermaid'`. Flipping the mode is the one change
+ * that brings it back, as lazy chunks (`PELE.md`, "Turning Pele on").
+ */
+export const PELE_IN_BUILD: boolean = DIAGRAM_ENGINE_MODE !== 'mermaid';
+
+/** A conditional on a constant, so Rollup drops the import, and with it
+ * every Pele chunk, from a build where `PELE_IN_BUILD` is false. */
+function importPele(): Promise<PeleRuntime> {
+  return PELE_IN_BUILD
+    ? import('pele/lazy').then(peleRuntimeFrom)
+    : Promise.reject(new Error("Pele is not part of this build: DIAGRAM_ENGINE_MODE is 'mermaid'."));
 }
 
 let loader: () => Promise<PeleRuntime> = importPele;

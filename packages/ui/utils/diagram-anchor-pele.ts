@@ -22,15 +22,12 @@ import { diagramFamilyOf, MERMAID_FINDER, splitEdgeStem, type DiagramFinder } fr
  * line, a class's annotation), the label here is the part's name, which the
  * Mermaid finder also reads now.
  */
-export const PELE_TARGET_SELECTOR = [
-  'g.pele-node[data-id]',
-  'g.pele-cluster[data-id]',
-  'g.pele-edge[data-id]',
-  'g.pele-edge-label[data-id]',
-  'g.pele-note[data-id]',
-  'path.pele-lifeline[data-id]',
-  'g.pele-frame',
-].join(', ');
+// One string literal, not a joined array: a module-level call is kept by a
+// bundler as a possible side effect, so a build with Pele out of it
+// (`PELE_IN_BUILD`) would still carry it.
+export const PELE_TARGET_SELECTOR =
+  'g.pele-node[data-id], g.pele-cluster[data-id], g.pele-edge[data-id], g.pele-edge-label[data-id], ' +
+  'g.pele-note[data-id], path.pele-lifeline[data-id], g.pele-frame';
 
 function isPele(svg: Element): boolean {
   return svg.classList.contains('pele');
@@ -396,7 +393,11 @@ export const PELE_FINDER: DiagramFinder = {
 /** Select the codec from the SVG actually displayed, not the user's current
  * engine preference. This lets a cached/restored SVG keep its own grammar. */
 export const PELE_COMPAT_FINDER: DiagramFinder = {
-  targetSelector: `${PELE_TARGET_SELECTOR}, ${MERMAID_FINDER.targetSelector}`,
+  // A getter: read at module load, `MERMAID_FINDER.targetSelector` is a
+  // property read a bundler keeps even where this finder is dropped.
+  get targetSelector() {
+    return `${PELE_TARGET_SELECTOR}, ${MERMAID_FINDER.targetSelector}`;
+  },
   targetFromElement(svg, el, renderId) {
     return isPele(svg) ? PELE_FINDER.targetFromElement(svg, el, renderId) : MERMAID_FINDER.targetFromElement(svg, el, renderId);
   },

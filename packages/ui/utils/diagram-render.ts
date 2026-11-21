@@ -43,7 +43,7 @@ import { loadMathRenderer } from './math';
 import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
-import { loadPeleRuntime, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleSvgId, renderPeleSource } from './pele';
+import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleSvgId, renderPeleSource } from './pele';
 import { applyPeleThemeVariables, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -858,11 +858,27 @@ const engineSwitchRenderer: DiagramRenderer = {
   },
 };
 
+/**
+ * The engine switch's renderer, when Pele is part of the build
+ * (`PELE_IN_BUILD`, false while `DIAGRAM_ENGINE_MODE` is `'mermaid'`). A
+ * conditional on that constant, so a shipped build drops the switch and all
+ * of Plannotator's Pele code behind it (`renderPele`, the Pele finders,
+ * `peleTheme`), not only Pele's library.
+ */
+let engineSwitch: DiagramRenderer | undefined = PELE_IN_BUILD ? engineSwitchRenderer : undefined;
+
+/** Test hook: route Mermaid fences through the engine switch, as a build
+ * with Pele in it does (`test-setup/pele.ts`); `undefined` restores the
+ * build's own choice. */
+export function __setPeleInBuildForTests(on: boolean | undefined): void {
+  engineSwitch = (on ?? PELE_IN_BUILD) ? engineSwitchRenderer : undefined;
+}
+
 /** The renderer for a kind. With the switch on `'mermaid'` (the shipped
  * value) a Mermaid fence gets exactly the Mermaid entry above. */
 function rendererFor(kind: DiagramKind): DiagramRenderer {
   if (kind === 'graphviz') return graphvizRenderer;
-  return diagramEngineMode() === 'mermaid' ? mermaidRenderer : engineSwitchRenderer;
+  return engineSwitch === undefined || diagramEngineMode() === 'mermaid' ? mermaidRenderer : engineSwitch;
 }
 
 /** The finder for a kind, synchronously: the viewer wires the pointer and

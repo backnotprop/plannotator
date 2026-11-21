@@ -25,6 +25,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
+import { loadRealPele, setPeleInBuildForTests } from '../test-setup/pele';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { MERMAID_FINDER, type DiagramTarget } from '../utils/diagram-anchor';
 import { PELE_FINDER } from '../utils/diagram-anchor-pele';
@@ -76,6 +77,7 @@ const noop = (): void => {};
 beforeAll(() => {
   if (!hasDom) return;
   restoreParser = installInertDiagramSvgParser();
+  setPeleInBuildForTests(true);
   setMermaidRuntime(
     {
       initialize: noop,
@@ -100,7 +102,7 @@ afterAll(() => {
   svgProto['getScreenCTM'] = saved.getScreenCTM;
   __setMermaidRuntimeLoaderForTests(undefined);
   __setDiagramEngineModeForTests(undefined);
-  __setPeleRuntimeLoaderForTests(undefined);
+  setPeleInBuildForTests(false);
   restoreParser?.();
 });
 
@@ -115,7 +117,7 @@ afterEach(async () => {
   host?.remove();
   host = null;
   __setDiagramEngineModeForTests(undefined);
-  __setPeleRuntimeLoaderForTests(undefined);
+  __setPeleRuntimeLoaderForTests(loadRealPele);
 });
 
 function fence(source: string): Block {
@@ -202,20 +204,26 @@ async function commentOnAPart(type: CaseType, mode: DiagramEngineMode, pick?: (s
 describe.if(hasDom)('diagram engine: the shipped switch is Mermaid', () => {
   test('every fence is drawn by Mermaid, Pele is never imported, and the finder is Mermaid\'s own', async () => {
     expect(DIAGRAM_ENGINE_MODE).toBe('mermaid');
-    let peleImports = 0;
-    __setPeleRuntimeLoaderForTests(() => {
-      peleImports += 1;
-      return Promise.reject(new Error('Pele must not load'));
-    });
-    for (const type of Object.keys(CASES) as CaseType[]) {
-      await mount(<MermaidBlock block={fence(CASES[type].source)} annotations={[]} onAddAnnotation={noop} />);
-      await waitFor(() => drawn());
-      expect(engineOf(drawn())).toBe('mermaid');
-      await act(async () => root!.unmount());
-      root = null;
+    // The shipped build's own state: Pele not in it (the suite puts it back after).
+    setPeleInBuildForTests(false);
+    try {
+      let peleImports = 0;
+      __setPeleRuntimeLoaderForTests(() => {
+        peleImports += 1;
+        return Promise.reject(new Error('Pele must not load'));
+      });
+      for (const type of Object.keys(CASES) as CaseType[]) {
+        await mount(<MermaidBlock block={fence(CASES[type].source)} annotations={[]} onAddAnnotation={noop} />);
+        await waitFor(() => drawn());
+        expect(engineOf(drawn())).toBe('mermaid');
+        await act(async () => root!.unmount());
+        root = null;
+      }
+      expect(peleImports).toBe(0);
+      expect(diagramFinder('mermaid')).toBe(MERMAID_FINDER);
+    } finally {
+      setPeleInBuildForTests(true);
     }
-    expect(peleImports).toBe(0);
-    expect(diagramFinder('mermaid')).toBe(MERMAID_FINDER);
   });
 });
 

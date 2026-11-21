@@ -1,14 +1,30 @@
 // The Pele runtime as Plannotator calls it (no DOM needed): what it is told
 // to leave out, what it cannot do that the capability map records, and its
 // limits.
-import { describe, expect, test } from 'bun:test';
-import { DIAGRAM_FEATURES } from './diagram-engine';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { loadRealPele } from '../test-setup/pele';
+import { DIAGRAM_ENGINE_MODE, DIAGRAM_FEATURES } from './diagram-engine';
 import { MERMAID_LABEL_WRAP_WIDTH } from './mermaid';
-import { loadPeleRuntime, PELE_SOURCE_LIMIT, peleSvgId, renderPeleSource } from './pele';
+import { __setPeleRuntimeLoaderForTests, loadPeleRuntime, PELE_IN_BUILD, PELE_SOURCE_LIMIT, peleSvgId, renderPeleSource } from './pele';
 
 const fonts = { sans: 'sans-serif', mono: 'monospace' };
 
+// What regresses if this fails: a build with the shipped switch carries
+// Pele's library again, or a fence reaches it (tests/entry-assets.test.ts
+// reads the built files for the same promise).
+describe('Pele under the shipped switch', () => {
+  test("is not part of the build while the switch is 'mermaid': its loader refuses", async () => {
+    __setPeleRuntimeLoaderForTests(undefined);
+    expect(DIAGRAM_ENGINE_MODE).toBe('mermaid');
+    expect(PELE_IN_BUILD).toBe(false);
+    await expect(loadPeleRuntime()).rejects.toThrow(/not part of this build/u);
+  });
+});
+
 describe('Pele runtime', () => {
+  beforeAll(() => __setPeleRuntimeLoaderForTests(loadRealPele));
+  afterAll(() => __setPeleRuntimeLoaderForTests(undefined));
+
   test('draws a flowchart with no link and no image, whatever the source asks', async () => {
     const runtime = await loadPeleRuntime();
     const { svg } = await renderPeleSource(
