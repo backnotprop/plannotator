@@ -13,14 +13,14 @@
   --muted-foreground: #a7aeba;
   --accent: #f0657d;
   --accent-foreground: #16181d;
-  --destructive: #d94862;
-  --destructive-foreground: #ffffff;
+  --destructive: #e0566f;
+  --destructive-foreground: #16181d;
   --border: #343945;
   --input: #232730;
   --ring: #3cc6d9;
-  --success: #18a4b8;
+  --success: #168fa1;
   --success-foreground: #10131a;
-  --warning: #e86b82;
+  --warning: #d9a839;
   --warning-foreground: #16181d;
 
   --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
@@ -30,8 +30,8 @@
   --code-bg: #1d212a;
   --focus-highlight: #3cc6d9;
 
-  --diffs-addition-color-override: #18a4b8;
-  --diffs-deletion-color-override: #d94862;
+  --diffs-addition-color-override: #168fa1;
+  --diffs-deletion-color-override: #e0566f;
 }
 
 .theme-tritanopia.light {
@@ -54,14 +54,14 @@
   --border: #d8dce3;
   --input: #eceef3;
   --ring: #0b7a8c;
-  --success: #0d8294;
+  --success: #0b7a8c;
   --success-foreground: #ffffff;
-  --warning: #b82944;
+  --warning: #8f6400;
   --warning-foreground: #ffffff;
 
   --code-bg: #eef0f4;
   --focus-highlight: #0b7a8c;
 
-  --diffs-addition-color-override: #0d8294;
+  --diffs-addition-color-override: #0b7a8c;
   --diffs-deletion-color-override: #c42b47;
 }
