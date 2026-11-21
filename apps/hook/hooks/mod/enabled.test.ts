@@ -89,18 +89,22 @@ describe('plan review switch', () => {
 // Same mirror for auto reload: the failure is the mod running /reload-plugins
 // for a user who turned it off with the key Pi already reads (or the reverse).
 describe('auto reload switch', () => {
-  const envs = [undefined, '', '1', 'true', 'ON', ' on ', '0', 'false', 'off', 'disabled', 'yes', 'garbage']
-  const configs: unknown[] = [undefined, true, false, 'true', 'false', '1', '0', 'yes', 1, null]
+  const envs = [undefined, '', '1', 'true', 'ON', ' on ', '0', 'false', 'off', 'disabled', ' OFF ', 'False', 'yes', 'garbage']
+  const configs: unknown[] = [undefined, true, false, 'true', 'false', '1', '0', 'TRUE', ' False ', 'yes', 1, 0, null, {}, []]
 
   test('the mod and packages/shared resolve every combination the same way', () => {
     for (const env of envs) {
+      const processEnv = env === undefined ? {} : { PLANNOTATOR_AUTO_RELOAD: env }
       for (const value of configs) {
         const config = value === undefined ? {} : { autoReload: value }
-        const shared = resolveAutoReload(config as never, env === undefined ? {} : { PLANNOTATOR_AUTO_RELOAD: env })
+        const shared = resolveAutoReload(config as never, processEnv)
         expect([env, value, resolveAutoReloadEnabled(env, JSON.stringify(config))]).toEqual([env, value, shared])
       }
+      // An unreadable or broken config.json reads as none (packages/shared's loadConfig gives {}).
+      for (const text of [null, '', '{ not json']) {
+        expect([env, text, resolveAutoReloadEnabled(env, text)]).toEqual([env, text, resolveAutoReload({}, processEnv)])
+      }
     }
-    expect(resolveAutoReloadEnabled(undefined, '{ not json')).toBe(resolveAutoReload({}, {}))
     expect(resolveAutoReloadEnabled(undefined, null)).toBe(AUTO_RELOAD_DEFAULT)
   })
 })
