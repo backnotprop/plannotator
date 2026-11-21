@@ -369,11 +369,13 @@ function shortOf(pull: InboxThreadPullWire): string {
 }
 
 /**
- * Decisions post on GitHub and GitLab PRs only: the server refuses a Bitbucket or Forgejo one (`forge_unsupported`), so
- * no Post decisions button or menu row is offered for it.
+ * Decisions post on GitHub, GitLab and Forgejo PRs only: the server refuses a Bitbucket one (`forge_unsupported`), so
+ * no Post decisions button or menu row is offered for it. Nor for a Forgejo on a host the person has not named
+ * (`forgejo.unsupported`, the reason its read answers with): the server posts only to a host they named, so the click
+ * would only come back refused.
  */
-export function canPostDecisionsOn(pull: Pick<InboxThreadPullWire, 'platform'>): boolean {
-  return pull.platform === 'github' || pull.platform === 'gitlab';
+export function canPostDecisionsOn(pull: Pick<InboxThreadPullWire, 'platform' | 'problem'>): boolean {
+  return pull.platform !== 'bitbucket' && !(pull.platform === 'forgejo' && pull.problem?.code === 'forgejo.unsupported');
 }
 
 /**

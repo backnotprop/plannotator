@@ -22,6 +22,16 @@
 
 import { FORGE_REF_BODY_MAX, FORGE_REF_COMMENT_MAX, type ForgeRefCardData, type ForgeRefChecks } from "@plannotator/core/forge-ref-card";
 import { getForgejoOrigin } from "./pr-types";
+import {
+  markedCommentText,
+  PRMarkedForbiddenError,
+  PRMarkedRaceError,
+  spliceMarkedSection,
+  startsWithMarker,
+  type PRMarkedCommentInput,
+  type PRMarkedResult,
+  type PRMarkedSectionInput,
+} from "./pr-marked";
 import type {
   ForgejoPRRef,
   PRContext,
@@ -890,4 +900,73 @@ export async function fetchFjCard(runtime: PRRuntime, ref: ForgejoCardRef, signa
         }
       : {}),
   };
+}
+
+// --- Marked text (the Inbox's Post decisions) ---
+
+/**
+ * The most characters one Forgejo comment or description is given. Forgejo documents no limit for either; this is
+ * GitHub's, so a text that fits here fits anywhere, and a longer one takes the comment-instead / "too long" path.
+ * Unverified against a real instance's own cap.
+ */
+export const FJ_BODY_MAX = 65_535;
+
+/** The comment's own page: Forgejo's `html_url`, else the pull request's with the comment's anchor. */
+function commentUrl(ref: ForgejoPRRef, comment: { id?: number; html_url?: string }): string {
+  return comment.html_url || (typeof comment.id === "number" ? `${webUrl(ref)}#issuecomment-${comment.id}` : webUrl(ref));
+}
+
+/**
+ * Post the person's marked comment on a pull request, or edit it in place: the comment of the token's own account
+ * whose body starts with the marker (someone else's with the same marker is never touched), else a new one. A
+ * comment deleted since is posted again.
+ */
+export async function upsertFjMarkedComment(runtime: PRRuntime, ref: ForgejoPRRef, input: PRMarkedCommentInput): Promise<PRMarkedResult> {
+  const ctx = context(runtime, ref);
+  const text = markedCommentText(input, FJ_BODY_MAX);
+  const issue = `${repoPath(ref)}/issues`;
+  const comments = await paginate<FjIssueComment>(ctx, `${issue}/${ref.number}/comments`, "read the pull request's comments");
+  const marked = comments.filter((comment) => startsWithMarker(comment.body, input.marker));
+  const me = marked.length > 0 ? await getFjUser(runtime, ref) : null;
+  const existing = marked.filter((comment) => me !== null && userName(comment.user).toLowerCase() === me.toLowerCase()).at(-1);
+  if (existing) {
+    const edited = await request(ctx, `${issue}/comments/${existing.id}`, { method: "PATCH", body: { body: text } });
+    if (edited.ok) return { action: "updated", url: commentUrl(ref, existing) };
+    // Gone since it was listed: post it again below. Anything else is the person's to see.
+    if (edited.status !== 404) throw await failure(edited, "update the comment", ctx);
+  }
+  const posted = await request(ctx, `${issue}/${ref.number}/comments`, { method: "POST", body: { body: text } });
+  if (!posted.ok) throw await failure(posted, "post the comment", ctx);
+  let made: FjIssueComment | null = null;
+  try {
+    made = (await posted.json()) as FjIssueComment;
+  } catch {
+    // The comment went; its link is the pull request's.
+  }
+  return { action: "created", url: made ? commentUrl(ref, made) : webUrl(ref) };
+}
+
+/**
+ * Put a marked section in the pull request's description (or replace the one there), every byte outside it kept. The
+ * description is read twice: one that changed in between is not written over. A refusal for access (not its author,
+ * no write access) is `PRMarkedForbiddenError`, so the caller can post a comment instead.
+ */
+export async function upsertFjDescriptionSection(runtime: PRRuntime, ref: ForgejoPRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
+  const ctx = context(runtime, ref);
+  const path = `${repoPath(ref)}/pulls/${ref.number}`;
+  const read = async (): Promise<{ body: string; url: string }> => {
+    const pr = await json<FjPullRequest>(ctx, path, "read the pull request");
+    return { body: pr.body ?? "", url: pr.html_url || webUrl(ref) };
+  };
+  const first = await read();
+  const planned = spliceMarkedSection(first.body, input, FJ_BODY_MAX);
+  if ((await read()).body !== first.body) throw new PRMarkedRaceError();
+  const written = await request(ctx, path, { method: "PATCH", body: { body: planned.text } });
+  if (!written.ok) {
+    const error = await failure(written, "edit the description", ctx);
+    // The same account just read it, so a 403 or a 404 on the write is "you may not edit this".
+    if (error.status === 403 || error.status === 404) throw new PRMarkedForbiddenError(error.message);
+    throw error;
+  }
+  return { action: planned.replaced ? "updated" : "created", url: first.url };
 }

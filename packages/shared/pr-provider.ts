@@ -20,7 +20,7 @@ import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhRequestedRe
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree, upsertGlDescriptionSection, upsertGlMarkedNote } from "./pr-gitlab";
 import { fetchGlMRList, fetchGlMRStack } from "./pr-gitlab-stack";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList, fetchBbTree } from "./pr-bitbucket";
-import { checkFjAuth, getFjUser, fetchFjPR, fetchFjPRContext, fetchFjFileContent, fetchFjFileBytes, submitFjPRReview, fetchFjPRList, fetchFjTree } from "./pr-forgejo";
+import { checkFjAuth, getFjUser, fetchFjPR, fetchFjPRContext, fetchFjFileContent, fetchFjFileBytes, submitFjPRReview, fetchFjPRList, fetchFjTree, upsertFjMarkedComment, upsertFjDescriptionSection } from "./pr-forgejo";
 import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
 import type { PRMarkedCommentInput, PRMarkedResult, PRMarkedSectionInput } from "./pr-marked";
 import type { BitbucketPRRef, ForgejoPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem, PRTreeResult } from "./pr-types";
@@ -138,6 +138,8 @@ const forgejoProvider: PRProvider<ForgejoPRRef> = {
     submitFjPRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
   fetchList: fetchFjPRList,
   fetchTree: fetchFjTree,
+  upsertMarkedComment: upsertFjMarkedComment,
+  upsertDescriptionSection: upsertFjDescriptionSection,
 };
 
 type ProviderRegistry = { [P in Platform]: PRProvider<Extract<PRRef, { platform: P }>> };
@@ -294,7 +296,7 @@ export async function fetchPRList(
   return provider.fetchList ? provider.fetchList(runtimeFor(runtime, ref), ref) : [];
 }
 
-/** The platform can take a marked comment (and a description section): GitHub and GitLab, not Bitbucket today. */
+/** The platform can take a marked comment (and a description section): GitHub, GitLab and Forgejo, not Bitbucket today. */
 export function canPostMarkedText(ref: PRRef): boolean {
   return !!getPRProvider(ref).upsertMarkedComment;
 }
