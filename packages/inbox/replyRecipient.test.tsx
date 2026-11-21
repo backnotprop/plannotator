@@ -18,6 +18,7 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
 import { setSessionLabels } from './sessionLabels';
+import { setAgentNames } from './agents/agentNames';
 import { firstLineRtl } from './components/FieldLead';
 import { saysWords } from './components/ReplyRecipient';
 
@@ -878,4 +879,34 @@ test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no cont
   await send(el);
   expect(el.querySelector('[data-recipient-list]')).toBeNull();
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
+});
+
+test.skipIf(!hasDom)('three Pi sessions in one folder, one renamed in the sidebar: the chip and its row show that name alone, the others read "Pi" and "Pi 2", on a computer and a phone', async () => {
+  const PI2 = { kind: 'agent' as const, host: 'pi', session: 'ses_pi2', name: null };
+  const PI3 = { kind: 'agent' as const, host: 'pi', session: 'ses_pi3', name: null };
+  taggable = [tagged('ses_pi', 'pi'), tagged('ses_pi2', 'pi'), tagged('ses_pi3', 'pi')];
+  const thread = threadOf(agentMessage(M1, PI, 41), agentMessage(M2, PI3, 43), agentMessage(M3, PI2, 45));
+  try {
+    act(() => setAgentNames(new Map([['ses_pi2', 'Billing review']])));
+    const el = await render(thread);
+    await write(el, 'Use the old totals.');
+    const chip = pill(el)!;
+    expect(chip.getAttribute('data-recipient-chosen')).toBe('ses_pi2');
+    expect(pillName(el)).toBe('Billing review');
+    expect(chip.querySelector('.ib-rto-short')?.textContent).toBe('Billing review');
+    expect(chip.getAttribute('aria-label')).toBe('To Billing review. Change who gets this reply');
+    await openList(el);
+    expect(named(el).map((r) => r[0])).toEqual(['Pi', 'Pi 2', 'Billing review']);
+    act(() => root?.unmount());
+    host?.remove();
+    const phone = await render(thread, true);
+    await write(phone, 'Use the old totals.');
+    const control = pill(phone)!;
+    expect(control.hasAttribute('data-narrow')).toBe(true);
+    expect(control.querySelector('.ib-rto-short')?.textContent).toBe('Billing review');
+    expect(control.getAttribute('aria-label')).toBe('To Billing review. Change who gets this reply');
+  } finally {
+    // The names are global: clear them inside act, while the pane is still mounted.
+    act(() => setAgentNames(new Map()));
+  }
 });

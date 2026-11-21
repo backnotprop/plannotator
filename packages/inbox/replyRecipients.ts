@@ -19,7 +19,7 @@ export type RecipientState = 'live' | 'ended' | 'reader' | 'old';
 export interface RecipientRow {
   session: string;
   host: string | null;
-  /** The name in the pill and the list: "Claude Code (plannotator)", "Claude Code 2", "OpenCode". */
+  /** The name in the pill and the list: "Claude Code (plannotator)", "Claude Code 2", "OpenCode", or the name the person gave it. */
   label: string;
   /** What a phone's pill shows: the folder alone when the label carries one ("plannotator"), else the label. */
   short: string;
@@ -90,17 +90,24 @@ export function recipientState(session: string, model: TaggableModel | null, end
   return found.taggable ? 'live' : 'old';
 }
 
-/** The pill's rows, named as the approval says, live first and ended last (each group in the order given). */
+/**
+ * The pill's rows, named as the approval says, live first and ended last (each group in the order given). A session
+ * the person renamed in the Inbox (`givenNameOf`, agents/agentNames.ts) is that name alone, in full and short: no
+ * folder, no number. The others are named among themselves, so the numbering counts only them.
+ */
 export function recipientRows(
   people: readonly RecipientPerson[],
   folderOf: (session: string) => string | null,
   stateOf: (session: string) => RecipientState,
+  givenNameOf: (session: string) => string | null = () => null,
 ): RecipientRow[] {
-  const named = people.map((p) => ({ ...p, agent: agentName(p.host, p.name ?? null), folder: folderOf(p.session) }));
+  const named = people.map((p) => ({ ...p, agent: agentName(p.host, p.name ?? null), folder: folderOf(p.session), given: givenNameOf(p.session) }));
+  const unnamed = named.filter((p) => !p.given);
   const used = new Map<string, number>();
   const rows = named.map((p): RecipientRow => {
+    if (p.given) return { session: p.session, host: p.host, label: p.given, short: p.given, state: stateOf(p.session) };
     // The folder only when this agent's sessions are in more than one.
-    const folders = new Set(named.filter((o) => o.agent === p.agent).map((o) => o.folder));
+    const folders = new Set(unnamed.filter((o) => o.agent === p.agent).map((o) => o.folder));
     const folder = folders.size > 1 ? p.folder : null;
     const base = folder ? `${p.agent} (${folder})` : p.agent;
     const n = (used.get(base) ?? 0) + 1;

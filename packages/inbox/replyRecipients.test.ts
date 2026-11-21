@@ -27,6 +27,28 @@ test('two sessions in one folder: "Claude Code", then "Claude Code 2", in the or
   ]);
 });
 
+test('a session the person renamed is that name alone, in full and short; the others are numbered among themselves', () => {
+  const people = [{ host: 'pi', session: 'a' }, { host: 'pi', session: 'b' }, { host: 'pi', session: 'c' }];
+  const given: Record<string, string> = { a: 'Billing review' };
+  const rows = recipientRows(people, () => 'superfans', () => 'live', (s) => given[s] ?? null).map((r) => [r.session, r.label, r.short]);
+  expect(rows).toEqual([
+    ['a', 'Billing review', 'Billing review'],
+    ['b', 'Pi', 'Pi'],
+    ['c', 'Pi 2', 'Pi 2'],
+  ]);
+});
+
+test('a renamed session in another folder takes no folder, and leaves the others no folder to tell apart', () => {
+  const people = [{ host: 'claude-code', session: 'a' }, { host: 'claude-code', session: 'b' }, { host: 'claude-code', session: 'c' }];
+  const folders: Record<string, string> = { a: 'plannotator', b: 'superfans', c: 'superfans' };
+  const rows = recipientRows(people, (s) => folders[s] ?? null, () => 'live', (s) => (s === 'a' ? 'Docs pass' : null)).map((r) => [r.label, r.short]);
+  expect(rows).toEqual([
+    ['Docs pass', 'Docs pass'],
+    ['Claude Code', 'Claude Code'],
+    ['Claude Code 2', 'Claude Code 2'],
+  ]);
+});
+
 test('live first, ended last, each group in the order given', () => {
   const rows = rowsOf([{ host: 'codex', session: 'gone' }, { host: 'pi', session: 'p' }, { host: 'opencode', session: 'o' }], {}, { gone: 'ended', o: 'reader' });
   expect(rows.map((r) => r[0])).toEqual(['p', 'o', 'gone']);
