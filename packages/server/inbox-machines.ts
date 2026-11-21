@@ -845,9 +845,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     const fileRead = forwardedFileReadRefusal(route, req);
     if (fileRead) return json(fileRead.body, fileRead.status);
-    // HEAD as a local page and its folder answer it: the far GET's headers, no body.
+    const downloadHead = req.method === "HEAD" && /^attachments\/att_[A-Za-z0-9]+\/download$/.test(route);
+    // Page routes need the far GET to rebase the answer. A download's HEAD can go straight to its owner.
     const head = req.method === "HEAD" && (MACHINE_PAGE_ROUTE.test(route) || MACHINE_ASSET_ROUTE.test(route) || MACHINE_MARKDOWN_IMAGE_ROUTE.test(route));
-    if (req.method === "GET" || head) {
+    if (req.method === "GET" || head || downloadHead) {
       const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
       // Another machine's folder names ("Another folder on <machine>…"): the owner's window only, and said so to it.
@@ -863,7 +864,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       // An attached page's own tab is made here from its door's `view` (inbox-machine-page.ts): no page route there.
       const page = MACHINE_PAGE_ROUTE.exec(route);
       try {
-        const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
+        const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: downloadHead ? "HEAD" : "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
         if (page) {
           const made = await machinePageAnswer(answer, machine, search, (far) => passAnswer(far));
@@ -881,7 +882,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
           const asset = await machineAssetAnswer(answer, machine);
           return passAnswer(asset, { also: ["access-control-allow-origin"], csp: machineAssetCsp(asset), head });
         }
-        return passAnswer(answer);
+        return passAnswer(answer, { head: downloadHead });
       } catch {
         return offline();
       }

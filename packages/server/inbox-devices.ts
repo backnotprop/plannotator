@@ -191,7 +191,7 @@ function routeNotFound(device: Pick<InboxDevice, "platform"> | null = null): Res
  * Wi-Fi or the tailnet only.
  */
 interface DoorRoute {
-  method: "GET" | "POST";
+  method: "GET" | "HEAD" | "POST";
   route: RegExp;
   window: (m: RegExpExecArray) => string;
   /** A raw body (a file), at most `max` bytes, refused past it with `413 <code>`. */
@@ -290,6 +290,7 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // sniffed type and headers. Of the phone's request headers the door forwards
   // Range, If-Range and If-None-Match (and Last-Event-ID to the event stream).
   { method: "GET", route: /^attachments\/([^/]+)\/(image|video|audio|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
+  { method: "HEAD", route: /^attachments\/([^/]+)\/download$/, window: (m) => `/api/inbox/attachments/${m[1]}/download` },
   // A Markdown file's own pictures and a document next to an attached file (approval "linked computers only",
   // 2026-11-16): a linked machine's window shows them as for a file of its own. The window's own routes, so the same
   // rules (by the attachment's id, inside its folder, pictures the file shows, sniffed, capped) and headers. Not a
@@ -1006,7 +1007,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // routes answer 206 with Content-Range, Accept-Ranges and ETag).
     const ifNoneMatch = req.headers.get("if-none-match");
     if (ifNoneMatch) headers.set("If-None-Match", ifNoneMatch);
-    if (req.method === "GET") {
+    if (req.method === "GET" || req.method === "HEAD") {
       const range = req.headers.get("range");
       if (range) headers.set("Range", range);
       const ifRange = req.headers.get("if-range");

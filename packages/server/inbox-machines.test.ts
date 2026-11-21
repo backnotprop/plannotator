@@ -255,6 +255,30 @@ describe("linked machines, on three real Inboxes", () => {
     expect(own.err).toContain("own link code");
   }, 60_000);
 
+  test("an attachment download can be inspected with HEAD from either linked Inbox", async () => {
+    for (const [owner, viewer] of [[A, B], [B, A]] as const) {
+      const agent = await agentOn(owner);
+      try {
+        const file = join(owner.w.project, "header-check.txt");
+        writeFileSync(file, "A small fixture.");
+        const sent = await agent.send("Attachment for a linked download.", { attachments: [file] });
+        const thread = await getJson(owner, `/api/inbox/threads/${sent.thread_id}`);
+        const id = thread.thread.messages.find((message: Json) => message.id === sent.message_id).attachments[0].id;
+        const options = { method: "HEAD", headers: { Range: "bytes=2-6" } };
+        const own = await fetch(`${base(owner)}/api/inbox/attachments/${id}/download`, options);
+        const far = await fetch(`${base(viewer)}/api/inbox/m/${owner.id}/attachments/${id}/download`, options);
+        expect(own.status).toBe(206);
+        expect(far.status).toBe(own.status);
+        for (const header of ["content-range", "content-length", "content-disposition", "accept-ranges", "etag"]) {
+          expect(far.headers.get(header)).toBe(own.headers.get(header));
+        }
+        expect(await far.text()).toBe("");
+      } finally {
+        await agent.client.close();
+      }
+    }
+  });
+
   test("2. an agent on B asks; the person answers from A; B's agent reads the answer", async () => {
     const agent = await agentOn(B);
     try {

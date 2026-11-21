@@ -26,7 +26,7 @@ import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
-import type { InboxPeerTransport } from "./inbox-transport";
+import type { InboxDoorRequest, InboxPeerTransport } from "./inbox-transport";
 import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
 import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 
@@ -588,7 +588,7 @@ export class PeerLink {
   async request(
     route: string,
     search: string,
-    init: { method: "GET" | "POST"; headers: Record<string, string>; body?: BodyInit | null; signal?: AbortSignal; timeoutMs?: number },
+    init: InboxDoorRequest & { timeoutMs?: number },
   ): Promise<Response> {
     // The time limit runs until the answer's headers arrive, never over its body: a long download or video keeps streaming.
     const limit = new AbortController();
