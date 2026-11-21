@@ -427,6 +427,7 @@ html.pfc .pf-chip{position:static;opacity:1}
 .pf-name{font-size:13px;font-weight:500;line-height:1.3;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pf-co{font-size:12px;line-height:1.3;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pf-link{position:absolute;inset:0;z-index:3}
+.pf-link:focus-visible{outline:2px solid var(--iris);outline-offset:-2px;border-radius:inherit}
 .pf-note{position:absolute;left:96px;top:200px;margin:0;height:50px;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--soft)}
 .pf-note strong{font-weight:600;color:var(--ink)}
 .pf-quote,.pf-contrib,.pf-foot,.pf-note{transition:opacity .4s ease .12s}
