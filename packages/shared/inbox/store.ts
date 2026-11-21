@@ -130,6 +130,7 @@ import { INBOX_T3_HOST, isInboxT3WaitReason, isT3ThreadId } from "@plannotator/c
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
+import { parseHtmlBlockAnchor } from "@plannotator/core/html-block-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
   INBOX_LIVE_ANNOTATION_MAX,
@@ -2046,10 +2047,23 @@ export class InboxStore {
    * can carry status that goes stale, and a plain reply repeated it every
    * time, so a plain reply takes the thread's short name, or null with none
    * (the connection then says `a reply`).
-   * Everything else keeps the thread's subject (`plainReplyFor` says why).
+   * A thread the person started and named (`named_by.kind` "person": typed
+   * in compose, or a name the Inbox filled in for them) takes that name on
+   * everything it delivers, its first message and every first sight
+   * included, as a mail's subject goes with it: its subject is only the
+   * body's first words. Everything else keeps the thread's subject
+   * (`plainReplyFor` says why).
    */
   agentTitle(message: InboxMessage, session: string | null): string | null {
-    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+    if (this.plainReplyFor(message, session)) return this.threadShortName(message.thread_id);
+    if (this.namedByPerson(message.thread_id)) return this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id);
+    return this.threadSubject(message.thread_id);
+  }
+
+  /** A thread the person started and named themselves (not compose's suggestion, not an agent). */
+  private namedByPerson(threadId: string): boolean {
+    const root = this.messages.get(threadId);
+    return !!root?.started_by_person && root.named_by?.kind === "person" && !!root.thread_name?.trim();
   }
 
   /**
@@ -5945,7 +5959,9 @@ export class InboxStore {
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
    * the person selected, or a comment on a rendered diagram part, with
-   * `diagramAnchor` and the part's label as `originalText`, or a Delete on
+   * `diagramAnchor` and the part's label as `originalText`, or a comment on an
+   * element of a live html block (`htmlBlockAnchor`, with the page's own
+   * `htmlAnchor` and `elementContext`), or a Delete on
    * selected words (`type` "DELETION", no words of its own needed; approval
    * "inbox-toolbar-delete"). An agent's message takes one, and the person's own
    * (approval "inbox-annotate-own-and-questions"), never one of the Inbox's own notes (a set-aside or reopened
@@ -5982,11 +5998,24 @@ export class InboxStore {
     if (!((deletion || pictured) && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
+    // A comment on an element of a live html block in the message (the owner's pick "A · In place", 2026-11-20): the
+    // anchor names the block (its place, its source, its lines), and the element is the page's own anchor.
+    const htmlBlockAnchor = fields.htmlBlockAnchor === undefined ? undefined : parseHtmlBlockAnchor(fields.htmlBlockAnchor);
+    if (htmlBlockAnchor === null) throw new InboxError("validation_error", "annotation.htmlBlockAnchor: { v: 1, index, id, sourceLine }.", { field: "annotation.htmlBlockAnchor" });
     // A comment on a message's words points at no element or page and starts no reply thread.
     const images = this.commentPictures(fields.images);
     for (const field of ["elementContext", "pageUrl", "inReplyTo"] as const) {
+      if (field === "elementContext" && htmlBlockAnchor) continue;
       const value = fields[field];
       if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) throw new InboxError("validation_error", `annotation.${field}: a comment on a message's text takes none.`, { field: `annotation.${field}` });
+    }
+    // What the block's page supplied about the element is capped, as a running site's is.
+    if (htmlBlockAnchor) {
+      for (const key of ["elementContext", "htmlAnchor", "htmlAdditionalTargets"] as const) {
+        if (fields[key] !== undefined && JSON.stringify(fields[key]).length > INBOX_LIVE_ELEMENT_MAX) {
+          throw new InboxError("validation_error", `annotation.${key}: at most ${INBOX_LIVE_ELEMENT_MAX} characters as JSON.`, { field: `annotation.${key}` });
+        }
+      }
     }
     // A comment on a part of a diagram in the message: the part's label is its "words", and the anchor names the part.
     // The same fail-closed parser as the external-annotations route: what the window and the export read is what is stored.
@@ -6010,7 +6039,7 @@ export class InboxStore {
       path: message.id,
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
-      annotation: { ...withoutExportLocation({ ...fields, images: undefined }), ...(images ? { images } : {}), ...(diagramAnchor ? { diagramAnchor } : {}) },
+      annotation: { ...withoutExportLocation({ ...fields, images: undefined }), ...(images ? { images } : {}), ...(diagramAnchor ? { diagramAnchor } : {}), ...(htmlBlockAnchor ? { htmlBlockAnchor } : {}) },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
