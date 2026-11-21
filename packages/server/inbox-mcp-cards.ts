@@ -185,6 +185,11 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   for (const [field, value] of Object.entries(input) as [keyof CardCallInput, unknown][]) {
     // `false` is a default (include_resolved: false), not a field the agent meant to set: tolerated, as the plannotator tool contract does.
     if (value === undefined || value === false || OP_COMMON.has(field)) continue;
+    // The agent door fills `relay.<commandId>` on every tool whose fields list
+    // `idempotency_key`, for a call that came through the relay and sent none
+    // (inbox-agent-door.ts). Only `create` reads a key, so the other ops leave
+    // the relay's own unread instead of refusing the whole call.
+    if (field === "idempotency_key" && typeof value === "string" && value.startsWith("relay.")) continue;
     if (!INBOX_CARD_OP_FIELDS[input.op].includes(field)) {
       throw new InboxError("validation_error", `${field}: op ${input.op} does not take it (it takes ${INBOX_CARD_OP_FIELDS[input.op].join(", ")}).`, { field });
     }
