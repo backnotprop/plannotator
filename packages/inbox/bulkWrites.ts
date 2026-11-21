@@ -210,8 +210,11 @@ export function bulkWrites(host: BulkHost) {
     );
   };
 
-  /** False when the warning was cancelled: nothing was written (a drop on Quiet keeps the picks then, listDrops.tsx). */
-  const markRead = async (rows: readonly InboxListRow[]): Promise<boolean> => {
+  /**
+   * False when the warning was cancelled: nothing was written (a drop on Quiet keeps the picks then, listDrops.tsx).
+   * `detail`: the toast's words after the count (Mark all as read's, markAllRead.ts).
+   */
+  const markRead = async (rows: readonly InboxListRow[], detail?: string): Promise<boolean> => {
     // Questions these would close unanswered: the warning asks once for all of them, as Mark all as read does.
     if (!(await host.warnSetAside(setAsideCount(rows), true))) return false;
     const patch = readRowPatch(new Date().toISOString());
@@ -221,10 +224,15 @@ export function bulkWrites(host: BulkHost) {
     outcomes.forEach((o, i) => !o.ok && drawings[i]!.failed());
     void afterWrite(ids(outcomes)).finally(() => drawings.forEach((drawing) => drawing.done()));
     // Mark read ended a snooze: its Undo puts that back too.
-    finish('read', outcomes, undoWith(outcomes, async ({ row }) => {
-      await inboxApi.markRead(row.thread_id, false);
-      await host.restoreSnooze(row.thread_id, row.snoozed);
-    }));
+    finish(
+      'read',
+      outcomes,
+      undoWith(outcomes, async ({ row }) => {
+        await inboxApi.markRead(row.thread_id, false);
+        await host.restoreSnooze(row.thread_id, row.snoozed);
+      }),
+      detail || undefined,
+    );
     return true;
   };
 

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { Icon } from '../icons';
+import { Icon, type IconName } from '../icons';
+import { Tip } from './Tip';
 
 /**
  * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron shows at once
@@ -36,5 +37,21 @@ export function GroupBand({ open, onToggle, children }: { open: boolean; onToggl
       {children}
       <Icon name="chevR" className="ib-band-chev" />
     </button>
+  );
+}
+
+/**
+ * A button over a group header's right end, beside its chevron (the "New since you looked" band's Mark all as read,
+ * markAllRead.ts): the header is the group's toggle, so this is its sibling, after it. Icon only, its name the
+ * tooltip. It takes no height of its own (inbox.css `.ib-band-act`), so the header and its count never move. On a
+ * wider window it shows with the chevron (the pointer on the header, or keyboard focus on either); a phone always shows it.
+ */
+export function BandAction({ label, icon, onClick, ...data }: { label: string; icon: IconName; onClick: () => void } & Record<`data-${string}`, string>) {
+  return (
+    <Tip content={label}>
+      <button type="button" className="ib-band-act" aria-label={label} onClick={onClick} {...data}>
+        <Icon name={icon} size={15} />
+      </button>
+    </Tip>
   );
 }

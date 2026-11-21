@@ -9,6 +9,8 @@
  *    an agent was stopped, and Z undoes the whole batch;
  *  - Archive all from the keyboard hides the project, focus lands on Inbox
  *    (never the page), and the agent's next reply brings the project back;
+ *  - the list: the "New since you looked" band's button marks that band read,
+ *    the list ⋮'s Mark all as read every row shown, and Z undoes each;
  *  - a phone: ⋯ always shown in the navigation sheet, the menu a sheet.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -178,6 +180,44 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await page.reload();
   await expect(row(page, 'billing')).toBeVisible();
   await expect.poll(() => sectionOf(page, threads.search)).toBe('new');
+  expect(world.errors).toEqual([]);
+});
+
+test('the list: the New band’s button marks that band read, the ⋮’s Mark all as read every row shown, Z undoes each', async () => {
+  const { page, threads } = world;
+  const band = page.locator('[data-section-id="new"] > .ib-band');
+  const button = page.locator('[data-section-id="new"] > [data-band-mark-all-read]');
+  await expect.poll(() => sectionOf(page, threads.search)).toBe('new');
+  // Icon only, shown with the chevron: the pointer on the band.
+  await expect(button).toHaveAccessibleName('Mark all as read');
+  await expect(button).toHaveCSS('opacity', '0');
+  const before = await band.boundingBox();
+  await band.hover();
+  await expect(button).toHaveCSS('opacity', '1');
+  // Nothing on the band moved for it.
+  expect(await band.boundingBox()).toEqual(before);
+  await button.click();
+  const toast = page.locator('[data-inbox-toast]');
+  await expect(toast).toContainText('Marked 1 thread read');
+  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.search}"]`)).not.toHaveClass(/\bib-u\b/);
+  // The other groups' rows are not the band's.
+  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.docs}"]`)).toHaveClass(/\bib-u\b/);
+  await page.locator('body').focus();
+  await page.keyboard.press('z');
+  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.search}"]`)).toHaveClass(/\bib-u\b/);
+  // The list's ⋮: right after Select threads, every row the list shows.
+  await page.locator('[data-tidy-menu]').click();
+  const items = page.locator('[data-tidy-menu-popup] [role="menuitem"]');
+  const labels = await items.allTextContents();
+  expect(labels.indexOf('Mark all as read')).toBe(labels.findIndex((label) => label.startsWith('Select threads')) + 1);
+  await page.screenshot({ path: join(proofDir, '05-list-menu.png') });
+  await page.locator('[data-list-mark-all-read]').click();
+  await expect(toast).toContainText('Marked 2 threads read');
+  await expect(toast.locator('.ib-tdetail')).toHaveText('Closed 1 question');
+  for (const id of [threads.search, threads.docs]) await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).not.toHaveClass(/\bib-u\b/);
+  await page.locator('body').focus();
+  await page.keyboard.press('z');
+  for (const id of [threads.search, threads.docs]) await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).toHaveClass(/\bib-u\b/);
   expect(world.errors).toEqual([]);
 });
 

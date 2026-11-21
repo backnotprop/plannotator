@@ -6050,7 +6050,7 @@
     },
     {
       "id": "messages-182",
-      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, ⋯ (Mark read, Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
+      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, Mark read (its own button where there is room; beside an open thread in the ⋯), ⋯ (Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -6161,6 +6161,18 @@
       "mobile": "v1",
       "why": "",
       "source": "SCOPE 16. The project menu; M:L68, M:L95, M:L104, M:L181",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "messages-262",
+      "title": "Mark all as read on the list: \"Mark all as read\" in the list ⋮ (after \"Select threads\") takes every row the list shows that takes Mark read; an icon-only \"Mark all as read\" button on the \"New since you looked\" band takes that band's rows; never a snoozed row; the set-aside warning, one toast \"Marked N threads read\" and one Undo",
+      "surface": [],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
       "ios": {
         "state": "not-started"
       }

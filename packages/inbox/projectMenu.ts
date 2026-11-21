@@ -54,17 +54,10 @@ export interface ProjectBatchToast {
 }
 
 /**
- * The toast after a batch: `taken` is how many threads the server says the
- * batch took (its answer's ids), and `rows` the list's rows for those as they
- * were before it (the window may not have every one: a thread that arrived
- * since its last read), which give the warning and the questions closed. In
- * the approved one-line toast style (`.product/approved/inbox-toast/`), short
- * enough for one line: the detail is the warning (or the questions closed)
- * when there is one, else the project. The rest ("Back when an agent
- * writes") is said only to a screen reader, through `speech`.
+ * What a batch on these rows (as they were before it) did beyond its count: an agent stopped or held up (`warning`;
+ * `said` names a cut agent whole for the live region), else the questions it closed (`closed`).
  */
-export function projectBatchToast(action: ProjectAction, projectName: string, taken: number, rows: readonly InboxListRow[]): ProjectBatchToast {
-  const threads = plural(taken, 'thread');
+function batchWhy(rows: readonly InboxListRow[]): { warning: string; said: string; phoneDetail?: string; closed: string } {
   // Questions still waiting on the person in the threads taken: Mark read and the archive close them.
   const questions = rows.reduce((sum, row) => sum + row.questions.open + row.questions.picked, 0);
   const stopped = rows.filter((row) => row.questions.stopped && row.questions.open > 0);
@@ -81,6 +74,31 @@ export function projectBatchToast(action: ProjectAction, projectName: string, ta
   else if (stopped.length > 1) warning = `${stopped.length} agents were stopped`;
   else if (holds > 0) warning = `Held up ${plural(holds, 'thing')}`;
   const closed = questions > 0 ? `Closed ${plural(questions, 'question')}` : '';
+  return { warning, said, ...(phoneDetail ? { phoneDetail } : {}), closed };
+}
+
+/**
+ * The detail a list-wide Mark all as read (markAllRead.ts) puts after "Marked 3 threads read": the project menu's
+ * words, the warning or the questions closed; empty when there are neither.
+ */
+export function batchReadDetail(rows: readonly InboxListRow[]): string {
+  const { warning, closed } = batchWhy(rows);
+  return warning || closed;
+}
+
+/**
+ * The toast after a batch: `taken` is how many threads the server says the
+ * batch took (its answer's ids), and `rows` the list's rows for those as they
+ * were before it (the window may not have every one: a thread that arrived
+ * since its last read), which give the warning and the questions closed. In
+ * the approved one-line toast style (`.product/approved/inbox-toast/`), short
+ * enough for one line: the detail is the warning (or the questions closed)
+ * when there is one, else the project. The rest ("Back when an agent
+ * writes") is said only to a screen reader, through `speech`.
+ */
+export function projectBatchToast(action: ProjectAction, projectName: string, taken: number, rows: readonly InboxListRow[]): ProjectBatchToast {
+  const threads = plural(taken, 'thread');
+  const { warning, said, phoneDetail, closed } = batchWhy(rows);
   const why = warning || closed;
   const back = action === 'read' ? 'Back when an agent writes' : 'Back when an agent writes there';
   const lead = action === 'read' ? `Marked ${threads} read` : `Archived ${threads}`;

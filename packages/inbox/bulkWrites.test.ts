@@ -146,4 +146,46 @@ describe('one Undo', () => {
       inboxApi.snooze = real;
     }
   });
+
+  test('Mark all as read: the warning asks once for every row, one toast with its words after the count, one Undo', async () => {
+    const { toasts, bulk } = harness();
+    const asked: unknown[] = [];
+    const calls: string[] = [];
+    const real = inboxApi.markRead;
+    inboxApi.markRead = (async (id: string, on: boolean) => {
+      calls.push(`${on ? 'read' : 'unread'} ${id}`);
+      return {};
+    }) as typeof inboxApi.markRead;
+    try {
+      const rows = [
+        { ...row('a'), questions: { open: 2, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 } },
+        { ...row('b'), questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 } },
+      ] as unknown as InboxListRow[];
+      const ok = await bulkWrites({ ...bulk.host, warnSetAside: async (count: unknown) => (asked.push(count), true) }).markRead(rows, 'Closed 2 questions');
+      expect(ok).toBe(true);
+      expect(asked).toEqual([{ questions: 2, actions: 0, threads: 1 }]);
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0]).toMatchObject({ lead: 'Marked 2 threads read', detail: 'Closed 2 questions' });
+      toasts[0]!.onUndo!();
+      await flush();
+      expect(calls.sort()).toEqual(['read a', 'read b', 'unread a', 'unread b']);
+    } finally {
+      inboxApi.markRead = real;
+    }
+  });
+
+  test('Mark all as read cancelled at the warning writes nothing and shows no toast', async () => {
+    const { toasts, bulk } = harness();
+    const real = inboxApi.markRead;
+    let wrote = 0;
+    inboxApi.markRead = (async () => void (wrote += 1)) as unknown as typeof inboxApi.markRead;
+    try {
+      const rows = [{ ...row('a'), questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 } }] as unknown as InboxListRow[];
+      expect(await bulkWrites({ ...bulk.host, warnSetAside: async () => false }).markRead(rows, 'Closed 1 question')).toBe(false);
+      expect(wrote).toBe(0);
+      expect(toasts).toHaveLength(0);
+    } finally {
+      inboxApi.markRead = real;
+    }
+  });
 });

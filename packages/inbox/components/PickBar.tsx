@@ -1,7 +1,7 @@
 /**
  * Picking thread rows (approval "inbox-multi-select", 1B + 2A; rowPicks.ts): the box a row, a group or the whole list
- * is picked with, the bar that stands in for the list's header while picking ("3 selected", Archive, Snooze, Tidy…,
- * Combine…, ⋯, Done; beside an open thread Tidy… and Combine… are the ⋯'s first items),
+ * is picked with, the bar that stands in for the list's header while picking ("3 selected", Archive, Snooze, Mark read,
+ * Tidy…, Combine…, ⋯, Done; beside an open thread Mark read is in the ⋯, and Tidy… and Combine… are its first items),
  * a phone's sheet of the same actions at the bottom edge, and the items the bar's ⋯ and a picked row's menu share.
  * Every action takes the picked rows it applies to (rowPicks.ts `bulkTargets`), with one toast and one Undo
  * (bulkWrites.ts). In a narrow list (beside an open thread) the bar keeps one line: a count of 100 or more draws
@@ -140,9 +140,9 @@ export function runBulk(act: PickActions, action: BulkAction, until?: string): P
  * or Remove from Priority, then Add tag. An item no picked row takes is not offered; Star shows while any picked row
  * is not starred, Unstar once all are.
  */
-export function BulkItems({ act, onTags }: { act: PickActions; onTags: () => void }) {
+export function BulkItems({ act, onTags, skip }: { act: PickActions; onTags: () => void; skip?: BulkAction }) {
   const has = (action: BulkAction) => bulkTargets(act.rows, action, act.rules).length > 0;
-  const shown = ITEMS.filter(({ action }) => (action === 'unstar' ? !has('star') && has('unstar') : action === 'priority-remove' ? !has('priority-add') && has('priority-remove') : has(action)));
+  const shown = ITEMS.filter(({ action }) => action !== skip).filter(({ action }) => (action === 'unstar' ? !has('star') && has('unstar') : action === 'priority-remove' ? !has('priority-add') && has('priority-remove') : has(action)));
   const tags = useBulkTagsShown(act.rows);
   return (
     <>
@@ -173,7 +173,7 @@ export function BulkItems({ act, onTags }: { act: PickActions; onTags: () => voi
 }
 
 /** A menu from a bar button: Snooze's times, or the ⋯'s items (Add tag's list swaps in place). */
-function BarMenu({ kind, act, phone, trigger, label, className }: { kind: 'snooze' | 'more'; act: PickActions; phone: boolean; trigger: ReactNode; label: string; className: string }) {
+function BarMenu({ kind, act, phone, trigger, label, className, skip }: { kind: 'snooze' | 'more'; act: PickActions; phone: boolean; trigger: ReactNode; label: string; className: string; skip?: BulkAction }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const portal = usePortal(anchor);
   const [open, setOpen] = useState(false);
@@ -210,7 +210,7 @@ function BarMenu({ kind, act, phone, trigger, label, className }: { kind: 'snooz
               <>
                 {phone && <div className="ib-pm-title" aria-hidden="true">{n === 1 ? '1 thread' : `${formatCount(n)} threads`}</div>}
                 {act.narrow && !phone && <WorkItems act={act} anchor={() => anchor.current} />}
-                <BulkItems act={act} onTags={() => setTags(true)} />
+                <BulkItems act={act} onTags={() => setTags(true)} skip={skip} />
               </>
             )}
           </Menu.Popup>
@@ -234,6 +234,8 @@ export function PickBar({ act, all, onAll, onDone, phone }: PickBarProps) {
   const n = act.rows.length;
   const archives = bulkTargets(act.rows, 'archive', act.rules).length > 0;
   const snoozes = act.snoozes && bulkTargets(act.rows, 'snooze', act.rules).length > 0;
+  // Mark read is the bar's own button where there is room (not beside an open thread), and so not in its ⋯.
+  const reads = !act.narrow && bulkTargets(act.rows, 'read', act.rules).length > 0;
   return (
     <div className="ib-lhead ib-pickbar" role="toolbar" aria-label="Selected threads" data-pick-bar="" data-long={n >= 100 ? '' : undefined}>
       <PickBox state={all} label="Select all" onPick={onAll} />
@@ -264,6 +266,12 @@ export function PickBar({ act, all, onAll, onDone, phone }: PickBarProps) {
               }
             />
           )}
+          {reads && (
+            <button type="button" className="ib-pick-btn" aria-label="Mark read" data-bulk-action="read" onClick={() => void runBulk(act, 'read')}>
+              <Icon name="checkCircle" size={15} className="ib-pick-i" />
+              <span className="ib-pick-l">Mark read</span>
+            </button>
+          )}
           {!act.narrow && act.tidy && (
             <button type="button" className="ib-pick-btn" onClick={(event) => act.tidy!(event.currentTarget)} data-pick-tidy="">
               Tidy…
@@ -276,7 +284,7 @@ export function PickBar({ act, all, onAll, onDone, phone }: PickBarProps) {
               </button>
             </Tip>
           )}
-          <BarMenu kind="more" act={act} phone={false} label="More for the selected threads" className="ib-pick-btn ib-pick-ico" trigger={<Icon name="dots" size={16} />} />
+          <BarMenu kind="more" act={act} phone={false} label="More for the selected threads" className="ib-pick-btn ib-pick-ico" trigger={<Icon name="dots" size={16} />} skip={reads ? 'read' : undefined} />
         </>
       )}
       <button type="button" className="ib-pick-btn ib-pick-end" onClick={onDone} data-pick-done="">
