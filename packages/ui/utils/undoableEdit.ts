@@ -24,6 +24,7 @@ import { endTypingRun, type PlainTextField } from './pasteInsert';
 export function replaceUndoably(field: PlainTextField, from: number, to: number, insert: string): boolean {
   const doc = field.ownerDocument;
   if (doc.activeElement !== field || typeof doc.execCommand !== 'function') return false;
+  if (!chromiumEditing(doc.defaultView?.navigator)) return false;
   const before = field.value;
   if (from < 0 || to < from || to > before.length) return false;
   const expected = before.slice(0, from) + insert + before.slice(to);
@@ -37,4 +38,23 @@ export function replaceUndoably(field: PlainTextField, from: number, to: number,
   } catch {
     return false;
   }
+}
+
+/** What the engine check reads off `navigator` (User-Agent Client Hints are Chromium-only). */
+export interface EditingEngineNavigator {
+  userAgent?: string;
+  userAgentData?: { brands?: ReadonlyArray<{ brand: string; version: string }> } | null;
+}
+
+/**
+ * Only Chromium takes the edit path; elsewhere the caller writes the words as before (as 0.28.67 did everywhere).
+ * In WebKit (Safari, iOS) the `execCommand` insertion merged with the typing before it and the earlier undo steps
+ * were lost: one ⌘Z after `Run /dep` and a pick emptied the box (QA of 0.29.0's gate, Playwright's WebKit). Firefox
+ * is not proved either way. Chromium is told by the "Chromium" brand of User-Agent Client Hints, else by `Chrome/`
+ * in the UA string (Safari and Firefox carry none; Chrome on iOS is WebKit and says `CriOS/`).
+ */
+export function chromiumEditing(nav: EditingEngineNavigator | undefined | null): boolean {
+  if (!nav) return false;
+  if (nav.userAgentData?.brands?.some((b) => b.brand === 'Chromium')) return true;
+  return /\bChrome\/\d+/.test(nav.userAgent ?? '');
 }

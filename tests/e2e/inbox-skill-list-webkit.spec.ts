@@ -360,3 +360,32 @@ test('a phone on its side, the keyboard up (113 and 140 px visible): the first r
   expect((page as Page & { errors?: string[] }).errors).toEqual([]);
   await page.context().close();
 });
+
+/**
+ * Undo after a pick in WebKit (QA of the 0.29.0 gate): `alpha beta gamma`, select all, Backspace, `Run /dep`, a pick,
+ * then ⌘Z once emptied the box and the earlier words left the history. The pick's `execCommand` edit is Chromium's
+ * only now (ui's utils/undoableEdit.ts `chromiumEditing`); WebKit writes the words as 0.28.67 did. One undo never
+ * empties the box nor brings deleted words back beside the pick.
+ */
+test('desktop: one undo after a pick never empties the box or mixes in deleted words', async () => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
+  await context.route(/\/api\/inbox\/skills(\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ skills: SKILLS }) }));
+  const page = await context.newPage();
+  try {
+    const field = await openReply(page);
+    await field.focus();
+    await field.pressSequentially('alpha beta gamma', { delay: 20 });
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await expect(field).toHaveValue('');
+    await field.pressSequentially('Run /big', { delay: 20 });
+    await page.locator('[data-skill-item="big-picture"]').dispatchEvent('pointerdown');
+    await expect(field).toHaveValue('Run /big-picture ');
+    await page.keyboard.press('ControlOrMeta+z');
+    await frames(page);
+    const after = await field.inputValue();
+    expect(['Run /big', 'Run /big-picture '], `one undo after the pick: ${JSON.stringify(after)}`).toContain(after);
+  } finally {
+    await context.close();
+  }
+});
