@@ -375,10 +375,6 @@ export function buildMermaidShadow(ground: RgbColor | undefined, amount: number)
   return `drop-shadow(${geometry} ${rgba(colour, alpha)})`;
 }
 
-/**
- * Push a fill's lightness away from `ink` until `ink` reads on it at 4.5:1.
- * Used for the categorical scale, whose single ink is fixed per mode.
- */
 /** Euclidean distance in OKLab. */
 function oklabDeltaE(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): number {
   const x = rgbToOklab(a);
@@ -413,6 +409,10 @@ function fitDoneTaskFill(ink: RgbColor, bars: RgbColor[], page: RgbColor, polari
   return fitted;
 }
 
+/**
+ * Push a fill's lightness away from `ink` until `ink` reads on it at 4.5:1.
+ * Used for the categorical scale, whose single ink is fixed per mode.
+ */
 function fitFillForInk(fill: RgbColor, ink: RgbColor, polarity: MermaidThemeMode): RgbColor {
   let current = quantize(fill);
   const step = polarity === 'dark' ? 0.02 : -0.02;
