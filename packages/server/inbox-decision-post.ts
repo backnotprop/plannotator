@@ -22,7 +22,7 @@ import { DECISION_POST_COMMENT_MARKER, DECISION_POST_SECTION_END, DECISION_POST_
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { PRMarkedBrokenSectionError, PRMarkedForbiddenError, PRMarkedRaceError, PRMarkedTooLongError, type PRMarkedDestination, type PRMarkedResult } from "@plannotator/shared/pr-marked";
 import { canPostMarkedText, upsertPRDescriptionSection, upsertPRMarkedComment, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
-import { threadDecisionExport } from "./inbox-decision-export";
+import { inboxDecisionsZone, threadDecisionExport } from "./inbox-decision-export";
 
 export const INBOX_DECISION_POST_ROUTE = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/decisions\/post$/;
 
@@ -80,7 +80,7 @@ export async function postThreadDecisions(
   input: { pull: unknown; tz?: unknown },
   deps: { runtime: PRRuntime; version: string; now?: () => Date; destination?: unknown; signedIn?: (cli: "gh" | "glab") => Promise<ReadonlySet<string>> },
 ): Promise<InboxDecisionPostResult> {
-  const built = threadDecisionExport(store, threadId, { tz: typeof input.tz === "string" ? input.tz : "UTC", version: deps.version, now: deps.now });
+  const built = threadDecisionExport(store, threadId, { tz: typeof input.tz === "string" && input.tz ? input.tz : inboxDecisionsZone(), version: deps.version, now: deps.now });
   if (!built) return refused(404, "thread_not_found", "No such thread.");
   const parsed = parseInboxThreadPullRef(input.pull);
   if ("error" in parsed) return refused(422, "validation_error", `pull: ${parsed.error}`);

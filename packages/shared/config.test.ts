@@ -13,7 +13,9 @@ import {
   symlinkSync,
   lstatSync,
   renameSync,
+  statSync,
 } from "node:fs";
+import * as nodeOs from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -51,6 +53,7 @@ import {
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
   __setConfigWriteForTest,
+  __setConfigReadForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
@@ -1730,5 +1733,340 @@ describe("resolveForgejoToken (a token goes only to the origin it was configured
     expect(resolveForgejoToken({ forgejoTokens: ["x"] } as never, ORIGIN, {})).toBeNull();
     expect(resolveForgejoToken({ forgejoTokens: { [ORIGIN]: "t" } }, "ftp://forgejo.example.com", {})).toBeNull();
     expect(resolveForgejoToken({ forgejoTokens: { [ORIGIN]: "t" } }, "https://u:p@forgejo.example.com", {})).toBeNull();
+  });
+});
+
+describe("loadConfig reads config.json and state.json only when they change", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  const originalShare = process.env.PLANNOTATOR_SHARE;
+  let root: string;
+  let tempDir: string;
+  let reads: string[];
+  let stats: string[];
+  let warnings: string[];
+  let warn: ReturnType<typeof spyOn>;
+  /** The clock loadConfig sees: a minute ahead, so a file this test just wrote counts as settled (older than a timestamp tick). */
+  let clockAhead: number;
+
+  const countingSeams = (stat: (path: string) => ReturnType<typeof statSync> = (path) => statSync(path)) => ({
+    stat: (path: string) => {
+      stats.push(path);
+      return stat(path);
+    },
+    read: (path: string) => {
+      reads.push(path);
+      return readFileSync(path, "utf-8");
+    },
+    now: () => Date.now() + clockAhead,
+  });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "plannotator-config-cache-"));
+    tempDir = join(root, "data");
+    mkdirSync(tempDir);
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+    delete process.env.PLANNOTATOR_SHARE;
+    reads = [];
+    stats = [];
+    clockAhead = 60_000;
+    __setConfigReadForTest(countingSeams());
+    warnings = [];
+    warn = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      warnings.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+    __setConfigReadForTest(null);
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    if (originalShare !== undefined) process.env.PLANNOTATOR_SHARE = originalShare;
+    else delete process.env.PLANNOTATOR_SHARE;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const configPath = () => join(tempDir, "config.json");
+  const statePath = () => join(tempDir, "state.json");
+  const count = (list: string[], file: string) => list.filter((entry) => entry === file).length;
+
+  test("an unchanged file is read and parsed once; each later call costs one stat per file", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada", experimental: { voice: true } }));
+    writeFileSync(statePath(), JSON.stringify({ inboxTour: { version: 2 } }));
+    for (let i = 0; i < 25; i++) {
+      const config = loadConfig();
+      expect(config.displayName).toBe("Ada");
+      expect(config.inboxTour?.version).toBe(2);
+    }
+    expect(count(reads, configPath())).toBe(1);
+    expect(count(reads, statePath())).toBe(1);
+    expect(count(stats, configPath())).toBe(25);
+    expect(count(stats, statePath())).toBe(25);
+  });
+
+  test("a missing file costs one stat and no read", () => {
+    for (let i = 0; i < 5; i++) expect(loadConfig()).toEqual({});
+    expect(reads).toEqual([]);
+    expect(count(stats, configPath())).toBe(5);
+    expect(count(stats, statePath())).toBe(5);
+  });
+
+  test("an edit by another program, in place or by an editor's rename, is read on the next call", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    expect(loadConfig().displayName).toBe("Ada");
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Grace Hopper" }));
+    expect(loadConfig().displayName).toBe("Grace Hopper");
+    // An editor's save: a new file renamed over the old one (a new inode).
+    writeFileSync(join(tempDir, "config.json.swp"), JSON.stringify({ displayName: "Linus" }));
+    renameSync(join(tempDir, "config.json.swp"), configPath());
+    expect(loadConfig().displayName).toBe("Linus");
+    writeFileSync(statePath(), JSON.stringify({ inboxTour: { version: 3 } }));
+    expect(loadConfig().inboxTour?.version).toBe(3);
+    expect(count(reads, configPath())).toBe(3);
+  });
+
+  test("a file deleted, then created again", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    expect(loadConfig().displayName).toBe("Ada");
+    rmSync(configPath());
+    expect(loadConfig()).toEqual({});
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(count(reads, configPath())).toBe(2);
+  });
+
+  test("our own save is read at once, even when the file's stat would not show it", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    writeFileSync(statePath(), JSON.stringify({ inboxTour: { version: 2 } }));
+    // Stats that never change: only the save itself can tell the next load to read again.
+    const frozen = statSync(configPath());
+    const frozenState = statSync(statePath());
+    __setConfigReadForTest(countingSeams((path) => (path === configPath() ? frozen : path === statePath() ? frozenState : statSync(path))));
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(count(reads, configPath())).toBe(1);
+    expect(saveConfig({ displayName: "Grace" })).toBe(true);
+    expect(loadConfig().displayName).toBe("Grace");
+    // Machine state goes to state.json (#2852): read at once too.
+    expect(loadConfig().inboxTour?.version).toBe(2);
+    expect(saveConfig({ inboxTour: { version: 4 } })).toBe(true);
+    expect(loadConfig().inboxTour?.version).toBe(4);
+    expect(loadConfig().displayName).toBe("Grace");
+  });
+
+  test("a file changed within one timestamp tick at the same size is never hidden: a parse is kept only once the file is older than a tick", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "aaaa" }));
+    const real = statSync(configPath());
+    // Two writes in one tick at the same size: the stat (mtime, ctime, size, inode) is the same for both.
+    const sameTick = { ...real, mtimeMs: 1_000_000, ctimeMs: 1_000_000, isFile: () => true } as unknown as ReturnType<typeof statSync>;
+    let now = 1_000_500;
+    __setConfigReadForTest({ ...countingSeams((path) => (path === configPath() ? sameTick : statSync(path))), now: () => now });
+    expect(loadConfig().displayName).toBe("aaaa");
+    writeFileSync(configPath(), JSON.stringify({ displayName: "bbbb" }));
+    expect(loadConfig().displayName).toBe("bbbb");
+    expect(count(reads, configPath())).toBe(2);
+    // 2.5 s on, past a FAT tick but inside the margin: still read every time.
+    now = 1_002_500;
+    expect(loadConfig().displayName).toBe("bbbb");
+    expect(count(reads, configPath())).toBe(3);
+    // Three seconds on: the same stat now holds for good, so the parse is kept.
+    now = 1_003_000;
+    expect(loadConfig().displayName).toBe("bbbb");
+    expect(loadConfig().displayName).toBe("bbbb");
+    expect(count(reads, configPath())).toBe(4);
+  });
+
+  test("a file just written is read on every call until it settles (the real clock)", () => {
+    clockAhead = 0;
+    __setConfigReadForTest(countingSeams());
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    for (let i = 0; i < 3; i++) expect(loadConfig().displayName).toBe("Ada");
+    expect(count(reads, configPath())).toBe(3);
+  });
+
+  test("invalid JSON is read and warned about on every call, never kept; a good file is not kept past a bad edit", () => {
+    writeFileSync(configPath(), "{ broken");
+    writeFileSync(statePath(), "{ broken too");
+    for (let i = 0; i < 3; i++) expect(loadConfig()).toEqual({});
+    expect(count(reads, configPath())).toBe(3);
+    expect(count(reads, statePath())).toBe(3);
+    expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(3);
+    // quiet: no warning, as before.
+    expect(loadConfig({ quiet: true })).toEqual({});
+    expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(3);
+    // Fixed: read and kept.
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(count(reads, configPath())).toBe(5);
+    // Broken again: the good parse is not served.
+    writeFileSync(configPath(), "{ broken again");
+    expect(loadConfig()).toEqual({});
+    expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(4);
+  });
+
+  test("a JSON value that is not an object reads as {} on every call, never kept", () => {
+    writeFileSync(configPath(), "[1, 2]");
+    expect(loadConfig()).toEqual({});
+    expect(loadConfig()).toEqual({});
+    expect(count(reads, configPath())).toBe(2);
+  });
+
+  test("two data dirs each keep their own parse", () => {
+    const other = join(root, "other");
+    mkdirSync(other);
+    writeFileSync(configPath(), JSON.stringify({ displayName: "first" }));
+    writeFileSync(join(other, "config.json"), JSON.stringify({ displayName: "second" }));
+    for (let i = 0; i < 3; i++) {
+      process.env.PLANNOTATOR_DATA_DIR = tempDir;
+      expect(loadConfig().displayName).toBe("first");
+      process.env.PLANNOTATOR_DATA_DIR = other;
+      expect(loadConfig().displayName).toBe("second");
+    }
+    expect(count(reads, configPath())).toBe(1);
+    expect(count(reads, join(other, "config.json"))).toBe(1);
+  });
+
+  test("a caller that changes what it got changes nothing for the next caller", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada", experimental: { voice: true }, inboxReactions: { emoji: ["a"] } }));
+    writeFileSync(statePath(), JSON.stringify({ inboxTour: { version: 2 } }));
+    const first = loadConfig() as Record<string, any>;
+    first.displayName = "changed";
+    first.experimental.voice = false;
+    first.inboxReactions.emoji.push("b");
+    first.inboxTour.version = 99;
+    const second = loadConfig() as Record<string, any>;
+    expect(second.displayName).toBe("Ada");
+    expect(second.experimental).toEqual({ voice: true });
+    expect(second.inboxReactions).toEqual({ emoji: ["a"] });
+    expect(second.inboxTour).toEqual({ version: 2 });
+    // The second came from the cache: changing it leaves the third clean too.
+    second.experimental.voice = "hit";
+    second.inboxReactions.emoji.push("c");
+    second.inboxTour.version = 100;
+    const third = loadConfig() as Record<string, any>;
+    expect(third.experimental).toEqual({ voice: true });
+    expect(third.inboxReactions).toEqual({ emoji: ["a"] });
+    expect(third.inboxTour).toEqual({ version: 2 });
+    expect(count(reads, configPath())).toBe(1);
+    expect(count(reads, statePath())).toBe(1);
+  });
+
+  test("an env override read beside the config still changes between calls", () => {
+    writeFileSync(configPath(), JSON.stringify({ share: "disabled" }));
+    expect(resolveSharingEnabled(loadConfig())).toBe(false);
+    process.env.PLANNOTATOR_SHARE = "enabled";
+    expect(resolveSharingEnabled(loadConfig())).toBe(true);
+    delete process.env.PLANNOTATOR_SHARE;
+    expect(resolveSharingEnabled(loadConfig())).toBe(false);
+  });
+
+  test("no data dir to name (no home folder to find): {} with one warning, as before", () => {
+    const home = spyOn(nodeOs, "homedir").mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT: no such file or directory, uv_os_homedir"), { code: "ENOENT" });
+    });
+    try {
+      expect(loadConfig()).toEqual({});
+      expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(1);
+      expect(loadConfig({ quiet: true })).toEqual({});
+      expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(1);
+    } finally {
+      home.mockRestore();
+    }
+  });
+
+  describe("through fake stats", () => {
+    type FakeStat = { mtimeMs: number; ctimeMs: number; size: number; dev: number; ino: number; isFile: () => boolean };
+    let fake: Map<string, FakeStat | Error>;
+    const statOf = (path: string) => {
+      const entry = fake.get(path);
+      if (entry instanceof Error) throw entry;
+      if (entry) return entry as unknown as ReturnType<typeof statSync>;
+      return statSync(path);
+    };
+    const file = (over: Partial<FakeStat> = {}): FakeStat => ({ mtimeMs: 1000, ctimeMs: 1000, size: 20, dev: 1, ino: 7, isFile: () => true, ...over });
+
+    beforeEach(() => {
+      fake = new Map();
+      // The clock far past every fake time: every parse counts as settled.
+      __setConfigReadForTest({ ...countingSeams(statOf), now: () => 1_000_000 });
+    });
+
+    test("a change of ctime alone, of the inode alone or of the device alone is read", () => {
+      fake.set(configPath(), file());
+      writeFileSync(configPath(), JSON.stringify({ displayName: "aaaa" }));
+      expect(loadConfig().displayName).toBe("aaaa");
+      expect(loadConfig().displayName).toBe("aaaa");
+      expect(count(reads, configPath())).toBe(1);
+      writeFileSync(configPath(), JSON.stringify({ displayName: "bbbb" }));
+      fake.set(configPath(), file({ ctimeMs: 1001 }));
+      expect(loadConfig().displayName).toBe("bbbb");
+      writeFileSync(configPath(), JSON.stringify({ displayName: "cccc" }));
+      fake.set(configPath(), file({ ctimeMs: 1001, ino: 8 }));
+      expect(loadConfig().displayName).toBe("cccc");
+      writeFileSync(configPath(), JSON.stringify({ displayName: "dddd" }));
+      fake.set(configPath(), file({ ctimeMs: 1001, ino: 8, dev: 2 }));
+      expect(loadConfig().displayName).toBe("dddd");
+      expect(loadConfig().displayName).toBe("dddd");
+      expect(count(reads, configPath())).toBe(4);
+    });
+
+    test("at most 8 paths are kept: the oldest is read again, every answer stays right", () => {
+      const dirs = Array.from({ length: 9 }, (_, i) => join(root, `dir-${i}`));
+      dirs.forEach((dir, i) => {
+        mkdirSync(dir);
+        writeFileSync(join(dir, "config.json"), JSON.stringify({ displayName: `n${i}` }));
+        fake.set(join(dir, "config.json"), file({ ino: 100 + i }));
+        fake.set(join(dir, "state.json"), Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+      });
+      const load = (i: number) => {
+        process.env.PLANNOTATOR_DATA_DIR = dirs[i];
+        return loadConfig().displayName;
+      };
+      dirs.forEach((_, i) => expect(load(i)).toBe(`n${i}`));
+      // dir-0 was the oldest of 9: read again; dir-8, the newest, is still kept.
+      expect(load(0)).toBe("n0");
+      expect(load(8)).toBe("n8");
+      expect(count(reads, join(dirs[0], "config.json"))).toBe(2);
+      expect(count(reads, join(dirs[8], "config.json"))).toBe(1);
+      dirs.forEach((_, i) => expect(load(i)).toBe(`n${i}`));
+    });
+
+    test("a folder in place of either file reads as before: config.json warns every call, state.json is no state", () => {
+      mkdirSync(configPath());
+      mkdirSync(statePath());
+      for (let i = 0; i < 3; i++) expect(loadConfig()).toEqual({});
+      expect(warnings.filter((line) => line.includes("failed to read config.json"))).toHaveLength(3);
+    });
+
+    test("EACCES: a stat refused reads as no file, silently; a read refused warns every call and is never kept", () => {
+      const refused = () => Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      fake.set(configPath(), refused());
+      fake.set(statePath(), refused());
+      expect(loadConfig()).toEqual({});
+      expect(reads).toEqual([]);
+      expect(warnings).toEqual([]);
+      fake.set(configPath(), file());
+      fake.set(statePath(), file({ ino: 9 }));
+      writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+      writeFileSync(statePath(), JSON.stringify({ inboxTour: { version: 2 } }));
+      __setConfigReadForTest({
+        stat: statOf,
+        read: (path) => {
+          reads.push(path);
+          throw refused();
+        },
+        now: () => 1_000_000,
+      });
+      for (let i = 0; i < 3; i++) expect(loadConfig()).toEqual({});
+      expect(count(reads, configPath())).toBe(3);
+      expect(count(reads, statePath())).toBe(3);
+      expect(warnings.filter((line) => line.includes("failed to read config.json") && line.includes("EACCES"))).toHaveLength(3);
+      // Readable again: read and right.
+      __setConfigReadForTest({ ...countingSeams(statOf), now: () => 1_000_000 });
+      expect(loadConfig().displayName).toBe("Ada");
+      expect(loadConfig().inboxTour?.version).toBe(2);
+    });
   });
 });
