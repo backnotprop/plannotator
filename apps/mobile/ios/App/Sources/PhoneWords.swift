@@ -387,4 +387,30 @@ enum PhoneWords {
   static let answerOnComputer = "Answer this one on your computer"
   static let done = "Done"
   static let selected = "Selected"
+
+  // MARK: Files (FLOWS 7; the window's file viewer)
+  /// apps/mobile/contract/flows/07-attachment.md: "File 2 of 4".
+  static func filePlace(_ at: Int, of count: Int) -> String { "File \(at) of \(count)" }
+  /// flows/07: the More menu's Share.
+  static let share = "Share"
+  /// packages/inbox/components/CopyFileButton.tsx.
+  static let copyFile = "Copy file"
+  /// The window's tile menu (parity ledger files-068).
+  static let copyImage = "Copy image"
+  /// packages/inbox/components/AttachmentPane.tsx:2235, the note over a file that is not what was sent.
+  static let fileChanged = "Changed since sent"
+  static let fileShowingSent = "Showing the sent version"
+  static let fileGone = "The file is gone; showing the sent copy"
+  static let fileOtherKind = "The file is not that kind any more; showing the sent copy"
+  /// A tile's short words for a file that cannot be opened as it is now (packages/inbox/components/ArtifactsView.tsx).
+  static let fileNoLongerOnDisk = "No longer on disk"
+  static let fileChangedType = "Changed type"
+  /// packages/inbox/components/versionLineWords.ts.
+  static let viewSent = "View sent version"
+  static let viewCurrent = "View current file"
+  /// packages/inbox/components/ReferencedFilePane.tsx, after the file's name.
+  static func fileTooLarge(_ name: String) -> String { "\(name) is too large to show here." }
+  static func fileNotShown(_ name: String) -> String { "\(name) does not show here." }
+  /// An alert in a document, by its kind (`> [!NOTE]`).
+  static func alert(_ kind: String) -> String { kind.prefix(1).uppercased() + kind.dropFirst() }
 }

@@ -322,4 +322,58 @@ describe.if(hasDom)('DiagramBlock: comments that name no diagram block', () => {
     await waitFor(() => expect(document.querySelector('[data-diagram-popout] [data-diagram-canvas]')).not.toBeNull());
     expect(document.querySelector('[data-diagram-popout] [data-diagram-canvas]')!.classList.contains('touch-none')).toBe(true);
   });
+
+  test('a plain wheel over the inline diagram scrolls the page; Ctrl/Cmd+wheel and a pinch zoom it; the popout zooms on a plain wheel', async () => {
+    // What regresses: six wheel notches over an inline diagram scrolled the
+    // page 0 px and shrank the diagram to a strip.
+    const wheel = (target: Element, init: WheelEventInit): WheelEvent => {
+      const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, ...init });
+      // happy-dom's WheelEvent is a UIEvent; a browser's is a MouseEvent and
+      // carries the modifier keys.
+      for (const key of ['ctrlKey', 'metaKey'] as const) {
+        if (event[key] !== Boolean(init[key])) Object.defineProperty(event, key, { value: Boolean(init[key]) });
+      }
+      target.dispatchEvent(event);
+      return event;
+    };
+    const scaleOf = (scope: ParentNode): string => /scale\(([^)]+)\)/.exec(scope.querySelector<HTMLElement>('[data-diagram-svg]')!.style.transform)?.[1] ?? '';
+    const block = fence();
+    await mount(<MermaidBlock block={block} annotations={[]} onAddAnnotation={noop} />);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-expand]')).not.toBeNull());
+    const inline = host!.querySelector('[data-diagram-canvas]')!;
+    const before = scaleOf(host!);
+    for (let i = 0; i < 6; i += 1) {
+      let event: WheelEvent | null = null;
+      await act(async () => {
+        event = wheel(inline, { deltaY: 100 });
+      });
+      expect(event!.defaultPrevented).toBe(false);
+    }
+    expect(scaleOf(host!)).toBe(before);
+    expect(inline.getAttribute('aria-label')).not.toMatch(/wheel/i);
+    // A trackpad pinch arrives as a wheel with ctrlKey; Cmd+wheel on a Mac.
+    for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
+      const was = scaleOf(host!);
+      let event: WheelEvent | null = null;
+      await act(async () => {
+        event = wheel(inline, { deltaY: -100, ...mod });
+      });
+      expect(event!.defaultPrevented).toBe(true);
+      expect(Number(scaleOf(host!))).toBeGreaterThan(Number(was));
+    }
+
+    await act(async () => {
+      host!.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click();
+    });
+    await waitFor(() => expect(document.querySelector('[data-diagram-popout] [data-diagram-canvas]')).not.toBeNull());
+    const popout = document.querySelector('[data-diagram-popout]')!;
+    await waitFor(() => expect(popout.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const popoutBefore = scaleOf(popout);
+    let event: WheelEvent | null = null;
+    await act(async () => {
+      event = wheel(popout.querySelector('[data-diagram-canvas]')!, { deltaY: 100 });
+    });
+    expect(event!.defaultPrevented).toBe(true);
+    expect(Number(scaleOf(popout))).toBeLessThan(Number(popoutBefore));
+  });
 });

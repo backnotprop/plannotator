@@ -19,6 +19,15 @@ final class RowActionUITests: XCTestCase {
     return app
   }
 
+  /// The next Wednesday at 10:00 here, at least a day on.
+  private static func aWednesdayMorning() -> String {
+    let calendar = Calendar.current
+    var day = calendar.date(byAdding: .day, value: 1, to: Date())!
+    while calendar.component(.weekday, from: day) != 4 { day = calendar.date(byAdding: .day, value: 1, to: day)! }
+    let at = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: day)!
+    return ISO8601DateFormatter().string(from: at)
+  }
+
   @MainActor
   private func row(_ app: XCUIApplication, _ title: String) -> XCUIElement {
     app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
@@ -124,7 +133,9 @@ final class RowActionUITests: XCTestCase {
   // proves: list-08, list-11
   @MainActor
   func testHoldOpensTheMenuAndSnoozeMovesTheRowToTheFoldedBand() {
-    let app = launch()
+    // A Wednesday morning a few days ahead: every one of the window's four times is its own (on a Friday "In 3 days"
+    // is Monday, the same as "Next week", and the menu rightly drops one), and every one is still to come.
+    let app = launch(more: ["-clockAt", Self.aWednesdayMorning()])
     let retry = row(app, "Retry logic for the relay client")
     XCTAssertTrue(retry.waitForExistence(timeout: 10))
     retry.press(forDuration: 1.0)
