@@ -57,10 +57,9 @@ export function diagramFamilyOf(svg: Element): DiagramFamily {
   // discriminator: its SVG ids and group structure are not Mermaid's.
   if (svg.classList.contains('pele')) {
     const peleRole = Array.from(svg.classList).find((name) => name.startsWith('pele-'))?.slice(5);
-    if (peleRole === 'flowchart') return 'flowchart';
-    if (peleRole === 'class') return 'class';
-    if (peleRole === 'state') return 'state';
-    return 'other';
+    // The families `diagram-anchor-pele.ts` addresses.
+    const families: readonly DiagramFamily[] = ['flowchart', 'sequence', 'state', 'class', 'er', 'requirement'];
+    return families.find((family) => family === peleRole) ?? 'other';
   }
   if (role.startsWith('flowchart')) return 'flowchart';
   if (role === 'stateDiagram') return 'state';

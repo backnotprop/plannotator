@@ -1,10 +1,11 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseInertSvg } from '../test-setup/diagramSvg';
-import { diagramFamilyOf } from './diagram-anchor';
-import { MERMAID_FINDER } from './diagram-anchor';
+import { installInertDiagramSvgParser, parseInertSvg } from '../test-setup/diagramSvg';
+import { diagramFamilyOf, diagramSourceLine, MERMAID_FINDER, type DiagramFinder, type DiagramTarget } from './diagram-anchor';
 import { PELE_COMPAT_FINDER, PELE_FINDER } from './diagram-anchor-pele';
+import { __setDiagramEngineModeForTests } from './diagram-engine';
+import { renderDiagram } from './diagram-render';
 
 const hasDom = typeof document !== 'undefined';
 const FIXTURES = join(import.meta.dir, '..', 'test-setup', 'fixtures', 'diagrams');
@@ -74,5 +75,202 @@ describe.if(hasDom)('Pele 1.3.0 flowchart anchors', () => {
     expect(PELE_COMPAT_FINDER.targetFromElement(mermaid, mermaidNode, RENDER_ID)).toEqual(
       MERMAID_FINDER.targetFromElement(mermaid, mermaidNode, RENDER_ID),
     );
+  });
+});
+
+/**
+ * Pele's finders against Mermaid's, per type, on the same source: a Mermaid
+ * svg captured in Chromium (Mermaid 12.2.0, `test-setup/fixtures/diagrams/2x-*.svg`,
+ * its source in the `.mmd` beside it) and Pele drawing that source for real.
+ *
+ * What regresses if these fail: a click on a part under Pele makes a
+ * different anchor (kind, id, ends or label) than the same click under
+ * Mermaid, so a comment made under one engine is lost, or lands on another
+ * part, under the other; or a part with a twin (the same label, the same
+ * ends) restores onto the twin.
+ */
+describe.if(hasDom)('Pele finders make the anchors Mermaid makes', () => {
+  let restoreParser: (() => void) | undefined;
+  beforeAll(() => {
+    restoreParser = installInertDiagramSvgParser();
+    __setDiagramEngineModeForTests('pele');
+  });
+  afterAll(() => {
+    restoreParser?.();
+    __setDiagramEngineModeForTests(undefined);
+  });
+
+  const PELE_ID = 'parts';
+  const source = (name: string): string => readFileSync(join(FIXTURES, `${name}.mmd`), 'utf8');
+
+  async function drawn(name: string): Promise<{ mermaid: SVGSVGElement; pele: SVGSVGElement; source: string }> {
+    const result = await renderDiagram('mermaid', PELE_ID, source(name), { colorTheme: 'github', mode: 'dark' });
+    if (result.ok === false) throw new Error(result.message);
+    expect(result.svgNode.classList.contains('pele')).toBe(true);
+    return { mermaid: load(name), pele: result.svgNode, source: source(name) };
+  }
+
+  /** Every target a click can make under one engine, by its JSON. */
+  function clickable(svg: Element, finder: DiagramFinder, renderId: string): Map<string, DiagramTarget> {
+    const targets = new Map<string, DiagramTarget>();
+    for (const el of Array.from(svg.querySelectorAll(finder.targetSelector))) {
+      const target = finder.targetFromElement(svg, el, renderId);
+      if (target !== null) targets.set(JSON.stringify(target), target);
+    }
+    return targets;
+  }
+
+  /** The target the restored element stands for (a Mermaid frame restores to its group: read one of its lines). */
+  function restoredAs(svg: Element, finder: DiagramFinder, target: DiagramTarget, renderId: string): DiagramTarget | null {
+    const el = finder.findTarget(svg, target, renderId);
+    if (el === null) return null;
+    const part = el.matches('g') && el.querySelector(':scope > line.loopLine') !== null ? el.querySelector(':scope > line.loopLine')! : el;
+    return finder.targetFromElement(svg, part, renderId);
+  }
+
+  const identity = ({ label: _label, ...rest }: DiagramTarget) => JSON.stringify(rest);
+
+  function expectParity(svgs: { mermaid: SVGSVGElement; pele: SVGSVGElement }, compareLabels = true): DiagramTarget[] {
+    const underMermaid = clickable(svgs.mermaid, MERMAID_FINDER, RENDER_ID);
+    const underPele = clickable(svgs.pele, PELE_FINDER, PELE_ID);
+    const key = compareLabels ? (t: DiagramTarget) => JSON.stringify(t) : identity;
+    expect([...underPele.values()].map(key).sort()).toEqual([...underMermaid.values()].map(key).sort());
+    for (const target of underMermaid.values()) {
+      // Made under Mermaid, restored under Pele: the same part, not a twin.
+      expect(key(restoredAs(svgs.pele, PELE_FINDER, target, PELE_ID)!)).toBe(key(target));
+    }
+    for (const target of underPele.values()) {
+      expect(key(restoredAs(svgs.pele, PELE_FINDER, target, PELE_ID)!)).toBe(key(target));
+      // Made under Pele, restored under Mermaid.
+      expect(key(restoredAs(svgs.mermaid, MERMAID_FINDER, target, RENDER_ID)!)).toBe(key(target));
+    }
+    return [...underPele.values()];
+  }
+
+  const ids = (targets: readonly DiagramTarget[]) => targets.map((t) => `${t.kind} ${t.id ?? `${t.from} -> ${t.to}`}: ${t.label}`).sort();
+
+  test('sequence: actors (the stick figure too), messages with a twin label, self-messages, notes and frames, nested ones first', async () => {
+    const svgs = await drawn('20-sequence-parts');
+    const targets = expectParity(svgs);
+    expect(ids(targets)).toEqual([
+      'cluster frame-1: opt [busy]',
+      'cluster frame-2: loop [Every minute]',
+      'cluster frame-3: alt [ok]',
+      'cluster frame-4: par [first]',
+      'edge msg-1: ping',
+      'edge msg-2: pong',
+      'edge msg-3: think',
+      'edge msg-4: ping',
+      'edge msg-5: wait',
+      'edge msg-6: ack',
+      'edge msg-7: fail "x" < y & z',
+      'edge msg-8: one',
+      'edge msg-9: two',
+      'node A: Ada Novak',
+      'node B: Bob Tully',
+      'node C: Charlie Dunn',
+      'node note-1: shared note',
+      'node note-2: done',
+    ]);
+    const message = (id: string) => targets.find((t) => t.id === id)!;
+    expect([message('msg-3').from, message('msg-3').to]).toEqual(['A', 'A']);
+    expect([message('msg-4').from, message('msg-4').to]).toEqual(['B', 'C']);
+    // The two `ping`s are two parts, and each restores to its own.
+    expect(PELE_FINDER.findTarget(svgs.pele, message('msg-1'), PELE_ID)).not.toBe(PELE_FINDER.findTarget(svgs.pele, message('msg-4'), PELE_ID));
+    // Every part's source line is the line that declares it, under either engine.
+    const line = (id: string) => svgs.source.split('\n')[(diagramSourceLine(svgs.source, targets.find((t) => t.id === id)!)?.[0] ?? 0) - 1]?.trim();
+    expect(line('msg-4')).toBe('B->>C: ping');
+    expect(line('frame-1')).toBe('opt busy');
+    expect(line('frame-2')).toBe('loop Every minute');
+    expect(line('note-2')).toBe('Note right of C: done');
+  });
+
+  test('sequence: a frame with no label, a rect background, an activation and labels over two lines', async () => {
+    const svgs = await drawn('25-sequence-frames-multiline');
+    // Mermaid empties every message label once one message wraps, and keeps a
+    // wrapped note's first line only; the parts are the same parts.
+    const targets = expectParity(svgs, false);
+    expect(ids(targets)).toEqual([
+      'cluster frame-1: critical [crit]',
+      'cluster frame-2: break [stop]',
+      'cluster frame-3: loop',
+      'edge msg-1: in rect',
+      'edge msg-2: c1',
+      'edge msg-3: c2',
+      'edge msg-4: b1',
+      'edge msg-5: line one line two',
+      'edge msg-6: act',
+      'edge msg-7: back',
+      'node A: A',
+      'node B: B',
+      'node note-1: two lines',
+    ]);
+    const line = (id: string) => svgs.source.split('\n')[(diagramSourceLine(svgs.source, targets.find((t) => t.id === id)!)?.[0] ?? 0) - 1]?.trim();
+    expect(line('frame-1')).toBe('critical crit');
+    expect(line('frame-3')).toBe('loop');
+    // Mermaid's placeholder for the missing label (a zero-width space) is no part of it.
+    expect([...clickable(svgs.mermaid, MERMAID_FINDER, RENDER_ID).values()]).toContainEqual({ family: 'sequence', kind: 'cluster', id: 'frame-3', label: 'loop' });
+  });
+
+  test('state: two states named alike in two composites, composites, a self-transition, a note; no pseudo-state', async () => {
+    const svgs = await drawn('21-state-parts');
+    const targets = expectParity(svgs);
+    const run = targets.filter((t) => t.label === 'Run');
+    expect(run.map((t) => t.id).sort()).toEqual(['Run', 'Run2']);
+    expect(PELE_FINDER.findTarget(svgs.pele, run[0]!, PELE_ID)).not.toBe(PELE_FINDER.findTarget(svgs.pele, run[1]!, PELE_ID));
+    expect(targets).toContainEqual({ family: 'state', kind: 'node', id: 'Busy', label: 'Busy' });
+    expect(targets).toContainEqual({ family: 'state', kind: 'edge', id: 'edge3', label: 'retry' });
+    expect(targets).toContainEqual({ family: 'state', kind: 'edge', id: 'edge7', label: '"x" < y & z' });
+    expect(targets).toContainEqual({ family: 'state', kind: 'node', id: 'Idle----note', label: 'a note' });
+    expect(targets.some((t) => /_(?:start|end)$/u.test(t.id ?? ''))).toBe(false);
+    expectParity(await drawn('26-state-pseudostates'));
+  });
+
+  test('class: two relations with the same ends restore by their label; a self-relation; a note is not a part', async () => {
+    const svgs = await drawn('22-class-parts');
+    const targets = expectParity(svgs);
+    const twins = targets.filter((t) => t.from === 'User' && t.to === 'Order');
+    expect(twins.map((t) => t.label).sort()).toEqual(['owns', 'places']);
+    expect(PELE_FINDER.findTarget(svgs.pele, twins[0]!, PELE_ID)).not.toBe(PELE_FINDER.findTarget(svgs.pele, twins[1]!, PELE_ID));
+    expect(MERMAID_FINDER.findTarget(svgs.mermaid, twins[0]!, RENDER_ID)).not.toBe(MERMAID_FINDER.findTarget(svgs.mermaid, twins[1]!, RENDER_ID));
+    expect(targets).toContainEqual({ family: 'class', kind: 'edge', from: 'User', to: 'User', label: 'self' });
+    expect(targets).toContainEqual({ family: 'class', kind: 'node', id: 'Order', label: 'Order<T>' });
+    expect(PELE_FINDER.targetFromElement(svgs.pele, svgs.pele.querySelector('g.pele-note')!, PELE_ID)).toBeNull();
+    // A class with an annotation is labelled by its name under both engines.
+    const annotated = expectParity(await drawn('27-class-namespace-annotation'));
+    expect(annotated).toContainEqual({ family: 'class', kind: 'node', id: 'Shape', label: 'Shape' });
+  });
+
+  test('er: two relationships with the same ends, a self-relationship, an aliased entity', async () => {
+    const svgs = await drawn('23-er-parts');
+    const targets = expectParity(svgs);
+    const twins = targets.filter((t) => t.from === 'CUSTOMER' && t.to === 'ORDER');
+    expect(twins.map((t) => t.label).sort()).toEqual(['places', 'returns']);
+    expect(PELE_FINDER.findTarget(svgs.pele, twins[0]!, PELE_ID)).not.toBe(PELE_FINDER.findTarget(svgs.pele, twins[1]!, PELE_ID));
+    expect(targets).toContainEqual({ family: 'er', kind: 'edge', from: 'PERSON', to: 'PERSON', label: 'is married to' });
+    expect(targets).toContainEqual({ family: 'er', kind: 'node', id: 'p', label: 'Person A & B' });
+  });
+
+  test('requirement: a requirement or element is labelled by its name, not its type line', async () => {
+    const svgs = await drawn('24-requirement-parts');
+    const targets = expectParity(svgs);
+    expect(targets.filter((t) => t.kind === 'node').map((t) => t.label).sort()).toEqual(['e1', 'e2', 'r1', 'r2']);
+    expect(targets).toContainEqual({ family: 'requirement', kind: 'edge', id: 'e1-r2', label: '<<verifies>>' });
+  });
+
+  test('two relations that are the same in ends AND label cannot be told apart, so neither is offered under Pele', async () => {
+    const svgs = await drawn('22-class-parts');
+    const edge = svgs.pele.querySelector('g.pele-edge[data-id="id_User_Order_2"]')!;
+    const twin = edge.cloneNode(true) as Element;
+    twin.setAttribute('data-id', 'id_User_Order_9');
+    edge.parentElement!.appendChild(twin);
+    const label = svgs.pele.querySelector('g.pele-edge-label[data-id="id_User_Order_2"]')!.cloneNode(true) as Element;
+    label.setAttribute('data-id', 'id_User_Order_9');
+    svgs.pele.appendChild(label);
+    expect(PELE_FINDER.targetFromElement(svgs.pele, twin, PELE_ID)).toBeNull();
+    expect(PELE_FINDER.targetFromElement(svgs.pele, edge, PELE_ID)).toBeNull();
+    expect(PELE_FINDER.findTarget(svgs.pele, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'owns' }, PELE_ID)).toBeNull();
+    // The relation beside them keeps its own.
+    expect(PELE_FINDER.findTarget(svgs.pele, { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'places' }, PELE_ID)?.getAttribute('data-id')).toBe('id_User_Order_1');
   });
 });
