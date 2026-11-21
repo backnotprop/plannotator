@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+import { LineFeedbackToolsContext } from './LineFeedbackTools';
+import React, { useContext, useRef, useState } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { useReviewAnnotationToolbarShortcuts } from '@plannotator/ui/shortcuts';
@@ -6,6 +7,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 
 interface ExpandedCommentDialogProps {
+  voiceTarget?: string;
   title: string;
   commentText: string;
   setCommentText: (text: string) => void;
@@ -24,10 +26,11 @@ interface ExpandedCommentDialogProps {
 
 export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
   title,
+  voiceTarget,
   commentText,
   setCommentText,
   isEditing,
-  canSubmit,
+  canSubmit: hasContent,
   aiAvailable = false,
   onAskAI,
   onSubmit,
@@ -38,6 +41,9 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
   onEditSuggestion,
   hasSuggestedCode = false,
 }) => {
+  const FeedbackTools = useContext(LineFeedbackToolsContext);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const canSubmit = hasContent && !voiceBusy;
   const dialogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const askAIEnabled = aiAvailable && !!onAskAI && commentText.trim().length > 0;
@@ -177,6 +183,7 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
                   Collapse
                 </button>
               )}
+              {FeedbackTools && <FeedbackTools key={voiceTarget} textareaRef={textareaRef} onBusyChange={setVoiceBusy} />}
               <button
                 type="button"
                 onClick={onSubmit}

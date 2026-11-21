@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { QuestionOtherToolsContext } from '../QuestionOtherTools';
+import React, { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
@@ -479,6 +480,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         setDraft(sameAnswer(next, savedAnswer) ? null : { answer: next })
     : onLiveAnswer;
   const readOnly = !onAnswer;
+  const OtherTools = useContext(QuestionOtherToolsContext);
+  const [otherRevision, setOtherRevision] = useState(0);
+  const supersedeOther = () => { if (OtherTools) setOtherRevision((n) => n + 1); };
 
   const save = () => {
     if (!onSaveAnswer || !draft || saving) return;
@@ -604,6 +608,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       nextSelected.sort((a, b) => order.indexOf(a) - order.indexOf(b));
       commit({ ...rest, selected: nextSelected });
     } else if (checked) {
+      supersedeOther();
       const { other: _o, ...single } = rest;
       commit({ ...single, selected: [label] });
     }
@@ -617,6 +622,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const pickSuggestion = (checked: boolean) => {
     const text = question.suggestedText;
     if (!text) return;
+    supersedeOther();
     lastPickRef.current = { label: SUGGESTION_ROW, before: answer, at: now() };
     const { skipped: _s, other: _o, ...rest } = base;
     if (question.kind === 'multi') {
@@ -656,6 +662,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const toggleSkip = () => {
+    supersedeOther();
     replacedOtherRef.current = null;
     if (base.skipped) {
       const { skipped: _s, ...rest } = base;
@@ -670,6 +677,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     const recommended = recommendedQuestionAnswer(indexed, base);
     if (!recommended) return;
     const keptOther = acceptBehavior?.keepOther && question.kind === 'multi' && recommended.selected.length > 0 && base.other?.trim() ? base.other : undefined;
+    if (!keptOther) supersedeOther();
     const next = keptOther ? { ...recommended, other: keptOther } : recommended;
     const before = answer;
     replacedOtherRef.current = null;
@@ -1234,6 +1242,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     !readOnly && 'max-h-48',
                   )}
                 />
+                {OtherTools && !readOnly && <OtherTools key={`${question.key}:${otherRevision}`} textareaRef={otherRef} />}
               </div>
             )}
           </div>
