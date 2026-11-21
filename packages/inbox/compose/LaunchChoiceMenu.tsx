@@ -2,11 +2,12 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import type { InboxLaunchChoice, InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
 import { Icon } from '../icons';
 import { launchEffortsFor } from '@plannotator/core/inbox-launch-choice';
-import { launchChoiceButton, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
+import { launchChoiceButton, launchChoiceButtonParts, launchChoiceNotice, launchDefaultRow, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
 import { filterLaunchModels, LAUNCH_MODEL_FILTER_FROM } from './modelFilter';
 
 export function LaunchChoiceButton({ choice, choices, open, onToggle, className }: { choice: InboxLaunchChoice; choices: InboxLaunchChoices; open: boolean; onToggle: () => void; className: string }) {
   const words = launchChoiceButton(choice, choices);
+  const parts = launchChoiceButtonParts(choice, choices);
   return (
     <button
       type="button"
@@ -17,7 +18,16 @@ export function LaunchChoiceButton({ choice, choices, open, onToggle, className 
       data-compose-choice={words}
       onClick={onToggle}
     >
-      <span>{words}</span>
+      {parts ? (
+        // A long default gives way inside its brackets only: "Default (qwen2.5-coder:32b-instruc…) · build".
+        <span className="ib-cp-lchw">
+          <span>{parts.lead}</span>
+          <span className="ib-cp-lchdn">{parts.name}</span>
+          <span>{parts.tail}</span>
+        </span>
+      ) : (
+        <span>{words}</span>
+      )}
       <Icon name="chevD" size={13} />
     </button>
   );
@@ -25,6 +35,7 @@ export function LaunchChoiceButton({ choice, choices, open, onToggle, className 
 
 /** What the menu picks: "Model and variant", or with OpenCode's agents "Model, variant and agent". */
 function launchChoiceMenuName(choices: InboxLaunchChoices): string {
+  if (choices.reading || choices.unread) return 'Model';
   const effort = choices.effort_word.toLowerCase();
   return choices.primary_agents?.length ? `Model, ${effort} and agent` : `Model and ${effort}`;
 }
@@ -67,7 +78,7 @@ export function LaunchChoiceMenu({
     button?.focus();
   };
   const effortWord = choices.effort_word;
-  const column = (field: 'model' | 'effort' | 'primary_agent', caption: string, values: string[], show: (value: string) => string) => (
+  const column = (field: 'model' | 'effort' | 'primary_agent', caption: string, values: string[], show: (value: string) => string, notice: string | null = null) => (
     <div className="ib-cp-list ib-cp-lchcol" role="group" aria-label={caption} data-compose-choice-menu={field}>
       <div className="ib-cp-cap">{caption}</div>
       {[null, ...values].map((value) => {
@@ -89,19 +100,29 @@ export function LaunchChoiceMenu({
               onChoice(next);
             }}
           >
-            <span className="ib-cp-op">
-              {value === null ? 'Default' : show(value)}
-            </span>
+            {value === null && field === 'model' ? (
+              <DefaultName choices={choices} />
+            ) : (
+              <span className="ib-cp-op">{value === null ? 'Default' : show(value)}</span>
+            )}
             <span className="ib-cp-check" aria-hidden="true">
               {on && <Icon name="check" size={15} />}
             </span>
           </button>
         );
       })}
+      {notice && (
+        <div className="ib-cp-opt ib-cp-fnotice" aria-disabled="true" data-compose-choice-notice={choices.reading ? 'reading' : (choices.unread ?? '')}>
+          {choices.reading ? <span className="ib-spin" aria-hidden="true" /> : <Icon name="info" size={15} />}
+          <span className="ib-cp-op">{notice}</span>
+        </div>
+      )}
     </div>
   );
   const models = launchModelRows(choice, choices);
   const efforts = launchEffortsFor(choices, choice.model);
+  // OpenCode's list being read or not readable: Default, then one line that says so.
+  const notice = launchChoiceNotice(choices);
   return (
     <div className="ib-cp-picker ib-cp-lch" ref={ref} role="menu" aria-label={launchChoiceMenuName(choices)} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (
@@ -115,9 +136,9 @@ export function LaunchChoiceMenu({
       )}
       <div className="ib-cp-lchcols">
         {models.length >= LAUNCH_MODEL_FILTER_FROM ? (
-          <ModelFilterColumn models={models} picked={choice.model ?? null} onPick={(value) => onChoice(pickLaunchModel(choice, choices, value))} />
+          <ModelFilterColumn models={models} picked={choice.model ?? null} choices={choices} onPick={(value) => onChoice(pickLaunchModel(choice, choices, value))} />
         ) : (
-          models.length > 0 && column('model', 'Model', models, shortLaunchModel)
+          (models.length > 0 || notice) && column('model', 'Model', models, shortLaunchModel, notice)
         )}
         {efforts.length > 0 && column('effort', effortWord, efforts, (v) => v)}
         {/* OpenCode's own agents (build, plan, …), the session's from its start. */}
@@ -130,7 +151,19 @@ export function LaunchChoiceMenu({
 const providerOf = (model: string) => (model.indexOf('/') > 0 ? model.slice(0, model.indexOf('/')) : null);
 const idOf = (model: string) => (model.indexOf('/') > 0 ? model.slice(model.indexOf('/') + 1) : model);
 
-function ModelFilterColumn({ models, picked, onPick }: { models: string[]; picked: string | null; onPick: (value: string | null) => void }) {
+/** The model menu's Default row: "Default (big-pickle)" with its provider muted after it (under it in a narrow column). */
+function DefaultName({ choices }: { choices: InboxLaunchChoices }) {
+  const row = launchDefaultRow(choices);
+  if (!row.provider && row.name === 'Default') return <span className="ib-cp-op">Default</span>;
+  return (
+    <span className="ib-cp-op ib-cp-lchname ib-cp-lchdef">
+      <span>{row.name}</span>
+      {row.provider && <span className="ib-cp-lchprov">{row.provider}</span>}
+    </span>
+  );
+}
+
+function ModelFilterColumn({ models, picked, choices, onPick }: { models: string[]; picked: string | null; choices: InboxLaunchChoices; onPick: (value: string | null) => void }) {
   const uid = useId();
   const [query, setQuery] = useState('');
   const [typing, setTyping] = useState(false);
@@ -205,10 +238,14 @@ function ModelFilterColumn({ models, picked, onPick }: { models: string[]; picke
             title={value ?? undefined}
             onClick={() => pick(value)}
           >
-            <span className="ib-cp-op ib-cp-lchname">
-              <span>{value === null ? 'Default' : idOf(value)}</span>
-              {value !== null && providerOf(value) && <span className="ib-cp-lchprov">{providerOf(value)}</span>}
-            </span>
+            {value === null ? (
+              <DefaultName choices={choices} />
+            ) : (
+              <span className="ib-cp-op ib-cp-lchname">
+                <span>{idOf(value)}</span>
+                {providerOf(value) && <span className="ib-cp-lchprov">{providerOf(value)}</span>}
+              </span>
+            )}
             <span className="ib-cp-check" aria-hidden="true">
               {picked === value && <Icon name="check" size={15} />}
             </span>

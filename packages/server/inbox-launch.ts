@@ -84,7 +84,7 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { LaunchChoiceError, launchChoicesReadable, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
 import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
@@ -359,7 +359,12 @@ export function createInboxLaunch(options: {
         // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
         for (const name of hostList.flatMap((host) => host.shellFlags ?? [])) if (login[name]) kept[name] = "1";
         shell = { kept, at: now() };
-        for (const host of hostList) host.loginRead?.(login);
+        for (const host of hostList) {
+          // A host's own hook: one that throws never fails the login read (or the start waiting on it).
+          try {
+            host.loginRead?.(login);
+          } catch {}
+        }
         return login;
       } finally {
         reading = null;
@@ -2107,7 +2112,7 @@ ${result.text}`);
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
       // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
-      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      const lists = host.choices ? launchChoicesReadable(await withinLaunchWait(host.choices())) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
@@ -2293,8 +2298,10 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
-          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          // A list still being read past the wait, or one that could not be read: compose has Default and says so
+          // (OpenCode), with no last pick (Default stays picked).
+          const lists = host.choices ? await withinLaunchWait(host.choices(), undefined, host.choicesWhileReading ?? null) : null;
+          const last = launchChoicesReadable(lists) ? readLastLaunchChoice(options.dataDir, host.agent) : null;
           const choices = lists ? { ...lists, ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) } : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),

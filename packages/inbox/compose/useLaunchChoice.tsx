@@ -1,13 +1,14 @@
 import { useCallback, useState } from 'react';
 import type { InboxLaunchChoice, InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
-import { initialLaunchChoice, launchChoiceSend } from './launchChoice';
+import { initialLaunchChoice, launchChoiceHasModels, launchChoiceSend } from './launchChoice';
 import { LaunchChoiceButton, LaunchChoiceMenu } from './LaunchChoiceMenu';
 
 /** `key` is the machine and agent: a pick holds only while that same one is in To. */
 export function useLaunchChoice(key: string | null, choices: InboxLaunchChoices | undefined, phone: boolean) {
   const [picked, setPicked] = useState<{ key: string; choice: InboxLaunchChoice } | null>(null);
   const [open, setOpen] = useState(false);
-  const offered = key !== null && !!choices && (choices.models.length > 0 || choices.efforts.length > 0);
+  // OpenCode's list being read or not readable still offers the menu: Default, and why there is nothing else.
+  const offered = key !== null && !!choices && (launchChoiceHasModels(choices) || choices.efforts.length > 0);
   const choice = picked && picked.key === key ? picked.choice : initialLaunchChoice(choices);
   const close = useCallback(() => setOpen(false), []);
   return {

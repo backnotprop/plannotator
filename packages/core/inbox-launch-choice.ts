@@ -6,6 +6,14 @@ export interface InboxLaunchChoice {
   primary_agent?: string;
 }
 
+/**
+ * Why OpenCode's model list could not be read, as a code: the window says it in its own words (never stderr, never a
+ * path). `empty`: the list was read and holds no model.
+ */
+export type InboxLaunchChoicesUnread = "timeout" | "exit" | "unreadable" | "missing" | "not_started" | "empty";
+
+export const INBOX_LAUNCH_CHOICES_UNREAD: readonly InboxLaunchChoicesUnread[] = ["timeout", "exit", "unreadable", "missing", "not_started", "empty"];
+
 export interface InboxLaunchChoices {
   models: string[];
   efforts: string[];
@@ -13,7 +21,18 @@ export interface InboxLaunchChoices {
   model_efforts?: Record<string, string[]>;
   /** OpenCode's own agents a session may start as (`GET /api/agent`: primary, not hidden). Absent: no Agent column. */
   primary_agents?: string[];
+  /** The model the agent's CLI starts on when none is picked (OpenCode's `GET /api/model/default`), provider/model. Absent: unknown. */
+  default_model?: string;
+  /** OpenCode's list could not be read (the lists are empty): the menu has Default and says why. */
+  unread?: InboxLaunchChoicesUnread;
+  /** OpenCode's list is being read (the lists are empty): the menu has Default and says so. */
+  reading?: true;
   last?: InboxLaunchChoice;
+}
+
+/** Lists a model or an effort can be checked against: none while being read or when they could not be read. */
+export function launchChoicesReadable<T extends Pick<InboxLaunchChoices, "unread" | "reading">>(lists: T | null | undefined): T | null {
+  return lists && !lists.unread && !lists.reading ? lists : null;
 }
 
 /** Goes on argv as one entry: never a leading "-", which the CLI would read as a flag. */
@@ -76,6 +95,14 @@ export function parseCodexModels(answer: unknown): Omit<InboxLaunchChoices, "las
   }
   if (models.length === 0) return null;
   return { models, efforts, effort_word: "Effort", model_efforts: modelEfforts };
+}
+
+/** OpenCode's default model (`GET /api/model/default`: `{ data: { providerID, id } }`) as provider/model, or null. */
+export function parseOpenCodeDefaultModel(answer: unknown): string | null {
+  const data = (answer as { data?: { providerID?: unknown; id?: unknown } | null } | null)?.data;
+  if (typeof data?.providerID !== "string" || typeof data.id !== "string" || !data.providerID || !data.id) return null;
+  const model = `${data.providerID}/${data.id}`;
+  return inboxLaunchTokenOk(model) ? model : null;
 }
 
 export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {

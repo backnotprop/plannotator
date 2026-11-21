@@ -2,11 +2,11 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { inboxLaunchTokenOk, openCodeSessionModel, parseOpenCodeAgents, parseOpenCodeModels } from "@plannotator/core/inbox-launch-choice";
+import { inboxLaunchTokenOk, openCodeSessionModel, parseOpenCodeAgents, parseOpenCodeDefaultModel, parseOpenCodeModels, type InboxLaunchChoices, type InboxLaunchChoicesUnread } from "@plannotator/core/inbox-launch-choice";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
-import { agentVersionRun, createAgentEnvironmentFor, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
+import { agentVersionRun, createAgentEnvironmentFor, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { LOGIN_ENV_FALLBACKS, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
@@ -150,6 +150,23 @@ export function openCodeListStamp(e: AgentEnvironment): string {
       }
     })
     .join(",");
+}
+
+/** OpenCode's lists when they could not be read: empty, with why, as a code (the window has the words). */
+export function openCodeUnread(why: InboxLaunchChoicesUnread): Omit<InboxLaunchChoices, "last"> {
+  return { models: [], efforts: [], effort_word: "Variant", unread: why };
+}
+
+/** The lists while they are being read (a read longer than the offer's wait): the menu has Default and says so. */
+export const OPENCODE_CHOICES_READING: Omit<InboxLaunchChoices, "last"> = { models: [], efforts: [], effort_word: "Variant", reading: true };
+
+/** Why a model list run failed, or null when it ran. Never its output: a code only. */
+export function openCodeListFailure(ran: AgentRunResult | null): InboxLaunchChoicesUnread | null {
+  if (!ran) return "not_started";
+  if (ran.timedOut) return "timeout";
+  if (ran.exitCode === 127) return "not_started";
+  if (ran.exitCode !== 0) return "exit";
+  return null;
 }
 
 export function openCodeTurnErrorNote(error: string): string {
@@ -472,29 +489,40 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   const choiceLists = launchChoiceCache(async () => {
     const e = await ctx.environment();
     const path = binOf(e);
-    if (!path) return null;
+    if (!path) return openCodeUnread("missing");
     // Read with the login env, filtered (`openCodeListEnv`): the keys and OPENCODE_CONFIG it sets decide which
     // providers OpenCode lists.
     const env = openCodeListEnv(listFrom ?? (await listSource()).env);
-    const read = (route: string) => e.run([path, "--standalone", "api", "GET", route], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true, outputCap: OPENCODE_LIST_OUTPUT_CAP });
-    // The models, and OpenCode's own agents (build, plan, …) a session can start as: an agent list that can't be
-    // read leaves no Agent column, never the models.
-    const [listed, agents] = await Promise.all([read("/api/model"), read("/api/agent").catch(() => null)]);
-    if (listed.exitCode !== 0 || listed.timedOut) return null;
-    let models: ReturnType<typeof parseOpenCodeModels>;
+    const read = (route: string) =>
+      e
+        .run([path, "--standalone", "api", "GET", route], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true, outputCap: OPENCODE_LIST_OUTPUT_CAP })
+        .catch(() => null);
+    // The models; OpenCode's own agents (build, plan, …) a session can start as; and the model it starts on when none
+    // is picked (Default's name). An agent list or a default that can't be read leaves no Agent column or no name,
+    // never the models.
+    const [listed, agents, fallback] = await Promise.all([read("/api/model"), read("/api/agent"), read("/api/model/default")]);
+    const failed = openCodeListFailure(listed);
+    if (failed) return openCodeUnread(failed);
+    let answer: unknown;
     try {
-      models = parseOpenCodeModels(JSON.parse(listed.stdout));
+      answer = JSON.parse(listed!.stdout);
     } catch {
-      return null;
+      return openCodeUnread("unreadable");
     }
-    if (!models) return null;
-    let primary: string[] | null = null;
-    try {
-      primary = agents && agents.exitCode === 0 && !agents.timedOut ? parseOpenCodeAgents(JSON.parse(agents.stdout)) : null;
-    } catch {
-      primary = null;
-    }
-    return primary && primary.length > 0 ? { ...models, primary_agents: primary } : models;
+    if (!Array.isArray((answer as { data?: unknown } | null)?.data)) return openCodeUnread("unreadable");
+    const models = parseOpenCodeModels(answer);
+    if (!models) return openCodeUnread("empty");
+    const ok = (ran: AgentRunResult | null) => (ran && ran.exitCode === 0 && !ran.timedOut ? ran.stdout : null);
+    const parsed = <T>(text: string | null, parse: (value: unknown) => T): T | null => {
+      try {
+        return text === null ? null : parse(JSON.parse(text));
+      } catch {
+        return null;
+      }
+    };
+    const primary = parsed(ok(agents), parseOpenCodeAgents);
+    const defaultModel = parsed(ok(fallback), parseOpenCodeDefaultModel);
+    return { ...models, ...(primary && primary.length > 0 ? { primary_agents: primary } : {}), ...(defaultModel ? { default_model: defaultModel } : {}) };
   }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS, failedAgainMaxMs: LIST_FAILED_AGAIN_MAX_MS, binaryOf: (key) => key.slice(0, key.indexOf(LIST_KEY_CUT)) });
 
   return {
@@ -518,6 +546,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
 
     /** Every login read the Inbox makes: held for the list reads (not a shell that did not answer). */
     loginRead: holdLogin,
+    choicesWhileReading: OPENCODE_CHOICES_READING,
 
     // The key: the binary (path@version), which env the read starts from, and OpenCode's config and sign-in files'
     // stamps, found with that same env. A provider added or signed in to shows on the next read, with no Inbox restart.
