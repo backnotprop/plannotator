@@ -13,6 +13,7 @@ import { AccountsRefresh, AccountsSection } from './Accounts';
 import { LinearKeySettings } from './LinearKeySettings';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { AgentStatusRow } from '../agents/AgentStatusSwitch';
+import { ContentsDotsRow } from '../parts/ContentsDotsRow';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
@@ -392,6 +393,8 @@ function GeneralSection({
           {splitView && !phone && <SplitViewRow saved={splitView.on} />}
           {/* Agent status (agents/agentStatus.ts, owner 2026-11-18): every agent's mark; the ⋮ menu has the same switch. */}
           <AgentStatusRow />
+          {/* Comment dots (data/contentsDots.ts): the contents rail's comments as dots; the rail itself stays. */}
+          <ContentsDotsRow />
           <PaletteRow />
           {favicon && (
             <div className="ib-prow" data-settings-favicon={favicon}>
