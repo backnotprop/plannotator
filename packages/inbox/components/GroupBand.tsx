@@ -12,7 +12,8 @@ import { Tip } from './Tip';
  * and covers no row: it hangs on an empty anchor of no size (`.ib-band-tipat`), just after the name and count on a
  * desktop (`tipEnd` false: it reads to their right), at the band's right end on a phone (`tipEnd`: it reads to the
  * anchor's left, inside the band). The anchor is always inside its Tip (empty, it never opens), so showing the tip
- * never draws the band again, and it neither changes the band's height nor moves its name or chevron.
+ * never draws the band again, and it neither changes the band's height nor moves its name or chevron. The pointer goes
+ * through the tip (inbox.css `[data-band-tip]`): a right-click on it opens the band's menu, a click toggles the band.
  */
 export function GroupBand({
   open,
@@ -63,7 +64,7 @@ export function GroupBand({
       onBlur={() => setFocusShown(false)}
     >
       {children}
-      <Tip content={tip ?? ''} open={tip ? true : undefined} side={tipEnd ? 'left' : 'right'} align="center">
+      <Tip content={tip ? <span data-band-tip="">{tip}</span> : ''} open={tip ? true : undefined} side={tipEnd ? 'left' : 'right'} align="center">
         <span className="ib-band-tipat" data-end={tipEnd ? '' : undefined} />
       </Tip>
       <Icon name="chevR" className="ib-band-chev" />

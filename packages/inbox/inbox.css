@@ -1089,6 +1089,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    the name and count it takes back the flex gap it adds; at the right end it is out of the flow. */
 .ib-band-tipat { align-self: stretch; width: 0; margin-inline-start: -8px; flex: none; }
 .ib-band-tipat[data-end] { position: absolute; inset-block: 0; inset-inline-end: 12px; margin: 0; }
+/* The tip sits on the band: the pointer goes through it to the band (a right-click there is the band's menu). */
+:is([data-pn-tooltip], :has(> [data-pn-tooltip])):has([data-band-tip]) { pointer-events: none; }
 /* The one-line row (approval "inbox-row-byline", 2026-10-29; its cells by approval "list-rows-mail-icons",
    2026-10-30): the agents' marks with the project after them, the title cell (the thread's name, then the grey
    subject), then right-aligned the count in words, the badge, the open counts and the time, each in a column of its

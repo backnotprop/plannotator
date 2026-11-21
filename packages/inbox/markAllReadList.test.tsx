@@ -226,6 +226,155 @@ test.skipIf(!hasDom)('while picking a band has no menu (its box is the picks’)
   expect(bandMenu()?.getAttribute('data-band-menu')).toBe('new');
 });
 
+/** Waits in real time (the hold's timers are real ones). */
+const wait = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
+/** The parts of a band a pointer can land on: the band's own box (its empty middle), the name's count, the chevron, the tip's anchor. */
+const bandParts = (id: string): [string, Element][] => [
+  ['the band', band(id)],
+  ['the count', band(id).querySelector('.ib-n')!],
+  ['the chevron', band(id).querySelector('svg.ib-band-chev')!],
+  ['the tip anchor', band(id).querySelector('.ib-band-tipat')!],
+];
+/** A mouse's right-click as a browser sends it: down, the menu event, up, and no click. */
+function mouseRight(el: Element): MouseEvent {
+  const at = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: 900, clientY: 20 };
+  act(() => void el.dispatchEvent(new PointerEvent('pointerdown', { ...at, pointerType: 'mouse' })));
+  act(() => void el.dispatchEvent(new MouseEvent('mousedown', at)));
+  const menuEvent = new MouseEvent('contextmenu', at);
+  act(() => void el.dispatchEvent(menuEvent));
+  act(() => void el.dispatchEvent(new PointerEvent('pointerup', { ...at, buttons: 0, pointerType: 'mouse' })));
+  act(() => void el.dispatchEvent(new MouseEvent('mouseup', { ...at, buttons: 0 })));
+  return menuEvent;
+}
+/** A mouse's left click as a browser sends it. */
+function mouseLeft(el: Element): void {
+  const at = { bubbles: true, cancelable: true, button: 0, clientX: 900, clientY: 20 };
+  act(() => void el.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1, pointerType: 'mouse' })));
+  act(() => void el.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 })));
+  act(() => void el.dispatchEvent(new PointerEvent('pointerup', { ...at, pointerType: 'mouse' })));
+  act(() => void el.dispatchEvent(new MouseEvent('mouseup', at)));
+  act(() => void el.dispatchEvent(new MouseEvent('click', { ...at, detail: 1 })));
+}
+/** One finger's touch event at (x, y), as a phone sends it. */
+function finger(target: Element, type: 'touchstart' | 'touchmove' | 'touchend', x = 40, y = 20): Event {
+  const point = { identifier: 1, clientX: x, clientY: y, pageX: x, pageY: y, target };
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+  Object.defineProperty(event, 'changedTouches', { value: [point] });
+  act(() => void target.dispatchEvent(event));
+  return event;
+}
+/**
+ * A finger on `el` for `holdMs`, as a phone's browser reports it: pointerdown and touchstart, a drift to `moveTo` (a
+ * scroll's start) when given, the lift (touchend, pointerup), then the mouse events and the click a browser makes of a
+ * touch that did not move (`click` false: none, as after a scroll). Returns the touchstart and touchend events.
+ */
+async function fingerOn(el: Element, holdMs: number, { moveTo, click = !moveTo }: { moveTo?: [number, number]; click?: boolean } = {}) {
+  const at = { bubbles: true, cancelable: true, clientX: 40, clientY: 20, pointerType: 'touch', isPrimary: true, pointerId: 7 };
+  act(() => void el.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1 })));
+  const start = finger(el, 'touchstart');
+  if (moveTo) {
+    await wait(Math.min(100, holdMs));
+    finger(el, 'touchmove', ...moveTo);
+    act(() => void el.dispatchEvent(new PointerEvent('pointercancel', at)));
+    await wait(Math.max(0, holdMs - 100));
+  } else await wait(holdMs);
+  const end = finger(el, 'touchend', ...(moveTo ?? [40, 20]));
+  if (!moveTo) act(() => void el.dispatchEvent(new PointerEvent('pointerup', at)));
+  let clicked: MouseEvent | null = null;
+  if (click) {
+    const mouse = { bubbles: true, cancelable: true, button: 0, clientX: 40, clientY: 20 };
+    act(() => void el.dispatchEvent(new MouseEvent('mousedown', { ...mouse, buttons: 1 })));
+    act(() => void el.dispatchEvent(new MouseEvent('mouseup', mouse)));
+    clicked = new MouseEvent('click', { ...mouse, detail: 1 });
+    act(() => void el.dispatchEvent(clicked!));
+  }
+  return { start, end, clicked };
+}
+
+test.skipIf(!hasDom)('a right-click anywhere on a band (the band itself, its count, its chevron, the tip’s spot) opens its menu and never toggles it; a left click anywhere on it toggles it', async () => {
+  if (!hasDom) return;
+  draw();
+  for (const [part, el] of bandParts('new')) {
+    const expanded = band('new').getAttribute('aria-expanded');
+    const event = mouseRight(el);
+    await settle();
+    expect([part, event.defaultPrevented, bandMenu()?.getAttribute('data-band-menu')]).toEqual([part, true, 'new']);
+    expect([part, band('new').getAttribute('aria-expanded')]).toEqual([part, expanded]);
+    await closeMenu();
+  }
+  for (const [part, el] of bandParts('new')) {
+    const expanded = band('new').getAttribute('aria-expanded');
+    mouseLeft(el);
+    await settle();
+    expect([part, band('new').getAttribute('aria-expanded')]).toEqual([part, expanded === 'true' ? 'false' : 'true']);
+    expect(bandMenu()).toBeNull();
+  }
+});
+
+test.skipIf(!hasDom)('a phone: a tap on a band toggles it at its click, with nothing held back (no menu, ever); the hold is LONG_PRESS_MS, the rows’ own', async () => {
+  if (!hasDom) return;
+  draw(false, SECTIONS, true);
+  // The rows and the bands share one menu and one hold: the trigger's LONG_PRESS_MS (450 ms).
+  expect(LONG_PRESS_MS).toBe(450);
+  const expanded = band('new').getAttribute('aria-expanded');
+  const tap = await fingerOn(band('new'), 90);
+  // Nothing cancels the browser's own click (a cancelled touchstart or touchend would), and the click toggles at once.
+  expect(tap.start.defaultPrevented).toBe(false);
+  expect(tap.end.defaultPrevented).toBe(false);
+  expect(tap.clicked!.defaultPrevented).toBe(false);
+  expect(band('new').getAttribute('aria-expanded')).not.toBe(expanded);
+  await wait(LONG_PRESS_MS + 100);
+  expect(bandMenu()).toBeNull();
+  // Just short of the hold: still a tap.
+  const short = await fingerOn(band('new'), LONG_PRESS_MS - 120);
+  expect(short.clicked!.defaultPrevented).toBe(false);
+  expect(band('new').getAttribute('aria-expanded')).toBe(expanded);
+  await wait(200);
+  expect(bandMenu()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a phone: a hold opens the sheet and its lift does not toggle the band; once the sheet is closed by a tap outside, the next tap on the band toggles it', async () => {
+  if (!hasDom) return;
+  calls.length = 0;
+  draw(false, SECTIONS, true);
+  const expanded = band('new').getAttribute('aria-expanded');
+  const hold = await fingerOn(band('new'), LONG_PRESS_MS + 120);
+  expect(bandMenu()?.getAttribute('data-band-menu')).toBe('new');
+  expect(bandMenu()!.closest('[data-phone]')).not.toBeNull();
+  expect(hold.clicked!.defaultPrevented).toBe(true);
+  expect(band('new').getAttribute('aria-expanded')).toBe(expanded);
+  expect(calls).toEqual([]);
+  // A tap outside the sheet (on the page under its scrim) closes it.
+  await wait(150);
+  await fingerOn(document.body, 80);
+  await settle();
+  expect(bandMenu()).toBeNull();
+  expect(calls).toEqual([]);
+  // The very next tap on the band is a tap again.
+  const tap = await fingerOn(band('new'), 80);
+  expect(tap.clicked!.defaultPrevented).toBe(false);
+  expect(band('new').getAttribute('aria-expanded')).not.toBe(expanded);
+  expect(bandMenu()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a phone: a finger that moves (a scroll) opens nothing and toggles nothing, however long it stays; a quick double tap opens no sheet', async () => {
+  if (!hasDom) return;
+  draw(false, SECTIONS, true);
+  const expanded = band('new').getAttribute('aria-expanded');
+  // Down on the band, then the list scrolls under it: past the slop, held well past the hold's time.
+  await fingerOn(band('new'), LONG_PRESS_MS + 300, { moveTo: [40, 60] });
+  expect(bandMenu()).toBeNull();
+  expect(band('new').getAttribute('aria-expanded')).toBe(expanded);
+  // Two quick taps: each is a tap (as on main, the band toggles twice), and no sheet comes after.
+  await fingerOn(band('new'), 70);
+  await wait(60);
+  await fingerOn(band('new'), 70);
+  expect(band('new').getAttribute('aria-expanded')).toBe(expanded);
+  await wait(LONG_PRESS_MS + 100);
+  expect(bandMenu()).toBeNull();
+});
+
 test.skipIf(!hasDom)('the list ⋮: "Mark all as read" right after "Select threads", taking every row the list shows but the snoozed one', async () => {
   if (!hasDom) return;
   calls.length = 0;
