@@ -7,6 +7,9 @@ import SwiftUI
 struct FileOpen: Identifiable, Hashable {
   let thread: ThreadID
   let file: AttachmentID
+  /// A comment to open at, and whether its words are to be changed at once.
+  var seek: FileComment?
+  var edits = false
   var id: String { file.rawValue }
 }
 
@@ -42,16 +45,19 @@ enum FileGlyph {
 struct FileTiles: View {
   let session: InboxSession
   let items: [AttachmentItem]
+  /// The thread they are in: a tile counts the comments on its file that ride the next Send.
+  var thread: ThreadID?
   @Environment(\.openFile) private var open
 
   var body: some View {
+    let riding = thread.map { session.commentsToSend($0) } ?? []
     VStack(spacing: 0) {
       ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
         if index > 0 { Hairline().padding(.leading, Media.rowThumb + Space.step) }
         Button {
           open(item)
         } label: {
-          FileTile(session: session, item: item)
+          FileTile(session: session, item: item, comments: riding.filter { $0.attachment == item.id }.count)
         }
         .buttonStyle(RowStyle(inset: Space.close))
         .accessibilityIdentifier("file/\(item.name)")
@@ -63,6 +69,14 @@ struct FileTiles: View {
 struct FileTile: View {
   let session: InboxSession
   let item: AttachmentItem
+  /// The comments on the file that ride the next Send.
+  var comments = 0
+
+  /// The file's facts, then its comments ("12 KB, 2 comments"), as the window's tile caption.
+  static func caption(_ item: AttachmentItem, comments: Int) -> String {
+    let facts = FileFacts.detail(item)
+    return comments > 0 ? "\(facts), \(CountWords.comments(comments))" : facts
+  }
 
   /// What changed about the file since it was sent, in the window's tile words
   /// (packages/inbox/components/ArtifactsView.tsx `artifactChanged`).
@@ -76,7 +90,7 @@ struct FileTile: View {
       FileThumb(session: session, item: item)
       VStack(alignment: .leading, spacing: Space.hair) {
         Text(item.name).font(TextRole.label).foregroundStyle(Token.foreground).lineLimit(2).truncationMode(.middle).multilineTextAlignment(.leading)
-        Text(FileFacts.detail(item)).font(TextRole.meta).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(2).multilineTextAlignment(.leading)
+        Text(Self.caption(item, comments: comments)).font(TextRole.meta).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(2).multilineTextAlignment(.leading)
         if let changed { RoleLine(words: changed, role: .hold).font(TextRole.meta) }
       }
       Spacer(minLength: 0)

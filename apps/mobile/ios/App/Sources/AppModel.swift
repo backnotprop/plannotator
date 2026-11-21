@@ -244,6 +244,8 @@ struct LaunchOptions {
   var open: ThreadID? { debug ? defaults.string(forKey: "open").map { ThreadID($0) } : nil }
   var resetFolds: Bool { debug && defaults.bool(forKey: "resetFolds") }
   var stageName: String? { debug ? defaults.string(forKey: "stage") : nil }
+  /// UI tests: each VoiceOver action a test needs is also a button (`voice-comment`).
+  var voiceActions: Bool { debug && defaults.bool(forKey: "voiceActions") }
 
   private var debug: Bool {
     #if DEBUG
@@ -353,11 +355,48 @@ struct LaunchOptions {
           await session.open(StandInData.files)
           await session.readAttachments(StandInData.files)
           if let plan = session.attachments(StandInData.files).first, (try? await session.openAttachment(plan)) != nil { session.attachmentClosed(plan) }
+        case "commented":
+          // The person read the plan and the code and left comments on both: they wait for the next Send.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          let files = session.attachments(StandInData.files)
+          for file in files.prefix(2) { if (try? await session.openAttachment(file)) != nil { session.attachmentClosed(file) } }
+          if let plan = files.first(where: { $0.name == StandInData.planName }) {
+            session.addComment(thread: StandInData.files, item: plan, version: .current, annotation: FileComments.words(block: "block-3", start: 4, quote: "client drops its socket", comment: "Say which client: the phone's or the desktop's."))
+            session.addComment(thread: StandInData.files, item: plan, version: .current, annotation: FileComments.words(block: "block-7", start: 0, quote: "Stop after ten minutes and say so.", comment: "Say it where? A banner, or the status line."))
+          }
+          if let code = files.first(where: { $0.name == StandInData.codeName }) {
+            session.addComment(thread: StandInData.files, item: code, version: .current, annotation: FileComments.lines(lineStart: 3, lineEnd: 4, code: "const CAP_MS = 60_000\nconst GIVE_UP_MS = 10 * 60_000", comment: "Lower both on a metered connection?"))
+          }
+          await session.deliverHeld(thread: StandInData.files)
+        case "commentstanding":
+          // Two drawings on the flame graph that have not reached the computer: one it refused as too large (that
+          // comment is not saved, and no Send carries it), one that waits for a way that can carry it (it rides no Send until then).
+          let files = session.attachments(StandInData.files)
+          if let picture = files.first(where: { $0.name == "reconnect-flamegraph.png" }) {
+            func drawing(_ shade: CGFloat) -> Data {
+              UIGraphicsImageRenderer(size: CGSize(width: 24, height: 6)).pngData { context in
+                UIColor(white: shade, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 24, height: 6))
+              }
+            }
+            let mark = [PictureMark(kind: .stroke, points: [600, 150, 1800, 420], size: 12)]
+            await door.setOptions { $0.refusesMarkups = "markup_too_large" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "The flat top is the cap.", markup: nil), drawing: drawing(0.2), marks: mark)
+            await session.deliverHeld(thread: StandInData.files)
+            await door.setOptions { $0.refusesMarkups = "relay_upload_unavailable" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing(0.6), marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
+            await session.deliverHeld(thread: StandInData.files)
+          }
         case "filechangesnext":
           // The agent edits the plan after the phone last asked how the thread's files stand.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
             await door.changeFileAfterNextRead(plan.id, to: Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
           }
+        case "framedpage":
+          // A page with a frame that lets touches through to a button under it.
+          _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.framedPageName, kind: .html, bytes: Data(StandInData.framedPage.utf8))
+          await session.refresh()
         case "filespage":
           // A page that tries to leave: to the network, to a site, to the phone's dialer.
           _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.leavingPageName, kind: .html, bytes: Data(StandInData.leavingPage.utf8))

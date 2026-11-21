@@ -46,6 +46,12 @@ struct StandInState {
   /// A file that changes right after the computer next says how a thread's files stand: the agent edits it after
   /// the phone last asked.
   var changeAfterRead: (id: String, bytes: Data?)?
+  /// The person's comments (`annotations.jsonl`): every record ever saved, by annotation id.
+  var annotations: [String: InboxAnnotationRecord] = [:]
+  /// Drawings kept (`inbox/markups/<sha256>.png`), by file name.
+  var markups: [String: Data] = [:]
+  /// Saves of a comment answered `422 annotation_not_allowed`, by attachment id (a file that takes none).
+  var refusesComments: Set<String> = []
 }
 
 extension StandInDoor {
@@ -75,7 +81,7 @@ extension StandInDoor {
   public func addFile(thread id: ThreadID, message: MessageID? = nil, name: String, kind: InboxAttachmentKind, bytes: Data, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil) -> InboxAttachment {
     counter += 1
     let attachment = InboxAttachment(
-      id: "att_STANDIN\(counter)", path: "/work/\(name)", name: name, kind: kind, sentSha256: Self.sha(bytes), size: Int64(bytes.count), sentAt: StandInData.iso(Date()),
+      id: "att_STANDIN\(counter)", path: "\(threads.first { $0.threadId == id }?.project.root ?? "/work")/\(name)", name: name, kind: kind, sentSha256: Self.sha(bytes), size: Int64(bytes.count), sentAt: StandInData.iso(Date()),
       sentMtime: StandInData.iso(Date()), mediaType: mediaType, width: width, height: height, durationMs: durationMs)
     guard let t = threads.firstIndex(where: { $0.threadId == id }), let m = threads[t].messages.lastIndex(where: { candidate in message.map { $0 == candidate.id } ?? (candidate.author.kind == .agent) }) else { return attachment }
     threads[t].messages[m].attachments = (threads[t].messages[m].attachments ?? []) + [attachment]
@@ -154,7 +160,7 @@ extension StandInDoor {
         state.changeAfterRead = nil
         state.files[change.id]?.current = change.bytes
       }
-      return encode(200, DoorThreadAttachmentsAnswer(serverSession: session, attachments: states, inlineImages: []))
+      return encode(200, DoorThreadAttachmentsAnswer(serverSession: session, attachments: states, inlineImages: [], annotations: options.omitsComments ? nil : pendingComments(id)))
     }
     if parts.count == 3, parts[0] == "attachments", ["image", "video", "audio", "download"].contains(parts[2]) {
       return bytes(call, file: parts[1], ranged: parts[2] != "image")
@@ -224,7 +230,9 @@ extension StandInDoor {
       }
       return json(200, ["pins": .array(state.pins.map { .string($0.rawValue) })])
     }
+    if parts == ["annotations"] { return saveComment(fields) }
     guard parts.count == 3 else { return nil }
+    if parts[0] == "annotations", parts[2] == "remove" { return removeComment(parts[1]) }
     let id = ThreadID(parts[1])
     if parts[0] == "messages", parts[2] == "resolve" {
       // The thread's root message carries the thread's id.

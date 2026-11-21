@@ -34,8 +34,8 @@ final class FileLoad {
   /// computer has not spoken of since the app started, whose sent version this phone does not keep, opens as this
   /// phone last read it while the computer is away (`lastKept`: it says it changed since sent).
   func target(_ item: AttachmentItem, session: InboxSession) -> (item: AttachmentItem, version: AttachmentVersion) {
-    if asked != .sent, item.changedSinceSent == nil, session.availability(item, version: .sent) == .notKept, let kept = session.lastKept(item) { return (kept, .current) }
-    return (item, asked ?? item.opens)
+    let opening = session.opening(item, asked: asked)
+    return (opening.item, opening.version)
   }
 
   func open(_ item: AttachmentItem, session: InboxSession) async {
@@ -96,6 +96,9 @@ final class FileLoad {
     if case .ready(let url) = phase { return url }
     return nil
   }
+
+  /// The cache key of the bytes on screen: what a comment made on them was read on.
+  var key: String? { held?.key }
 }
 
 /// The loads of the files a cover has shown, so the bar's menu acts on the file that is on screen.
@@ -126,6 +129,9 @@ struct FileCover: View {
   let session: InboxSession
   let thread: ThreadID
   let start: AttachmentID
+  /// A comment the cover opens at (from the thread's list of comments), and whether to change its words at once.
+  var seek: FileComment?
+  var edits = false
   /// The file on screen (the one the cover opened on, until the first step).
   @State private var shown: AttachmentID?
   private var at: AttachmentID { shown ?? start }
@@ -133,6 +139,8 @@ struct FileCover: View {
   /// The bars are put away: a touch on a picture hides them and brings them back.
   @State private var bare = false
   @State private var copied = false
+  /// The comment being written, the marks drawn, the comment asked for.
+  @State private var desk = CommentDesk()
   @Environment(\.dismiss) private var dismiss
 
   private var items: [AttachmentItem] { session.attachments(thread).filter { !$0.inline } }
@@ -148,10 +156,11 @@ struct FileCover: View {
       // cover, and keeps what it shows at rest clear of them.
       GeometryReader { geometry in
         let bars = geometry.safeAreaInsets
+        ScrollViewReader { pages in
         ScrollView(.horizontal) {
           LazyHStack(spacing: 0) {
             ForEach(items) { item in
-              FilePage(session: session, item: item, load: shelf.load(item.id), bars: bars, current: item.id == at, bare: $bare) { dismiss() }
+              FilePage(session: session, thread: thread, item: item, load: shelf.load(item.id), bars: bars, current: item.id == at, bare: $bare, desk: desk) { dismiss() }
                 .containerRelativeFrame([.horizontal, .vertical])
                 .id(item.id)
             }
@@ -159,6 +168,35 @@ struct FileCover: View {
           .scrollTargetLayout()
         }
         .ignoresSafeArea()
+        // While a picture takes the finger, a drag draws: it never steps to the next file.
+        .scrollDisabled(desk.marking)
+        // Back to a comment: its file comes on screen (said to the scroller itself: the cover may have been opened
+        // on that file a moment ago, before its pages were laid out), and its viewer shows where it is.
+        .onChange(of: desk.sought) { _, sought in
+          guard let comment = sought?.comment else { return }
+          let file = comment.attachment
+          // A comment made on the version that was sent opens on that version, and one on the file as it is now on
+          // that one.
+          if let item = items.first(where: { $0.id == file }) {
+            let load = shelf.load(file)
+            let wanted: AttachmentVersion = comment.version == FileComment.current ? .current : .sent
+            if load.target(item, session: session).version != wanted { load.asked = wanted }
+          }
+          shown = file
+          pages.scrollTo(file, anchor: .leading)
+        }
+        }
+      }
+      // The comment field stands at the foot, over the keyboard when it is up; each page is told how much it covers.
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        if let current, !(bare && onDark), session.takesComments(current, in: thread) {
+          let load = shelf.load(current.id)
+          let shown = FileFacts.shown(current.kind, name: current.name, size: load.url.map(Self.size(of:)) ?? current.size)
+          if load.url != nil, [.picture, .document, .text, .code, .page].contains(shown) {
+            CommentFoot(session: session, thread: thread, item: current, version: load.target(current, session: session).version, shown: shown, desk: desk, readKey: load.key)
+              .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { desk.foot = $0 }
+          }
+        }
       }
       .scrollTargetBehavior(.paging)
       .scrollPosition(id: $shown)
@@ -180,9 +218,31 @@ struct FileCover: View {
           .accessibilityAddTraits(.isHeader)
           .accessibilityShowsLargeContentViewer { Text(current?.name ?? "") }
         }
+        // The number is what the next Send carries; the list also shows the comments that stay, and why.
+        let waiting = session.commentsToSend(thread).count
+        if !session.comments(thread).isEmpty {
+          // What waits for the next Send, whichever file it is on: a touch lists it.
+          ToolbarItem(placement: .topBarTrailing) {
+            Button {
+              desk.listOpen = true
+            } label: {
+              HStack(spacing: Space.tight) {
+                Image(systemName: "text.bubble")
+                Text("\(waiting)").font(TextRole.link).monospacedDigit()
+              }
+            }
+            .accessibilityLabel(CountWords.comments(waiting))
+            .accessibilityIdentifier("file-comments")
+          }
+        }
         if let current, let url = shelf.load(current.id).url {
           ToolbarItem(placement: .topBarTrailing) {
             Menu {
+              if let whole = wholeComment(current, url: url) {
+                Button { desk.begin(CommentDesk.Draft(file: current.id, version: shelf.load(current.id).target(current, session: session).version, target: .whole)) } label: {
+                  Label(whole, systemImage: "text.bubble")
+                }
+              }
               ShareLink(item: url) { Label(PhoneWords.share, systemImage: "square.and.arrow.up") }
               if current.kind == .image {
                 Button { Task { await Copy.picture(url) } } label: { Label(PhoneWords.copyImage, systemImage: "square.on.square") }
@@ -205,11 +265,54 @@ struct FileCover: View {
     .accessibilityAction(.escape) { dismiss() }
     .statusBarHidden(bare && onDark)
     .motion(.fade, value: bare)
-    .onChange(of: shown) { _, _ in bare = false }
-    .onAppear { if shown == nil { shown = start } }
+    .onChange(of: shown) { old, now in
+      bare = false
+      // Another file: what was being written on the last one waits for the person's return to it.
+      desk.step(from: old ?? start, to: now ?? start)
+      desk.marking = false
+    }
+    .commentToast(desk.toasts, lift: desk.foot)
+    .sheet(isPresented: $desk.listOpen) {
+      CommentsSheet(session: session, thread: thread, current: at, toasts: desk.toasts) { comment in
+        // After the sheet is down, so the viewer is on screen to move.
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(350))
+          desk.seek(comment)
+        }
+      } edit: { comment in
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(350))
+          desk.seek(comment)
+          desk.edit(comment)
+        }
+      }
+    }
+    .onAppear {
+      guard shown == nil else { return }
+      shown = start
+      if let seek {
+        // Once the file is drawn.
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(700))
+          desk.seek(seek)
+          if edits { desk.edit(seek) }
+        }
+      }
+    }
     // How each file stands now (changed since sent, gone), asked once the cover is up.
     .task { await session.readAttachments(thread) }
     .onDisappear { shelf.closeAll(session) }
+  }
+
+  /// The More menu's way to comment on the whole file, in the window's words: a document's or a code file's
+  /// Global comment (packages/ui/components/Viewer.tsx), a page's own comment (HtmlPageComment.tsx).
+  private func wholeComment(_ item: AttachmentItem, url: URL) -> String? {
+    guard session.takesComments(item, in: thread) else { return nil }
+    switch FileFacts.shown(item.kind, name: item.name, size: Self.size(of: url)) {
+    case .document, .text, .code: return PhoneWords.globalComment
+    case .page: return PhoneWords.commentOnPage
+    default: return nil
+    }
   }
 
   /// The size of the bytes on screen.
@@ -222,6 +325,7 @@ struct FileCover: View {
 /// One file in the cover: its viewer once its bytes are here, and until then where it stands.
 struct FilePage: View {
   let session: InboxSession
+  let thread: ThreadID
   let item: AttachmentItem
   let load: FileLoad
   /// How much of the screen the bars cover, at each edge.
@@ -229,6 +333,7 @@ struct FilePage: View {
   /// The page on screen (the cover lays out the ones beside it too).
   let current: Bool
   @Binding var bare: Bool
+  let desk: CommentDesk
   let close: () -> Void
 
   var body: some View {
@@ -251,13 +356,13 @@ struct FilePage: View {
       case .failed(let words):
         Standing(symbol: "doc", words: words, action: PhoneWords.tryAgain) { Task { await load.open(item, session: session) } }
       case .ready(let url):
-        viewer(shown, url)
+        viewer(shown, url, CommentContext(session: session, thread: thread, item: item, version: version, desk: desk))
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .environment(\.colorScheme, onDark ? .dark : colorScheme)
     .safeAreaInset(edge: .top, spacing: 0) {
-      if !(bare && onDark) { VersionLine(item: shownItem, version: version, load: load) }
+      if !(bare && onDark) { VersionLine(item: shownItem, version: version, load: load, keptCopy: session.opening(item, asked: load.asked).keptCopy ? PhoneWords.away(session.computer.name) : nil) }
     }
     // A picture fills the screen and keeps clear of the bars itself; every other page starts under the title bar.
     .safeAreaPadding(.top, bars.top)
@@ -268,11 +373,13 @@ struct FilePage: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
-  @ViewBuilder private func viewer(_ shown: FileFacts.Shown, _ url: URL) -> some View {
+  @ViewBuilder private func viewer(_ shown: FileFacts.Shown, _ url: URL, _ context: CommentContext) -> some View {
     switch shown {
-    case .picture: PicturePage(session: session, url: url, item: item, bars: bars, bare: $bare, close: close)
-    case .document, .text, .code: WordsPage(url: url, item: item, shown: shown)
-    case .page: WebPage(url: url, name: item.name).ignoresSafeArea(edges: .bottom)
+    case .picture: PicturePage(session: session, url: url, item: item, bars: bars, bare: $bare, context: context, current: current, close: close)
+    case .document, .text, .code: WordsPage(url: url, item: item, shown: shown, context: context)
+    // The page runs to the foot of the screen under the comment field, which floats over it; the keyboard still
+    // takes its room, so what is being commented on stays in view.
+    case .page: PinnedPage(url: url, name: item.name, context: context, foot: desk.foot).ignoresSafeArea(.container, edges: .bottom)
     case .player: PlayerPage(session: session, item: item, url: url, current: current)
     case .pdf: PDFPage(url: url).accessibilityIdentifier("file-pdf")
     case .card: FileCard(session: session, item: item, url: url)
@@ -286,8 +393,12 @@ struct VersionLine: View {
   let item: AttachmentItem
   let version: AttachmentVersion
   let load: FileLoad
+  /// The words for a copy this phone kept, shown while the computer is away: nothing says it is the file as it is
+  /// now, and the sent version is not here to offer.
+  var keptCopy: String?
 
   private var words: (line: String, link: String?, to: AttachmentVersion)? {
+    if let keptCopy { return (keptCopy, nil, .current) }
     if let unavailable = item.unavailable { return (unavailable.code == .attachmentMissing ? PhoneWords.fileGone : PhoneWords.fileOtherKind, nil, .sent) }
     guard item.changedSinceSent == true || load.asked == .sent else { return nil }
     return version == .sent ? (PhoneWords.fileShowingSent, PhoneWords.viewCurrent, .current) : (PhoneWords.fileChanged, PhoneWords.viewSent, .sent)
@@ -297,7 +408,7 @@ struct VersionLine: View {
     if let words {
       VStack(spacing: 0) {
         HStack(alignment: .firstTextBaseline, spacing: Space.close) {
-          Image(systemName: "clock.arrow.circlepath").font(TextRole.meta).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+          Image(systemName: keptCopy == nil ? "clock.arrow.circlepath" : "wifi.slash").font(TextRole.meta).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
           Text(words.line).font(TextRole.secondary).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
           if let link = words.link {
             Button(link) { load.asked = words.to }

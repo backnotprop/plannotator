@@ -75,6 +75,14 @@ public enum Words {
   public static func deliveryReaskSaved(name: String) -> String { "Re-ask saved for \(name). It sees it when it next reads this thread." }
   /// run.turn_failed: packages/core/inbox-run-line.ts INBOX_TURN_FAILED_WORDS
   public static let runTurnFailed = "couldn't answer"
+  /// feedback.files_title: packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING title
+  public static let feedbackFilesTitle = "Feedback on the attached files"
+  /// feedback.files_intro: packages/inbox/attachments.ts ATTACHMENT_FEEDBACK_HEADING intro
+  public static let feedbackFilesIntro = "The following feedback is on the files you attached, one section per file and version."
+  /// feedback.sent_yours: packages/inbox/attachments.ts SENT_VERSION_SUFFIX yours
+  public static let feedbackSentYours = " (the version you sent)"
+  /// markup.only: packages/inbox/markup.ts MARKUP_ONLY_TEXT
+  public static let markupOnly = "See the marked-up image."
 
   /// A section's name by its id (InboxSectionId's raw value).
   public static let sections: [String: String] = [
