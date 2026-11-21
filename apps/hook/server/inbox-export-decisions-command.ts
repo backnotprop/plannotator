@@ -14,6 +14,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
+import { localRouteFetch, type InboxRouteFetch } from "./inbox-route-fetch";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_EXPORT_DECISIONS_USAGE = [
@@ -60,6 +61,8 @@ export interface ExportDecisionsCommandDeps {
   err?: (text: string) => void;
   /** Tests: how long one request may take. */
   timeoutMs?: number;
+  /** A paired cloud agent's way to the person's Inbox (inbox-call-command.ts `inboxPairedRouteFetch`), in place of this computer's. */
+  fetchRoute?: InboxRouteFetch;
 }
 
 /** This computer's zone, so the file's dates read as the person's. */
@@ -88,19 +91,25 @@ export async function runInboxExportDecisionsCommand(argv: readonly string[], de
     err(`${code}: ${message}\n`);
     return 1;
   };
-  let entry: InboxRegistryEntry;
-  try {
-    entry = await deps.ensureRunning();
-  } catch (error) {
-    return refused("inbox_not_running", inboxEnsureFailedWords(error));
+  let route: InboxRouteFetch;
+  if (deps.fetchRoute) route = deps.fetchRoute;
+  else {
+    let entry: InboxRegistryEntry;
+    try {
+      entry = await deps.ensureRunning();
+    } catch (error) {
+      return refused("inbox_not_running", inboxEnsureFailedWords(error));
+    }
+    route = localRouteFetch(entry.port, deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
   }
-  const base = `http://127.0.0.1:${entry.port}/api/inbox/threads/${encodeURIComponent(parsed.thread)}/decisions`;
-  const signal = AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  const base = `/api/inbox/threads/${encodeURIComponent(parsed.thread)}/decisions`;
+  // Through a pairing the file's dates read in the person's zone, which their Inbox knows; here, this computer's.
+  const zone: Record<string, string> = deps.fetchRoute ? {} : { tz: localZone() };
   let response: Response;
   try {
     response = parsed.pr
-      ? await fetch(`${base}/post`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pull: parsed.pr, tz: localZone() }), signal })
-      : await fetch(`${base}?${new URLSearchParams({ format: parsed.format, tz: localZone() })}`, { signal });
+      ? await route(`${base}/post`, { method: "POST", body: JSON.stringify({ pull: parsed.pr, ...zone }) })
+      : await route(`${base}?${new URLSearchParams({ format: parsed.format, ...zone })}`);
   } catch (error) {
     return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
   }
