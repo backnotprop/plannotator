@@ -384,7 +384,7 @@ svg.am{color:var(--ink)}
 .ags.inc{gap:14px;margin:10px 0 8px}
 .ags.tab{gap:20px;margin:auto 0}
 .ags.tab .am{width:28px;height:28px}
-.dev.full{height:1100px;margin-top:100px}
+.dev.full{height:1100px;margin-top:150px}
 .dev.full .words{height:300px;display:flex;flex-direction:column}
 .dev.full .frm{left:128px;top:300px}
 .dev.full .tl,.dev.full .wg{display:none}
@@ -399,7 +399,7 @@ svg.am{color:var(--ink)}
 .cfl.id{height:24px}
 .cfl.id,html:not(.light) .cfl.il{display:none}
 html:not(.light) .cfl.id{display:block}
-.proof{height:250px;margin-top:calc(850px - var(--F));z-index:2;overflow:hidden;transition:height .5s cubic-bezier(.645,.045,.355,1)}
+.proof{height:250px;margin-top:calc(900px - var(--F));z-index:2;overflow:hidden;transition:height .5s cubic-bezier(.645,.045,.355,1)}
 html.pfc .proof{height:50px}
 .proof::before{content:"";position:absolute;left:96px;right:96px;top:0;height:1px;background:var(--rule)}
 .pf-rail{position:absolute;left:96px;right:96px;top:22px;height:156px;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)}
@@ -452,7 +452,7 @@ html.pfc .pf-quote,html.pfc .pf-contrib,html.pfc .pf-foot,html.pfc .pf-note{opac
   .fanh{left:auto;width:auto;height:auto}
   .dev[data-job="repo"],.dev[data-job="pr"]{height:auto}
   .cf{position:static;height:auto;margin:24px 16px 0;white-space:normal}
-  .proof{margin-top:0;min-height:250px;transition:min-height .5s cubic-bezier(.645,.045,.355,1)}
+  .proof{margin-top:50px;min-height:250px;transition:min-height .5s cubic-bezier(.645,.045,.355,1)}
   html.pfc .proof{min-height:100px}
   .proof::before{left:24px;right:24px}
   .pf-rail{left:0;right:0}
@@ -468,7 +468,8 @@ html.pfc .pf-quote,html.pfc .pf-contrib,html.pfc .pf-foot,html.pfc .pf-note{opac
   .fanh .h2s br{display:none}
   .fanf{left:auto;width:auto;height:auto;margin-top:0;padding:100px 16px 50px}
   .fanbox{position:static;width:auto}
-  .dev.full,.dev.row,.close{margin-top:0}
+  .dev.row,.close{margin-top:0}
+  .dev.full{margin-top:50px}
   .dev.full .words{height:auto;display:block}
   .ags.tab{margin:32px 0 0}
   .fanh .words{padding-top:0}

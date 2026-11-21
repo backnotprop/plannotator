@@ -231,7 +231,9 @@ function convertP4DiffToGitFormat(
         relativePath = toRelativePath(rawPath, normalizedRoot);
       }
 
-      result.push(`diff --git a/${relativePath} b/${relativePath}`);
+      const header = `diff --git a/${relativePath} b/${relativePath}`;
+      // A Perforce separator may already have started this file's patch.
+      if (result.at(-1) !== header) result.push(header);
       result.push(`--- a/${relativePath}`);
       continue;
     }
