@@ -77,7 +77,7 @@ function inboxes() {
   const theirs = facesRoute(there);
   const builtIn = createBuiltInIconSets();
   const fetcher = createIconSetFetcher({ dir: join(scratchDir(), 'icon-sets'), pointer: null, builtIn: builtIn.ids, fetch: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch });
-  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', localOnly: () => json({ code: 'local_only' }, 403), readBody, json }).route;
+  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', readBody, json }).route;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     const method = init?.method ?? 'GET';
@@ -91,7 +91,7 @@ function inboxes() {
       return (await theirs(new Request(forwardedUrl, { method, body: init?.body ?? null }), forwardedUrl)) ?? json({ error: 'not here' }, 404);
     }
     const req = new Request(url, { method, ...(init?.body ? { body: init.body } : {}) });
-    return (await own(req, url)) ?? (await setsRoute(req, url, true)) ?? json({ error: 'not here' }, 404);
+    return (await own(req, url)) ?? (await setsRoute(req, url)) ?? json({ error: 'not here' }, 404);
   }) as typeof fetch;
 }
 
@@ -138,6 +138,17 @@ async function settle() {
   await act(async () => {
     for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   });
+}
+
+/** Waits for what reads the disk (the icon sets' manifests), which no count of ticks bounds. */
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 300; i++) {
+    if (check()) return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }
 
 function mount(marks: string[] | undefined) {
@@ -290,7 +301,10 @@ test.skipIf(!hasDom)('Sets on a linked machine\'s agent: the grid, no switch; it
     await openFan(id);
     await act(async () => document.querySelector<HTMLButtonElement>('[data-face-choice="sets"]')!.click());
     await settle();
-    return document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+    const dialog = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+    // The grid draws after two reads (the sets, then the open set's icons), each reading manifests from disk.
+    await until(() => dialog.querySelector('.am-sets-i') !== null, 'the Sets grid');
+    return dialog;
   };
   const dialog = await sets('ses_m');
   expect(dialog.querySelector('[data-agi-place]')?.tagName).toBeUndefined();

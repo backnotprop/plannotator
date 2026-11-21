@@ -61,6 +61,12 @@ function readTombstoneGeneration(key: string): number | null {
  * logical draft under several keys (PR review drafts, see review-draft.ts) and
  * must let one key's tombstone guard the others.
  */
+export const DRAFT_GENERATION_HEADER = "Plannotator-Draft-Generation";
+
+export function missingDraftHeaders(draftGeneration: number | null): Record<string, string> {
+  return draftGeneration === null ? {} : { [DRAFT_GENERATION_HEADER]: String(draftGeneration) };
+}
+
 export function getDraftTombstoneGeneration(key: string): number | null {
   return readTombstoneGeneration(key);
 }

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const roots: string[] = [];
@@ -48,11 +49,11 @@ function fixture() {
   git(target, "checkout", "-qb", "selected-branch");
   git(target, "remote", "add", "origin", "https://github.com/example/selected.git");
   mkdirSync(dataDir);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ reviewAnalysis: { semanticDiff: false, callFlow: false } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ reviewAnalysis: { callFlow: false } }));
   return { root, caller, target, dataDir };
 }
 
-async function launch(cwd: string, args: string[], dataDir: string, bridge = false, invocationCwd = cwd) {
+async function launch(cwd: string, args: string[], dataDir: string, bridge = false, invocationCwd = cwd, extraEnv: Record<string, string> = {}) {
   const ready = join(dataDir, `ready-${crypto.randomUUID()}.json`);
   const proc = Bun.spawn([process.execPath, "run", entry, ...(bridge ? ["opencode-review-directory"] : ["review", ...args, "--json"])], {
     cwd,
@@ -69,6 +70,7 @@ async function launch(cwd: string, args: string[], dataDir: string, bridge = fal
       PLANNOTATOR_GIT_REMOTE_CHECK: "0",
       PLANNOTATOR_REVIEW_PROGRESS: "1",
       PLANNOTATOR_FEEDBACK_HISTORY: "1",
+      ...extraEnv,
     },
     stdin: bridge ? new TextEncoder().encode(JSON.stringify({ arguments: args.map(arg => `"${arg}"`).join(" ") })) : "ignore",
     stdout: "pipe",
@@ -187,6 +189,34 @@ for (const bridge of [false, true]) {
       session.stop();
     }
   }, 15_000);
+
+  test(`${bridge ? "OpenCode bridge" : "CLI"}: a named directory wins over the caller's exported GIT_DIR`, async () => {
+    const { caller, target, dataDir } = fixture();
+    // As from a git hook of the caller's repo, or a shell that exported them.
+    const callerGit = { GIT_DIR: join(caller, ".git"), GIT_WORK_TREE: caller };
+    for (const env of [{ GIT_DIR: callerGit.GIT_DIR }, callerGit]) {
+      const session = await launch(caller, ["--diff-type", "uncommitted", target], dataDir, bridge, caller, env);
+      try {
+        const diff = await session.api("/api/diff");
+        expect(diff.gitContext.cwd).toBe(target);
+        expect(diff.rawPatch).toContain("+export const selected = 2;");
+        expect(diff.rawPatch).not.toContain("caller");
+        await session.api("/api/exit", {});
+        await session.finish();
+      } finally {
+        session.stop();
+      }
+    }
+    // With no directory named, the exported repository is still the one reviewed.
+    const session = await launch(target, ["--diff-type", "uncommitted"], dataDir, bridge, target, callerGit);
+    try {
+      expect((await session.api("/api/diff")).rawPatch).toContain("+export const caller = 2;");
+      await session.api("/api/exit", {});
+      await session.finish();
+    } finally {
+      session.stop();
+    }
+  }, 45_000);
 }
 
 test("direct CLI honors PLANNOTATOR_CWD only for an explicit directory", async () => {
@@ -243,10 +273,64 @@ test("invalid targets exit before opening the invoking repository", async () => 
       ]);
       expect(code).toBe(1);
       expect(stdout).toBe("");
-      expect(stderr).toMatch(/does not exist|not a directory|only one directory/);
+      expect(stderr).toMatch(/No folder|is a file, not a folder|only one directory/);
       expect(existsSync(ready)).toBe(false);
     } finally {
       proc.kill();
     }
   }
 }, 15_000);
+
+/** Runs `review <args>` (or the OpenCode bridge with those arguments) to its exit. */
+async function runToExit(cwd: string, args: string[], dataDir: string, bridge: boolean) {
+  const ready = join(dataDir, `unexpected-ready-${crypto.randomUUID()}.json`);
+  const proc = Bun.spawn([process.execPath, "run", entry, ...(bridge ? ["opencode-review"] : ["review", ...args])], {
+    cwd,
+    env: {
+      ...process.env, PLANNOTATOR_CWD: cwd, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_READY_FILE: ready,
+      PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_SKIP_BROWSER_OPEN: "1", PLANNOTATOR_AI: "disabled",
+    },
+    stdin: bridge ? new TextEncoder().encode(JSON.stringify({ arguments: args.join(" ") })) : "ignore",
+    stdout: "pipe", stderr: "pipe",
+  });
+  try {
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+    ]);
+    return { stdout, stderr, code, opened: existsSync(ready) };
+  } finally {
+    proc.kill();
+  }
+}
+
+for (const bridge of [false, true]) {
+  test(`${bridge ? "OpenCode bridge" : "CLI"}: a sole folder name that is not there stops and says what to run`, async () => {
+    const { caller, dataDir } = fixture();
+    mkdirSync(join(caller, "backend"));
+    const typo = await runToExit(caller, ["backnd"], dataDir, bridge);
+    expect(typo).toMatchObject({ code: 1, stdout: "", opened: false });
+    expect(typo.stderr).toContain(
+      `No folder "backnd" in ${caller}; nothing was opened.\n` +
+        "Did you mean backend? Run: plannotator review backend\n" +
+        "To review the current project instead, run: plannotator review\n",
+    );
+    const unknown = await runToExit(caller, ["--diff-type", "uncommitted", "otherproj"], dataDir, bridge);
+    expect(unknown).toMatchObject({ code: 1, stdout: "", opened: false });
+    expect(unknown.stderr).toContain(`No folder "otherproj" in ${caller}; nothing was opened.\n`);
+    expect(unknown.stderr).toContain("plannotator review <path to an existing folder>");
+  }, 20_000);
+}
+
+test("prose of several words still reviews the invoking repository", async () => {
+  const { caller, dataDir } = fixture();
+  for (const args of [["please", "review", "my", "changes"], ["look", "at", "the", "api/users", "code"]]) {
+    const session = await launch(caller, args, dataDir);
+    try {
+      expect((await session.api("/api/diff")).rawPatch).toContain("+export const caller = 2;");
+      await session.api("/api/exit", {});
+      await session.finish();
+    } finally {
+      session.stop();
+    }
+  }
+}, 30_000);

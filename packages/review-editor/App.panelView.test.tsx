@@ -172,6 +172,14 @@ async function mount(seed: () => void = () => {}): Promise<void> {
   if (!selectedPanelSegment()) throw new Error("panel view toggle did not render");
 }
 
+async function treeMounted(): Promise<void> {
+  for (let attempt = 0; attempt < 50 && !document.querySelector("[data-tree-grouping]"); attempt += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+}
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -193,7 +201,7 @@ describe.if(hasDom)("opening panel view", () => {
     await mount();
 
     expect(selectedPanelSegment()).toBe("Tree");
-    expect(panelSegment("Git status")).toBeDefined(); // still one click away
+    expect(panelSegment("Git status")).toBeUndefined();
     // No setup chooser interrupts the session. With every UNRELATED one-time
     // announcement retired above, any remaining chain dialog would have to be
     // a review-setup one, so the absence of a modal overlay is the assertion.
@@ -203,14 +211,16 @@ describe.if(hasDom)("opening panel view", () => {
     expect(memory.get("plannotator-review-panel-view")).toBe("tree");
   });
 
-  test("a persisted sections cookie still opens on Git status", async () => {
+  test("a persisted sections cookie opens the tree grouped by git status", async () => {
     // Failure caught: the default flip reaching existing users. Anyone who
     // chose Git status in Settings keeps it.
     await mount(() => {
       memory.set("plannotator-review-panel-view", "sections");
     });
 
-    expect(selectedPanelSegment()).toBe("Git status");
+    expect(selectedPanelSegment()).toBe("Tree");
+    await treeMounted();
+    expect(document.querySelector('[data-tree-grouping="status"]')).not.toBeNull();
   });
 
   test("the last-used memo still layers over the persisted default", async () => {
@@ -221,6 +231,8 @@ describe.if(hasDom)("opening panel view", () => {
       memory.set("plannotator-review-panel-view-last-used", "sections");
     });
 
-    expect(selectedPanelSegment()).toBe("Git status");
+    expect(selectedPanelSegment()).toBe("Tree");
+    await treeMounted();
+    expect(document.querySelector('[data-tree-grouping="status"]')).not.toBeNull();
   });
 });

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent } from 'react';
-import { useAgentFacesKey } from '../agents/agentFaces';
-import type { ThreadSession } from '../agents/model';
+import { agentTakesTiles, useAgentFacesKey } from '../agents/agentFaces';
+import type { AgentFace } from '../agents/faceChoices';
+import { shownAgentFace } from '../agents/projectFace';
+import { useRowMarks } from '../letterMarks';
+import { agentSessionState, type ThreadSession } from '../agents/model';
 import { inboxAgentsFlat, useInboxAgents } from '../agentsList';
 import { HostMark } from '../icons';
 import { agentName } from '../tags';
@@ -31,11 +34,14 @@ export const SESSION_STATE_WORDS: Record<NonNullable<ThreadSession['state']>, st
 /** The most marks the closed pile draws. */
 export const PILE_MARKS = 4;
 
-/** Each session's look: its face when it has one, else its agent's own mark (one per agent, by name). */
+/**
+ * Each session's look: its face when it has one, else its agent's own mark (one per agent, by name). A project tile
+ * carries its agent's mark on the corner: one per agent too.
+ */
 export function sessionLooks(sessions: readonly Pick<ThreadSession, 'host'>[], faces: readonly string[]): string[] {
   return sessions.map((s, i) => {
     const face = faces[i] ?? 'agent';
-    return face === 'agent' ? `agent:${agentName(s.host)}` : `face:${face}`;
+    return face === 'agent' || face === 'project' ? `${face}:${agentName(s.host)}` : `face:${face}`;
   });
 }
 
@@ -62,8 +68,11 @@ export interface ThreadSessionsProps {
 export function ThreadSessions({ sessions, phone = false, agentFilter = null, onAgentFilter }: ThreadSessionsProps) {
   const groups = useInboxAgents();
   // The same id on two machines is two agents: each is found under its own machine.
-  const live = new Map(inboxAgentsFlat(groups).map((a) => [`${a.machine ?? ''}\n${a.id}`, a.state] as const));
-  const faces = useAgentFacesKey(sessions.map((s) => s.session)).split('\n');
+  // A live agent whose host reports no turns says nothing here (never "idle"): `agentSessionState`.
+  const live = new Map<string, ThreadSession['state']>(inboxAgentsFlat(groups).map((a) => [`${a.machine ?? ''}\n${a.id}`, agentSessionState(a)]));
+  // As each mark draws it (icons.tsx `HostMark`): Settings → Rows' "From the project name" decides what none shows.
+  const { projectIcons } = useRowMarks();
+  const faces = useAgentFacesKey(sessions.map((s) => s.session)).split('\n').map((face, i) => shownAgentFace(face as AgentFace, projectIcons && agentTakesTiles(sessions[i]?.session)));
   const looks = sessionLooks(sessions, faces);
   // How it was opened: a mouse resting on it closes when it leaves; a click, a tap or focus keeps it until it is
   // closed (Escape, a click or tap outside, focus leaving it, a second click on its marks).
@@ -155,7 +164,8 @@ export function ThreadSessions({ sessions, phone = false, agentFilter = null, on
         <div className="ib-ss-band" onClick={press}>
           <ul className="ib-ss-list" aria-label={count}>
             {sessions.map((s, i) => {
-              const state = (s.agentId ? live.get(`${s.machine ?? ''}\n${s.agentId}`) : undefined) ?? s.state;
+              const key = `${s.machine ?? ''}\n${s.agentId}`;
+              const state = s.agentId && live.has(key) ? (live.get(key) ?? null) : s.state;
               return (
                 <li key={s.session} className="ib-ss-item" data-session={s.session} data-state={state ?? undefined}>
                   {/* A mark starts each run of sessions that look alike. */}

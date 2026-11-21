@@ -22,6 +22,9 @@
  *     initiatives.jsonl                the Board's initiatives (approval
  *                                      "board-initiatives"): one file for every
  *                                      project, read by the Board only
+ *     scheduled.jsonl                  routines (inbox-scheduled-types.ts):
+ *                                      one file for every project, read by the clock
+ *                                      and the scheduled routes only
  *     blobs/<sha256>                  the bytes of each attachment as sent
  *     seq.json                         the highest seq ever written (kept
  *                                      across a deletion, so seq never repeats)
@@ -58,12 +61,14 @@ export const PULLS_FILE = "pulls.jsonl";
  */
 export const INITIATIVES_FILE = "initiatives.jsonl";
 export const SEQ_FLOOR_FILE = "seq.json";
+/** Routines (inbox-scheduled-types.ts): one file in the inbox folder, like initiatives, so one with no project yet has a place. */
+export const SCHEDULED_FILE = "scheduled.jsonl";
 
 export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull", "scheduled"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

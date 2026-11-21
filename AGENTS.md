@@ -7,6 +7,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 ## Hard rules (read before touching anything)
 
 - **Never compromise UX.** Plannotator is an open-source product that has to work well and feel like magic; it is not an enterprise critical system. Don't add friction for defensive reasons: no extra gates, confirmations, owner-only checks, warnings or settings that make it harder to use. Fix real bugs without making the product worse to use, and when a safety idea would cost UX, ask the owner first.
+- **One experience across a person's devices.** Every Inbox feature works the same on a thread, agent or project that lives on another of the person's linked machines as on this one: tagging, Priority, pins, starting agents, replying, anything. Never ship a feature that works only on this machine's own threads, and never add a rule that treats a linked machine's thread differently. Send the action to the machine that owns the thing; if an older or offline machine cannot take it yet, that is the one allowed gap and it closes when that machine updates. Build and test both ways (two linked Inboxes) before calling a feature done. See [Linked machines](docs/agent-guides/inbox-machines.md).
 - **Reusing the document UI in the commercial Workspaces app?** Read [`packages/ui/README.md`](packages/ui/README.md) FIRST: an earlier from-scratch rebuild of this UI broke the app and was reverted. Do not rebuild the UI or recreate `packages/document-ui`; add a seam to `@plannotator/ui` (`configurePlannotatorUI()`), keep Plannotator's app unchanged, and never delete working code until a human confirms parity in the browser.
 - **Two server runtimes change together.** An endpoint change goes into both the Bun server (`packages/server/`) and the Pi server (`apps/pi-extension/server/`); shared logic lives in `packages/shared/`. Only the Inbox and the Shapes server are Bun-only. See [Server Runtimes](docs/agent-guides/project-and-development.md#server-runtimes).
 - **Build order: review, then hook, then opencode.** `bun run --cwd apps/review build && bun run build:hook && bun run build:opencode`; building out of order copies stale HTML. See [Build](docs/agent-guides/project-and-development.md#build).
@@ -17,8 +18,10 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
   - Tests never run the real GitHub CLI, and never signal an Inbox except through `tests/helpers/inbox-process.ts`.
   - Every test guards a behavior that can regress: no copy snapshots of prose, no round-trip prop tests, no implementation echo.
   - Test agent-facing instructions (tool text, skills, `--help`) clean room: a fresh agent with only that text, in a scratch folder outside this repo, given a real task. Judge what it does, not what it says.
+- **PR checks cover only what your change touches.** A PR runs the tests its changed files can reach, not the whole suite. After your PR's checks finish, read which tests ran and confirm they exercised your code. If they did not, run the missing tests yourself and say so in the PR before it merges.
 - **No new Inbox keyboard shortcuts without the owner's approval** (see the Inbox shortcuts note in [Keyboard Shortcuts](docs/agent-guides/guides-and-shared-ui.md#keyboard-shortcuts)). Shortcuts elsewhere go through the shortcut registry.
 - **Git:** never rebase or force-push a shared branch; merge main instead.
+- **No AI attribution.** Commit messages, tags, release notes and PR bodies carry no AI attribution and no session links.
 - **Releases:** follow [`.agents/skills/release/SKILL.md`](.agents/skills/release/SKILL.md).
 
 ## Topic guides
@@ -33,6 +36,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 - [`inbox.md`](docs/agent-guides/inbox.md): index to the Plannotator Inbox guides (`inbox-*.md`).
 - [`server-and-storage.md`](docs/agent-guides/server-and-storage.md): archive, Server API tables and guards, plan history, feedback archive, plan diff.
 - [`guides-and-shared-ui.md`](docs/agent-guides/guides-and-shared-ui.md): portable Guided Reviews, data types, parser, annotation system, question blocks, WebMCP, shortcuts, sharing, settings, syntax highlighting.
+- [`mobile.md`](docs/agent-guides/mobile.md): the native iPhone app's contract kit (`apps/mobile/contract`, `scripts/mobile`): generators, checks, and how the app stays aligned with the window.
 
 ## Where new docs go
 

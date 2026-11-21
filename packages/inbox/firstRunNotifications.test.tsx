@@ -52,7 +52,6 @@ let settingsOver: (settings: Record<string, any>) => void = () => {};
 /** The sound dialog's claim answers yes (the one page that shows it). */
 let soundShows = false;
 /** The page came through the tailnet (settings `via`). */
-let tailnetPage = false;
 /** The line's answer to the note dialog's claim (`POST /api/inbox/reveal` `agent_note`); null: the real Inbox's. */
 let noteClaim: boolean | null = null;
 const posts: { path: string; body: Record<string, unknown> }[] = [];
@@ -127,7 +126,6 @@ beforeEach(async () => {
   asked = 0;
   settingsOver = () => {};
   soundShows = false;
-  tailnetPage = false;
   noteClaim = null;
   agentsModel = model();
   posts.length = 0;
@@ -149,7 +147,6 @@ beforeEach(async () => {
       return Response.json({ ...agentsModel, results: [] });
     }
     // Over the tailnet the agents are local only, as the real listener answers.
-    if (path.startsWith('/api/inbox/agents') && tailnetPage) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     if (path.startsWith('/api/inbox/agents')) return Response.json(agentsModel);
     if (path.startsWith('/api/inbox/reveal') && noteClaim !== null && body?.includes('"agent_note"')) return Response.json({ show: noteClaim, reveal: { next: null }, board: { on: false } });
     if (path.startsWith('/api/inbox/sound/dialog')) {
@@ -360,25 +357,10 @@ test.skipIf(!hasDom)("the owner over the tailnet (their phone or another compute
   agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   settingsOver = (settings) => {
     settings.via = 'tailnet';
-    settings.guest = false;
   };
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the first-run ask');
   expect(buttonIn(firstRunAsk(el)!, 'Turn on')).toBeDefined();
-}, 30_000);
-
-test.skipIf(!hasDom)("a tailnet guest's page: the first-run screen asks nothing (the first run is the owner's)", async () => {
-  tailnetPage = true;
-  settingsOver = (settings) => {
-    settings.via = 'tailnet';
-    settings.guest = true;
-  };
-  const el = await renderApp();
-  // The note dialog is never decided for a tailnet page's sake (a guest's agents are local only), so give the window time.
-  await wait(3500);
-  expect(el.querySelector('[data-inbox-empty]')).not.toBeNull();
-  expect(firstRunAsk(el)).toBeNull();
-  expect(noteDialog()).toBeNull();
 }, 30_000);
 
 test.skipIf(!hasDom)('a load that showed the sound dialog: no ask while it is open, and none after it closes on that load', async () => {

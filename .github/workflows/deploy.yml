@@ -50,6 +50,8 @@ jobs:
       paste: ${{ steps.changes.outputs.paste }}
       waitlist: ${{ steps.changes.outputs.waitlist }}
     steps:
+      # A Test preview (a manual run given as_if_changed, named "Test preview: ...")
+      # runs only part of Test, so it does not count.
       - name: Manual run needs a passed Test run on this commit
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -58,7 +60,7 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           conclusion="$(gh api "repos/${REPOSITORY}/actions/workflows/test.yml/runs?head_sha=${COMMIT_SHA}&per_page=100" \
-            --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last | .conclusion // "missing"')"
+            --jq '[.workflow_runs[] | select(.event == "push" or (.event == "workflow_dispatch" and ((.display_title // "") | startswith("Test preview:") | not)))] | sort_by(.created_at) | last | .conclusion // "missing"')"
           if [[ "$conclusion" != "success" ]]; then
             echo "The latest Test run on ${COMMIT_SHA} is ${conclusion}, not success. Run Test on this commit first." >&2
             exit 1
@@ -187,14 +189,18 @@ jobs:
           --exclude "assets/*.mp4" --exclude "assets/*.webm"
           --exclude "assets/hosted/*"
 
-      - name: Set the Inbox prompt's content type
+      # The sync names .md text/markdown and .txt text/plain with no charset, so
+      # an agent reads the agent pages' curly quotes and arrows as Latin-1.
+      # Every .md and .txt the build emits goes up again with UTF-8 named
+      # (apps/marketing/llms.test.ts checks the patterns cover them).
+      - name: Set the agent pages' content type
         run: |
-          for page in prompt.md cloud-agent.md muse.md; do
-            if [ -f "apps/marketing/dist/inbox/$page" ]; then
-              aws s3 cp "apps/marketing/dist/inbox/$page" "s3://plannotator-marketing/inbox/$page" \
-                --content-type "text/markdown; charset=utf-8"
-            fi
-          done
+          aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
+            --exclude "*" --include "*.md" \
+            --content-type "text/markdown; charset=utf-8"
+          aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
+            --exclude "*" --include "*.txt" \
+            --content-type "text/plain; charset=utf-8"
 
       - name: Invalidate CloudFront
         run: |

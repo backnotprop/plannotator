@@ -68,6 +68,47 @@ async function pixel(page: Page, x: number, y: number): Promise<[number, number,
 
 const luminance = ([r, g, b]: [number, number, number]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
+async function lightShare(page: Page): Promise<number> {
+  const png = await page.screenshot({ animations: 'allow' });
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const channels = png[25] === 6 ? 4 : 3;
+  const idat: Buffer[] = [];
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at);
+    if (png.toString('latin1', at + 4, at + 8) === 'IDAT') idat.push(png.subarray(at + 8, at + 8 + length));
+    at += 12 + length;
+  }
+  const data = inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  let previous = new Uint8Array(stride);
+  let light = 0;
+  for (let y = 0; y < height; y++) {
+    const filter = data[y * (stride + 1)]!;
+    const line = new Uint8Array(data.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x++) {
+      const left = x >= channels ? line[x - channels]! : 0;
+      const up = previous[x]!;
+      const upLeft = x >= channels ? previous[x - channels]! : 0;
+      let predictor = 0;
+      if (filter === 1) predictor = left;
+      else if (filter === 2) predictor = up;
+      else if (filter === 3) predictor = (left + up) >> 1;
+      else if (filter === 4) {
+        const estimate = left + up - upLeft;
+        const toLeft = Math.abs(estimate - left);
+        const toUp = Math.abs(estimate - up);
+        const toUpLeft = Math.abs(estimate - upLeft);
+        predictor = toLeft <= toUp && toLeft <= toUpLeft ? left : toUp <= toUpLeft ? up : upLeft;
+      }
+      line[x] = (line[x]! + predictor) & 255;
+    }
+    for (let x = 0; x < stride; x += channels) if (luminance([line[x]!, line[x + 1]!, line[x + 2]!]) > 64) light++;
+    previous = line;
+  }
+  return light / (width * height);
+}
+
 for (const file of builds) {
   const name = file.split('/').pop();
 
@@ -102,7 +143,7 @@ for (const file of builds) {
       releaseEntry();
       await expect(page.locator('#root > *').first()).toBeAttached();
       await page.waitForTimeout(200);
-      expect(luminance(await pixel(page, 400, 300))).toBeLessThan(64);
+      expect(await lightShare(page)).toBeLessThan(0.25);
     } finally {
       await context.close();
       server.close();

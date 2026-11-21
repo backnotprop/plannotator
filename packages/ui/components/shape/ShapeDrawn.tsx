@@ -30,6 +30,7 @@ import { parseCssColor } from '../../utils/cssColor';
 import { readThemeTokenValues } from '../../utils/themeTokens';
 import { SHAPE_COLOR_NAMES, shapeContrastFixes, shapeLogoFill, type ShapeColors } from './shapeContrast';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
+import { syncTalkBubbles, TALK_BUBBLE_CSS, type TalkBubble } from './talkBubbles';
 import { SHAPE_SHARP_COLOR_NAMES, shapeSharpFixes, type ShapeSharpColors } from './sharpContrast';
 import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
 import { ScenePlayers } from './scene/ScenePlayers';
@@ -428,6 +429,9 @@ export interface ShapeDrawnProps {
    * drawing fades out and a small track under it shows how much there is. Absent: it shrinks to fit.
    */
   pan?: boolean;
+  /** The px a side panel takes from the view right now (References beside the board, read as it slides): the drawing
+   *  scales into what is left but keeps the layout it has without the panel (no switch to its tall layout, no pan). */
+  aside?: () => number;
   /** A fixed canvas sits at the top of its view, not in the middle. Absent: in the middle, as before. */
   top?: boolean;
   /**
@@ -458,6 +462,10 @@ export interface ShapeDrawnProps {
   boxable?: boolean;
   /** Kept boxes with their comments, on this view. Board only. */
   boxes?: readonly KeptBox[];
+  /** Comment bubbles on the parts and boxes something was asked or changed on, on this view (talkBubbles.ts). Board only. */
+  talk?: readonly TalkBubble[];
+  /** A comment bubble was pressed. */
+  onTalk?: (bubble: TalkBubble, el: HTMLElement) => void;
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
@@ -477,8 +485,8 @@ export interface ShapeDrawnProps {
 }
 
 /** How much room the view has, for a fixed canvas. */
-function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean, aside: React.RefObject<(() => number) | undefined>) {
+  const [size, setSize] = useState<{ w: number; h: number; aside: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
@@ -487,6 +495,8 @@ function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
       setSize({
         w: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
         h: el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
+        // Read with the width, in the same frame: as a panel slides, the two always add up to the room without it.
+        aside: aside.current?.() ?? 0,
       });
     };
     measure();
@@ -514,8 +524,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   handlers.current = props;
 
   const canvas = drawn.width !== undefined && drawn.height !== undefined;
-  const fit = useFit(frameRef, canvas);
-  const narrow = canvas ? (fit ? fit.w < 700 : false) : false;
+  const asideRef = useRef(props.aside);
+  asideRef.current = props.aside;
+  const fit = useFit(frameRef, canvas, asideRef);
+  const narrow = canvas ? (fit ? fit.w + fit.aside < 700 : false) : false;
   const useTall = canvas && narrow && !!drawn.tall;
   const html = useTall ? drawn.tall!.html : drawn.html;
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';
@@ -533,7 +545,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${TALK_BUBBLE_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
@@ -687,6 +699,19 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
   }, [boxes, useTall, scaled, k, contentKey]);
+
+  // Comment bubbles: inside the drawing too, placed again when it lays out again (a reflowing page, a new scale).
+  const talk = props.talk;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board || !talk) return;
+    const place = () => syncTalkBubbles(board, talk.filter((b) => !b.box || !!b.box.tall === useTall), (b, el) => handlers.current.onTalk?.(b, el));
+    place();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => place());
+    ro.observe(board);
+    return () => ro.disconnect();
+  }, [talk, useTall, scaled, k, contentKey, phase]);
 
   // Marks, and a host's tags on them.
   const stale = props.stale;

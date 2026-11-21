@@ -109,7 +109,12 @@ export interface SavedGuideListEntry {
   progress: { reviewed: number; total: number };
   /** True when the stored head sha differs from the current head. */
   moved: boolean;
+  where?: SavedGuideWhere;
+  engine?: string;
+  model?: string;
 }
+
+export type SavedGuideWhere = "diff" | "target" | "other";
 
 /** UI-side guide shape: server output extended with persisted per-section reviewed state.
  *  `saved` is set when the guide is persisted on disk (autosaved live job, or a

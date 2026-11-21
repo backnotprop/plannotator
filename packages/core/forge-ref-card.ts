@@ -10,7 +10,8 @@
  * shape before it runs anything.
  */
 
-import { classifyForgeHost, FORGE_SPECS, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import type { Problem } from "./problem";
 
 export type { ForgePlatform } from "./forge-refs";
 
@@ -39,7 +40,7 @@ const NUMBER = /^[1-9]\d{0,9}$/;
  * - GitLab: `https://<host>/<namespace>/<project>/-/(issues|work_items|merge_requests)/<n>`
  * - Bitbucket Cloud: `https://bitbucket.org/<workspace>/<repo>/(issues|pull-requests)/<n>`
  * A trailing `/files`, `?query` or `#fragment` is ignored. Only https, no
- * credentials, no port.
+ * credentials, no port on github.com, gitlab.com or bitbucket.org.
  */
 export function parseForgeRefUrl(href: string): ForgeRef | null {
   let url: URL;
@@ -48,11 +49,10 @@ export function parseForgeRefUrl(href: string): ForgeRef | null {
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
-  const host = webForgeHost(url.hostname);
-  if (!host) return null;
-  const platform = classifyForgeHost(host);
-  if (!platform) return null;
+  if (url.protocol !== "https:" || url.username || url.password) return null;
+  const forge = forgeOfUrl(url);
+  if (!forge) return null;
+  const { host, platform } = forge;
   const parts = url.pathname.split("/").filter(Boolean);
   let owner: string;
   let repo: string | undefined;
@@ -88,6 +88,24 @@ export function webForgeHost(hostname: string): string | null {
   return h;
 }
 
+const PUBLIC_FORGE_HOSTS: Readonly<Record<ForgePlatform, string>> = { github: "github.com", gitlab: "gitlab.com", bitbucket: "bitbucket.org" };
+const GITLAB_REF_PATHS = new Set(["merge_requests", "issues", "work_items"]);
+
+export function forgeOfUrl(url: URL): { host: string; platform: ForgePlatform } | null {
+  const name = webForgeHost(url.hostname);
+  if (!name) return null;
+  if (url.port && Object.values(PUBLIC_FORGE_HOSTS).includes(name)) return null;
+  const host = url.port ? `${name}:${url.port}` : name;
+  const parts = url.pathname.split("/").filter(Boolean);
+  const dash = parts.indexOf("-");
+  const platform = classifyForgeHost(host) ?? (dash >= 2 && GITLAB_REF_PATHS.has(parts[dash + 1] ?? "") ? "gitlab" : null);
+  return platform ? { host, platform } : null;
+}
+
+export function forgeHostTrusted(ref: Pick<ForgeRef, "platform" | "host">, signedIn: ReadonlySet<string>): boolean {
+  return ref.host === PUBLIC_FORGE_HOSTS[ref.platform] || signedIn.has(ref.host);
+}
+
 function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | null {
   switch (platform) {
     case "github":
@@ -101,10 +119,11 @@ function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | nu
 
 /**
  * One cache entry per ref. On GitHub an issue link to a PR is the same item, so the kind is not part of it there;
- * GitLab and Bitbucket number them apart (`:pull`, `:issue`).
+ * GitLab and Bitbucket number them apart (`:pull`, `:issue`). A ref card provider's ref (the Inbox's Linear issues, ui
+ * `utils/refCardProviders`) names a platform with no spec here: no kind in its key.
  */
 export function forgeRefKey(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number" | "kind">): string {
-  const kind = FORGE_SPECS[ref.platform].numbersByKind ? `:${ref.kind}` : "";
+  const kind = (FORGE_SPECS as Partial<typeof FORGE_SPECS>)[ref.platform]?.numbersByKind ? `:${ref.kind}` : "";
   return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}${kind}`.toLowerCase();
 }
 
@@ -195,7 +214,11 @@ export type ForgeRefCardError =
 
 export type ForgeRefCardResult =
   | { ok: true; data: ForgeRefCardData; fetchedAt: number }
-  | { ok: false; error: ForgeRefCardError; fetchedAt: number };
+  /**
+   * `problem` (newer servers): the tool's state in the one table's words (problem-words.ts); `error` stays the older
+   * code every window reads.
+   */
+  | { ok: false; error: ForgeRefCardError; problem?: Problem; fetchedAt: number };
 
 export const FORGE_REF_BODY_MAX = 4000;
 export const FORGE_REF_COMMENT_MAX = 600;
@@ -212,8 +235,9 @@ const SHORT_GITLAB_PULL = /^([A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100})*)\
  * anything else are not one.
  *
  * `projectHost` is the host of the thread's project's git remote. A
- * `group/sub/project!45` is on that host when it is a GitLab (GitLab reads the
- * short form on its own instance), else on gitlab.com. A URL keeps its own host.
+ * `group/sub/project!45` is on that host unless it is GitHub's or Bitbucket's
+ * (GitLab reads the short form on its own instance; `shortGitlabHost`), else
+ * on gitlab.com. A URL keeps its own host.
  */
 export function parseForgePullRef(text: string, projectHost?: string | null): ForgeRef | null {
   const value = text.trim();
@@ -232,9 +256,20 @@ export function parseForgePullRef(text: string, projectHost?: string | null): Fo
   return null;
 }
 
+/**
+ * Only GitLab writes `!45`, so a short ref in a project whose remote is on any host but GitHub's or Bitbucket's is on
+ * that host, whatever it is called: never gitlab.com for a self-managed project, which would send its private path to
+ * a public site. gitlab.com only when the project has no usable remote host or is on GitHub or Bitbucket. A host the
+ * Inbox knows as a GitLab with a port (`gitlabHosts: ["git.acme.com:8443"]`; a remote host never has one) keeps it.
+ */
 function shortGitlabHost(projectHost: string | null | undefined): string {
   const host = normalizeForgeHost(projectHost);
-  return host && classifyForgeHost(host) === "gitlab" ? host : "gitlab.com";
+  if (!host) return "gitlab.com";
+  const platform = classifyForgeHost(host);
+  if (platform === "github" || platform === "bitbucket") return "gitlab.com";
+  if (platform === "gitlab") return host;
+  const withPort = [...gitlabHostsSnapshot()].filter((known) => known.startsWith(`${host}:`));
+  return withPort.length === 1 ? withPort[0]! : host;
 }
 
 /** A pull or merge request's web address. */
@@ -251,4 +286,14 @@ export function forgePullRefText(ref: Pick<ForgeRef, "platform" | "host" | "owne
   if (ref.platform === "github" && ref.host === "github.com") return `${ref.owner}/${ref.repo}#${ref.number}`;
   if (ref.platform === "gitlab" && ref.host === "gitlab.com") return `${ref.owner}/${ref.repo}!${ref.number}`;
   return forgePullUrl(ref);
+}
+
+/**
+ * A PR as a person reads it on screen: `owner/repo#12`, `group/project!45`, with the host in front only off
+ * github.com and gitlab.com (`gitlab.example.dev/group/project!45`). Never the URL: that is `forgePullRefText`'s, for
+ * what an agent writes back.
+ */
+export function forgePullRefShort(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
+  const text = `${ref.owner}/${ref.repo}${ref.platform === "gitlab" ? "!" : "#"}${ref.number}`;
+  return ref.host === (ref.platform === "gitlab" ? "gitlab.com" : "github.com") ? text : `${ref.host}/${text}`;
 }

@@ -27,16 +27,16 @@ In these sessions "Ask this session" is the only Ask AI option. There is no prov
 - Stopping a question stops only that question.
 - If the session closes or can't be reached, Plannotator says so. It does not switch to a different AI.
 - **OpenCode 2 plan review:** the agent is waiting for your plan decision, so it cannot run a full turn. You get a quick answer from the session's context ("Quick answer from this session"), and nothing is added to the conversation.
-- **Over your tailnet (`--tailscale`):** "Ask this session" works on this computer and, on your phone or another device, only for the Tailscale login that owns this computer. Nothing to set up: Plannotator asks Tailscale who owns the machine. Anyone else on your tailnet who opens the review gets the providers below instead, never the agent session.
+- **Over your tailnet (`--tailscale`):** "Ask this session" works on this computer and, on your phone or another device, only for the Tailscale login that owns this computer. Nothing to set up: Plannotator asks Tailscale who owns the machine. Any other Tailscale account gets a page saying the session belongs to this computer's owner.
 
 You pick a provider as before (see below) when:
 
-- the session is in remote mode, or you open a `--tailscale` session with a Tailscale login other than the one that owns the computer
+- the session is in remote mode
 - Plannotator was opened from OpenCode 1
 - the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`)
 - you run the `plannotator` CLI yourself, outside an agent session
 
-Review Agents, Code Tour and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
+Review Agents and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.
 
 ## Supported providers
 
@@ -44,13 +44,13 @@ Review Agents, Code Tour and Guided Review are separate from Ask AI. They always
 
 Requires the `claude` CLI installed and authenticated. Uses Claude Code's full system prompt, so the AI has the same capabilities as a Claude Code session — file reading, search, web access — plus the diff context.
 
-**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
+**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent and Guided Review pickers show the same list.
 
 ### Codex (via Codex SDK)
 
 Requires the `codex` CLI installed and authenticated. The AI operates in a sandboxed read-only mode with the diff context injected as a system prompt prefix.
 
-**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
+**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent and Guided Review pickers show the same list.
 
 ### Pi (via RPC subprocess)
 

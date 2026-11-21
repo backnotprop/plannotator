@@ -50,19 +50,41 @@ export function normalizeForgeHost(host: string | null | undefined): string | nu
 
 /**
  * Classify a remote host by name: exact/prefix github is GitHub (github.com
- * and GitHub Enterprise hosts like `github.acme.com`); gitlab.com, `gitlab.*`
- * and `*.gitlab.*` are GitLab; bitbucket.org is Bitbucket Cloud (Bitbucket
- * Data Center has another API and is not one). A structured match, not a
- * bare substring: `mygitlabproxy.example.com` does not qualify. Opaque
+ * and GitHub Enterprise hosts like `github.acme.com`); a host with a label
+ * (before its last) that is `gitlab` or starts `gitlab-` is GitLab
+ * (gitlab.com, `gitlab.acme.dev`, `code.gitlab.acme.dev`,
+ * `gitlab-master.example.com`), and so is a host learned as one
+ * (`learnGitlabHosts`); bitbucket.org is Bitbucket Cloud (Bitbucket Data
+ * Center has another API and is not one). A structured match, not a bare
+ * substring: `mygitlabproxy.example.com` does not qualify. Opaque
  * self-hosted names return null.
  */
 export function classifyForgeHost(host: string): ForgePlatform | null {
   if (host === "github.com" || host.startsWith("github.")) return "github";
   if (host === "bitbucket.org") return "bitbucket";
-  if (host === "gitlab.com" || host.startsWith("gitlab.") || host.includes(".gitlab.")) {
-    return "gitlab";
-  }
+  if (host.split(".").slice(0, -1).some(gitlabLabel) || knownGitlabHosts.has(host)) return "gitlab";
   return null;
+}
+
+const gitlabLabel = (label: string): boolean => label === "gitlab" || label.startsWith("gitlab-");
+
+let knownGitlabHosts: ReadonlySet<string> = new Set();
+const knownGitlabListeners = new Set<() => void>();
+
+export function learnGitlabHosts(hosts: Iterable<string>): void {
+  const next = new Set([...hosts].map((host) => host.toLowerCase()));
+  if (next.size === knownGitlabHosts.size && [...next].every((host) => knownGitlabHosts.has(host))) return;
+  knownGitlabHosts = next;
+  for (const listener of knownGitlabListeners) listener();
+}
+
+export function subscribeGitlabHosts(listener: () => void): () => void {
+  knownGitlabListeners.add(listener);
+  return () => knownGitlabListeners.delete(listener);
+}
+
+export function gitlabHostsSnapshot(): ReadonlySet<string> {
+  return knownGitlabHosts;
 }
 
 export interface ForgeRefLinks {

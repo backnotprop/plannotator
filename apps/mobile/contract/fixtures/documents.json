@@ -1,0 +1,40 @@
+{
+  "about": "Invented Markdown files for the blocks a document is split into. scripts/mobile/vectors-files.ts runs the window's own parser over these (packages/ui/utils/parser.ts parseMarkdownToBlocks and computeListIndices, with the front matter rule of packages/core/annotatable.ts) and scripts/mobile/vectors.ts writes vectors/documents.json. None holds display math, a raw HTML block or a link reference definition: the phone does not have those parts of the parser yet.",
+  "documents": [
+    {
+      "name": "retry-plan.md",
+      "note": "A plan: headings, paragraphs, lists, a table, code, a quote, a rule",
+      "text": "# Retry plan for the relay client\n\nStatus: **draft** · Owner: `relay` · Target: next release\n\n## Problem\n\nThe client drops its socket when the laptop sleeps and never comes back.\nIt retries at once, three times, then gives up.\n\n## Proposal\n\n1. Retry with a growing wait, capped at 60 seconds.\n2. Add jitter so a fleet does not retry in step.\n5. Stop after ten minutes and say so.\n\n- [x] Reproduce on a sleeping laptop\n- [ ] Ship behind a flag\n  - nested bullet\n    continued on the next line\n* star bullet\n\n  A loose paragraph inside the item.\n\n| Attempt | Wait | Jitter |\n|---|---:|:---:|\n| 1 | 1 s | 250 ms |\n| 2 | 2 s | 250 ms |\n| 6+ | 60 s | `250 ms` |\n\n```ts\nconst wait = Math.min(60_000, 1000 * 2 ** tries)\nawait sleep(wait + jitter(250))\n```\n\n> Ten minutes is a guess.\n> Measure before the release.\n\n---\n\n### Open questions\n\n#123 is not a heading, and neither is #hashtag.\n"
+    },
+    {
+      "name": "alerts.md",
+      "note": "Alerts, a quote with blank edges, nested fences, a directive, an unclosed fence",
+      "text": "> [!NOTE]\n> Read this first.\n>   indented under it\n\n>\n> A quote that starts with a blank line.\n>\nNot a lazy line.\n\n````md\n```js\ninner()\n```\n````\n\n:::note\nBody of the note.\nSecond line.\n:::\n\n::: question-block\nnever closed\n#still body\n\n```\nunclosed code\n"
+    },
+    {
+      "name": "front.md",
+      "note": "Front matter is not read, and lines count from the file's own first line",
+      "text": "---\ntitle: Rollout\ntags: [a, b]\n---\n\n\n# Rollout\n\nFirst paragraph.\n"
+    },
+    {
+      "name": "notes.txt",
+      "note": "A text file keeps its front matter lines: they are a rule and words",
+      "text": "---\ntitle: not front matter here\n---\nBody.\n"
+    },
+    {
+      "name": "edges.md",
+      "note": "Tabs, numbered items past nine, a table at the end, trailing spaces, carriage returns",
+      "text": "\t- tabbed item\n\t\t- deeper\n10. ten\n11. eleven\n- bullet breaks the run\n3. three again\n\nPara one  \nsame para\r\n\r\nPara two\n***\n####### seven hashes\n#\n## \n-not a bullet\n1.no space\n| a | b |\n| 1 \\| 2 | `x|y` |"
+    },
+    {
+      "name": "empty.md",
+      "note": "Nothing at all",
+      "text": ""
+    },
+    {
+      "name": "one.md",
+      "note": "One line, no line break",
+      "text": "Just this."
+    }
+  ]
+}

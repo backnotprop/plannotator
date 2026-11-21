@@ -1,0 +1,47 @@
+/* The free layout of thread panes after the list (config.json `inboxSplitView`; panes/ThreadPanes.tsx, FreeLayout.tsx).
+   @pierre/layouts (packages/vendor-pierre-layouts) places the panes; each pane's own card is the thread's section, as
+   with one thread, so the engine's host draws nothing of its own: no border, no background, no ring, no header. The
+   gutter between the cards is the engine's gap, and a divider sits in it. */
+.ib-layout.pierre-layout { flex: 1; width: auto; min-width: 0; min-height: 0; overflow: visible; isolation: auto; --layout-duration: 200ms; }
+.ib-layout > .pierre-layout-pane { transform: none; overflow: visible; border: 0; border-radius: var(--ib-pane-r); background: transparent; contain: none; }
+.ib-layout > .pierre-layout-pane:focus-visible { outline: none; }
+.ib-layout .pierre-layout-pane-inner { transform: none; }
+.ib-layout .pierre-layout-content { display: flex; gap: var(--ib-gutter); overflow: visible; }
+.ib-layout :is(.pierre-layout-focus, .pierre-layout-sr, .pierre-layout-drop, .pierre-layout-corner) { display: none; }
+/* A pane's content is a node the pane keeper moves (paneKeeper.tsx) inside the place it shows: neither box is drawn,
+   so the thread's card and a file beside it lay out as children of that place (inbox.css reaches them through both). */
+.ib-panehost, .ib-panedock { display: contents; }
+/* What `.ib-main > …` gives a thread's card and a file beside it (inbox.css), inside a pane. */
+.ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > :is(.ib-pane, .ib-view) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; overflow: var(--ib-clip-s, visible); }
+.ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > .ib-pane { flex: 1; min-width: 0; }
+.ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
+/* Only a pane against the window's left edge clears the window's buttons (inbox.css `--ib-controls-left`). */
+.ib-layout > .pierre-layout-pane:not([data-layout-edges~="left"]) { --ib-controls-left: 0px; }
+/* The divider: nothing until hovered or dragged, then a hairline in the gutter. */
+.ib-layout > .pierre-layout-separator { background: transparent; border-radius: 0; }
+.ib-layout > .pierre-layout-separator::after { content: ""; position: absolute; background: var(--ring); opacity: 0; transition: opacity 120ms ease-out; }
+.ib-layout > .pierre-layout-separator[data-direction="horizontal"]::after { top: 0; bottom: 0; left: calc(50% - 0.5px); width: 1px; }
+.ib-layout > .pierre-layout-separator[data-direction="vertical"]::after { left: 0; right: 0; top: calc(50% - 0.5px); height: 1px; }
+.ib-layout > .pierre-layout-separator:is(:hover, :focus-visible, [data-preview="true"]) { background: transparent; }
+.ib-layout > .pierre-layout-separator:is(:hover, :focus-visible, [data-preview="true"])::after { opacity: 1; }
+/* A pane is moved by its header. */
+.ib-layout .ib-phead { cursor: grab; }
+.ib-layout > .pierre-layout-pane[data-pane-dragging] { opacity: 0.55; }
+/* The pane the person is not in: its header tinted and its title in the secondary text colour and weight, so the
+   active one (the card's own header, its title in the text colour) reads as the one keys and typing go to. No border
+   or ring marks either. */
+[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: var(--muted); }
+/* Dark themes put --muted barely above --card: the quiet header sinks toward the window's background instead. */
+.dark [data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--background) 88%, var(--card)); }
+[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); font-weight: 500; }
+
+/* A pane carried by its header (paneDrag.ts): its pill; and where letting go puts a pane or a row's thread (paneDrop.ts). */
+:root[data-ib-dragging], :root[data-ib-dragging] * { cursor: grabbing !important; user-select: none !important; }
+.ib-dragghost { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; display: flex; align-items: center; gap: 8px; max-width: 320px; padding: 5px 10px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 6px 20px rgb(0 0 0 / 0.16), 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent); font-size: 12.5px; line-height: 18px; white-space: nowrap; }
+.ib-dragghost-what { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-dragghost-act { flex: none; color: var(--primary); font-weight: 550; }
+.ib-dragghost[data-none] .ib-dragghost-act { display: none; }
+.ib-droppreview { position: fixed; z-index: 60; pointer-events: none; border-radius: var(--ib-pane-r, 10px); background: color-mix(in oklch, var(--primary) 14%, transparent); transition: left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-droppreview, .ib-layout > .pierre-layout-separator::after { transition: none; }
+}

@@ -37,6 +37,7 @@ import {
   INBOX_ATTACHMENTS_PICTURES_LINE,
   INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE,
   INBOX_BRIEFING_FROM_NOW_ON,
+  INBOX_CHANGE_RULE,
   INBOX_CHANNEL_RULE,
   INBOX_COMMAND_BRIEFING,
   INBOX_DELEGATED_OPTIONS_RULE,
@@ -58,6 +59,7 @@ import { INBOX_MCP_INSTRUCTIONS } from "../packages/server/inbox-mcp";
 import { INBOX_NOTE_BODY } from "../packages/server/inbox-agent-notes";
 import { createAgentEnvironmentFor } from "../packages/server/inbox-agents";
 import { formatInboxHelp } from "../apps/hook/server/inbox-help";
+import { buildLlmsInbox } from "../apps/marketing/src/lib/llms";
 import { inboxCommandTurnText } from "../apps/opencode-plugin/cli-bridge";
 import { runDroidInboxCommand } from "./helpers/droid-inbox-command";
 
@@ -294,6 +296,28 @@ describe("Inbox guidance parity across harnesses", () => {
     for (const [surface, text] of Object.entries(SURFACES)) {
       expect([surface, /screenshot or image usually reads fastest|short summary, files in `attachments`|put the files to read in `attachments`/.test(text)]).toEqual([surface, false]);
     }
+  });
+
+  test("a question that proposes a change shows it: every body description, --help, the skill and llms.txt carry the change rule word for word", () => {
+    // Approval "before-after" (2026-11-18): the person could not tell where a proposed change sits or what surrounds it.
+    const send = INBOX_DEFAULT_TOOLS.find((tool) => tool.name === "send_message")!;
+    const mcpBody = (send.inputSchema.properties as Record<string, { description?: string }>).body!.description!;
+    const toolBody = ((inboxAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties ?? {}) as Record<string, { description?: string }>).body!.description!;
+    const modBody = ((modAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties ?? {}) as Record<string, { description?: string }>).body!.description!;
+    const surfaces: Record<string, string> = {
+      "tool: Claude Code, Pi, OpenCode": toolBody,
+      "tool: the Claude Code mod": modBody,
+      "MCP send_message (Codex, Gemini, Cursor, MCP clients)": mcpBody,
+      "plannotator inbox --help": SURFACES["plannotator inbox --help"]!,
+      "plannotator skill": SURFACES["plannotator skill"]!,
+      // The page as served, so the bullet itself is checked (an import line alone would not count).
+      "llms.txt": buildLlmsInbox(),
+    };
+    for (const [surface, text] of Object.entries(surfaces)) {
+      expect([surface, text.includes(INBOX_CHANGE_RULE)]).toEqual([surface, true]);
+    }
+    // Right after the pictures rule on every body.
+    for (const body of [toolBody, modBody, mcpBody]) expect(body).toContain(`${INBOX_PICTURES_RULE}\n${INBOX_CHANGE_RULE}`);
   });
 
   test("the skill's description carries the subagent rule", () => {
