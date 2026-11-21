@@ -543,6 +543,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const merged = useRef<{ key: string; model: SearchModel } | null>(null);
   const carry = useRef<{ key: string; top: number | null; height: number } | null>(null);
   const pointed = useRef(false);
+  const moved = useRef(false);
   const pressing = useRef(false);
   const heldMerge = useRef<(() => void) | null>(null);
   const optionsRef = useRef<SearchOption[]>([]);
@@ -579,7 +580,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
             const apply = () => {
               if (seq !== requestSeq.current) return;
               const at = hlRef.current;
-              const option = at === null ? undefined : optionsRef.current[at];
+              const option = at === null || !moved.current ? undefined : optionsRef.current[at];
               const shown = at === null ? null : document.getElementById(optionId(at));
               carry.current = option ? { key: optionKey(option), top: shown ? shown.getBoundingClientRect().top : null, height: listRef.current?.clientHeight ?? 0 } : null;
               setAnswered((current) => (current && current.key === key ? { ...current, model: keepingRow(model, option) } : current));
@@ -682,6 +683,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
   useLayoutEffect(() => {
     pointed.current = false;
+    moved.current = false;
     carry.current = null;
     if (listRef.current) listRef.current.style.maxHeight = '';
     setHl(options.length > 0 ? 0 : null);
@@ -834,6 +836,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       if (options.length === 0) return;
       const down = event.key === 'ArrowDown';
       pointed.current = false;
+      moved.current = true;
       setHl((current) => (current === null ? (down ? 0 : options.length - 1) : (current + (down ? 1 : -1) + options.length) % options.length));
       return;
     }
@@ -1123,6 +1126,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               'data-option': i,
               onPointerMove: () => {
                 pointed.current = true;
+                moved.current = true;
                 if (hl !== i) setHl(i);
               },
               onMouseDown: keepInputFocus,
