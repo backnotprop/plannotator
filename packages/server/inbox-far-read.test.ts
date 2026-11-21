@@ -200,17 +200,19 @@ describe("read_thread of a thread on a linked machine", () => {
     expect(mini.store.pendingReplies("ses_builder").map((m) => m.id)).toEqual(waiting);
   });
 
-  test("a paired cloud agent's read of a far id stays this Inbox's own: no linked machine is asked", async () => {
+  test("a paired cloud agent reads a far thread too, with no file command it cannot run", async () => {
     const studio = machine("Studio");
     const mini = machine("Mini");
-    const id = await thread(mini);
-    let asked = 0;
-    const link = linkTo(mini, { rows: [id], request: async () => (asked++, Response.json({}, { status: 500 })) });
-    readerTools(studio, [link], {});
+    const id = await thread(mini, ["notes.md"]);
+    const link = linkTo(mini, { rows: [id] });
+    readerTools(studio, [link], { [link.id]: "Mini" });
     studio.context.cloudAgent = { homeRoot: studio.root };
     const read = await studio.tools().read_thread!.handler({ thread_id: id }, {});
-    expect(read.content[0]!.text).toBe(`thread_not_found: No thread ${id}.`);
-    expect(asked).toBe(0);
+    const text = read.content[0]!.text;
+    expect(text.startsWith(`${FAR_READ_WORDS.on("Mini")}${FAR_READ_WORDS.cloudFiles("Mini")}\n`)).toBe(true);
+    expect(text).toContain("The lower one, 100 a minute.");
+    expect(text).toContain(`(to your machine: ${FAR_READ_WORDS.cloudFetch})`);
+    expect(text).not.toContain("inbox call fetch_file");
   });
 
   test("takes exactly what a local read takes: a stop notice's id, a fractional cursor, a message the thread lacks", async () => {
@@ -440,10 +442,12 @@ describe("a far thread's files", () => {
 
 describe("the door routes", () => {
   test("only a linked machine's token reaches them: never a phone, and never through the window routes", () => {
-    for (const name of ["GET agent-read", "GET agent-file"]) {
+    for (const name of ["GET agent-read", "GET agent-file", "GET agent-search", "GET agent-threads"]) {
       expect(doorRouteTable().find((row) => row.name === name)).toMatchObject({ grant: "machine" });
     }
     expect(doorRouteOf("GET", "agent-read", false)).toBeNull();
     expect(doorRouteOf("GET", "agent-file", false)).toBeNull();
+    expect(doorRouteOf("GET", "agent-search", false)).toBeNull();
+    expect(doorRouteOf("GET", "agent-threads", false)).toBeNull();
   });
 });

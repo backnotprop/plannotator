@@ -18,7 +18,7 @@ import { writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload } from "@plannotator/shared/inbox/uploads";
 import { INBOX_AGENT_FETCH_PIECE_BYTES, inboxAgentFetchAction } from "./inbox-agent-files";
-import { createInboxAgentDoor } from "./inbox-agent-door";
+import { CLOUD_FAR_FILE_REFUSAL, createInboxAgentDoor } from "./inbox-agent-door";
 import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 
@@ -106,10 +106,21 @@ async function world() {
       }
       return { ok: true, structured: result.structuredContent };
     });
-  return { root, store, tools, threadId, root0, reply, big, shot, drawing, call, refusal, fetchFile };
+  return { root, store, mcp, tools, threadId, root0, reply, big, shot, drawing, call, refusal, fetchFile };
 }
 
 describe("a paired cloud agent fetches the files of a thread", () => {
+  test("a message this computer does not hold, with a machine linked, is refused in words: a linked machine's files do not come through yet", async () => {
+    const w = await world();
+    const far = `msg_${"01JD5FAR".padEnd(26, "0")}`;
+    expect(await w.refusal({ message_id: far, file: "att_x" })).toStartWith("message_not_found: ");
+    w.mcp.findOnMachines = () => ({ any: () => true }) as never;
+    expect(await w.refusal({ message_id: far, file: "att_x" })).toBe(`file_on_linked_machine: ${CLOUD_FAR_FILE_REFUSAL(far)}`);
+    // This computer's own files still come.
+    const piece = await w.call(INBOX_AGENT_FETCH_FILE, { message_id: w.root0.id, file: "notes.md" });
+    expect(piece.isError).toBeUndefined();
+  });
+
   test("read_thread through the door lists every file with its path on the person's computer and the command that fetches it", async () => {
     const w = await world();
     const read = await w.call("read_thread", { thread_id: w.threadId });

@@ -9,6 +9,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, readInboxUpload, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { inboxAgentFetchAction } from "./inbox-agent-files";
+import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
 import { bytesOfBase64, createInboxAgentPieces, inboxAgentPieceAction } from "./inbox-agent-pieces";
 import { inboxAgentRouteAction } from "./inbox-agent-routes";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
@@ -54,6 +55,10 @@ class DoorRefusal extends Error {
     super(message);
   }
 }
+
+/** DRAFT words (the owner's to approve): a cloud agent's fetch_file of a message this computer does not hold. */
+export const CLOUD_FAR_FILE_REFUSAL = (id: string): string =>
+  `No message ${id} on this computer. A file of a thread on a linked computer cannot be fetched by a cloud agent yet.`;
 
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -280,6 +285,10 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     }
     const pieceResult = inboxAgentPieceAction(pieces, agent.session, tool, args);
     if (pieceResult) return pieceResult;
+    // A file of a linked machine's thread: read_thread shows it, but its bytes do not come through the pairing yet.
+    if (tool === INBOX_AGENT_FETCH_FILE && typeof args.message_id === "string" && !store.message(args.message_id.trim()) && context.mcp.findOnMachines?.()?.any()) {
+      throw new DoorRefusal("file_on_linked_machine", CLOUD_FAR_FILE_REFUSAL(args.message_id.trim()));
+    }
     const fetched = await inboxAgentFetchAction(store, agent.session, tool, args);
     if (fetched) return fetched;
     const routed = await inboxAgentRouteAction(context.route, { host: inboxCloudHostOf(agent.preset), session: agent.session }, tool, args);

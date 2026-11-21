@@ -5,6 +5,8 @@
       "GET accounts",
       "GET agent-file",
       "GET agent-read",
+      "GET agent-search",
+      "GET agent-threads",
       "GET attachments/:id/audio",
       "GET attachments/:id/download",
       "GET attachments/:id/image",

@@ -451,6 +451,8 @@ export interface InboxSearchQuery {
   current?: string | null;
   /** The order: best match (default) or newest first. */
   sort?: InboxSearchSort | null;
+  /** Each row's rank too (`scores`), so answers of two Inboxes merge in one order (a linked machine's agent search). */
+  scores?: boolean;
 }
 
 export interface InboxSearchProjectRef {
@@ -540,4 +542,6 @@ export interface InboxSearchAnswer {
   groups: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> | null;
   /** An empty query with no filters: the threads the person looked at last. */
   recent: InboxSearchThreadRow[] | null;
+  /** With `scores`: each group's rows' ranks, in the rows' order (higher first). */
+  scores?: Partial<Record<InboxSearchGroupId, number[]>>;
 }

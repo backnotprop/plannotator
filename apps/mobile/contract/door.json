@@ -2019,6 +2019,38 @@
       "relay": true
     },
     {
+      "name": "GET agent-search",
+      "method": "GET",
+      "path": "agent-search",
+      "params": [],
+      "call": "getAgentSearch",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "GET agent-threads",
+      "method": "GET",
+      "path": "agent-threads",
+      "params": [],
+      "call": "getAgentThreads",
+      "window": null,
+      "grant": "machine",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST link-back",
       "method": "POST",
       "path": "link-back",

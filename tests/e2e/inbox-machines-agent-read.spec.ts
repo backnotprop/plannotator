@@ -13,7 +13,12 @@
  *  3b. A read from Studio leaves MacBook's delivery state unchanged: the person's reply still waits for MacBook's
  *     agent, and that agent's own read takes it.
  *  4. A reply into MacBook's thread from Studio's agent says it is not available from this computer yet.
- *  5. MacBook stopped: Studio's agent is told at once that it cannot be reached, with its name.
+ *  4b. Studio's agent finds MacBook's thread with search and with read_thread's list, in its own project (the same
+ *      folder name there), each far row marked with MacBook; then read by its id.
+ *  4c. "This project" by git remote: a project in another folder on MacBook with the same origin is found from
+ *      Studio's; one with the same folder name and another origin is not.
+ *  5. MacBook stopped: Studio's agent is told at once that it cannot be reached, with its name; search and the list
+ *     answer with Studio's own rows and one line naming MacBook.
  *
  * Build the binary first (see inbox.spec.ts).
  */
@@ -228,6 +233,45 @@ test('4. a reply into the far thread says plainly it is not available from this 
   expect(sent.err).toContain('thread_on_other_machine: ');
 });
 
+/** A git project with `origin` set, as a clone on that computer would have it. */
+function cloneOf(m: Machine, folder: string, origin: string): string {
+  const dir = scratchProject(join(m.root, 'code'), folder);
+  spawnSync('git', ['remote', 'add', 'origin', origin], { cwd: dir, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+  return dir;
+}
+
+test('4b. Studio\'s agent finds MacBook\'s thread with search and the list, in its own project', () => {
+  const here = join(studio.root, 'code', 'billing-svc');
+  const found = call(studio, 'search', { query: 'Refund webhook' }, { cwd: here });
+  expect(found.status, found.err).toBe(0);
+  expect(found.json!.results).toContainEqual(expect.objectContaining({ thread_id: onMac.id, machine: { id: macbook.id, name: 'MacBook' } }));
+  const listed = call(studio, 'read_thread', { asked_by: 'anyone' }, { cwd: here });
+  expect(listed.status, listed.err).toBe(0);
+  expect(listed.json!.threads).toContainEqual(expect.objectContaining({ thread_id: onMac.id, machine: { id: macbook.id, name: 'MacBook' } }));
+  // Studio's own thread is still listed, unmarked.
+  expect((listed.json!.threads as { machine?: unknown }[]).some((t) => !t.machine)).toBe(true);
+  const got = call(studio, 'read_thread', { thread_id: onMac.id });
+  expect(got.status, got.err).toBe(0);
+  expect(got.json!.machine).toEqual({ id: macbook.id, name: 'MacBook' });
+});
+
+test('4c. this project on the other computer is the one with the same git remote', async () => {
+  const mine = cloneOf(studio, 'ledger', 'git@github.com:acme/ledger.git');
+  const same = cloneOf(macbook, 'ledger-main', 'https://github.com/acme/ledger.git');
+  const other = cloneOf(macbook, 'ledger', 'https://github.com/someone-else/ledger.git');
+  const agent = await SimAgent.connect({ binary, env: macbook.env, name: 'Claude Code', host: 'claude-code', cwd: macbook.root });
+  agents.push(agent);
+  const sameId = (await agent.send({ project_path: same, subject: 'Ledger migration', body: 'Migration of the ledger tables.' })).thread_id as string;
+  const otherId = (await agent.send({ project_path: other, subject: 'Other ledger migration', body: 'Migration of another ledger.' })).thread_id as string;
+  // Studio's project needs no thread of its own: its folder's remote names it.
+  await expect.poll(() => {
+    const found = call(studio, 'search', { query: 'migration' }, { cwd: mine });
+    return (found.json?.results as { thread_id: string }[] | undefined)?.map((r) => r.thread_id) ?? [];
+  }, { timeout: 15_000 }).toEqual([sameId]);
+  const every = call(studio, 'search', { query: 'migration', all_projects: true }, { cwd: mine });
+  expect((every.json!.results as { thread_id: string }[]).map((r) => r.thread_id).sort()).toEqual([sameId, otherId].sort());
+});
+
 test('5. with the other computer stopped, the read says it cannot be reached, at once', async () => {
   await stopScratchInbox(macbook.dataDir);
   await expect.poll(async () => (await read<{ machines: { id: string; state: string }[] }>(studio, '/api/inbox/machines')).machines.find((m) => m.id === macbook.id)?.state, { timeout: 30_000 }).toBe('offline');
@@ -236,4 +280,12 @@ test('5. with the other computer stopped, the read says it cannot be reached, at
   expect(got.status).toBe(1);
   expect(got.err).toContain('machine_offline: This thread is on MacBook, which cannot be reached now');
   expect(Date.now() - started).toBeLessThan(15_000);
+  const here = join(studio.root, 'code', 'billing-svc');
+  const found = call(studio, 'search', { query: 'Ledger export' }, { cwd: here });
+  expect(found.status, found.err).toBe(0);
+  expect((found.json!.results as { machine?: unknown }[]).every((r) => !r.machine)).toBe(true);
+  expect(found.json!.not_searched).toEqual(['Not searched: MacBook, which cannot be reached now (asleep, offline or still connecting).']);
+  const listed = call(studio, 'read_thread', { asked_by: 'anyone' }, { cwd: here });
+  expect(listed.json!.not_listed).toEqual(['Not listed: MacBook, which cannot be reached now (asleep, offline or still connecting).']);
+  expect(Date.now() - started).toBeLessThan(30_000);
 });

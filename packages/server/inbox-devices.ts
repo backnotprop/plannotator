@@ -368,7 +368,7 @@ const ALLOWLIST: readonly DoorRoute[] = [
  * The door's own routes, beside the allowlist: `pair` (no token, answered before the token is read), `revoke`, and a
  * linked machine's own (never on the allowlist, so no phone reaches them): its link-back and unlink (inbox-machines.ts
  * answers them), this computer's update, read and started for a linked machine's window, this computer's accounts,
- * and its agents' reads of this computer's threads and their files (`agent-read`, `agent-file`). `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
+ * and its agents' reads of this computer's threads and their files (`agent-read`, `agent-file`), search and list (`agent-search`, `agent-threads`). `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
  * or an answer not here, does not compile. `needs`: answered only while this Inbox has it, and only then listed.
  */
 const DOOR_OWN_ROUTES = [
@@ -378,6 +378,9 @@ const DOOR_OWN_ROUTES = [
   // A linked machine's agent reads this Inbox's threads and fetches the files they list (inbox-far-read.ts, mark `agent-read`).
   { method: "GET", route: "agent-read", grant: "machine", needs: "machines" },
   { method: "GET", route: "agent-file", grant: "machine", needs: "machines" },
+  // Its agent's search and thread list of this Inbox's threads (inbox-far-find.ts, mark `agent-search`).
+  { method: "GET", route: "agent-search", grant: "machine", needs: "machines" },
+  { method: "GET", route: "agent-threads", grant: "machine", needs: "machines" },
   { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
   { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
   { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
@@ -601,6 +604,8 @@ export interface InboxDevicesContext {
   machines?: () => InboxDoorMachines | null;
   /** A linked machine's agents' reads of this Inbox's threads and their files (inbox-far-read.ts). */
   agentRead?: { read: (url: URL) => Response; file: (url: URL) => Promise<Response> };
+  /** A linked machine's agents' search and thread list of this Inbox's threads (inbox-far-find.ts). */
+  agentFind?: { search: (url: URL) => Promise<Response>; threads: (url: URL) => Response };
   /** A linked machine's Update (inbox-updates.ts). */
   machineUpdate?: { read: () => unknown; start: () => Promise<{ outcome: string }> };
   /** Tests: the door's look-again clock (`INBOX_DOOR_REPUBLISH`). Default: unref'd timers. */
@@ -1150,6 +1155,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // read_thread's read of one of this Inbox's threads, and a file it lists: reads only, as a guest's.
     "GET agent-read": async (_req, url, device) => context.agentRead?.read(url) ?? routeNotFound(device),
     "GET agent-file": async (_req, url, device) => (context.agentRead ? await context.agentRead.file(url) : routeNotFound(device)),
+    // Its agent's search and thread list here: reads only, as a guest's.
+    "GET agent-search": async (_req, url, device) => (context.agentFind ? await context.agentFind.search(url) : routeNotFound(device)),
+    "GET agent-threads": async (_req, url, device) => context.agentFind?.threads(url) ?? routeNotFound(device),
     "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
     "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
     // The body is never read, so a machine cannot name a version or a place to download from.

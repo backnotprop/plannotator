@@ -372,6 +372,11 @@ import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller
 import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { agentFileDoorAnswer, agentReadDoorAnswer } from "./inbox-far-read";
+import { agentSearchDoorAnswer, agentThreadsDoorAnswer } from "./inbox-far-find";
+import { farRemoteKey } from "./inbox-machine-agent-find";
+
+/** How long an agent's search or list waits for git to name this project's remote before it asks the linked machines. */
+const FAR_REMOTE_WAIT_MS = 2_000;
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { mergePullBoards } from "./inbox-machine-pulls";
@@ -1863,6 +1868,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
     readOnMachine: async (ask) => (machines ? machines.readThread(ask) : null),
     farThreadMachine: (threadId) => machines?.farThreadMachine(threadId) ?? null,
+    // search and read_thread's list ask the linked machines too, naming a project by its git remote (inbox-mcp-far-find.ts).
+    findOnMachines: () => machines?.agentFind ?? null,
+    projectRemoteKey: async (root) =>
+      farRemoteKey(repos.known(root) ? repos.peek(root) : await Promise.race([repos.refresh(root), new Promise<null>((resolve) => setTimeout(() => resolve(null), FAR_REMOTE_WAIT_MS))])),
     snoozeMade: () => markSnoozeUsed(),
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
@@ -8310,6 +8319,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       machines: () => machines ?? null,
       // A linked machine's agents read this Inbox's threads and their files (inbox-far-read.ts).
       agentRead: { read: (url) => agentReadDoorAnswer(mcpContext, url), file: (url) => agentFileDoorAnswer(store, url) },
+      // ...and search and list them (inbox-far-find.ts): a project named by its git remote, from the cache only.
+      agentFind: {
+        search: (url) => agentSearchDoorAnswer({ store, searchIndex: search.index, remoteKeyOf: (root) => farRemoteKey(repos.get(root)) }, url),
+        threads: (url) => agentThreadsDoorAnswer({ store, remoteKeyOf: (root) => farRemoteKey(repos.get(root)) }, url),
+      },
       machineUpdate: {
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),

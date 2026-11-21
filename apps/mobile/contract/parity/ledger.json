@@ -21477,6 +21477,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-door-get-agent-search",
+      "title": "door:GET agent-search",
+      "surface": [
+        "door:GET agent-search"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-agent-threads",
+      "title": "door:GET agent-threads",
+      "surface": [
+        "door:GET agent-threads"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

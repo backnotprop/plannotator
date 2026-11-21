@@ -1,7 +1,7 @@
 /**
  * read_thread of a thread on a linked machine (inbox-far-read.ts): the same read, options and text as a local one,
- * with a first line that says which computer it is on. Only for an id this Inbox's store does not hold, and only for
- * an agent on this computer: a paired cloud agent reads this Inbox's own threads, as before.
+ * with a first line that says which computer it is on. Only for an id this Inbox's store does not hold. A paired cloud
+ * agent reads them too (the person's computer asks for it), but cannot fetch their files yet: no command is printed.
  */
 
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -11,7 +11,7 @@ import { ok, okComplete, type ToolResult } from "./inbox-mcp-result";
 export interface InboxFarReadMcpContext {
   store: InboxStore;
   baseUrl: () => string;
-  /** Through the agent door: a paired cloud agent, which reads this Inbox's threads only. */
+  /** Through the agent door: a paired cloud agent (it reads a linked machine's threads, not their files). */
   cloudAgent?: { homeRoot: string };
   /**
    * A thread a linked machine holds, read there (inbox-machine-agent-read.ts). Null: no linked machine holds it.
@@ -34,7 +34,7 @@ function farCandidate(store: InboxStore, input: FarReadAsk): boolean {
 
 /** The far read, or null when it is not one (the caller reads here, and says "No thread …" as before). */
 export async function farThreadRead(context: InboxFarReadMcpContext, input: FarReadAsk): Promise<ToolResult | null> {
-  if (!context.readOnMachine || context.cloudAgent || !farCandidate(context.store, input)) return null;
+  if (!context.readOnMachine || !farCandidate(context.store, input)) return null;
   const far = await context.readOnMachine(input);
   if (!far) return null;
   const { machine } = far;
@@ -52,6 +52,6 @@ export async function farThreadRead(context: InboxFarReadMcpContext, input: FarR
       { thread, url, machine: where },
     );
   }
-  const { text, result } = farThreadReadText(answer, far.name, url);
+  const { text, result } = farThreadReadText(answer, far.name, url, !!context.cloudAgent);
   return okComplete(text, { ...result, machine: where, ...(answer.steps ? { steps: answer.steps } : {}), ...(answer.pulls ? { pulls: answer.pulls } : {}) });
 }

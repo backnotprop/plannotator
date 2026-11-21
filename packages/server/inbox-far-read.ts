@@ -218,6 +218,10 @@ export const FAR_READ_WORDS = {
   on: (machine: string) => `This thread is on ${machine}.`,
   /** When a message shows files: their paths are that computer's, and how to get a copy here. */
   files: (machine: string) => ` Its files are on ${machine}; the command after each saves a copy on this computer and prints its path.`,
+  /** The same, for a paired cloud agent: its fetch_file reaches this computer's files only. */
+  cloudFiles: (machine: string) => ` Its files are on ${machine}, which a cloud agent cannot fetch from yet.`,
+  /** In place of each file's command, for a paired cloud agent. */
+  cloudFetch: "not available to a cloud agent yet",
 } as const;
 
 /** A machine's name on one line, for the words. */
@@ -228,13 +232,13 @@ const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]
 /** Control characters but a line break and a tab. */
 const CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 /** On one line: no control character, line break or line separator at all. */
-const oneLine = (text: string): string => text.replace(ESCAPES, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim();
+export const oneLine = (text: string): string => text.replace(ESCAPES, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim();
 
 /** The thread's own words (a message's body, its first words), printed as a local read prints them. */
 const CONTENT_KEYS = new Set(["body", "words"]);
 
 /** Every far string but the thread's own words with no terminal escape and no control character but a line break or tab. */
-function cleanStrings(value: unknown, key = ""): unknown {
+export function cleanStrings(value: unknown, key = ""): unknown {
   if (typeof value === "string") return CONTENT_KEYS.has(key) ? value : value.replace(ESCAPES, "").replace(CONTROLS, "");
   if (Array.isArray(value)) return value.map((item) => cleanStrings(item));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cleanStrings(v, k)]));
@@ -273,10 +277,12 @@ export function farAnswerCleaned<T extends FarReadAnswer>(answer: T): T {
 }
 
 /** A far windowed read as the local read's text: the line that says where, then exactly what a local read prints. */
-export function farThreadReadText(answer: Extract<FarReadAnswer, { result: unknown }>, machine: string, url: string): { text: string; result: ThreadWindowResult } {
+export function farThreadReadText(answer: Extract<FarReadAnswer, { result: unknown }>, machine: string, url: string, cloud = false): { text: string; result: ThreadWindowResult } {
   const result = { ...answer.result, url };
   const name = machineNameWords(machine);
   const files = result.thread.messages.some((m) => (m.files?.length ?? 0) > 0);
-  const head = `${FAR_READ_WORDS.on(name)}${files ? FAR_READ_WORDS.files(name) : ""}`;
+  // A paired cloud agent's fetch_file reaches this computer's files only: no command it cannot run.
+  if (cloud) for (const m of result.thread.messages) if (m.files) m.files = m.files.map((f) => ({ ...f, fetch: FAR_READ_WORDS.cloudFetch }));
+  const head = `${FAR_READ_WORDS.on(name)}${files ? (cloud ? FAR_READ_WORDS.cloudFiles(name) : FAR_READ_WORDS.files(name)) : ""}`;
   return { text: `${head}\n${windowedThreadText(result, answer.order, "", answer.lines)}`, result };
 }

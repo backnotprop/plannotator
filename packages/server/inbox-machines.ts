@@ -40,6 +40,7 @@ import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_RO
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { createMachineAgentRead, FAR_READ_REFUSALS } from "./inbox-machine-agent-read";
+import { createMachineAgentFind } from "./inbox-machine-agent-find";
 import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { createMachineBranches } from "./inbox-machine-branches";
@@ -454,6 +455,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const launchReads = createMachineLaunchReads();
   // An agent here reads a linked machine's thread, and saves its files here (inbox-machine-agent-read.ts).
   const agentRead = createMachineAgentRead({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
+  // ...and finds them: its search and read_thread's list ask every linked machine too (inbox-machine-agent-find.ts).
+  const agentFind = createMachineAgentFind({ peers: () => peers.values(), nameOf: (id) => links.get(id)?.name ?? "A linked machine" });
   const listeners = new Set<(frame: MachineFrame) => void>();
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1363,6 +1366,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     farCard,
     snoozeThread,
     readThread: agentRead.readThread,
+    /** An agent's search and thread list on every linked machine (inbox-machine-agent-find.ts). */
+    agentFind,
     /** The name of the linked machine whose list names `threadId` (send_message's reply_to there is refused in words). */
     farThreadMachine: (threadId: string): string | null => {
       const peer = [...peers.values()].find((p) => p.list?.rows.some((row) => row.thread_id === threadId));
