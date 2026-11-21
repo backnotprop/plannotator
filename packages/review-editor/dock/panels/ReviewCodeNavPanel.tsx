@@ -120,7 +120,7 @@ const ReferenceList: React.FC<{
   };
 
   return (
-    <div className="text-[11px]">
+    <div className="text-xs">
       {groups.map((group) => {
         const isCollapsed = collapsed.has(group.filePath);
         return (
@@ -139,10 +139,10 @@ const ReferenceList: React.FC<{
               <span className="font-medium truncate text-foreground">
                 {basename(group.filePath)}
               </span>
-              <span className="text-muted-foreground/60 truncate text-[10px]">
+              <span className="text-muted-foreground/60 truncate text-xs">
                 {dirname(group.filePath)}
               </span>
-              <span className="ml-auto text-[10px] font-mono text-muted-foreground/50 flex-shrink-0">
+              <span className="ml-auto text-xs font-mono text-muted-foreground/50 flex-shrink-0">
                 ({group.locations.length})
               </span>
             </button>
@@ -163,10 +163,10 @@ const ReferenceList: React.FC<{
                       onClick={() => onSelect(loc)}
                       data-code-nav-location={`${loc.filePath}:${loc.line}`}
                     >
-                      <span className="font-mono text-[10px] flex-shrink-0 w-8 text-right">
+                      <span className="font-mono text-xs flex-shrink-0 w-8 text-right">
                         :{loc.line}
                       </span>
-                      <span className="truncate font-mono text-[10px]">
+                      <span className="truncate font-mono text-xs">
                         {loc.snippet.trim()}
                       </span>
                     </button>

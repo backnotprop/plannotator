@@ -95,7 +95,7 @@ const BlockRendererBody: React.FC<{
       return (
         <Tag
           id={headingAnchorId}
-          className={styles}
+          className={`${styles} [overflow-wrap:anywhere]`}
           data-block-id={block.id}
           data-block-type="heading"
           {...sourceLineAttrs(block)}
@@ -146,7 +146,7 @@ const BlockRendererBody: React.FC<{
         ? checkboxOverrides.get(block.id)!
         : block.checked;
       const isInteractive = isCheckbox && !!onToggleCheckbox;
-      const textClass = `text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`;
+      const textClass = `text-sm leading-relaxed [overflow-wrap:anywhere] ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`;
       const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost, onNavigateAnchor };
       return (
         <div
@@ -268,7 +268,7 @@ const BlockRendererBody: React.FC<{
     default:
       return (
         <p
-          className="relative mb-4 leading-relaxed text-foreground/90 text-[15px]"
+          className="relative mb-4 leading-relaxed text-foreground/90 text-[15px] [overflow-wrap:anywhere]"
           data-block-id={block.id}
           // Blank lines the person typed (parse option keepBlankLines): N lines in all. This margin collapses with the
           // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.

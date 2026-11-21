@@ -1,0 +1,146 @@
+/*
+ * The Rex status marks on agents' icons (agents/rexMark.tsx; the owner's "jelly" marks, approved 2026-11-17; the
+ * design is the approved "Final: jelly"). Transform and opacity only (the individual `translate`, `rotate`
+ * and `scale` properties). Each agent's tempo and phase come in as --rx-t (0.82 to 1.18) and --rx-p (0 to 1): every
+ * duration is divided by the tempo and every delay is minus the phase of that duration, so a room of marks never
+ * moves in step.
+ *
+ * Nesting: .ib-rxm (placed over the icon's corner, never moves) > .ib-rxm-l (a layer: arrival, the answered pop,
+ * the extra pop) > .ib-rxm-jump > .ib-rxm-a > .ib-rxm-b (the body's beats) > shape, .ib-rxm-arc, .ib-rxm-ga >
+ * .ib-rxm-gb > .ib-rxm-g (the glyph, lagging, with its kind's character).
+ *
+ * Z-order: the mark is above every tile of its pile (z-index 6); a pile with a mark isolates, and so does a lone
+ * icon's box, so no mark rises over anything outside its icon or pile (a sticky bar, a menu). No tile gets a
+ * transform or will-change (they would trap the mark under the next tile).
+ */
+.ib-mk:has(> .ib-rxm) { position: relative; }
+:is(.ib-atiles, .ib-ss-pile):has(.ib-rxm),
+.ib-mk:has(> .ib-rxm):not(:is(.ib-atiles, .ib-ss-pile) .ib-mk),
+.am-btn:has(> .ib-rxm) { isolation: isolate; }
+.ib-rxm {
+  position: absolute; z-index: 6; pointer-events: none; overflow: visible;
+  right: calc(var(--rx-r, -3px) - var(--rx-dx, 0px));
+  --rx-halo: var(--card);
+}
+/* A waiting mark rises above its pile's other marks (it gathers on the corner, over the last tile's own). */
+.ib-rxm[data-rx-wait] { z-index: 7; }
+.ib-rxm svg { display: block; overflow: visible; }
+.ib-rxm-l, .ib-rxm-jump, .ib-rxm-a, .ib-rxm-b, .ib-rxm-arc, .ib-rxm-ga, .ib-rxm-gb { position: absolute; inset: 0; }
+.ib-rxm-l { inset: auto; }
+.ib-rxm-shape { position: absolute; inset: 0; }
+.ib-rxm-g { position: absolute; inset: 1.25px; }
+
+/* The halo is the surface under the mark. */
+.ib-sbagent .ib-rxm { --rx-halo: var(--ib-ground); }
+:is([role="listbox"], [role="menu"], [role="dialog"], .ib-menu, .ib-pop) .ib-rxm { --rx-halo: var(--popover); }
+.ib-sel .ib-rxm { --rx-halo: color-mix(in oklch, var(--primary) 15%, var(--card)); }
+
+/* Waiting, forever: two uneven jiggles, a hop now and then, the glyph lagging behind; on top, the kind's character. */
+.ib-rxm-l[data-rx="question"], .ib-rxm-l[data-rx="permission"], .ib-rxm-l[data-rx="signin"], .ib-rxm-l[data-rx="blocked"] {
+  --rx-d-a: calc(1250ms / var(--rx-t, 1));
+  --rx-d-b: calc(1730ms / var(--rx-t, 1));
+  --rx-d-j: calc(3300ms / var(--rx-t, 1));
+}
+.ib-rxm-l:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]):not([data-rx-out]) > .ib-rxm-jump { animation: rex-jump var(--rx-d-j) linear calc(-1 * var(--rx-p, 0) * var(--rx-d-j)) infinite; }
+.ib-rxm-l:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]):not([data-rx-out]) .ib-rxm-a { animation: rex-jiggle-a var(--rx-d-a) linear calc(-1 * var(--rx-p, 0) * var(--rx-d-a)) infinite; }
+.ib-rxm-l:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]):not([data-rx-out]) .ib-rxm-b { animation: rex-jiggle-b var(--rx-d-b) linear calc(-500ms / var(--rx-t, 1) - var(--rx-p, 0) * var(--rx-d-b)) infinite; }
+.ib-rxm-l:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]):not([data-rx-out]) .ib-rxm-ga { animation: rex-lag-a var(--rx-d-a) linear calc(-1 * var(--rx-p, 0) * var(--rx-d-a)) infinite; }
+.ib-rxm-l:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]):not([data-rx-out]) .ib-rxm-gb { animation: rex-lag-b var(--rx-d-b) linear calc(-500ms / var(--rx-t, 1) - var(--rx-p, 0) * var(--rx-d-b)) infinite; }
+.ib-rxm-l[data-rx="question"]:not([data-rx-out]) .ib-rxm-g {
+  animation:
+    rex-q-tilt calc(1700ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 1700ms / var(--rx-t, 1)) infinite,
+    rex-q-bob calc(1150ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 1150ms / var(--rx-t, 1)) infinite,
+    rex-q-breathe calc(900ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 900ms / var(--rx-t, 1)) infinite;
+}
+.ib-rxm-l[data-rx="permission"]:not([data-rx-out]) .ib-rxm-g { animation: rex-key-knock calc(1900ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 1900ms / var(--rx-t, 1)) infinite; }
+.ib-rxm-l[data-rx="permission"]:not([data-rx-out]) .ib-rxm-b {
+  animation:
+    rex-jiggle-b var(--rx-d-b) linear calc(-500ms / var(--rx-t, 1) - var(--rx-p, 0) * var(--rx-d-b)) infinite,
+    rex-key-nudge calc(1900ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 1900ms / var(--rx-t, 1)) infinite;
+}
+.ib-rxm-l[data-rx="signin"]:not([data-rx-out]) .ib-rxm-g { animation: rex-signin-walk calc(1700ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 1700ms / var(--rx-t, 1)) infinite; }
+.ib-rxm-l[data-rx="signin"]:not([data-rx-out]) .ib-rxm-b {
+  animation:
+    rex-jiggle-b var(--rx-d-b) linear calc(-500ms / var(--rx-t, 1) - var(--rx-p, 0) * var(--rx-d-b)) infinite,
+    rex-signin-sway calc(2100ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 2100ms / var(--rx-t, 1)) infinite;
+}
+
+/* Working: the arc runs round its track, with a surge. */
+.ib-rxm-l[data-rx="working"] .ib-rxm-arc { animation: rex-working calc(1900ms / var(--rx-t, 1)) linear calc(-1 * var(--rx-p, 0) * 1900ms / var(--rx-t, 1)) infinite; }
+
+/* A change while shown: each state arrives its own way (once); a waiting mark answered pops with a check and goes,
+   and the next fades in at 700 ms. At first everything is at rest (no data-rx-arrive). */
+.ib-rxm-l[data-rx-arrive="now"]:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]) { animation: rex-arrive 850ms linear both; }
+.ib-rxm-l[data-rx-arrive="now"]:is([data-rx="question"], [data-rx="permission"], [data-rx="signin"], [data-rx="blocked"]) .ib-rxm-gb { animation: rex-arrive-glyph 600ms linear both, rex-lag-b var(--rx-d-b) linear calc(-500ms / var(--rx-t, 1) - var(--rx-p, 0) * var(--rx-d-b)) infinite; }
+.ib-rxm-l[data-rx-arrive][data-rx="done"] { animation: rex-done-in 700ms linear both; }
+.ib-rxm-l[data-rx-arrive][data-rx="done"] .ib-rxm-g { animation: rex-done-glyph 700ms linear both; }
+.ib-rxm-l[data-rx-arrive][data-rx="error"] { animation: rex-error-in 440ms linear both; }
+.ib-rxm-l[data-rx-arrive]:is([data-rx="working"], [data-rx="idle"]) { animation: rex-fade-in 240ms linear both; }
+.ib-rxm-l[data-rx-arrive="late"] { animation-delay: 700ms !important; }
+.ib-rxm-l[data-rx-arrive="late"] .ib-rxm-g { animation-delay: 700ms; }
+.ib-rxm-l[data-rx-out="answered"] { animation: rex-answered 780ms linear both; }
+.ib-rxm-l[data-rx-out="answered"] .ib-rxm-g { animation: rex-answered-glyph 780ms linear both; }
+.ib-rxm-l[data-rx-out="fade"] { animation: rex-out 150ms linear both; }
+
+/* One more pop for a waiting mark (two names, so a second pop restarts it). */
+.ib-rxm-l[data-rx-pop="a"]:not([data-rx-arrive="now"]) { animation: rex-pop 900ms linear; }
+.ib-rxm-l[data-rx-pop="b"]:not([data-rx-arrive="now"]) { animation: rex-pop-b 900ms linear; }
+
+/* Off screen: nothing runs. */
+.ib-rxm[data-rx-off] * { animation-play-state: paused !important; }
+
+/* Reduced motion: still marks at rest; working's arc rests at 60 degrees; a change simply swaps the mark. */
+@media (prefers-reduced-motion: reduce) {
+  .ib-rxm, .ib-rxm * { animation: none !important; }
+  .ib-rxm-arc { rotate: 60deg; }
+  .ib-rxm-l[data-rx-out] { display: none; }
+}
+
+@keyframes rex-out{to{opacity:0;scale:0.8}}
+
+/* Sampled from the approved mock's own motion formulas (spring and wobble curves), not hand-tuned; its .rex-a, .rex-b, .rex-jump, .rex-glyph-a and .rex-glyph-b are .ib-rxm-a, -b, -jump, -ga and -gb here. */
+/* 1250 ms, infinite, on .rex-a */
+@keyframes rex-jiggle-a{0%{scale:1 1;rotate:0deg}4%{scale:1.096 0.904;rotate:4.77deg}8%{scale:1.1 0.9;rotate:5.44deg}12%{scale:1.047 0.953;rotate:3.32deg}16%{scale:0.99 1.01;rotate:0.49deg}20%{scale:0.962 1.038;rotate:-1.45deg}24%{scale:0.966 1.034;rotate:-1.96deg}28%{scale:0.987 1.013;rotate:-1.35deg}32%{scale:1.007 0.993;rotate:-0.36deg}36%{scale:1.015 0.985;rotate:0.41deg}40%{scale:1.011 0.989;rotate:0.69deg}44%{scale:1.003 0.997;rotate:0.54deg}48%{scale:0.997 1.003;rotate:0.19deg}52%{scale:0.995 1.005;rotate:-0.1deg}56%{scale:0.996 1.004;rotate:-0.24deg}60%{scale:0.999 1.001;rotate:-0.21deg}64%{scale:1.002 0.998;rotate:-0.09deg}68%{scale:1.002 0.998;rotate:0.02deg}72%{scale:1.001 0.999;rotate:0.08deg}76%{scale:1 1;rotate:0.08deg}80%{scale:0.999 1.001;rotate:0.04deg}84%{scale:0.999 1.001;rotate:0deg}88%{scale:1 1;rotate:-0.03deg}96%{scale:1 1;rotate:-0.02deg}100%{scale:1 1;rotate:0deg}}
+/* 1730 ms, infinite, on .rex-b, delay -500ms */
+@keyframes rex-jiggle-b{0%{scale:1 1}4%{scale:1.067 0.933}8%{scale:1.051 0.949}12%{scale:1.004 0.996}16%{scale:0.977 1.023}20%{scale:0.98 1.02}24%{scale:0.997 1.003}28%{scale:1.008 0.992}36%{scale:1.002 0.998}40%{scale:0.997 1.003}48%{scale:0.999 1.001}52%{scale:1.001 0.999}60%{scale:1 1}100%{scale:1 1}}
+/* 3300 ms, infinite, on .rex-jump */
+@keyframes rex-jump{0%{translate:0 0px;scale:1 1}2.3%{translate:0 -4.24px;scale:1 1}4.5%{translate:0 -6px;scale:1 1}6.8%{translate:0 -4.24px;scale:1 1}9.1%{translate:0 0px;scale:1 1}11.4%{translate:0 0.8px;scale:1.161 0.839}13.6%{translate:0 0px;scale:1 1}15.9%{translate:0 0px;scale:0.954 1.046}18.2%{translate:0 0px;scale:1 1}20.5%{translate:0 0.07px;scale:1.013 0.987}22.7%{translate:0 0px;scale:1 1}25%{translate:0 0px;scale:0.996 1.004}27.3%{translate:0 0px;scale:1 1}100%{translate:0 0px;scale:1 1}}
+/* 1250 ms, infinite, on .rex-glyph-a */
+@keyframes rex-lag-a{0%{translate:0px 0}8%{translate:-0.53px 0}12%{translate:-0.83px 0}16%{translate:-0.55px 0}20%{translate:-0.08px 0}24%{translate:0.24px 0}28%{translate:0.3px 0}32%{translate:0.17px 0}36%{translate:0px 0}40%{translate:-0.1px 0}48%{translate:-0.05px 0}52%{translate:0.01px 0}56%{translate:0.04px 0}64%{translate:0.01px 0}68%{translate:-0.01px 0}72%{translate:-0.02px 0}76%{translate:-0.01px 0}80%{translate:0px 0}88%{translate:0.01px 0}92%{translate:0px 0}100%{translate:0px 0}}
+/* 1730 ms, infinite, on .rex-glyph-b, delay -500ms */
+@keyframes rex-lag-b{0%{translate:0 0px}8%{translate:0 0.49px}12%{translate:0 0.38px}16%{translate:0 0.04px}20%{translate:0 -0.17px}24%{translate:0 -0.15px}28%{translate:0 -0.03px}32%{translate:0 0.06px}40%{translate:0 0.01px}44%{translate:0 -0.02px}52%{translate:0 -0.01px}56%{translate:0 0.01px}64%{translate:0 0px}100%{translate:0 0px}}
+/* 1700 ms, infinite, question glyph */
+@keyframes rex-q-tilt{0%{rotate:0deg}6.3%{rotate:4.97deg}12.5%{rotate:9.19deg}18.8%{rotate:12.01deg}25%{rotate:13deg}31.3%{rotate:12.01deg}37.5%{rotate:9.19deg}43.8%{rotate:4.97deg}50%{rotate:0deg}56.3%{rotate:-4.97deg}62.5%{rotate:-9.19deg}68.8%{rotate:-12.01deg}75%{rotate:-13deg}81.3%{rotate:-12.01deg}87.5%{rotate:-9.19deg}93.8%{rotate:-4.97deg}100%{rotate:0deg}}
+/* 1150 ms, infinite, question glyph */
+@keyframes rex-q-bob{0%{translate:0 0.76px}6.3%{translate:0 0.89px}12.5%{translate:0 0.88px}18.8%{translate:0 0.74px}25%{translate:0 0.49px}31.3%{translate:0 0.16px}37.5%{translate:0 -0.19px}43.8%{translate:0 -0.51px}50%{translate:0 -0.76px}56.3%{translate:0 -0.89px}62.5%{translate:0 -0.88px}68.8%{translate:0 -0.74px}75%{translate:0 -0.49px}81.3%{translate:0 -0.16px}87.5%{translate:0 0.19px}93.8%{translate:0 0.51px}100%{translate:0 0.76px}}
+/* 900 ms, infinite, question glyph */
+@keyframes rex-q-breathe{0%{scale:1.073}6.3%{scale:1.054}12.5%{scale:1.028}18.8%{scale:0.997}25%{scale:0.967}31.3%{scale:0.941}37.5%{scale:0.925}43.8%{scale:0.92}50%{scale:0.927}56.3%{scale:0.946}62.5%{scale:0.972}68.8%{scale:1.003}75%{scale:1.033}81.3%{scale:1.059}87.5%{scale:1.075}93.8%{scale:1.08}100%{scale:1.073}}
+/* 1900 ms, infinite, permission glyph */
+@keyframes rex-key-knock{0%{rotate:0deg}2.6%{rotate:-20.18deg}5.3%{rotate:-9.08deg}7.9%{rotate:4.04deg}10.5%{rotate:5.48deg}13.2%{rotate:0.84deg}15.8%{rotate:-21.28deg}18.4%{rotate:-13.51deg}21.1%{rotate:2.49deg}23.7%{rotate:6.56deg}26.3%{rotate:1.95deg}28.9%{rotate:-1.77deg}31.6%{rotate:-1.58deg}34.2%{rotate:0deg}36.8%{rotate:0.64deg}39.5%{rotate:0.29deg}42.1%{rotate:-0.13deg}44.7%{rotate:-0.17deg}47.4%{rotate:-0.03deg}50%{rotate:0.06deg}52.6%{rotate:0.04deg}55.3%{rotate:-0.01deg}57.9%{rotate:-0.02deg}60.5%{rotate:-0.01deg}63.2%{rotate:0deg}100%{rotate:0deg}}
+/* 1900 ms, infinite, permission body */
+@keyframes rex-key-nudge{0%{translate:0px 0}2.6%{translate:-0.48px 0}5.3%{translate:-0.2px 0}7.9%{translate:0.08px 0}10.5%{translate:0.1px 0}13.2%{translate:0.01px 0}15.8%{translate:-0.5px 0}18.4%{translate:-0.29px 0}21.1%{translate:0.05px 0}23.7%{translate:0.11px 0}26.3%{translate:0.03px 0}28.9%{translate:-0.03px 0}31.6%{translate:-0.02px 0}34.2%{translate:0px 0}36.8%{translate:0.01px 0}39.5%{translate:0px 0}100%{translate:0px 0}}
+/* 1700 ms, infinite, sign-in glyph */
+@keyframes rex-signin-walk{0%{translate:-2.6px 0}2.9%{translate:-1.77px 0}5.9%{translate:-0.63px 0}8.8%{translate:0.35px 0}11.8%{translate:0.9px 0}14.7%{translate:0.99px 0}17.6%{translate:0.73px 0}20.6%{translate:0.31px 0}23.5%{translate:-0.07px 0}26.5%{translate:-0.31px 0}29.4%{translate:-0.37px 0}32.4%{translate:-0.29px 0}35.3%{translate:-0.15px 0}38.2%{translate:0px 0}41.2%{translate:0.1px 0}44.1%{translate:0.14px 0}47.1%{translate:0.12px 0}50%{translate:0.07px 0}52.9%{translate:0.01px 0}55.9%{translate:-0.03px 0}58.8%{translate:-0.05px 0}64.7%{translate:-0.03px 0}67.6%{translate:-0.01px 0}70.6%{translate:0px 0}100%{translate:0px 0}}
+/* 2100 ms, infinite, sign-in body */
+@keyframes rex-signin-sway{0%{rotate:0deg}6.3%{rotate:1.91deg}12.5%{rotate:3.54deg}18.8%{rotate:4.62deg}25%{rotate:5deg}31.3%{rotate:4.62deg}37.5%{rotate:3.54deg}43.8%{rotate:1.91deg}50%{rotate:0deg}56.3%{rotate:-1.91deg}62.5%{rotate:-3.54deg}68.8%{rotate:-4.62deg}75%{rotate:-5deg}81.3%{rotate:-4.62deg}87.5%{rotate:-3.54deg}93.8%{rotate:-1.91deg}100%{rotate:0deg}}
+/* 850 ms, once, on .rex-mark; the idle beats fade in from 350 ms */
+@keyframes rex-arrive{0%{opacity:0;translate:0 0px;scale:0 0}5.9%{opacity:1;translate:0 -1.32px;scale:0.58 0.45}11.8%{opacity:1;translate:0 -1.28px;scale:1.17 0.914}17.6%{opacity:1;translate:0 -0.56px;scale:1.36 1.22}23.5%{opacity:1;translate:0 0.11px;scale:1.247 1.273}29.4%{opacity:1;translate:0 0.4px;scale:1.061 1.145}35.3%{opacity:1;translate:0 0.33px;scale:0.936 0.997}41.2%{opacity:1;translate:0 0.12px;scale:0.905 0.925}47.1%{opacity:1;translate:0 -0.06px;scale:0.939 0.929}52.9%{opacity:1;translate:0 -0.11px;scale:0.991 0.969}58.8%{opacity:1;translate:0 -0.08px;scale:1.022 1.006}64.7%{opacity:1;translate:0 -0.02px;scale:1.026 1.022}70.6%{opacity:1;translate:0 0.02px;scale:1.014 1.018}76.5%{opacity:1;translate:0 0.03px;scale:1 1.006}82.4%{opacity:1;translate:0 0.02px;scale:0.993 0.997}88.2%{opacity:1;translate:0 0px;scale:0.993 0.994}94.1%{opacity:1;translate:0 -0.01px;scale:0.997 0.995}100%{opacity:1;translate:0 -0.01px;scale:1.001 0.999}}
+/* 600 ms, once, on the glyph */
+@keyframes rex-arrive-glyph{0%{opacity:0;scale:0}25%{opacity:1;scale:0.535}33.3%{opacity:1;scale:1.136}41.7%{opacity:1;scale:1.274}50%{opacity:1;scale:1.119}58.3%{opacity:1;scale:0.965}66.7%{opacity:1;scale:0.93}75%{opacity:1;scale:0.97}83.3%{opacity:1;scale:1.009}91.7%{opacity:1;scale:1.018}100%{opacity:1;scale:1.008}}
+/* 780 ms, once; the glyph swaps to the check at 0 and springs in; working fades in at 700 ms */
+@keyframes rex-answered{0%{opacity:1;scale:1.1}3.8%{opacity:1;scale:1.199}7.7%{opacity:1;scale:1.226}11.5%{opacity:1;scale:1.192}15.4%{opacity:1;scale:1.121}19.2%{opacity:1;scale:1.044}23.1%{opacity:1;scale:0.982}26.9%{opacity:1;scale:0.947}30.8%{opacity:1;scale:0.938}34.6%{opacity:1;scale:0.949}38.5%{opacity:1;scale:0.971}42.3%{opacity:1;scale:0.993}46.2%{opacity:1;scale:1.01}50%{opacity:1;scale:1.019}57.7%{opacity:1;scale:1.014}61.5%{opacity:1;scale:1.007}65.4%{opacity:1;scale:1}69.2%{opacity:1;scale:0.995}73.1%{opacity:1;scale:0.994}80.8%{opacity:0.82;scale:0.824}84.6%{opacity:0.42;scale:0.422}88.5%{opacity:0.18;scale:0.178}92.3%{opacity:0.05;scale:0.053}96.2%{opacity:0.01;scale:0.007}100%{opacity:0;scale:0}}
+/* 1900 ms, infinite, linear, on the tapered arc */
+@keyframes rex-working{0%{rotate:0deg}5%{rotate:28.5deg}10%{rotate:56deg}15%{rotate:81.5deg}20%{rotate:104.3deg}25%{rotate:124deg}30%{rotate:140.3deg}35%{rotate:153.5deg}40%{rotate:164deg}45%{rotate:172.5deg}50%{rotate:180deg}55%{rotate:187.5deg}60%{rotate:196deg}65%{rotate:206.5deg}70%{rotate:219.7deg}75%{rotate:236deg}80%{rotate:255.7deg}85%{rotate:278.5deg}90%{rotate:304deg}95%{rotate:331.5deg}100%{rotate:360deg}}
+/* 900 ms, once, on the waiting mark */
+@keyframes rex-pop{0%{scale:1 1}3.3%{scale:1.225 1.076}6.7%{scale:1.319 1.101}10%{scale:1.289 1.094}13.3%{scale:1.186 1.065}16.7%{scale:1.067 1.026}20%{scale:0.972 0.989}23.3%{scale:0.918 0.965}26.7%{scale:0.905 0.959}30%{scale:0.922 0.967}33.3%{scale:0.955 0.981}36.7%{scale:0.99 0.996}40%{scale:1.016 1.006}43.3%{scale:1.03 1.012}50%{scale:1.022 1.009}53.3%{scale:1.011 1.004}56.7%{scale:1 1}60%{scale:0.993 0.997}63.3%{scale:0.99 0.996}66.7%{scale:0.991 0.996}70%{scale:0.994 0.998}73.3%{scale:0.998 0.999}76.7%{scale:1.001 1}80%{scale:1.003 1.001}90%{scale:1.002 1.001}93.3%{scale:1 1}96.7%{scale:0.999 1}100%{scale:0.999 1}}
+/* 780 ms, once, the check on the answered mark */
+@keyframes rex-answered-glyph{0%{scale:0;rotate:0deg}3.8%{scale:0.464;rotate:-9.16deg}7.7%{scale:0.938;rotate:-11.54deg}11.5%{scale:1.209;rotate:-8.98deg}15.4%{scale:1.256;rotate:-4.32deg}19.2%{scale:1.167;rotate:0deg}23.1%{scale:1.048;rotate:2.62deg}26.9%{scale:0.966;rotate:3.31deg}30.8%{scale:0.938;rotate:2.57deg}34.6%{scale:0.952;rotate:1.24deg}38.5%{scale:0.98;rotate:0deg}42.3%{scale:1.003;rotate:-0.75deg}46.2%{scale:1.014;rotate:-0.95deg}50%{scale:1.013;rotate:-0.74deg}53.8%{scale:1.007;rotate:-0.35deg}57.7%{scale:1.001;rotate:0deg}61.5%{scale:0.997;rotate:0.22deg}65.4%{scale:0.997;rotate:0.27deg}69.2%{scale:0.998;rotate:0.21deg}73.1%{scale:0.999;rotate:0.1deg}76.9%{scale:1;rotate:0deg}80.8%{scale:1.001;rotate:-0.06deg}84.6%{scale:1.001;rotate:-0.08deg}88.5%{scale:1;rotate:-0.06deg}92.3%{scale:1;rotate:-0.03deg}96.2%{scale:1;rotate:0deg}100%{scale:1;rotate:0.02deg}}
+/* 700 ms, once */
+@keyframes rex-done-in{0%{opacity:0;scale:0.55}4.8%{opacity:0.37;scale:0.775}9.5%{opacity:0.74;scale:0.948}14.3%{opacity:1;scale:1.035}19%{opacity:1;scale:1.055}23.8%{opacity:1;scale:1.042}28.6%{opacity:1;scale:1.02}33.3%{opacity:1;scale:1.004}38.1%{opacity:1;scale:0.996}42.9%{opacity:1;scale:0.995}47.6%{opacity:1;scale:0.996}52.4%{opacity:1;scale:0.998}57.1%{opacity:1;scale:1}100%{opacity:1;scale:1}}
+/* 700 ms, once */
+@keyframes rex-done-glyph{0%{scale:0}14.3%{scale:0.313}19%{scale:0.795}23.8%{scale:1.07}28.6%{scale:1.146}33.3%{scale:1.112}38.1%{scale:1.05}42.9%{scale:1.005}47.6%{scale:0.985}52.4%{scale:0.984}57.1%{scale:0.991}61.9%{scale:0.997}66.7%{scale:1.001}71.4%{scale:1.002}81%{scale:1.001}85.7%{scale:1}100%{scale:1}}
+/* 440 ms, once */
+@keyframes rex-error-in{0%{opacity:0;scale:0.6}4.5%{opacity:0.25;scale:0.835}9.1%{opacity:0.5;scale:0.986}13.6%{opacity:0.75;scale:1.071}18.2%{opacity:1;scale:1.109}22.7%{opacity:1;scale:1.12}27.3%{opacity:1;scale:1.102}31.8%{opacity:1;scale:1.073}36.4%{opacity:1;scale:1.052}40.9%{opacity:1;scale:1.037}45.5%{opacity:1;scale:1.027}50%{opacity:1;scale:1.019}54.5%{opacity:1;scale:1.014}59.1%{opacity:1;scale:1.01}63.6%{opacity:1;scale:1.007}68.2%{opacity:1;scale:1.005}72.7%{opacity:1;scale:1.004}77.3%{opacity:1;scale:1.003}81.8%{opacity:1;scale:1.002}86.4%{opacity:1;scale:1.001}100%{opacity:1;scale:1}}
+/* 240 ms, once */
+@keyframes rex-fade-in{0%{opacity:0;scale:0.8}8.3%{opacity:0.27;scale:0.85}16.7%{opacity:0.49;scale:0.89}25%{opacity:0.66;scale:0.923}33.3%{opacity:0.78;scale:0.948}41.7%{opacity:0.88;scale:0.968}50%{opacity:0.94;scale:0.981}58.3%{opacity:0.97;scale:0.99}66.7%{opacity:0.99;scale:0.996}75%{opacity:1;scale:0.999}83.3%{opacity:1;scale:1}100%{opacity:1;scale:1}}
+@keyframes rex-pop-b{0%{scale:1 1}3.3%{scale:1.225 1.076}6.7%{scale:1.319 1.101}10%{scale:1.289 1.094}13.3%{scale:1.186 1.065}16.7%{scale:1.067 1.026}20%{scale:0.972 0.989}23.3%{scale:0.918 0.965}26.7%{scale:0.905 0.959}30%{scale:0.922 0.967}33.3%{scale:0.955 0.981}36.7%{scale:0.99 0.996}40%{scale:1.016 1.006}43.3%{scale:1.03 1.012}50%{scale:1.022 1.009}53.3%{scale:1.011 1.004}56.7%{scale:1 1}60%{scale:0.993 0.997}63.3%{scale:0.99 0.996}66.7%{scale:0.991 0.996}70%{scale:0.994 0.998}73.3%{scale:0.998 0.999}76.7%{scale:1.001 1}80%{scale:1.003 1.001}90%{scale:1.002 1.001}93.3%{scale:1 1}96.7%{scale:0.999 1}100%{scale:0.999 1}}

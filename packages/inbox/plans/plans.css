@@ -1,0 +1,399 @@
+/* Spaces (packages/inbox/plans/): the get-started screen over its dither, a plan's page (layout B), and the home.
+   Theme tokens only, light and dark from the same rules. Rows show their state by fill, never by a border or an
+   outline; no card has a side bar. */
+
+.ib-plans { --ib-plans-ink: var(--muted-foreground); color: var(--foreground); }
+.ib-plans .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* Buttons */
+.ib-plans-primary { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-14, 14px); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ib-plans-primary:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.ib-plans-primary .ib-ic { width: 16px; height: 16px; }
+.ib-plans-soft { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 16%, transparent); color: var(--primary); font-size: var(--ib-fs-13, 13px); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ib-plans-soft:hover { background: color-mix(in oklch, var(--primary) 24%, transparent); }
+.ib-plans-soft .ib-ic { width: 15px; height: 15px; }
+.ib-plans-quiet { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 550; cursor: pointer; white-space: nowrap; }
+.ib-plans-quiet:hover { background: color-mix(in oklch, var(--muted) 80%, var(--foreground)); }
+.ib-plans-link { color: var(--primary); font-weight: 550; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ib-plans-back { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px 0 4px; border-radius: 8px; font-size: var(--ib-fs-14, 14px); font-weight: 550; color: var(--foreground); cursor: pointer; }
+.ib-plans-back:hover { background: var(--muted); }
+.ib-plans-back .ib-ic { width: 16px; height: 16px; }
+.ib-plans :is(button, input, select, a):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* A long-press on a card or a row opens its menu (Pin to sidebar, Unpin), the only way to pin a row on a touch screen
+   (the rows show no pin at rest there). iOS would open its own link preview on a long-pressed link instead. */
+.ib-spaces :is([data-frame-card], [data-frame-card-row]) a { -webkit-touch-callout: none; }
+.ib-plans-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+
+/* A whole-page message: loading, failed, missing */
+.ib-plans-msg-body { max-width: 560px; margin: 18vh auto 0; padding: 0 24px; text-align: center; }
+.ib-plans-msg-body h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 0 0 6px; }
+.ib-plans-msg-body p { margin: 0 0 16px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-plans-msg[aria-busy] .ib-plans-msg-body h1 { color: var(--muted-foreground); }
+
+/* A decision's mark */
+.ib-plans-dmark { display: inline-flex; flex: none; }
+.ib-plans-dmark .ib-ic { width: 15px; height: 15px; }
+.ib-plans-dmark[data-tone="approved"] { color: var(--success); }
+.ib-plans-dmark[data-tone="changes"] { color: var(--warning); }
+.ib-plans-dmark[data-tone="none"] { color: var(--muted-foreground); }
+
+/* Get started: the words over the dithered field */
+.ib-plans-start { position: relative; overflow: hidden; display: flex; flex-direction: column; }
+.ib-plans-field { position: absolute; inset: 0; pointer-events: none; }
+.ib-plans-field canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.ib-plans-starthead { position: relative; }
+.ib-plans-words { position: relative; max-width: 620px; margin: auto; padding: 24px; }
+.ib-plans-eyebrow { margin: 0 0 6px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-plans-words h1 { margin: 0 0 12px; font-size: clamp(28px, 4vw, 40px); line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; }
+.ib-plans-lede { margin: 0 0 20px; font-size: var(--ib-fs-16, 16px); line-height: 1.55; color: var(--foreground); opacity: 0.85; }
+.ib-plans-steps { margin: 18px 0 0; padding: 14px 18px 14px 36px; border-radius: 12px; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border); font-size: var(--ib-fs-14, 14px); line-height: 1.6; }
+.ib-plans-steps li + li { margin-top: 4px; }
+
+/* A plan, drawn from the shared frame (@plannotator/ui/components/frame, frame.css): its ground (`FrameGround
+   as="div"`), top bar and three cards. Here only what is ours: the ground fills the Inbox's main column (the frame
+   keeps its own 8 px gutter, so the Inbox's is not added), and the plan's own parts inside the frame's slots. */
+.ib-main:has(> [data-frame-ground]) { padding: 0; }
+.ib-plan-page { height: 100%; min-width: 0; }
+/* The page card's body: a banner, then the file filling the rest */
+.ib-plan-cardbody { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ib-plan-doc { flex: 1; min-height: 0; display: flex; }
+.ib-plan-docscroll { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 24px 40px; overscroll-behavior: contain; }
+/* A Markdown or diagram page: the Inbox's reader frame (.ib-docscroll, the Clean look, AttachmentPane), its column
+   and contents rail, filling the card; the reader's top room for its toolstrip is not needed here. */
+.ib-plan-docarea { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; isolation: isolate; }
+.ib-plan-docarea > .ib-plan-reader { padding-top: 12px; }
+.pn-inbox .ib-plan-docarea .ib-contents-open { top: 8px; right: 16px; }
+/* A Markdown page: the Inbox's own file pane (PlanAnnotate.tsx) filling the card, the plan's Send under it */
+.ib-plan-annotate { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.ib-plan-annotate > .ib-view:not(.ib-full) { background: transparent; }
+.ib-plan-send { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 8px 12px 8px 16px; border-top: 1px solid var(--border); }
+.ib-plan-send-t { margin: 0; min-width: 0; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-plan-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 16px 4px; padding: 8px 12px 8px 14px; border-radius: 10px; background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 13px; }
+.ib-plan-banner > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--primary); }
+.ib-plan-banner p { margin: 0; flex: 1 1 260px; min-width: 0; }
+/* Approval "plans-editing": a refusal or a stale edit reads as a warning; the line about the newest version's approval */
+.ib-plan-banner[role="alert"] { background: color-mix(in oklch, var(--warning, oklch(0.75 0.15 75)) 14%, transparent); }
+.ib-plan-banner[role="alert"] > .ib-ic { color: var(--warning-foreground, var(--foreground)); }
+.ib-plan-approval { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-plan-approval[data-plan-approval="approved"], .ib-plan-approval[data-plan-approval="moved"] { color: var(--success, var(--foreground)); }
+.ib-plan-approval > span { min-width: 0; }
+.ib-plan-approval > svg.ib-ic { width: 13px; height: 13px; flex: none; }
+.ib-plan-approval-x { height: 24px; width: 24px; padding: 0; justify-content: center; background: transparent; }
+.ib-plan-approval-x .ib-ic { width: 13px; height: 13px; }
+/* The editor fills the page card, as the file viewer does */
+.ib-plan-editor { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+/* The rail head's quiet line: the plan's project, then its current decision; the project gives way first */
+.ib-plan-railmeta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-plan-railproj { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 2 auto; }
+.ib-plan-raildec { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; }
+.ib-plan-railsep { flex: none; }
+:is(.ib-plan-railproj, .ib-plan-raildec) > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The Inbox's icon rule (inbox.css) again for our marks in the frame's sheets, which portal out of `.pn-inbox`. */
+:is(.ib-plan-railproj, .ib-plan-seen, .ib-plan-activity, .ib-plans-dmark) svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ib-plan-railproj > svg.ib-ic, .pn-inbox .ib-plan-railproj > svg.ib-ic,
+.ib-plan-raildec svg.ib-ic, .pn-inbox .ib-plan-raildec svg.ib-ic { width: 12px; height: 12px; }
+/* The versions panel: "You saw this" under a row */
+.ib-plan-seen { display: inline-flex; align-items: center; gap: 6px; }
+.ib-plan-seen > svg.ib-ic, .pn-inbox .ib-plan-seen > svg.ib-ic { width: 12px; height: 12px; }
+/* An artifact's line on its card: no versions, and what the file is */
+.ib-plan-artline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 16px 6px; font-size: 13px; color: var(--muted-foreground); }
+/* The rail's list (the frame's rows and headings), the Main mark at a row's end, the filter field */
+.ib-plan-files { display: flex; flex-direction: column; }
+.ib-plan-files-art { margin-top: 8px; }
+.ib-plan-file-main { font-size: 11px; color: var(--frame-tertiary); }
+.ib-plan-files-field { width: 100%; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--muted); color: var(--foreground); font-size: 13px; }
+
+
+/* An artifact, or an HTML page, in the card */
+.ib-plan-framewrap { display: flex; padding: 8px 24px 16px; }
+.ib-plan-htmlframe { flex: 1; width: 100%; min-height: 480px; border: 0; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--border); }
+.ib-plan-picture { display: flex; align-items: flex-start; justify-content: center; }
+.ib-plan-picture img { max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 0 0 1px var(--border); background: var(--muted); }
+.ib-plan-filecard { max-width: 420px; margin: 48px auto; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.ib-plan-filecard > .ib-ic { width: 28px; height: 28px; color: var(--muted-foreground); }
+.ib-plan-filecard-n { margin: 6px 0 0; font-size: var(--ib-fs-16, 16px); font-weight: 600; overflow-wrap: anywhere; }
+.ib-plan-filecard-k { margin: 0 0 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-plan-filecard .ib-plans-quiet { gap: 6px; text-decoration: none; }
+.ib-plan-filecard .ib-plans-quiet .ib-ic { width: 15px; height: 15px; }
+.ib-plan-docstate { margin: 40px auto; text-align: center; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-plan-docstate p { margin: 0 0 12px; }
+
+/* The diff: fills, not side bars */
+.ib-plan-diffwrap { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+.ib-plan-legend { display: flex; align-items: center; gap: 14px; margin: 8px 0 16px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-plan-key { display: inline-flex; align-items: center; gap: 6px; }
+.ib-plan-key::before { content: ''; width: 10px; height: 10px; border-radius: 3px; }
+.ib-plan-key[data-k="added"]::before { background: color-mix(in oklch, var(--success) 45%, transparent); }
+.ib-plan-key[data-k="removed"]::before { background: color-mix(in oklch, var(--destructive) 40%, transparent); }
+.ib-plan-stats { margin-left: auto; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); padding: 1px 8px; border-radius: 6px; background: var(--muted); }
+.ib-plan-stats [data-k="added"] { color: var(--success); }
+.ib-plan-stats [data-k="removed"] { color: var(--destructive); }
+.ib-plan-same { color: var(--muted-foreground); }
+.ib-plan-diff :is(.plan-diff-added, .plan-diff-removed, .plan-diff-modified) { border-left: 0; border-radius: 8px; padding: 2px 14px; }
+.ib-plan-diff .plan-diff-added { background: color-mix(in oklch, var(--success) 12%, transparent); }
+.ib-plan-diff .plan-diff-removed { background: color-mix(in oklch, var(--destructive) 10%, transparent); }
+.ib-plan-diff .plan-diff-modified { background: transparent; }
+
+/* The versions panel's footer: the file's activity */
+.ib-plan-activity { margin-top: 8px; }
+.ib-plan-activity h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; }
+.ib-plan-activity ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ib-plan-activity li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ib-plan-activity li > .ib-ic { width: 15px; height: 15px; color: var(--muted-foreground); flex: none; }
+.ib-plan-activity li > span:not(.ib-plans-dmark) { flex: 1; min-width: 0; }
+.ib-plan-activity time { color: var(--muted-foreground); font-size: 12px; white-space: nowrap; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-plan-banner { flex-wrap: wrap; }
+  .ib-plan-page { padding-top: env(safe-area-inset-top); }
+  .ib-plans-words { padding: 24px 20px; }
+}
+
+/* Spaces' home (SpacesHome.tsx, approval "plans-home", home-5.html): the question over the field, the tools at the top
+   right, then Now, Recent and the groups. The cards and rows are the frame's (@plannotator/ui/components/frame); this
+   is only the page around them. Fills for hover and focus, never a border; no uppercase labels. */
+.ib-dpage.ib-spaces { padding: 0; display: flex; flex-direction: column; color: var(--foreground); }
+.ib-spaces :is(.ib-plans-primary, .ib-plans-link):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-spc-hearth { position: relative; padding: 12px 40px 40px 12px; flex: none; }
+.ib-spc-field { position: absolute; inset: 0; pointer-events: none; -webkit-mask-image: linear-gradient(to bottom, #000 20%, transparent); mask-image: linear-gradient(to bottom, #000 20%, transparent); }
+.ib-spc-field canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.ib-spc-top { position: relative; justify-content: space-between; margin-bottom: 0; }
+.ib-spc-tools { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.ib-spc-local { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; font-size: var(--ib-fs-12, 12px); line-height: 16px; color: var(--muted-foreground); white-space: nowrap; }
+.ib-spc-local .ib-ic { width: 14px; height: 14px; }
+.ib-spc-search { display: inline-flex; align-items: center; gap: 6px; width: 200px; height: 28px; padding: 0 8px; border-radius: 8px; background: color-mix(in oklch, var(--foreground) 5%, var(--card)); color: var(--muted-foreground); }
+.ib-spc-search:focus-within { background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: var(--foreground); }
+.ib-spc-search .ib-ic { width: 14px; height: 14px; flex: none; }
+.ib-spc-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-spc-search input::placeholder { color: var(--muted-foreground); }
+/* A project's scope in the search field: a chip whose × goes Home (search still covers every title). */
+.ib-spc-search.ib-spc-scoped { width: 290px; }
+.ib-spc-chip { display: inline-flex; align-items: center; gap: 2px; flex: none; max-width: 120px; height: 20px; padding: 0 2px 0 7px; border-radius: 6px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--foreground); font-size: var(--ib-fs-12, 12px); line-height: 16px; }
+.ib-spc-chip > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-spc-chip button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 4px; color: var(--muted-foreground); }
+.ib-spc-chip button:hover { background: color-mix(in oklch, var(--foreground) 10%, transparent); color: var(--foreground); }
+.ib-spc-chip button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-chip .ib-ic { width: 12px; height: 12px; }
+.ib-spc-vsw { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: color-mix(in oklch, var(--foreground) 5%, var(--card)); }
+.ib-spc-vsw button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.ib-spc-vsw button:hover { color: var(--foreground); }
+.ib-spc-vsw button[aria-pressed="true"] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 14%, transparent); }
+.ib-spc-vsw button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-words { position: relative; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 40px 0 0 36px; width: fit-content; }
+.ib-spc-words h1 { margin: 0; font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -0.015em; }
+.ib-spc-words h1:focus { outline: none; }
+.ib-spc-body { padding: 24px 48px 64px; }
+.ib-spc-list .ib-spc-body { padding: 8px 40px 64px; }
+.ib-spc-body > .ib-plans-note { margin: 0 0 16px; }
+.ib-spc-sec { margin-bottom: 44px; }
+.ib-spc-list .ib-spc-sec { margin-bottom: 20px; }
+.ib-spc-h { display: flex; align-items: center; gap: 12px; height: 30px; margin: 0 0 16px; padding-bottom: 8px; font-size: var(--ib-fs-13, 13px); line-height: 20px; font-weight: 500; color: var(--muted-foreground); box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 8%, transparent); }
+.ib-spc-h:has(> .ib-spc-fold) { height: 36px; }
+.ib-spc-h.ib-spc-nowh { height: 20px; margin: 8px 0 16px; padding-bottom: 0; box-shadow: none; }
+.ib-spc-list .ib-spc-h { margin: 0 0 4px; padding: 0 8px 8px; }
+.ib-spc-list .ib-spc-h.ib-spc-nowh { padding-bottom: 0; }
+/* The card grids are the card's CardGrid and the rows its CardRows (their `<li>` holds the item); the rest of Now,
+   under its one row of large cards, is rows, as the list draws them. */
+.ib-spaces [data-frame-card-grid="large"] + .ib-spc-rows { margin-top: 20px; }
+.ib-spc-item { min-width: 0; display: flex; }
+[data-frame-card-grid] > li > .ib-spc-item { flex: 1; }
+.ib-spc-item > .ib-spc-in { display: contents; }
+.ib-spc-item > .ib-spc-in > * { flex: 1; min-width: 0; }
+.ib-spc-rows { display: flex; flex-direction: column; }
+.ib-spc-pin { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in oklch, var(--card) 88%, transparent); color: var(--muted-foreground); box-shadow: 0 1px 3px color-mix(in oklch, var(--foreground) 14%, transparent); cursor: pointer; }
+.ib-spc-rowitem .ib-spc-pin { background: transparent; box-shadow: none; }
+.ib-spc-pin:hover { color: var(--foreground); background: var(--card); }
+.ib-spc-rowitem .ib-spc-pin:hover { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
+.ib-spc-pin.ib-spc-pinned { color: var(--primary); }
+.ib-spc-pin:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-more { display: inline-flex; align-items: center; height: 30px; margin: 14px 0 0 -10px; padding: 0 10px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); cursor: pointer; }
+.ib-spc-list .ib-spc-more { margin: 2px 0 0 46px; height: 36px; }
+.ib-spc-more.ib-spc-all { color: var(--foreground); opacity: 0.8; }
+.ib-spc-more:hover { background: var(--ib-hover); color: var(--foreground); opacity: 1; }
+.ib-spc-more:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-fold { display: inline-flex; align-items: center; gap: 4px; height: 28px; margin-left: -6px; padding: 0 8px 0 4px; border-radius: 7px; font: inherit; color: inherit; cursor: pointer; }
+.ib-spc-fold .ib-ic { width: 14px; height: 14px; transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+.ib-spc-fold[aria-expanded="false"] .ib-ic { transform: rotate(-90deg); }
+.ib-spc-fold:hover { background: var(--ib-hover); color: var(--foreground); }
+.ib-spc-fold:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-fcount { margin-left: 8px; font-weight: 400; color: var(--muted-foreground); }
+.ib-spc-group[data-folded] { margin-bottom: 8px; }
+.ib-spc-crumbs { display: flex; align-items: center; gap: 6px; margin: 0 0 20px; font-size: var(--ib-fs-14, 14px); }
+.ib-spc-crumbs button { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 4px; margin-left: -4px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; }
+.ib-spc-crumbs button .ib-ic { width: 15px; height: 15px; }
+.ib-spc-crumbs button:hover { background: var(--ib-hover); color: var(--foreground); }
+.ib-spc-crumbs button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-crumbs b { font-weight: 600; }
+.ib-spc-list .ib-spc-crumbs { margin-left: 4px; }
+.ib-spc-none { margin: 8px 0; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+/* A face: the plan's top in the sheet's type (home-5's `.dd`), laid out at the card's face width (`CARD_FACE_WIDTH`, set on
+   the home as --ib-spc-face-w) and scaled by the card.
+   Scoped here, so the plan page's own type is untouched. Headings are the body's size, set apart by weight and space;
+   list markers muted; the first sentence the lede. */
+.ib-spc-face { padding: 34px 36px; font-size: 15px; line-height: 24px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.ib-spc-face p { margin: 0 0 10px; font-size: 15px; line-height: 24px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.ib-spc-face :is(h1, h2, h3, h4, h5, h6), .ib-spc-face .ib-spc-fh { margin: 18px 0 8px; font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: normal; color: var(--foreground); }
+.ib-spc-face > .ib-spc-fh:first-child, .ib-spc-face .ib-spc-fb:first-child :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.ib-spc-face .ib-spc-lede { margin: 0 0 10px; font-size: 18px; line-height: 27px; font-weight: 500; color: var(--foreground); }
+.ib-spc-face [data-rich-list-kind] { margin: 0 0 2px; gap: 8px; }
+.ib-spc-face [data-rich-list-kind] :is(.text-sm, span, div) { font-size: 15px; line-height: 24px; }
+.ib-spc-face [data-rich-list-kind] .annotation-exclude span { color: color-mix(in oklch, var(--foreground) 40%, transparent); }
+.ib-spc-fb > div > div:last-child[data-rich-list-kind] { margin-bottom: 10px; }
+.ib-spc-face pre, .ib-spc-face table { margin: 0 0 10px; }
+/* A row's thumbnail: the same sheet, drawn at the thumbnail's scale (a texture of the plan's own lines). */
+.ib-spc-thumbface { width: var(--ib-spc-face-w, 420px); transform-origin: 0 0; pointer-events: none; }
+.ib-spc-thumbface > * { display: block; margin: 0 0 10px; }
+.ib-spc-thumbface .ib-spc-tli::before { content: "• "; color: color-mix(in oklch, var(--foreground) 40%, transparent); }
+.ib-spc-thumbface .ib-spc-tcells { font-family: var(--font-mono, ui-monospace, monospace); white-space: pre; }
+.ib-spc-pageface { width: var(--ib-spc-face-w, 420px); height: calc(var(--ib-spc-face-w, 420px) * 0.75); overflow: hidden; }
+.ib-spc-pageface iframe { border: 0; transform-origin: 0 0; background: white; pointer-events: none; }
+/* A picture or a drawn diagram: drawn once into a canvas, fitted whole on the flat panel. */
+.ib-spc-picface { width: var(--ib-spc-face-w, 420px); height: calc(var(--ib-spc-face-w, 420px) * 0.731); }
+.ib-spc-still { display: block; width: 100%; height: 100%; }
+/* Dark: what the plan brought (its picture, its HTML page) is lit for a light page; on the home it is dimmed, never
+   recoloured (the colours stay its own), so it is no bright slab. The plan's page shows it as it is. */
+:root:not(.light) :is(.ib-spc-own, .ib-spc-pageface iframe) { filter: brightness(0.78); }
+/* Data: a spreadsheet's top, mono 12/16, the header and the row numbers tinted (home-5's `.fx-cells`). */
+.ib-spc-dataface { width: var(--ib-spc-face-w, 420px); overflow: hidden; }
+.ib-spc-cells { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 16px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.ib-spc-cells :is(th, td) { padding: 6px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent), inset -1px 0 0 color-mix(in oklch, var(--foreground) 7%, transparent); }
+.ib-spc-cells th { font-weight: 500; color: var(--foreground); background: color-mix(in oklch, var(--foreground) 5%, transparent); }
+.ib-spc-cells :is(th, td):first-child { width: 34px; color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 5%, transparent); text-align: right; }
+/* The plan page's picture and data pages (read only). */
+.ib-plan-picture { display: flex; align-items: flex-start; justify-content: center; }
+.ib-plan-picture img { max-width: 100%; height: auto; display: block; border-radius: 6px; }
+.ib-plan-picdiff { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: start; }
+.ib-plan-picdiff figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.ib-plan-picdiff .ib-plan-picture { padding: 0; overflow: visible; }
+.ib-plan-picdiff figcaption { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); text-align: center; }
+.ib-plan-data { overflow: auto; }
+.ib-plan-data table { border-collapse: collapse; font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; line-height: 18px; }
+.ib-plan-data :is(th, td) { padding: 6px 10px; text-align: left; white-space: nowrap; box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 8%, transparent), inset -1px 0 0 color-mix(in oklch, var(--foreground) 8%, transparent); }
+.ib-plan-data thead th { position: sticky; top: 0; font-weight: 500; background: color-mix(in oklch, var(--foreground) 5%, var(--card)); }
+.ib-plan-data tbody th { font-weight: 400; color: var(--muted-foreground); text-align: right; background: color-mix(in oklch, var(--foreground) 3%, var(--card)); }
+/* The pinned spaces under Spaces in the sidebar. */
+.ib-space-pins { padding-left: 10px; }
+.ib-space-pins .ib-pin .ib-ic { width: 15px; height: 15px; flex: none; color: var(--muted-foreground); }
+/* Opening a card: its face grows into the plan page's document, and back (spacesMotion.ts; never with reduced motion). */
+.ib-space-opening [data-plan-document] { view-transition-name: ib-space-open; }
+::view-transition-group(ib-space-open) { animation-duration: 280ms; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .ib-spc-fold .ib-ic { transition: none; }
+}
+@media (max-width: 1100px) {
+  .ib-spc-body { padding-left: 24px; padding-right: 24px; }
+  .ib-spc-words { padding-left: 12px; }
+  .ib-spc-local { display: none; }
+}
+@media (max-width: 767px) {
+  .ib-spc-hearth { padding: 8px 16px 28px 8px; }
+  .ib-spc-top { flex-wrap: wrap; row-gap: 8px; }
+  .ib-spc-search { width: 150px; }
+  .ib-spc-search.ib-spc-scoped { width: 200px; }
+  .ib-spc-chip { max-width: 76px; }
+  .ib-spc-words { padding: 20px 0 0 8px; flex-direction: column; align-items: flex-start; gap: 16px; }
+  .ib-spc-words h1 { font-size: 24px; line-height: 30px; }
+  .ib-spc-body, .ib-spc-list .ib-spc-body { padding: 8px 16px 48px; }
+  .ib-spc-list .ib-spc-body { padding-left: 8px; padding-right: 8px; }
+}
+
+/* Share this space (PlanShare.tsx, approval "share-this-space"): the top bar's button and the panel under it. */
+.ib-shr-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; color: var(--muted-foreground); white-space: nowrap; flex-shrink: 0; cursor: pointer; }
+.ib-shr-btn .ib-ic { width: 14px; height: 14px; flex: none; }
+.ib-shr-btn:not([data-phone]):hover, .ib-shr-btn:not([data-phone])[aria-expanded="true"], .ib-shr-btn:not([data-phone])[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.ib-shr-btn:focus-visible, .ib-shr :is(button, a, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-shr-btn[data-state="busy"], .ib-shr-btn[data-state="shared"], .ib-shr-btn[data-state="look"], .ib-shr-btn[data-state="failed"] { color: var(--foreground); }
+.ib-shr-btn[data-state="update"] { color: var(--primary); }
+.ib-shr-btn[data-state="look"] .ib-ic, .ib-shr-btn[data-state="failed"] .ib-ic { color: var(--warning); }
+.ib-shr-btn[data-phone] { height: 36px; padding: 0 10px; font-size: var(--ib-fs-14, 14px); }
+.ib-shr-spin { display: inline-block; width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--muted-foreground) 30%, transparent); border-top-color: var(--primary); animation: ib-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .ib-shr-spin { animation: none; } }
+
+.ib-shr { position: relative; width: 336px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 14px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 70%, transparent); box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.08); font-size: var(--ib-fs-13, 13px); line-height: 1.45; text-align: left; outline: none; transform-origin: var(--transform-origin, top right); animation: ib-pm-in 120ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-shr > :first-child { margin-top: 0; }
+.ib-shr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ib-shr-head:has(.ib-shr-backb) { justify-content: flex-start; gap: 8px; }
+.ib-shr-title { margin: 0; font-size: var(--ib-fs-14, 14px); font-weight: 600; line-height: 1.45; }
+.ib-shr-who { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-shr-who .ib-ic { width: 14px; height: 14px; }
+.ib-shr-count { flex-shrink: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-shr-backb { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -3px; border-radius: 6px; cursor: pointer; }
+.ib-shr-backb:hover { background: var(--muted); }
+.ib-shr-backb .ib-ic { width: 14px; height: 14px; }
+
+.ib-shr-seg { display: flex; margin-top: 12px; padding: 2px; border-radius: 8px; background: var(--muted); }
+.ib-shr-segb { flex: 1; text-align: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 26px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.ib-shr-segb[aria-checked="true"] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+:root:not(.light) .ib-shr-segb[aria-checked="true"] { background: color-mix(in oklch, var(--foreground) 14%, transparent); }
+
+.ib-shr-arow { display: flex; align-items: center; gap: 10px; margin-top: 12px; min-height: 32px; font-size: var(--ib-fs-13, 13px); }
+.ib-shr-disc { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--muted); color: var(--muted-foreground); }
+.ib-shr-disc .ib-ic { width: 14px; height: 14px; }
+.ib-shr-warnrow .ib-shr-disc { color: var(--warning); }
+.ib-shr-atext { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+/* The longest access line stays on one line beside Invite: the row gives it its gaps. */
+.ib-shr-oneline { gap: 6px; }
+.ib-shr-oneline .ib-shr-atext { white-space: nowrap; overflow-wrap: normal; }
+:root:not(.light) .ib-shr-disc { background: color-mix(in oklch, var(--foreground) 9%, transparent); }
+
+.ib-shr-b { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 6px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; white-space: nowrap; flex-shrink: 0; cursor: pointer; text-decoration: none; }
+.ib-shr-b:hover { background: color-mix(in oklch, var(--muted) 80%, var(--foreground)); }
+:root:not(.light) .ib-shr-b:not(.ib-shr-pri):not(.ib-shr-danger) { background: color-mix(in oklch, var(--foreground) 11%, transparent); }
+:root:not(.light) .ib-shr-b:not(.ib-shr-pri):not(.ib-shr-danger):hover { background: color-mix(in oklch, var(--foreground) 16%, transparent); }
+.ib-shr-b.ib-shr-pri { background: var(--primary); color: var(--primary-foreground); }
+.ib-shr-b.ib-shr-pri:hover { background: color-mix(in oklch, var(--primary) 90%, transparent); }
+.ib-shr-b.ib-shr-danger { background: var(--destructive); color: var(--destructive-foreground, #fff); }
+.ib-shr-b.ib-shr-dangerq { color: var(--destructive); }
+.ib-shr-b.ib-shr-icb { padding: 0 9px; color: var(--muted-foreground); }
+.ib-shr-b .ib-ic { width: 13px; height: 13px; }
+.ib-shr-b:disabled { opacity: 0.5; cursor: default; }
+
+.ib-shr-linkrow { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.ib-shr-field { flex: 1; min-width: 0; height: 32px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 12px/30px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-shr-linkrow .ib-shr-b { height: 32px; }
+
+.ib-shr-prog { height: 4px; margin-top: 12px; border-radius: 2px; background: var(--muted); overflow: hidden; }
+.ib-shr-prog i { display: block; height: 4px; border-radius: 2px; background: var(--primary); transition: width 200ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .ib-shr-prog i, .ib-shr { transition: none; animation: none; } }
+
+.ib-shr-msg { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: var(--ib-fs-13, 13px); }
+.ib-shr-msg.ib-shr-first { margin-top: 2px; }
+.ib-shr-msgico { display: inline-flex; flex-shrink: 0; color: var(--muted-foreground); }
+.ib-shr-msgico .ib-ic { width: 14px; height: 14px; }
+.ib-shr-msg.ib-shr-quiet { color: var(--muted-foreground); }
+.ib-shr-msg.ib-shr-warn .ib-shr-msgico { color: var(--warning); }
+
+.ib-shr-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; min-height: 30px; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shr-fr { display: inline-flex; gap: 8px; }
+.ib-shr-det { font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); cursor: pointer; border-radius: 4px; }
+.ib-shr-det:hover { color: var(--foreground); }
+
+.ib-shr-infowrap { display: inline-flex; flex-shrink: 0; }
+.ib-shr-info { display: inline-flex; padding: 4px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.ib-shr-info .ib-ic { width: 14px; height: 14px; }
+.ib-shr-tip { position: absolute; right: 8px; z-index: 1; margin-top: 28px; padding: 6px 9px; border-radius: 6px; background: var(--foreground); color: var(--background); font-size: var(--ib-fs-12, 12px); line-height: 1.4; box-shadow: 0 4px 12px rgb(0 0 0 / 0.2); visibility: hidden; pointer-events: none; }
+.ib-shr-info:hover + .ib-shr-tip, .ib-shr-info:focus-visible + .ib-shr-tip, .ib-shr-tip[data-open] { visibility: visible; }
+
+.ib-shr-rows { margin: 8px 0 0; }
+.ib-shr-row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shr-row + .ib-shr-row { border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-shr-row dt, .ib-shr-row dd { margin: 0; }
+.ib-shr-row dd { color: var(--muted-foreground); text-align: right; font-variant-numeric: tabular-nums; font-size: var(--ib-fs-12, 12px); }
+.ib-shr-grp { margin: 14px 0 0; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--muted-foreground); }
+.ib-shr-grp + .ib-shr-rows { margin-top: 4px; }
+
+/* A phone: the panel is a sheet from the bottom, with larger type and targets. */
+.ib-shr[data-phone] { width: auto; max-width: none; padding: 18px 16px calc(22px + env(safe-area-inset-bottom)); border-radius: 16px 16px 0 0; border-bottom: 0; font-size: var(--ib-fs-15, 15px); animation: ib-oq-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-shr[data-phone] .ib-shr-title { font-size: var(--ib-fs-17, 17px); }
+.ib-shr[data-phone] .ib-shr-segb { line-height: 36px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-arow { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-disc { width: 34px; height: 34px; }
+.ib-shr[data-phone] .ib-shr-b { height: 40px; padding: 0 16px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-field { height: 40px; line-height: 38px; font-size: var(--ib-fs-13, 13px); }
+.ib-shr[data-phone] .ib-shr-foot { margin-top: 18px; min-height: 40px; font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-det { font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-msg, .ib-shr[data-phone] .ib-shr-count { font-size: var(--ib-fs-15, 15px); }
+.ib-shr[data-phone] .ib-shr-row { padding: 7px 0; font-size: var(--ib-fs-14, 14px); }
+.ib-shr[data-phone] .ib-shr-row dd { font-size: var(--ib-fs-13, 13px); }
+.ib-shr[data-phone] .ib-shr-backb, .ib-shr[data-phone] .ib-shr-info { width: 40px; height: 40px; align-items: center; justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .ib-shr[data-phone] { animation: none; } }

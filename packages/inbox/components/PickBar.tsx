@@ -19,6 +19,9 @@ import { useToastAbove } from '../toastAbove';
 import { BulkTagList, useBulkTagsShown } from './BulkTags';
 import { TagIcon } from './InitiativePeek';
 import { Tip } from './Tip';
+import { MentionMenuItem } from './MentionMenuItem';
+import { isPhone } from '../phone';
+import { hideKeysWords } from '../pulls/hiddenPulls';
 
 /** Combine… with one thread picked: greyed, and its tooltip says why. */
 export const COMBINE_NEEDS_TWO = 'Pick two or more threads to combine';
@@ -114,20 +117,22 @@ const ITEMS: { action: BulkAction; label: string; icon: IconName; iconClass?: st
   { action: 'unstar', label: 'Unstar threads', icon: 'star', iconClass: 'ib-star-on' },
   { action: 'priority-add', label: 'Add to Priority', icon: 'toTop' },
   { action: 'priority-remove', label: 'Remove from Priority', icon: 'toBottom' },
+  { action: 'hide-pulls', label: 'Hide pull requests', icon: 'eyeOff' },
 ];
 
-/** Runs one action on the rows it takes. */
-export function runBulk(act: PickActions, action: BulkAction, until?: string): void {
+/** Runs one action on the rows it takes. Mark read gives its answer: false when its warning was cancelled. */
+export function runBulk(act: PickActions, action: BulkAction, until?: string): Promise<boolean> | void {
   const rows = bulkTargets(act.rows, action, act.rules);
   if (rows.length === 0) return;
   const { bulk } = act;
   if (action === 'archive') void bulk.archive(rows);
   else if (action === 'snooze' && until) void bulk.snooze(rows, until);
-  else if (action === 'read') void bulk.markRead(rows);
+  else if (action === 'read') return bulk.markRead(rows);
   else if (action === 'unread') void bulk.markUnread(rows);
   else if (action === 'star' || action === 'unstar') void bulk.star(rows, action === 'star');
   else if (action === 'priority-add' || action === 'priority-remove') void bulk.priority(rows, action === 'priority-add');
-  if (action === 'archive' || action === 'snooze') act.onGone();
+  else if (action === 'hide-pulls') void bulk.hidePulls(rows);
+  if (action === 'archive' || action === 'snooze' || action === 'hide-pulls') act.onGone();
 }
 
 /**
@@ -141,12 +146,18 @@ export function BulkItems({ act, onTags }: { act: PickActions; onTags: () => voi
   const tags = useBulkTagsShown(act.rows);
   return (
     <>
-      {shown.map(({ action, label, icon, iconClass }) => (
-        <Menu.Item key={action} className="ib-pmi" label={label} data-bulk-action={action} onClick={() => runBulk(act, action)}>
-          <Icon name={icon} size={15} className={iconClass} />
-          {label}
-        </Menu.Item>
-      ))}
+      {/* Mention 3 in reply (approval "inbox-drag-threads"): the picked rows, in the reply on screen. */}
+      <MentionMenuItem rows={act.rows} phone={isPhone()} />
+      {shown.map(({ action, label: fixed, icon, iconClass }) => {
+        // Hide names the PRs it takes: "Hide pull request", "Hide 4 pull requests".
+        const label = action === 'hide-pulls' ? hideKeysWords([...new Set(bulkTargets(act.rows, action, act.rules).flatMap((row) => row.hide_pulls ?? []))]) : fixed;
+        return (
+          <Menu.Item key={action} className="ib-pmi" label={label} data-bulk-action={action} onClick={() => runBulk(act, action)}>
+            <Icon name={icon} size={15} className={iconClass} />
+            {label}
+          </Menu.Item>
+        );
+      })}
       {tags && shown.length > 0 && <Menu.Separator className="ib-pm-sep" />}
       {tags && (
         <Menu.Item className="ib-pmi" label="Add tag" closeOnClick={false} onClick={onTags} data-add-tag-item="">

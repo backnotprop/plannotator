@@ -323,6 +323,8 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           </>
         );
       }
+      // Refused by the host's check before it reached the page: the source, as code.
+      if (state.error?.refused) return <DiagramInlineSource block={block} kind={kind} />;
       if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
         return <DiagramInlineSource block={block} kind={kind} />;
       }

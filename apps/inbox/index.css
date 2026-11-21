@@ -30,8 +30,17 @@
 @source "../../packages/inbox/cloud/how/**/*.tsx";
 /* Routines: the page, the editor, a thread's run lines (packages/inbox/scheduled/). */
 @source "../../packages/inbox/scheduled/**/*.tsx";
+/* Plans: the home list, the get-started screen and a plan's page (packages/inbox/plans/). */
+@source "../../packages/inbox/plans/**/*.tsx";
+/* The shared page frame a plan is drawn in (packages/ui/components/frame: its .tsx and its .ts class recipes, not its
+   tests). frame.css below points Tailwind at the same files; these lines keep the rule of one @source per directory. */
+@source "../../packages/ui/components/frame/**/*.tsx";
+@source "../../packages/ui/components/frame/**/*.ts";
+@source not "../../packages/ui/components/frame/**/*.test.tsx";
 
 @import "../../packages/ui/theme.css";
+/* The shared page frame (top bar, rail, page card, versions panel, phone sheets): after the theme, as its README asks. */
+@import "../../packages/ui/components/frame/frame.css";
 /* The board's own sheet (shp- classes). */
 @import "../../packages/ui/components/shape/shape.css";
 /* A document's contents rail (its own sheet: not in theme.css). */
@@ -40,6 +49,8 @@
 @import "../../packages/ui/comment-card.css";
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
+@import "../../packages/review-editor/pierreTree.css";
+@import "../../packages/review-editor/semantic-colors.css";
 @import "../../packages/inbox/inbox.css";
 /* A question's prototypes: the options' tray, its Try prototype tab, and the full window (components/PrototypeWindow.tsx). */
 @import "../../packages/inbox/prototype-window.css";
@@ -49,11 +60,24 @@
 @import "../../packages/inbox/floaters/floaters.css";
 /* The Pull requests page and a stack's page (packages/inbox/prs/). */
 @import "../../packages/inbox/prs/prs.css";
+/* A PR's thread: its line, the empty thread before its first message, "Sent with" (packages/inbox/pulls/). */
+@import "../../packages/inbox/pulls/pullThread.css";
+/* Plans (packages/inbox/plans/). */
+@import "../../packages/inbox/plans/plans.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
+/* `:::run` and `:::secret` cards (packages/inbox/parts/RunBlocks/). */
+@import "../../packages/inbox/parts/RunBlocks/runBlocks.css";
+/* The free layout of thread panes ("Open to the side", packages/inbox/panes/): the engine's sheet, then the Inbox's over it. */
+@import "../../packages/vendor-pierre-layouts/src/styles.css";
+@import "../../packages/inbox/panes/panes.css";
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @import "../../packages/inbox/agents/agents.css";
 @import "../../packages/inbox/agents/iconDialog.css";
+/* The Rex status marks on agents' icons (packages/inbox/agents/rexMark.tsx). */
+@import "../../packages/inbox/agents/rexMark.css";
+/* The list's Agents view: each agent with its threads under it (packages/inbox/agentsView/). */
+@import "../../packages/inbox/agentsView/agentsView.css";
 /* Thread tags: the sidebar's Tags, Add tag, a tag's list header (packages/inbox/threadTags.css). */
 @import "../../packages/inbox/threadTags.css";
 @import "../../packages/inbox/cloudflare.css";

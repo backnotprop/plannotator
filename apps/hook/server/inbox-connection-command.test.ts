@@ -83,7 +83,7 @@ async function world() {
   return { project, dataDir, server };
 }
 
-function run(dataDir: string, pipe: Pipe, argv: string[] = ["--host", "hermes", "--plugin-version", "0.1.0"], env: NodeJS.ProcessEnv = { PLANNOTATOR_INBOX_TOOL: "1" }) {
+function run(dataDir: string, pipe: Pipe, argv: string[] = ["--host", "hermes", "--plugin-version", "0.1.0"], env: NodeJS.ProcessEnv = { PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_TEST_INBOX_ON: "1" }) {
   return runInboxConnectionCommand(argv, { dataDir, env, lines: pipe.lines(), write: pipe.write, tickMs: 40 });
 }
 
@@ -140,7 +140,7 @@ test("a Hermes session's message is signed as that session, and the person's rep
 test("the switch in Settings → Agents reaches a running connection, and while it is off no session is opened", async () => {
   const w = await world();
   const pipe = new Pipe();
-  const done = runInboxConnectionCommand(["--host", "hermes"], { dataDir: w.dataDir, env: {}, lines: pipe.lines(), write: pipe.write, tickMs: 40, switchEveryMs: 50 });
+  const done = runInboxConnectionCommand(["--host", "hermes"], { dataDir: w.dataDir, env: { PLANNOTATOR_TEST_INBOX_ON: "1" }, lines: pipe.lines(), write: pipe.write, tickMs: 40, switchEveryMs: 50 });
   const ready = await pipe.next("ready");
   expect((ready.tool as { name: string }).name).toBe("plannotator_inbox");
   expect(ready.on).toBe(false);

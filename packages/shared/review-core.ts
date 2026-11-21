@@ -14,6 +14,7 @@ import {
   parseDiffGitHeader,
   parseDiffMetadataPathLines,
   OVERSIZED_REVIEW_STUB_MARKER,
+  oversizedReviewStubBytesLine,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
@@ -227,6 +228,8 @@ export interface GitCommandOptions {
    * the argument vector.
    */
   config?: Record<string, string>;
+  /** Extra environment for this one command (e.g. `GIT_NO_LAZY_FETCH`), set last. */
+  env?: Record<string, string>;
 }
 
 /** Runtime-neutral Git arguments and subprocess policy produced at the process boundary. */
@@ -390,8 +393,27 @@ export const GIT_COLOR_FREE_ARGS: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * Output settings every command pins on argv after the color ones, whatever
+ * the user's config says:
+ * - `core.quotePath=false`: non-ASCII paths print as they are;
+ * - `diff.relative=false`: with it on, a review started in a subdirectory
+ *   lists only that subdirectory, with paths relative to it, while hunk
+ *   expansion, stage and unstage, and untracked files use paths from the root;
+ * - `log.showSignature=false`: with it on, `log` and `show` print a signature
+ *   check before the formatted fields, so a commit's SHA reads wrong.
+ */
+export const GIT_OUTPUT_ARGS: readonly string[] = Object.freeze([
+  "-c",
+  "core.quotePath=false",
+  "-c",
+  "diff.relative=false",
+  "-c",
+  "log.showSignature=false",
+]);
+
+/**
  * The same color-off settings as `GIT_CONFIG_*` environment variables, for
- * processes Plannotator spawns that run git themselves (review, tour and
+ * processes Plannotator spawns that run git themselves (review and
  * guide agent jobs). Inherited `GIT_CONFIG_*` entries are kept. Git 2.31+
  * reads these; an older git ignores them, which only costs color in the
  * agent's own tool output.
@@ -420,8 +442,8 @@ export function prepareGitCommand(
   const interaction = options?.interaction ?? "allow";
   if (interaction === "allow") {
     return {
-      args: [...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", ...args],
-      ...(configEnv ? { env: { ...environment, ...configEnv } } : {}),
+      args: [...GIT_COLOR_FREE_ARGS, ...GIT_OUTPUT_ARGS, ...args],
+      ...(configEnv || options?.env ? { env: { ...environment, ...configEnv, ...options?.env } } : {}),
       isolateProcessGroup: false,
     };
   }
@@ -435,8 +457,7 @@ export function prepareGitCommand(
   return {
     args: [
       ...GIT_COLOR_FREE_ARGS,
-      "-c",
-      "core.quotePath=false",
+      ...GIT_OUTPUT_ARGS,
       "-c",
       "credential.interactive=false",
       ...args,
@@ -447,6 +468,7 @@ export function prepareGitCommand(
       GIT_TERMINAL_PROMPT: "0",
       GIT_SSH_COMMAND: `${sshCommand} ${sshBatchOptions}`,
       SSH_ASKPASS_REQUIRE: "never",
+      ...options?.env,
     },
     isolateProcessGroup: true,
   };
@@ -936,6 +958,8 @@ interface RawDiffEntry {
 interface OversizedTrackedDiffEntry extends RawDiffEntry {
   oldObjectId: string;
   newObjectId: string;
+  oldSize?: number | null;
+  newSize?: number | null;
 }
 
 const NULL_OBJECT_ID = /^0+$/;
@@ -1086,6 +1110,8 @@ function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
     `diff --git ${headerOldToken} ${headerNewToken}`,
     OVERSIZED_REVIEW_STUB_MARKER,
   ];
+  const bytesLine = oversizedReviewStubBytesLine({ old: entry.oldPath ? entry.oldSize : null, new: entry.newPath ? entry.newSize : null });
+  if (bytesLine) lines.push(bytesLine);
 
   if (!entry.oldPath) lines.push(`new file mode ${entry.newMode}`);
   if (!entry.newPath) lines.push(`deleted file mode ${entry.oldMode}`);
@@ -1129,6 +1155,10 @@ interface BoundedTrackedDiff {
  */
 const BOUNDED_DIFF_GIT_CONFIG: Record<string, string> = {
   "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
+  // Keep gitlinks as parseable pointer hunks even if interactive Git uses log or inline diffs.
+  "diff.submodule": "short",
+  // Keep the space on a blank context row: without it the viewer's parser skips the row and every later line number is one off.
+  "diff.suppressBlankEmpty": "false",
 };
 
 /**
@@ -1265,6 +1295,8 @@ async function buildBoundedTrackedDiff(
     oversized.push({
       ...entry,
       newObjectId: workingObjectId ?? entry.newObjectId,
+      oldSize,
+      newSize,
     });
   }
 
@@ -1456,8 +1488,8 @@ async function getUntrackedFileDiffs(
   // diff can't access the literal quoted filename (the file silently drops
   // out of the review), and the returned paths would never match the
   // unquoted deletion paths in removeTrackedDeletions.
+  // A leading or trailing space is part of an unquoted Git path.
   const files = lsResult.stdout
-    .trim()
     .split("\n")
     .filter((file) => file.length > 0)
     .map((file) => unquoteGitPath(file));
@@ -1511,6 +1543,7 @@ async function getUntrackedFileDiffs(
           // Same size-cap marker the tracked stub carries (see
           // buildOversizedTrackedStub) so the UI explains both the same way.
           OVERSIZED_REVIEW_STUB_MARKER,
+          oversizedReviewStubBytesLine({ new: fileInfo.size })!,
           `new file mode ${mode}`,
           `Binary files /dev/null and ${newToken} differ`,
           "",
@@ -1817,49 +1850,28 @@ export async function runGitDiff(
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
-        let trackedPatch = "";
+        let base: string;
         if (hasHead) {
-          // Resolve the merge-base with the requested base. When the base
-          // doesn't exist (repo with no main/master/origin — e.g. a `trunk`
-          // default and no remote) merge-base fails; degrade to HEAD so the
-          // reviewer still sees their working-tree changes instead of a raw
-          // git error. The sections sidecar degrades the same way.
+          // Fall back to HEAD when the requested branch cannot be resolved.
           const mergeBaseResult = await runtime.runGit(
             ["merge-base", "--end-of-options", defaultBranch, "HEAD"],
             { cwd },
           );
-          const mergeBase = mergeBaseResult.exitCode === 0
-            ? mergeBaseResult.stdout.trim()
-            : "HEAD";
-          trackedPatch = await getWorkingTreeDiffFromBase(runtime, mergeBase, cwd, options, "best-effort", fileIdentities);
-        }
-        if (hasHead) {
-          patch = trackedPatch;
+          base = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : "HEAD";
         } else {
-          const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options, "best-effort", false, fileIdentities);
-          patch = untracked.diff;
+          base = await getEmptyTreeSha(runtime, cwd);
         }
+        patch = await getWorkingTreeDiffFromBase(runtime, base, cwd, options, "best-effort", fileIdentities);
         label = `All changes since ${displayRef(defaultBranch)}`;
         break;
       }
 
       case "uncommitted": {
-        const trackedDiffArgs = [
-          "diff",
-          "--no-ext-diff",
-          ...wFlag,
-          "--src-prefix=a/",
-          "--dst-prefix=b/",
-          "HEAD",
-        ];
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
-        const trackedPatch = hasHead
-          ? await runBoundedTrackedDiff(runtime, trackedDiffArgs, cwd, fileIdentities)
-          : "";
-        const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options, "best-effort", false, fileIdentities);
-        patch = removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
+        const base = hasHead ? "HEAD" : await getEmptyTreeSha(runtime, cwd);
+        patch = await getWorkingTreeDiffFromBase(runtime, base, cwd, options, "best-effort", fileIdentities);
         label = "Uncommitted changes";
         break;
       }
@@ -1900,10 +1912,8 @@ export async function runGitDiff(
           ["rev-parse", "--verify", "HEAD~1"],
           { cwd },
         );
-        const args =
-          hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "HEAD~1..HEAD"]
-            : ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "--root", "HEAD"];
+        const baseRef = hasParent.exitCode === 0 ? "HEAD~1" : await getEmptyTreeSha(runtime, cwd);
+        const args = ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", `${baseRef}..HEAD`];
         patch = await runBoundedTrackedDiff(runtime, args, cwd, fileIdentities);
         label = "Last commit";
         break;
@@ -2104,7 +2114,7 @@ async function appendUntrackedFingerprint(
   const untracked = status.stdout
     .split("\n")
     .filter((line) => line.startsWith("?? "))
-    .map((line) => unquoteGitPath(line.slice(3).trim()))
+    .map((line) => unquoteGitPath(line.slice(3)))
     .slice(0, MAX_UNTRACKED_FINGERPRINT_FILES);
   if (untracked.length > 0) {
     const baseDir = await resolveRepoToplevel(runtime, cwd);
@@ -2222,12 +2232,13 @@ export async function getGitDiffFingerprint(
           const mergeBase = mb.exitCode === 0 ? mb.stdout.trim() : "HEAD";
           parts.push(mergeBase);
           if (!(await hashDiffOutput(["--end-of-options", mergeBase]))) return null;
-        }
+        } else if (!(await hashDiffOutput([await getEmptyTreeSha(runtime, cwd)]))) return null;
         if (!(await hashUntracked())) return null;
         break;
       }
       case "uncommitted": {
-        if (headSha !== "no-head" && !(await hashDiffOutput(["HEAD"]))) return null;
+        const base = headSha === "no-head" ? await getEmptyTreeSha(runtime, cwd) : "HEAD";
+        if (!(await hashDiffOutput([base]))) return null;
         if (!(await hashUntracked())) return null;
         break;
       }
@@ -2697,7 +2708,7 @@ export async function getSinceBaseSections(
         // Untracked. Don't clobber an existing tracked entry for the same
         // path: `git rm --cached f` emits BOTH `D  f` (staged delete) and
         // `?? f` (now-untracked file) — the tracked/staged signal wins.
-        const path = unquoteGitPath(rest.trim());
+        const path = unquoteGitPath(rest);
         if (path && !files[path]) files[path] = { group: "untracked", staged: false };
         continue;
       }
@@ -2710,7 +2721,7 @@ export async function getSinceBaseSections(
       // no sidecar entry, defaulting it to Committed. Both-sides prevents that.
       const staged = x !== " " && x !== "?";
       for (const token of splitPorcelainRename(rest)) {
-        const path = unquoteGitPath(token.trim());
+        const path = unquoteGitPath(token);
         if (path) files[path] = { group: "changes", staged };
       }
     }
@@ -2742,7 +2753,7 @@ export async function getSinceBaseSections(
       );
       if (committed.exitCode !== 0) return null;
       for (const line of committed.stdout.split("\n")) {
-        const path = unquoteGitPath(line.trim());
+        const path = unquoteGitPath(line);
         if (!path) continue;
         // Dirty state wins: a file with both committed and working-tree
         // changes lives in "changes" (its diff still shows the full story).
@@ -2794,7 +2805,7 @@ export async function gitAddFile(
   // Patch paths are repo-root-relative; from a subdirectory launch the
   // pathspec must be applied at the toplevel or `git add` fails with
   // "did not match any files".
-  await ensureGitSuccess(runtime, ["add", "--", filePath], await resolveRepoToplevel(runtime, cwd));
+  await ensureGitSuccess(runtime, ["add", "--", `:(top,literal)${filePath}`], await resolveRepoToplevel(runtime, cwd));
 }
 
 export async function gitResetFile(
@@ -2804,7 +2815,7 @@ export async function gitResetFile(
 ): Promise<void> {
   validateFilePath(filePath);
   // Toplevel for the same reason as gitAddFile.
-  await ensureGitSuccess(runtime, ["reset", "HEAD", "--", filePath], await resolveRepoToplevel(runtime, cwd));
+  await ensureGitSuccess(runtime, ["reset", "HEAD", "--", `:(top,literal)${filePath}`], await resolveRepoToplevel(runtime, cwd));
 }
 
 export function parseP4DiffType(
@@ -2832,37 +2843,7 @@ export function isP4DiffType(diffType: string): boolean {
 export function listPatchFiles(
   patch: string,
 ): { path: string; additions: number; deletions: number }[] {
-  if (!patch) return [];
-
-  const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
-  if (chunkStarts.length === 0) return [];
-
-  const files: { path: string; additions: number; deletions: number }[] = [];
-
-  for (let i = 0; i < chunkStarts.length; i++) {
-    const start = chunkStarts[i].index ?? 0;
-    const end = chunkStarts[i + 1]?.index ?? patch.length;
-    const lines = patch.slice(start, end).split("\n");
-
-    // Prefer the --- /+++ path lines (present on every non-mode-only chunk);
-    // fall back to the "diff --git a/x b/y" header for the rare chunk that
-    // lacks them (e.g. a pure mode change).
-    const { oldPath: bodyOldPath, newPath: bodyNewPath } = parseDiffFilePathLines(lines);
-    const headerPaths = parseDiffGitHeader(lines[0] ?? "");
-    const path = bodyNewPath ?? bodyOldPath ?? headerPaths.newPath ?? headerPaths.oldPath;
-    if (!path) continue;
-
-    let additions = 0;
-    let deletions = 0;
-    for (const line of lines) {
-      if (line.startsWith("+") && !line.startsWith("+++")) additions++;
-      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
-    }
-
-    files.push({ path, additions, deletions });
-  }
-
-  return files;
+  return parseDiffToFiles(patch).map(({ path, additions, deletions }) => ({ path, additions, deletions }));
 }
 
 /** One changed file's chunk in a patch, as the server sees it. */

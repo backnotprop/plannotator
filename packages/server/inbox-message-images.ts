@@ -24,6 +24,9 @@ import { basename } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
+import { openInboxMessageMedia } from "@plannotator/shared/inbox/message-media";
+import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
+import { byteRangeResponse, decideByteRange } from "./inbox-byte-range";
 import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
 import { syncSection } from "./inbox-perf";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -58,15 +61,27 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
   const project = store.project(message.project_id);
   if (!project) return refuse(404, "project_not_found", "The message's project is gone.");
 
-  const result = await readInboxMessageImageAsync({
+  const input = {
     body: message.body,
     root: project.root,
     base: message.base_path ?? null,
     path: url.searchParams.get("path"),
     // An agent's images come from anywhere; a person's own message (a phone, the relay, a tailnet login) from its project.
     anywhere: message.author.kind === "agent",
-  });
-  return inboxImageResponse(req, result, inboxImageWidth(url));
+  };
+  if (input.path && inboxInlineMediaKind(input.path)) {
+    const media = await openInboxMessageMedia(input);
+    if (!media.ok) return refuse(media.status, media.code, media.error);
+    const decision = decideByteRange(req.headers.get("range"), media.size, { ifRange: req.headers.get("if-range"), etag: media.etag });
+    return byteRangeResponse(media.handle, media.size, decision, {
+      ...GUARD_HEADERS,
+      "Content-Type": media.contentType,
+      "Content-Disposition": contentDisposition("inline", basename(media.named)),
+      "Cache-Control": "private, no-cache",
+      ETag: media.etag,
+    }, { head: req.method === "HEAD" });
+  }
+  return inboxImageResponse(req, await readInboxMessageImageAsync(input), inboxImageWidth(url));
 }
 
 /** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */

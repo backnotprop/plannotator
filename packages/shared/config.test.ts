@@ -12,6 +12,7 @@ import {
   chmodSync,
   symlinkSync,
   lstatSync,
+  renameSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,13 +50,14 @@ import {
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
+  __setConfigWriteForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
 describe("resolveInboxLaunch", () => {
   test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
     // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
-    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null });
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null, startIn: "inbox" });
     // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
     const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
     expect(on({ inboxLaunch: {} })).toBe(true);
@@ -71,7 +73,10 @@ describe("resolveInboxLaunch", () => {
     expect(on({}, "win32")).toBe(false);
     expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
     expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
-    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null, startIn: "inbox" });
+    // Rex only when it says exactly that: anything else starts in the background.
+    expect(resolveInboxLaunch({ inboxLaunch: { startIn: "rex" } }).startIn).toBe("rex");
+    for (const startIn of ["REX", "inbox", true, 1, null]) expect(resolveInboxLaunch({ inboxLaunch: { startIn } } as unknown as PlannotatorConfig).startIn).toBe("inbox");
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
     expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
@@ -258,17 +263,14 @@ describe("parseReviewAnalysisConfig", () => {
   test("accepts independent boolean analysis flags", () => {
     expect(parseReviewAnalysisConfig({ semanticDiff: false })).toEqual({ semanticDiff: false });
     expect(parseReviewAnalysisConfig({ callFlow: true })).toEqual({ callFlow: true });
-    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({
-      semanticDiff: true,
-      callFlow: false,
-    });
+    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({ semanticDiff: true, callFlow: false });
   });
 
   test("rejects non-object and non-boolean settings", () => {
     expect(parseReviewAnalysisConfig(null)).toBeUndefined();
     expect(parseReviewAnalysisConfig([])).toBeUndefined();
-    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
     expect(parseReviewAnalysisConfig({ callFlow: 1 })).toBeUndefined();
+    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
   });
 
   test("ignores unknown keys instead of persisting them", () => {
@@ -893,6 +895,7 @@ describe("saveConfig never writes over a config.json it could not read", () => {
   });
 
   afterEach(() => {
+    __setConfigWriteForTest(null);
     process.stderr.write = savedWrite;
     if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
     else delete process.env.PLANNOTATOR_DATA_DIR;
@@ -908,10 +911,153 @@ describe("saveConfig never writes over a config.json it could not read", () => {
     expect(warnings).toEqual([]);
   });
 
-  test("an empty config.json holds nothing to lose and is written", () => {
-    writeFileSync(configPath(), "  \n");
-    expect(saveConfig({ displayName: "x" })).toBe(true);
-    expect(loadConfig().displayName).toBe("x");
+  test("an empty config.json (zero bytes or only whitespace) holds nothing to lose: it reads as defaults and a save writes it", () => {
+    for (const bytes of ["", "  \n"]) {
+      writeFileSync(configPath(), bytes);
+      expect(loadConfig()).toEqual({});
+      warnings = [];
+      expect(saveConfig({ displayName: "x" })).toBe(true);
+      expect(JSON.parse(raw())).toEqual({ displayName: "x" });
+      expect(warnings).toEqual([]);
+    }
+  });
+
+  test("a save whose rename fails leaves config.json byte for byte, says so, and leaves no temp file", () => {
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" }, null, 2) + "\n";
+    writeFileSync(configPath(), bytes);
+    // ENOSPC stands in for a disk that filled up; EPERM for a lock that never lets go.
+    for (const code of ["ENOSPC", "EPERM"]) {
+      let calls = 0;
+      const waits: number[] = [];
+      let lockHeldWhileWaiting = true;
+      __setConfigWriteForTest({
+        rename: () => {
+          calls++;
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+        sleep: (ms) => {
+          waits.push(ms);
+          lockHeldWhileWaiting &&= existsSync(join(tempDir, "config.json.lock"));
+        },
+      });
+      try {
+        warnings = [];
+        expect(saveConfig({ displayName: "Grace" })).toBe(false);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain("failed to write config.json");
+      expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+      // A disk error is not retried; a Windows lock error is, with backoff, for about 2 s, under the config lock.
+      const waited = waits.reduce((a, b) => a + b, 0);
+      if (code === "ENOSPC") {
+        expect(calls).toBe(1);
+        expect(waits).toEqual([]);
+      } else {
+        expect(calls).toBe(waits.length + 1);
+        expect(waited).toBeGreaterThanOrEqual(1800);
+        expect(waited).toBeLessThanOrEqual(2500);
+        expect(waits[0]).toBeLessThan(waits[waits.length - 1]);
+        expect(lockHeldWhileWaiting).toBe(true);
+      }
+    }
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" });
+  });
+
+  test("a rename held for a while by another program (Windows) is retried and lands", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    let calls = 0;
+    __setConfigWriteForTest({
+      rename: (from, to) => {
+        if (++calls <= 6) throw Object.assign(new Error("EBUSY: simulated"), { code: "EBUSY" });
+        renameSync(from, to);
+      },
+      sleep: () => {},
+    });
+    try {
+      expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    } finally {
+      __setConfigWriteForTest(null);
+    }
+    expect(JSON.parse(raw())).toEqual({ displayName: "Ada", favicon: "yellow" });
+    expect(warnings).toEqual([]);
+  });
+
+  test("an fsync error (a full disk or quota that shows up only there) stops the write before the rename; only 'no fsync here' is ignored", () => {
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" } });
+    writeFileSync(configPath(), bytes);
+    for (const code of ["ENOSPC", "EDQUOT", "EIO"]) {
+      let renamed = false;
+      __setConfigWriteForTest({
+        fsync: () => {
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+        rename: (from, to) => {
+          renamed = true;
+          renameSync(from, to);
+        },
+      });
+      try {
+        warnings = [];
+        expect(saveConfig({ displayName: "Grace" })).toBe(false);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(renamed).toBe(false);
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain(code);
+      expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+    }
+    for (const [code, favicon] of [["EINVAL", "yellow"], ["ENOTSUP", "blue"]]) {
+      __setConfigWriteForTest({
+        fsync: () => {
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+      });
+      try {
+        expect(saveConfig({ favicon } as Partial<PlannotatorConfig>)).toBe(true);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(JSON.parse(raw()).favicon).toBe(favicon);
+    }
+    expect(JSON.parse(raw())).toEqual({ displayName: "Ada", theme: { mode: "dark" }, favicon: "blue" });
+  });
+
+  test("a folder that is not writable: the save fails and config.json keeps its bytes (never written in place)", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" } });
+    writeFileSync(configPath(), bytes);
+    chmodSync(tempDir, 0o555);
+    try {
+      expect(saveConfig({ displayName: "Grace" })).toBe(false);
+    } finally {
+      chmodSync(tempDir, 0o700);
+    }
+    expect(raw()).toBe(bytes);
+    expect(warnings.join("")).toContain("failed to write config.json");
+  });
+
+  test("a symlinked config.json in a folder that is not writable still saves: the temp file goes beside the link's target", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const dotfiles = mkdtempSync(join(tmpdir(), "plannotator-config-dotfiles-"));
+    try {
+      const target = join(dotfiles, "config.json");
+      writeFileSync(target, JSON.stringify({ displayName: "Ada" }));
+      symlinkSync(target, configPath());
+      chmodSync(tempDir, 0o555);
+      try {
+        expect(saveConfig({ favicon: "yellow" })).toBe(true);
+      } finally {
+        chmodSync(tempDir, 0o700);
+      }
+      expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ displayName: "Ada", favicon: "yellow" });
+      expect(readdirSync(dotfiles)).toEqual(["config.json"]);
+    } finally {
+      rmSync(dotfiles, { recursive: true, force: true });
+    }
   });
 
   test("config.json that is not valid JSON is kept byte for byte, and the save says so", () => {

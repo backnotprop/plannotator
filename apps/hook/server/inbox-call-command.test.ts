@@ -30,7 +30,7 @@ import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { T3_THREAD_ID_FORMS } from "../../../tests/helpers/fake-t3";
 import { INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
-import { type CallCommandDeps, inboxCallerOf, parseCallCommand, routineCallArgs, runInboxCallCommand } from "./inbox-call-command";
+import { type CallCommandDeps, inboxCallerOf, parseCallCommand, runInboxCallCommand } from "./inbox-call-command";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const HOUR = 60 * 60_000;
@@ -196,11 +196,6 @@ describe("what a script gets", () => {
     expect(parseCallCommand(["steps", "{}"])).toMatchObject({ ok: true, action: "steps" });
   });
 
-  test("plannotator routine <op> is inbox call routine with the op inside its JSON, the session passed on", () => {
-    expect(routineCallArgs(["update", '{"id":"sch_1","name":"Morning triage"}', "--session", "s-maya"])).toEqual(["--session", "s-maya", "routine", '{"id":"sch_1","name":"Morning triage","op":"update"}']);
-    expect(routineCallArgs([])).toMatchObject({ code: "usage" });
-  });
-
   test("bad JSON, a non-object, an unknown action, wait_for_reply and a named identity are usage errors, sent nowhere", async () => {
     const box = sandbox();
     for (const [args, code] of [
@@ -222,7 +217,9 @@ describe("what a script gets", () => {
 
   test("an Inbox started without the test sandbox still reaches only a stub", async () => {
     const box = sandbox();
-    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...env } = box.env;
+    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...rest } = box.env;
+    // Without the sandbox marker only the test knob makes this scratch data dir count as turned on (turned-on.ts).
+    const env = { ...rest, PLANNOTATOR_TEST_INBOX_ON: "1" };
     const sent = await cli({ ...box, env }, ["send_message", '{"body":"From a Codex thread."}'], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
     const inbox = inboxEntryOf(box.dataDir);
     if (inbox) detached.push({ entry: inbox, root: box.root });

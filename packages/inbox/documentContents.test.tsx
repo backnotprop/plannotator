@@ -5,7 +5,7 @@
  * never in the comments column and never moving the page. Where the rail
  * yields (its gutter rule), until it has drawn, and on a phone: a Contents
  * button over the file opens the rail's headings (levels 1 to 4) as a sheet.
- * Fewer than 4 headings: neither. The rail's Hide is remembered and leaves a
+ * Fewer than 2 headings: neither (ui's rail asks for 4 by default; the Inbox passes 2). The rail's Hide is remembered and leaves a
  * button that shows it again; focus moves to what replaces each. The sheet
  * mounted mid-document marks the section being read (the rail's scroll math),
  * holds focus and takes Escape first; an open rail panel takes Escape before
@@ -280,8 +280,16 @@ test.skipIf(!hasDom)('where the gutter is short the rail yields and the Contents
   expect(host!.querySelector('[data-contents-open]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a document with fewer than 4 headings has no Contents', async () => {
-  await renderPane('# Refund worker\n\nShort.\n\n## Context\n\nStill short.\n\n## Design\n\nA worker.\n');
+// A short plan (two or three headings) has Contents too: ui's rail asks for 4 by default, the Inbox passes 2.
+test.skipIf(!hasDom)('a document with 2 headings has Contents; with 1 it has none', async () => {
+  await renderPane('# Refund worker\n\nShort.\n\n## Context\n\nStill short.\n');
+  await layOutPage(1000, 820);
+  expect(railOf()).not.toBeNull();
+  expect(ticks()).toHaveLength(2);
+
+  act(() => root?.unmount());
+  host!.remove();
+  await renderPane('# Refund worker\n\nShort, with one heading.\n');
   await layOutPage(1000, 820);
   expect(railOf()).toBeNull();
   expect(host!.querySelector('[data-contents-open], [data-contents-show], [data-contents]')).toBeNull();

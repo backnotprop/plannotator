@@ -22,7 +22,7 @@ import { getPRDiscussionCount } from './prDiscussion';
 /** Region label header shared by the panel's regions, with an optional right-aligned action. */
 function RegionHeader({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="flex-shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/30 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="flex-shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/30 text-xs font-semibold text-muted-foreground">
       <span>{children}</span>
       {action}
     </div>
@@ -71,8 +71,8 @@ function ChecksDisclosure({ context }: { context: PRContext }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tone.dot}`} />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Checks</span>
-        <span className={`text-[10px] font-mono ${tone.text}`}>{label}</span>
+        <span className="text-xs font-semibold text-muted-foreground">Checks</span>
+        <span className={`text-xs font-mono ${tone.text}`}>{label}</span>
       </button>
       {open && (
         <div className="mt-2">

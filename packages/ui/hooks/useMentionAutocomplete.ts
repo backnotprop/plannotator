@@ -10,6 +10,7 @@ import {
   type MentionTrigger,
 } from '../utils/mentions';
 import { mentionAnchorOf, type MentionAnchor } from '../components/MentionPicker';
+import { replaceUndoably } from '../utils/undoableEdit';
 
 export interface MentionMenuState {
   items: readonly MentionPerson[];
@@ -30,6 +31,11 @@ export interface UseMentionAutocompleteResult {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** Call from the textarea's onSelect and onChange (every caret move + input). */
   onSelect: () => void;
+  /**
+   * Call from the textarea's onChange with the input's `inputType`, in place of `onSelect` there. It reads the caret
+   * as `onSelect` does; with `quietOnDelete` it also keeps the list from opening on a deletion.
+   */
+  onEdit: (inputType?: string) => void;
   /** Insert the given menu item at the active trigger. */
   select: (index: number) => void;
   /** The ids whose readable token still survives in the text. */
@@ -71,8 +77,14 @@ export function useMentionAutocomplete(options: {
   setText: (text: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   source?: MentionSource;
+  /**
+   * The list opens when the person types, never because they deleted (opt-in; the Inbox's composers): holding
+   * Backspace back into an `@name` already in the words keeps it shut. A list for the name being typed stays with it
+   * through a Backspace, as before. Needs `onEdit` from the onChange. Absent: as before.
+   */
+  quietOnDelete?: boolean;
 }): UseMentionAutocompleteResult {
-  const { text, setText, textareaRef, source } = options;
+  const { text, setText, textareaRef, source, quietOnDelete = false } = options;
   const enabled = !!source;
   const [caret, setCaret] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -81,6 +93,10 @@ export function useMentionAutocomplete(options: {
   // Escape dismisses the menu for the trigger it was open on; the same trigger
   // does not reopen until the caret leaves it.
   const [dismissedStart, setDismissedStart] = useState<number | null>(null);
+  // With `quietOnDelete`: the trigger a deletion brought the caret to, shut until the person types at it, and the
+  // one they last typed at (its list goes with them through a typo's Backspace, even when the typo had shut it).
+  const [quietStart, setQuietStart] = useState<number | null>(null);
+  const typedStart = useRef<number | null>(null);
 
   const trigger: MentionTrigger | null = useMemo(() => {
     if (!enabled || caret === null) return null;
@@ -124,6 +140,7 @@ export function useMentionAutocomplete(options: {
   const open =
     trigger !== null
     && trigger.from !== dismissedStart
+    && trigger.from !== quietStart
     && (items.length > 0 || !!emptyNotice);
 
   // A new trigger start clears the dismissal memory.
@@ -133,6 +150,7 @@ export function useMentionAutocomplete(options: {
     if (triggerStart !== lastTriggerStart.current) {
       lastTriggerStart.current = triggerStart;
       setDismissedStart(null);
+      setQuietStart((quiet) => (quiet === triggerStart ? quiet : null));
     }
   }, [triggerStart]);
 
@@ -169,6 +187,25 @@ export function useMentionAutocomplete(options: {
     setCaret(el ? el.selectionStart : null);
   }, [enabled, textareaRef]);
 
+  const onEdit = useCallback(
+    (inputType?: string) => {
+      readCaret();
+      if (!enabled || !quietOnDelete) return;
+      const el = textareaRef.current;
+      const next = el ? (mentionTrigger(el.value, el.selectionStart)?.from ?? null) : null;
+      if (!inputType?.startsWith('delete')) {
+        typedStart.current = next;
+        setQuietStart(null);
+        return;
+      }
+      // The name being typed, or the list already open for it: it stays. Any other trigger a deletion reaches: shut.
+      const typing = next !== null && (next === typedStart.current || (open && next === trigger?.from));
+      if (!typing) typedStart.current = null;
+      setQuietStart(typing ? null : next);
+    },
+    [enabled, open, quietOnDelete, readCaret, textareaRef, trigger],
+  );
+
   const select = useCallback(
     (index: number) => {
       const el = textareaRef.current;
@@ -182,8 +219,11 @@ export function useMentionAutocomplete(options: {
         setDismissedStart(trigger.from);
         return;
       }
+      // A picked name is no longer the one being typed: a Backspace after the pick reaches it as a deletion.
+      typedStart.current = null;
       const result = applyMentionPick(text, trigger, person);
-      setText(result.text);
+      // The browser's own edit, one ⌘Z step of its own (utils/undoableEdit.ts); else written as before.
+      if (!el || !replaceUndoably(el, trigger.from, trigger.to, result.text.slice(trigger.from, result.caret))) setText(result.text);
       setCaret(result.caret);
       setTagged((prev) => (prev.some((p) => p.id === person.id) ? prev : [...prev, person]));
       setActiveIndex(null);
@@ -249,6 +289,7 @@ export function useMentionAutocomplete(options: {
       : null,
     onKeyDown,
     onSelect: readCaret,
+    onEdit,
     select,
     mentionIds,
     mentions,

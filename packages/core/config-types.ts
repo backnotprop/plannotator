@@ -46,6 +46,7 @@ export interface DiffOptions {
   expandUnchanged?: boolean;
   defaultDiffType?: DefaultDiffType;
   lineBgIntensity?: DiffLineBgIntensity;
+  semantic?: boolean;
 }
 
 /**
