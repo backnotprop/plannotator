@@ -289,10 +289,27 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
   }, [annotate?.annotations, index, embedId]);
   // The annotatable document, once asked for (the pen, or a comment to show), stays: going back would load the page again.
   const [annotatable, setAnnotatable] = useState(false);
-  const wantsAnnotatable = index > 0 && (armed || mine.own.length > 0 || mine.pending);
+  // A host that could not keep the annotatable document: the block goes back to its light frame, pen off, until
+  // the pen is pressed again (never a blank box).
+  const [refused, setRefused] = useState(false);
+  const wantsAnnotatable = index > 0 && !refused && (armed || mine.own.length > 0 || mine.pending);
   useEffect(() => {
     if (wantsAnnotatable) setAnnotatable(true);
   }, [wantsAnnotatable]);
+  const annotatableUrl = useCallback(async (document: string): Promise<string | null> => {
+    let next: string | null = null;
+    try {
+      next = (await hostRef.current.annotate?.frameUrl(document)) ?? null;
+    } catch {
+      next = null;
+    }
+    if (next === null) {
+      setRefused(true);
+      setAnnotatable(false);
+      setArmed(false);
+    }
+    return next;
+  }, []);
   // The page's own verdict on the comments it was given (null until its first), and the block's report to the host.
   const [missing, setMissing] = useState<readonly string[] | null>(null);
   useEffect(() => {
@@ -446,7 +463,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
                 <AnnotatableEmbedFrame
                   key={url}
                   html={block.content}
-                  frameUrl={annotate.frameUrl}
+                  frameUrl={annotatableUrl}
                   theme={theme}
                   title={title}
                   height={height}
@@ -532,7 +549,10 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
               aria-pressed={penOn}
               disabled={!live}
               className={`rounded px-1.5 py-[3px] disabled:pointer-events-none disabled:opacity-50 max-sm:-my-2 max-sm:px-2.5 max-sm:py-2.5 ${penOn ? 'bg-primary text-primary-foreground' : 'hover:bg-muted hover:text-foreground'}`}
-              onClick={() => setArmed((value) => !value)}
+              onClick={() => {
+                setRefused(false);
+                setArmed((value) => !value);
+              }}
             >
               <PenLine aria-hidden="true" className="h-3.5 w-3.5" />
             </button>

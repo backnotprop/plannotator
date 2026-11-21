@@ -1249,8 +1249,6 @@ export interface LiveSiteWire {
 export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
-  /** An html block's annotatable document (its page with the annotation bridge), kept by the Inbox and served under the embed's own policy (inbox-embeds.ts). */
-  embedPage: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embed-pages'), { html }, { gzip: true }),
   /** An attached HTML page's frame document, kept by the Inbox and served under its own policy (inbox-pages.ts). */
   page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }, { gzip: true }),
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */

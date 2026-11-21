@@ -48,6 +48,8 @@ export function splitReplyFeedback(text: string): { words: string; feedback: str
 
 /** A line of a pinned element's details, as the export writes them after its comment (`elementContextExportBlock`). */
 const ELEMENT_DETAIL = /^- \*\*(?:selector|path|role|name|component|attrs|text|route|box|near)\*\* /;
+/** The sections whose comments can be on an element of a page: an attached page's, and a message's live html block's. */
+const ELEMENT_SECTIONS = [`# ${ATTACHMENT_FEEDBACK_HEADING.title}`, `# ${MESSAGE_FEEDBACK_HEADING.title}`];
 /** The fence that opens a pinned element's HTML outline there. */
 const ELEMENT_OUTLINE = /^````html\s*$/;
 
@@ -56,14 +58,16 @@ const ELEMENT_OUTLINE = /^````html\s*$/;
  * pin on an HTML page carries for the agent (the owner's audit, 2026-11-19:
  * the sent reply showed the element's outline, drawn as a little page, then
  * its selector, path, box in pixels and the like). Under "# Feedback on the
- * attached files", each pinned element's outline fence and the detail lines
+ * attached files", and under "# Feedback on your messages" (a pin on an
+ * element of a message's live html block, whose outline fence would draw as a
+ * little live page), each pinned element's outline fence and the detail lines
  * after it are left out of the drawing, so the comment reads as its heading
  * (`Feedback on: "412 ms"`) and the person's words. The stored text, which is
  * what the agent reads, keeps them all. Display only; any other fence and any
  * other list stays as written.
  */
 export function withoutElementDetails(markdown: string): string {
-  if (!markdown.includes(`# ${ATTACHMENT_FEEDBACK_HEADING.title}`) || !markdown.includes('- **')) return markdown;
+  if (!ELEMENT_SECTIONS.some((heading) => markdown.includes(heading)) || !markdown.includes('- **')) return markdown;
   const lines = markdown.split('\n');
   const kept: string[] = [];
   let inSection = false;
@@ -76,7 +80,7 @@ export function withoutElementDetails(markdown: string): string {
   };
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
-    if (line === `# ${ATTACHMENT_FEEDBACK_HEADING.title}`) inSection = true;
+    if (ELEMENT_SECTIONS.includes(line)) inSection = true;
     else if (inSection && /^# /.test(line)) inSection = false;
     if (inSection && ELEMENT_OUTLINE.test(line)) {
       // The outline's fence and the details right after it: one pinned element.

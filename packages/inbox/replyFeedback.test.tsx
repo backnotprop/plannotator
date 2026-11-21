@@ -156,6 +156,42 @@ test("a pin on an HTML page: the person's reply is drawn without the element's o
   expect(withoutElementDetails(plain)).toBe(plain);
 });
 
+test("a pin on an element of a message's live html block: the reply is drawn without the outline (it would draw as a live page) and the selector lines", () => {
+  const stored = [
+    'One note on the chart.',
+    '',
+    '# Feedback on your messages',
+    '',
+    'The following feedback is on the text of your messages in this thread, one section per message.',
+    '',
+    '## Feedback on your message from 2:58 PM (msg_A)',
+    '',
+    "I've reviewed this message and have 1 piece of feedback:",
+    '',
+    '### 1. Feedback on: "Pro, W3"',
+    'HTML block 1 in the message, lines 3–40',
+    '',
+    '````html',
+    '<rect id="pro-w3" aria-label="Pro, W3"></rect>',
+    '````',
+    '- **selector** `#pro-w3`',
+    '- **path** `body > svg > rect`',
+    '',
+    '> Label this dip.',
+    '',
+    '---',
+  ].join('\n');
+  const shown = withoutElementDetails(stored);
+  expect(shown).not.toContain('````html');
+  expect(shown).not.toContain('<rect');
+  expect(shown).not.toContain('- **selector** ');
+  expect(shown).not.toContain('- **path** ');
+  // Which block, the element's label and the person's words stay.
+  expect(shown).toContain('### 1. Feedback on: "Pro, W3"');
+  expect(shown).toContain('HTML block 1 in the message, lines 3–40');
+  expect(shown).toContain('> Label this dip.');
+});
+
 test("the person's own fences and lists are never taken, even ones that look like an element's", () => {
   const own = 'Like this:\n\n````html\n<div>mine</div>\n````\n\nand\n\n- **path** first\n- **box** second';
   // Outside the files' feedback: as written.

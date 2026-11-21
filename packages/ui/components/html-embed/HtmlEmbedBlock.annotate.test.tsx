@@ -291,6 +291,17 @@ describe.skipIf(!hasDom)('the pen on', () => {
     expect(pen(el)!.disabled).toBe(true);
   });
 
+  test('a host that cannot keep the annotatable document: the light frame comes back with the pen off, never a blank box', async () => {
+    const w = world([], { frameUrl: async () => null });
+    const el = await mount(w.embeds);
+    await turnPenOn(el);
+    await settle(60);
+    expect(annotatableFrame(el)).toBeNull();
+    expect(lightFrame(el)).not.toBeNull();
+    expect(pen(el)!.getAttribute('aria-pressed')).toBe('false');
+    expect(pen(el)!.disabled).toBe(false);
+  });
+
   test('a comment the host did not keep is not left as the pen state: the pen is off either way', async () => {
     const w = world([], { onAdd: async () => false });
     const el = await mount(w.embeds);

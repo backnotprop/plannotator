@@ -1485,8 +1485,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
         const id = CSS.escape(record.id);
         const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"], ${inMessage} [data-html-embed-comments~="${id}"]`);
-        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view. One on
-        // an element of a live html block: the block is rung, and its page shows the marker selected.
+        // A comment on a diagram part (or an element of a live html block): the diagram (block) is rung, and its own selection brings the part into view.
         const onDiagram = annotationOf(record).diagramAnchor != null || annotationOf(record).htmlBlockAnchor != null;
         const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;

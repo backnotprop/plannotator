@@ -421,6 +421,12 @@ test('an element of an html block is commented in place: same boundary, the pers
     expect(body).toContain('- **selector** `#pro-3`');
     expect(body).toContain('> Label this dip with the date the pricing page changed');
     expect(body).not.toContain('FORGED');
+    // The person's own reply in the thread: the block and the words, never the element's outline drawn as a page.
+    const reply = page.locator('[data-reply-feedback]');
+    await expect(reply).toContainText('HTML block 1 in the message');
+    await expect(reply).toContainText('Label this dip with the date the pricing page changed');
+    await expect(reply.locator('iframe')).toHaveCount(0);
+    await expect(reply).not.toContainText('selector');
   } finally {
     await context.close().catch(() => {});
     await phone.close().catch(() => {});
