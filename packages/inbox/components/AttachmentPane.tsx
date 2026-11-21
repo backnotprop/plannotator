@@ -63,11 +63,11 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
-import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
 import { scrollerOf } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
-import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
-import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
+import { ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
+import { FileContentsRail } from '../parts/FileContentsRail';
 import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { ArtifactPinButton } from './ArtifactPinButton';
 import { ReuseButton } from '../reuse';
@@ -2841,20 +2841,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && hasContents && !phone && (
-            // ui's contents rail (Workspaces' rail, approved 2026-10-03): ticks in the page's right gutter, the panel
-            // opening left over the page. Loaded once the page is interactive; it measures itself and yields where the
-            // gutter is short, then says so and the Contents button takes over. Hidden by choice, it still measures.
-            <DeferredMarkdownContentsRail
+            <FileContentsRail
               key={`rail:${docKey}`}
               blocks={documentBlocks}
-              minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
               scrollViewport={scrollViewport}
-              contentSelector="[data-doc-text-root]"
               // A linked document over the file hides the file's Contents with it.
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
-              panelAction={<ContentsHide onHide={hideContents} />}
-              // The file's comments as dots beside the ticks; a dot selects its comment as the comments panel does.
+              onHide={hideContents}
               annotations={annotations}
               selectedAnnotationId={selectedId}
               onSelectAnnotation={setSelectedId}
