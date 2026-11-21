@@ -441,7 +441,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
-  // OpenCode's default is named only as read for the folder To names (a typed folder: none, `trustPick` is null).
   const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone, { defaultFor: trustPick?.projectId ?? null, say });
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home): plain Send. Its facts follow the pick by a read, so a press can come before them.
