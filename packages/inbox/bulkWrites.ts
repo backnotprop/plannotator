@@ -11,9 +11,11 @@ import type { InboxListRow, InboxListSection, InboxPriorityBefore } from '@plann
 import { plural } from '@plannotator/core/inbox-format';
 import { inboxSnoozeRunning, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { InboxHeldError, inboxApi, type ListModel } from './api';
-import { listGroups, markHeldRowArchived, putRowBack, replaceHeldRow, settleThread } from './held';
+import { drawnSection, listGroups, markHeldRowArchived, putRowBack, replaceHeldRow, settleThread } from './held';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { setAsideCount, type SetAsideCount } from './markRead';
+import { currentMarkAllRows } from './markAllRead';
+import { batchToastWhy } from './projectMenu';
 import type { RowWrites, RowDrawing } from './data/actions/rows';
 import { errorToast } from './toastError';
 import type { InboxToastModel } from './components/Toast';
@@ -110,6 +112,25 @@ export function bulkToast(action: BulkAction, outcomes: readonly Outcome<unknown
   };
 }
 
+/**
+ * Mark all as read's toast (the list's ⋮ and the New band, markAllRead.ts): the picks' Mark read toast with the project
+ * menu's words after the count (projectMenu.ts `batchToastWhy`), read from the rows that changed, never one refused:
+ * the warning icon when an agent was stopped or held up, a phone's words for it, and the agent's whole name for the
+ * live region.
+ */
+export function markAllToast(outcomes: readonly Outcome<unknown>[]): Pick<InboxToastModel, 'icon' | 'lead' | 'phoneLead' | 'detail' | 'phoneDetail' | 'speech' | 'wrap'> | null {
+  const { why, warn, said, phoneDetail } = batchToastWhy(outcomes.flatMap((o) => (o.ok ? [o.row] : [])));
+  const copy = bulkToast('read', outcomes, why || undefined);
+  if (!copy) return null;
+  const alone = copy.detail === why;
+  return {
+    ...copy,
+    icon: warn ? 'warn' : copy.icon,
+    ...(phoneDetail && alone ? { phoneDetail } : {}),
+    ...(why ? { speech: `${copy.lead}. ${said && alone ? said : copy.detail}.` } : {}),
+  };
+}
+
 /** Add tag on the picks: "Tagged 3 threads · Billing", "Removed 3 threads · from Billing". */
 export function tagsToast(outcomes: readonly Outcome<unknown>[], tag: string, on: boolean): Pick<InboxToastModel, 'icon' | 'lead' | 'phoneLead' | 'detail' | 'wrap'> | null {
   const copy = bulkToast('archive', outcomes, on ? tag : `from ${tag}`);
@@ -142,8 +163,8 @@ export function bulkWrites(host: BulkHost) {
       else say('Moved back.');
     })();
   };
-  const finish = (action: BulkAction, outcomes: readonly Outcome<unknown>[], onUndo: () => void, detail?: string) => {
-    const copy = bulkToast(action, outcomes, detail);
+  const finish = (action: BulkAction, outcomes: readonly Outcome<unknown>[], onUndo: () => void, detail?: string, all = false) => {
+    const copy = all ? markAllToast(outcomes) : bulkToast(action, outcomes, detail);
     if (!copy) return allRefused(outcomes);
     showToast({ ...copy, onUndo });
   };
@@ -212,16 +233,26 @@ export function bulkWrites(host: BulkHost) {
 
   /**
    * False when the warning was cancelled: nothing was written (a drop on Quiet keeps the picks then, listDrops.tsx).
-   * `detail`: the toast's words after the count (Mark all as read's, markAllRead.ts).
+   * Each thread is read as it is now (`rowOf`): the list holds still, so a picked row can be older than its thread
+   * (news waiting behind "N new"), and the warning counts the questions the write really closes. A picked row is
+   * written whatever waits there (the person picked it). `all`: Mark all as read's toast (`markAllToast`).
    */
-  const markRead = async (rows: readonly InboxListRow[], detail?: string): Promise<boolean> => {
+  const markRead = async (picked: readonly InboxListRow[], all = false): Promise<boolean> => {
+    const rows = picked.map((row) => rowOf(row.thread_id) ?? row);
     // Questions these would close unanswered: the warning asks once for all of them, as Mark all as read does.
     if (!(await host.warnSetAside(setAsideCount(rows), true))) return false;
     const patch = readRowPatch(new Date().toISOString());
+    const drawn = rows.map((row) => shownRowOf(shownRef.current, row.thread_id));
     const drawings = rows.map((row) => rowWrites.draw(row.thread_id, { patch }));
     setShown((current) => (current ? rows.reduce((sections, row) => patchShownRow(sections, row.thread_id, patch), current) : current));
     const outcomes = await eachRow(rows, (row) => inboxApi.markRead(row.thread_id, true));
-    outcomes.forEach((o, i) => !o.ok && drawings[i]!.failed());
+    // A refused write: its row is drawn as it was (as Archive's), not read until the list settles.
+    outcomes.forEach((o, i) => {
+      if (o.ok) return;
+      drawings[i]!.failed();
+      const before = drawn[i];
+      if (before) setShown((current) => (current ? replaceHeldRow(current, before) : current));
+    });
     void afterWrite(ids(outcomes)).finally(() => drawings.forEach((drawing) => drawing.done()));
     // Mark read ended a snooze: its Undo puts that back too.
     finish(
@@ -231,9 +262,21 @@ export function bulkWrites(host: BulkHost) {
         await inboxApi.markRead(row.thread_id, false);
         await host.restoreSnooze(row.thread_id, row.snoozed);
       }),
-      detail || undefined,
+      undefined,
+      all,
     );
     return true;
+  };
+
+  /**
+   * Mark all as read (the list's ⋮, the New band; markAllRead.ts): `drawn`, the rows it took off the list as drawn,
+   * each written as its thread is now; a thread whose news waits behind "N new · Show" is left out and stays new
+   * (`currentMarkAllRows`). False when nothing was written.
+   */
+  const markAllRead = async (drawn: readonly InboxListRow[]): Promise<boolean> => {
+    const rows = currentMarkAllRows(drawn, rowOf, (id) => drawnSection(shownRef.current, id));
+    if (rows.length === 0) return (say('Nothing to mark read.'), false);
+    return markRead(rows, true);
   };
 
   const markUnread = async (rows: readonly InboxListRow[]) => {
@@ -279,7 +322,7 @@ export function bulkWrites(host: BulkHost) {
   };
 
   // The window's toasts, live region and writes for the picks' other actions (Combine's tracker, useCombines.ts).
-  return { archive, snooze, markRead, markUnread, star, priority, hidePulls, host };
+  return { archive, snooze, markRead, markAllRead, markUnread, star, priority, hidePulls, host };
 }
 
 /** With the Combines the window follows (useCombines.ts), which the picks' Combine… starts. */

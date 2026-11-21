@@ -1367,8 +1367,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* The pointer on the button is still on the header: its fill and its chevron stay. */
 .pn-inbox .ib-group:has(> .ib-band-act:hover) > button.ib-band { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .ib-group:has(> .ib-band-act:is(:hover, :focus-visible)) > .ib-band svg.ib-band-chev { opacity: 1; translate: 0 0; }
+/* A touch never shows the chevron: always shown, where the chevron would be. */
 @media (hover: none) {
-  .pn-inbox .ib-band-act { opacity: 1; }
+  .pn-inbox .ib-band-act { opacity: 1; margin-right: 5px; }
 }
 /* The Archived group's own lines (components/ArchivedGroup.tsx): "Show 20 more" and its quiet lines start where the
    header's words do. A phone's archived row slides left over "Unarchive" (SwipeToUnarchive.tsx); the list scrolls

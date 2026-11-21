@@ -46,10 +46,27 @@ export function GroupBand({ open, onToggle, children }: { open: boolean; onToggl
  * tooltip. It takes no height of its own (inbox.css `.ib-band-act`), so the header and its count never move. On a
  * wider window it shows with the chevron (the pointer on the header, or keyboard focus on either); a phone always shows it.
  */
-export function BandAction({ label, icon, onClick, ...data }: { label: string; icon: IconName; onClick: () => void } & Record<`data-${string}`, string>) {
+export function BandAction({ label, icon, onClick, ...data }: { label: string; icon: IconName; onClick: () => Promise<unknown> | void } & Record<`data-${string}`, string>) {
   return (
     <Tip content={label}>
-      <button type="button" className="ib-band-act" aria-label={label} onClick={onClick} {...data}>
+      <button
+        type="button"
+        className="ib-band-act"
+        aria-label={label}
+        onClick={(event) => {
+          const button = event.currentTarget;
+          const header = button.previousElementSibling as HTMLElement | null;
+          // The button goes once its band has nothing left to take: focus that was on it moves to the header, never
+          // to the page.
+          void Promise.resolve(onClick()).finally(() => {
+            requestAnimationFrame(() => {
+              const lost = !document.activeElement || document.activeElement === document.body;
+              if (!button.isConnected && lost && header?.isConnected) header.focus();
+            });
+          });
+        }}
+        {...data}
+      >
         <Icon name={icon} size={15} />
       </button>
     </Tip>

@@ -54,10 +54,12 @@ export interface ProjectBatchToast {
 }
 
 /**
- * What a batch on these rows (as they were before it) did beyond its count: an agent stopped or held up (`warning`;
- * `said` names a cut agent whole for the live region), else the questions it closed (`closed`).
+ * What a batch on these rows (as they were before it) did beyond its count, for its toast: an agent stopped or held
+ * up (`warn`, the warning icon), else the questions it closed; empty `why` when neither. `said` names a cut agent
+ * whole for the live region; `phoneDetail` is a phone's words for a warning that names an agent ("Stopped · Pi").
+ * The project menu's toast and the list's Mark all as read (bulkWrites.ts) both read it.
  */
-function batchWhy(rows: readonly InboxListRow[]): { warning: string; said: string; phoneDetail?: string; closed: string } {
+export function batchToastWhy(rows: readonly InboxListRow[]): { why: string; warn: boolean; said: string; phoneDetail?: string } {
   // Questions still waiting on the person in the threads taken: Mark read and the archive close them.
   const questions = rows.reduce((sum, row) => sum + row.questions.open + row.questions.picked, 0);
   const stopped = rows.filter((row) => row.questions.stopped && row.questions.open > 0);
@@ -74,16 +76,7 @@ function batchWhy(rows: readonly InboxListRow[]): { warning: string; said: strin
   else if (stopped.length > 1) warning = `${stopped.length} agents were stopped`;
   else if (holds > 0) warning = `Held up ${plural(holds, 'thing')}`;
   const closed = questions > 0 ? `Closed ${plural(questions, 'question')}` : '';
-  return { warning, said, ...(phoneDetail ? { phoneDetail } : {}), closed };
-}
-
-/**
- * The detail a list-wide Mark all as read (markAllRead.ts) puts after "Marked 3 threads read": the project menu's
- * words, the warning or the questions closed; empty when there are neither.
- */
-export function batchReadDetail(rows: readonly InboxListRow[]): string {
-  const { warning, closed } = batchWhy(rows);
-  return warning || closed;
+  return { why: warning || closed, warn: warning !== '', said, ...(phoneDetail ? { phoneDetail } : {}) };
 }
 
 /**
@@ -98,15 +91,14 @@ export function batchReadDetail(rows: readonly InboxListRow[]): string {
  */
 export function projectBatchToast(action: ProjectAction, projectName: string, taken: number, rows: readonly InboxListRow[]): ProjectBatchToast {
   const threads = plural(taken, 'thread');
-  const { warning, said, phoneDetail, closed } = batchWhy(rows);
-  const why = warning || closed;
+  const { why, warn, said, phoneDetail } = batchToastWhy(rows);
   const back = action === 'read' ? 'Back when an agent writes' : 'Back when an agent writes there';
   const lead = action === 'read' ? `Marked ${threads} read` : `Archived ${threads}`;
   const detail = why || projectName;
   const speech = `${lead} in ${projectName}. ${said || why || back}.`;
   const phone = phoneDetail ? { phoneDetail } : {};
-  if (action === 'read') return { lead, phoneLead: `${threads} read`, detail, ...phone, speech, icon: warning ? 'warn' : 'check' };
-  return { lead, phoneLead: `Archived ${threads}`, detail, ...phone, speech, icon: warning ? 'warn' : 'archive' };
+  if (action === 'read') return { lead, phoneLead: `${threads} read`, detail, ...phone, speech, icon: warn ? 'warn' : 'check' };
+  return { lead, phoneLead: `Archived ${threads}`, detail, ...phone, speech, icon: warn ? 'warn' : 'archive' };
 }
 
 /** A key for one batch, so a retried request answers what the first did (the server's `batch_id`). */

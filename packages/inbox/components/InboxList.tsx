@@ -55,7 +55,6 @@ import { PickBox, PickMark } from './PickBar';
 import type { BulkWrites } from '../bulkWrites';
 import { BandAction, GroupBand } from './GroupBand';
 import { bandMarkAllRows, listMarkAllRows } from '../markAllRead';
-import { batchReadDetail } from '../projectMenu';
 import { AgentsList } from '../agentsView/AgentsList';
 import { LineRow } from '../agentsView/LineRow';
 import { rowAgent, slotSession, cardOf, SnoozedUntil, RowTime, BadgeWords, subjectOf, sentWordsOf, titleOf, RowTitle, countWords, liveCount, CountWords, EndedMark, LineCount, openCountsKey, OpenCounts, ClipText, RowWithAction } from './rowParts';
@@ -856,8 +855,8 @@ export function InboxList(props: InboxListProps) {
   }, []);
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
-  /** Mark all as read (the ⋮'s, the New band's): these rows, through the picks' Mark read, its warning, toast and Undo. */
-  const markAllRead = props.bulk ? (rows: readonly InboxListRow[]) => void (rows.length > 0 && props.bulk!.markRead(rows, batchReadDetail(rows))) : undefined;
+  /** Mark all as read (the ⋮'s, the New band's): these drawn rows, each written as its thread is now (bulkWrites.ts `markAllRead`). */
+  const markAllRead = props.bulk ? (rows: readonly InboxListRow[]) => (rows.length > 0 ? props.bulk!.markAllRead(rows) : undefined) : undefined;
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
   // list is sorted whole (`props.sort`), as the groups keep theirs. Only while List shows: a switch to List is a
   // sort of the whole list (the held list's rows, so nothing behind "N new" comes in).
@@ -1148,7 +1147,7 @@ export function InboxList(props: InboxListProps) {
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
             starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
             onSelect={pick.start}
-            markAllRead={markAllRead ? { disabled: listMarkAllRows(props.sections).length === 0, onClick: () => markAllRead(listMarkAllRows(props.sections)) } : undefined}
+            markAllRead={markAllRead ? { disabled: listMarkAllRows(props.sections).length === 0, onClick: () => void markAllRead(listMarkAllRows(props.sections)) } : undefined}
             showArchived={props.archived && props.rememberLook !== false ? { on: showArchived, onChange: props.archived.setOn } : undefined}
             tagColours={props.tagColours?.setShow ? { on: props.tagColours.show, onChange: props.tagColours.setShow } : undefined}
           />

@@ -1,13 +1,14 @@
 /**
  * Picking thread rows (approval "inbox-multi-select", 1B + 2A; rowPicks.ts): the box a row, a group or the whole list
  * is picked with, the bar that stands in for the list's header while picking ("3 selected", Archive, Snooze, Mark read,
- * Tidy…, Combine…, ⋯, Done; beside an open thread Mark read is in the ⋯, and Tidy… and Combine… are its first items),
+ * Tidy…, Combine…, ⋯, Done; beside an open thread, or where the column has no room for the line, Mark read is in the
+ * ⋯, and beside an open thread Tidy… and Combine… are its first items),
  * a phone's sheet of the same actions at the bottom edge, and the items the bar's ⋯ and a picked row's menu share.
  * Every action takes the picked rows it applies to (rowPicks.ts `bulkTargets`), with one toast and one Undo
  * (bulkWrites.ts). In a narrow list (beside an open thread) the bar keeps one line: a count of 100 or more draws
  * Archive and Snooze as their icons, named for a screen reader.
  */
-import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
@@ -229,15 +230,47 @@ export interface PickBarProps {
   phone: boolean;
 }
 
+/**
+ * Whether the wide bar has room for Mark read as its own button, measured: a list column too narrow for the whole
+ * line (the sidebar open in a window under about 930 px) would cut the count under the buttons or push Done out, so
+ * Mark read goes back into the ⋯ then, and comes out again once the bar is as wide as the line needed. The bar never
+ * takes two lines.
+ */
+function useBarRoom(wanted: boolean, count: number): { ref: RefObject<HTMLDivElement | null>; fits: boolean } {
+  const ref = useRef<HTMLDivElement>(null);
+  /** The width the line needed with Mark read in it, once it did not fit; null while it fits. */
+  const [needs, setNeeds] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const bar = ref.current;
+    if (!bar || !wanted) return;
+    const check = () => {
+      if (needs === null) {
+        // Short of room: the line runs past the bar, or the count (which may shrink) is cut under the buttons.
+        const count = bar.querySelector<HTMLElement>('.ib-pick-n');
+        const short = Math.max(0, bar.scrollWidth - bar.clientWidth) + (count ? Math.max(0, count.scrollWidth - count.clientWidth) : 0);
+        if (short > 1) setNeeds(bar.clientWidth + short);
+      } else if (bar.clientWidth >= needs) setNeeds(null);
+    };
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(check);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }, [wanted, needs, count]);
+  return { ref, fits: needs === null };
+}
+
 /** The bar in the list header's place while picking (2A). */
 export function PickBar({ act, all, onAll, onDone, phone }: PickBarProps) {
   const n = act.rows.length;
   const archives = bulkTargets(act.rows, 'archive', act.rules).length > 0;
   const snoozes = act.snoozes && bulkTargets(act.rows, 'snooze', act.rules).length > 0;
   // Mark read is the bar's own button where there is room (not beside an open thread), and so not in its ⋯.
-  const reads = !act.narrow && bulkTargets(act.rows, 'read', act.rules).length > 0;
+  const wantsRead = !act.narrow && bulkTargets(act.rows, 'read', act.rules).length > 0;
+  const room = useBarRoom(wantsRead, n);
+  const reads = wantsRead && room.fits;
   return (
-    <div className="ib-lhead ib-pickbar" role="toolbar" aria-label="Selected threads" data-pick-bar="" data-long={n >= 100 ? '' : undefined}>
+    <div ref={room.ref} className="ib-lhead ib-pickbar" role="toolbar" aria-label="Selected threads" data-pick-bar="" data-long={n >= 100 ? '' : undefined}>
       <PickBox state={all} label="Select all" onPick={onAll} />
       {/* The count is a live region: each pick is said, as the bar shows it. */}
       <span className="ib-pick-n" role="status" data-pick-count={n}>

@@ -3,7 +3,8 @@
  * takes that band's rows only, never a snoozed one, and is gone while picking (the group's box is the header's
  * then); the list's ⋮ offers "Mark all as read" after "Select threads", taking every row the list shows that takes
  * Mark read; the picks' bar shows Mark read as its own button where there is room, and its ⋯ then does not list it
- * again. Each goes through the picks' Mark read (bulkWrites.ts), so its warning, toast and Undo are that one's.
+ * again. Mark all as read goes through bulkWrites.ts `markAllRead` (each thread as it is now, the picks' warning, toast
+ * and Undo); the bar's button through the picks' Mark read.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -64,11 +65,12 @@ const SECTIONS: InboxListSection[] = [
   { id: 'new', label: 'New since you looked', threads: [row('n1'), row('n2', { snoozed: SNOOZED }), row('n3')] },
 ];
 
-const calls: { ids: string[]; detail?: string }[] = [];
+const calls: { via: 'all' | 'picks'; ids: string[] }[] = [];
 const bulk = {
   archive: async () => {},
   snooze: async () => {},
-  markRead: async (rows: readonly InboxListRow[], detail?: string) => (calls.push({ ids: rows.map((r) => r.thread_id), detail }), true),
+  markRead: async (rows: readonly InboxListRow[]) => (calls.push({ via: 'picks', ids: rows.map((r) => r.thread_id) }), true),
+  markAllRead: async (rows: readonly InboxListRow[]) => (calls.push({ via: 'all', ids: rows.map((r) => r.thread_id) }), true),
   markUnread: async () => {},
   star: async () => {},
   priority: async () => {},
@@ -77,7 +79,7 @@ const bulk = {
 
 const tidy: TidyController = { surface: 'list', scope: null, plan: { serverSession: 's', count: 0, agents: [], run: null } as unknown as InboxTidyPlan as TidyController['plan'], run: null, start: async () => null, refresh: () => {} };
 
-function draw(narrow = false): void {
+function draw(narrow = false, sections: InboxListSection[] = SECTIONS): void {
   if (!host) {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -87,7 +89,7 @@ function draw(narrow = false): void {
     root!.render(
       <SidebarProvider>
         <div className="pn-inbox">
-          <InboxList title="Inbox" path={null} scope={null} sections={SECTIONS} filtered={false} narrow={narrow} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} onRowAction={() => {}} bulk={bulk} pinned={new Set()} tidy={tidy} />
+          <InboxList title="Inbox" path={null} scope={null} sections={sections} filtered={false} narrow={narrow} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} onRowAction={() => {}} bulk={bulk} pinned={new Set()} tidy={tidy} />
         </div>
       </SidebarProvider>,
     );
@@ -115,7 +117,7 @@ test.skipIf(!hasDom)('the New band’s button: icon only, named "Mark all as rea
   expect(button.previousElementSibling!.classList.contains('ib-band')).toBe(true);
   expect(host!.querySelector('[data-section-id="waiting"] > [data-band-mark-all-read]')).toBeNull();
   act(() => button.click());
-  expect(calls).toEqual([{ ids: ['n1', 'n3'], detail: '' }]);
+  expect(calls).toEqual([{ via: 'all', ids: ['n1', 'n3'] }]);
 });
 
 test.skipIf(!hasDom)('while picking the band’s button is gone (the group’s box is there); it comes back after Done', () => {
@@ -137,7 +139,7 @@ test.skipIf(!hasDom)('the list ⋮: "Mark all as read" right after "Select threa
   expect(labels.indexOf('Mark all as read')).toBe(labels.indexOf('Select threads') + 1);
   act(() => menu.querySelector<HTMLElement>('[data-list-mark-all-read]')!.click());
   await settle();
-  expect(calls).toEqual([{ ids: ['w1', 'n1', 'n3'], detail: 'Closed 1 question' }]);
+  expect(calls).toEqual([{ via: 'all', ids: ['w1', 'n1', 'n3'] }]);
 });
 
 test.skipIf(!hasDom)('the picks’ bar: Mark read is its own button and not in its ⋯; beside an open thread it stays in the ⋯', async () => {
@@ -152,7 +154,7 @@ test.skipIf(!hasDom)('the picks’ bar: Mark read is its own button and not in i
   await settle();
   expect(document.querySelector('[data-pick-popup="more"] [data-bulk-action="read"]')).toBeNull();
   act(() => read.click());
-  expect(calls.map((c) => c.ids)).toEqual([['n1']]);
+  expect(calls).toEqual([{ via: 'picks', ids: ['n1'] }]);
   // Narrow (beside an open thread): no room in the bar, so Mark read is the ⋯'s.
   act(() => root?.unmount());
   host?.remove();
@@ -164,4 +166,65 @@ test.skipIf(!hasDom)('the picks’ bar: Mark read is its own button and not in i
   act(() => host!.querySelector<HTMLButtonElement>('[data-pick-bar] [data-pick-menu="more"]')!.click());
   await settle();
   expect(document.querySelector('[data-pick-popup="more"] [data-bulk-action="read"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('the band’s button gone after its click (nothing left to take): focus that was on it goes to the band, not the page', async () => {
+  if (!hasDom) return;
+  draw();
+  const button = bandButton()!;
+  const read = SECTIONS.map((s) => (s.id === 'new' ? { ...s, threads: s.threads.map((r) => ({ ...r, unread: false, unseen: 0, section: 'quiet' as const, read_at: AGO })) } : s));
+  const real = bulk.markAllRead;
+  (bulk as { markAllRead: unknown }).markAllRead = async () => {
+    draw(false, read);
+    return true;
+  };
+  try {
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    await act(async () => {
+      button.click();
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(bandButton()).toBeNull();
+    expect(document.activeElement).toBe(host!.querySelector('[data-section-id="new"] > .ib-band'));
+  } finally {
+    (bulk as { markAllRead: unknown }).markAllRead = real;
+  }
+});
+
+test.skipIf(!hasDom)('the picks’ bar with no room for the whole line (measured): Mark read goes back into its ⋯, and comes out once there is room', async () => {
+  if (!hasDom) return;
+  // As a browser lays it out: the line never runs past the bar; the count shrinks under the buttons instead (it is cut).
+  // The line needs 600 px with Mark read, 505 without. The column gives 552, then 640.
+  let column = 552;
+  const proto = HTMLElement.prototype;
+  const sw = Object.getOwnPropertyDescriptor(proto, 'scrollWidth');
+  const cw = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+  const need = (bar: Element) => (bar.querySelector(':scope > [data-bulk-action="read"]') ? 600 : 505);
+  const width = (el: HTMLElement, scroll: boolean): number => {
+    if (el.hasAttribute('data-pick-bar')) return column;
+    if (el.classList.contains('ib-pick-n')) return scroll ? 76 : Math.max(0, 76 - Math.max(0, need(el.parentElement!) - column));
+    return 0;
+  };
+  Object.defineProperty(proto, 'scrollWidth', { configurable: true, get(this: HTMLElement) { return width(this, true); } });
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get(this: HTMLElement) { return width(this, false); } });
+  try {
+    draw();
+    act(() => void rowEl('n1').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
+    expect(host!.querySelector('[data-pick-bar] > [data-bulk-action="read"]')).toBeNull();
+    act(() => host!.querySelector<HTMLButtonElement>('[data-pick-bar] [data-pick-menu="more"]')!.click());
+    await settle();
+    expect(document.querySelector('[data-pick-popup="more"] [data-bulk-action="read"]')).not.toBeNull();
+    act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await settle();
+    // Wider: the next pick measures again and Mark read is the bar's own button.
+    column = 640;
+    act(() => void rowEl('n3').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
+    expect(host!.querySelector('[data-pick-bar] > [data-bulk-action="read"]')).not.toBeNull();
+  } finally {
+    if (sw) Object.defineProperty(proto, 'scrollWidth', sw);
+    else delete (proto as { scrollWidth?: number }).scrollWidth;
+    if (cw) Object.defineProperty(proto, 'clientWidth', cw);
+    else delete (proto as { clientWidth?: number }).clientWidth;
+  }
 });

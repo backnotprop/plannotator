@@ -1,12 +1,12 @@
 /**
  * Mark all as read on the list (markAllRead.ts): the ⋮ takes every row the list shows that single Mark read is
  * offered on, the "New since you looked" band only its own; neither ever takes a snoozed row (the project menu's
- * rule). The toast's words after the count are the project menu's (projectMenu.ts `batchReadDetail`).
+ * rule). What it writes is each thread as it is now (`currentMarkAllRows`): a thread whose news waits behind
+ * "N new · Show" is left out and stays new.
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { bandMarkAllRows, listMarkAllRows } from './markAllRead';
-import { batchReadDetail } from './projectMenu';
+import { bandMarkAllRows, currentMarkAllRows, listMarkAllRows } from './markAllRead';
 
 const NO_QUESTIONS = { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 };
 
@@ -93,10 +93,21 @@ describe('the New band: only its own rows', () => {
   });
 });
 
-describe('the toast’s words after "Marked N threads read"', () => {
-  test('the questions closed; a stopped agent before them; none when nothing was waiting', () => {
-    expect(batchReadDetail([waiting('a', { questions: { ...NO_QUESTIONS, open: 2 } }), waiting('b', { questions: { ...NO_QUESTIONS, open: 1 } })])).toBe('Closed 3 questions');
-    expect(batchReadDetail([waiting('a', { questions: { ...NO_QUESTIONS, open: 1, stopped: true } })])).toBe('Claude Code was stopped');
-    expect(batchReadDetail([row('a'), row('b')])).toBe('');
+describe('what it writes: each thread as it is now', () => {
+  const T2 = '2026-11-20T07:05:00.000Z';
+  const now = (rows: InboxListRow[]) => (id: string) => rows.find((r) => r.thread_id === id);
+  const inNew = () => 'new' as const;
+
+  test('a thread whose agent asked a question since the list was drawn is left out; one with no news is written as it is now', () => {
+    const drawn = [row('asked'), row('plain')];
+    const plainNow = row('plain', { subject: 'renamed elsewhere' });
+    const latest = [row('asked', { section: 'waiting', last_at: T2, last_agent_at: T2, unseen: 2, questions: { ...NO_QUESTIONS, open: 1 } }), plainNow];
+    expect(currentMarkAllRows(drawn, now(latest), inNew)).toEqual([plainNow]);
+  });
+
+  test('left out too: a thread gone from the list, snoozed since, or read elsewhere', () => {
+    const drawn = [row('gone'), row('snoozed'), row('readElsewhere')];
+    const latest = [row('snoozed', { snoozed: SNOOZED }), row('readElsewhere', { section: 'quiet', unread: false, unseen: 0, waiting_on_person: false, read_at: '2026-11-20T07:02:00.000Z' } as Partial<InboxListRow>)];
+    expect(currentMarkAllRows(drawn, now(latest), inNew)).toEqual([]);
   });
 });
