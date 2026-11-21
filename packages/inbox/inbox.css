@@ -9478,7 +9478,9 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
    circle's and a 5 px ring (19 px), tangent to the window's edges. The button is a 44 px box at the corner whose hit
    area is clipped (inline clip-path) to the pocket and the ground strips along the window's edges: never the pane. */
 .ib-sc { --ib-sc-d: 28px; --ib-sc-r: 19px; position: absolute; right: 0; bottom: 0; width: 0; height: 0; }
-.pn-inbox .ib-sc-btn { position: absolute; right: 0; bottom: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
+.pn-inbox .ib-sc-btn { position: absolute; right: 0; bottom: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; outline: none; }
+/* Its menu's trigger (parts/SideCircleMenu.tsx: right-click, long press, Close) draws no box: the button keeps its place. */
+.ib-sc-trig { display: contents; }
 /* The circle: the panes' own material (the card, their hairline and a soft shadow), centred on the pocket. */
 .ib-sc-dot {
   position: absolute; width: var(--ib-sc-d); height: var(--ib-sc-d);
