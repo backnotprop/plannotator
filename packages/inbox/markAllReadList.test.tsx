@@ -23,6 +23,7 @@ const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as t
 const { LONG_PRESS_MS } = await import('./components/useContextMenuTrigger');
 const { resetListGroupsForTests } = await import('./listGroups');
 const { BAND_TIP_TIMES } = await import('./bandTip');
+const REAL_TIP_TIMES = { ...BAND_TIP_TIMES };
 import type { BandTipHost } from './bandTip';
 
 let root: Root | null = null;
@@ -37,6 +38,7 @@ afterEach(() => {
   // A test that toggles a band keeps it for the page (listGroups.ts): each test starts from the defaults.
   resetListGroupsForTests();
   tipHost = undefined;
+  Object.assign(BAND_TIP_TIMES, REAL_TIP_TIMES);
 });
 
 const AGO = '2026-11-20T07:00:00.000Z';
@@ -91,7 +93,7 @@ const bulk = {
 const tidy: TidyController = { surface: 'list', scope: null, plan: { serverSession: 's', count: 0, agents: [], run: null } as unknown as InboxTidyPlan as TidyController['plan'], run: null, start: async () => null, refresh: () => {} };
 
 let tipHost: BandTipHost | undefined;
-function draw(narrow = false, sections: InboxListSection[] = SECTIONS, phone = false): void {
+function draw(narrow = false, sections: InboxListSection[] = SECTIONS, phone = false, covered = false): void {
   if (!host) {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -101,7 +103,7 @@ function draw(narrow = false, sections: InboxListSection[] = SECTIONS, phone = f
     root!.render(
       <SidebarProvider>
         <div className="pn-inbox">
-          <InboxList title="Inbox" path={null} scope={null} sections={sections} filtered={false} narrow={narrow} phone={phone} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} onRowAction={() => {}} bulk={bulk} bandTip={tipHost} pinned={new Set()} tidy={tidy} />
+          <InboxList title="Inbox" path={null} scope={null} sections={sections} filtered={false} narrow={narrow} phone={phone} covered={covered} selectedThreadId={covered ? 'w1' : null} notice={null} onShowNew={() => {}} onOpen={() => {}} onRowAction={() => {}} bulk={bulk} bandTip={tipHost} pinned={new Set()} tidy={tidy} />
         </div>
       </SidebarProvider>,
     );
@@ -163,14 +165,15 @@ test.skipIf(!hasDom)('a right-click on a band: Mark all as read and Archive all 
   expect(band('waiting').getAttribute('aria-expanded')).toBe('true');
 });
 
-test.skipIf(!hasDom)('a band with nothing to take (Snoozed) has no menu: the browser keeps its own; it names no menu key', async () => {
+test.skipIf(!hasDom)('a band with nothing to take (Snoozed) has no menu: the browser keeps its own; only a band with a menu says it has one (aria-haspopup), and none names a key', async () => {
   if (!hasDom) return;
   draw();
   const event = await rightClick(band('snoozed'));
   expect(event.defaultPrevented).toBe(false);
   expect(bandMenu()).toBeNull();
-  expect(band('snoozed').hasAttribute('aria-keyshortcuts')).toBe(false);
-  expect(band('new').getAttribute('aria-keyshortcuts')).toBe('Shift+F10');
+  expect(band('snoozed').hasAttribute('aria-haspopup')).toBe(false);
+  expect(band('new').getAttribute('aria-haspopup')).toBe('menu');
+  expect([band('new'), band('waiting'), band('snoozed')].some((el) => el.hasAttribute('aria-keyshortcuts'))).toBe(false);
 });
 
 test.skipIf(!hasDom)('Shift+F10 on the focused band opens its menu; Escape puts focus back on the band', async () => {
@@ -450,12 +453,13 @@ test.skipIf(!hasDom)('the picks’ bar with no room for the whole line (measured
   }
 });
 
-/** The Group tip's host as App hands it (bandTip.ts): due, with a claim the Inbox grants once. */
-function tipWorld(busy = () => false) {
+/** The Group tip's host as App hands it (bandTip.ts): due, with a claim the Inbox grants once, and `used` heard. */
+function tipWorld(busy = () => false, due = true) {
   const claims: number[] = [];
+  used.length = 0;
   let granted = false;
   tipHost = {
-    due: true,
+    due,
     busy: () => busy(),
     claim: async () => {
       claims.push(Date.now());
@@ -463,97 +467,220 @@ function tipWorld(busy = () => false) {
       granted = true;
       return ok;
     },
+    used: () => void used.push(Date.now()),
   };
+  // Short times, so each test runs the real rules quickly (afterEach puts them back).
+  BAND_TIP_TIMES.restMs = 60;
+  BAND_TIP_TIMES.phoneViewMs = 120;
   return claims;
 }
-// React's onPointerEnter listens for pointerover with where the pointer came from.
+/** The "a band's menu opened" retirements the Inbox heard (`used`). */
+const used: number[] = [];
+// React's onPointerEnter listens for pointerover with where the pointer came from; onPointerLeave, pointerout.
 const point = (el: Element, pointerType = 'mouse') => act(() => void el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType, relatedTarget: document.body })));
+const unpoint = (el: Element) => act(() => void el.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body })));
+/** The pointer comes onto the band and rests there past BAND_TIP_TIMES.restMs. */
+async function rest(el: Element) {
+  point(el);
+  await wait(BAND_TIP_TIMES.restMs + 40);
+  await settle();
+}
 const tipText = () => [...document.querySelectorAll('[data-pn-tooltip]')].map((el) => el.textContent).join('|');
 /** The band the shown tip hangs on, and where on it: covering no row, it sits on the band (GroupBand.tsx). */
 const tipAt = () => {
   const anchor = document.querySelector('.ib-band-tipat[data-popup-open]');
   return anchor ? { band: anchor.closest('[data-section-id]')?.getAttribute('data-section-id'), inBand: anchor.parentElement?.matches('button.ib-band'), end: anchor.hasAttribute('data-end') } : null;
 };
+/** No tip bubble is drawn empty: one still there while it fades out keeps its words. */
+const noEmptyBubble = () => [...document.querySelectorAll('[data-pn-tooltip]')].every((el) => (el.textContent ?? '').trim() !== '');
 
-test.skipIf(!hasDom)('the Group tip: the first hover of a band with a menu shows "Right-click for group actions" once; a press takes it away; never again', async () => {
+test.skipIf(!hasDom)('the Group tip: a pointer that rests on a band with a menu shows "Right-click for group actions" once, on the band after its name; a press takes it away; never again', async () => {
   if (!hasDom) return;
   const claims = tipWorld();
   draw();
   // A band with no menu (Snoozed) asks nothing.
-  point(band('snoozed'));
-  await settle();
+  await rest(band('snoozed'));
   expect(claims).toHaveLength(0);
-  point(band('new'));
-  await settle();
+  await rest(band('new'));
   expect(claims).toHaveLength(1);
   expect(tipText()).toBe('Right-click for group actions');
   // On the band, just after its name and count: never over the first row.
   expect(tipAt()).toEqual({ band: 'new', inBand: true, end: false });
   act(() => void window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
   await settle();
-  expect(tipText()).toBe('');
-  point(band('waiting'));
-  await settle();
+  expect(tipAt()).toBeNull();
+  expect(noEmptyBubble()).toBe(true);
+  await rest(band('waiting'));
   expect(claims).toHaveLength(1);
-  expect(tipText()).toBe('');
+  expect(tipAt()).toBeNull();
 });
 
-test.skipIf(!hasDom)('the Group tip: the band’s menu opened first retires it (claimed unshown); a hover after shows nothing', async () => {
+test.skipIf(!hasDom)('the Group tip: a pointer only crossing a band spends nothing; it shows after a rest and goes when the pointer leaves, as a tooltip does', async () => {
+  if (!hasDom) return;
+  const claims = tipWorld();
+  draw();
+  point(band('waiting'));
+  await wait(BAND_TIP_TIMES.restMs / 2);
+  unpoint(band('waiting'));
+  point(band('new'));
+  await wait(BAND_TIP_TIMES.restMs / 2);
+  unpoint(band('new'));
+  await wait(BAND_TIP_TIMES.restMs + 40);
+  expect(claims).toHaveLength(0);
+  expect(tipAt()).toBeNull();
+  await rest(band('new'));
+  expect(claims).toHaveLength(1);
+  expect(tipAt()?.band).toBe('new');
+  unpoint(band('new'));
+  await settle();
+  expect(tipAt()).toBeNull();
+  expect(noEmptyBubble()).toBe(true);
+});
+
+test.skipIf(!hasDom)('the Group tip: a band’s menu opened first retires it for good (`used`, never a claim); a hover after shows nothing', async () => {
   if (!hasDom) return;
   const claims = tipWorld();
   draw();
   await rightClick(band('new'));
   expect(bandMenu()).not.toBeNull();
-  expect(claims).toHaveLength(1);
+  expect(used).toHaveLength(1);
   await closeMenu();
-  point(band('waiting'));
-  await settle();
-  expect(claims).toHaveLength(1);
-  expect(tipText()).toBe('');
+  await rightClick(band('waiting'));
+  await closeMenu();
+  // Once per page.
+  expect(used).toHaveLength(1);
+  await rest(band('waiting'));
+  expect(claims).toHaveLength(0);
+  expect(tipAt()).toBeNull();
 });
 
-test.skipIf(!hasDom)('the Group tip: not while picking rows, not while another one-time thing is up; the next hover after is the one', async () => {
+test.skipIf(!hasDom)('the Group tip: opening a band’s menu retires it even when it is not due yet (the first day, a dialog’s gap): the Inbox stamps it then', async () => {
+  if (!hasDom) return;
+  const claims = tipWorld(() => false, false);
+  draw();
+  await rest(band('new'));
+  expect(claims).toHaveLength(0);
+  await rightClick(band('new'));
+  expect(bandMenu()).not.toBeNull();
+  expect(used).toHaveLength(1);
+});
+
+test.skipIf(!hasDom)('the Group tip: a short touch (a 200 ms tap) or a paused scroll on a band retires nothing; only a hold that opens the menu does', async () => {
+  if (!hasDom) return;
+  const claims = tipWorld();
+  draw(false, SECTIONS, true);
+  // The press takes its look 120 ms in; a tap of 200 ms is still a tap.
+  await fingerOn(band('new'), 200);
+  // A finger that rests, then scrolls on.
+  await fingerOn(band('waiting'), 600, { moveTo: [40, 80] });
+  expect(bandMenu()).toBeNull();
+  expect(used).toHaveLength(0);
+  // A hold that lasts opens the sheet: that retires it.
+  await fingerOn(band('new'), LONG_PRESS_MS + 100);
+  expect(bandMenu()).not.toBeNull();
+  expect(used).toHaveLength(1);
+  expect(claims).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('the Group tip: not while picking rows, not while another one-time thing is up; the next rest after is the one', async () => {
   if (!hasDom) return;
   let reveal = true;
   const claims = tipWorld(() => reveal);
   draw();
-  point(band('new'));
-  await settle();
+  await rest(band('new'));
   expect(claims).toHaveLength(0);
   reveal = false;
   act(() => void rowEl('n1').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
-  point(band('waiting'));
-  await settle();
+  await rest(band('waiting'));
   expect(claims).toHaveLength(0);
   act(() => host!.querySelector<HTMLButtonElement>('[data-pick-done]')!.click());
-  point(band('waiting'));
-  await settle();
+  await rest(band('waiting'));
   expect(claims).toHaveLength(1);
   expect(tipText()).toBe('Right-click for group actions');
 });
 
-test.skipIf(!hasDom)('the Group tip on a phone: the list held still a while shows "Hold a group for actions" on the first band with a menu; a touch first waits again', async () => {
+/** Band rects as a phone lays them out (happy-dom draws none): `top` by section, 44 px tall, in a 390 × 844 window. */
+function layBands(tops: Record<string, number>): () => void {
+  const proto = HTMLElement.prototype;
+  const real = proto.getBoundingClientRect;
+  const innerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+  proto.getBoundingClientRect = function (this: HTMLElement) {
+    const id = this.matches('button.ib-band') ? this.parentElement?.getAttribute('data-section-id') : null;
+    const top = id ? tops[id] : undefined;
+    return top === undefined ? real.call(this) : ({ top, bottom: top + 44, left: 0, right: 390, width: 390, height: 44, x: 0, y: top } as DOMRect);
+  };
+  return () => {
+    proto.getBoundingClientRect = real;
+    if (innerHeight) Object.defineProperty(window, 'innerHeight', innerHeight);
+  };
+}
+
+test.skipIf(!hasDom)('the Group tip on a phone: the list held still shows "Hold a group for actions" inside the first band on screen, at its right end; a touch first waits again', async () => {
   if (!hasDom) return;
-  const real = { ...BAND_TIP_TIMES };
-  BAND_TIP_TIMES.phoneViewMs = 120;
+  // Scrolled: the Waiting band is above the window, New is on screen.
+  const tops: Record<string, number> = { waiting: -300, new: 200, snoozed: 600 };
+  const unlay = layBands(tops);
   try {
     const claims = tipWorld();
     draw(false, SECTIONS, true);
-    await act(async () => void (await new Promise((r) => setTimeout(r, 80))));
+    await wait(80);
     // A touch (a scroll's start, a swipe) before the wait is over: the wait starts again.
     act(() => void window.dispatchEvent(new Event('touchstart')));
-    await act(async () => void (await new Promise((r) => setTimeout(r, 80))));
+    await wait(80);
     expect(claims).toHaveLength(0);
-    await act(async () => void (await new Promise((r) => setTimeout(r, 120))));
+    await wait(120);
     expect(claims).toHaveLength(1);
     expect(tipText()).toBe('Hold a group for actions');
-    // Inside the band at its right end.
-    expect(tipAt()).toEqual({ band: 'waiting', inBand: true, end: true });
-    // A mouse never asks on a phone, and a touch takes it away.
+    expect(tipAt()).toEqual({ band: 'new', inBand: true, end: true });
+    // A touch takes it away.
     act(() => void window.dispatchEvent(new Event('touchstart')));
     await settle();
-    expect(tipText()).toBe('');
+    expect(tipAt()).toBeNull();
   } finally {
-    Object.assign(BAND_TIP_TIMES, real);
+    unlay();
+  }
+});
+
+test.skipIf(!hasDom)('the Group tip on a phone: no band with a menu on screen, no tip yet; once one scrolls into view and the list holds still, it shows there', async () => {
+  if (!hasDom) return;
+  const tops: Record<string, number> = { waiting: -300, new: -200, snoozed: 300 };
+  const unlay = layBands(tops);
+  try {
+    const claims = tipWorld();
+    draw(false, SECTIONS, true);
+    await wait(300);
+    expect(claims).toHaveLength(0);
+    tops.new = 100;
+    act(() => void window.dispatchEvent(new Event('scroll')));
+    await wait(200);
+    expect(claims).toHaveLength(1);
+    expect(tipAt()?.band).toBe('new');
+  } finally {
+    unlay();
+  }
+});
+
+test.skipIf(!hasDom)('the Group tip on a phone: never while a thread covers the list (it waits, unclaimed, and shows over no thread); once the list is back it may', async () => {
+  if (!hasDom) return;
+  // The bands are laid out on screen (the list is drawn, under the thread).
+  const unlay = layBands({ waiting: 100, new: 300, snoozed: 600 });
+  try {
+    const claims = tipWorld();
+    draw(false, SECTIONS, true, true);
+    await wait(400);
+    expect(claims).toHaveLength(0);
+    expect(tipText()).toBe('');
+    // Back on the list.
+    draw(false, SECTIONS, true, false);
+    await wait(200);
+    expect(claims).toHaveLength(1);
+    expect(tipAt()?.band).toBe('waiting');
+    // A thread opens over it: the tip goes at once.
+    draw(false, SECTIONS, true, true);
+    await settle();
+    expect(tipAt()).toBeNull();
+  } finally {
+    unlay();
   }
 });

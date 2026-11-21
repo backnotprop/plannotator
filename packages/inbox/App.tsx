@@ -4259,8 +4259,14 @@ function Inbox() {
   // dialog or tip of this load claimed or up, the page not clear, something typed or open, a menu, a toast or a dialog.
   const bandTipClaim = useMemo(() => bandTipClaimer(), []);
   const bandTipBusy = useRef<() => boolean>(() => false);
-  bandTipBusy.current = () => revealBlocked || lineBusy || !listIntroClear || revealHeldBack() || modalOpen();
-  const bandTipHost: BandTipHost = { due: bandTipDue(settings) && !tourOn && !firstRun && lineLatch !== null, busy: () => bandTipBusy.current(), claim: bandTipClaim };
+  // A thread covering the list (a phone, a stacked window, full screen) or a hidden page: the list is out of sight.
+  bandTipBusy.current = () => revealBlocked || lineBusy || !listIntroClear || revealHeldBack() || modalOpen() || (route.thread !== null && (phone || stack.thread || full)) || document.visibilityState === 'hidden';
+  const bandTipHost: BandTipHost = {
+    due: bandTipDue(settings) && !tourOn && !firstRun && lineLatch !== null,
+    busy: () => bandTipBusy.current(),
+    claim: bandTipClaim,
+    used: inboxApi.retireBandTip,
+  };
   // Ask AI, on in every Inbox but the tour's (off, this reads nothing and draws nothing), and
   // only once the settings say which this page is. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);

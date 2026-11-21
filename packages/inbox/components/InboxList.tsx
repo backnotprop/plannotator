@@ -996,11 +996,14 @@ export function InboxList(props: InboxListProps) {
             if (action === 'read') void markAllRead?.(bandMarkAllRows(section));
             else void props.bulk!.archiveAll(bandArchiveAllRows(section));
           },
+          // A band's menu really opened (not a press that only took its look): the Group tip goes, for good.
+          onOpened: () => bandTip.menuOpened(),
         }
       : undefined;
-  // The bands on screen that have a menu now (none while picking), for the Group tip.
-  const menuBands = bands ? (asList || asAgents ? (listBand ? [listBand] : []) : visible).filter((section) => bands.actionsOf(section.id).length > 0).map((section) => section.id) : [];
-  const bandTip = useBandTip(props.bandTip, props.phone === true, menuBands);
+  // The bands drawn that have a menu now, for the Group tip: none while picking, none while a thread covers the list.
+  const menuBands =
+    bands && props.covered !== true ? (asList || asAgents ? (listBand ? [listBand] : []) : visible).filter((section) => bands.actionsOf(section.id).length > 0).map((section) => section.id) : [];
+  const bandTip = useBandTip(props.bandTip, props.phone === true, menuBands, (id) => bandOnScreen(bodyRef.current, id));
   // The row callbacks keep one identity for the list's life (they call the latest props), so a row whose
   // data did not change is not rendered again when the list is (ListRow is memoized on its row's content).
   const latest = useRef(props);
@@ -1215,11 +1218,7 @@ export function InboxList(props: InboxListProps) {
           onSnoozeBlocked={props.onSnoozeBlocked}
           pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
           prioritizesOf={props.machines ? (row) => machineTakes(row, props.machines!, 'priority') : undefined}
-          onTarget={(id) => {
-            setMenuRow(id);
-            // A band's menu opened: the Group tip goes, for good.
-            if (id?.startsWith(bandMenuId(''))) bandTip.menuOpened();
-          }}
+          onTarget={(id) => setMenuRow(id)}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
@@ -1264,10 +1263,11 @@ export function InboxList(props: InboxListProps) {
                 <GroupBand
                   open={open}
                   menu={menuRow === bandMenuId(section.id)}
-                  keys={bands && bands.actionsOf(section.id).length > 0 ? rowKeys : undefined}
+                  menuPopup={!!bands && bands.actionsOf(section.id).length > 0}
                   tip={bandTip.shown?.band === section.id ? bandTip.shown.words : null}
                   tipEnd={props.phone === true}
                   onPointed={() => bandTip.pointed(section.id)}
+                  onLeft={() => bandTip.left(section.id)}
                   onToggle={(band) => {
                     // Focus in a row of the group that closes goes to its header, not to the page.
                     const active = document.activeElement;
@@ -1332,4 +1332,26 @@ export const ListRow = memo(
 function guideLabelHidden(trigger: Element): boolean {
   const label = trigger.querySelector<HTMLElement>('.ib-att-l');
   return !label || label.offsetWidth === 0 || getComputedStyle(label).display === 'none';
+}
+
+/**
+ * Whether a group's band is in view now: inside the window and inside the list's scrolling box (a phone's Group tip
+ * waits for one).
+ */
+function bandOnScreen(body: HTMLElement | null, sectionId: string): boolean {
+  const band = body?.querySelector<HTMLElement>(`.ib-group[data-section-id="${CSS.escape(sectionId)}"] > button.ib-band`);
+  if (!band) return false;
+  const rect = band.getBoundingClientRect();
+  if (rect.height === 0) return false;
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let el = band.parentElement; el; el = el.parentElement) {
+    const overflow = getComputedStyle(el).overflowY;
+    if (overflow !== 'auto' && overflow !== 'scroll') continue;
+    const box = el.getBoundingClientRect();
+    top = Math.max(top, box.top);
+    bottom = Math.min(bottom, box.bottom);
+    break;
+  }
+  return rect.top >= top && rect.bottom <= bottom;
 }

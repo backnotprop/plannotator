@@ -266,12 +266,15 @@ export function bulkWrites(host: BulkHost) {
       if (before) setShown((current) => (current ? replaceHeldRow(current, before) : current));
     });
     void afterWrite(ids(outcomes)).finally(() => drawings.forEach((drawing) => drawing.done()));
-    // Mark read ended a snooze: its Undo puts that back too.
+    // Mark read ended a snooze: its Undo puts that back too. A thread the person had read before (a read stamp, then
+    // Mark unread) goes back by Mark unread, as the project menu's Undo does (project-batch.ts `looked`): a full move
+    // back would leave it more unread than it was.
     finish(
       'read',
       outcomes,
       undoWith(outcomes, async ({ row }) => {
-        await inboxApi.markRead(row.thread_id, false);
+        if ((row.read_at ?? null) !== null) await inboxApi.markUnread(row.thread_id);
+        else await inboxApi.markRead(row.thread_id, false);
         await host.restoreSnooze(row.thread_id, row.snoozed);
       }),
       undefined,

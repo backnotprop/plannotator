@@ -371,6 +371,29 @@ describe('Mark all as read and the picks’ Mark read read each thread as it is 
       inboxApi.markRead = realRead;
     }
   });
+
+  test('Undo of Mark all as read: a thread read before (a read stamp, then Mark unread) goes back by Mark unread; one never read, by a move back', async () => {
+    const looked = full('looked', { read_at: T1 } as Partial<InboxListRow>);
+    const rows = [full('fresh'), looked];
+    const shown: InboxListSection[] = [{ id: 'new', label: 'New since you looked', threads: rows }];
+    const { state, bulk } = listHost(shown, rows);
+    const calls: string[] = [];
+    const realRead = inboxApi.markRead;
+    const realUnread = inboxApi.markUnread;
+    inboxApi.markRead = (async (id: string, on: boolean) => void calls.push(`${on ? 'read' : 'unread'} ${id}`)) as unknown as typeof inboxApi.markRead;
+    inboxApi.markUnread = (async (id: string) => void calls.push(`mark-unread ${id}`)) as unknown as typeof inboxApi.markUnread;
+    try {
+      await bulk.markAllRead(rows);
+      expect(calls.sort()).toEqual(['read fresh', 'read looked']);
+      calls.length = 0;
+      (state.toasts[0]!.onUndo as () => void)();
+      await new Promise((done) => setTimeout(done, 10));
+      expect(calls.sort()).toEqual(['mark-unread looked', 'unread fresh']);
+    } finally {
+      inboxApi.markRead = realRead;
+      inboxApi.markUnread = realUnread;
+    }
+  });
 });
 
 describe('Mark all as read’s and Archive all’s toast is the project menu’s', () => {

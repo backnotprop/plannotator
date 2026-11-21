@@ -326,7 +326,7 @@ import {
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
-import { bandTipClaim, bandTipDue, type BandTipState } from "@plannotator/shared/inbox/band-tip";
+import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
@@ -3906,8 +3906,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tenure: snoozeIntroRelease,
     saved: loadConfig().inboxReveals?.band_tip,
   });
-  const claimBandTip = (key: string | null): boolean => {
+  const claimBandTip = (key: string | null, used: boolean): boolean => {
     const at = new Date().toISOString();
+    // A band's menu opened: stamped whatever the tenure or the gap, and never shown.
+    if (used) {
+      const save = bandTipUsed(bandTipState(), at);
+      if (save) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: save } });
+      return false;
+    }
     const claim = bandTipClaim(bandTipState(), key, at);
     if (!claim.save) return claim.show;
     saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: claim.save } });
@@ -7222,6 +7228,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
         const key = body.key;
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
+        // `used`: the Group tip only, a band's menu opened (it retires the tip, never shows it).
+        if (body.used !== undefined && (body.used !== true || id !== "band_tip")) throw new InboxError("validation_error", "used: true, with id band_tip only.", { field: "used" });
         const load = revealLoadId(req.headers.get("x-plannotator-load"));
         // Not now on an offer already shown: the line waits three days. Nothing is claimed.
         if (body.answer === "not_now") {
@@ -7238,7 +7246,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
         if (id === "band_tip") {
-          return json({ show: claimBandTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+          return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {

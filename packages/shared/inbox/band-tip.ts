@@ -19,6 +19,8 @@ import { SIDEBAR_TIP_TENURE_MS } from "./sidebar-tip";
 export interface BandTipSaved {
   shownAt?: string;
   key?: string;
+  /** The person opened a band's menu before the tip ever showed: it never will (`bandTipUsed`). */
+  usedAt?: string;
 }
 
 export interface BandTipState {
@@ -49,4 +51,14 @@ export function bandTipClaim(state: BandTipState, key: string | null, at: string
   if (key && state.saved?.shownAt && state.saved.key === key) return { show: true, save: null };
   if (!bandTipDue(state, at)) return { show: false, save: null };
   return { show: true, save: { ...state.saved, shownAt: at, ...(key ? { key } : {}) } };
+}
+
+/**
+ * The person opened a band's menu: they found it, so the tip is never shown. Stamped whatever the tenure or a dialog's
+ * gap (someone who finds the menu on their first day is not told about it on the second). `save`: what to write to
+ * config.json, or null when it is stamped already.
+ */
+export function bandTipUsed(state: BandTipState, at: string): BandTipSaved | null {
+  if (state.saved?.shownAt) return null;
+  return { ...state.saved, shownAt: at, usedAt: at };
 }

@@ -6,16 +6,18 @@
  * `id: "band_tip"`). There is no card and no dialog: the Launch and Sidebar tips' coach card asks for a calm moment
  * and a Got it, too much for one line about a right-click. The rules the window keeps:
  *
- *  - A desktop: the first time the pointer rests on a band that has a menu, its tooltip reads BAND_TIP_WORDS.desktop.
- *    A phone (no hover): once the list has held still with such a band on screen for BAND_TIP_TIMES.phoneViewMs, with
- *    no touch meanwhile (so never in a scroll or a row's swipe), the first such band's tooltip reads
- *    BAND_TIP_WORDS.phone.
- *  - Never while picking rows (a band has no menu then), while another one-time dialog or tip is claimed or up, a menu
- *    or a dialog is open, or something is typed (`busy`); never on the tour. The Inbox reports it due only outside a
- *    dialog's gap and only a day after first use, so a fresh world (the e2e ones) never sees it.
+ *  - A desktop: once the pointer has rested on a band that has a menu for BAND_TIP_TIMES.restMs (a pointer merely
+ *    crossing it spends nothing), its tooltip reads BAND_TIP_WORDS.desktop; it goes when the pointer leaves the band.
+ *    A phone (no hover): once the list has held still (no touch, no scroll) for BAND_TIP_TIMES.phoneViewMs, the first
+ *    band with a menu that is on screen shows BAND_TIP_WORDS.phone; with none on screen it waits again.
+ *  - Never while the list is out of sight (a thread covers it: a phone, a stacked window, full screen; the page
+ *    hidden), while picking rows (a band has no menu then), while another one-time dialog or tip is claimed or up, a
+ *    menu or a dialog is open, or something is typed (`busy`); never on the tour. The Inbox reports it due only outside
+ *    a dialog's gap and only a day after first use, so a fresh world (the e2e ones) never sees it.
  *  - It goes by itself after BAND_TIP_TIMES.shownMs, and at once on any press, key, scroll, a right-click or the band's
  *    menu opening. One claim per page; the Inbox gives it once per person.
- *  - Opening a band's menu before the tip ever showed claims it too (unshown): the person has found the menu.
+ *  - A band's menu really opening (never a press that only took the pressed look) before the tip ever showed retires
+ *    it for good: `used` stamps it whatever the tenure or a dialog's gap (the person has found the menu).
  */
 import { useEffect, useRef, useState } from 'react';
 import type { SettingsModel } from './api';
@@ -31,8 +33,10 @@ export const BAND_TIP_WORDS = {
 export const BAND_TIP_TIMES = {
   /** Shown this long, then gone. */
   shownMs: 6000,
-  /** A phone: the list held still (no touch) this long with a band that has a menu on screen. */
+  /** A phone: the list held still (no touch, no scroll) this long with a band that has a menu on screen. */
   phoneViewMs: 2500,
+  /** A desktop: the pointer rests on the band this long first. */
+  restMs: 600,
 };
 
 /** The Inbox has the tip for this page. */
@@ -44,10 +48,12 @@ export function bandTipDue(settings: Pick<SettingsModel, 'reveal'> | null | unde
 export interface BandTipHost {
   /** The Inbox has it for this page, and nothing of this load rules it out (the tour, the first-run screen). */
   due: boolean;
-  /** Another one-time dialog or tip is claimed or up, a menu or dialog is open, or something is typed. */
+  /** The list is out of sight, another one-time dialog or tip is claimed or up, a menu or dialog is open, or something is typed. */
   busy: () => boolean;
   /** Spends the claim: true when the tip may show (`claimRevealOnce('band_tip')`). */
   claim: () => Promise<boolean>;
+  /** A band's menu opened: the tip is stamped and never shows (`inboxApi.retireBandTip`), due or not. */
+  used: () => unknown;
 }
 
 /** The App side: one key per page, so a retry after a lost answer is shown it again. */
@@ -60,15 +66,18 @@ export function bandTipClaimer(): () => Promise<boolean> {
 }
 
 /**
- * The list side. `menuBands`: the bands on screen that have a menu now, in order (none while picking). Returns the band
- * showing the tip (its words), and what the bands report: a hover (`pointed`), a band's menu opening (`menuOpened`).
+ * The list side. `menuBands`: the bands that have a menu now, in order (none while picking, none while the list is out
+ * of sight). `onScreen`: whether a band is in view now (a phone's tip waits for one). Returns the band showing the tip
+ * (its words), and what the bands report: a hover (`pointed`) and its end (`left`), a band's menu opening (`menuOpened`).
  */
-export function useBandTip(host: BandTipHost | undefined, phone: boolean, menuBands: readonly string[]) {
+export function useBandTip(host: BandTipHost | undefined, phone: boolean, menuBands: readonly string[], onScreen: (band: string) => boolean = () => true) {
   const [shown, setShown] = useState<{ band: string; words: string } | null>(null);
   /** This page has asked (or retired it): never again on this load. */
   const spent = useRef(false);
-  const latest = useRef({ host, menuBands });
-  latest.current = { host, menuBands };
+  const latest = useRef({ host, menuBands, onScreen });
+  latest.current = { host, menuBands, onScreen };
+  /** A desktop: the band the pointer rests on, and the wait before its tip. */
+  const resting = useRef<{ band: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   const may = () => {
     const now = latest.current;
     return !!now.host?.due && !spent.current && !now.host.busy();
@@ -83,6 +92,11 @@ export function useBandTip(host: BandTipHost | undefined, phone: boolean, menuBa
       () => {},
     );
   };
+  const stopResting = () => {
+    if (resting.current) clearTimeout(resting.current.timer);
+    resting.current = null;
+  };
+  useEffect(() => stopResting, []);
   // Shown: gone after a while, and at once on any press, key, scroll or right-click.
   useEffect(() => {
     if (!shown) return;
@@ -95,44 +109,64 @@ export function useBandTip(host: BandTipHost | undefined, phone: boolean, menuBa
       for (const kind of kinds) window.removeEventListener(kind, hide, { capture: true });
     };
   }, [shown]);
-  // The band left, or picking started: gone.
+  // The band left, picking started or the list went out of sight: gone.
   useEffect(() => {
     if (shown && !menuBands.includes(shown.band)) setShown(null);
   }, [shown, menuBands]);
   // A phone: the list held still for a while with a band that has a menu on screen.
-  const first = phone ? (menuBands[0] ?? null) : null;
+  const watching = phone && menuBands.length > 0;
   const due = !!host?.due;
   useEffect(() => {
-    if (!first || !due || spent.current) return;
+    if (!watching || !due || spent.current) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const wait = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        const band = latest.current.menuBands[0];
+        timer = null;
+        if (spent.current) return;
+        const band = latest.current.menuBands.find((id) => latest.current.onScreen(id));
         if (band && may()) show(band, BAND_TIP_WORDS.phone);
+        // None on screen, or something else is up: it waits again.
+        else wait();
       }, BAND_TIP_TIMES.phoneViewMs);
     };
     wait();
-    // A touch (a scroll, a swipe, a tap) starts the wait again.
+    // A touch (a scroll, a swipe, a tap) or a scroll by any means starts the wait again.
     window.addEventListener('touchstart', wait, { capture: true, passive: true });
+    window.addEventListener('scroll', wait, { capture: true, passive: true });
     return () => {
       if (timer) clearTimeout(timer);
       window.removeEventListener('touchstart', wait, { capture: true });
+      window.removeEventListener('scroll', wait, { capture: true });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [first, due]);
+  }, [watching, due]);
   return {
     shown,
-    /** The pointer came onto a band (a mouse, never a touch). */
+    /** The pointer came onto a band (a mouse, never a touch): its tip shows once it has rested there. */
     pointed: (band: string) => {
-      if (!phone && latest.current.menuBands.includes(band) && may()) show(band, BAND_TIP_WORDS.desktop);
+      if (phone || !latest.current.menuBands.includes(band) || !may()) return;
+      stopResting();
+      resting.current = {
+        band,
+        timer: setTimeout(() => {
+          resting.current = null;
+          if (latest.current.menuBands.includes(band) && may()) show(band, BAND_TIP_WORDS.desktop);
+        }, BAND_TIP_TIMES.restMs),
+      };
     },
-    /** A band's menu opened: the tip goes, and one never shown is claimed so it never shows. */
+    /** The pointer left a band: no tip for it now, and one showing goes, as a tooltip does. */
+    left: (band: string) => {
+      if (resting.current?.band === band) stopResting();
+      setShown((now) => (now?.band === band ? null : now));
+    },
+    /** A band's menu really opened: the tip goes, and one never shown is retired for good (whatever the tenure). */
     menuOpened: () => {
       setShown(null);
-      if (spent.current || !latest.current.host?.due) return;
+      stopResting();
+      if (spent.current || !latest.current.host) return;
       spent.current = true;
-      void latest.current.host.claim().catch(() => {});
+      void Promise.resolve(latest.current.host.used()).catch(() => {});
     },
   };
 }

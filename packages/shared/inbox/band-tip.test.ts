@@ -3,7 +3,7 @@
  * stamps it once; the same page's key is shown it again; any other claim after the stamp gets no.
  */
 import { describe, expect, test } from "bun:test";
-import { bandTipClaim, bandTipDue } from "./band-tip";
+import { bandTipClaim, bandTipDue, bandTipUsed } from "./band-tip";
 
 const NOW = "2026-11-20T12:00:00.000Z";
 const DAY = 24 * 60 * 60 * 1000;
@@ -26,5 +26,20 @@ describe("the Group tip", () => {
     expect(bandTipClaim(after, "key-aaaaaaaa", NOW)).toEqual({ show: true, save: null });
     expect(bandTipClaim(after, "key-bbbbbbbb", NOW)).toEqual({ show: false, save: null });
     expect(bandTipClaim(after, null, NOW)).toEqual({ show: false, save: null });
+  });
+
+  test("a band's menu opened retires it whatever the tenure: on the first day it is stamped too, so it never shows; stamped once", () => {
+    const firstDay = { firstUseAt: ago(60_000), tenure: true, saved: undefined };
+    expect(bandTipDue(firstDay, NOW)).toBe(false);
+    const save = bandTipUsed(firstDay, NOW);
+    expect(save).toEqual({ shownAt: NOW, usedAt: NOW });
+    // The next day: not due, and no claim shows it.
+    const nextDay = NOW.replace("2026-11-20", "2026-11-21");
+    const after = { ...firstDay, saved: save! };
+    expect(bandTipDue(after, nextDay)).toBe(false);
+    expect(bandTipClaim(after, "key-aaaaaaaa", nextDay)).toEqual({ show: false, save: null });
+    // Already stamped (shown once): nothing to write.
+    expect(bandTipUsed(after, nextDay)).toBeNull();
+    expect(bandTipUsed({ ...firstDay, saved: { shownAt: NOW, key: "key-aaaaaaaa" } }, nextDay)).toBeNull();
   });
 });

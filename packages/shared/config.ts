@@ -746,7 +746,7 @@ export interface PlannotatorConfig {
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
     /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
-    band_tip?: { shownAt?: string; key?: string };
+    band_tip?: { shownAt?: string; key?: string; usedAt?: string };
   };
   /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {

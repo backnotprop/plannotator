@@ -81,6 +81,8 @@ export interface BandMenu {
   /** What a write changes on the band (its threads' ids): once it differs, the write has landed. */
   stateOf: (sectionId: string) => string;
   onAction: (sectionId: string, action: BandMenuAction) => void;
+  /** The band's menu really opened (a right-click, the key, or a hold that lasted): never a press that only took the look. */
+  onOpened?: (sectionId: string) => void;
 }
 
 const BAND_LABELS: Record<BandMenuAction, { label: string; icon: IconName }> = {
@@ -181,6 +183,11 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   });
   // A band's menu, or a row's.
   const bandTarget = bandOf(menu.targetId);
+  const bandOpen = menu.open && bandTarget !== null ? bandTarget : null;
+  useEffect(() => {
+    if (bandOpen !== null) bands?.onOpened?.(bandOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bandOpen]);
   const bandActions = bandTarget !== null && bands ? bands.actionsOf(bandTarget) : [];
   const target = menu.targetId && bandTarget === null ? props.rowOf(menu.targetId) : null;
   // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention; to the list's top or
