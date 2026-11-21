@@ -24,6 +24,7 @@ import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
+import type { InboxPictureItPage } from "./picture-it-page";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -629,6 +630,7 @@ export interface InboxMessage {
    * it was sent (packages/server/inbox-live.ts). Absent otherwise.
    */
   live_sites?: InboxLiveSiteRef[];
+  picture_it?: InboxPictureItPage;
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -1216,6 +1218,12 @@ export interface InboxLaunchRecord {
 export interface InboxLaunchRex {
   line?: string;
   unavailable?: true;
+  /**
+   * With `unavailable`, why, where it is not "Rex's app isn't open here" (a Mac): `server`, Rex on that computer is a
+   * server with no app (Linux, FreeBSD) and it did not answer; `shared`, the Rex server there is another account's
+   * (a shared server named by `REX_SERVER`), where the Inbox reads but never starts an agent.
+   */
+  why?: "server" | "shared";
   refused?: true;
   session?: string;
   block?: string;
@@ -1322,7 +1330,7 @@ export interface InboxRun {
    * has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own
    * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
    */
-  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
+  rex?: { line: string | null; unavailable?: true; why?: "server" | "shared"; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -1582,8 +1590,13 @@ export interface InboxActionFacts {
 
 /** What came of an action item (`InboxQuestionRecord.action_result`). */
 export interface InboxActionResult {
-  outcome: "done" | "cant";
-  /** The person's note with Done, or the reason with Can't do it; null for none. */
+  /**
+   * The person's mark: Done, Can't do it (with a reason), or Skip (they chose
+   * not to do it; approval "action-item-skip", option A). A record stored
+   * before Skip only ever holds "done" or "cant".
+   */
+  outcome: "done" | "cant" | "skip";
+  /** The person's note with Done, or the reason with Can't do it; null for none (always for Skip). */
   note: string | null;
   at: string;
   by: "person" | "agent";
@@ -1601,8 +1614,11 @@ export interface InboxActionResult {
    * (approval "inbox-action-items-in-reply", Q3). When it carries a note, the
    * note still goes with the person's next Send (`inboxActionInDraft`).
    */
-  person?: { outcome: "done" | "cant"; note: string | null; at: string } | null;
+  person?: { outcome: "done" | "cant" | "skip"; note: string | null; at: string } | null;
 }
+
+/** The person's mark on an action item (`InboxActionResult.outcome`). */
+export type InboxActionOutcome = InboxActionResult["outcome"];
 
 /**
  * An action item whose result waits in the person's reply draft (approval
@@ -1621,7 +1637,7 @@ export function inboxActionInDraft(
 }
 
 /** The person's own mark on an action item in their draft or sent: their staged mark, or the one the agent's done settled. */
-export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: "done" | "cant"; note: string | null; at: string } | null {
+export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: InboxActionOutcome; note: string | null; at: string } | null {
   if (!result) return null;
   if (result.by === "person") return { outcome: result.outcome, note: result.note, at: result.at };
   return result.person ?? null;
@@ -3263,6 +3279,7 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
  * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
  */
+/* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
 const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
 export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
@@ -3352,6 +3369,8 @@ export interface InboxRowUnsent {
   done?: number;
   /** Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none. */
   cant?: number;
+  /** Action items skipped waiting in the reply draft ("Draft · 1 skipped"; approval "action-item-skip"). Absent: none. */
+  skipped?: number;
 }
 
 /**
@@ -3367,7 +3386,7 @@ export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_f
 
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
-  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0);
+  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0 || (unsent.skipped ?? 0) > 0);
 }
 
 /**
@@ -3571,9 +3590,10 @@ export interface InboxComposeSession {
 
 /**
  * Where an agent lives, as this computer's Rex last confirmed it (packages/server/inbox-rex.ts): one quiet line,
- * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered (the window asking is on
- * this computer, and Rex's app here confirmed a jump in this run and has not failed one since). Additive: absent from an older Inbox,
- * and for an agent whose place Rex does not confirm.
+ * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered to the window asking: a
+ * Rex app that can go to the pane for it is attached to that Rex (this computer's own app for this computer's own
+ * window; an app attached from another computer for the tailnet's or a linked machine's) and has not failed a Show
+ * since. Additive: absent from an older Inbox, and for an agent whose place Rex does not confirm.
  */
 export interface InboxAgentPlace {
   kind: "rex";
@@ -3584,7 +3604,7 @@ export interface InboxAgentPlace {
 /** The longest place line kept from another machine's list. */
 const INBOX_AGENT_PLACE_LINE_MAX = 200;
 
-/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed (never from another machine: its Rex is not here). */
+/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed and it is exactly `true`. */
 export function inboxAgentPlaceChecked(value: unknown, options: { show: boolean }): InboxAgentPlace | undefined {
   if (!value || typeof value !== "object") return undefined;
   const place = value as Record<string, unknown>;
@@ -3601,8 +3621,9 @@ export interface InboxComposeProject {
 
 /**
  * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
- * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
- * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ * `agents`; packages/server/inbox-agents-list.ts) and the list's Agents view. An agent is a live session, a session
+ * that owns a thread waiting on the person (ended or not), a session that ended in the last seven days
+ * (`INBOX_AGENTS_ENDED_DAYS`), or a session the Inbox launched (a stopped one is idle).
  */
 export interface InboxAgent {
   /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */

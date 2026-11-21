@@ -970,6 +970,60 @@
       "relay": true
     },
     {
+      "name": "GET messages/:id/run",
+      "method": "GET",
+      "path": "messages/{message}/run",
+      "params": [
+        "message"
+      ],
+      "call": "getMessageRun",
+      "window": "/api/inbox/messages/{message}/run",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "read",
+      "write": null,
+      "key": null,
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST messages/:id/run",
+      "method": "POST",
+      "path": "messages/{message}/run",
+      "params": [
+        "message"
+      ],
+      "call": "postMessageRun",
+      "window": "/api/inbox/messages/{message}/run",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST messages/:id/secret",
+      "method": "POST",
+      "path": "messages/{message}/secret",
+      "params": [
+        "message"
+      ],
+      "call": "postMessageSecret",
+      "window": "/api/inbox/messages/{message}/secret",
+      "grant": "phone",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "POST threads/:id/delete",
       "method": "POST",
       "path": "threads/{thread}/delete",
@@ -1200,7 +1254,7 @@
       "write": null,
       "key": null,
       "answer": "bytes",
-      "range": false,
+      "range": true,
       "relay": true
     },
     {
@@ -1767,6 +1821,22 @@
       "auth": "token",
       "kind": "hold",
       "write": "set",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
+      "name": "POST rex/show",
+      "method": "POST",
+      "path": "rex/show",
+      "params": [],
+      "call": "postRexShow",
+      "window": "/api/inbox/rex/show",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
       "key": "body",
       "answer": "json",
       "range": false,

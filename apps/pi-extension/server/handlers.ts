@@ -12,6 +12,8 @@ import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHead
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
+import { getPlannotatorDataDir } from "../generated/data-dir.ts";
+import { customThemesAnswer, pageWithCustomThemes } from "../generated/theme-files.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
@@ -285,6 +287,22 @@ export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
 		"Content-Type": contentType,
 		"Cache-Control": "no-cache",
 	});
+}
+
+/**
+ * `/plannotator-themes.js`: the person's own themes for the page's first
+ * frame, and with `?syntax=<id>` that theme's code colours. Mirrors
+ * packages/server/shared-handlers.ts handleCustomThemesScript() (the answer
+ * itself is packages/shared/theme-files.ts, vendored).
+ */
+/** The page with the person's themes written in (mirrors shared-handlers.ts customThemesPage). */
+export function customThemesPage(html: string): string {
+	return pageWithCustomThemes(html, getPlannotatorDataDir());
+}
+
+export function handleCustomThemesScript(res: Res, search: URLSearchParams = new URLSearchParams()): void {
+	const answer = customThemesAnswer(getPlannotatorDataDir(), search);
+	send(res, Buffer.from(answer.body), answer.status, answer.headers);
 }
 
 /**

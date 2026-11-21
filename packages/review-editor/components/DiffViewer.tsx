@@ -294,8 +294,12 @@ interface DiffViewerProps {
    * the caller decides what a hoverable symbol is. Stitching a fragmented
    * identifier is app-only work, and this component is also compiled into the
    * read-only portable guide viewer, which passes neither handler.
+   *
+   * Return `false` when the token is not a symbol a card can open for (a
+   * comment, punctuation, a keyword): the view then paints no hover underline
+   * or hand cursor on it.
    */
-  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => boolean | void;
   onTokenHoverLeave?: () => void;
   /** The token under the pointer, and the last one clicked: where F12 looks. */
   onTokenTarget?: import('../utils/tokenTarget').TokenTargetHandler;
@@ -1054,16 +1058,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [filePath, onCodeNavRequest, onTokenTarget]);
 
   const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps, event: PointerEvent) => {
-    // Only where a card can actually open. The class carries a pointer cursor
-    // (now !important, so it genuinely wins over Pierre's I-beam), and painting
-    // it unconditionally promised clickability on every token even with hover
-    // cards switched off.
-    if (onTokenHoverEnter) props.tokenElement.classList.add('pn-token-hover');
     if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
       props.tokenElement.classList.add('pn-token-nav');
     }
     onTokenTarget?.('enter', props, filePath);
-    onTokenHoverEnter?.(props, filePath);
+    // Only where a card can actually open. The class carries a pointer cursor
+    // (now !important, so it genuinely wins over Pierre's I-beam), and painting
+    // it unconditionally promised clickability on every token even with hover
+    // cards switched off, and on comments and punctuation that never get one.
+    if (onTokenHoverEnter && onTokenHoverEnter(props, filePath) !== false) {
+      props.tokenElement.classList.add('pn-token-hover');
+    }
   }, [filePath, onCodeNavRequest, onTokenHoverEnter, onTokenTarget]);
 
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {

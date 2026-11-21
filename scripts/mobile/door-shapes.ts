@@ -9,7 +9,9 @@
  * Types only: nothing imports this file at run time.
  */
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
-import type { InboxMessageWire, InboxQuestion, InboxRecordKind } from '../../packages/core/inbox-types';
+import type { InboxAttachmentState } from '../../packages/core/inbox-attachments';
+import type { InboxRowSnooze } from '../../packages/core/inbox-snooze';
+import type { InboxListRow, InboxMessageWire, InboxQuestion, InboxRecordKind, InboxReplyDraft } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
 import type { inboxPickBody } from '../../packages/core/inbox-answers';
 
@@ -125,4 +127,81 @@ export interface DoorReplyBody {
   with_thread?: boolean;
   /** The `cursor` of the thread read the person saw (`409 thread_moved_on` when an agent wrote after it). */
   seen_through_seq?: number;
+}
+
+// The thread actions (packages/server/inbox.ts, inbox-pins.ts, inbox-snooze.ts, inbox-priority.ts): each body is the
+// window's own (packages/inbox/api.ts) with the door's key. None compares and sets: each writes a state, and writing
+// the state a thread already has changes nothing.
+
+/** `POST messages/:id/resolve`: archive (`true`) or unarchive (`false`) the message's thread. */
+export interface DoorResolveBody {
+  idempotency_key: string;
+  resolved: boolean;
+}
+
+/** `POST threads/:id/read` (Mark read), `unread` (Move back) and `mark-unread`: the key alone. */
+export interface DoorKeyBody {
+  idempotency_key: string;
+}
+
+/** `POST threads/:id/mark-unread`. `wrote: false`: nothing to make new. `through_seq`: what a `seen` puts back. */
+export interface DoorMarkUnreadAnswer {
+  thread: InboxListRow;
+  wrote: boolean;
+  through_seq: number;
+}
+
+/** `POST threads/:id/pin`: star or unstar (a new star goes last). */
+export interface DoorPinBody {
+  idempotency_key: string;
+  pinned: boolean;
+}
+
+/** `POST pins`: one of `order` (the stars' new order) or `restore` (Unstar's Undo, at its place). */
+export interface DoorPinsBody {
+  idempotency_key: string;
+  order?: string[];
+  restore?: { thread_id: string; index: number; pinned_at: string };
+}
+
+/** `POST threads/:id/snooze`: until a time (ISO, UTC), or `null` to unsnooze. `at`: an Undo's earlier snooze's own time. */
+export interface DoorSnoozeBody {
+  idempotency_key: string;
+  until: string | null;
+  at?: string;
+}
+
+/** `POST threads/:id/snooze` answers the snooze as it stands (`null`: none, or a held time already past). */
+export interface DoorSnoozeAnswer {
+  snoozed: InboxRowSnooze | null;
+}
+
+/** `POST threads/:id/priority`: one of `priority` (add or remove) or `restore` (an Undo puts back what was). */
+export interface DoorPriorityBody {
+  idempotency_key: string;
+  priority?: boolean;
+  restore?: DoorPriorityBefore;
+}
+
+/** What a priority write found: its Undo's `restore`. */
+export interface DoorPriorityBefore {
+  at: string | null;
+  off_at: string | null;
+}
+
+export interface DoorPriorityAnswer {
+  before: DoorPriorityBefore;
+}
+
+/** `GET threads/:id/draft` (packages/server/inbox-reply-drafts.ts): the thread's reply draft on the computer, or none. */
+export interface DoorThreadDraftAnswer {
+  serverSession: string;
+  draft: InboxReplyDraft | null;
+}
+
+/** `GET threads/:id/attachments` (packages/server/inbox-attachments.ts): every file the thread carries, as it is now. */
+export interface DoorThreadAttachmentsAnswer {
+  serverSession: string;
+  attachments: InboxAttachmentState[];
+  inline_images?: InboxAttachmentState[];
 }

@@ -29,6 +29,7 @@ import { connect, createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
+import { INBOX_OFF_LINE } from "./connection";
 import { processMatchesEntry, proveInboxProcess, readProcessInfo, type ProcessInfo } from "./process-proof";
 import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
 import { directFetchInit } from "../loopback-proxy";
@@ -397,6 +398,8 @@ export class InboxUnreachableError extends Error {
 /** What a command says when the Inbox it needs could not be had (its `ensureRunning` threw). */
 export function inboxEnsureFailedWords(error: unknown): string {
   if (error instanceof InboxUnreachableError) return error.message;
+  // Not turned on here (turned-on.ts): the one line, as it is.
+  if (error instanceof Error && error.message === INBOX_OFF_LINE) return error.message;
   return `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`;
 }
 

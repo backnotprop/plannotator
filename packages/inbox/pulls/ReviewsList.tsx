@@ -24,7 +24,7 @@ import { Named, usePicture } from './Face';
 import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
 import { UnreportedBranches } from './UnreportedBranches';
-import type { InboxUnreportedBranch } from '@plannotator/core/inbox-types';
+import type { InboxPullRiskAutoRun, InboxUnreportedBranch } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
 import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
 
@@ -105,6 +105,7 @@ function ReviewRowItem({
   now,
   judgments,
   riskFailed,
+  autoRuns,
   menu = false,
   onOpen,
 }: {
@@ -116,6 +117,7 @@ function ReviewRowItem({
   now: number;
   judgments: RiskJudgments;
   riskFailed: RiskFailures;
+  autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>;
   /** Its right-click menu is open (the muted background the Inbox's rows take then). */
   menu?: boolean;
   onOpen: () => void;
@@ -124,7 +126,7 @@ function ReviewRowItem({
   // A thread's row is judged by the PRs it owns, a reported branch by its report; a local review has neither, so no mark.
   const judged = rowRisk(row, judgments);
   const riskFailure = rowRiskFailure(row, judgments, riskFailed);
-  const line = reviewRowLine(row);
+  const line = reviewRowLine(row, autoRuns);
   const layers = stack?.layers.length ?? 0;
   const focusPull = stack?.layers.find((pull) => pull.state === 'open' || pull.state === 'draft') ?? stack?.layers[0] ?? null;
   return (
@@ -435,6 +437,7 @@ export function ReviewsList({
   notRanked = NO_ROWS,
   judgments = NO_JUDGMENTS,
   riskFailed = NO_FAILURES,
+  autoRuns,
   projectNames,
   selected,
   phone,
@@ -457,6 +460,7 @@ export function ReviewsList({
   notRanked?: readonly InboxReviewRow[];
   judgments?: RiskJudgments;
   riskFailed?: RiskFailures;
+  autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>;
   projectNames: ReadonlyMap<string, string>;
   /** The open thread's id, or the open stack's. */
   selected: string | null;
@@ -540,7 +544,7 @@ export function ReviewsList({
   };
   const links = reviewLinksOf(model, answer);
   const draw = (row: InboxReviewRow) => (
-    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
+    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} autoRuns={autoRuns} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
   );
   // Under a project filter, that project's hidden PRs and repositories only, as the rest of the page (its count follows).
   const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} repos={hiddenInProject(answer.hidden_repos ?? [], project, answer.projects)} onShow={onShowAgain} onShowRepo={onShowRepo} onOpenThread={onOpenThread} /> : null;

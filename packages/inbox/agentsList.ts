@@ -15,6 +15,7 @@ import { inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type Inbo
 import { agentListFilter, type AgentListFilter } from './agents/model';
 import { givenName, useAgentNames, type AgentNames } from './agents/agentNames';
 import type { MachinesModel } from './machines';
+import { usePictureWorld } from './pictureWorld';
 
 const STATES = new Set<InboxAgent['state']>(['waiting', 'working', 'idle', 'ended']);
 
@@ -34,7 +35,7 @@ export function setInboxAgents(next: unknown): void {
     ? next
         .filter((group): group is InboxAgentsGroup => !!group && typeof group === 'object' && Array.isArray((group as InboxAgentsGroup).agents))
         .map((group) => {
-          // `show` as this Inbox sent it: it never passes one on from a linked machine (inboxPeerAgentsGroup).
+          // `show` as this Inbox sent it: its own, and a linked machine's as that machine offered it (inboxPeerAgentsGroup).
           const agents = group.agents.filter(isAgent).map((agent) => inboxAgentNamesChecked(agent, { show: true }));
           return {
             ...(typeof group.machine === 'string' ? { machine: group.machine } : {}),
@@ -140,15 +141,18 @@ export function agentIsNamed(agent: InboxAgent): boolean {
  * draw later with focus on the page (rowMenu.test.tsx). As state, the agents draw in the same pass as the read.
  */
 export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
-  const [groups, setGroups] = useState(snapshot);
+  // In a picture (pictureWorld.ts): its own agents, the person's never read.
+  const world = usePictureWorld();
+  const [groups, setGroups] = useState(() => (world ? null : snapshot()));
   useEffect(() => {
+    if (world) return;
     const read = () => setGroups(snapshot());
     // A read that landed between the first draw and this subscription.
     read();
     return subscribeInboxAgents(read);
-  }, []);
+  }, [world]);
   const names = useAgentNames();
-  return withGivenNames(groups, names);
+  return world ? world.agents : withGivenNames(groups, names);
 }
 
 /**

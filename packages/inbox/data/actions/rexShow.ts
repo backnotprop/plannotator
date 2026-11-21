@@ -1,4 +1,8 @@
-/** Show in Rex (packages/server/inbox-rex.ts): Rex's app goes to the pane this computer's live session lives in. */
+/**
+ * Show in Rex (packages/server/inbox-rex.ts): Rex's app goes to the pane a live session lives in. For a linked
+ * machine's agent the ask goes to that machine's Inbox (its Rex holds the pane) through the machine link
+ * (packages/server/inbox-rex-far.ts), sent now or not at all.
+ */
 import { useSyncExternalStore } from 'react';
 import { post } from '../../api';
 import { dropRexShow } from '../../agentsList';
@@ -35,14 +39,14 @@ export function useRexShowNote(session: string): string | null {
  * Ask for it, on the person's click. When Rex did not go there, a line under the agent's row says so (and the
  * window's live region says it too), and the item leaves the agent's menu until Rex's app confirms a jump again.
  */
-export function showInRex(session: string, announce?: (text: string) => void): void {
+export function showInRex(session: string, announce?: (text: string) => void, machine: string | null = null): void {
   setNote(null);
   const failed = (text: string) => {
     dropRexShow(session);
     setNote({ session, text });
     announce?.(text);
   };
-  void post<{ shown?: unknown; refused?: unknown }>(inboxUrl('/rex/show'), { session }).then(
+  void post<{ shown?: unknown; refused?: unknown }>(inboxUrl('/rex/show', undefined, machine), { session }).then(
     (answer) => {
       if (answer.shown !== true) failed(answer.refused === true ? REX_SHOW_REFUSED : REX_SHOW_FAILED);
     },
