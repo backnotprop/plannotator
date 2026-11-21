@@ -2854,6 +2854,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
               panelAction={<ContentsHide onHide={hideContents} />}
+              // The file's comments as dots beside the ticks; a dot selects its comment as the comments panel does.
+              annotations={annotations}
+              selectedAnnotationId={selectedId}
+              onSelectAnnotation={setSelectedId}
             />
           )}
         </div>

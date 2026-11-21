@@ -313,8 +313,173 @@
   transition-delay: 0ms;
 }
 
+/* Annotation marks (MarkdownContentsRail's `annotations` + `onSelectAnnotation`;
+ * owner-approved 2026-11, "dots beside each heading's tick"). Closed: a row's
+ * section's dots beside its tick's line, 3 px, in the annotation colours (the
+ * annotation panel's: comment, deletion, global purple), a quiet "more" dot
+ * for the rest. Open: 5 px at the end of each row, then "+N". Hovered,
+ * focused or selected, a dot grows, as a tick's line grows when pointed at.
+ * Drawn only when there are marks: without them none of these rules match. */
+.pn-contents-rail-marks {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--pn-contents-dock-width);
+  pointer-events: none;
+}
+
+.pn-contents-rail-mark,
+.pn-contents-rail-more {
+  --pn-contents-mark-comment: var(--annotation-comment, var(--accent));
+  --pn-contents-mark-deletion: var(--destructive);
+  --pn-contents-mark-global: var(--color-purple-500, oklch(62.7% 0.265 303.9));
+
+  position: absolute;
+  z-index: 2;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  outline: none;
+}
+
+/* The dot: centred in the slot's first 5 px (a row's last slot runs on to the dock's edge). */
+.pn-contents-rail-mark::after,
+.pn-contents-rail-more::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2.5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  translate: -50% -50%;
+  background: var(--pn-contents-mark-comment);
+  pointer-events: none;
+}
+
+.pn-contents-rail-mark[data-kind='deletion']::after {
+  background: var(--pn-contents-mark-deletion);
+}
+
+.pn-contents-rail-mark[data-kind='global']::after {
+  background: var(--pn-contents-mark-global);
+}
+
+.pn-contents-rail-mark[data-highlighted]::after,
+.pn-contents-rail-mark[data-selected]::after,
+.pn-contents-rail-mark:focus-visible::after {
+  width: 5px;
+  height: 5px;
+}
+
+/* The overflow: a quiet dot in the ticks' own colour. */
+.pn-contents-rail-more::after {
+  background: var(--muted-foreground);
+  opacity: 0.55;
+}
+
+.pn-contents-rail-more:focus-visible::after {
+  width: 5px;
+  height: 5px;
+  opacity: 1;
+}
+
+/* Open: at the end of the row, a little larger; they come in with the labels. */
+.pn-contents-rail[data-revealed] .pn-contents-rail-mark,
+.pn-contents-rail[data-revealed] .pn-contents-rail-more {
+  animation: pn-contents-rail-enter var(--motion-duration-basic, 150ms) cubic-bezier(0.23, 1, 0.32, 1)
+    var(--motion-duration-basic, 150ms) both;
+}
+
+.pn-contents-rail[data-revealed] .pn-contents-rail-mark::after {
+  left: 50%;
+  width: 5px;
+  height: 5px;
+}
+
+.pn-contents-rail[data-revealed] .pn-contents-rail-mark[data-highlighted]::after,
+.pn-contents-rail[data-revealed] .pn-contents-rail-mark[data-selected]::after,
+.pn-contents-rail[data-revealed] .pn-contents-rail-mark:focus-visible::after {
+  width: 7px;
+  height: 7px;
+}
+
+.pn-contents-rail[data-revealed] .pn-contents-rail-more {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: right;
+}
+
+.pn-contents-rail[data-revealed] .pn-contents-rail-more::after {
+  content: none;
+}
+
+.pn-contents-rail[data-revealed] .pn-contents-rail-more:is(:hover, :focus-visible) {
+  color: var(--foreground);
+}
+
+/* A mark's card: the panel's floating surface holding the annotation panel
+ * card's parts (AnnotationCardParts). Where the closed panel would be, or left
+ * of the open one; placed by the component. */
+.pn-contents-rail-card {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  width: var(--pn-contents-panel-width);
+  padding: 10px 12px;
+  border-radius: var(--geometry-floating-radius, 10px);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(
+    --shadow-menu,
+    0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent),
+    0 12px 32px -8px color-mix(in oklch, var(--foreground) 22%, transparent)
+  );
+  font-size: 13px;
+  text-align: left;
+  pointer-events: none;
+  animation: pn-contents-rail-enter var(--motion-duration-fast, 120ms)
+    var(--ease-enter, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+.pn-contents-rail:focus-within .pn-contents-rail-mark,
+.pn-contents-rail:focus-within .pn-contents-rail-more {
+  animation-delay: 0ms;
+}
+
+.pn-contents-rail-card p {
+  margin-top: 0;
+}
+
+.pn-contents-rail-card > :last-child {
+  margin-bottom: 0;
+}
+
+.pn-contents-rail-card-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pn-contents-rail {
+    animation: none;
+  }
+  .pn-contents-rail-card,
+  .pn-contents-rail[data-revealed] .pn-contents-rail-mark,
+  .pn-contents-rail[data-revealed] .pn-contents-rail-more {
     animation: none;
   }
   .pn-contents-rail-line {
