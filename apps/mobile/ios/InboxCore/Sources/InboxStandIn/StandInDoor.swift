@@ -24,6 +24,9 @@ public actor StandInDoor {
     public var racesPicks = 0
     /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
     public var proxyRefusesReplies: Int?
+    /// Threads whose archive something between the phone and the computer refuses with a web page (a 403): one
+    /// row of an act on several rows that is not taken.
+    public var proxyRefusesArchive: Set<String> = []
     /// True: the Authorization header never reaches the door, as when something in between strips it.
     public var stripsToken = false
     public init() {}
@@ -35,16 +38,18 @@ public actor StandInDoor {
   /// Every call the door received, for the tests.
   public private(set) var calls: [DoorCall] = []
 
-  private var threads: [InboxThread]
-  private var unread: Set<ThreadID>
+  var threads: [InboxThread]
+  var unread: Set<ThreadID>
+  /// Stars, archives, snoozes, priority, drafts and files (StandInRowState.swift).
+  var state = StandInState()
   private var tokens: [String: DeviceID] = [:]
   private var revoked: Set<DeviceID> = []
   private var wrongCodes = 0
   private var offerOpen = true
   private var replays: [String: (method: String, path: String, answer: DoorAnswerBytes)] = [:]
-  private var seq: Int64
-  private let session = "standin-session"
-  private var counter = 0
+  var seq: Int64
+  let session = "standin-session"
+  var counter = 0
 
   public init(options: Options = Options(), threads: [InboxThread]? = nil, unread: Set<ThreadID>? = nil, now: Date = Date()) {
     self.options = options
@@ -136,17 +141,17 @@ public actor StandInDoor {
     let parts = call.path.split(separator: "/").map(String.init)
     switch parts.count {
     case 1 where parts[0] == "health": return health()
-    case 1 where parts[0] == "threads": return encode(200, StandInData.list(threads: threads, unread: unread, session: session, cursor: seq, version: options.version))
-    case 2 where parts[0] == "threads":
+    case 1 where parts[0] == "threads": return encode(200, dressed(StandInData.list(threads: threads, unread: unread, session: session, cursor: seq, version: options.version)))
+    case 2 where parts[0] == "threads" && parts[1] != "archived":
       let id = ThreadID(parts[1].removingPercentEncoding ?? parts[1])
       guard let thread = threads.first(where: { $0.threadId == id }) else { return refuse(404, "thread_not_found", "That thread is not here.") }
       return encode(200, model(thread))
-    default: return refuse(404, "device_route_not_found", "Not a route of the door.")
+    default: return getMore(call, parts) ?? refuse(404, "device_route_not_found", "Not a route of the door.")
     }
   }
 
-  private func model(_ thread: InboxThread) -> ThreadModel {
-    ThreadModel(serverSession: session, cursor: seq, thread: thread, row: StandInData.row(of: thread, unread: unread.contains(thread.threadId)))
+  func model(_ thread: InboxThread) -> ThreadModel {
+    ThreadModel(serverSession: session, cursor: seq, thread: thread, row: dressed(StandInData.row(of: thread, unread: unread.contains(thread.threadId))))
   }
 
   private func health() -> DoorAnswerBytes {
@@ -207,12 +212,15 @@ public actor StandInDoor {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
     case ("messages", 4, _) where parts[2] == "actions": answer = markAction(MessageID(parts[1]), parts[3], fields)
+    case ("messages", 3, "resolve") where options.proxyRefusesArchive.contains(parts[1]):
+      return DoorAnswerBytes(status: 403, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8))
     case ("messages", 3, "reply"):
       if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
       answer = reply(MessageID(parts[1]), fields)
     default:
       // Not on the list: answered, and never kept under the key.
-      return refuse(404, "device_route_not_found", "Not a route of the door.")
+      guard let more = postMore(parts, fields) else { return refuse(404, "device_route_not_found", "Not a route of the door.") }
+      answer = more
     }
     if answer.status < 500 { replays[key] = (call.method.rawValue, call.path, answer) }
     return answer
@@ -337,7 +345,7 @@ public actor StandInDoor {
     }
   }
 
-  /// `markAction`: Done (with an optional note), Can't do it (with a reason), or null to take it back.
+  /// `markAction`: Done (with an optional note), Can't do it (with a reason), Skip (no note: one sent is dropped), or null to take it back.
   private func markAction(_ message: MessageID, _ key: String, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
     do {
       let at = try target(message)
@@ -350,13 +358,15 @@ public actor StandInDoor {
       case .null?: outcome = nil
       case .string("done")?: outcome = .done
       case .string("cant")?: outcome = .cant
-      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", or null to undo.", field: "outcome")
+      case .string("skip")?: outcome = .skip
+      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", \"skip\", or null to undo.", field: "outcome")
       }
       var note = ""
       if let raw = fields["note"], raw != .null {
         guard case .string(let text) = raw else { return refuse(422, "validation_error", "note: text.", field: "note") }
         note = text.trimmingCharacters(in: .whitespacesAndNewlines)
       }
+      if outcome == .skip { note = "" }
       if outcome == .cant, note.isEmpty { return refuse(422, "validation_error", "note: say why you can't do it; the agent gets it word for word.", field: "note") }
       let state = questions[q].state
       if state == .sent { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }
@@ -484,13 +494,13 @@ public actor StandInDoor {
 
   // MARK: Answers
 
-  private func encode<T: Encodable>(_ status: Int, _ value: T) -> DoorAnswerBytes {
+  func encode<T: Encodable>(_ status: Int, _ value: T) -> DoorAnswerBytes {
     DoorAnswerBytes(status: status, headers: ["content-type": "application/json; charset=utf-8", "cache-control": "no-store"], body: (try? JSONEncoder().encode(value)) ?? Data("{}".utf8))
   }
 
-  private func json(_ status: Int, _ fields: [String: JSONValue]) -> DoorAnswerBytes { encode(status, JSONValue.object(fields)) }
+  func json(_ status: Int, _ fields: [String: JSONValue]) -> DoorAnswerBytes { encode(status, JSONValue.object(fields)) }
 
-  private func refuse(_ status: Int, _ code: String, _ words: String, field: String? = nil, triesLeft: Int? = nil, key: String? = nil, extra: [String: JSONValue] = [:]) -> DoorAnswerBytes {
+  func refuse(_ status: Int, _ code: String, _ words: String, field: String? = nil, triesLeft: Int? = nil, key: String? = nil, extra: [String: JSONValue] = [:]) -> DoorAnswerBytes {
     encode(status, DoorError(error: words, code: code, field: field, triesLeft: triesLeft.map(Double.init), key: key, unknownFields: extra))
   }
 }

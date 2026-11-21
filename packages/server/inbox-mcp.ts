@@ -22,6 +22,7 @@ import { checkSendPrototypes } from "./inbox-prototypes";
 import { prototypesNotFramedText } from "./inbox-web-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
+import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
@@ -29,6 +30,8 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
+import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { readInboxAttachmentQuestions } from "@plannotator/shared/inbox/attachment-questions";
@@ -228,6 +231,10 @@ export const SEND_BODY_DESCRIPTION = [
   INBOX_ACTION_GUIDE,
   "",
   INBOX_ACTION_EXAMPLE,
+  "",
+  // Run and Secret: a command the person runs with one press, a secret they save on their computer. Short here;
+  // the whole text and its examples are in `plannotator inbox --help` (INBOX_RUN_GUIDE).
+  INBOX_RUN_TOOL_TEXT,
   "",
   INBOX_REREAD_RULE,
 ].join("\n");
@@ -756,7 +763,7 @@ function imagesNotShown(body: string, failures: readonly InlineImageFailure[]): 
     const reason = IMAGE_NOT_SHOWN_REASONS[code];
     if (reason) out.push({ ref, reason });
   }
-  for (const ref of inboxMessageRemoteImageRefsInOrder(body)) out.push({ ref, reason: IMAGE_REMOTE_REASON });
+  for (const ref of inboxMessageRemoteImageRefsInOrder(body)) if (!inboxInlineMediaKind(ref)) out.push({ ref, reason: IMAGE_REMOTE_REASON });
   return out;
 }
 
@@ -869,7 +876,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; mediaNotShown: MediaNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -954,6 +961,7 @@ export async function sendAgentMessage(
   const superseded = store.supersededBy(message.id);
   const markedDone = result.done ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
+  const notPlayed = await mediaNotShown(input.body, { root: project.root, base: basePath });
   // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
   // the result advises the next message; the send and what the person sees are unchanged.
   // The message is already stored: advice that fails is left out, never an error for a sent message.
@@ -993,6 +1001,7 @@ export async function sendAgentMessage(
   return {
     notFramed,
     imagesNotShown: notShown,
+    mediaNotShown: notPlayed,
     attachedImagesNotInBody: attachedOnly,
     questionOpenersWithText: openers,
     noStakes: noStakes.length,
@@ -1034,6 +1043,8 @@ export async function sendAgentMessage(
       /** Images the body shows that the window will not (missing, not an image, too large, hidden, remote). */
       ...(notShown.length > 0 ? { images_not_shown: notShown.slice(0, IMAGES_NOT_SHOWN_MAX) } : {}),
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
+      ...(notPlayed.length > 0 ? { media_not_shown: notPlayed.slice(0, MEDIA_NOT_SHOWN_MAX) } : {}),
+      ...(notPlayed.length > MEDIA_NOT_SHOWN_MAX ? { media_not_shown_more: notPlayed.length - MEDIA_NOT_SHOWN_MAX } : {}),
       /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */
       ...(attachedOnly.length > 0 ? { attached_images_not_in_body: attachedOnly } : {}),
       /** Lines that start with a question directive and text after it, so they opened no block (a warning; the message was sent). */
@@ -1317,6 +1328,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // follow them, each a line of its own (so no hint is glued onto a warning).
         const hints = [
           imagesNotShownText(sent.imagesNotShown),
+          mediaNotShownText(sent.mediaNotShown),
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),

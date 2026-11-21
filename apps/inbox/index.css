@@ -66,6 +66,8 @@
 @import "../../packages/inbox/plans/plans.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
+/* `:::run` and `:::secret` cards (packages/inbox/parts/RunBlocks/). */
+@import "../../packages/inbox/parts/RunBlocks/runBlocks.css";
 /* The free layout of thread panes ("Open to the side", packages/inbox/panes/): the engine's sheet, then the Inbox's over it. */
 @import "../../packages/vendor-pierre-layouts/src/styles.css";
 @import "../../packages/inbox/panes/panes.css";
@@ -74,6 +76,8 @@
 @import "../../packages/inbox/agents/iconDialog.css";
 /* The Rex status marks on agents' icons (packages/inbox/agents/rexMark.tsx). */
 @import "../../packages/inbox/agents/rexMark.css";
+/* The list's Agents view: each agent with its threads under it (packages/inbox/agentsView/). */
+@import "../../packages/inbox/agentsView/agentsView.css";
 /* Thread tags: the sidebar's Tags, Add tag, a tag's list header (packages/inbox/threadTags.css). */
 @import "../../packages/inbox/threadTags.css";
 @import "../../packages/inbox/cloudflare.css";

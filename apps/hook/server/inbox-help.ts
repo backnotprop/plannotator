@@ -27,6 +27,7 @@ import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
+import { INBOX_RUN_EXAMPLE, INBOX_RUN_GUIDE, INBOX_RUN_REPORT_HEADING, INBOX_SECRET_EXAMPLE } from "@plannotator/core/inbox-run-guide";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT_LINE } from "@plannotator/core/inbox-hermes";
 import { join } from "node:path";
@@ -139,7 +140,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       `- Pictures: ${INBOX_PICTURES_RULE}`,
       `- Before and after: ${INBOX_CHANGE_RULE}`,
       `- ${INBOX_DELEGATED_OPTIONS_RULE}`,
-      "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show; copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
+      "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show (`media_not_shown`, the same shape, each sound or video that will not play); copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
       "- Fenced blocks in `body` that draw: a block fenced as `mermaid` or `dot` draws as a diagram, and one fenced as `html` draws as a live page in the message (a chart, an SVG drawing, a small mock). The page runs in a sandbox: its scripts run and it may load libraries, data, images and fonts over https, but it cannot reach the Inbox, the person's files or a path beside you (give images as https or data: URLs). Leave its background transparent so it sits in the message, and use the theme's variables: `var(--foreground)`, `var(--muted-foreground)`, `var(--border)`, `var(--chart-1)` to `var(--chart-5)`, `var(--font-sans)`. Let content set its height: do not use vh units or `height:100%` on html or body (the frame takes the page's height, so the page would grow without end). It shows up to 480 px tall, then Show more; the person can open it full screen or read its code. A block fenced as `svg` shows as an image.",
       `- Issue and PR refs in \`body\`: ${INBOX_REF_LINK_RULE}`,
       `- ${INBOX_REREAD_RULE}`,
@@ -489,7 +490,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- The person may react to your latest message with an emoji, a quick label. It reaches you about ten seconds later, and read_thread shows it on that message.",
     `- The person may press Re-ask: you get one message (with a wake: \`Plannotator Inbox: <subject> (<id>)\`, then \`${inboxReaskInstruction("both")}\`, which names only what the note lists) listing your questions and action items still open in the thread by id. Check each against where the work is now and send ONE message with \`reply_to\` that id: the ones still needed, asked again with the context the person needs today and a \`Replaces: <id>\` line in each block; the ids of those that no longer apply in \`supersedes\`, with a line on why. An action item still needed goes back as a \`:::action\` block with its \`Replaces: <id>\` line; one you saw done goes in \`done\`. Answers the person had picked come with it under "Answers to your questions": don't ask those again. Until you do, the old questions stay open and the thread waits on you.`,
     `- The person may mark a thread read without answering: its waiting questions and action items close unanswered, and you get one message from them that starts \`${INBOX_SET_ASIDE_HEADING}\` and lists them (questions as \`- Q1.\`, action items as \`- A1.\`). Do not wait on those; ask again if you must.`,
-    `- When the person marks one of your action items Done or Can't do it, it comes with their next reply, together with their words and answers: its first line says it (\`Did 1 action item.\`, or joined to the answers' line: \`Answered 1 question, did 1 action item.\`), and a section \`## ${INBOX_ACTIONS_HEADING}\` after everything else has \`### A1. <what to do>\` and \`Done, 3:12 PM.\` (and \`Note: …\` when they added one) or \`Can't do it: <their reason>\`; one you marked done yourself meanwhile reads \`You saw it done, 3:14 PM.\` with their note. Until they send, read_thread says it is in their reply draft, not sent yet. A last \`Still open: …\` line names what of that message still waits on them (don't ask those again). Go on with the work it unblocks; on Can't do it, find another way or ask.`,
+    `- When the person marks one of your action items Done, Can't do it or Skip, it comes with their next reply, together with their words and answers: its first line says it (\`Did 1 action item.\`, \`Skipped 1 action item.\`, or joined to the answers' line: \`Answered 1 question, did 1 action item.\`), and a section \`## ${INBOX_ACTIONS_HEADING}\` after everything else has \`### A1. <what to do>\` and \`Done, 3:12 PM.\` or \`Skipped by the person, 3:12 PM.\` (and \`Note: …\` when they added one) or \`Can't do it: <their reason>\`; one you marked done yourself meanwhile reads \`You saw it done, 3:14 PM.\` with their note. Until they send, read_thread says it is in their reply draft, not sent yet. A last \`Still open: …\` line names what of that message still waits on them (don't ask those again). Go on with the work it unblocks; on Can't do it, find another way or ask. Skipped means the person chose not to do it: carry on without it where you can, say what stays blocked, and don't ask for it again unless they bring it up.`,
     "",
     QUESTION_AUTHORING_GUIDE.trimEnd(),
     "",
@@ -563,6 +564,18 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "```",
     "",
     "The first line is the action item; every other line that is not `Where:`, `Run:`, `Stopped:`, `Holds up:`, `Watching:` or `Replaces:` is the why. An action item counts like an open question in the person's list (`Stopped:` puts the thread under \"" + SECTION_LABEL("stopped") + "\"), and its key starts with `a-`.",
+    "",
+    "### Commands the person runs, and secrets",
+    "",
+    INBOX_RUN_GUIDE,
+    "",
+    "```markdown",
+    INBOX_RUN_EXAMPLE,
+    "",
+    INBOX_SECRET_EXAMPLE,
+    "```",
+    "",
+    "Each block draws as a card in the window and on the person's phone. Their reply after a run starts with \"" + INBOX_RUN_REPORT_HEADING + "\"; after a save, it names the secret only. In a viewer that does not know these blocks, each still reads as its title, its why and its command in a code block.",
     "",
     "Attach the files a question points to (send_message's `attachments`, here `[\"load-test.html\"]`) and link them from its context, as above: the link opens the file beside the thread; " + INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE + " A link to a file you did not attach shows as \"Not attached\". Add a screenshot (`![alt](path)`) when the question is about something visual.",
     "",

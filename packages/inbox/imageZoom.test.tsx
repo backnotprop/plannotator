@@ -19,6 +19,7 @@ import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { Annotation } from '@plannotator/ui/types';
 
 const hasDom = typeof document !== 'undefined';
+const { PHONE_QUERY, TOUCH_QUERY } = await import('./phone');
 const { ImageAttachmentView } = (hasDom ? await import('./components/ImageAttachmentView') : {}) as typeof import('./components/ImageAttachmentView');
 type ImageSwipeEdges = import('./components/ImageAttachmentView').ImageSwipeEdges;
 
@@ -372,6 +373,41 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     } finally {
       window.matchMedia = realMatch;
       window.getComputedStyle = realStyle;
+    }
+  });
+
+  test('on a touch phone a panorama fits whole, and Mark up opens the zoomable drawing screen; a desktop keeps both as they were', async () => {
+    const realMatch = window.matchMedia;
+    const fake = (phone: boolean) =>
+      ((query: string) => ({
+        matches: phone && (query === PHONE_QUERY || query === TOUCH_QUERY),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as unknown as typeof window.matchMedia;
+    try {
+      window.matchMedia = fake(true);
+      document.body.classList.add('pn-inbox');
+      await mount();
+      const phone = await load(6000, 1000);
+      // Contain: the whole 6000 px width inside the 1000 px stage, not its height from the left.
+      expect(view(phone.img).scale).toBeCloseTo(1000 / 6000, 5);
+      await act(async () => host!.querySelector<HTMLButtonElement>('[data-markup-open]')!.click());
+      expect(document.querySelector('[data-pn-image-annotator-stage]')!.hasAttribute('data-pn-image-annotator-zoomable')).toBe(true);
+      expect(document.querySelector('[data-pn-image-annotator-area]')).not.toBeNull();
+      await act(async () => root!.unmount());
+      root = null;
+      host!.remove();
+      document.body.replaceChildren();
+      window.matchMedia = fake(false);
+      await mount();
+      const desk = await load(6000, 1000);
+      expect(view(desk.img)).toEqual({ x: 0, y: 0, scale: 0.6 });
+      await act(async () => host!.querySelector<HTMLButtonElement>('[data-markup-open]')!.click());
+      expect(document.querySelector('[data-pn-image-annotator-stage]')!.hasAttribute('data-pn-image-annotator-zoomable')).toBe(false);
+    } finally {
+      window.matchMedia = realMatch;
+      document.body.classList.remove('pn-inbox');
     }
   });
 

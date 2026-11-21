@@ -1,0 +1,174 @@
+{
+  "generatedFrom": "Comments made on the Viewer of origin/main f89f51a7b848a03d9a27eb19f6da24576feb6173 (no footnotes, autolinks or character references drawn): each document rendered there, its text selected and commented through the composer, the annotation saved as the Viewer handed it over. `restoreOn`, when present, is the document as later edited, on which the saved comment is restored.",
+  "docs": [
+    {
+      "name": "a definition mid-document; the second copy of a repeated sentence",
+      "markdown": "## Database\nWe add an index on users.email.[^1]\n\n[^1]: Postgres 16 builds it concurrently.\n\n## API\nThen run the tests.\n\n## Rollout\nThen run the tests.\n",
+      "annotation": {
+        "id": "old-0",
+        "blockId": "block-6",
+        "startOffset": 0,
+        "endOffset": 19,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 3,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 3,
+          "textOffset": 19
+        }
+      }
+    },
+    {
+      "name": "a run of definitions under a line; the second copy of a repeated sentence",
+      "markdown": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111\n\n## API\nThen run the tests.\n\n## Rollout\nThen run the tests.\n\nCites [^1] and [^2].\n",
+      "annotation": {
+        "id": "old-1",
+        "blockId": "block-4",
+        "startOffset": 0,
+        "endOffset": 19,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 2,
+          "textOffset": 19
+        }
+      }
+    },
+    {
+      "name": "a repeated sentence after a character reference in its paragraph",
+      "markdown": "## API\nThen run the tests.\n\n## Types\nMap&lt;K, V&gt; is kept as is. Then run the tests.\n",
+      "annotation": {
+        "id": "old-2",
+        "blockId": "block-3",
+        "startOffset": 31,
+        "endOffset": 50,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "Then run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 31
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 50
+        }
+      }
+    },
+    {
+      "name": "a repeated link after a new www. link in its paragraph",
+      "markdown": "## A\nRead [the docs](https://example.com/docs) first.\n\n## B\nVisit www.example.org or read [the docs](https://example.com/docs) again.\n",
+      "annotation": {
+        "id": "old-3",
+        "blockId": "block-3",
+        "startOffset": 30,
+        "endOffset": 38,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "the docs",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "A",
+          "parentIndex": 1,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "A",
+          "parentIndex": 1,
+          "textOffset": 8
+        }
+      }
+    },
+    {
+      "name": "a whole old definition paragraph, marker included",
+      "markdown": "A claim.[^1]\n\n[^1]: The first note.\n\nMore text.\n",
+      "annotation": {
+        "id": "old-4",
+        "blockId": "block-1",
+        "startOffset": 0,
+        "endOffset": 21,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "[^1]: The first note.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 21
+        }
+      }
+    },
+    {
+      "name": "a quote across a reference",
+      "markdown": "Here is a claim with a footnote.[^1] And another claim.\n\n[^1]: The note.\n",
+      "annotation": {
+        "id": "old-5",
+        "blockId": "block-0",
+        "startOffset": 21,
+        "endOffset": 48,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "a footnote.[^1] And another",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 21
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 0,
+          "textOffset": 48
+        }
+      }
+    },
+    {
+      "name": "a draft reopened after a heading was inserted above a repeated sentence",
+      "markdown": "# Plan\n\nRun the tests.\n\nRun the tests.\n",
+      "restoreOn": "# Plan\n\n## Steps\n\nRun the tests.\n\nRun the tests.\n",
+      "annotation": {
+        "id": "old-6",
+        "blockId": "block-2",
+        "startOffset": 0,
+        "endOffset": 14,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "Run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 14
+        }
+      }
+    }
+  ]
+}
