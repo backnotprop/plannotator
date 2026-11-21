@@ -542,7 +542,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const openWhenSettled = useRef(false);
   const merged = useRef<{ key: string; model: SearchModel } | null>(null);
   const carry = useRef<{ key: string; top: number | null } | null>(null);
-  const touched = useRef(false);
+  const pointed = useRef(false);
   const pressing = useRef(false);
   const heldMerge = useRef<(() => void) | null>(null);
   const optionsRef = useRef<SearchOption[]>([]);
@@ -681,7 +681,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   hlRef.current = hl;
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
   useLayoutEffect(() => {
-    touched.current = false;
+    pointed.current = false;
     carry.current = null;
     setHl(options.length > 0 ? 0 : null);
     // Only a new answer resets it; expanding a group keeps the row.
@@ -695,7 +695,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (at < 0) return;
     const row = document.getElementById(optionId(at));
     const list = listRef.current;
-    if (touched.current && held.top !== null && row && list) list.scrollTop += row.getBoundingClientRect().top - held.top;
+    if (pointed.current && held.top !== null && row && list) list.scrollTop += row.getBoundingClientRect().top - held.top;
     setHl(at);
     // optionId is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -829,7 +829,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       event.preventDefault();
       if (options.length === 0) return;
       const down = event.key === 'ArrowDown';
-      touched.current = true;
+      pointed.current = false;
       setHl((current) => (current === null ? (down ? 0 : options.length - 1) : (current + (down ? 1 : -1) + options.length) % options.length));
       return;
     }
@@ -1118,7 +1118,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               'aria-selected': selected,
               'data-option': i,
               onPointerMove: () => {
-                touched.current = true;
+                pointed.current = true;
                 if (hl !== i) setHl(i);
               },
               onMouseDown: keepInputFocus,
