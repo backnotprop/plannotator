@@ -377,11 +377,14 @@ const leakedIds =
   mkdirSync(dataDir, { recursive: true });
   const file = join(dataDir, "config.json");
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
-  const settled = {
+  const settled: Record<string, unknown> = {
     ...(config.inboxThemeChooser === undefined ? { inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" } } : {}),
     ...(config.inboxMarkReadWarning === undefined ? { inboxMarkReadWarning: false } : {}),
     ...((config.inboxReveals as { view_choice?: unknown } | undefined)?.view_choice === undefined ? { inboxReveals: { ...(config.inboxReveals as Record<string, unknown> | undefined), view_choice: { shownAt: "2026-10-01T10:00:00.000Z" } } } : {}),
   };
+  // The Group tip (band-tip.ts, a band's one-time tooltip) too, so no hover in a test shows it.
+  const reveals = (settled.inboxReveals ?? config.inboxReveals) as Record<string, unknown> | undefined;
+  if (reveals?.band_tip === undefined) Object.assign(settled, { inboxReveals: { ...reveals, band_tip: { shownAt: "2026-10-01T10:00:00.000Z" } } });
   if (Object.keys(settled).length > 0) writeFileSync(file, JSON.stringify({ ...config, ...settled }));
 }
 const server = await startInboxServer({
