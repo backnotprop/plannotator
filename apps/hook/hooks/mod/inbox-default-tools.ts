@@ -224,7 +224,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "agent_session": {
-          "description": "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.",
+          "description": "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold an open question your session asked.",
           "type": "string"
         }
       },

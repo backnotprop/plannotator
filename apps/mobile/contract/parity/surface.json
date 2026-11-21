@@ -1175,6 +1175,8 @@
       "InboxMessageWire.viewing",
       "InboxMessageWire.wait_started_at",
       "InboxMessageWire.wakes",
+      "InboxMovedTo.name",
+      "InboxMovedTo.open",
       "InboxMovedTo.subject",
       "InboxMovedTo.thread_id",
       "InboxNotifyReach.allowed",

@@ -515,6 +515,13 @@ export interface InboxReplyViewing {
 export interface InboxMovedTo {
   thread_id: string;
   subject: string | null;
+  /**
+   * Served on a thread's root, never stored: `true` while that thread is still open (the archived foot links to
+   * it). Absent when it is archived or gone: the foot then names `subject` without a link.
+   */
+  open?: true;
+  /** Served with `open`: that thread's name now, as the list shows it (its thread name over its subject). */
+  name?: string | null;
 }
 
 /** A message or reply. A thread is its root message's id. */

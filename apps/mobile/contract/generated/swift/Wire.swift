@@ -5606,14 +5606,18 @@ public enum InboxMessageWireThreadNamingStatus: Codable, Hashable, Sendable, Raw
 public struct InboxMovedTo: Codable, Hashable, Sendable {
   public var threadId: ThreadID
   public var subject: String?
+  public var openValue: Bool?
+  public var name: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["thread_id", "subject"]
+  static let knownKeys: Set<String> = ["thread_id", "subject", "open", "name"]
 
-  public init(threadId: ThreadID, subject: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(threadId: ThreadID, subject: String? = nil, openValue: Bool? = nil, name: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.threadId = threadId
     self.subject = subject
+    self.openValue = openValue
+    self.name = name
     self.unknownFields = unknownFields
   }
 
@@ -5621,6 +5625,8 @@ public struct InboxMovedTo: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.threadId = try c.decode(ThreadID.self, forKey: WireKey("thread_id"))
     self.subject = try c.decodeIfPresent(String.self, forKey: WireKey("subject"))
+    self.openValue = try c.decodeIfPresent(Bool.self, forKey: WireKey("open"))
+    self.name = try c.decodeIfPresent(String.self, forKey: WireKey("name"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -5628,6 +5634,8 @@ public struct InboxMovedTo: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.threadId, forKey: WireKey("thread_id"))
     try c.encode(self.subject, forKey: WireKey("subject"))
+    try c.encodeIfPresent(self.openValue, forKey: WireKey("open"))
+    try c.encodeIfPresent(self.name, forKey: WireKey("name"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

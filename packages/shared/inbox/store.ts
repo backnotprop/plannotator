@@ -1978,7 +1978,16 @@ export class InboxStore {
     const questions = this.questionsOf(message.id);
     // A subject is served as shown (displayInboxSubject), never as stored.
     const shown = message.subject ? { ...message, subject: displayInboxSubject(message.subject) } : { ...message };
+    if (message.moved_to) shown.moved_to = this.movedToShown(message.moved_to);
     return questions.length > 0 ? { ...shown, questions } : shown;
+  }
+
+  /** A stored `moved_to` as the window shows it: with `open` and the thread's name now while that thread is open. */
+  private movedToShown(moved: InboxMovedTo): InboxMovedTo {
+    const { open: _open, name: _name, ...stored } = moved;
+    const target = this.messages.get(moved.thread_id);
+    if (!target || target.taken_back_at || target.resolved_at !== null) return stored;
+    return { ...stored, open: true, name: target.thread_name || this.threadSubject(target.id) };
   }
 
   messageWire(id: string): InboxMessageWire | null {
@@ -4486,6 +4495,12 @@ export class InboxStore {
         at,
       );
     }
+    // An agent wrote in an archived thread whose questions moved: it comes back to the person, so where they moved
+    // no longer applies (the archived foot would point away from what is now live). The archive line stays.
+    if (threadId && input.author.kind === "agent") {
+      const root = this.messages.get(threadId)!;
+      if (root.resolved_at !== null && root.moved_to) this.appendMessage({ ...root, moved_to: null }, at);
+    }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
     return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
   }
@@ -5617,10 +5632,11 @@ export class InboxStore {
    *
    * `movedTo` (an agent's resolve_message `moved_to`): the thread, or a message
    * of it, this thread's questions were moved to. Checked before anything is
-   * written: an open thread of the same project, not this one, that the
-   * calling `session` wrote in. The root then keeps it (`InboxMessage.moved_to`)
-   * so the archived foot says where they went; no message is written. A
-   * person's Unarchive drops it.
+   * written: an open thread of the same project, not this one, holding an
+   * open question the calling `session` asked. The root then keeps it
+   * (`InboxMessage.moved_to`) so the archived foot says where they went; no
+   * message is written. A person's Unarchive drops it, and so does an agent
+   * writing in the thread again (sendMessage: the thread came back).
    */
   resolveThread(
     messageId: string,
@@ -5675,8 +5691,15 @@ export class InboxStore {
     if (target.project_id !== root.project_id) throw refuse(`thread ${target.id} is in another project; questions move only within a project.`);
     if (target.resolved_at !== null) throw refuse(`thread ${target.id} is archived; move the questions to an open thread.`, "thread_resolved");
     const session = movedTo.session?.trim() || null;
-    const wrote = session !== null && this.threadMessages(target.id).some((m) => m.author.kind === "agent" && m.author.session === session);
+    if (session === null) throw refuse("needs your session (agent_session).");
+    const members = this.threadMessages(target.id);
+    const wrote = members.some((m) => m.author.kind === "agent" && m.author.session === session);
     if (!wrote) throw refuse(`thread ${target.id} has no message from your session; name the thread you sent the questions in.`);
+    // A thread with nothing of the caller's left for the person to answer would swallow the old thread's questions.
+    const asks = members.some((m) =>
+      this.questionsOf(m.id).some((q) => q.kind !== "action" && q.asked_by_agent_id === session && (q.state === "open" || q.state === "picked")),
+    );
+    if (!asks) throw refuse(`thread ${target.id} has no open question from your session; ask the questions there first.`);
     return { thread_id: target.id, subject: this.threadSubject(target.id) };
   }
 

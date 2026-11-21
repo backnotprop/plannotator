@@ -21449,6 +21449,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-name",
+      "title": "field:InboxMovedTo.name",
+      "surface": [
+        "field:InboxMovedTo.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxmovedto-open",
+      "title": "field:InboxMovedTo.open",
+      "surface": [
+        "field:InboxMovedTo.open"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

@@ -43,8 +43,13 @@ const DRAFT_STATUS = { label: 'Draft', tone: 'open' } as const;
  * (ActionChecklist). The body's cards use it too (useQuestionCards).
  */
 export const ARCHIVE_CLOSED_STATUS = { label: 'Closed', tone: 'skip' } as const;
-/** The archive closed it: `closed` with no Mark read's `set_aside_at` (a Mark read's has its skip answer's tag). */
-export const closedByArchive = (q: Pick<InboxQuestion, 'state' | 'set_aside_at'> | undefined): boolean => q?.state === 'closed' && !q.set_aside_at;
+/**
+ * The archive closed it unanswered: `closed` with no Mark read's `set_aside_at` (a Mark read's has its skip
+ * answer's tag) and never sent. An answer or skip the person sent before the archive reads `closed` too, and keeps
+ * its own "Answered" / "Skipped" tag.
+ */
+export const closedByArchive = (q: Pick<InboxQuestion, 'state' | 'set_aside_at' | 'sent_reply_id' | 'revision' | 'sent_revision'> | undefined): boolean =>
+  q?.state === 'closed' && !q.set_aside_at && !q.sent_reply_id && !(q.revision > 0 && q.sent_revision === q.revision);
 
 /** The records of `message` asked inside the attachment `attachmentId`, then the questions of its body. */
 export function fileQuestionRecords(message: Pick<InboxMessageWire, 'questions'> | undefined, attachmentId: string): InboxQuestion[] {

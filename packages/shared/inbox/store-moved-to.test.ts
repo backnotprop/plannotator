@@ -179,11 +179,14 @@ describe("resolve_message with moved_to", () => {
     expect(inboxRowArchived(row)).toBe(false);
     expect(store.questionsOf(old.id)[0]!.state).toBe("closed");
     expect(store.questionsOf(after.id)[0]!.state).toBe("open");
-    expect(store.message(old.id)!.moved_to?.thread_id).toBe(brief.id);
+    // It came back: where its questions moved no longer applies, and the archived foot reads as any thread's.
+    expect(store.message(old.id)!.moved_to ?? null).toBeNull();
+    expect(store.messageWire(old.id)!.moved_to ?? null).toBeNull();
+    expect(store.archiveSeq(old.id)).not.toBeNull();
     // Derived from the log: a store read again from disk agrees.
     const replay = InboxStore.open(dir);
     expect(replay.listRow(old.id)).toEqual(row);
-    expect(replay.message(old.id)!.moved_to).toEqual(store.message(old.id)!.moved_to);
+    expect(replay.message(old.id)!.moved_to ?? null).toBeNull();
   });
 
   test("Unarchive drops it, and the person's own Archive never sets it", () => {
@@ -195,5 +198,54 @@ describe("resolve_message with moved_to", () => {
     store.resolveThread(old.id, true, "person");
     expect(store.message(old.id)!.moved_to ?? null).toBeNull();
     expect(InboxStore.open(dir).message(old.id)!.moved_to ?? null).toBeNull();
+  });
+
+  test("no session is refused as such, not as a thread the caller never wrote in", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    for (const session of [null, "  "]) {
+      const error = refusal(() => store.resolveThread(old.id, true, "agent", { to: brief.id, session }));
+      expect(error.message).toBe("moved_to: needs your session (agent_session). Nothing was archived.");
+    }
+    expect(store.message(old.id)!.resolved_at).toBeNull();
+  });
+
+  test("refuses a thread with no open question from the caller: nothing for the person to answer there would swallow the old questions", () => {
+    const { store } = open();
+    const { project, old } = world(store);
+    const noQuestion = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Notes only", body: "What I did overnight." }).message;
+    // The caller's question there was answered and sent: nothing left open.
+    const answered = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Answered brief", body: ASK("Ship it?") }).message;
+    const [record] = store.questionsOf(answered.id);
+    store.sendReply(answered.id, { idempotency_key: "k-answered", questions: [{ key: record!.key, revision: 0, answer: { v: 1, key: record!.key, kind: "single", prompt: record!.prompt, selected: ["Yes"] } }] });
+    expect(store.questionsOf(answered.id)[0]!.state).toBe("sent");
+    // Only another session's question is open there.
+    const othersOnly = store.sendMessage({ project_id: project.id, author: SUB, subject: "Sub brief", body: ASK("Sub's question?") }).message;
+    store.sendMessage({ project_id: project.id, author: ORCH, body: "Noted.", reply_to: othersOnly.id });
+    const cursor = store.cursor();
+    for (const target of [noQuestion, answered, othersOnly]) {
+      const error = refusal(() => store.resolveThread(old.id, true, "agent", { to: target.id, session: ORCH.session }));
+      expect(error.code).toBe("validation_error");
+      expect(error.message).toBe(`moved_to: thread ${target.id} has no open question from your session; ask the questions there first. Nothing was archived.`);
+    }
+    expect(store.cursor()).toBe(cursor);
+    expect(store.message(old.id)!.resolved_at).toBeNull();
+  });
+
+  test("the window's read names the brief as it is now while it is open (its thread name over its subject); archived, only the subject it had", () => {
+    const { store } = open();
+    const { project, old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.messageWire(old.id)!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief", open: true, name: "Morning brief" });
+    // A brief with a thread name: the window shows that name, as the list does.
+    const other = store.sendMessage({ project_id: project.id, author: agent("ses_sub2"), subject: "Refund copy", body: ASK("Say refund or credit?") }).message;
+    const named = store.sendMessage({ project_id: project.id, author: ORCH, subject: "Evening brief", thread: "Thursday brief", body: ASK("Say refund or credit?") }).message;
+    store.resolveThread(other.id, true, "agent", { to: named.id, session: ORCH.session });
+    expect(store.messageWire(other.id)!.moved_to).toEqual({ thread_id: named.id, subject: "Evening brief", open: true, name: "Thursday brief" });
+    // Never stored: the log keeps the subject it had.
+    expect(store.message(old.id)!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
+    store.resolveThread(brief.id, true, "person");
+    expect(store.messageWire(old.id)!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
+    expect(store.thread(old.id)!.messages[0]!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
   });
 });

@@ -241,6 +241,9 @@ export const SEND_BODY_DESCRIPTION = [
 
 const AGENT_SESSION_DESCRIPTION =
   "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.";
+/** resolve_message's `agent_session`: it is there for `moved_to` only (the thread it names must hold your open question). */
+const RESOLVE_AGENT_SESSION_DESCRIPTION =
+  "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold an open question your session asked.";
 
 /**
  * The fields every sending tool takes beside its content (send_message and
@@ -1539,7 +1542,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           message_id: z.string().describe("Any message id in the thread, or the thread id."),
           resolved: z.boolean().optional().describe("Default true."),
           moved_to: z.string().optional().describe(INBOX_MOVED_TO_FIELD_DESCRIPTION),
-          agent_session: z.string().optional().describe(AGENT_SESSION_DESCRIPTION),
+          agent_session: z.string().optional().describe(RESOLVE_AGENT_SESSION_DESCRIPTION),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },

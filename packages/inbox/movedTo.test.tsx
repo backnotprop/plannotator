@@ -1,8 +1,10 @@
 /**
  * A thread an agent archived after moving its questions to another thread
  * (resolve_message's `moved_to`): the archived foot says where they went and
- * links to that thread, so the person can follow them. Without `moved_to`
- * the foot reads as before.
+ * links to that thread, by its name now, so the person can follow them; once
+ * that thread is archived or gone, the subject it had, unlinked. Without
+ * `moved_to` (none, or cleared when the old thread came back) the foot reads
+ * as before.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -79,12 +81,26 @@ async function render(thread: InboxThread) {
 }
 
 test.skipIf(!hasDom)('an archived thread whose questions moved: the foot names the thread they went to and links to it', async () => {
-  const el = await render(archived({ moved_to: { thread_id: BRIEF, subject: 'Morning brief' } }));
+  const el = await render(archived({ moved_to: { thread_id: BRIEF, subject: 'Morning brief', open: true, name: 'Morning brief' } }));
   const line = el.querySelector('[data-moved-to]');
   expect(line?.textContent).toBe('Archived. Its questions moved to Morning brief.');
   expect(line?.querySelector('a')?.getAttribute('href')).toBe(`#thread=${BRIEF}`);
   // Unarchive stays offered beside it.
   expect([...el.querySelectorAll('.ib-pfoot button')].some((b) => b.textContent?.trim() === 'Unarchive')).toBe(true);
+});
+
+test.skipIf(!hasDom)('the foot names that thread as it is called now (its thread name over the subject it had)', async () => {
+  const el = await render(archived({ moved_to: { thread_id: BRIEF, subject: 'Morning brief', open: true, name: 'Thursday brief' } }));
+  const line = el.querySelector('[data-moved-to]');
+  expect(line?.textContent).toBe('Archived. Its questions moved to Thursday brief.');
+  expect(line?.querySelector('a')?.textContent).toBe('Thursday brief');
+});
+
+test.skipIf(!hasDom)('that thread archived or gone (no open served): the subject it had, as plain words, with no link', async () => {
+  const el = await render(archived({ moved_to: { thread_id: BRIEF, subject: 'Morning brief' } }));
+  const line = el.querySelector('[data-moved-to]');
+  expect(line?.textContent).toBe('Archived. Its questions moved to Morning brief.');
+  expect(line?.querySelector('a')).toBeNull();
 });
 
 test.skipIf(!hasDom)('an archived thread with no moved_to reads as before', async () => {

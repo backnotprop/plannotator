@@ -22,9 +22,16 @@ const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as ty
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billing', root: '/work/billing', created_at: '2026-11-20T06:00:00.000Z' };
 const AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_sub', name: null };
 const M1 = 'msg_01M4H6G73M9H3Z32T859E72DPY';
+// The person's reply that carried a sent answer or skip (not in the thread here: it would fold the card away).
+const M2 = 'msg_01M4H6G73M9H3Z32T859E72DPZ';
 const BODY = ['Overnight work on retries.', '', ':::question', 'Retry failed charges automatically?', '', '- [ ] Yes, three times over 24 h', '- [ ] No, email the customer', ':::'].join('\n');
 
-function questions(state: InboxQuestion['state'], picked = false): InboxQuestion[] {
+/** `picked`: a pick saved, not sent. `sent`: an answer (or a skip) the person sent before the archive. */
+type Given = boolean | 'sent-answer' | 'sent-skip';
+
+function questions(state: InboxQuestion['state'], given: Given = false): InboxQuestion[] {
+  const picked = given !== false;
+  const sent = given === 'sent-answer' || given === 'sent-skip';
   return parseInboxQuestionBlocks(BODY).map((q) => ({
     key: q.key,
     position: q.position,
@@ -39,18 +46,23 @@ function questions(state: InboxQuestion['state'], picked = false): InboxQuestion
     asked_by_agent_id: AGENT.session,
     orphaned: false,
     state,
-    answer: picked ? { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: ['Yes, three times over 24 h'] } : null,
+    answer:
+      given === 'sent-skip'
+        ? { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: [], skipped: true, by_reply: true }
+        : picked
+          ? { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: ['Yes, three times over 24 h'] }
+          : null,
     revision: picked ? 1 : 0,
-    sent_revision: 0,
+    sent_revision: sent ? 1 : 0,
     picked_by: null,
     picked_at: picked ? '2026-11-20T03:00:00.000Z' : null,
-    sent_reply_id: null,
+    sent_reply_id: sent ? M2 : null,
     message_id: M1,
     superseded_by: null,
   }));
 }
 
-function thread(archived: boolean, picked = false): InboxThread {
+function thread(archived: boolean, picked: Given = false): InboxThread {
   const root: InboxMessageWire = {
     id: M1,
     project_id: PROJECT.id,
@@ -149,4 +161,18 @@ test.skipIf(!hasDom)('a pick saved before the archive does not make the closed c
   expect(closed.text).toContain('Closed');
   expect(closed.text).not.toContain('Draft');
   expect(closed.enabled).toBe(0);
+});
+
+test.skipIf(!hasDom)('an answer sent before the archive keeps its Answered tag; the archive did not close it', async () => {
+  const el = await render(thread(true, 'sent-answer'));
+  const sent = card(el);
+  expect(sent.text).toContain('Answered');
+  expect(sent.text).not.toContain('Closed');
+});
+
+test.skipIf(!hasDom)('a skip sent before the archive keeps its Skipped tag', async () => {
+  const el = await render(thread(true, 'sent-skip'));
+  const sent = card(el);
+  expect(sent.text).toContain('Skipped');
+  expect(sent.text).not.toContain('Closed');
 });
