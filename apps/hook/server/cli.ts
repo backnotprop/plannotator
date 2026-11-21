@@ -730,7 +730,9 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
-const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "routine");
+// Every action the door carries, steps and routine too (the owner, 2026-11-21: routines "same as a local agent"): the
+// switches that serve them are the person's Inbox's, which this machine cannot read, so the help says so instead.
+const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS;
 
 export const INBOX_PAIRED_CALL_USAGE = [
   "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
@@ -740,18 +742,26 @@ export const INBOX_PAIRED_CALL_USAGE = [
   "the Inbox's relay, sealed end to end. You can read, search and write in every thread of every",
   "project; you post under your own name.",
   `Actions: ${INBOX_PAIRED_CALL_ACTIONS.join(", ")}. The JSON holds the action's fields, as in`,
-  "'plannotator inbox --help', except that you name a project by its name (\"project\": \"api\"), never",
-  "by a folder. With no project, read_thread and search cover every project, and a new thread",
-  "goes in the project whoami names.",
+  "'plannotator inbox --help'. Name a project by its name (\"project\": \"api\"), its git address",
+  "(\"project\": \"https://github.com/acme/api\") or its folder on the person's computer (project_path).",
+  "With no project, read_thread, search and card list cover every project, a card call with card_id",
+  "uses that card's project, and a new thread goes in the project whoami names. steps and routine",
+  "answer only while the person has them on in their Inbox.",
   "",
   "  plannotator inbox call whoami        check the setup: who you are, or exactly what is wrong",
   "  plannotator inbox call read_thread '{\"thread_id\":\"thr_1\"}'",
   "  plannotator inbox call send_message '{\"project\":\"api\",\"subject\":\"Release\",\"body\":\"Ready to tag?\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Done: the tests pass.\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"The screenshot is below.\",\"attachments\":[\"shot.png\"]}'",
+  "  plannotator inbox call fetch_file '{\"message_id\":\"msg_3\",\"file\":\"att_1\"}'",
   "",
-  "A path in attachments is read from this machine and sent as bytes, a big file in pieces on its own",
-  "(up to 100 MB a file); the Inbox opens no path for you.",
+  "A path in attachments, or a picture's path in the body (![alt](shot.png)), that is a file on this",
+  "machine is sent from here as bytes, a big file in pieces on its own (up to 100 MB a file); any other",
+  "path is opened on the person's computer, as for an agent there.",
+  "An attachment written as {\"path\":\"docs/plan.md\"} is always opened on the person's computer.",
+  "fetch_file saves a file of a message (read_thread lists each with its path and its command) on this",
+  "machine, in a new temp folder or in \"folder\", and prints its path.",
+  "plannotator inbox rows, projects, icon and export-decisions work through the pairing too.",
   "When the person's computer is asleep, a read fails and says so, and an action that changes",
   "something (send_message, resolve_message and the like) waits at the relay and is applied once",
   "when it is back (stdout then says queued: true; do not send it again).",

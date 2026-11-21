@@ -714,6 +714,8 @@ export interface InboxDeliveryPresence {
   askerLive(session: string): boolean;
   /** Whether a reply to this session starts it again (a launched thread's own session): it has not ended. Absent: never. */
   launchResumes?(threadId: string, session: string): boolean;
+  /** Runs one list read with the launched sessions' pending replies found in one pass over the messages, dropped when it ends. Absent: none. */
+  onePass?<T>(read: () => T): T;
   /**
    * Whether an item may not have reached its session though it was handed on
    * (a Codex `codex queue` call that ran out of time): the row says it is
@@ -2794,6 +2796,11 @@ export class InboxStore {
    * (`session`: the threads it started, joined or replied in).
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
+    const presence = this.deliveryPresence;
+    return presence?.onePass ? presence.onePass(() => this.listRowsRead(filter)) : this.listRowsRead(filter);
+  }
+
+  private listRowsRead(filter: { projectId?: string | null; session?: string | null }): InboxListRow[] {
     if (filter.projectId || filter.session) return this.buildRows(filter);
     // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
     const memo = this.rowsMemo;

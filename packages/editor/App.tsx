@@ -88,7 +88,8 @@ import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils
 import { getNotionSettings, getNotionParentPageId, isNotionConfigured, setNotionAvailable } from '@plannotator/ui/utils/notion';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { agentSwitchTargetLabel, getAgentSwitchDefaults, getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { adoptServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { adoptServerSession, currentServerSession, noteServerSessionMismatch, withServerSession, withServerSessionQuery } from '@plannotator/ui/utils/serverSession';
+import { aiChatStorageKey } from '@plannotator/ui/utils/aiChatPersistence';
 import { assertSendOk, PLAN_REVISED_CODE, refusalCode, throwUnreachable } from '@plannotator/ui/utils/sendFailure';
 import { dismissSendFailureToast, sendSettled, sendStarted, showSendFailureToast } from '@plannotator/ui/components/SendFailureToast';
 import { ServerSessionReplacedBanner } from '@plannotator/ui/components/ServerSessionReplacedBanner';
@@ -5736,6 +5737,7 @@ const App: React.FC = () => {
   const askDocumentLatchRef = useRef<AskDocumentLatch>(EMPTY_ASK_DOCUMENT_LATCH);
 
   const aiChat = useAIChat({
+    storageKey: isLoading ? null : aiChatStorageKey(currentServerSession(), 'editor'),
     context: aiContext,
     providerId: aiConfig.providerId,
     model: aiConfig.model,

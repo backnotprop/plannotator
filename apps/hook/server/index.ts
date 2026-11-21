@@ -274,7 +274,8 @@ import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { inboxHelpTopic } from "./inbox-help-before-after";
-import { runInboxCallCommand } from "./inbox-call-command";
+import { inboxPairedRouteFetch, runInboxCallCommand } from "./inbox-call-command";
+import { isInboxTurnedOn } from "@plannotator/shared/inbox/turned-on";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
@@ -549,10 +550,17 @@ if (isReviewDrawCommand(rawArgs, () => {
   const args = rawArgs;
   if (args[0] === "inbox" && args[1] === "export-decisions") {
     const exportDataDir = getPlannotatorDataDir();
+    // A paired cloud agent's machine has no Inbox: the person's, through the agent door (inbox-call-command.ts).
+    const pairedRoute = process.env.PLANNOTATOR_PAIRING && !isInboxTurnedOn(exportDataDir) ? inboxPairedRouteFetch({ env: process.env }) : null;
+    if (pairedRoute && "code" in pairedRoute) {
+      process.stderr.write(`${pairedRoute.code}: ${pairedRoute.message}\n`);
+      process.exit(1);
+    }
     process.exit(
       await runInboxExportDecisionsCommand(args.slice(2), {
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         ensureRunning: () => ensureInboxRunning(exportDataDir),
+        ...(pairedRoute ? { fetchRoute: pairedRoute } : {}),
       }),
     );
   }

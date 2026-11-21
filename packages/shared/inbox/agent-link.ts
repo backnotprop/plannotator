@@ -40,6 +40,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  INBOX_CONTINUES_POLL_FIELD,
   INBOX_PLACE_POLL_FIELD,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
@@ -501,6 +502,15 @@ export interface InboxWakeTarget {
    */
   label?(): string | null | undefined | Promise<string | null | undefined>;
   /**
+   * The session ids this conversation continues under a new id, nearest first
+   * (Pi: a handed-off session's `parentSession` line), read by the host from
+   * its own records, never by the model. Each poll carries them as
+   * `continues` (INBOX_CONTINUES_POLL_FIELD): while one of them does not poll,
+   * this session is handed what waits for it. Optional: a host without it
+   * sends none.
+   */
+  continues?(): readonly string[];
+  /**
    * The version of Plannotator's plugin or extension this process loaded
    * (Pi: the extension's package.json). Each poll carries it as `plugin:
    * { version }`, so the Inbox can say when the session runs an older one.
@@ -767,6 +777,12 @@ export class InboxWake {
     } catch {
       // It cannot tell now: the last word stands.
     }
+    let continues: readonly string[] = [];
+    try {
+      continues = this.target.continues?.() ?? [];
+    } catch {
+      continues = [];
+    }
     let plugin: InboxLoadedPluginReport | { version: string } | null = null;
     try {
       plugin = this.target.plugin?.() ?? null;
@@ -788,6 +804,8 @@ export class InboxWake {
         ...(place ? { [INBOX_PLACE_POLL_FIELD]: place } : {}),
         // The host's title for the session (additive): the To picker's name for it; empty clears it.
         ...(this.target.label ? { label: this.lastLabel } : {}),
+        // The sessions this one continues (a hand-off): their replies come here while they do not poll.
+        ...(continues.length > 0 ? { [INBOX_CONTINUES_POLL_FIELD]: [...continues] } : {}),
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
