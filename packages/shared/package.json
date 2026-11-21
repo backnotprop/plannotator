@@ -198,6 +198,7 @@
     "./inbox/list": "./inbox/list.ts",
     "./inbox/tidy": "./inbox/tidy.ts",
     "./inbox/project-batch": "./inbox/project-batch.ts",
+    "./inbox/reask-all": "./inbox/reask-all.ts",
     "./inbox/search": "./inbox/search.ts",
     "./inbox/registry": "./inbox/registry.ts",
     "./inbox/turned-on": "./inbox/turned-on.ts",

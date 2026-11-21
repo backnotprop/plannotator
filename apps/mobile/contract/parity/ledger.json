@@ -21435,6 +21435,20 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-window-api-inbox-threads-id-reask",
+      "title": "window:/api/inbox/threads/:id/reask",
+      "surface": [
+        "window:/api/inbox/threads/:id/reask"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

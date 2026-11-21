@@ -12,8 +12,22 @@ import { offersRowMarkRead } from './markRead';
 import type { BulkWrites } from './bulkWrites';
 import type { BandMenu } from './components/RowMenu';
 
-/** A band menu's items, in their order: the project menu's words ("Mark all as read", "Archive all"). */
-export type BandMenuAction = 'read' | 'archive';
+/**
+ * A band menu's items, in their order: the project menu's words ("Mark all as read", "Archive all"), then Re-ask all
+ * on a band of open questions (reaskAll.ts).
+ */
+export type BandMenuAction = 'read' | 'archive' | 'reask';
+
+/** The groups that hold questions open for the person: Re-ask all is offered on these bands only. */
+export const REASK_GROUPS: ReadonlySet<InboxListGroupId> = new Set<InboxListGroupId>(['stopped', 'holding', 'waiting']);
+
+/**
+ * A row Re-ask all takes: drawn in a group of open questions, with a question open, and not already asked again (its
+ * every open question is in a Re-ask note that still waits, `reask_pending`; such a row is in Sent anyway).
+ */
+export function offersRowReask(row: InboxListRow, drawn: InboxListGroupId | null): boolean {
+  return drawn !== null && REASK_GROUPS.has(drawn) && row.questions.open > 0 && row.reask_pending !== true;
+}
 
 /** The rows of these sections that `takes`, each once, in the order drawn. */
 function each(sections: readonly InboxListSection[], takes: (row: InboxListRow, drawn: InboxListGroupId) => boolean): InboxListRow[] {
@@ -47,19 +61,25 @@ export function bandArchiveAllRows(section: InboxListSection): InboxListRow[] {
   return each([section], (row) => !inboxRowArchived(row));
 }
 
-/** The items a band's menu offers: none (no menu, the browser's own) when neither has anything to take. */
+/** A band's Re-ask all: that band's rows with a question open, on a band of open questions only. */
+export function bandReaskAllRows(section: InboxListSection): InboxListRow[] {
+  return each([section], offersRowReask);
+}
+
+/** The items a band's menu offers: none (no menu, the browser's own) when none has anything to take. */
 export function bandMenuActions(section: InboxListSection): BandMenuAction[] {
   const out: BandMenuAction[] = [];
   if (bandMarkAllRows(section).length > 0) out.push('read');
   if (bandArchiveAllRows(section).length > 0) out.push('archive');
+  if (bandReaskAllRows(section).length > 0) out.push('reask');
   return out;
 }
 
 /**
- * A group band's menu (RowMenu.tsx `bands`): Mark all as read and Archive all on that band's threads, each written as
- * its thread is now (bulkWrites.ts). `onOpened`: a band's menu really opened (not a press that only took its look).
+ * A group band's menu (RowMenu.tsx `bands`): Mark all as read, Archive all and Re-ask all on that band's threads, each
+ * written as its thread is now (bulkWrites.ts). `onOpened`: a band's menu really opened (not a press that only took its look).
  */
-export function bandMenuOf(sections: readonly InboxListSection[], bulk: Pick<BulkWrites, 'markAllRead' | 'archiveAll'>, onOpened: () => void): BandMenu {
+export function bandMenuOf(sections: readonly InboxListSection[], bulk: Pick<BulkWrites, 'markAllRead' | 'archiveAll' | 'reaskAll'>, onOpened: () => void): BandMenu {
   const bandSection = (id: string) => sections.find((section) => section.id === id);
   return {
     actionsOf: (id) => {
@@ -71,6 +91,7 @@ export function bandMenuOf(sections: readonly InboxListSection[], bulk: Pick<Bul
     onAction: (id, action) => {
       const section = bandSection(id);
       if (!section) return;
+      if (action === 'reask') return void bulk.reaskAll(bandReaskAllRows(section));
       const rows = action === 'read' ? bandMarkAllRows(section) : bandArchiveAllRows(section);
       if (action === 'archive') void bulk.archiveAll(rows);
       else if (rows.length > 0) void bulk.markAllRead(rows);
@@ -100,6 +121,15 @@ export function currentMarkAllRows(
   drawnIn: (threadId: string) => InboxListGroupId | null,
 ): InboxListRow[] {
   return current(drawn, rowOf, (now) => offersRowMarkRead(now, drawnIn(now.thread_id)));
+}
+
+/** Re-ask all's rows as they are now; one answered, asked again or moved out of the question groups since is left out. */
+export function currentReaskAllRows(
+  drawn: readonly InboxListRow[],
+  rowOf: (threadId: string) => InboxListRow | undefined,
+  drawnIn: (threadId: string) => InboxListGroupId | null,
+): InboxListRow[] {
+  return current(drawn, rowOf, (now) => offersRowReask(now, drawnIn(now.thread_id)));
 }
 
 /** Archive all's rows as they are now; one archived elsewhere is left out. */

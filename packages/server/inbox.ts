@@ -174,6 +174,7 @@ import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@planno
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
+import { reaskThreadAll } from "@plannotator/shared/inbox/reask-all";
 import {
   INBOX_ASK_BRIDGE_PREFIX,
   INBOX_ASK_WAITS_FIELD,
@@ -7606,6 +7607,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const row = store.markRead(readMatch[1]!, read);
         if (read) scheduleSetAside(readMatch[1]!);
         return json({ thread: row });
+      }
+
+      // Re-ask all (a group's menu in the list; shared/inbox/reask-all.ts): the thread's Re-ask to each session with a
+      // question open that can still be woken, each delivered and woken as the thread's own Re-ask note. `batch_id`: the
+      // press's key, so a retry answers the notes it wrote. A session past waking is counted (`unreached`), never written to.
+      const reaskAllMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/reask$/.exec(path);
+      if (reaskAllMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const threadId = reaskAllMatch[1]!;
+        return json(reaskThreadAll(store, threadId, typeof body.batch_id === "string" ? body.batch_id : "", (message) => {
+          const session = message.author.kind === "agent" ? message.author.session : null;
+          // No session named (an MCP agent): it reads the thread when it looks, as a reply to it waits.
+          if (!session) return true;
+          if (t3Wake.gone(session) || cloudWake.status(session) === "dead") return false;
+          // Only a waking connection can be told ended (the thread's own rule, ReplyRoute.tsx `askerCanEnd`).
+          return message.wakes !== true || live.askerLive(session) || launch.resumes(threadId, session);
+        }));
       }
 
       // Mark unread: the latest agent message is new again (New, bold); nothing is sent, and a Mark read stands (store.markUnread).
