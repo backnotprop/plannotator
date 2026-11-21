@@ -54,46 +54,69 @@ export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOIC
   return Promise.race([answer.catch(() => null), late]).finally(() => clearTimeout(timer));
 }
 
+/** How many keys the cache remembers (lists and failures): a few config edits, never a growing map. */
+const CHOICE_KEYS_KEPT = 16;
+
+/** `map.set` that keeps `key` newest and drops the oldest past `CHOICE_KEYS_KEPT`. */
+function setNewest<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > CHOICE_KEYS_KEPT) map.delete(map.keys().next().value!);
+}
+
 /**
  * `key` is the CLI's path and version (OpenCode adds its config and sign-in files' modification times): a help read
- * costs a process, and compose asks every few seconds.
+ * costs a process, and compose asks every few seconds. Per key: its lists once read, its failures, and at most one
+ * read in flight, so keys that alternate keep each one's lists and wait.
  *
- * Stale while read again: once a key's read succeeded, its lists are answered at once while a new key reads (in the
- * background) and after a new key's read failed, so a key change never hides the menu or drops a pick. A new key's
- * lists replace them only when its read succeeds. A key whose read failed is not read again for `failedAgainMs`,
- * doubled after each failure in a row up to `failedAgainMaxMs` (default: no doubling); a success or another key starts
- * over.
+ * A key whose read failed is not read again for `failedAgainMs`, doubled after each failure in a row up to
+ * `failedAgainMaxMs` (default: no doubling); a success starts over.
+ *
+ * `binaryOf` (opt-in, OpenCode): the part of a key that names the binary (path and version). With it, a new key of
+ * the SAME binary answers the last good lists at once while it reads (in the background) and after its read failed,
+ * so a config change never hides the menu or drops a pick. A new binary never gets an old binary's lists: it waits for
+ * its own read, and a read that fails leaves no lists (no button, a Default start), as without `binaryOf`.
  */
-export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now, options: { failedAgainMs?: number; failedAgainMaxMs?: number } = {}) {
+export function launchChoiceCache(
+  load: () => Promise<LaunchChoiceLists | null>,
+  now: () => number = Date.now,
+  options: { failedAgainMs?: number; failedAgainMaxMs?: number; binaryOf?: (key: string) => string } = {},
+) {
   const failedAgainMs = options.failedAgainMs ?? FAILED_AGAIN_MS;
   const failedAgainMaxMs = Math.max(failedAgainMs, options.failedAgainMaxMs ?? failedAgainMs);
-  let kept: { key: string; value: LaunchChoiceLists } | null = null;
-  let failed: { key: string; at: number; times: number } | null = null;
-  let reading: { key: string; answer: Promise<LaunchChoiceLists | null> } | null = null;
-  /** The key asked for last: a slower read for an older key never replaces its lists. */
-  let latest: string | null = null;
+  const kept = new Map<string, LaunchChoiceLists>();
+  const failed = new Map<string, { at: number; times: number }>();
+  const reading = new Map<string, Promise<LaunchChoiceLists | null>>();
+  /** The key of the last read that succeeded, for `binaryOf`'s stale lists. */
+  let lastGood: string | null = null;
+  const staleFor = (key: string): Promise<LaunchChoiceLists | null> | null => {
+    if (!options.binaryOf || lastGood === null || options.binaryOf(lastGood) !== options.binaryOf(key)) return null;
+    const value = kept.get(lastGood);
+    return value ? Promise.resolve(value) : null;
+  };
   const read = (key: string | null): Promise<LaunchChoiceLists | null> => {
     if (key === null) return Promise.resolve(null);
-    latest = key;
-    if (kept?.key === key) return Promise.resolve(kept.value);
-    const stale = kept ? Promise.resolve(kept.value) : null;
-    if (failed?.key === key && now() - failed.at < Math.min(failedAgainMaxMs, failedAgainMs * 2 ** (failed.times - 1))) return stale ?? Promise.resolve(null);
-    if (reading?.key === key) return stale ?? reading.answer;
+    const value = kept.get(key);
+    if (value) return Promise.resolve(value);
+    const stale = staleFor(key);
+    const failure = failed.get(key);
+    if (failure && now() - failure.at < Math.min(failedAgainMaxMs, failedAgainMs * 2 ** (failure.times - 1))) return stale ?? Promise.resolve(null);
+    const under = reading.get(key);
+    if (under) return stale ?? under;
     const answer = load()
       .catch(() => null)
-      .then((value) => {
-        if (value) {
-          if (latest === key || !kept) kept = { key, value };
-          if (failed?.key === key) failed = null;
+      .then((lists) => {
+        if (lists) {
+          setNewest(kept, key, lists);
+          failed.delete(key);
+          lastGood = key;
         } else {
-          failed = { key, at: now(), times: failed?.key === key ? failed.times + 1 : 1 };
+          setNewest(failed, key, { at: now(), times: (failed.get(key)?.times ?? 0) + 1 });
         }
-        return value;
+        return lists;
       })
-      .finally(() => {
-        if (reading?.answer === answer) reading = null;
-      });
-    reading = { key, answer };
+      .finally(() => reading.delete(key));
+    reading.set(key, answer);
     return stale ?? answer;
   };
   return read;

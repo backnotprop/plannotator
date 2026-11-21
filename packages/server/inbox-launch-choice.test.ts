@@ -63,6 +63,8 @@ test("the lists never hold up an offer: a slow CLI is waited on a moment only, a
 });
 
 const lists = (...models: string[]) => ({ models, efforts: [], effort_word: "Variant" });
+/** OpenCode's keys: `<path>@<version>|<the rest>`; the binary is the part before the bar. */
+const binaryOf = (key: string) => key.split("|")[0]!;
 
 test("a failed read is tried again after the host's wait, doubled after each failure in a row up to its most; a success starts over", async () => {
   let clock = 0;
@@ -98,13 +100,13 @@ test("a failed read is tried again after the host's wait, doubled after each fai
   expect(calls).toBe(4);
 });
 
-test("a new key answers the last good lists at once while it reads, and its own once read", async () => {
+test("a new key of the same binary answers the last good lists at once while it reads, and its own once read", async () => {
   let finish: (value: ReturnType<typeof lists> | null) => void = () => {};
   let calls = 0;
   const read = launchChoiceCache(() => {
     calls++;
     return new Promise((resolve) => (finish = resolve));
-  });
+  }, Date.now, { binaryOf });
   const first = read("opencode2@2.2.7|a");
   finish(lists("opencode/big-pickle"));
   expect((await first)?.models).toEqual(["opencode/big-pickle"]);
@@ -118,14 +120,14 @@ test("a new key answers the last good lists at once while it reads, and its own 
   expect(calls).toBe(2);
 });
 
-test("a new key whose read fails keeps the last good lists, and is not read again before its wait", async () => {
+test("a new key of the same binary whose read fails keeps the last good lists, and is not read again before its wait", async () => {
   let clock = 0;
   let answer: ReturnType<typeof lists> | null = lists("opencode/big-pickle");
   let calls = 0;
   const read = launchChoiceCache(async () => {
     calls++;
     return answer;
-  }, () => clock, { failedAgainMs: 15_000 });
+  }, () => clock, { failedAgainMs: 15_000, binaryOf });
   expect((await read("opencode2@2.2.7|a"))?.models).toEqual(["opencode/big-pickle"]);
   answer = null; // A half-edited config: OpenCode can't list them.
   expect((await read("opencode2@2.2.7|b"))?.models).toEqual(["opencode/big-pickle"]);
@@ -136,14 +138,57 @@ test("a new key whose read fails keeps the last good lists, and is not read agai
   expect(calls).toBe(2);
 });
 
-test("a slower read for an older key never replaces a newer key's lists", async () => {
-  const pending: ((value: ReturnType<typeof lists>) => void)[] = [];
-  const read = launchChoiceCache(() => new Promise((resolve) => pending.push(resolve)));
-  const a = read("k|a");
-  const b = read("k|b");
-  pending[1]!(lists("new"));
-  expect((await b)?.models).toEqual(["new"]);
-  pending[0]!(lists("old"));
-  await a;
-  expect((await read("k|b"))?.models).toEqual(["new"]);
+test("a new binary (an upgrade) never gets the old binary's lists: none while it reads, none when its read fails", async () => {
+  let answer: ReturnType<typeof lists> | null = lists("opencode/retired-model");
+  let finish: (value: ReturnType<typeof lists> | null) => void = () => {};
+  let slow = false;
+  const read = launchChoiceCache(() => (slow ? new Promise((resolve) => (finish = resolve)) : Promise.resolve(answer)), Date.now, { binaryOf });
+  expect((await read("/bin/opencode2@2.2.7|a"))?.models).toEqual(["opencode/retired-model"]);
+  slow = true;
+  expect(await withinLaunchWait(read("/bin/opencode2@2.3.0|a"), 20)).toBeNull();
+  finish(null);
+  await Bun.sleep(0);
+  expect(await read("/bin/opencode2@2.3.0|a")).toBeNull();
+  // Without binaryOf (Claude Code, Codex, Pi) a new key never gets another key's lists either.
+  slow = false;
+  const plain = launchChoiceCache(() => Promise.resolve(answer));
+  expect((await plain("claude@2.1.1"))?.models).toEqual(["opencode/retired-model"]);
+  answer = null;
+  expect(await plain("claude@2.2.0")).toBeNull();
+  expect(await plain("claude@2.2.0")).toBeNull();
+});
+
+test("keys that alternate keep each one's lists and wait, and one key never has two reads at once", async () => {
+  let clock = 0;
+  const calls: string[] = [];
+  const answers: Record<string, ReturnType<typeof lists> | null> = { "k|a": lists("a"), "k|b": null };
+  let current = "";
+  const read = launchChoiceCache(async () => {
+    calls.push(current);
+    return answers[current] ?? null;
+  }, () => clock, { failedAgainMs: 15_000, binaryOf });
+  const ask = (key: string) => {
+    current = key;
+    return read(key);
+  };
+  expect((await ask("k|a"))?.models).toEqual(["a"]);
+  expect((await ask("k|b"))?.models).toEqual(["a"]); // b failed: a's lists stay (same binary).
+  await Bun.sleep(0);
+  for (let n = 0; n < 4; n++) {
+    clock += 2_000;
+    expect((await ask("k|a"))?.models).toEqual(["a"]);
+    expect((await ask("k|b"))?.models).toEqual(["a"]);
+  }
+  // a was never read again (its lists kept); b not before its 15 s.
+  expect(calls).toEqual(["k|a", "k|b"]);
+  // A good read for b is kept even when a is asked for in between.
+  answers["k|b"] = lists("b");
+  clock += 10_000;
+  void ask("k|b");
+  void ask("k|b");
+  expect((await ask("k|a"))?.models).toEqual(["a"]);
+  await Bun.sleep(0);
+  expect((await ask("k|b"))?.models).toEqual(["b"]);
+  expect((await ask("k|a"))?.models).toEqual(["a"]);
+  expect(calls).toEqual(["k|a", "k|b", "k|b"]);
 });

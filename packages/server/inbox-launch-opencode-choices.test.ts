@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentEnvironmentFor } from "./inbox-agents";
-import { launchSpawnEnv } from "./inbox-launch-env";
+import { LOGIN_ENV_FALLBACKS, launchSpawnEnv } from "./inbox-launch-env";
 import type { LaunchHostContext } from "./inbox-launch-host";
 import { createOpenCodeLaunchHost, openCodeErrorText, openCodeFailedTurnText, openCodeTurnErrorNote } from "./inbox-launch-opencode";
 
@@ -31,6 +31,8 @@ if (args[0] === "--standalone" && args[1] === "api" && args[2] === "GET" && args
   fs.appendFileSync(path.join(__dirname, "reads.log"), "model\n");
   fs.writeFileSync(path.join(__dirname, "env-names.json"), JSON.stringify(Object.keys(process.env)));
   const listed = JSON.parse(fs.readFileSync(path.join(__dirname, "state.json"), "utf8")).models.slice();
+  // A provider whose key only the person's shell rc exports (as OpenCode lists a provider once its key is in the env).
+  if (process.env.GATEWAY_KEY) listed.push({ providerID: "vercel", id: "gw-model" });
   const extra = process.env.OPENCODE_CONFIG;
   if (extra && fs.existsSync(extra)) {
     const providers = JSON.parse(fs.readFileSync(extra, "utf8")).provider || {};
@@ -49,7 +51,7 @@ if (args[0] === "--standalone" && args[1] === "api" && args[2] === "GET" && args
 process.exit(1);
 `;
 
-function setup(models: { providerID: string; id: string }[], options: { loginEnv?: Record<string, string>; ownEnv?: Record<string, string>; noShellRead?: boolean } = {}) {
+function setup(models: { providerID: string; id: string }[], options: { loginEnv?: Record<string, string>; ownEnv?: Record<string, string>; noShellRead?: boolean; loginFallback?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-opencode-choices-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -79,7 +81,11 @@ function setup(models: { providerID: string; id: string }[], options: { loginEnv
     shell: () => (options.noShellRead ? null : login),
     loginEnv: async () => {
       loginReads++;
-      return login;
+      if (!options.loginFallback) return login;
+      // The shell did not answer: the Inbox's env stands in, marked as `createLoginEnv` marks it.
+      const fallback = { ...login };
+      LOGIN_ENV_FALLBACKS.add(fallback);
+      return fallback;
     },
     launchDir: (id: string) => join(dataDir, "launch", id),
     startLog: () => {},
@@ -162,9 +168,43 @@ describe("OpenCode's model list reaches the picker", () => {
     writeFileSync(file, JSON.stringify({ provider: { lmstudio: { npm: "@ai-sdk/openai-compatible", options: { baseURL: "http://127.0.0.1:1234/v1" }, models: { "qwen/qwen3-coder-30b": {} } } } }));
     const t = setup(zen, { loginEnv: { OPENCODE_CONFIG: file } });
     expect((await t.host.available()).ok).toBe(true);
+    // A login read already finished: the first read uses its kept names, never waiting on a shell run.
     expect((await t.host.choices())!.models).toContain("lmstudio/qwen/qwen3-coder-30b");
-    // A login read already finished: its kept names are used, the login shell is not run again for the list.
-    expect(t.loginReads()).toBe(0);
+  });
+
+  test("a key exported only in the shell rc reaches the list when a login read finished before OpenCode's first list read", async () => {
+    const t = setup(zen, { loginEnv: { GATEWAY_KEY: "gw-not-real" } });
+    expect((await t.host.available()).ok).toBe(true);
+    // The first read: the kept names (no key), with one login read started behind it.
+    expect((await t.host.choices())!.models).not.toContain("vercel/gw-model");
+    // With the whole login env held, the lists are read once again, with the key.
+    await until(async () => (await t.host.choices())!.models.includes("vercel/gw-model"));
+    expect(t.reads()).toBe(2);
+    expect(t.loginReads()).toBe(1);
+    for (let n = 0; n < 3; n++) await t.host.choices();
+    expect(t.reads()).toBe(2);
+    expect(t.loginReads()).toBe(1);
+  });
+
+  test("a stand-in env from a shell that did not answer is never held as the login env; a later good login read is", async () => {
+    const t = setup(zen, { loginEnv: { GATEWAY_KEY: "gw-not-real" }, loginFallback: true });
+    expect((await t.host.available()).ok).toBe(true);
+    expect((await t.host.choices())!.models).not.toContain("vercel/gw-model");
+    await until(async () => t.loginReads() === 1);
+    await Bun.sleep(50);
+    for (let n = 0; n < 3; n++) expect((await t.host.choices())!.models).not.toContain("vercel/gw-model");
+    expect(t.reads()).toBe(1);
+    // Within 5 minutes no other login read for the lists.
+    expect(t.loginReads()).toBe(1);
+    const standIn = { HOME: t.home, PATH: "/usr/bin:/bin", GATEWAY_KEY: "gw-not-real" };
+    LOGIN_ENV_FALLBACKS.add(standIn);
+    t.host.loginRead!(standIn);
+    await t.host.choices();
+    expect(t.reads()).toBe(1);
+    // Any good login read the Inbox makes (Settings → Agents, another agent's start) reaches the host.
+    t.host.loginRead!({ ...standIn });
+    await until(async () => (await t.host.choices())!.models.includes("vercel/gw-model"));
+    expect(t.reads()).toBe(2);
   });
 
   test("with no login read yet, the list read asks for one once, reads with it, and later reads reuse it", async () => {

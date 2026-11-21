@@ -915,3 +915,13 @@ describe("the Inbox list's Hide: what counts as an agent's new activity (attenti
     expect(launch.attentionSince()(root.thread_id)).toBeNull();
   });
 });
+
+describe("each login read reaches the hosts", () => {
+  test("a host with loginRead gets the whole env of every login read the engine makes", async () => {
+    const seen: Record<string, string>[] = [];
+    const t = setup({ adapt: (host) => Object.assign(host, { loginRead: (login: Record<string, string>) => seen.push({ ...login }) }) });
+    await t.context().loginEnv();
+    expect(t.logins.count).toBe(1);
+    expect(seen).toEqual([{ HOME: t.home, PATH: "", FAKE_LOGIN: "yes" }]);
+  });
+});

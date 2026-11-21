@@ -9,7 +9,7 @@ import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk }
 import { agentVersionRun, createAgentEnvironmentFor, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
-import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { LOGIN_ENV_FALLBACKS, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext, type LaunchStartFailure } from "./inbox-launch-host";
 import { createOpenCodePermissions, OPENCODE, OPENCODE_NAME, type OpenCodePermissionAsked } from "./inbox-launch-opencode-permission";
 import { openCodeConfigFiles } from "./inbox-restart";
@@ -117,6 +117,8 @@ export const OPENCODE_LIST_OUTPUT_CAP = 16 * 1024 * 1024;
 /** A list read that failed (a slow first run, a config mid-edit) is tried again this soon, doubling up to 5 minutes. */
 const LIST_FAILED_AGAIN_MS = 15_000;
 const LIST_FAILED_AGAIN_MAX_MS = 5 * 60_000;
+/** Between a list key's parts: never in a path. */
+const LIST_KEY_CUT = "\u0000";
 /** A list read that found no login env runs the login shell again at most this often. */
 const LIST_LOGIN_AGAIN_MS = 5 * 60_000;
 /** The login shell's names this host keeps (`shellNames`): where OpenCode's files are, and an explicit config. */
@@ -423,30 +425,47 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   let binName = "opencode2";
   let choiceKey: string | null = null;
   /**
-   * The env of the last login read this host had (its own list read's, or a start's or a resume's): list reads reuse
-   * it, so they don't run the person's login shell again (their rc files) for each read.
+   * The env of the last login read this host had (any login read the Inbox made, `loginRead`; a start's; a resume's; or
+   * its own): list reads reuse it, so they don't run the person's login shell (their rc files) for each read. Memory
+   * only, never written. A stand-in from a shell that did not answer (`LOGIN_ENV_FALLBACKS`) is never held as it.
    */
   let heldLogin: LaunchEnv | null = null;
   let listLoginTriedAt: number | null = null;
+  let listLoginTry: Promise<void> | null = null;
   const holdLogin = (login: Readonly<LaunchEnv>) => {
-    if (login.PATH) heldLogin = { ...login };
+    if (login.PATH && !LOGIN_ENV_FALLBACKS.has(login)) heldLogin = { ...login };
   };
+  /** One login read for the lists, shared with any under way, at most every 5 minutes; null when none may start. */
+  const listLogin = (): Promise<void> | null => {
+    if (listLoginTry) return listLoginTry;
+    if (listLoginTriedAt !== null && Date.now() - listLoginTriedAt < LIST_LOGIN_AGAIN_MS) return null;
+    listLoginTriedAt = Date.now();
+    listLoginTry = ctx
+      .loginEnv()
+      .then(holdLogin, () => {})
+      .finally(() => {
+        listLoginTry = null;
+      });
+    return listLoginTry;
+  };
+  type ListSource = { env: LaunchEnv; from: "held" | "names" | "plain" };
   /**
-   * The env a list read starts from. A login env this host holds; else, when no login read finished yet, one (shared
-   * with compose's read ahead, which a Send waits on anyway; at most every 5 minutes); else the Inbox's env with the
-   * login PATH and the names this host keeps from the last login read, with no shell run.
+   * The env a list read starts from, and which it is (part of the cache key, so getting the full login env reads the
+   * lists once again). A login env this host holds. Else, once a login read finished (it held nothing: the shell did
+   * not answer), the Inbox's env with the login PATH and the names this host keeps, while one login read runs in the
+   * background (never waited on here). Else, before any login read finished, one login read (shared with compose's
+   * read ahead, which a Send waits on anyway), then the Inbox's env if it gave nothing to hold.
    */
-  const listSource = async (): Promise<LaunchEnv> => {
-    if (heldLogin) return heldLogin;
+  const listSource = async (): Promise<ListSource> => {
+    if (heldLogin) return { env: heldLogin, from: "held" };
     const plain = (await ctx.environment()).env as LaunchEnv;
     const shell = ctx.shell();
-    if (shell) return { ...plain, ...Object.fromEntries(OPENCODE_SHELL_NAMES.flatMap((name) => (shell[name] === undefined ? [] : [[name, shell[name]!]]))) };
-    if (listLoginTriedAt === null || Date.now() - listLoginTriedAt >= LIST_LOGIN_AGAIN_MS) {
-      listLoginTriedAt = Date.now();
-      holdLogin(await ctx.loginEnv().catch((): LaunchEnv => ({})));
-      if (heldLogin) return heldLogin;
+    if (shell) {
+      void listLogin();
+      return { env: { ...plain, ...Object.fromEntries(OPENCODE_SHELL_NAMES.flatMap((name) => (shell[name] === undefined ? [] : [[name, shell[name]!]]))) }, from: "names" };
     }
-    return plain;
+    await listLogin();
+    return heldLogin ? { env: heldLogin, from: "held" } : { env: plain, from: "plain" };
   };
   /** The source `choices` keyed its read on, so the read runs with the env its key came from. */
   let listFrom: LaunchEnv | null = null;
@@ -456,7 +475,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     if (!path) return null;
     // Read with the login env, filtered (`openCodeListEnv`): the keys and OPENCODE_CONFIG it sets decide which
     // providers OpenCode lists.
-    const env = openCodeListEnv(listFrom ?? (await listSource()));
+    const env = openCodeListEnv(listFrom ?? (await listSource()).env);
     const read = (route: string) => e.run([path, "--standalone", "api", "GET", route], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true, outputCap: OPENCODE_LIST_OUTPUT_CAP });
     // The models, and OpenCode's own agents (build, plan, …) a session can start as: an agent list that can't be
     // read leaves no Agent column, never the models.
@@ -476,7 +495,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       primary = null;
     }
     return primary && primary.length > 0 ? { ...models, primary_agents: primary } : models;
-  }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS, failedAgainMaxMs: LIST_FAILED_AGAIN_MAX_MS });
+  }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS, failedAgainMaxMs: LIST_FAILED_AGAIN_MAX_MS, binaryOf: (key) => key.slice(0, key.indexOf(LIST_KEY_CUT)) });
 
   return {
     agent: OPENCODE,
@@ -497,16 +516,17 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return { ok: true, version };
     },
 
-    // Read again when OpenCode's config or sign-in file changes (where the login shell says they are), not only on a new
-    // binary or version: a provider added or signed in to shows on the next read, with no Inbox restart.
-    // The key's file locations come from the env the read runs with (`listSource`), so the key does not change when
-    // only the source does.
+    /** Every login read the Inbox makes: held for the list reads (not a shell that did not answer). */
+    loginRead: holdLogin,
+
+    // The key: the binary (path@version), which env the read starts from, and OpenCode's config and sign-in files'
+    // stamps, found with that same env. A provider added or signed in to shows on the next read, with no Inbox restart.
     async choices() {
       if (choiceKey === null) return choiceLists(null);
       const key = choiceKey;
-      const from = await listSource();
-      listFrom = from;
-      return choiceLists(`${key}|${openCodeListStamp(createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: from }))}`);
+      const source = await listSource();
+      listFrom = source.env;
+      return choiceLists([key, source.from, openCodeListStamp(createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: source.env }))].join(LIST_KEY_CUT));
     },
 
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
