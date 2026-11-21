@@ -39,7 +39,9 @@ import type {
 const PROVIDER_NAME = "opencode-sdk";
 
 function withOpenCodeServerAuth<T>(password: string, start: () => T): T {
-	const values = { OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password };
+	// OpenCode 2 reads OPENCODE_PASSWORD before the legacy OPENCODE_SERVER_PASSWORD, so a
+	// password the person's shell sets would otherwise win over ours. OpenCode 1 reads the legacy name.
+	const values = { OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_PASSWORD: password, OPENCODE_SERVER_PASSWORD: password };
 	const saved = Object.keys(values).map((key) => [key, process.env[key]] as const);
 	Object.assign(process.env, values);
 	try {

@@ -90,11 +90,21 @@ describe("OpenCode 2 transport", () => {
 		} finally { server.stop(true); }
 	});
 
-	for (const status of [401, 403, 500]) {
+	for (const status of [401, 403]) {
 		test(`HTTP ${status} during detection is a startup error, not v1`, async () => {
 			const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("denied", { status }) });
 			try {
-				await expect(detectOpenCodeV2(server.url.origin, "Basic x")).rejects.toThrow(`OpenCode startup failed: HTTP ${status}`);
+				await expect(detectOpenCodeV2(server.url.origin, "Basic x")).rejects.toThrow(`OpenCode startup failed: HTTP ${status} (server password not accepted)`);
+			} finally { server.stop(true); }
+		});
+	}
+
+	// OpenCode 1 has no /api/info; its catch-all answers it, and offline that is an error.
+	for (const status of [404, 500, 502]) {
+		test(`HTTP ${status} during detection keeps the 1.x client`, async () => {
+			const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("Internal Server Error", { status }) });
+			try {
+				expect(await detectOpenCodeV2(server.url.origin, "Basic x")).toBe(false);
 			} finally { server.stop(true); }
 		});
 	}

@@ -56,6 +56,7 @@ mock.module("@opencode-ai/sdk", () => ({
 			closed: false,
 			env: {
 				OPENCODE_SERVER_USERNAME: process.env.OPENCODE_SERVER_USERNAME,
+				OPENCODE_PASSWORD: process.env.OPENCODE_PASSWORD,
 				OPENCODE_SERVER_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD,
 				PLANNOTATOR_ASK_AI_CHILD: process.env.PLANNOTATOR_ASK_AI_CHILD,
 				PLANNOTATOR_INBOX_TOOL: process.env.PLANNOTATOR_INBOX_TOOL,
@@ -94,32 +95,42 @@ beforeEach(() => {
 	serverUrl = legacyInfo.url.origin;
 });
 
+const CREDENTIALS = ["OPENCODE_SERVER_USERNAME", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"] as const;
+/** Clears the credential names for a test and puts the runner's own values back after it. */
+function saveCredentials() {
+	const saved = CREDENTIALS.map((name) => [name, process.env[name]] as const);
+	for (const name of CREDENTIALS) delete process.env[name];
+	return {
+		restore() {
+			for (const [name, value] of saved) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+		},
+	};
+}
+
 describe("OpenCode protocol detection and authentication", () => {
 	test("temporary credentials are removed even when spawn fails", async () => {
-		const username = process.env.OPENCODE_SERVER_USERNAME;
-		const password = process.env.OPENCODE_SERVER_PASSWORD;
-		delete process.env.OPENCODE_SERVER_USERNAME;
-		delete process.env.OPENCODE_SERVER_PASSWORD;
+		const saved = saveCredentials();
 		const provider = makeProvider();
 		try {
 			serverError = new Error("spawn failed");
 			await expect(provider.ensureServer()).rejects.toThrow("spawn failed");
-			expect(process.env.OPENCODE_SERVER_USERNAME).toBeUndefined();
-			expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined();
+			for (const name of CREDENTIALS) expect(process.env[name]).toBeUndefined();
 			serverError = null;
 			await provider.ensureServer();
-			expect(process.env.OPENCODE_SERVER_USERNAME).toBeUndefined();
-			expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined();
+			for (const name of CREDENTIALS) expect(process.env[name]).toBeUndefined();
 		} finally {
 			provider.dispose();
-			if (username !== undefined) process.env.OPENCODE_SERVER_USERNAME = username;
-			if (password !== undefined) process.env.OPENCODE_SERVER_PASSWORD = password;
+			saved.restore();
 		}
 	});
 
 	test("the spawn gets a fresh password, the v1 client authenticates, and the host env is restored", async () => {
-		const saved = { username: process.env.OPENCODE_SERVER_USERNAME, password: process.env.OPENCODE_SERVER_PASSWORD };
+		const saved = saveCredentials();
 		process.env.OPENCODE_SERVER_USERNAME = "personal";
+		process.env.OPENCODE_PASSWORD = "personal-current";
 		process.env.OPENCODE_SERVER_PASSWORD = "personal-password";
 		const provider = makeProvider();
 		try {
@@ -127,19 +138,31 @@ describe("OpenCode protocol detection and authentication", () => {
 			const first = spawned[0]!.env;
 			expect(first.OPENCODE_SERVER_USERNAME).toBe("opencode");
 			expect(first.OPENCODE_SERVER_PASSWORD).toMatch(/^[\w-]{43}$/);
+			// OpenCode 2 reads OPENCODE_PASSWORD first: it must be ours too, not the shell's.
+			expect(first.OPENCODE_PASSWORD).toBe(first.OPENCODE_SERVER_PASSWORD);
 			expect(clientConfig.headers?.Authorization).toBe(`Basic ${Buffer.from(`opencode:${first.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`);
 			expect(process.env.OPENCODE_SERVER_USERNAME).toBe("personal");
+			expect(process.env.OPENCODE_PASSWORD).toBe("personal-current");
 			expect(process.env.OPENCODE_SERVER_PASSWORD).toBe("personal-password");
 			provider.dispose();
 			await provider.ensureServer();
 			expect(spawned[1]!.env.OPENCODE_SERVER_PASSWORD).not.toBe(first.OPENCODE_SERVER_PASSWORD);
 		} finally {
 			provider.dispose();
-			if (saved.username === undefined) delete process.env.OPENCODE_SERVER_USERNAME;
-			else process.env.OPENCODE_SERVER_USERNAME = saved.username;
-			if (saved.password === undefined) delete process.env.OPENCODE_SERVER_PASSWORD;
-			else process.env.OPENCODE_SERVER_PASSWORD = saved.password;
+			saved.restore();
 		}
+	});
+
+	test("an OpenCode 1 whose /api/info fails (its catch-all, offline) keeps the 1.x client", async () => {
+		const offline = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("Internal Server Error", { status: 500 }) });
+		serverUrl = offline.url.origin;
+		clientConfig = {};
+		const provider = makeProvider();
+		try {
+			await provider.ensureServer();
+			expect(spawned[0]!.closed).toBe(false);
+			expect(clientConfig.headers?.Authorization).toStartWith("Basic ");
+		} finally { provider.dispose(); offline.stop(true); }
 	});
 
 	test("a failed detection reaps the server and removes its exit handler", async () => {
@@ -196,7 +219,9 @@ describe("OpenCode 2 through an authenticated HTTP server", () => {
 			async fetch(req) {
 				const url = new URL(req.url);
 				const path = url.pathname;
-				const password = spawned.at(-1)?.env.OPENCODE_SERVER_PASSWORD;
+				// OpenCode 2's order: the current name, then the legacy one.
+				const env = spawned.at(-1)?.env;
+				const password = env?.OPENCODE_PASSWORD ?? env?.OPENCODE_SERVER_PASSWORD;
 				if (req.headers.get("Authorization") !== `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`) {
 					badAuth++;
 					return Response.json({ message: "Authentication required" }, { status: 401 });

@@ -19,7 +19,12 @@ export async function detectOpenCodeV2(url: string, authorization: string, signa
 	});
 	if (!response.ok) {
 		await response.body?.cancel();
-		throw new Error(`OpenCode startup failed: HTTP ${response.status}${response.status === 401 || response.status === 403 ? " (server password not accepted)" : ""}`);
+		if (response.status === 401 || response.status === 403) {
+			throw new Error(`OpenCode startup failed: HTTP ${response.status} (server password not accepted)`);
+		}
+		// 1.x has no /api/info: its catch-all route answers, and that can fail (offline, say).
+		// Only 2.x serves /api/info itself, so any other error keeps the 1.x client.
+		return false;
 	}
 	// 1.x serves its HTML application here, even with a 200 status.
 	const text = await response.text();
