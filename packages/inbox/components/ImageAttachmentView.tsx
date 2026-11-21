@@ -1,16 +1,16 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
-import { ImageZoomStage, type FitAxis, type ImageZoomStageHandle, type WheelHintGate, type ZoomMode } from '@plannotator/ui/components/ImageZoomStage';
+import { ImageZoomStage, type FitAxis, type ImageZoomStageHandle, type NaturalBox, type WheelHintGate, type ZoomMode } from '@plannotator/ui/components/ImageZoomStage';
 import { canPanToward } from '@plannotator/ui/components/imageZoom';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import { InboxApiError } from '../api';
-import { imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
+import { imageCommentAnnotation, imageFitAxis, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { useClearRows } from '../imageClear';
-import { PHONE_QUERY } from '../phone';
+import { PHONE_QUERY, usePhone, useTouchPhone } from '../phone';
 import { Tip } from './Tip';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
@@ -213,10 +213,18 @@ export function ImageAttachmentView({
     return () => cancelAnimationFrame(frame);
   }, [natural, failed]);
 
-  // A panorama fitted to the pane would be a sliver: Fit keeps a readable height (read from the left); a tall screenshot fits its width (read from the top).
+  // Fit's axis (`imageFitAxis`, the swipe's neighbour picture's too): a panorama keeps a readable height from the left,
+  // whole on a phone; a tall screenshot fits its width from the top.
+  const phone = usePhone();
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural !== null && natural.height > natural.width * 2;
-  const fitAxis: FitAxis = wide ? 'height' : tall ? 'width' : 'contain';
+  const fitAxis: FitAxis = natural ? imageFitAxis(natural, phone) : 'contain';
+  // A touch phone draws on the picture full screen, zoomable, opening on the part the viewer showed.
+  const touchPhone = useTouchPhone();
+  const [drawFrom, setDrawFrom] = useState<NaturalBox | null>(null);
+  useLayoutEffect(() => {
+    setDrawFrom(annotating && touchPhone ? (zoomRef.current?.visibleBox() ?? null) : null);
+  }, [annotating, touchPhone]);
 
   // The stage's own padding (28 px, 12 on a phone) is what Fit leaves around the image.
   const stageRef = useRef<HTMLDivElement>(null);
@@ -254,9 +262,9 @@ export function ImageAttachmentView({
     };
   }, []);
 
-  // A horizontal swipe on the image at Fit: more than 60 px across, less than 40 px up or down (a panorama pans instead).
+  // A horizontal swipe on the image at Fit: more than 60 px across, less than 40 px up or down (a panorama fitted to its height pans instead).
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
-  const swipes = onSwipe !== undefined && mode === 'fit' && !wide;
+  const swipes = onSwipe !== undefined && mode === 'fit' && fitAxis !== 'height';
 
   // A selected comment that carries a drawing shows the drawing over the image.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
@@ -527,6 +535,8 @@ export function ImageAttachmentView({
           isOpen={annotating}
           escapeCancels={DRAWING_SCREEN.escapeCancels}
           hint={DRAWING_SCREEN.hint}
+          zoomable={touchPhone || undefined}
+          initialBox={drawFrom}
           onClose={() => {
             setAnnotating(false);
             requestAnimationFrame(() => textRef.current?.focus());

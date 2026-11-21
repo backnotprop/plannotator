@@ -13,7 +13,8 @@ import { AgentMark, type AgentMarkPicks } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
 import { showInRex, useRexShowNote } from '../data/actions/rexShow';
-import { rexMarkWords } from './rexMark';
+import { rexMarkWords, shownMarkOf } from './rexMark';
+import { useAgentStatusOn } from './agentStatus';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -81,10 +82,11 @@ export interface AgentsSectionProps {
   onStop?: (agent: InboxAgent, machine: string | null) => void;
   onDelete?: (agent: InboxAgent, machine: string | null) => void;
   /**
-   * Show in Rex: Rex's app goes to the pane this computer's agent lives in. Offered on an agent whose place says so
-   * (`place.show`: Rex's app on this computer confirmed a jump in this run and has not failed one since). Absent: `showInRex` (the Inbox's own).
+   * Show in Rex: Rex's app goes to the pane the agent lives in, here or on a linked machine (`machine`: its id, null
+   * for this Inbox's). Offered on an agent whose place says so (`place.show`: a Rex app that can go there is attached
+   * to that agent's Rex and has not failed a Show since). Absent: `showInRex` (the Inbox's own).
    */
-  onShowInRex?: (agent: InboxAgent) => void;
+  onShowInRex?: (agent: InboxAgent, machine: string | null) => void;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
 }
@@ -157,6 +159,8 @@ const AgentRow = memo(
     picks: AgentMarkPicks;
   }) {
     const { entry, machine, on, away } = props;
+    // Its icon's mark, spoken with its name (the mark's own label is not always reached).
+    const mark = shownMarkOf(entry.agent, useAgentStatusOn());
     const [menuOpen, setMenuOpen] = useState(false);
     const [contextOpen, setContextOpen] = useState(false);
     const [renaming, setRenaming] = useState(false);
@@ -289,11 +293,11 @@ const AgentRow = memo(
             <span className="ib-sr">
               , {agentHostName(entry.agent.host)}
               {entry.agent.place ? `, in ${entry.agent.place.line.replace(' · ', ', ').replace(' / ', ', ')}` : ''}
-              {entry.agent.rex_mark ? `, ${rexMarkWords(entry.agent.rex_mark)}` : ''}
+              {mark ? `, ${rexMarkWords(mark)}` : ''}
             </span>
           </button>
         </Tip>
-        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} />
+        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} statusMarks />
         {hasMenu && (
           <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
             <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${entry.name} options`} data-agent-more={entry.agent.id}>
@@ -399,12 +403,13 @@ export function AgentsSection(props: AgentsSectionProps) {
   rexNow.current = props.onShowInRex;
   const announceNow = useRef(props.announce);
   announceNow.current = props.announce;
-  // This computer's agents only: a linked machine's Rex is not this one. Offered only where the list says (`place.show`).
+  // Offered only where the list says (`place.show`). A linked machine's agent: asked of that machine's Inbox, whose
+  // Rex holds the pane, through the machine link.
   const onShowInRex = useMemo(
     () => (entry: AgentEntry) => {
-      if (entry.machine !== null && entry.machine !== props.machines.self) return;
-      if (rexNow.current) rexNow.current(entry.agent);
-      else showInRex(entry.agent.session, announceNow.current);
+      const machine = entry.machine === null || entry.machine === props.machines.self ? null : entry.machine;
+      if (rexNow.current) rexNow.current(entry.agent, machine);
+      else showInRex(entry.agent.session, announceNow.current, machine);
     },
     [props.machines.self],
   );
@@ -476,11 +481,11 @@ export function AgentsSection(props: AgentsSectionProps) {
                   onRename={names ? onRename : undefined}
                   onStop={onStop}
                   onDelete={onDelete}
-                  onShowInRex={!linked ? onShowInRex : undefined}
+                  onShowInRex={linked && away ? undefined : onShowInRex}
                   picks={picks}
                   announce={props.announce}
                 />,
-                !linked && <RexShowNote key={`${entry.agent.id}:rex`} session={entry.agent.session} />,
+                <RexShowNote key={`${entry.agent.id}:rex`} session={entry.agent.session} />,
               ])}
             </div>
           );

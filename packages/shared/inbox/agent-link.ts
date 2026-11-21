@@ -63,7 +63,11 @@ import {
   type InboxRegistryView,
   type InboxReplyCommand,
   type InboxToolInfo,
+  inboxBlockedField,
+  type InboxBlockedKind,
+  INBOX_OFF_LINE,
 } from "./connection";
+import { isInboxTurnedOn } from "./turned-on";
 import { directFetchInit } from "../loopback-proxy";
 
 /** The longest a host's start waits for a running Inbox's `tools/list` (the mod's bound). */
@@ -312,6 +316,8 @@ export class InboxAgentConnection {
 
   /** The running Inbox, starting a stopped one detached (no browser) first. */
   async ensureRunning(): Promise<InboxRegistryView | { error: string }> {
+    // Not turned on here (turned-on.ts): nothing is reached or started.
+    if (!isInboxTurnedOn(this.dataDir)) return { error: INBOX_OFF_LINE };
     const known = readRegistry(this.dataDir);
     if (known && (await this.isRunning(known))) return known;
     const started = await this.startInbox();
@@ -322,6 +328,7 @@ export class InboxAgentConnection {
     }
     if (started.exitCode !== 0) {
       const why = started.output.trim() || `exit ${started.exitCode}`;
+      if (why.includes(INBOX_OFF_LINE)) return { error: INBOX_OFF_LINE };
       if (/unknown command/i.test(why)) return { error: "The plannotator on PATH has no Inbox (an older version); update Plannotator." };
       return { error: `The Plannotator Inbox did not start: ${why}` };
     }
@@ -508,6 +515,12 @@ export interface InboxWakeTarget {
    * `plugin`, so the Inbox can say which command loads the newer code.
    */
   plugin?(): InboxLoadedPluginReport | null;
+  /**
+   * The session waits on the person in its own terminal now (blocked.ts): a permission prompt or a question, the kind
+   * only. Asked every tick (keep it cheap: no I/O); a change goes to the Inbox at once as a `state` event, and every
+   * poll repeats it. Null once the prompt is answered or the turn ends. Optional: a host without it never says so.
+   */
+  blocked?(): InboxBlockedKind | null;
 }
 
 /** A poll's `plugin` as Pi, Oh My Pi and OpenCode 2 send it. */
@@ -570,6 +583,10 @@ export class InboxWake {
   private stateCheckedAt = Number.NEGATIVE_INFINITY;
   /** Whether Send now could go in, as last told to the Inbox. */
   private lastSteerable: boolean | null = null;
+  /** What the session waits on in its terminal, as last told to the Inbox (`target.blocked`). */
+  private blocked: InboxBlockedKind | null = null;
+  /** When `blocked` last changed (INBOX_BLOCKED_AT_FIELD): this link's start until the first change. */
+  private blockedAt = Date.now();
 
   constructor(
     private readonly connection: InboxAgentConnection,
@@ -653,6 +670,7 @@ export class InboxWake {
       busy = await this.target.isBusy();
       this.noteBusy(busy, asked);
     }
+    this.noteBlocked();
     this.idleTicks = this.pending.size === 0 || busy !== false ? 0 : this.idleTicks + 1;
     for (const id of [...this.unacked]) await this.acknowledge(id);
     const now = Date.now();
@@ -698,9 +716,35 @@ export class InboxWake {
     this.lastSteerable = steerable;
     if (known && this.leader && !this.disposed) {
       void this.connection
-        .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: steerable })
+        .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: steerable, ...inboxBlockedField(this.blocked, this.blockedAt) })
         .catch(() => null);
     }
+  }
+
+  /**
+   * A prompt came up in the session's terminal, or went (`target.blocked`): the Inbox hears it at once, as a `state`
+   * event carrying the kind (none: cleared). Through `bridge`, which sends nothing while no Inbox exists (no
+   * registry: no request, no file).
+   */
+  private noteBlocked(): void {
+    let blocked: InboxBlockedKind | null = null;
+    try {
+      blocked = this.target.blocked?.() ?? null;
+    } catch {
+      blocked = null;
+    }
+    if (blocked === this.blocked) return;
+    this.blocked = blocked;
+    this.blockedAt = Math.max(Date.now(), this.blockedAt + 1);
+    if (!this.leader || this.disposed) return;
+    void this.connection
+      .bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, {
+        type: "state",
+        ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
+        [INBOX_SEND_NOW_POLL_FIELD]: this.steerable,
+        ...inboxBlockedField(blocked, this.blockedAt),
+      })
+      .catch(() => null);
   }
 
   /**
@@ -747,6 +791,8 @@ export class InboxWake {
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+        // A prompt up in its terminal (blocked.ts): said again on every poll while it lasts.
+        ...inboxBlockedField(this.blocked, this.blockedAt),
         [INBOX_STEER_POLLS_POLL_FIELD]: true,
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,

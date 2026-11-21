@@ -289,7 +289,7 @@ export const JOB_MAP: Record<string, Record<string, string>> = {
   'inbox-claude-code.yml': { 'inbox-claude-code': 'paths' },
   'relay.yml': { relay: 'paths' },
   'mobile-ios.yml': { ios: 'paths', 'ios-nightly': 'no-pr' },
-  'mobile-ledger.yml': { ledger: 'paths' },
+  'mobile-contract.yml': { contract: 'paths', ledger: 'paths' },
   'e2e-slice.yml': { plan: 'slice', slice: 'slice' },
   'inbox-e2e.yml': { head: 'label', build: 'label', plan: 'label', 'inbox-window-e2e': 'label', blame: 'label', 'full-ci': 'label' },
   'dast.yml': { 'passive-baseline': 'no-pr' },

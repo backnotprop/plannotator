@@ -236,6 +236,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // tags this Inbox's threads by a tag's name and changes the tag of that name here. Phones do not take tags.
   { method: "POST", route: /^threads\/([^/]+)\/tags$/, window: (m) => `/api/inbox/threads/${m[1]}/tags`, machineOnly: true },
   { method: "POST", route: /^initiatives\/([^/]+)$/, window: (m) => `/api/inbox/initiatives/${m[1]}`, machineOnly: true },
+  // A project's tags (project-tags.ts, mark `project-tags`): a linked machine's window tags this Inbox's projects by a
+  // tag's name, as it tags its threads. Phones do not take them.
+  { method: "POST", route: /^projects\/([^/]+)\/tags$/, window: (m) => `/api/inbox/projects/${m[1]}/tags`, machineOnly: true },
   // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
   // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).
   { method: "POST", route: /^tag-colours$/, window: () => "/api/inbox/tag-colours" },
@@ -270,6 +273,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^messages\/([^/]+)\/handoff\/undo$/, window: (m) => `/api/inbox/messages/${m[1]}/handoff/undo` },
   // An action item's Done or Can't do it, and its Undo (approval "inbox-next-actions", contract 7.63).
   { method: "POST", route: /^messages\/([^/]+)\/actions\/(a-[0-9a-f]{8}(?:-\d{1,3})?)$/, window: (m) => `/api/inbox/messages/${m[1]}/actions/${m[2]}` },
+  // Run on a `:::run` block, its Stop and Open in terminal, and Save or Remove on a `:::secret` block: the person on
+  // their phone, or a press in a window on their linked machine (inbox-run-routes.ts checks which; never held).
+  { method: "GET", route: /^messages\/([^/]+)\/run$/, window: (m) => `/api/inbox/messages/${m[1]}/run` },
+  { method: "POST", route: /^messages\/([^/]+)\/run$/, window: (m) => `/api/inbox/messages/${m[1]}/run` },
+  { method: "POST", route: /^messages\/([^/]+)\/secret$/, window: (m) => `/api/inbox/messages/${m[1]}/secret` },
   { method: "POST", route: /^threads\/([^/]+)\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/delete` },
   // The thread's reply draft (the words typed on the computer and not sent), read only: contract 7.62.
   { method: "GET", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft` },
@@ -341,6 +349,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
+  // Show in Rex for one of this Inbox's agents, from a linked machine's window (inbox-rex-far.ts): the Rex apps
+  // attached to this computer's Rex from elsewhere go to its pane.
+  { method: "POST", route: /^rex\/show$/, window: () => "/api/inbox/rex/show", machineOnly: true },
   // A file an agent's message names, read only (approval "inbox-file-refs-open-viewer"): its view and an image's or a
   // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
   // Not a phone's: a phone reads them through the tailnet as the owner.

@@ -165,7 +165,8 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   const routineThreads = useRoutineThreads();
   const isRoutine = routineThreads.state === 'ready' ? routineThreads.test : null;
   const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped, routineThreads.state !== 'off'), host?.tags ?? null);
-  const tagsOf = host?.rowTags;
+  // A row's tags as the Tag group reads them: its own and its project's (projectTags.ts).
+  const tagsOf = host?.filterTags ?? host?.rowTags;
   const routineTest = isRoutine ?? undefined;
   const countOf = (group: Parameters<typeof countWhere>[3], test: (row: InboxListRow) => boolean) => countWhere(rows, filter, now, group, test, tagsOf, routineTest);
   const [open, setOpen] = useState(false);
