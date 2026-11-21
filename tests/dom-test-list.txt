@@ -555,6 +555,7 @@ packages/ui/components/html-viewer/bridgeAssetLinkKey.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
+packages/ui/components/MarkdownContentsRail.marks.test.tsx
 packages/ui/components/DeferredMarkdownContentsRail.test.ts
 packages/ui/components/CommentPopover.overlayGutter.test.tsx
 packages/ui/components/ComposerTokenTextarea.perKey.test.tsx
