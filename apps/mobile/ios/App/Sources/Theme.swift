@@ -31,6 +31,8 @@ enum Token {
 struct AgentMark: View {
   let author: InboxAuthor
   var size: CGFloat = 36
+  /// The tile under the mark (another ground when the row itself rests on this one).
+  var ground: Color = Token.muted
   @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
   var body: some View {
@@ -50,7 +52,7 @@ struct AgentMark: View {
       }
     }
     .frame(width: side, height: side)
-    .background(Token.muted, in: shape)
+    .background(ground, in: shape)
     .clipShape(shape)
     .accessibilityHidden(true)
   }

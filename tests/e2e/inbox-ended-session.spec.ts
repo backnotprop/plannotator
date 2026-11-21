@@ -251,8 +251,8 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const box = pane.getByRole('textbox', { name: 'Reply to Pi' });
   const words = 'Go with backoff, but cap the total wait at 10 minutes so it finishes before the 2 AM export.';
   await box.fill(words);
-  // The box open: the recipient pill under it names the asker, ended, in the note's place (approval
-  // "inbox-reply-recipient"); the note's always-mounted status region stays.
+  // The box open: the recipient chip at the start of the words names the asker, ended, in the note's place (approval
+  // "inbox-reply-recipient", placed by "inbox-reply-target-chip"); the note's always-mounted status region stays.
   const pill = pane.locator('[data-recipient]');
   await expect(pill).toHaveAttribute('aria-label', 'To Pi, ended. Change who gets this reply');
   await expect(pane.locator('[data-asker-note]')).toHaveAttribute('role', 'status');

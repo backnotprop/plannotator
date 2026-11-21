@@ -7,11 +7,15 @@ import { useSideButton } from '../../ask/sideButton';
 import type { SelectionActionContext } from '@plannotator/ui/utils/selectionActions';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import type { HtmlEmbedAnnotate } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
+import { isHtmlEmbedLanguage } from '@plannotator/ui/components/html-embed/languages';
+import { parseHtmlBlockAnchor } from '@plannotator/core/html-block-anchor';
 import type { MessageBodyProps } from './types';
+import { inboxEmbedPageUrl } from '../../data/actions/embed';
 import { NO_ANNOTATIONS } from '../../thread/helpers';
 
 /** The person's comments on the body's text: drawn as highlights, a new one saved, Side, and a pick passed on. */
-export function useBodyComments({ comments, message, blocks, onPick }: Pick<MessageBodyProps, 'comments' | 'message' | 'onPick'> & { blocks: Block[] }) {
+export function useBodyComments({ comments, message, blocks, onPick, pictures = true }: Pick<MessageBodyProps, 'comments' | 'message' | 'onPick'> & { blocks: Block[]; pictures?: boolean }) {
   // ── Comments on the text (approval "inbox-message-comments") ──────────────
   // The highlights are drawn once per mount for the comments already saved;
   // a new comment paints itself (the selection becomes its mark), and one the
@@ -78,5 +82,36 @@ export function useBodyComments({ comments, message, blocks, onPick }: Pick<Mess
       for (const a of fresh) painted.current.delete(a.id);
     };
   }, [commentsOn, commentList]);
-  return { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion };
+  // ── Comments on an element of a live html block, in place (the owner's pick "A · In place", 2026-11-20) ──
+  // Each block draws its own (ui's HtmlEmbedBlock, by the anchor's place and source); a comment that names a place
+  // no block has is unanchored here, since no block will say so.
+  const htmlBlockIndex = useMemo(() => {
+    const places = new Map<string, number>();
+    for (const block of blocks) if (block.type === 'code' && isHtmlEmbedLanguage(block.language)) places.set(block.id, places.size + 1);
+    return places;
+  }, [blocks]);
+  const htmlBlockComments = useMemo(() => commentList.filter((comment) => comment.htmlBlockAnchor != null), [commentList]);
+  useEffect(() => {
+    if (!commentsOn) return;
+    const lost = htmlBlockComments.filter((comment) => (parseHtmlBlockAnchor(comment.htmlBlockAnchor)?.index ?? 0) > htmlBlockIndex.size || parseHtmlBlockAnchor(comment.htmlBlockAnchor) === null).map((comment) => comment.id);
+    if (lost.length > 0) commentsRef.current?.onUnanchored?.({ attempted: lost, unanchored: lost });
+  }, [commentsOn, htmlBlockComments, htmlBlockIndex]);
+  const embedSelected = comments?.revealed ?? comments?.openId ?? null;
+  const embedAnnotate = useMemo<HtmlEmbedAnnotate | undefined>(
+    () =>
+      commentsOn
+        ? {
+            frameUrl: inboxEmbedPageUrl,
+            indexOf: (block) => htmlBlockIndex.get(block.id) ?? 0,
+            annotations: htmlBlockComments,
+            onAdd: (annotation) => commentsRef.current?.onSave(annotation) ?? false,
+            selectedId: embedSelected,
+            onSelect: (id) => commentsRef.current?.onOpen?.(id),
+            onRestoreReport: (report) => commentsRef.current?.onUnanchored?.(report),
+            allowImages: pictures,
+          }
+        : undefined,
+    [commentsOn, htmlBlockIndex, htmlBlockComments, embedSelected, pictures],
+  );
+  return { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion, embedAnnotate };
 }

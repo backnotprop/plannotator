@@ -19,7 +19,7 @@ final class FirstSliceTests: XCTestCase {
     // The list: the computer's sections, in its order, under the product's names.
     XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 10))
     for section in ["Stopped on you", "Holding up work", "Waiting on you"] {
-      XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "\(section), ")).firstMatch.exists, section)
+      XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "\(section), ")).firstMatch.exists, section)
     }
 
     // A tap on a row opens the thread, with its question as a card.
@@ -47,7 +47,7 @@ final class FirstSliceTests: XCTestCase {
 
     // Back in the list the thread has moved to Sent.
     app.navigationBars.buttons.firstMatch.tap()
-    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Sent, ")).firstMatch.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Sent, ")).firstMatch.waitForExistence(timeout: 5))
   }
 
   /// An action item is done on the phone, and a permission prompt is answered with one touch and shrinks to a line.
