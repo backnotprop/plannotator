@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Docs-only gate for the fast CI tier (Test, Browser smoke, Semgrep).
+# Docs-only rule for the fast CI tier. scripts/ci-affected.ts (the plan and
+# gate jobs) reads its verdict: a docs-only PR runs no test, build or scan but
+# Gitleaks.
 #
 # A PR that changes only files on the allowlist below cannot break a unit, DOM,
 # browser or package test, nor give Semgrep anything to scan: no test, build or
-# scanner reads them (scripts/ci-docs-only.test.ts holds that). The gated jobs
-# still start and report SUCCESS under their usual names, since the merge
-# script requires each fast check by name and a skipped matrix job loses its
-# name; their steps after this one skip.
+# scanner reads them (scripts/ci-docs-only.test.ts holds that).
 #
 # It is an allowlist on purpose, of named root files and of document and image
 # types in a few folders. Only types: `bun test` discovers *.test.ts anywhere,
@@ -19,6 +18,12 @@
 # read them), .github/pull_request_template.md (scripts/e2e-slice.test.ts reads
 # it), every README under apps/ or packages/ (shipped in npm packages), SKILL.md
 # files and apps/marketing.
+#
+# The native iPhone app's own kinds under apps/mobile/ios (Swift, Xcode project
+# and asset files) count too: only .github/workflows/mobile-ios.yml builds
+# them, and no Bun test, build or scanner reads them. Its shell, JS/TS and
+# package.json files do not: Semgrep and the test sweep read those. Nor does
+# a Swift lockfile (Package.resolved): the dependency scans read it.
 #
 # Only plain files count: a symlink, a gitlink (submodule) or an executable
 # file on either side of the change runs everything, whatever its path.
@@ -37,7 +42,7 @@
 # explicit `true` (this step failing, its output missing) as "run".
 set -euo pipefail
 
-DOCS_ONLY='^(README\.md|CONTRIBUTING\.md|SECURITY\.md|LICENSE-MIT|LICENSE-APACHE|docs/[^/]+\.md|(adr|docs/releases|\.github/assets)/([^/]+/)*[^/]+\.(md|png|jpe?g|gif|webp|avif|svg))$'
+DOCS_ONLY='^(README\.md|CONTRIBUTING\.md|SECURITY\.md|LICENSE-MIT|LICENSE-APACHE|docs/[^/]+\.md|(adr|docs/releases|\.github/assets)/([^/]+/)*[^/]+\.(md|png|jpe?g|gif|webp|avif|svg)|apps/mobile/ios/([^/]+/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|apps/mobile/ios/([^/]+/)*[^/]+\.xcassets/([^/]+/)*Contents\.json|apps/mobile/ios/([^/]+/)*\.gitignore)$'
 
 # Every stdin line a plain-file change on the allowlist, and at least one line:
 # `docs`. Otherwise `code`. A raw line is `:<old mode> <new mode> <old sha>

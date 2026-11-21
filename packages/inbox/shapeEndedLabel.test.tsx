@@ -1,12 +1,13 @@
 /**
- * Once the agent's session ended, the board's Ask panel says what happens to a
- * question (owner's call on #2592, "A"): in the Inbox nothing answers then, so
- * it reads "Session ended · your question waits for the agent"; a host with an
- * Ask AI fallback keeps "Session ended · Ask AI answers; changes wait for the
- * agent". The standalone page knows no sessions (every board reads `gone`), so
- * it shows no session line at all. What regresses: the Inbox promising an Ask
- * AI answer that never comes, a host with the fallback losing its words, or the
- * standalone page saying "Session ended" while the agent is live.
+ * Once the agent's session ended, a comment box on the board says what happens to a
+ * question (owner's call on #2592, "A"), above its words, before anything is asked:
+ * in the Inbox nothing answers then, so it reads "Session ended · your question
+ * waits for the agent"; a host with an Ask AI fallback keeps "Session ended · Ask
+ * AI answers; changes wait for the agent". The standalone page knows no sessions
+ * (every board reads `gone`), so it shows no session line at all. What regresses:
+ * the Inbox promising an Ask AI answer that never comes, a host with the fallback
+ * losing its words, or the standalone page saying "Session ended" while the agent
+ * is live. (The board's side panel is References only: the line moved here.)
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -42,18 +43,21 @@ function endedBoard(): ShapeLoaded {
   return { shape: made.record, version: store.read(made.id)!, seen: 1, notes: [], session: { state: 'gone', agent: 'Claude Code' } };
 }
 
-async function askPanel(host: ShapeHost, id: string): Promise<HTMLElement> {
+/** The whole board's comment box (Global comment), as the person opens it before asking. */
+async function askBox(host: ShapeHost, id: string): Promise<HTMLElement | null> {
   const el = document.createElement('div');
   document.body.appendChild(el);
   root = createRoot(el);
-  act(() => root!.render(<ShapeSurface host={host} id={id} initialPanel="ask" />));
-  for (let i = 0; i < 50 && !el.querySelector('.shp-sidep-body') ; i++) await act(() => new Promise((r) => setTimeout(r, 20)));
-  for (let i = 0; i < 10 && !el.textContent?.includes('Session ended'); i++) await act(() => new Promise((r) => setTimeout(r, 20)));
-  return el;
+  act(() => root!.render(<ShapeSurface host={host} id={id} />));
+  const button = () => el.querySelector<HTMLElement>('.shp-general, [aria-label="Global comment"]');
+  for (let i = 0; i < 50 && !button(); i++) await act(() => new Promise((r) => setTimeout(r, 20)));
+  await act(async () => button()!.click());
+  for (let i = 0; i < 20 && !document.querySelector('[data-comment-popover]'); i++) await act(() => new Promise((r) => setTimeout(r, 20)));
+  return document.querySelector<HTMLElement>('[data-comment-popover]');
 }
 
-async function askPanelText(host: ShapeHost, id: string): Promise<string> {
-  return (await askPanel(host, id)).textContent ?? '';
+async function askBoxText(host: ShapeHost, id: string): Promise<string> {
+  return (await askBox(host, id))?.textContent ?? '';
 }
 
 function fakeHost(loaded: ShapeLoaded, extra: Partial<ShapeHost>): ShapeHost {
@@ -74,13 +78,13 @@ test.skipIf(!hasDom)('the Inbox host says a question waits once the session ende
   const inbox = createInboxShapeHost({ subscribe: () => () => {} });
   expect(inbox.askWaitsWhenEnded).toBe(true);
 
-  const waits = await askPanelText(fakeHost(loaded, { askWaitsWhenEnded: inbox.askWaitsWhenEnded }), loaded.shape.id);
+  const waits = await askBoxText(fakeHost(loaded, { askWaitsWhenEnded: inbox.askWaitsWhenEnded }), loaded.shape.id);
   expect(waits).toContain('Session ended · your question waits for the agent');
   expect(waits).not.toContain('Ask AI answers');
   act(() => root?.unmount());
   document.body.innerHTML = '';
 
-  const fallback = await askPanelText(fakeHost(loaded, {}), loaded.shape.id);
+  const fallback = await askBoxText(fakeHost(loaded, {}), loaded.shape.id);
   expect(fallback).toContain('Session ended · Ask AI answers; changes wait for the agent');
 });
 
@@ -89,8 +93,8 @@ test.skipIf(!hasDom)('the standalone page knows no sessions: no session line, ne
   const { createStandaloneShapeHost } = await import('./shape/standalone/host');
   const standalone = createStandaloneShapeHost({ api: {} as never, subscribe: () => () => {} });
   expect(standalone.sessionless).toBe(true);
-  const el = await askPanel(fakeHost(loaded, { askWaitsWhenEnded: standalone.askWaitsWhenEnded, sessionless: standalone.sessionless }), loaded.shape.id);
-  expect(el.querySelector('.shp-sidep-body')).not.toBeNull();
-  expect(el.querySelector('[data-ai-provider-session-bridge]')).toBeNull();
-  expect(el.textContent).not.toContain('Session ended');
+  const box = await askBox(fakeHost(loaded, { askWaitsWhenEnded: standalone.askWaitsWhenEnded, sessionless: standalone.sessionless }), loaded.shape.id);
+  expect(box).not.toBeNull();
+  expect(box!.querySelector('[data-shape-talk]')).toBeNull();
+  expect(box!.textContent).not.toContain('Session ended');
 });

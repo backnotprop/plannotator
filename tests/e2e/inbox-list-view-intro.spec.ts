@@ -8,7 +8,7 @@
  *     --define '__CLI_VERSION__="0.28.50"' --outfile .local/plannotator-release
  *
  * A grouped list of six threads, a page a minute old, a thread opened, read and left: the dialog opens over the list
- * (1440 px and a 390 px phone, light and dark); "Use Simple list" switches the list at once and is remembered; "Use Smart groups"
+ * (1440 px and a 390 px phone, light and dark); "Use Simple list" switches the list at once and is remembered; "Keep Smart groups"
  * keeps the groups; neither browser sees it again. HOME and the data dir are temp folders. PNGs land in
  * PLANNOTATOR_LIST_VIEW_SHOTS; with PLANNOTATOR_LIST_VIEW_VIDEO set, the desktop page is recorded (list-view-intro.webm).
  */
@@ -28,10 +28,10 @@ const shots = resolve(process.env.PLANNOTATOR_LIST_VIEW_SHOTS ?? join(repo, '.lo
 
 test.describe.configure({ mode: 'serial' });
 test.skip(!binary, 'set PLANNOTATOR_E2E_RELEASE_BINARY to a release build');
-// The choice now goes through the Inbox's schedule (packages/shared/inbox/reveals.ts `list_view`): this world needs
-// a seeded line (first use two days back, 15 threads or more, a list taller than the window) before it runs again.
+// The choice now goes through the Inbox's schedule (packages/shared/inbox/reveals.ts `view_choice`, three views):
+// this world needs a seeded line and its steps redone for three choices before it runs again.
 // packages/inbox/listViewReveal.test.tsx guards the wiring meanwhile.
-test.skip(true, 'needs a world seeded for the dialog schedule (list_view next or ahead)');
+test.skip(true, 'needs a world seeded for the dialog schedule (view_choice next or ahead)');
 
 let url = '';
 let first = '';
@@ -119,7 +119,7 @@ async function both(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light' });
 }
 
-test('a minute in, back on the grouped list after reading a thread: the choice, once; Use Simple list on a desktop, Use Smart groups on a phone', async ({ browser }: { browser: Browser }) => {
+test('a minute in, back on the grouped list after reading a thread: the choice, once; Use Simple list on a desktop, Keep Smart groups on a phone', async ({ browser }: { browser: Browser }) => {
   test.setTimeout(420_000);
   const video = process.env.PLANNOTATOR_LIST_VIEW_VIDEO ? { dir: join(shots, 'video'), size: { width: 1280, height: 800 } } : undefined;
   const desk = await browser.newContext({ viewport: video ? { width: 1280, height: 800 } : { width: 1440, height: 900 }, colorScheme: 'light', recordVideo: video });
@@ -146,8 +146,9 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
     // Focus on the question; Smart groups is marked In use (the list is grouped) and its button is the primary one.
     await expect(dialog(page).locator('#ib-lvc-title')).toBeFocused();
     await expect(dialog(page).locator('[data-list-view-in-use]')).toHaveCount(1);
-    await expect(dialog(page).locator('.ib-lvc-col').first().locator('[data-list-view-in-use]')).toHaveText('In use');
+    await expect(dialog(page).locator('.ib-lvc-col').filter({ has: page.locator('[data-list-view-choice="smart"]') }).locator('[data-list-view-in-use]')).toHaveText('In use');
     await expect(dialog(page).locator('[data-list-view-choice="smart"]')).toHaveClass(/ib-pri/);
+    await expect(dialog(page).locator('[data-list-view-choice="smart"]')).toHaveText('Keep Smart groups');
     await page.waitForTimeout(2600);
     if (!video) await both(page, 'intro-1440');
     // Phone: the same moment.
@@ -169,7 +170,7 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
     await page.mouse.move(1200, 780);
     await page.waitForTimeout(800);
     if (!video) await both(page, 'list-after-choosing');
-    // Use Smart groups: the groups stay, and the choice is not written.
+    // Keep Smart groups: the groups stay, and the choice is not written.
     await phone.locator('[data-list-view-choice="smart"]').tap({ timeout: 10_000 });
     await expect(dialog(phone)).toHaveCount(0);
     await expect(phone.locator('.ib-listcol .ib-lbody [data-section-id="waiting"]')).toBeVisible();

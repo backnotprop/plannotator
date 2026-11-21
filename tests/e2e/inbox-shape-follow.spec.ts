@@ -17,6 +17,9 @@
  *  - the keys never fall to the page, and Esc stops following before it closes the board;
  *  - the board's status stays in view and clickable above the card.
  *
+ * A desk size here is the room the board had when it took a window of that size; the board now draws in its
+ * thread's pane, and `roomOf` grows the window by the pane's frame so each size keeps its meaning.
+ *
  * Build first: see inbox.spec.ts.
  */
 import { devices, expect, test, type Browser, type Page } from './inbox-test';
@@ -106,15 +109,39 @@ const board = {
 };
 
 async function openBoard(browser: Browser, options: Parameters<Browser['newContext']>[0] = {}, shape = id) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...options });
+  const size = options.viewport ?? { width: 1440, height: 900 };
+  const context = await browser.newContext({ viewport: size, ...options });
   await context.route((url) => !['127.0.0.1', 'localhost'].includes(url.hostname), (route) => route.abort());
   const page = await context.newPage();
   await page.goto(`${w.url}#thread=${w.threads.snooze}&shape=${shape}&view=how`);
+  await page.locator('.shp-root').waitFor();
+  if (!options.isMobile) await roomOf(page, size);
   await page.locator('.shp-dock button[title="How it works"]').click();
   await page.locator('[data-follow]').click();
   await page.getByRole('button', { name: 'Step through' }).click();
   await settle(page);
   return { context, page };
+}
+/**
+ * Give the board the room a desk window of `size` gave it when it took the window beside the sidebar (less the
+ * gutters). It now draws in the thread's pane, under the thread's header and beside the list, and lays out by its
+ * own width and height, so the window grows by that frame and each size here keeps its meaning. A phone's board
+ * takes the screen under the thread's header: phone sizes stay as they are.
+ */
+async function roomOf(page: Page, size: { width: number; height: number }) {
+  const want = await page.evaluate(([width, height]) => {
+    const main = document.querySelector<HTMLElement>('.ib-main')!;
+    const gutter = parseFloat(getComputedStyle(main).paddingTop) || 0;
+    return { width: width! - (innerWidth - main.getBoundingClientRect().width) - 2 * gutter, height: height! - 2 * gutter };
+  }, [size.width, size.height]);
+  for (let i = 0; i < 6; i++) {
+    const board = (await rect(page, '.shp-root'))!;
+    if (Math.abs(board.width - want.width) <= 1 && Math.abs(board.height - want.height) <= 1) return;
+    const now = page.viewportSize()!;
+    await page.setViewportSize({ width: now.width + want.width - board.width, height: now.height + want.height - board.height });
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  }
+  throw new Error(`the board did not get its room: ${JSON.stringify(want)}`);
 }
 const settle = (page: Page) => page.waitForTimeout(420);
 const press = async (page: Page, name: string) => {
@@ -416,7 +443,7 @@ test('with a panel open the dock stays whole beside it: this button gives up its
 test('a window made only shorter lays out again: the board clears the card, and a phone hides a slice of it', async ({ browser }) => {
   const desk = await openBoard(browser, { viewport: { width: 1440, height: 1000 } });
   await press(desk.page, 'Inputs and outputs');
-  await desk.page.setViewportSize({ width: 1440, height: 640 });
+  await roomOf(desk.page, { width: 1440, height: 640 });
   await settle(desk.page);
   expect((await rect(desk.page, '.shp-view.v-how .shp-drawn-fit'))!.bottom).toBeLessThanOrEqual((await rect(desk.page, '.shp-ex-card'))!.top);
   await desk.context.close();

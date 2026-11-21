@@ -87,3 +87,20 @@ test("on a phone New message's pickers keep their full-screen sheet: the editor'
   expect(placing.length).toBeGreaterThan(0);
   expect([...new Set(placing)].filter((selector) => !selector.includes(':not([data-phone])'))).toEqual([]);
 });
+
+test('beside the editor the list hides Runs and gives its room to the name, Run still right of it', () => {
+  const split = new Map<string, Map<string, string>>();
+  sheet().walkAtRules('media', (media) => {
+    if (!/min-width:\s*761px/.test(media.params)) return;
+    media.walkRules((rule) => {
+      const decls = new Map<string, string>();
+      rule.walkDecls((decl) => void decls.set(decl.prop, decl.value));
+      split.set(rule.selector, decls);
+    });
+  });
+  expect(split.get('.st-list-split .st-scols > .st-count')?.get('display')).toBe('none');
+  const columns = split.get('.st-list-split .st-short')?.get('grid-template-columns') ?? '';
+  // Name, Run, the space, Last run, the menu: no Runs track, and the name's cap is Runs' 40px and its gap wider.
+  expect([...columns.matchAll(/\[(\w+)\]/g)].map((m) => m[1])).toEqual(['name', 'btn', 'space', 'last', 'more', 'end']);
+  expect(columns).toContain('fit-content(calc(100% - 236px))');
+});

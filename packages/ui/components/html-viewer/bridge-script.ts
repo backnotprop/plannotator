@@ -10,6 +10,7 @@
  * the Pi extension vendors both files (apps/pi-extension/vendor.sh).
  */
 import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
+import { LINK_GUARD_FUNCTION } from "./linkGuard";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -278,8 +279,12 @@ body[data-plannotator-vim-focus-owner]:focus {
  * they match by construction; the check exists for hosts that serve the
  * generated `bridge-script.asset.js` separately (`bridgeScriptUrl`), where a
  * cached asset from a previous package version can outlive the parent code.
+ *
+ * 2: link-clicks travel only on the link guard's MessagePort (linkGuard.ts),
+ * offered once per load in a `link-offer` message with that load's key,
+ * never on the window.
  */
-export const BRIDGE_PROTOCOL_VERSION = 1;
+export const BRIDGE_PROTOCOL_VERSION = 2;
 
 export const BRIDGE_SCRIPT = `(function() {
   var PREFIX = 'plannotator-bridge-';
@@ -324,6 +329,28 @@ ${SANDBOX_SHIM_SCRIPT}
       return;
     }
     parent.postMessage(msg, '*');
+  }
+
+  // --- Links go out through the link guard (linkGuard.ts; never live) ---
+  // A link the person followed moves the host (in the Inbox: to another
+  // thread), so it never rides the window-wide postMessage the page's own
+  // script can forge. The guard runs first in the document (the inline path
+  // injects it before any page script), holds the only port the host takes
+  // links on, and sends on it only while a person's click is being dispatched,
+  // for the link that click is on. The bridge only decides WHETHER a click
+  // follows (Interact, Annotate's pin rules, forms) and hands it to the guard.
+  // On the URL path (bridgeScriptUrl) the guard is installed here, from the
+  // key on this script's tag; there a script the page put before the bridge
+  // in <head> runs first and is not covered.
+  if (!LIVE && !window.__plannotatorLinkGuard) {
+    var guardKey = null;
+    try { guardKey = document.currentScript && document.currentScript.getAttribute('data-plannotator-link-key'); } catch (ex) {}
+    if (guardKey) ${LINK_GUARD_FUNCTION}(guardKey);
+  }
+  var linkGuard = LIVE ? null : window.__plannotatorLinkGuard || null;
+  function sendOnLinkPort(msg, kind) {
+    if (!linkGuard || typeof linkGuard.follow !== 'function') return;
+    try { linkGuard.follow(kind, msg); } catch (ex) {}
   }
   // Page identity for multi-page live sessions: annotations are stamped with
   // the page they were made on, and restore filters to the current page.
@@ -907,7 +934,21 @@ ${SANDBOX_SHIM_SCRIPT}
       renderAnnotationOverlay();
     }
 
+    else if (type === PREFIX + 'set-structural-anchors') {
+      structuralAnchors = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-markers-above') {
+      var above = e.data.active === true;
+      if (above !== markersAbove) {
+        markersAbove = above;
+        renderAnnotationOverlay();
+      }
+    }
+
     else if (type === PREFIX + 'find-and-mark') {
+      // The host's word that this document is the one the comment was made on (structural anchors).
+      if (e.data.structural === true) structuralAnchors = true;
       var found = restoreAnnotation(
         e.data.id,
         e.data.annotationType || 'comment',
@@ -1764,6 +1805,11 @@ ${SANDBOX_SHIM_SCRIPT}
   var MARKER_SPREAD_STEP = 12.5;   // horizontal step for coincident markers
   var MARKER_SPREAD_EDGE = 28.5;   // effective edge clamp while spreading
   var MARKER_ASSOC_TOLERANCE = 16; // clamped point must stay this close to the visible target
+  var MARKER_ABOVE_LIFT = 13;      // markersAbove: the bubble's tail just over the element's top edge
+  // The host's opt-in (set-markers-above): an element's marker sits on its
+  // top edge, above it, at the clicked x, so it never covers a small element
+  // (a chart's bar). Where that is not shown, the clicked point, as always.
+  var markersAbove = false;
   var MAX_HIGHLIGHT_RECTS = 48;    // highlight rects drawn per range target
   var MAX_SYNC_ANNOTATIONS = 512;  // parent-synced numbering entries
 
@@ -2876,11 +2922,11 @@ ${SANDBOX_SHIM_SCRIPT}
           var zeroSize = layoutActive() && !(rect.width || 0) && !(rect.height || 0);
           var styleHidden = !zeroSize && targetStyleHidden(el);
           var point = target.point || { x: 0.5, y: 0.5 };
-          var placed = zeroSize || styleHidden ? null : markerViewportPoint(
-            clippedTargetRect(el, rect),
-            rect.left + point.x * (rect.width || 0),
-            rect.top + point.y * (rect.height || 0)
-          );
+          var markerX = rect.left + point.x * (rect.width || 0);
+          var visibleRect = zeroSize || styleHidden ? null : clippedTargetRect(el, rect);
+          var placed = !visibleRect ? null
+            : (markersAbove && markerViewportPoint(visibleRect, markerX, rect.top - MARKER_ABOVE_LIFT))
+              || markerViewportPoint(visibleRect, markerX, rect.top + point.y * (rect.height || 0));
           if (placed && seenRecordElements.indexOf(el) >= 0) placed = null;
           if (placed) {
             seenRecordElements.push(el);
@@ -3232,6 +3278,107 @@ ${SANDBOX_SHIM_SCRIPT}
     return null;
   }
 
+  // --- Structural anchors (opt-in: the parent's set-structural-anchors, or
+  // the flag on its find-and-mark). The host has checked that this document
+  // is, byte for byte, the one the comments were made on (the Inbox: a live
+  // html block's source hash). Only then may an element with no text and no
+  // stable identity be anchored by where it sits: the child index at each
+  // level from the root element down, saved with a signature of the element
+  // (tag, namespace, its own attributes). Restore follows the path and takes
+  // the element ONLY when the signature is exactly the same. It never takes
+  // an element nearby, and a page that builds its DOM differently on each
+  // load fails the check: unanchored. Off (every other host), the rule above
+  // stands: no anchor.
+  var structuralAnchors = false;
+  var STRUCTURE_MAX_DEPTH = 64;
+  var STRUCTURE_MAX_ATTRS = 24;
+  var STRUCTURE_MAX_NAME = 64;
+  var STRUCTURE_MAX_VALUE = 160;
+
+  // The viewer's own overlays are not the page's: they are not counted.
+  function structureChildren(parent) {
+    var out = [];
+    var kids = parent.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (!overlayNodes.has(kids[i])) out.push(kids[i]);
+    }
+    return out;
+  }
+
+  function structurePath(el) {
+    var path = [];
+    var current = el;
+    while (current && current !== document.documentElement) {
+      var parent = current.parentElement;
+      if (!parent || path.length >= STRUCTURE_MAX_DEPTH) return null;
+      var index = structureChildren(parent).indexOf(current);
+      if (index < 0) return null;
+      path.unshift(index);
+      current = parent;
+    }
+    return current === document.documentElement && path.length ? path : null;
+  }
+
+  // A long value (a path's d) is kept as a digest and its length.
+  function structureDigest(value) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < value.length; i++) {
+      h ^= value.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16);
+  }
+
+  // Null: an element whose attributes are past the caps gets no anchor
+  // (nothing is cut to fit: a shortened signature could match another).
+  function structureSignature(el) {
+    var list = el.attributes;
+    if (!list) return null;
+    var attrs = [];
+    for (var i = 0; i < list.length; i++) {
+      var name = list[i].name;
+      // The viewer's own marks on the page (the armed cursor on body).
+      if (name.indexOf('data-plannotator-') === 0) continue;
+      if (!name || name.length > STRUCTURE_MAX_NAME || attrs.length >= STRUCTURE_MAX_ATTRS) return null;
+      var value = String(list[i].value);
+      // The keyboard pinpoint's hover class on the element is the viewer's, not the page's.
+      if (name === 'class' && value.indexOf('plannotator-pinpoint-hover') >= 0) {
+        var own = value.split(/\\s+/).filter(function(c) { return c && c !== 'plannotator-pinpoint-hover'; });
+        if (!own.length) continue;
+        value = own.join(' ');
+      }
+      attrs.push(value.length <= STRUCTURE_MAX_VALUE ? [name, value] : [name, structureDigest(value), value.length]);
+    }
+    attrs.sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+    return { ns: el.namespaceURI || '', attrs: attrs };
+  }
+
+  function buildAnchorStructure(el) {
+    if (!structuralAnchors || isViewerOverlayNode(el)) return null;
+    var path = structurePath(el);
+    var signature = path && structureSignature(el);
+    if (!signature) return null;
+    return { path: path, ns: signature.ns, attrs: signature.attrs };
+  }
+
+  function resolveAnchorStructure(anchor) {
+    var structure = anchor.structure;
+    if (!structuralAnchors || !structure || typeof structure !== 'object') return null;
+    var path = structure.path;
+    if (!Array.isArray(path) || !path.length || path.length > STRUCTURE_MAX_DEPTH || !Array.isArray(structure.attrs)) return null;
+    var current = document.documentElement;
+    for (var i = 0; i < path.length; i++) {
+      if (typeof path[i] !== 'number') return null;
+      current = structureChildren(current)[path[i]];
+      if (!current) return null;
+    }
+    if (current.tagName.toLowerCase() !== anchor.tagName.toLowerCase()) return null;
+    var signature = structureSignature(current);
+    if (!signature || signature.ns !== structure.ns) return null;
+    if (JSON.stringify(signature.attrs) !== JSON.stringify(structure.attrs)) return null;
+    return current;
+  }
+
   function buildElementAnchor(el) {
     if (!el || el.nodeType !== 1) return null;
     var selector = buildAnchorSelector(el);
@@ -3245,7 +3392,12 @@ ${SANDBOX_SHIM_SCRIPT}
     // derived signature would validate the WRONG element after a sibling is
     // inserted or removed. A wrong-binding anchor is worse than no anchor:
     // ship none and fail closed (the pin simply doesn't restore).
-    if (!snapshot && !anchorHasStableIdentity(selector, el)) return null;
+    if (!snapshot && !anchorHasStableIdentity(selector, el)) {
+      // ...unless the host vouches for the document (structural anchors):
+      // then its place and its exact signature, never the selector.
+      var structure = buildAnchorStructure(el);
+      return structure ? { selector: selector, tagName: el.tagName.toLowerCase(), structure: structure } : null;
+    }
     return {
       selector: selector,
       tagName: el.tagName.toLowerCase(),
@@ -3277,6 +3429,8 @@ ${SANDBOX_SHIM_SCRIPT}
 
   function resolveAnchorElement(anchor) {
     if (!anchor || typeof anchor.selector !== 'string' || !anchor.selector || typeof anchor.tagName !== 'string') return null;
+    // A structural anchor resolves by its path and signature or not at all.
+    if (anchor.structure) return resolveAnchorStructure(anchor);
     return resolveAnchorSelector(anchor) || relocateBySource(anchor);
   }
 
@@ -4780,7 +4934,9 @@ ${SANDBOX_SHIM_SCRIPT}
         try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
         return;
       }
-      postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+      // Through the link guard only (see "Links go out through the link
+      // guard"): the host takes a link from nowhere else.
+      sendOnLinkPort({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) }, 'link');
     }, true);
   }
 
@@ -4827,7 +4983,8 @@ ${SANDBOX_SHIM_SCRIPT}
     var query = new URLSearchParams();
     data.forEach(function(value, key) { if (typeof value === 'string') query.append(key, value); });
     var path = action.split('#')[0].split('?')[0];
-    postToParent({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) });
+    // Through the link guard, as a form's address (see "Links go out through the link guard").
+    sendOnLinkPort({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) }, 'form');
   }
   if (!LIVE) window.addEventListener('click', submitPageForm, false);
 

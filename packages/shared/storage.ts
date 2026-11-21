@@ -8,7 +8,7 @@
  */
 
 import { join, resolve, sep } from "path";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from "fs";
 import { sanitizeTag } from "./project";
 import { resolveUserPath } from "./resolve-file";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -219,15 +219,29 @@ function getNextVersionNumber(historyDir: string): number {
   }
 }
 
+/** The agent session that submitted a plan version, as plan review knows it (its host, session id and name). */
+export interface HistoryAgent {
+  host: string;
+  session: string;
+  name: string | null;
+}
+
+/** A version's agent file beside it: `NNN.agent.json` (never matched by the `NNN.md` scans). */
+export const historyAgentFile = (version: number) => `${String(version).padStart(3, "0")}.agent.json`;
+
 /**
  * Save a plan version to the history directory.
  * Deduplication: if the latest version has identical content, skip saving.
  * Returns the version number, file path, and whether a new file was created.
+ * `agent`: the session that submitted it, written first beside it (`NNN.agent.json`), so the Inbox can say that
+ * agent is working on the plan while that session is live; none known, no file (and none left from before). Plan
+ * review passes one only while Plans is on (apps/hook/server/index.ts), so off it writes nothing new.
  */
 export function saveToHistory(
   project: string,
   slug: string,
-  plan: string
+  plan: string,
+  options: { agent?: HistoryAgent | null } = {},
 ): { version: number; path: string; isNew: boolean } {
   const historyDir = getHistoryDir(project, slug);
   const nextVersion = getNextVersionNumber(historyDir);
@@ -247,6 +261,13 @@ export function saveToHistory(
 
   const fileName = `${String(nextVersion).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
+  const agentPath = join(historyDir, historyAgentFile(nextVersion));
+  try {
+    if (options.agent) writeFileSync(agentPath, JSON.stringify({ host: options.agent.host, session: options.agent.session, name: options.agent.name }), "utf-8");
+    else rmSync(agentPath, { force: true });
+  } catch {
+    // The version without its agent: the Inbox only says less.
+  }
   writeFileSync(filePath, plan, "utf-8");
   return { version: nextVersion, path: filePath, isNew: true };
 }

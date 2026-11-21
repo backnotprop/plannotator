@@ -10,8 +10,9 @@
  */
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
-import type { CSSProperties } from 'react';
-import { useAgentFace } from './agents/agentFaces';
+import type { CSSProperties, ReactNode } from 'react';
+import { RexMark, useRexMarkOf } from './agents/rexMark';
+import { ProjectFaceMark, useShownAgentFace } from './agents/projectFace';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type AgentFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
@@ -20,17 +21,54 @@ import { isSetFace, setArtStyle, setFaceParts, setIconSrc, useSetLook, type SetF
 
 export * from '@plannotator/ui/components/inbox-thread/icons';
 
-/** The mark for an agent host; with `agent`, that agent's chosen face when it has one. */
+/**
+ * The mark for an agent host; with `agent`, that agent's chosen face when it has one, else, with Settings → Rows' Agent
+ * icons "From the project name", its project's tile (agents/projectFace.tsx).
+ */
 export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
-  return <FaceOfMark host={host} big={big} face={useAgentFace(agent)} />;
+  // An agent started in Rex carries its pane's status on the icon's corner (agents/rexMark.tsx); any other: today's icon.
+  const rex = useRexMarkOf(agent);
+  return (
+    <FaceOfMark host={host} big={big} face={useShownAgentFace(agent)} agent={agent}>
+      {rex && agent ? <RexMark mark={rex} seed={agent} size={big ? 30 : 16} /> : null}
+    </FaceOfMark>
+  );
 }
 
-/** A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). */
-export function FaceOfMark({ host, big, face }: { host: string | null | undefined; big?: boolean; face: AgentFace }) {
-  if (face === 'agent') return <UiHostMark host={host} big={big} />;
-  if (isOwnFace(face)) return <OwnMark key={face} face={face} host={host} big={big} />;
-  if (isSetFace(face)) return <SetMark key={face} face={face} host={host} big={big} />;
-  return <FaceMark face={face} big={big} />;
+/**
+ * A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). `agent`: whose
+ * project a `project` face draws. `children`: drawn inside the box after the face (the Rex status mark).
+ */
+export function FaceOfMark({ host, big, face, agent, children }: { host: string | null | undefined; big?: boolean; face: AgentFace; agent?: string | null; children?: ReactNode }) {
+  if (face === 'agent' || face === 'mark')
+    return (
+      <UiHostMark host={host} big={big}>
+        {children}
+      </UiHostMark>
+    );
+  if (face === 'project')
+    return (
+      <ProjectFaceMark agent={agent} host={host} big={big}>
+        {children}
+      </ProjectFaceMark>
+    );
+  if (isOwnFace(face))
+    return (
+      <OwnMark key={face} face={face} host={host} big={big}>
+        {children}
+      </OwnMark>
+    );
+  if (isSetFace(face))
+    return (
+      <SetMark key={face} face={face} host={host} big={big}>
+        {children}
+      </SetMark>
+    );
+  return (
+    <FaceMark face={face} big={big}>
+      {children}
+    </FaceMark>
+  );
 }
 
 /**
@@ -39,12 +77,18 @@ export function FaceOfMark({ host, big, face }: { host: string | null | undefine
  * the same box and no row changes size. Only ever an `<img>` of its address on this Inbox: an SVG runs nothing.
  * A picture that does not load (removed, kept on another machine) is the agent's own mark.
  */
-function OwnMark({ face, host, big }: { face: OwnFace; host: string | null | undefined; big?: boolean }) {
+function OwnMark({ face, host, big, children }: { face: OwnFace; host: string | null | undefined; big?: boolean; children?: ReactNode }) {
   const [failed, fail] = useImageRetry();
-  if (failed) return <UiHostMark host={host} big={big} />;
+  if (failed)
+    return (
+      <UiHostMark host={host} big={big}>
+        {children}
+      </UiHostMark>
+    );
   return (
     <span className={`ib-mk${big ? ' ib-big' : ''} ib-face ib-own`} data-agent-face={face}>
       <img src={ownIconSrc(face, true)} alt="" draggable={false} decoding="async" onError={fail} />
+      {children}
     </span>
   );
 }
@@ -55,11 +99,16 @@ function OwnMark({ face, host, big }: { face: OwnFace; host: string | null | und
  * a mask filled with the theme's text colour, with a hidden image of the same address that says when it does not
  * load. Only ever the icon's address on this Inbox; one that does not load is the agent's own mark.
  */
-function SetMark({ face, host, big }: { face: SetFace; host: string | null | undefined; big?: boolean }) {
+function SetMark({ face, host, big, children }: { face: SetFace; host: string | null | undefined; big?: boolean; children?: ReactNode }) {
   const [failed, fail] = useImageRetry();
   const { set, icon } = setFaceParts(face);
   const look = useSetLook(set);
-  if (failed) return <UiHostMark host={host} big={big} />;
+  if (failed)
+    return (
+      <UiHostMark host={host} big={big}>
+        {children}
+      </UiHostMark>
+    );
   const src = setIconSrc(set, icon);
   return (
     <span
@@ -77,6 +126,7 @@ function SetMark({ face, host, big }: { face: SetFace; host: string | null | und
       ) : (
         <img src={src} alt="" draggable={false} decoding="async" onError={fail} />
       )}
+      {children}
     </span>
   );
 }
@@ -91,7 +141,7 @@ export function AuthorMark({ author, big }: { author: InboxAuthor | null | undef
  * A face as a still picture in a mark's box (no motion: only the sidebar's Agents rows move). Until the pictures'
  * script is in, the box stays empty: no wrong picture first, nothing moves.
  */
-function FaceMark({ face, big }: { face: OurFace; big?: boolean }) {
+function FaceMark({ face, big, children }: { face: OurFace; big?: boolean; children?: ReactNode }) {
   const src = useAgentFaceSources(true)?.[face];
   return (
     <span className={`ib-mk${big ? ' ib-big' : ''} ib-face`} data-agent-face={face}>
@@ -103,6 +153,7 @@ function FaceMark({ face, big }: { face: OurFace; big?: boolean }) {
           <img className="ib-face-d" src={src.dark} alt="" draggable={false} />
         </>
       ) : null}
+      {children}
     </span>
   );
 }

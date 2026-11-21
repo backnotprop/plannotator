@@ -56,7 +56,7 @@ import type { PlannotatorConfig } from "./config";
 describe("resolveInboxLaunch", () => {
   test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
     // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
-    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null });
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null, startIn: "inbox" });
     // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
     const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
     expect(on({ inboxLaunch: {} })).toBe(true);
@@ -72,7 +72,10 @@ describe("resolveInboxLaunch", () => {
     expect(on({}, "win32")).toBe(false);
     expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
     expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
-    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null, startIn: "inbox" });
+    // Rex only when it says exactly that: anything else starts in the background.
+    expect(resolveInboxLaunch({ inboxLaunch: { startIn: "rex" } }).startIn).toBe("rex");
+    for (const startIn of ["REX", "inbox", true, 1, null]) expect(resolveInboxLaunch({ inboxLaunch: { startIn } } as unknown as PlannotatorConfig).startIn).toBe("inbox");
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
     expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
@@ -194,17 +197,14 @@ describe("parseReviewAnalysisConfig", () => {
   test("accepts independent boolean analysis flags", () => {
     expect(parseReviewAnalysisConfig({ semanticDiff: false })).toEqual({ semanticDiff: false });
     expect(parseReviewAnalysisConfig({ callFlow: true })).toEqual({ callFlow: true });
-    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({
-      semanticDiff: true,
-      callFlow: false,
-    });
+    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({ semanticDiff: true, callFlow: false });
   });
 
   test("rejects non-object and non-boolean settings", () => {
     expect(parseReviewAnalysisConfig(null)).toBeUndefined();
     expect(parseReviewAnalysisConfig([])).toBeUndefined();
-    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
     expect(parseReviewAnalysisConfig({ callFlow: 1 })).toBeUndefined();
+    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
   });
 
   test("ignores unknown keys instead of persisting them", () => {

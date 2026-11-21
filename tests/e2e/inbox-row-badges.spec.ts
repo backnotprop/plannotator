@@ -61,6 +61,8 @@ interface World {
   long: string;
   /** No badge, no thread name, no count: no line 3. */
   news: string;
+  /** No thread name, one message with a question: no preview, so a phone row's count sits beside the title. */
+  lone: string;
   /** Two agents in one thread. */
   pair: string;
   /** Holds up 3, a thread name, 2 questions and a guided review: a full phone line 3. */
@@ -92,17 +94,21 @@ async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await page.mouse.move(5, 5);
   await expect(card(page)).toHaveCount(0);
   const words = page.locator(`[data-thread-id="${threadId}"] [data-wait-words]`);
-  const target = (await words.count()) ? words : filled(page, threadId);
   // A line above the list (the notification line waits for the agents' read) can land after the rows draw and push
-  // them down, out from under a pointer already resting there. Only then is the mark hovered again: one that stayed
-  // under the pointer must open the card.
+  // them down, out from under a pointer already resting there. And the words come a moment after the rows (they wait
+  // for the list's width: `FULL_WORDS_MIN_LIST_WIDTH`), so a row read just after a load has only its marks, which the
+  // hover action covers once the row is hovered. Only in those two cases is the row hovered again, on the words where
+  // they came: a target that stayed under the pointer must open the card.
   for (let attempt = 1; ; attempt++) {
+    const onWords = (await words.count()) > 0;
+    const target = onWords ? words : filled(page, threadId);
     await target.hover();
     const rested = await target.boundingBox();
     if (await card(page).waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) return;
     const now = await target.boundingBox();
     const stayed = rested !== null && now !== null && Math.abs(rested.x - now.x) < 1 && Math.abs(rested.y - now.y) < 1;
-    if (stayed || attempt === 3) break;
+    const wordsCame = !onWords && (await words.count()) > 0;
+    if ((stayed && !wordsCame) || attempt === 3) break;
     await page.mouse.move(5, 5);
   }
   await expect(card(page)).toBeVisible();
@@ -131,6 +137,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const fcm = await pi.send({ project_path: relay, subject: 'FCM token migration', body: DEMO_MESSAGES.news });
   // Its own thread (pi's next relay message replies in the one above): no badge, no thread name, no question.
   const news = await opencode.send({ project_path: relay, subject: 'Release notes are up', body: DEMO_MESSAGES.news });
+  // Its own thread too, unnamed, its one message a question: the row's title is that message, so it has no preview.
+  const lone = await opencode.send({ project_path: docs, subject: 'Pick the cache store', body: [':::question', 'Which store backs the page cache?', '', '- [ ] Redis', '- [ ] In memory', ':::'].join('\n') });
   const long = await opencode.send({
     project_path: northwind,
     subject: "Approve the ledger reconciliation plan before Friday's cutover and the audit",
@@ -164,7 +172,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
-  world = { url, src: join(root, 'src'), agents: [claude, opencode, pi, codex], context, page, errors, stopped: stopped.thread_id as string, holding: holding.thread_id as string, long: long.thread_id as string, news: news.thread_id as string, pair: named.thread_id as string, guided: guided.thread_id as string };
+  world = { url, src: join(root, 'src'), agents: [claude, opencode, pi, codex], context, page, errors, stopped: stopped.thread_id as string, holding: holding.thread_id as string, long: long.thread_id as string, news: news.thread_id as string, lone: lone.thread_id as string, pair: named.thread_id as string, guided: guided.thread_id as string };
 });
 
 test.afterAll(async () => {
@@ -211,8 +219,10 @@ test('desktop: one question mark in its fill step, the words in full-width mode,
   }
   // One accessible name per row, its words short; the card's words as its description.
   const row = page.locator(`.ib-row[data-thread-id="${world.stopped}"]`);
-  const described = await row.getAttribute('aria-describedby');
+  // The row's description: the card's words, then the drag help every wide and three-line row has (listDrops.tsx).
+  const [described, help] = (await row.getAttribute('aria-describedby'))?.split(' ') ?? [];
   expect(described).toBeTruthy();
+  expect(help).toBe('ib-thread-drag-help');
   await expect(page.locator(`[id="${described}"]`)).toHaveText(/^Stopped: The retry worker cannot ship without this\. Also holds up: The retry worker; The admin retry view\.$/);
 
   // Left to right: the agents' marks and the project, the title cell, then the words, the badge, the count and the
@@ -520,6 +530,17 @@ test('an iPhone (WebKit): the marks only, no card; three lines, the agents\' til
         expect(r.top.titleCut || !r.top.titleInside, `row ${r.id}: the title is cut`).toBe(false);
         expectLineThree(r.l3, r.id);
       }
+      // A row with no preview: its count at the right end of the title's line, level with it, never alone on a line
+      // of its own under the title.
+      const lone = (await page.evaluate(`(() => {
+        const r = document.querySelector('.ib-mrow[data-thread-id="${world.lone}"]');
+        const box = (el) => el.getBoundingClientRect().toJSON();
+        return { title: box(r.querySelector(':scope > .ib-m2')), count: box(r.querySelector(':scope > .ib-m3 > .ib-qn')), preview: !!r.querySelector('.ib-pv') };
+      })()`)) as { title: DOMRect; count: DOMRect; preview: boolean };
+      expect(lone.preview, 'the lone row has no preview').toBe(false);
+      expect(lone.count.left, 'the count beside the title').toBeGreaterThanOrEqual(lone.title.right - 0.5);
+      const mid = (lone.count.top + lone.count.bottom) / 2;
+      expect(mid >= lone.title.top && mid <= lone.title.bottom, `the count on the title's line: ${JSON.stringify(lone)}`).toBe(true);
       // The long row: its preview is cut, the count is whole; its project is cut on one line, after both tiles.
       const long = rows.find((r) => r.id === world.long)!;
       expect(long.l3.previewCut).toBe(true);
@@ -538,6 +559,76 @@ test('an iPhone (WebKit): the marks only, no card; three lines, the agents\' til
     }
   } finally {
     await own?.close();
+  }
+});
+
+test('an iPhone in other row looks: a row with no preview keeps its marks beside the line above it; time under the preview keeps them on their own lines', async () => {
+  const health = (await (await fetch(new URL('/api/inbox/health', world.url))).json()) as { serverSession: string };
+  const rows = async (look: string[]) => {
+    const res = await fetch(new URL('/api/inbox/settings', world.url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: look, serverSession: health.serverSession }) });
+    expect(res.ok, `settings: ${res.status}`).toBe(true);
+  };
+  /** A phone row: what its marks sit beside (the agents and project line, the letter mark wrapper, or the title), its count and book and their lines, and whether it is the two-column row. */
+  const measure = (id: string) => `(() => {
+    const r = document.querySelector('.ib-mrow[data-thread-id="${id}"]');
+    if (!r) return null;
+    const box = (el) => (el ? el.getBoundingClientRect().toJSON() : null);
+    const beside = r.querySelector(':scope > .ib-m1-lead') ?? r.querySelector(':scope > .ib-lm-tt') ?? r.querySelector(':scope > .ib-m2');
+    const count = r.querySelector('.ib-qn');
+    const book = r.querySelector('[data-guide-mark]');
+    return { grid: getComputedStyle(r).display === 'grid', beside: box(beside), count: box(count), countLine: count ? count.parentElement.className.split(' ')[0] : null, book: box(book), bookLine: book ? book.parentElement.className.split(' ')[0] : null, preview: !!r.querySelector('.ib-pv') };
+  })()`;
+  type Row = { grid: boolean; beside: DOMRect; count: DOMRect; countLine: string; book: DOMRect | null; bookLine: string | null; preview: boolean };
+  const pv = `document.querySelectorAll('.ib-mrow .ib-pv').length`;
+  const lk = (c: string) => `!!document.querySelector('.ib-listcol.${c}')`;
+  const own = await webkit.launch({ args: [] });
+  try {
+    const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: 'light', reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    /**
+     * Show a look and wait until the list draws it: the look is read after the page loads (a page first paints the one
+     * it had), so `ready` is something only this look draws, never a fixed wait.
+     */
+    const show = async (options: string[], ready: string) => {
+      await rows(options);
+      await page.goto('about:blank');
+      await page.goto(world.url);
+      await expect.poll(() => page.evaluate(ready), { message: `the look ${options}` }).toBe(true);
+    };
+    const LOOKS: [string, string[], string, string[]][] = [
+      // [the look, its options, what only it draws, the rows with no preview in it]
+      ['Thread name first', ['smallNames', 'titleFirst'], `${lk('ib-lk-tfirst')} && !${lk('ib-lk-tbelow')} && ${pv} > 0`, [world.lone]],
+      ['Grey line under the name: None', ['smallNames', 'hidePreview'], `${lk('ib-lk-small')} && !!document.querySelector('.ib-mrow') && !${lk('ib-lk-tfirst')} && !${lk('ib-lk-tbelow')} && ${pv} === 0 && !document.querySelector('.ib-lm-tt')`, [world.lone, world.holding, world.guided]],
+      ['Letter marks, Inline', ['smallNames', 'marksThreads', 'markInline'], `!${lk('ib-lk-tfirst')} && ${pv} > 0 && !!document.querySelector('.ib-mrow .ib-lm-tt')`, [world.lone]],
+    ];
+    for (const [look, options, ready, ids] of LOOKS) {
+      await show(options, ready);
+      for (const id of ids) {
+        const name = `${look}: row ${id}`;
+        await expect.poll(async () => ((await page.evaluate(measure(id))) as Row | null)?.grid, { message: `${name}: the marks beside the line above` }).toBe(true);
+        const r = (await page.evaluate(measure(id))) as Row;
+        expect(r.preview, `${name}: no preview`).toBe(false);
+        expect(r.count.left, `${name}: the count right of that line`).toBeGreaterThanOrEqual(r.beside.right - 0.5);
+        const mid = (r.count.top + r.count.bottom) / 2;
+        expect(mid >= r.beside.top && mid <= r.beside.bottom, `${name}: the count on that line: ${JSON.stringify(r)}`).toBe(true);
+        if (r.book) expect(r.bookLine, `${name}: the book with the count`).toBe(r.countLine);
+      }
+    }
+    // Time under the preview: the row's end is on the time's own line, so nothing moves up. With Grey line None too, a
+    // guided review's book has its line 3 to itself: it stays there, never alone beside the title above its count.
+    await show(['smallNames', 'timeBelow', 'hidePreview'], `${lk('ib-lk-tbelow')} && ${pv} === 0`);
+    const guided = (await page.evaluate(measure(world.guided))) as Row;
+    expect(guided.grid, `time under the preview: the guided row keeps its lines: ${JSON.stringify(guided)}`).toBe(false);
+    expect(guided.bookLine, 'time under the preview: the book on its line 3').toBe('ib-m3');
+    expect(guided.countLine, "time under the preview: the count on the time's line").toBe('ib-m4');
+    expect(guided.book!.top, 'time under the preview: the book above the time line').toBeLessThan(guided.count.top);
+    await show(['smallNames', 'timeBelow'], `${lk('ib-lk-tbelow')} && ${pv} > 0`);
+    const lone = (await page.evaluate(measure(world.lone))) as Row;
+    expect(lone.grid, 'time under the preview: the lone row keeps its lines').toBe(false);
+    expect(lone.countLine, "time under the preview: the lone row's count on the time's line").toBe('ib-m4');
+  } finally {
+    await rows(['smallNames']);
+    await own.close();
   }
 });
 

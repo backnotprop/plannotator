@@ -32,7 +32,7 @@ const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, 
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
-  mock.module('#guide-reader', () => ({ default: () => null }));
+  mock.module('#guide-reader', () => ({ default: () => null, PullChangesTree: () => null }));
   // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
   // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
   const seam: string = './guide/PlatformPost.tsx';

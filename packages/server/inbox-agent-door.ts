@@ -95,6 +95,8 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       );
     },
     walkthroughThread: () => false,
+    // Branch reviews: a cloud agent's report is a branch that lives wherever it pushed it (inbox-mcp-branch.ts).
+    cloudAgent: { homeRoot: agents.homeRoot(agent) },
     // A routine runs an agent on the person's computer: kept to the agents on it.
     scheduledOn: () => false,
     sessionWakes: async (_host, session) => session === agent.session && hasCloudWake(agent),
@@ -213,6 +215,10 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       const extra = Object.keys(args)[0];
       if (extra) throw new DoorRefusal("validation_error", `${extra}: whoami takes no fields.`);
       return whoami(agent);
+    }
+    // The person can still ask for one in a cloud agent's thread (/create-routine): say why not, true whether Routines are on or off.
+    if (tool === "routine") {
+      throw new DoorRefusal("tool_not_allowed", "routine: a routine runs an agent on the person's computer, and you run elsewhere, so nothing was written. Tell the person to make it in Routines in the Inbox, or to ask an agent on their computer.");
     }
     const pieceResult = inboxAgentPieceAction(pieces, agent.session, tool, args);
     if (pieceResult) return pieceResult;

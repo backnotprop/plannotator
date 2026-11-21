@@ -129,7 +129,7 @@ describe('review entry assets', () => {
     const build = read('apps/review/diagram-engine/build.ts');
     expect(build).toContain("path.join(uiRoot, 'utils/mermaid.ts')");
     expect(build).toContain("path.join(uiRoot, 'utils/graphviz.ts')");
-    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts"');
+    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts && sem-jiff-copy-wasm dist/sem-diff"');
   });
 
   // The other half of the optimization: the renderers must stay OFF the
@@ -199,7 +199,7 @@ describe('review entry assets', () => {
     // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
     // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`. The PR page's
     // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx.
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx'];
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx', 'packages/inbox/guide/PullChangesTree.tsx', 'packages/inbox/guide/useSemDiffClient.ts'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
@@ -349,6 +349,17 @@ describe('review entry assets', () => {
     }
   });
 
+  test('the opt-in @pierre/patches WASM is aliased out of every bundled app', () => {
+    for (const config of [
+      'apps/review/vite.config.ts',
+      'apps/hook/vite.config.ts',
+      'apps/portal/vite.config.ts',
+      'apps/inbox/vite.config.ts',
+    ]) {
+      expect(read(config)).toContain("'@pierre/patches': path.resolve(");
+    }
+  });
+
   // The alias assertions above only read SOURCE. A future @pierre/diffs bump
   // could reach the same inlined blob through a different import specifier and
   // every source check would still pass, so this reads the ARTIFACT: a base64
@@ -375,6 +386,14 @@ describe('review entry assets', () => {
   // (`inlineDynamicImports`, vite-plugin-singlefile) builds and passes
   // everything else while quietly restoring the ~25 MB first load over a
   // tailnet or tunnel, so this reads the ARTIFACT.
+  const forkBundles = { 'apps/hook/dist/inbox.html': true, 'apps/hook/dist/surface.html': false, 'apps/hook/dist/shape.html': false };
+  for (const [path, fork] of Object.entries(forkBundles)) {
+    test.skipIf(!existsSync(resolve(root, path)))(`${path} draws diffs with ${fork ? 'the vendored fork' : 'the stock'} @pierre/diffs`, () => {
+      const onFork = readFileSync(resolve(root, path), 'utf8').includes('data-connector-level');
+      expect({ path, onFork }).toEqual({ path, onFork: fork });
+    });
+  }
+
   const packedBundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/review.html'];
   for (const path of packedBundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} loads only its entry chunk and stylesheet up front`, async () => {

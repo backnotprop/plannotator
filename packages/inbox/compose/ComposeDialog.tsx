@@ -102,7 +102,7 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPullAsk, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 import { LaunchTipCard } from './LaunchTipCard';
 import { LAUNCH_TIP_SAID, LAUNCH_TIP_TIMES, launchTipPlace, launchTipPlainOpen, type LaunchTipPlace } from './launchTip';
@@ -155,10 +155,9 @@ export interface ComposeRequest {
   files?: readonly File[];
   /** To opens on its own list at once: the person picks a running agent or a new session (compose/openComposer.ts). */
   pickTo?: boolean;
+  /** Told once this message is sent, after the window's own `onSent`, or held for another machine (`{ held }`): a plan's Send. */
+  onSent?: (sent: ComposeSent | { held: ComposeHeld }) => void;
 }
-
-
-
 
 export interface ComposeTransport {
   sessions: ComposeSessionsLoader;
@@ -239,13 +238,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
-  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : typed.kind);
+  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box?.branch ? 'local' : typed.kind);
   // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
   const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
   const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
   const linkKept = useRef(typed.link ?? '');
   const [linkRead, setLinkRead] = useState<InboxReviewLinkAnswer | null>(null);
-  const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
+  const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>(box?.branch ? 'branch' : 'uncommitted'); // Branch reviews' "Start a review": that branch, whole.
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
   // A pick kept or opened earlier that has since gone into review (handed elsewhere, say): its thread answers for it now. The words stay.
@@ -442,7 +441,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
-  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone);
+  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone, { defaultFor: trustPick?.projectId ?? null, say });
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
@@ -469,7 +468,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
+    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
@@ -510,7 +509,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // Never the last project's: its branch would go into the message if Start came before this read.
     setReviewSummary(null);
     const read = new AbortController();
-    inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal).then(setReviewSummary, () => setReviewSummary(null));
+    inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal, reviewChanges === 'branch' && box.branch?.projectId === reviewProject.id ? box.branch.name : undefined).then(setReviewSummary, () => setReviewSummary(null));
     return () => read.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewProject?.id, reviewChanges]);
@@ -808,8 +807,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         : reviewKind === 'walkthrough'
           ? walkthroughMessage(body)
           : boxPull || linkOnly
-          ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
-          : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body });
+          ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), reviewBoxPullAsk(box.ask, body))
+          : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body, ask: box.ask });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
@@ -836,9 +835,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(words, skills) : words,
         idempotency_key: sendKey.current,
-        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         ...(box && reviewKind === 'walkthrough' ? { review: { kind: 'walkthrough' as const } } : {}),
-        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: box?.ask === 'picture_it' ? ('picture_it' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
@@ -862,13 +861,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }
         : { session: target!.session, host: target!.host, projectName: targetMachineName ? `${target!.project.name} · ${targetMachineName}` : target!.project.name };
       if (box) forgetUnsentReview();
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) });
+      const sent: ComposeSent = { threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? reviewBoxPullAsk(box?.ask, body).kind : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) };
+      for (const tell of [props.onSent, request.onSent]) tell?.(sent);
     } catch (cause) {
       if (cause instanceof InboxHeldError && (start?.machine || targetOn) && props.onHeld) {
         // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there
         // when it is back. Compose closes; the window's toast offers Cancel while it has not left.
         if (draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
-        props.onHeld({
+        [props.onHeld, (held: ComposeHeld) => request.onSent?.({ held })].forEach((tell) => tell?.({
           key: cause.outbox.key,
           queued: cause.outbox.state === 'queued',
           machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
@@ -878,7 +878,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
           words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
-        });
+        }));
       } else if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');

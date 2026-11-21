@@ -7,14 +7,17 @@
  * - on, a route is reachable from anywhere but the owner's window on this computer, another site reads a plan, or a
  *   POST from a stale page (another server session) records a look;
  * - the settings switch takes a malformed value, does not stick, or answers what it did not save;
- * - turning it on does not import the library, and two imports run at once.
+ * - turning it on does not import the library, and two imports run at once;
+ * - a window open when it is turned on or off (from `plannotator plans`, saved through the Inbox) does not hear it:
+ *   `event: capabilities` must name `plans: { on: true }` while on and `{ on: false }` on the change that turned it
+ *   off, and nothing of Plans otherwise.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { answerInboxCapabilities, capabilitiesWire, checkInboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, type InboxCapabilityGuard } from "./inbox-capability";
-import { createPlansCapability } from "./plans-capability";
+import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, type InboxCapabilityGuard } from "./inbox-capability";
+import { createPlansCapability, PLAN_HISTORY_WATCH_FOLDERS } from "./plans-capability";
 import { createPlanStore, type PlanStore } from "@plannotator/shared/plans/store";
 import { saveFinalSnapshot, saveToHistory } from "@plannotator/shared/storage";
 import { appendFeedbackRecord } from "@plannotator/shared/feedback-archive";
@@ -54,7 +57,7 @@ function files(): Map<string, string> {
   return out;
 }
 
-function capabilityWorld(options: { fixed?: boolean } = {}) {
+function capabilityWorld(options: { fixed?: boolean; shareFixed?: boolean } = {}) {
   let opened = 0;
   let changed = 0;
   const capability = createPlansCapability({
@@ -118,7 +121,7 @@ describe("Plans off costs nothing", () => {
     expect(INBOX_MCP_INSTRUCTIONS).not.toMatch(/\bPlans\b|pln_|plan-library|plan library/);
   });
 
-  test("only the capability seam and the plans command reach Plans' modules: not plan review, the Inbox tool, the mod or Pi", () => {
+  test("only the capability seam, the plans command and the window's Plans page reach Plans' modules: not plan review, the Inbox tool, the mod or Pi", () => {
     const root = resolve(import.meta.dir, "../..");
     const allowed = new Set([
       "packages/core/plans.ts",
@@ -126,6 +129,11 @@ describe("Plans off costs nothing", () => {
       "packages/shared/plans/import.ts",
       "packages/shared/plans/routes.ts",
       "packages/shared/plans/switch.ts",
+      // Share this space reads the library to send it: reached only from the capability, behind its own switch.
+      "packages/core/space-share.ts",
+      "packages/shared/spaces/share-job.ts",
+      "packages/shared/spaces/record.ts",
+      "packages/shared/spaces/engine.ts",
       "packages/server/inbox-capability.ts",
       "packages/server/plans-capability.ts",
       "packages/server/inbox.ts",
@@ -141,7 +149,8 @@ describe("Plans off costs nothing", () => {
         if (entry.isDirectory()) walk(path);
         else if (/\.(ts|tsx|mjs)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
           const rel = relative(root, path).split("\\").join("/");
-          if (!allowed.has(rel) && reaches.test(readFileSync(path, "utf8"))) found.push(rel);
+          // The Inbox window's Plans page reads the routes' records (types and pure checks only: core is browser-safe).
+          if (!allowed.has(rel) && !rel.startsWith("packages/inbox/plans/") && reaches.test(readFileSync(path, "utf8"))) found.push(rel);
         }
       }
     };
@@ -190,8 +199,190 @@ describe("Plans on", () => {
     expect(running).not.toBeNull();
     expect(capability.sync()).toBe(running!);
     await running;
-    const second = (await (await route(list, "GET", "/api/plans"))!.json()) as { plans: unknown[] };
+    // Caught up: the pickup this request starts is not "importing", or a window polling while importing never stops.
+    const second = (await (await route(list, "GET", "/api/plans"))!.json()) as { plans: unknown[]; importing: boolean };
     expect(second.plans).toHaveLength(1);
+    expect(capability.importing()).not.toBeNull();
+    expect(second.importing).toBe(false);
+    await capability.importing();
+  });
+
+  test("the home's poll: 304 with no body while nothing changed, and it picks up plan history at most once per pollPickUpMs", async () => {
+    historyFixture();
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const get = (path: string, etag?: string) => routeInboxCapabilities(list, new Request(`http://127.0.0.1:1${path}`, etag ? { headers: { "If-None-Match": etag } } : {}), new URL(`http://127.0.0.1:1${path}`), owner);
+    // An ordinary read picks up (and the whole import runs once).
+    await get("/api/plans");
+    await capability.importing();
+    const answer = (await get("/api/plans?poll=1"))!;
+    // A poll right after: no pickup (the last one was under a minute ago).
+    expect(capability.importing()).toBeNull();
+    const etag = answer.headers.get("ETag")!;
+    expect(etag).toBeTruthy();
+    const unchanged = (await get("/api/plans?poll=1", etag))!;
+    expect(unchanged.status).toBe(304);
+    expect(await unchanged.text()).toBe("");
+    expect(capability.importing()).toBeNull();
+    // An ordinary read still picks up at once.
+    await get("/api/plans");
+    expect(capability.importing()).not.toBeNull();
+    await capability.importing();
+  });
+
+  test("plan review's write into history is heard: the next poll picks it up and answers with it, past the slow pickup", async () => {
+    historyFixture();
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, settleMs: 0, openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const poll = async () => (await (await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans?poll=1"), new URL("http://127.0.0.1:1/api/plans?poll=1"), owner))!.json()) as { plans: { name: string }[] };
+    await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans"), new URL("http://127.0.0.1:1/api/plans"), owner);
+    await capability.importing();
+    expect((await poll()).plans.map((p) => p.name)).toEqual(["Auth refactor"]);
+    // Plan review writes a new plan (settled: an hour old); within the minute the slow pickup would wait.
+    const dir = join(dataDir, "history", "api", "rate-limits-2026-11-02");
+    mkdirSync(dir, { recursive: true });
+    const when = new Date(Date.now() - 3_600_000);
+    writeFileSync(join(dir, "001.md"), "# Rate limits\n\nv1\n");
+    utimesSync(join(dir, "001.md"), when, when);
+    let names: string[] = [];
+    for (let i = 0; i < 200 && !names.includes("Rate limits"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      names = (await poll()).plans.map((p) => p.name);
+    }
+    expect(names.sort()).toEqual(["Auth refactor", "Rate limits"]);
+    // Heard once: the poll after it waits again.
+    await poll();
+    expect(capability.importing()).toBeNull();
+  }, 15_000);
+
+  test("on Linux a history of more folders than PLAN_HISTORY_WATCH_FOLDERS is not watched (inotify is shared): the slow pickup alone finds it", async () => {
+    historyFixture();
+    for (let i = 0; i <= PLAN_HISTORY_WATCH_FOLDERS; i++) mkdirSync(join(dataDir, "history", "bulk", `plan-${i}`), { recursive: true });
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, settleMs: 0, platform: "linux", openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const poll = async () => (await (await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans?poll=1"), new URL("http://127.0.0.1:1/api/plans?poll=1"), owner))!.json()) as { plans: { name: string }[] };
+    await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans"), new URL("http://127.0.0.1:1/api/plans"), owner);
+    await capability.importing();
+    const dir = join(dataDir, "history", "api", "rate-limits-2026-11-02");
+    mkdirSync(dir, { recursive: true });
+    const when = new Date(Date.now() - 3_600_000);
+    writeFileSync(join(dir, "001.md"), "# Rate limits\n\nv1\n");
+    utimesSync(join(dir, "001.md"), when, when);
+    // Long past the time a heard write is picked up here (under a second): nothing was heard, so the poll waits.
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect((await poll()).plans.map((p) => p.name)).toEqual(["Auth refactor"]);
+    }
+  }, 15_000);
+
+  test("an import that keeps failing waits longer each time, is logged once, says so in the list, and Try again runs it now", async () => {
+    historyFixture();
+    const lines: string[] = [];
+    let fail = true;
+    let imports = 0;
+    const real = createPlanStore({ dataDir });
+    const store = new Proxy(real, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          if (key === "legacyMap") imports++;
+          if (fail && key === "legacyMap") throw new Error("disk says no");
+          return value.apply(target, args);
+        };
+      },
+    });
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, retryMs: 1000, retryMaxMs: 3000, log: (line) => lines.push(line), openStore: () => store });
+    const list = [capability];
+    const read = async (path = "/api/plans") => (await (await route(list, "GET", path))!.json()) as { importing: boolean; import_error: string | null };
+    let now = Date.UTC(2026, 10, 2, 9);
+    const at = (ms: number) => setSystemTime(new Date((now += ms)));
+    /** Polls the list at `ms` from the last step, and says whether that poll started an import. */
+    const pollStarts = async (ms: number) => {
+      at(ms);
+      const before = imports;
+      const answer = await read();
+      expect(answer.importing).toBe(false);
+      await capability.importing()?.catch(() => {});
+      return imports > before;
+    };
+
+    try {
+      at(0);
+      await capability.sync().catch(() => {});
+      // Failed: said in the list (not "importing"), and logged once.
+      const answer = await read();
+      expect(answer.import_error).toContain("disk says no");
+      expect(capability.importing()).toBeNull();
+      // Waits 1 s, then 2 s, then 3 s (the cap), then 3 s: the polls in between start nothing.
+      expect(await pollStarts(500)).toBe(false);
+      expect(await pollStarts(600)).toBe(true);
+      expect(await pollStarts(1500)).toBe(false);
+      expect(await pollStarts(600)).toBe(true);
+      expect(await pollStarts(2900)).toBe(false);
+      expect(await pollStarts(200)).toBe(true);
+      expect(await pollStarts(2900)).toBe(false);
+      expect(await pollStarts(200)).toBe(true);
+      // The same error each time: one line in the log.
+      expect(lines).toHaveLength(1);
+
+      // Try again: runs now, whatever the wait, and the list says importing until it ends.
+      fail = false;
+      at(10);
+      const retried = await read("/api/plans?retry=1");
+      expect(retried.importing).toBe(true);
+      await capability.importing();
+      const after = await read();
+      expect(after.import_error).toBeNull();
+      expect(lines).toHaveLength(1);
+    } finally {
+      setSystemTime();
+    }
+  });
+});
+
+describe("Share this space is its own switch", () => {
+  test("off by default: its paths are any unknown plan path's 404, the settings answer is unchanged, nothing is written", async () => {
+    historyFixture();
+    const { list, capability } = capabilityWorld({ fixed: true });
+    await capability.sync();
+    const id = createPlanStore({ dataDir }).list()[0]!.id;
+    const before = files();
+    for (const [method, tail] of [["GET", ""], ["POST", ""], ["POST", "/keep"], ["POST", "/delete"]] as const) {
+      const answer = await route(list, method, `/api/plans/${id}/share${tail}`, method === "POST" ? {} : undefined);
+      expect([tail, answer?.status]).toEqual([tail, 404]);
+    }
+    expect(capabilitiesWire(list)).toEqual({ plans: { on: true } });
+    expect(files()).toEqual(before);
+  });
+
+  test("on: the status answers the owner's window only, the settings say so, and PLANNOTATOR_SHARE=disabled turns it off", async () => {
+    historyFixture();
+    const { list, capability } = capabilityWorld({ fixed: true, shareFixed: true });
+    await capability.sync();
+    const id = createPlanStore({ dataDir }).list()[0]!.id;
+    const answer = await route(list, "GET", `/api/plans/${id}/share`);
+    expect(answer?.status).toBe(200);
+    expect(await answer!.json()).toMatchObject({ phase: "none", link: null, signed_in: false });
+    // Going down with the Inbox: nothing of a share is left going.
+    capability.stopped!();
+    expect(capability.shares().running(id)).toBeNull();
+    expect(capabilitiesWire(list)).toEqual({ plans: { on: true, share: true } });
+    expect((await route(list, "GET", `/api/plans/${id}/share`, undefined, { ...owner, local: false }))?.status).toBe(404);
+    expect((await route(list, "POST", `/api/plans/${id}/share`, { serverSession: "another-page" }))?.status).toBe(409);
+    // The real switch: config.json, and the one off switch every share has.
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxPlans: true, inboxSpaceShare: true }));
+    const real = createPlansCapability({ dataDir, changed: () => {} });
+    expect(real.settingsWire!()).toEqual({ plans: { on: true, share: true } });
+    const was = process.env.PLANNOTATOR_SHARE;
+    process.env.PLANNOTATOR_SHARE = "disabled";
+    try {
+      expect(real.settingsWire!()).toEqual({ plans: { on: true } });
+      expect((await routeInboxCapabilities([real], request("GET", `/api/plans/${id}/share`), new URL(`http://127.0.0.1:1/api/plans/${id}/share`), owner))?.status).toBe(404);
+    } finally {
+      if (was === undefined) delete process.env.PLANNOTATOR_SHARE;
+      else process.env.PLANNOTATOR_SHARE = was;
+    }
   });
 });
 
@@ -219,6 +410,39 @@ describe("Plans' settings switch", () => {
     expect(changed()).toBe(2);
     expect(statSync(join(dataDir, "plan-library")).isDirectory()).toBe(true);
     expect((await route(list, "GET", "/api/plans"))?.status).toBe(404);
+  });
+
+  test("every open window hears it: the capabilities frame names Plans while on, and off only on the change", async () => {
+    historyFixture();
+    const { list, capability, changed } = capabilityWorld();
+    // Off and unchanged: a frame for another switch names nothing of Plans.
+    expect(capabilitiesFrame(list, false)).toEqual({});
+    // Saved on (what `plannotator plans` posts to a running Inbox): the windows are told, and the frame says so.
+    answerInboxCapabilities(list, { plans: { on: true } });
+    expect(changed()).toBe(1);
+    expect(capabilitiesFrame(list, true)).toEqual({ plans: { on: true } });
+    expect(capabilitiesFrame(list, false)).toEqual({ plans: { on: true } });
+    await capability.importing();
+    // Saved off (`plannotator plans off`): told again; that frame says off, a later frame for another switch nothing.
+    answerInboxCapabilities(list, { plans: { on: false } });
+    expect(changed()).toBe(2);
+    expect(capabilitiesFrame(list, true)).toEqual({ plans: { on: false } });
+    expect(capabilitiesFrame(list, false)).toEqual({});
+  });
+
+  test("a window the routes do not answer (a phone, a linked device) is never told of Plans, so it shows no dead row", async () => {
+    historyFixture();
+    const { list, capability } = capabilityWorld();
+    answerInboxCapabilities(list, { plans: { on: true } });
+    await capability.importing();
+    expect(capabilitiesWire(list, true)).toEqual({ plans: { on: true } });
+    expect(capabilitiesWire(list, false)).toEqual({});
+    expect(capabilitiesFrame(list, true, false)).toEqual({});
+    expect(capabilitiesFrame(list, false, false)).toEqual({});
+    // The same windows the routes refuse.
+    expect((await route(list, "GET", "/api/plans", undefined, { ...owner, local: false }))?.status).toBe(404);
+    answerInboxCapabilities(list, { plans: { on: false } });
+    expect(capabilitiesFrame(list, true, false)).toEqual({});
   });
 
   test("started while on: the import runs once the Inbox is up", async () => {

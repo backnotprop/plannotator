@@ -15,6 +15,7 @@ import { inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type Inbo
 import { agentListFilter, type AgentListFilter } from './agents/model';
 import { givenName, useAgentNames, type AgentNames } from './agents/agentNames';
 import type { MachinesModel } from './machines';
+import { usePictureWorld } from './pictureWorld';
 
 const STATES = new Set<InboxAgent['state']>(['waiting', 'working', 'idle', 'ended']);
 
@@ -34,7 +35,8 @@ export function setInboxAgents(next: unknown): void {
     ? next
         .filter((group): group is InboxAgentsGroup => !!group && typeof group === 'object' && Array.isArray((group as InboxAgentsGroup).agents))
         .map((group) => {
-          const agents = group.agents.filter(isAgent).map(inboxAgentNamesChecked);
+          // `show` as this Inbox sent it: its own, and a linked machine's as that machine offered it (inboxPeerAgentsGroup).
+          const agents = group.agents.filter(isAgent).map((agent) => inboxAgentNamesChecked(agent, { show: true }));
           return {
             ...(typeof group.machine === 'string' ? { machine: group.machine } : {}),
             agents,
@@ -42,15 +44,28 @@ export function setInboxAgents(next: unknown): void {
             ended_today: typeof group.ended_today === 'number' && group.ended_today >= 0 ? group.ended_today : 0,
             // A linked machine's faces and given names, kept there (agents/agentFaces.ts draws them).
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
+            // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
+            ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
+            // The person's "Agent status" setting (agents/agentStatus.ts): this Inbox's own group says it.
+            ...(group.status_marks === true ? { status_marks: true as const } : {}),
           };
         })
     : null;
   const json = JSON.stringify(clean);
-  if (json === currentJson) return;
-  current = clean === null ? null : Object.freeze(clean);
-  currentJson = json;
-  for (const listener of listeners) listener();
-  for (const listener of quiet) listener();
+  if (json !== currentJson) {
+    current = clean === null ? null : Object.freeze(clean);
+    currentJson = json;
+    for (const listener of listeners) listener();
+    for (const listener of quiet) listener();
+  }
+  for (const listener of reads) listener();
+}
+
+const reads = new Set<() => void>();
+/** Hear every list read, one that changes nothing included (agents/agentStatus.ts: a landed press yields to the list). */
+export function onInboxAgentsRead(listener: () => void): () => void {
+  reads.add(listener);
+  return () => reads.delete(listener);
 }
 
 const quiet = new Set<() => void>();
@@ -70,6 +85,12 @@ export function subscribeInboxAgents(listener: () => void): () => void {
 }
 
 const snapshot = () => current;
+
+/** Show in Rex was refused (the pane is gone, or Rex's app takes no actions now): the item goes until a read offers it again. */
+export function dropRexShow(session: string): void {
+  if (!current) return;
+  setInboxAgents(current.map((group) => ({ ...group, agents: group.agents.map((agent) => (agent.session === session && agent.place ? { ...agent, place: { kind: agent.place.kind, line: agent.place.line } } : agent)) })));
+}
 
 /** A named agent (its given name as `label`) → the agent as the list read it. */
 const asListed = new WeakMap<InboxAgent, InboxAgent>();
@@ -120,15 +141,18 @@ export function agentIsNamed(agent: InboxAgent): boolean {
  * draw later with focus on the page (rowMenu.test.tsx). As state, the agents draw in the same pass as the read.
  */
 export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
-  const [groups, setGroups] = useState(snapshot);
+  // In a picture (pictureWorld.ts): its own agents, the person's never read.
+  const world = usePictureWorld();
+  const [groups, setGroups] = useState(() => (world ? null : snapshot()));
   useEffect(() => {
+    if (world) return;
     const read = () => setGroups(snapshot());
     // A read that landed between the first draw and this subscription.
     read();
     return subscribeInboxAgents(read);
-  }, []);
+  }, [world]);
   const names = useAgentNames();
-  return withGivenNames(groups, names);
+  return world ? world.agents : withGivenNames(groups, names);
 }
 
 /**

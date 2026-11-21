@@ -28,6 +28,8 @@ export interface InboxCapability {
   settingsWire?(): Record<string, unknown>;
   /** The Inbox is up (it runs any background work it needs while on). */
   started?(): void;
+  /** The Inbox is going down: it ends what it has going (runs, listeners, watches). */
+  stopped?(): void;
 }
 
 /** What a capability may use of the Inbox core: only this. */
@@ -75,9 +77,24 @@ export async function routeInboxCapabilities(list: readonly InboxCapability[], r
   return (await capability.route!(req, url)) ?? NOT_FOUND();
 }
 
-/** Every capability's part of `GET /api/inbox/settings`. */
-export function capabilitiesWire(list: readonly InboxCapability[]): Record<string, unknown> {
-  return Object.assign({}, ...list.map((c) => c.settingsWire?.() ?? {}));
+/**
+ * Every capability's part of `GET /api/inbox/settings`. `local`: the window is the owner's on this computer, the only
+ * place a capability's routes answer (`routeInboxCapabilities`); any other window (the tailnet, a phone) is told
+ * nothing of them, so it draws no row that would lead to a 404.
+ */
+export function capabilitiesWire(list: readonly InboxCapability[], local = true): Record<string, unknown> {
+  return local ? Object.assign({}, ...list.map((c) => c.settingsWire?.() ?? {})) : {};
+}
+
+/**
+ * Every capability's part of `event: capabilities`: its settings wire while on, and `{ [key]: { on: false } }` to
+ * the frame of the change that turned it off (`changed`: a switch on this seam changed), so a window drops it at
+ * once and a frame names nothing of it otherwise. `local`: as for `capabilitiesWire`, a window anywhere else hears
+ * nothing of them.
+ */
+export function capabilitiesFrame(list: readonly InboxCapability[], changed: boolean, local = true): Record<string, unknown> {
+  if (!local) return {};
+  return Object.assign({}, ...list.map((c) => (c.on() ? (c.settingsWire?.() ?? {}) : changed ? { [c.key]: { on: false } } : {})));
 }
 
 /** The settings POST names a capability's switch. */
@@ -111,6 +128,17 @@ export function answerInboxCapabilities(list: readonly InboxCapability[], body: 
     Object.assign(answer, c.settingsWire?.() ?? {}, body[c.key] !== undefined ? { [c.key]: { on: c.on() } } : {});
   }
   return answer;
+}
+
+/** The Inbox is going down: each capability ends what it has going. */
+export function stopInboxCapabilities(list: readonly InboxCapability[]): void {
+  for (const c of list) {
+    try {
+      c.stopped?.();
+    } catch {
+      // A capability that cannot end cleanly never holds the Inbox's own stop.
+    }
+  }
 }
 
 /** The Inbox is up: each capability that is on starts its background work. */

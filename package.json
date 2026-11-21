@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.66",
+  "version": "0.29.1",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -52,13 +52,14 @@
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:e2e:quarantine": "bun run scripts/e2e-quarantine.ts",
     "e2e:slice": "bun run scripts/e2e-slice.ts",
+    "ci:affected": "bun run scripts/ci-affected.ts",
     "verify:inbox-live": "bun scripts/inbox-live-verify.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.303",
     "@opencode-ai/sdk": "1.19.3",
-    "@pierre/diffs": "1.6.4",
+    "@pierre/diffs": "1.7.0-beta.3",
     "diff": "^8.0.4",
     "dockview-react": "^5.2.0",
     "dompurify": "^3.4.17",
@@ -66,6 +67,7 @@
     "sonner": "^2.0.8"
   },
   "devDependencies": {
+    "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.6.tgz",
     "@agentclientprotocol/sdk": "1.9.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "1.64.1",
@@ -84,6 +86,7 @@
   },
   "patchedDependencies": {
     "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
-    "@pierre/diffs@1.6.4": "patches/@pierre%2Fdiffs@1.6.4.patch"
+    "@pierre/diffs@1.7.0-beta.3": "patches/@pierre%2Fdiffs@1.7.0-beta.3.patch",
+    "@pierre/trees@1.0.0": "patches/@pierre%2Ftrees@1.0.0.patch"
   }
 }

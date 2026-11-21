@@ -15,10 +15,10 @@
  *     board shrinks to the corner card naming the part; the card grows it back as
  *     it was. Show me on the same lines opens it again, from any window, and asks
  *     nothing. Plain Ask opens the Ask window with the lines named.
- *  3. The thread works with the board as Shape does on its own: the Chat's Ask
- *     reaches the session and its answer shows; the crosshair's (Comment, in
+ *  3. The thread works with the board as Shape does on its own: the whole board's
+ *     Ask reaches the session and its answer shows in its box; the crosshair's (Comment, in
  *     Annotate's place on the Inbox's board) and Global comment's Change it wake it and a new version draws in; the thread's own header has
- *     the Pebble; the board's Thread tab reads the thread.
+ *     the Pebble; the board has no Chat (its side panel is References only).
  *  4. Show me again is a new turn and a new version of the same board.
  *  5. A busy agent gets the Ask window's choice, never "drawing".
  *  6. The Overview's picture sent with the guide still opens its code; with no
@@ -555,9 +555,11 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   await expect(page).toHaveURL(new RegExp(`guide=${round1.message_id}.*shape=${shapeId}`));
   await expect(board(page).getByRole('heading', { name: 'After the third failure' })).toBeVisible();
   await expect(part(board(page), 'stays')).toBeVisible();
-  for (const name of ['Shape', 'How it works', 'Comment', 'References', 'Chat']) {
+  for (const name of ['Shape', 'How it works', 'Comment', 'References']) {
     await expect(board(page).getByRole('toolbar').getByRole('button', { name, exact: false }).first()).toBeVisible();
   }
+  // The side panel is References only (the owner, 2026-11-16): no Chat.
+  await expect(board(page).getByRole('toolbar').getByRole('button', { name: 'Chat' })).toHaveCount(0);
   // What to know is gone (approval shape-know-removed).
   await expect(board(page).getByRole('toolbar').getByRole('button', { name: 'What to know' })).toHaveCount(0);
   await expect(board(page).getByRole('button', { name: 'Global comment' })).toBeVisible();
@@ -637,26 +639,28 @@ test('a part lands on its line and the board shrinks to the corner card; it grow
   await expect(transcript).toContainText('Show me on retry-worker.ts lines 16–18: What happens after the third failure?');
   await expect(page.locator('[data-chat-window]')).not.toContainText('plannotator shape');
   await askBox.fill('');
-  await page.locator('[data-chat-window]').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator('[data-chat-window]').getByRole('button', { name: 'Minimize', exact: true }).click();
   await expect(page.locator('[data-chat-window]')).toHaveCount(0);
 });
 
-test("the thread works with the board as Shape does on its own: Chat's Ask, Annotate and Global comment, a redraw, the thread's Pebble and Thread tab", async () => {
+test("the thread works with the board as Shape does on its own: the whole board's Ask, Annotate and Global comment, a redraw, the thread's Pebble", async () => {
   test.setTimeout(120_000);
   const { page } = world;
   await page.locator(`[data-review-message] [data-shape-pebble="${shapeId}"]`).click();
   await expect(board(page)).toBeVisible();
   const toolbar = board(page).getByRole('toolbar');
 
-  // Chat: a question reaches the session that drew it, and its answer shows on the board.
-  await toolbar.getByRole('button', { name: 'Chat' }).click();
-  const chat = board(page).locator('.shp-sidep textarea').first();
-  await chat.fill('Why does the row stay?');
-  await chat.press('ControlOrMeta+Enter');
+  // The whole board's Ask (Global comment): a question reaches the session that drew it, and its answer shows in
+  // the box it was asked from.
+  await board(page).getByRole('button', { name: 'Global comment' }).click();
+  const asking = page.locator('[data-comment-popover]');
+  await asking.locator('textarea').fill('Why does the row stay?');
+  await asking.getByRole('button', { name: 'Ask', exact: true }).click();
   await expect.poll(() => world.agent.asked.some((text) => text.includes('About the Shape board') && text.includes('Why does the row stay?'))).toBe(true);
-  await expect(board(page).locator('.shp-sidep')).toContainText('nothing in the else branch removes it', { timeout: 20_000 });
-  await shot(page, '06-chat', ['light', 'dark']);
-  await board(page).getByRole('button', { name: 'Close panel' }).click();
+  await expect(asking.locator('[data-shape-talk]')).toContainText('nothing in the else branch removes it', { timeout: 20_000 });
+  await shot(page, '06-ask', ['light', 'dark']);
+  await asking.locator('textarea').press('Escape');
+  await expect(asking).toHaveCount(0);
 
   // The crosshair (Annotate's place on the Inbox's board): point at a part, Change it: the session is woken, reads
   // the note and draws v2.
@@ -681,7 +685,7 @@ test("the thread works with the board as Shape does on its own: Chat's Ask, Anno
   await page.getByRole('button', { name: 'Change it' }).click();
   await expect(board(page).locator('.shp-claim')).toContainText('Version 3', { timeout: 30_000 });
 
-  // The thread itself: the Pebble in its header opens the same board, and the Thread tab reads the thread.
+  // The thread itself: the Pebble in its header opens the same board.
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
   await page.locator('[data-review-message] .ib-back').click();
   await expect(page.locator('[data-review-message]')).toHaveCount(0);
@@ -689,10 +693,6 @@ test("the thread works with the board as Shape does on its own: Chat's Ask, Anno
   await shot(page, '09-thread-pebble', ['light', 'dark']);
   await page.locator(`[data-shape-pebble="${shapeId}"]`).first().click();
   await expect(board(page)).toBeVisible();
-  await board(page).getByRole('toolbar').getByRole('button', { name: 'Chat' }).click();
-  await board(page).getByRole('tab', { name: 'Thread' }).click();
-  await expect(board(page).locator('[data-shape-message]').first()).toContainText('Ready for review');
-  await board(page).getByRole('button', { name: 'Close panel' }).click();
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 

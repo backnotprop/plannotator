@@ -326,6 +326,117 @@ describe("linked machines, on three real Inboxes", () => {
       expect(download.headers.get("content-security-policy")).toStartWith("sandbox");
       await download.arrayBuffer();
 
+      // An HTML page on B with a folder, opened from A in a tab of its own (the owner, 2026-11-16): made on A from B's
+      // existing door routes (`view`, `html-assets`), under exactly the headers B's own new tab gets.
+      const site = join(B.w.project, "site");
+      mkdirSync(site, { recursive: true });
+      writeFileSync(join(site, "pricing.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>Pricing</h1></body></html>');
+      writeFileSync(join(site, "style.css"), "h1 { color: rebeccapurple }");
+      const pageSent = await agent.send("The pricing page.", { thread: "case-1", attachments: [join(site, "pricing.html")] });
+      const withPage = await getJson(A, `/api/inbox/m/${B.id}/threads/${pageSent.thread_id}`);
+      const htmlFile = (withPage.thread.messages as Json[]).find((m) => m.id === pageSent.message_id)!.attachments[0] as Json;
+      const farTab = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${htmlFile.id}/page`, { redirect: "manual", headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });
+      const localTab = await fetch(`${base(B)}/api/inbox/attachments/${htmlFile.id}/page`, { redirect: "manual" });
+      expect([farTab.status, localTab.status]).toEqual([303, 303]);
+      const localAt = localTab.headers.get("location")!;
+      expect(localAt).toMatch(/^\/api\/html-assets\/[A-Za-z0-9_-]+\/pricing\.html$/);
+      // The same file under the same token, through the forward.
+      const farAt = farTab.headers.get("location")!;
+      expect(farAt).toBe(`/api/inbox/m/${B.id}${localAt.replace(/^\/api/, "")}`);
+      for (const name of ["cache-control", "referrer-policy"]) expect([name, farTab.headers.get(name)]).toEqual([name, localTab.headers.get(name)]);
+      // The page as the tab gets it: the same document headers as B's own (the sandbox, no network), on A's origin.
+      const farDoc = await fetch(`${base(A)}${farAt}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } });
+      const localDoc = await fetch(`${base(B)}${localAt}`);
+      expect(farDoc.status).toBe(200);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cache-control", "access-control-allow-origin"]) {
+        expect([name, farDoc.headers.get(name)]).toEqual([name, localDoc.headers.get(name)]);
+      }
+      expect(farDoc.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts allow-modals");
+      expect(farDoc.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+      expect(await farDoc.text()).toContain("<h1>Pricing</h1>");
+      await localDoc.arrayBuffer();
+      // Its stylesheet, asked as the sandboxed page asks (an opaque origin: cross-site), loads through the forward.
+      const style = await fetch(new URL("style.css", `${base(A)}${farAt}`), { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "style" } });
+      expect(style.status).toBe(200);
+      expect(style.headers.get("content-type")).toContain("text/css");
+      expect(style.headers.get("content-security-policy")).toStartWith("sandbox");
+      expect(await style.text()).toContain("rebeccapurple");
+      // A font or module script asks in CORS mode with `Origin: null`: allowed, as on B.
+      const cors = await fetch(new URL("style.css", `${base(A)}${farAt}`), { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", Origin: "null" } });
+      expect([cors.status, cors.headers.get("access-control-allow-origin")]).toEqual([200, "*"]);
+      await cors.arrayBuffer();
+      // Nothing else under the forward opens cross-site: B's threads, the page route, the view.
+      for (const route of [`threads/${pageSent.thread_id}`, `attachments/${htmlFile.id}/page`, `attachments/${htmlFile.id}/view`]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/${route}`, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" } });
+        expect([route, refused.status]).toEqual([route, 403]);
+        await refused.arrayBuffer();
+      }
+      // The sent version: the page itself, its folder named through the forward, under B's own sent-page headers.
+      const farSent = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${htmlFile.id}/page?version=sent`);
+      const localSent = await fetch(`${base(B)}/api/inbox/attachments/${htmlFile.id}/page?version=sent`);
+      expect([farSent.status, localSent.status]).toEqual([200, 200]);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cache-control", "cross-origin-resource-policy", "referrer-policy"]) {
+        expect([name, farSent.headers.get(name)]).toEqual([name, localSent.headers.get(name)]);
+      }
+      const sentBody = await farSent.text();
+      expect(sentBody).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      expect(sentBody).not.toContain('"/api/html-assets/');
+      await localSent.arrayBuffer();
+      // The viewer in the thread: its page names its folder through the forward too.
+      const viewed = await getJson(A, `/api/inbox/m/${B.id}/attachments/${htmlFile.id}/view`);
+      expect(viewed.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      // A Markdown file on B (the owner, 2026-11-16: "Yes, for linked computers only"): its pictures and a document
+      // next to it open from A as B's own window shows them, through B's window routes on its door for a machine only.
+      const docs = join(B.w.project, "docs");
+      mkdirSync(docs, { recursive: true });
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+      writeFileSync(join(docs, "shot.png"), png);
+      writeFileSync(join(docs, "plan.md"), "# Plan\n\n![shot](shot.png)\n\nSee [the notes](notes.md).\n");
+      writeFileSync(join(docs, "notes.md"), "# Notes\n\nNext to the plan.\n");
+      const mdSent = await agent.send("The plan.", { thread: "case-1", attachments: [join(docs, "plan.md")] });
+      const withMd = await getJson(A, `/api/inbox/m/${B.id}/threads/${mdSent.thread_id}`);
+      const mdFile = (withMd.thread.messages as Json[]).find((m) => m.id === mdSent.message_id)!.attachments[0] as Json;
+      const farShot = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+      const localShot = await fetch(`${base(B)}/api/inbox/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`);
+      expect([farShot.status, localShot.status]).toEqual([200, 200]);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cross-origin-resource-policy", "etag", "cache-control"]) {
+        expect([name, farShot.headers.get(name)]).toEqual([name, localShot.headers.get(name)]);
+      }
+      expect(Buffer.from(await farShot.arrayBuffer()).equals(png)).toBe(true);
+      await localShot.arrayBuffer();
+      // Only what the file shows, inside its folder: B's own refusals come back.
+      for (const path of ["notes.md", "../site/style.css", join(docs, "shot.png").replace(/shot\.png$/, "other.png")]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=${encodeURIComponent(path)}&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+        expect([path, refused.status >= 400]).toEqual([path, true]);
+        await refused.arrayBuffer();
+      }
+      // The window's own read (same-origin); a bare call through the forward is refused, as for a file a message names.
+      const windowRead = async (path: string) => (await (await fetch(`${base(A)}${path}`, { headers: { "Sec-Fetch-Site": "same-origin" } })).json()) as Json;
+      const bare = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
+      const linkedMd = await windowRead(`/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      expect([linkedMd.name, linkedMd.html, linkedMd.url]).toEqual(["notes.md", null, null]);
+      expect(linkedMd.text).toContain("Next to the plan.");
+      // An HTML page's sibling page, in the viewer: its folder named through the forward, its new tab too.
+      writeFileSync(join(site, "faq.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>FAQ</h1></body></html>');
+      const linkedHtml = await windowRead(`/api/inbox/m/${B.id}/attachments/${htmlFile.id}/linked-page?path=faq.html`);
+      expect(linkedHtml.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      expect(linkedHtml.url).toMatch(new RegExp(`^/api/inbox/m/${B.id}/html-assets/[A-Za-z0-9_-]+/faq\\.html$`));
+      const faqTab = await fetch(`${base(A)}${linkedHtml.url}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });
+      expect([faqTab.status, faqTab.headers.get("content-security-policy")]).toEqual([200, "sandbox allow-scripts allow-modals; connect-src 'none'"]);
+      await faqTab.arrayBuffer();
+      // Not cross-site, and never a phone's: B's door answers them for a linked machine only.
+      for (const route of [`attachments/${mdFile.id}/markdown-image?path=shot.png`, `attachments/${mdFile.id}/linked-page?path=notes.md`]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/${route}`, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" } });
+        expect([route, refused.status]).toEqual([route, 403]);
+        await refused.arrayBuffer();
+      }
+      // B's door is unchanged: it still has no page route, for a linked machine as for a phone.
+      const tokenForB = linksFile(A).links.find((l: Json) => l.id === B.id).token as string;
+      const atDoor = await fetch(`${base(B)}/api/inbox/device/attachments/${htmlFile.id}/page`, { headers: { Authorization: `Bearer ${tokenForB}` } });
+      expect(atDoor.status).toBe(404);
+      expect(((await atDoor.json()) as Json).code).toBe("device_route_not_found");
+
       // A file sent to B from A's window: never held, streamed through by its route; A's page session is checked here, never sent on.
       const { serverSession } = await getJson(A, "/api/inbox/health");
       const upload = (session: string) =>
@@ -744,7 +855,7 @@ describe("the tailnet door with Phones off, in process", () => {
       expect(tailscale.serve.get(8443)).toBe(theirs);
       expect(tailscale.doorCalls()).toEqual([]);
       // What the Inbox made is recorded: port, target, and that the mapping may exist.
-      expect(record()).toEqual({ v: 1, https_port: 8444, target: door, published: true });
+      expect(record()).toEqual({ v: 1, https_port: 8444, target: door, published: true, made: [door] });
 
       // Linking: the way back handed to the other machine carries the port.
       const linked = await fetch(`${base}/api/inbox/machines/link`, { method: "POST", body: JSON.stringify({ serverSession, link: offered.link.replace(/id=[^&]+/, `id=${OTHER}`), address: `http://127.0.0.1:${peer.port}` }) });
@@ -811,7 +922,8 @@ describe("the tailnet door with Phones off, in process", () => {
     try {
       expect(own.tailscale.doorCalls()).toEqual(["on"]);
       expect([...own.tailscale.serve.keys()]).toEqual([8443]);
-      expect(own.record()).toEqual({ v: 1, https_port: 8443, target: own.tailscale.serve.get(8443), published: true });
+      expect(own.record()).toEqual({ v: 1, https_port: 8443, target: own.tailscale.serve.get(8443), published: true, made: expect.arrayContaining([own.tailscale.serve.get(8443)]) });
+      expect((own.record().made as string[]).at(-1)).toBe(own.tailscale.serve.get(8443));
     } finally {
       inbox.stop();
     }
@@ -1962,15 +2074,16 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
       const colourOf = async (port: number, name: string) => ((await list(port)).tags as Json[]).find((tag) => (tag.name as string).toLowerCase() === name)?.look?.colour;
       const shownOn = async (port: number) => ((await list(port)).tag_colours as Json).show;
-      // A's Release first, so its colour is the one both keep; B's own first tag takes green, so its Release is amber.
+      // A's Release first, so its colour is the one both keep; B's own first tag takes Green, so its Release is Indigo.
+      const GREEN = "#14cc61";
       const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
       b.store.createInitiative({ name: "Windows", by: { kind: "person" } });
       const bRelease = b.store.createInitiative({ name: "release", by: { kind: "person" } });
-      expect(a.store.tagLook(release.id)?.colour).toBe("green");
-      expect(b.store.tagLook(bRelease.id)?.colour).toBe("amber");
-      await waitFor("B's tags on A", async () => (await colourOf(a.port, "windows")) === "green", 30_000);
-      expect(await colourOf(a.port, "release")).toBe("green");
-      await waitFor("A's Release on B", async () => (await colourOf(b.port, "release")) === "green", 30_000);
+      expect(a.store.tagLook(release.id)?.colour).toBe(GREEN);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("#b1b7fd");
+      await waitFor("B's tags on A", async () => (await colourOf(a.port, "windows")) === GREEN, 30_000);
+      expect(await colourOf(a.port, "release")).toBe(GREEN);
+      await waitFor("A's Release on B", async () => (await colourOf(b.port, "release")) === GREEN, 30_000);
       expect(((((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!.marks as string[])).toContain("tag-colours");
 
       // Picked on A: A's copy, then B's by its id there (the window's write); both read the pick.

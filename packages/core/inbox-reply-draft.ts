@@ -19,7 +19,8 @@
  * held for this person's draft only. Nobody else sees them (no agent, phone
  * event, search or teammate) until a Send turns them into an attachment.
  */
-import type { InboxDraftPasted, InboxReplyDraft, InboxUpload } from './inbox-types';
+import type { InboxDraftPasted, InboxReplyDraft, InboxReplyMention, InboxUpload } from './inbox-types';
+import { inboxReplyMentionTitles, withoutInboxThreadMentions } from './inbox-thread-mention';
 
 /** A file as a draft save names it: the ref of bytes not sent yet, and for a long paste where it goes back in the words. */
 export interface ReplyDraftFileRef {
@@ -192,12 +193,14 @@ export type ReplyDraftAfterSend<F> = { kind: 'unchanged' } | { kind: 'delete' } 
  *    draft of files only: never lost, at worst left behind.
  *  - It names an older version: the draft goes only while it holds exactly the
  *    sent words and only files the Send carried. Anything else is another
- *    window's newer work, and stays whole.
+ *    window's newer work, and stays whole. The sent words carry each thread
+ *    mention as a reference and a list (inbox-thread-mention.ts): they are
+ *    compared with the draft's words read the same way (each mention its title).
  * The files a Send carried also leave every other draft (they are attachments
  * now); the store does that apart from this rule.
  */
 export function settleReplyDraftAfterSend<F extends { upload_id: string; pasted?: InboxDraftPasted }>(
-  existing: Pick<InboxReplyDraft, 'body' | 'updated_at'> & { files?: readonly F[] },
+  existing: Pick<InboxReplyDraft, 'body' | 'updated_at' | 'mentions'> & { files?: readonly F[] },
   sent: { clearDraft: string; words?: string; uploads: readonly string[] },
 ): ReplyDraftAfterSend<F> {
   const files = existing.files ?? [];
@@ -209,7 +212,11 @@ export function settleReplyDraftAfterSend<F extends { upload_id: string; pasted?
     return { kind: 'files', files: left.map((file) => (file.pasted ? { ...file, pasted: { at: 0, preview: file.pasted.preview } } : file)) };
   }
   const words = sent.words;
-  const sameWords = words !== undefined && existing.body.trim() === words.trim() && (words.trim() !== '' || files.length > 0);
+  const asSent = (text: string) => withoutInboxThreadMentions(text).trim();
+  const sameWords =
+    words !== undefined &&
+    (existing.body.trim() === words.trim() || inboxReplyMentionTitles(existing.body, existing.mentions ?? []).trim() === asSent(words)) &&
+    (words.trim() !== '' || files.length > 0);
   if (!sameWords || !files.every((file) => carried.has(file.upload_id))) return { kind: 'unchanged' };
   return { kind: 'delete' };
 }
@@ -237,6 +244,11 @@ export interface ReplyDraftSaveInput {
    * quote it has (a host or page that does not send one).
    */
   quote?: { of: string; words?: string } | null;
+  /**
+   * The threads mentioned in the words (approval "inbox-drag-threads"): each an id and the range its label holds
+   * (inbox-thread-mention.ts). Absent: the draft keeps those of its own that still stand in the new words.
+   */
+  mentions?: readonly InboxReplyMention[];
 }
 
 /**

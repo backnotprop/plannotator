@@ -1,15 +1,20 @@
 /**
  * `plannotator plans`: Plans' switch from a terminal, and its list (unreleased, HIDDEN_SUBCOMMANDS in cli.ts).
  *
- *   plannotator plans        turn Plans on (config.json `inboxPlans`) and open the Inbox on its Plans page, starting
- *                            the Inbox detached when it is not running (the rules of `plannotator inbox --open`);
- *                            prints the page's URL. Only from a person's terminal: typing it is the opt-in, so a
- *                            shell with no terminal (an agent's) is refused and nothing changes.
+ *   plannotator plans        turn Plans on (config.json `inboxPlans`) and show the Inbox's Plans page: in the window
+ *                            the person used last when one is open (as `plannotator inbox --open <thread>` shows a
+ *                            thread), else in a new tab, starting the Inbox detached when it is not running (the
+ *                            rules of `plannotator inbox --open`); prints the page's URL. Not gated: any shell on this
+ *                            computer may run it (an agent's included).
  *   plannotator plans off    turn Plans off; the library stays on disk.
  *   plannotator plans list   the plans, one line each: from the running Inbox (which picks up what plan review
  *                            wrote since), else read from the library on disk. Never starts the Inbox, never writes.
  *
  * Off, everything but `plans` and `plans off` prints PLANS_OFF_TEXT and exits 1, starting nothing.
+ *
+ * With an Inbox running, `plans` and `plans off` save the switch through it (`POST /api/inbox/settings`
+ * `{ plans: { on } }`, as the window would), so every open window hears `event: capabilities` and its Plans row comes
+ * or goes at once. With none running, or one that refuses, the command writes config.json itself.
  */
 import { createPlanStore } from "@plannotator/shared/plans/store";
 import { PLANS_SWITCH_NOT_SAVED, plansOn, setPlansSwitch } from "@plannotator/shared/plans/switch";
@@ -24,8 +29,8 @@ export const PLANS_OFF_TEXT = "plans_off: Plans is off. To turn it on, run `plan
 
 export interface PlansCommandDeps {
   dataDir: string;
-  /** The running Inbox, starting it detached when needed (`ensureInboxRunning`). */
-  ensureInbox: () => Promise<{ url: string; port: number }>;
+  /** The running Inbox, starting it detached when needed (`ensureInboxRunning`). `token`: its connection route's. */
+  ensureInbox: () => Promise<{ url: string; port: number; token?: string }>;
   /** Open a URL in the browser without waiting on it; "remote" when no browser could open here. */
   openUrl: (url: string) => Promise<unknown>;
   /** What to say when no browser opened because this is a remote session. */
@@ -37,6 +42,55 @@ export interface PlansCommandDeps {
   stderr?: (text: string) => void;
   /** How long `list` waits for an import the Inbox is running. */
   listWaitMs?: number;
+  /** How long the switch waits on a running Inbox before writing config.json itself. */
+  switchTimeoutMs?: number;
+}
+
+/** The running Inbox, else null; never starts one. */
+const runningInboxOf = (deps: PlansCommandDeps) =>
+  (deps.runningInbox ?? (async () => {
+    const status = await inboxStatus(deps.dataDir);
+    return status.state === "running" ? status.entry : null;
+  }))();
+
+/** Ask the running Inbox to show the Plans page in the window used last; false: no window is open (or no answer). */
+async function showInOpenWindow(entry: { url: string; token?: string }, deps: PlansCommandDeps): Promise<boolean> {
+  if (!entry.token) return false;
+  try {
+    const answer = await (deps.fetch ?? fetch)(new URL("/api/inbox/control/show", entry.url).href, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ page: "plans" }),
+      signal: AbortSignal.timeout(deps.switchTimeoutMs ?? 5_000),
+    });
+    const body = (await answer.json().catch(() => null)) as { shown?: unknown } | null;
+    return answer.ok && body?.shown === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Turn Plans on or off: through the running Inbox, so its open windows follow at once; else (none, gone, or an
+ * Inbox older than Plans) config.json directly, which an Inbox started later reads. False: nothing could be saved.
+ */
+async function savePlansSwitch(on: boolean, deps: PlansCommandDeps): Promise<boolean> {
+  const running = await runningInboxOf(deps).catch(() => null);
+  if (running) {
+    try {
+      const answer = await (deps.fetch ?? fetch)(new URL("/api/inbox/settings", running.url).href, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plans: { on } }),
+        signal: AbortSignal.timeout(deps.switchTimeoutMs ?? 5_000),
+      });
+      const body = (await answer.json().catch(() => null)) as { plans?: { on?: unknown } } | null;
+      if (answer.ok && body?.plans?.on === on) return true;
+    } catch {
+      // Gone, or not answering: config.json below.
+    }
+  }
+  return setPlansSwitch(on);
 }
 
 export async function runPlansCommand(argv: readonly string[], deps: PlansCommandDeps): Promise<number> {
@@ -45,7 +99,7 @@ export async function runPlansCommand(argv: readonly string[], deps: PlansComman
   const which = argv[0];
 
   if (which === "off" && argv.length === 1) {
-    if (!setPlansSwitch(false)) {
+    if (!(await savePlansSwitch(false, deps))) {
       err(`config_not_saved: ${PLANS_SWITCH_NOT_SAVED}`);
       return 1;
     }
@@ -54,7 +108,7 @@ export async function runPlansCommand(argv: readonly string[], deps: PlansComman
   }
 
   if (which === undefined) {
-    if (!setPlansSwitch(true)) {
+    if (!(await savePlansSwitch(true, deps))) {
       err(`config_not_saved: ${PLANS_SWITCH_NOT_SAVED}`);
       return 1;
     }
@@ -67,7 +121,8 @@ export async function runPlansCommand(argv: readonly string[], deps: PlansComman
       return 1;
     }
     const url = new URL("#plans", entry.url).href;
-    if ((await deps.openUrl(url)) === "remote" && deps.remoteHint) err(deps.remoteHint(entry.port));
+    // An open window goes to the page; with none, a new tab opens on it.
+    if (!(await showInOpenWindow(entry, deps)) && (await deps.openUrl(url)) === "remote" && deps.remoteHint) err(deps.remoteHint(entry.port));
     out(url);
     return 0;
   }
@@ -102,10 +157,7 @@ export function planLine(plan: PlanSummary): string {
 }
 
 async function listPlans(deps: PlansCommandDeps): Promise<PlanSummary[]> {
-  const running = await (deps.runningInbox ?? (async () => {
-    const status = await inboxStatus(deps.dataDir);
-    return status.state === "running" ? status.entry : null;
-  }))();
+  const running = await runningInboxOf(deps);
   if (running) {
     const get = deps.fetch ?? fetch;
     const until = Date.now() + (deps.listWaitMs ?? 30_000);
