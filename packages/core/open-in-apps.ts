@@ -185,8 +185,6 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     kind: 'editor',
     icon: 'android-studio',
     mac: { appName: 'Android Studio' },
-    // Studio's file opener can find the open project containing the file.
-    // Passing a line selects that opener even when the user just chose a file.
     line: { macArgs: 'line-flag', macDefaultLine: 1 },
   },
   // IntelliJ IDEA and PyCharm were two editions until 2025.3 / 2025.1: the older
