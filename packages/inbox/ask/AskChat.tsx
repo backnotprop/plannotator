@@ -222,6 +222,8 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     }
   };
 
+  // The header has the chevron only (the owner, 2026-11-20: "Drop the ×, keep the chevron"): the × only minimized.
+  // Reply in the thread minimizes the same way, into the corner's circle.
   const minimize = () => {
     store.setMinimized(true);
     onLeave();
@@ -302,7 +304,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
       rootProps={{ 'data-popover-layer': '', 'data-ask-window': threadId }}
       header={() => <AskChatMenu current={current} phone={phone} onPick={onPick} />}
       onMinimize={onLeave}
-      onClose={minimize}
     >
       {() => (
         <>

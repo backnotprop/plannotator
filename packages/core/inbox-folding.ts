@@ -13,6 +13,7 @@ import { withoutInboxSkillsBlock } from './skill-reference-block';
 import { INLINE_DESTINATION, stripInlineMarkup } from './inline-markdown';
 import { withoutInboxReplyQuoteLead } from './inbox-reply-quote';
 import { withoutInboxThreadMentions } from './inbox-thread-mention';
+import { parseInboxRunBlocks, parseInboxSecretBlocks } from './inbox-run-blocks';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -68,6 +69,14 @@ export function holdsUnsentPick(message: InboxMessageWire): boolean {
   return (message.questions ?? []).some((q) => q.state === 'picked');
 }
 
+/**
+ * An agent's message holding a `:::run` or `:::secret` card: it stays open like one with a pick, so a run's card
+ * (its result, Run again, a field) is not folded away under the person's reply that its run wrote.
+ */
+export function holdsRunCard(message: InboxMessageWire): boolean {
+  return message.author.kind === 'agent' && /^[ \t]*:::[ \t]*(run|secret)\b/im.test(message.body) && (parseInboxRunBlocks(message.body).length > 0 || parseInboxSecretBlocks(message.body).length > 0);
+}
+
 export interface FoldPlan {
   /** The messages that open folded to one line. */
   folded: Set<string>;
@@ -99,7 +108,7 @@ export const OPEN_NEWEST_MAX = 20;
  * newest OPEN_NEWEST_MAX (the read messages above it fold as before), so the
  * "New since you looked" line sits right above that fold and the thread
  * opens where it did. The thread's first message is never hidden. One
- * holding a pick not sent stays open, as before.
+ * holding a pick not sent, or a run or secret card (holdsRunCard), stays open, as before.
  */
 export function planFolds(messages: readonly InboxMessageWire[], fresh: ReadonlySet<string>, boundary: number | null): FoldPlan {
   const folded = new Set<string>();
@@ -124,7 +133,7 @@ export function planFolds(messages: readonly InboxMessageWire[], fresh: Readonly
     early = [];
   };
   messages.forEach((message, index) => {
-    const pick = holdsUnsentPick(message);
+    const pick = holdsUnsentPick(message) || holdsRunCard(message);
     if (many && index >= firstNew && index < newestFrom) {
       flush();
       if (pick) {

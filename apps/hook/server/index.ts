@@ -112,7 +112,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, saveConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -273,6 +273,7 @@ import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
+import { inboxHelpTopic } from "./inbox-help-before-after";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
@@ -567,6 +568,25 @@ if (isReviewDrawCommand(rawArgs, () => {
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(stepsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator theme …`: the person's own theme files (theme-command.ts). Reads and writes the data dir
+// only, so it works with nothing running. Before the strict-annotate parse: it takes its own flags and --help.
+{
+  const args = rawArgs;
+  if (args[0] === "theme") {
+    const { runThemeCommand } = await import("./theme-command");
+    process.exit(
+      await runThemeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        loadTheme: () => {
+          const theme = loadConfig({ quiet: true }).theme;
+          return theme && typeof theme === "object" ? theme : undefined;
+        },
+        saveTheme: (theme) => saveConfig({ theme }),
       }),
     );
   }
@@ -974,6 +994,12 @@ if (isTopLevelHelpInvocation(args)) {
 // otherwise `plannotator review --help` (commonly run by agents probing the
 // CLI) falls through to local review mode and launches the browser UI,
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
+// `inbox --help before-after` (inbox-help-before-after.ts): one topic of the guide, printed alone.
+const inboxTopic = args[0] === "inbox" ? inboxHelpTopic(args.slice(1)) : null;
+if (inboxTopic) {
+  await writeWholeToStdout(`${inboxTopic}\n`);
+  process.exit(0);
+}
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).

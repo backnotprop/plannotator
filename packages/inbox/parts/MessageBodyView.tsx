@@ -3,6 +3,7 @@ import type { InboxAttachmentState, InboxMessageWire, InboxProjectRepo, InboxQue
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { actionForBlock } from '../actions';
 import { ActionChecklist } from '../components/ActionChecklist';
+import { hasRunBlocks, runBlockFor } from './RunBlocks/RunBlock';
 import { ReplacedQuestionCard, ReplacesLine, type Replacement } from '../components/ReplacedQuestion';
 import type { ActionRow } from '../components/ReplyAnswers';
 import type { SentAnswerGroup } from '../sentReply';
@@ -79,6 +80,7 @@ export function drawMessageBody(d: MessageBodyData) {
           const old = d.replaced[at(key)]?.[2] ?? [];
           return old.length > 0 ? <ReplacesLine old={old} onJump={(target) => acts.current.jumpTo(target)} /> : null;
         }}
+        renderRunBlock={isAgent && hasRunBlocks(message.body) ? (block) => runBlockFor(message, block, d.name) : undefined}
         renderActions={
           isAgent && (message.actions?.length ?? 0) > 0
             ? {

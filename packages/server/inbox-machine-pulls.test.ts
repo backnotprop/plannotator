@@ -159,6 +159,15 @@ describe("createMachinePulls", () => {
     expect(old.asked).toEqual([]);
   });
 
+  test("a PR another machine's board links to a thread counts as having one there, from the board as last read", async () => {
+    const linked = { via: "owner", thread_id: B_THREAD, project_id: B_PROJECT, thread_subject: null, agent: null, last: null, guide: null };
+    const b = peer(B, { board: { pulls: [pull("northwind/api", 7), pull("northwind/api", 8)], links: { "github.com/northwind/api#7": linked }, projects: {}, cards: {}, hosts: [] } });
+    const pulls = createMachinePulls({ peers: () => [b.link] });
+    expect(pulls.linkedThere("github.com/northwind/api#7")).toBe(false);
+    await readAll(pulls, false);
+    expect([pulls.linkedThere("github.com/northwind/api#7"), pulls.linkedThere("github.com/northwind/api#8")]).toEqual([true, false]);
+  });
+
   test("asleep: nothing is asked and its rows stay as last read; back, it is read again", async () => {
     const b = peer(B);
     const pulls = createMachinePulls({ peers: () => [b.link] });
@@ -209,6 +218,24 @@ describe("createMachinePulls", () => {
     expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBe("merged");
     down = true;
     expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBeNull();
+  });
+
+  test("a read started before unlink cannot replace the board of the newly linked machine", async () => {
+    let release = () => {};
+    const old = peer(B, { hold: new Promise<void>((done) => (release = done)) });
+    const relinked = peer(B, { board: { pulls: [pull("northwind/api", 8)] } });
+    let linked = [old.link];
+    const pulls = createMachinePulls({ peers: () => linked });
+    pulls.start(false);
+    const stale = pulls.settled();
+    pulls.forget(B);
+    linked = [relinked.link];
+    const snapshot = pulls.start(false);
+
+    release();
+    await stale;
+    await pulls.settled();
+    expect(snapshot()[0]!.board!.pulls.map((pr) => pr.number)).toEqual([8]);
   });
 
   test("unlinked: nothing of its board stays", async () => {
