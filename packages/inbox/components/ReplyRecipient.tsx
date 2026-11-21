@@ -204,32 +204,87 @@ function useNarrowField(chipRef: RefObject<HTMLButtonElement | null>, phone: boo
 
 /** The least of a name the chip shows beside "to" before it drops the word (about six letters). */
 const NAME_LEAST = 48;
+/** How far "to" and the whole name must fit under the chip's widest before a chip that dropped the word shows it again. */
+const TO_BACK_ROOM = 2;
+/** How far past its widest the chip may need before it drops the word (sub-pixel rounding is no reason to). */
+const TO_DROP_SLACK = 0.5;
+
+/** What the chip needs, in px: `fixed` (its padding, the mark, the chevron and their gaps), `to` (the word and its gap), `name` (the whole name's text), and `max`, its widest. */
+export interface ChipWidths {
+  fixed: number;
+  to: number;
+  name: number;
+  max: number;
+}
 
 /**
- * Whether the chip drops its "to" (`data-tight`): "to", the mark, the whole name and the chevron do not fit in the
- * lead's widest (FieldLead.tsx `leadMaxWidth`, 40% of the first line), and without the word the whole name would fit
- * (a short agent name at 320 px: "to Codex" is 108 px of a 236 px line), or beside it under `NAME_LEAST` of the name
- * would show (a long name at 320 px). Otherwise the word stays and the name gives way with "…", as on a computer.
- * Measured from what the chip would need with the word, so dropping it never brings it back.
+ * Whether the chip drops its "to" (`data-tight`), from its state now (`tight`). It drops it when "to", the mark, the
+ * whole name and the chevron do not fit in its widest (FieldLead.tsx `leadMaxWidth`, 40% of the first line) and
+ * either the whole name fits without the word (a short agent name at 320 px: "to Codex" is 108 px of a 236 px line)
+ * or under `NAME_LEAST` of the name would show beside it (a long name at 320 px). Otherwise the word stays and the
+ * name gives way with "…", as on a computer. A chip that dropped it shows it again only when everything fits with
+ * `TO_BACK_ROOM` to spare, or dropping it no longer helps: a name within a pixel of the edge never flips it back and forth.
+ */
+export function chipDropsTo(w: ChipWidths, tight: boolean): boolean {
+  const withTo = w.fixed + w.to + w.name;
+  const helps = w.fixed + w.name <= w.max + TO_DROP_SLACK || w.max - w.fixed - w.to < NAME_LEAST;
+  if (!helps) return false;
+  return tight ? withTo > w.max - TO_BACK_ROOM : withTo > w.max + TO_DROP_SLACK;
+}
+
+/** The width of an element's text as laid out, cut or not (a Range over it, as utils/textCut.ts reads it). */
+function textWidth(el: Element): number {
+  if (typeof document.createRange !== 'function') return 0;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect?.().width ?? 0;
+}
+
+/**
+ * Whether the chip drops its "to" (`chipDropsTo`), measured after each commit and on each resize. Every width it reads
+ * is the same whether the word shows or not (the name's text by a Range, the word as last drawn: it is drawn on the
+ * first commit, `tight` starting false), and it decides once per shown name, widest and font size, so a decision can
+ * never undo itself in a loop of commits.
  */
 function useTightChip(chipRef: RefObject<HTMLButtonElement | null>): boolean {
   const [tight, setTight] = useState(false);
-  /** The word and its gap, as last drawn (it is drawn on the first commit: `tight` starts false). */
-  const toWidth = useRef(0);
+  const tightNow = useRef(false);
+  /** The word and its gap, as last drawn, and at which font size. */
+  const toWidth = useRef<{ px: number; font: string } | null>(null);
+  /** What the last decision was made for. */
+  const decided = useRef('');
   const measure = useCallback(() => {
+    const set = (next: boolean) => {
+      if (tightNow.current === next) return;
+      tightNow.current = next;
+      setTight(next);
+    };
     const chip = chipRef.current;
     const field = chip?.closest('.ib-cfield')?.querySelector('textarea');
     const max = chip?.closest('.ib-flead') && field ? leadMaxWidth(field) : null;
-    if (!chip || max === null) return setTight(false);
+    if (!chip || max === null) {
+      decided.current = '';
+      return set(false);
+    }
     const view = chip.ownerDocument.defaultView ?? window;
+    const style = view.getComputedStyle(chip);
+    const font = style.fontSize;
+    const gap = parseFloat(style.columnGap) || 0;
     const to = chip.querySelector<HTMLElement>('.ib-rto-l');
     const shown = !!to && view.getComputedStyle(to).display !== 'none';
-    if (shown) toWidth.current = to!.getBoundingClientRect().width + (parseFloat(view.getComputedStyle(chip).columnGap) || 0);
+    if (shown) toWidth.current = { px: to!.getBoundingClientRect().width + gap, font };
+    // The name as it shows: the short one in a narrow field, else the full one (an inline span: its Range, never its box).
+    const box = chip.querySelector<HTMLElement>('.ib-rto-n');
     const name = [...chip.querySelectorAll<HTMLElement>('.ib-rto-full, .ib-rto-short')].find((n) => view.getComputedStyle(n).display !== 'none');
-    const cut = name ? Math.max(0, name.scrollWidth - name.clientWidth) : 0;
-    const needs = chip.getBoundingClientRect().width + cut + (shown ? 0 : toWidth.current);
-    const nameRoom = max - (needs - (name?.scrollWidth ?? 0));
-    setTight(needs > max + 0.5 && (needs - toWidth.current <= max + 0.5 || nameRoom < NAME_LEAST));
+    const word = toWidth.current;
+    if (!box || !name) return;
+    // The word not yet drawn at this font size (the text size changed while it was dropped): draw it once to measure it.
+    if (!word || word.font !== font) return shown ? undefined : set(false);
+    const key = `${name.textContent ?? ''}|${max}|${font}`;
+    if (decided.current === key) return;
+    decided.current = key;
+    const fixed = chip.getBoundingClientRect().width - box.getBoundingClientRect().width - (shown ? word.px : 0);
+    set(chipDropsTo({ fixed, to: word.px, name: textWidth(name), max }, tightNow.current));
   }, [chipRef]);
   useLayoutEffect(() => {
     measure();

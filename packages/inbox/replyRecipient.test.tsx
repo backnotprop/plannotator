@@ -20,7 +20,7 @@ import type { TaggableSession } from './api';
 import { setSessionLabels } from './sessionLabels';
 import { setAgentNames } from './agents/agentNames';
 import { firstLineRtl } from './components/FieldLead';
-import { saysWords } from './components/ReplyRecipient';
+import { chipDropsTo, saysWords } from './components/ReplyRecipient';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -926,4 +926,39 @@ test.skipIf(!hasDom)('two sessions renamed alike: the chip and the rows add the 
   } finally {
     act(() => setAgentNames(new Map()));
   }
+});
+
+test('chipDropsTo: at every width near the edge, from either state and with the word\'s measure a pixel off either way, the chip settles in two steps and never flips back and forth', () => {
+  const max = 94;
+  // "to Codex" at 320 px: padding, the mark, the chevron and their gaps; the word and its gap.
+  const fixed = 49;
+  const to = 17.4;
+  for (let tenth = -20; tenth <= 20; tenth += 1) {
+    const withTo = max + tenth / 10;
+    const name = withTo - fixed - to;
+    for (const start of [false, true]) {
+      for (const off of [-1, 0, 1]) {
+        // While the word shows, its measure may be a whole pixel off what it is with the word gone.
+        const step = (tight: boolean) => chipDropsTo({ fixed, to, name: name + (tight ? 0 : off), max }, tight);
+        const states = [start];
+        for (let i = 0; i < 6; i += 1) states.push(step(states.at(-1)!));
+        expect(states.slice(2).every((s) => s === states[2]), `withTo ${withTo.toFixed(1)}, start ${start}, off ${off}: ${states.join(' ')}`).toBe(true);
+        const flips = states.slice(1).filter((s, i) => s !== states[i]).length;
+        expect(flips, `withTo ${withTo.toFixed(1)}, start ${start}, off ${off}: ${states.join(' ')}`).toBeLessThanOrEqual(1);
+      }
+    }
+  }
+});
+
+test('chipDropsTo: the word goes for a short name that then fits whole, or for a long one with under 48 px beside it; it stays for a long name with room, and comes back when everything fits with 2 px to spare', () => {
+  // 320 px: "to Codex" needs 108 of 94; without the word 90.6 fits.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 94 }, false)).toBe(true);
+  // 320 px, a long name: beside the word 27.6 px of it would show.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 94 }, false)).toBe(true);
+  // 390 px, a long name: 55.6 px of it shows beside the word, so the word stays and the name is cut.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 122 }, false)).toBe(false);
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 122 }, true)).toBe(false);
+  // Dropped, then the field grows: back only with 2 px to spare.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 109 }, true)).toBe(true);
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 110 }, true)).toBe(false);
 });
