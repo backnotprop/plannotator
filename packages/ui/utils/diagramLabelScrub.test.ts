@@ -1,32 +1,104 @@
 /**
- * The sanitizer's post-pass over what a diagram's labels may hold once
- * mounted (`scrubDiagramSvg`), on markup parsed inert (happy-dom cannot host
- * DOMPurify; the DOMPurify parse and Mermaid's own label pass are proven in a
- * browser by tests/e2e/diagram-label-scrub.spec.ts).
+ * What a diagram's labels and styles may do once drawn: never navigate or
+ * submit, never pin anything to the window. Mermaid's own label pass
+ * (`MERMAID_CONFIG.dompurifyConfig`), the post-pass (`scrubDiagramSvg`) and
+ * the style filter (`keepContainedDeclarations`, used on `style` attributes
+ * and on every rule `scopeDiagramCss` keeps). The DOMPurify parse and the
+ * mounts' confinement are proven in a browser by
+ * tests/e2e/diagram-label-scrub.spec.ts and diagram-label-scrub-webkit.spec.ts.
  *
  * What regresses if these fail:
- * - a label keeps an element that loads (a picture, media) or navigates the
- *   tab when clicked (an image map, a form, a button);
- * - an attribute that loads or navigates survives on any element
- *   (`background`, `poster`, `srcset`, `action`, an http(s) `href`, …);
- * - a `style` keeps a declaration that fetches or pins the label to the
- *   window, or loses the declarations around it;
- * - a label keeps a class of the page's own (`fixed inset-0`), or loses one
- *   of Mermaid's;
+ * - Mermaid's label pass stops dropping an image map, a form or its controls
+ *   (or a directive could replace that config);
+ * - a label keeps an element or attribute that navigates or submits when
+ *   clicked once mounted;
+ * - a `position` that takes an element out of the diagram (`fixed`,
+ *   `sticky`, `var(--p)`, an escaped spelling) survives in a style or a rule,
+ *   or the declarations around it are lost;
+ * - a label loses something that only loads (a picture), which drew before;
  * - a real diagram comes out different at all.
  *
- * DOM-gated (DOM_TESTS=1).
+ * The DOM-gated block runs with DOM_TESTS=1.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseInertSvg } from '../test-setup/diagramSvg';
-import { scrubDiagramSvg } from './diagram-render';
+import { keepContainedDeclarations, scopeDiagramCss, scrubDiagramSvg } from './diagram-render';
+import { MERMAID_CONFIG } from './mermaid';
 
 const hasDom = typeof document !== 'undefined';
 const FIXTURES = join(import.meta.dir, '..', 'test-setup', 'fixtures', 'diagrams');
 const SVG = 'http://www.w3.org/2000/svg';
 const XHTML = 'http://www.w3.org/1999/xhtml';
+
+describe("Mermaid's own label pass", () => {
+  test('drops what navigates or submits, keeps what only loads, and a directive cannot replace it', () => {
+    const config = MERMAID_CONFIG.dompurifyConfig as { FORBID_TAGS?: string[]; FORBID_ATTR?: string[] } | undefined;
+    const tags = config?.FORBID_TAGS ?? [];
+    const attrs = config?.FORBID_ATTR ?? [];
+    for (const tag of ['style', 'form', 'button', 'input', 'select', 'option', 'optgroup', 'datalist', 'textarea', 'map', 'area', 'base']) {
+      expect([tag, tags.includes(tag)]).toEqual([tag, true]);
+    }
+    for (const attr of ['action', 'formaction', 'ping', 'target', 'usemap']) expect([attr, attrs.includes(attr)]).toEqual([attr, true]);
+    // A picture or media in a label draws as it did on main (the page's own policy decides what loads).
+    for (const tag of ['img', 'picture', 'source', 'video', 'audio', 'image']) expect([tag, tags.includes(tag)]).toEqual([tag, false]);
+    for (const attr of ['src', 'srcset', 'href', 'background', 'poster']) expect([attr, attrs.includes(attr)]).toEqual([attr, false]);
+    expect(MERMAID_CONFIG.secure).toContain('dompurifyConfig');
+    expect(MERMAID_CONFIG.secure).toContain('securityLevel');
+  });
+});
+
+describe('keepContainedDeclarations', () => {
+  test('drops every position that is not static, relative or absolute, however it is spelled', () => {
+    const escaping = [
+      'position: fixed',
+      'position:sticky',
+      'position: -webkit-sticky',
+      'POSITION: FIXED !important',
+      'position: var(--p)',
+      'position: inherit',
+      'position: revert',
+      'position: \\66ixed',
+      'posit\\69on: fixed',
+      'position:/* x */fixed',
+    ];
+    for (const declaration of escaping) {
+      expect([declaration, keepContainedDeclarations(`color: red; ${declaration}; top: 0`)]).toEqual([declaration, 'color: red; top: 0']);
+    }
+  });
+
+  test('splits where the browser would, so a declaration cannot hide behind a quote, a comment or an escape', () => {
+    // A comment holding a quote, a string cut by a line break, an escaped quote outside a string.
+    expect(keepContainedDeclarations("color:red/*'*/;position:fixed")).toBe('color:red');
+    expect(keepContainedDeclarations('content:"a\n;position:fixed')).toBe('content:"a');
+    expect(keepContainedDeclarations("x:\\';position:fixed;color:red")).toBe("x:\\'; color:red");
+    // A nested rule in a body.
+    expect(keepContainedDeclarations('color:red;.nodeLabel{position:fixed}')).toBe('color:red');
+  });
+
+  test('keeps a contained position, and leaves a list with nothing refused byte for byte', () => {
+    for (const text of [
+      'position: relative; left: 2px',
+      'position:absolute!important;top:0;',
+      'position: static',
+      'display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;',
+      'content: "{"; color: red',
+      'fill: url(#grad); stroke: #333',
+    ]) {
+      expect(keepContainedDeclarations(text)).toBe(text);
+    }
+    expect(keepContainedDeclarations('position: fixed')).toBeNull();
+  });
+
+  test("a kept rule of the diagram's sheet loses the same declarations, and Mermaid's own rules are untouched", () => {
+    const own = '#r .node rect{fill:#fff;stroke:#333;}#r .label{position:relative;}#r div.mermaidTooltip{position:absolute;}';
+    expect(scopeDiagramCss(own, 'r')).toBe(own);
+    expect(scopeDiagramCss('#r .nodeLabel{position:fixed;inset:0;color:red}', 'r')).toBe('#r .nodeLabel{inset:0; color:red}');
+    expect(scopeDiagramCss('#r .bad > *{position:var(--p) !important}#r .ok{color:red}', 'r')).toBe('#r .ok{color:red}');
+    expect(scopeDiagramCss('@media screen{#r .x{position:sticky;top:0}}', 'r')).toBe('@media screen{#r .x{top:0}}');
+  });
+});
 
 /** One html label, the way Mermaid writes it. */
 function label(html: string): SVGSVGElement {
@@ -38,95 +110,59 @@ function label(html: string): SVGSVGElement {
 }
 
 describe.if(hasDom)('what a label may hold once mounted', () => {
-  test('drops what loads and what navigates, and keeps the words of a form', () => {
+  test('drops what navigates or submits and keeps its words', () => {
     const svg = label(
-      '<img src="https://evil.test/a.png" usemap="#m"/><map name="m"><area shape="default" href="https://evil.test/x"/></map>' +
-        '<video poster="https://evil.test/p.png"><source src="https://evil.test/v.mp4"/><track src="https://evil.test/t.vtt"/></video>' +
-        '<audio src="https://evil.test/a.mp3"></audio><picture><source srcset="https://evil.test/s.png"/></picture>' +
-        '<form action="https://evil.test/f"><button formaction="https://evil.test/g">Go</button><input type="image" src="https://evil.test/i.png"/>' +
-        '<select><option>One</option></select><textarea>Note</textarea></form>',
+      '<img src="https://example.org/a.png" usemap="#m"/><map name="m"><area shape="default" href="https://example.org/x"/></map>' +
+        '<form action="https://example.org/f" target="_top"><button formaction="https://example.org/g">Go</button><input type="submit" value="Send"/>' +
+        '<select><option>One</option></select><textarea>Note</textarea></form><base href="https://example.org/"/>' +
+        '<a href="https://example.org/a" ping="https://example.org/p" target="_blank">link</a>',
     );
     scrubDiagramSvg(svg);
     const tags = Array.from(svg.querySelectorAll('*')).map((e) => e.localName);
-    for (const tag of ['img', 'map', 'area', 'video', 'source', 'track', 'audio', 'picture', 'form', 'button', 'input', 'select', 'option', 'textarea']) {
+    for (const tag of ['map', 'area', 'form', 'button', 'input', 'select', 'option', 'textarea', 'base']) {
       expect([tag, tags.includes(tag)]).toEqual([tag, false]);
     }
-    expect(svg.querySelector('p')?.textContent).toBe('GoOneNote');
-  });
-
-  test('no element keeps an attribute that loads or navigates; a #fragment link stays', () => {
-    const svg = label(
-      '<table background="https://evil.test/t.png"><tr><td background="https://evil.test/d.png">x</td></tr></table>' +
-        '<blockquote cite="https://evil.test/c">q</blockquote><a href="https://evil.test/a" ping="https://evil.test/p">link</a>' +
-        '<object data="https://evil.test/o"></object><span longdesc="https://evil.test/l" lowsrc="https://evil.test/w">s</span>',
+    const navigating = Array.from(svg.querySelectorAll('*')).flatMap((e) =>
+      e.getAttributeNames().filter((n) => ['action', 'formaction', 'ping', 'target', 'usemap'].includes(n)).map((n) => `${e.localName}@${n}`),
     );
-    const g = svg.querySelector('g')!;
-    const image = document.createElementNS(SVG, 'image');
-    image.setAttribute('href', 'https://evil.test/i.png');
-    const use = document.createElementNS(SVG, 'use');
-    use.setAttribute('href', '#r');
-    const pattern = document.createElementNS(SVG, 'pattern');
-    pattern.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '//evil.test/p.svg#a');
-    g.append(image, use, pattern);
-    scrubDiagramSvg(svg);
-    const refs = Array.from(svg.querySelectorAll('*')).flatMap((e) => Array.from(e.attributes).filter((a) => /href|src|background|cite|ping|data$|longdesc|lowsrc/.test(a.name)).map((a) => `${e.localName}@${a.name}=${a.value}`));
-    expect(refs).toEqual(['use@href=#r']);
-    // The elements themselves (and their words) stay.
-    expect(svg.querySelector('td')?.textContent).toBe('x');
-    expect(svg.querySelector('a')?.textContent).toBe('link');
+    expect(navigating).toEqual([]);
+    expect(svg.querySelector('a')!.hasAttribute('href')).toBe(false);
+    expect(svg.querySelector('p')?.textContent).toBe('GoOneNotelink');
   });
 
-  test('a style keeps every declaration but one that fetches or pins the label to the window', () => {
+  test('keeps what only loads, as main did', () => {
     const svg = label(
-      '<span id="a" style="color: red; background: url(https://evil.test/bg.png); font-weight: bold">a</span>' +
-        '<span id="b" style="background-image: image-set(&quot;https://evil.test/i.png&quot; 1x)">b</span>' +
-        '<span id="c" style="b\\61ckground: u\\72l(//evil.test/e.png); color: blue">c</span>' +
-        '<span id="d" style="position: fixed; inset: 0; z-index: 50">d</span>' +
-        '<span id="e" style="position:-webkit-sticky;top:0">e</span>' +
-        '<span id="f" style="position: relative; left: 2px; fill: url(#grad)">f</span>' +
-        '<span id="g" style="color:red;font-size:18px">g</span>',
+      '<img src="https://example.org/a.png" srcset="https://example.org/b.png 2x" width="20"/>' +
+        '<video poster="https://example.org/p.png"></video><table background="https://example.org/t.png"><tr><td>x</td></tr></table>' +
+        '<span id="bg" style="background: url(https://example.org/bg.png); color: red">s</span>',
+    );
+    scrubDiagramSvg(svg);
+    expect(svg.querySelector('img')!.getAttribute('src')).toBe('https://example.org/a.png');
+    expect(svg.querySelector('img')!.getAttribute('srcset')).toBe('https://example.org/b.png 2x');
+    expect(svg.querySelector('video')!.getAttribute('poster')).toBe('https://example.org/p.png');
+    expect(svg.querySelector('table')!.getAttribute('background')).toBe('https://example.org/t.png');
+    expect(svg.querySelector('#bg')!.getAttribute('style')).toBe('background: url(https://example.org/bg.png); color: red');
+  });
+
+  test("a label's style loses only a position that leaves the diagram", () => {
+    const svg = label(
+      '<span id="a" style="position: fixed; inset: 0; z-index: 50">a</span>' +
+        '<span id="b" style="--p: fixed"><span id="c" style="position: var(--p); top: 0">c</span></span>' +
+        '<span id="d" style="position: fixed">d</span>' +
+        '<span id="e" style="color:red;font-size:18px">e</span>',
     );
     scrubDiagramSvg(svg);
     const style = (id: string) => svg.querySelector(`#${id}`)!.getAttribute('style');
-    expect(style('a')).toBe('color: red; font-weight: bold');
-    expect(style('b')).toBeNull();
-    expect(style('c')).toBe('color: blue');
-    expect(style('d')).toBe('inset: 0; z-index: 50');
-    expect(style('e')).toBe('top:0');
-    // Nothing refused: left byte for byte.
-    expect(style('f')).toBe('position: relative; left: 2px; fill: url(#grad)');
-    expect(style('g')).toBe('color:red;font-size:18px');
-  });
-
-  test('a presentation attribute that fetches goes; a marker reference stays', () => {
-    const svg = label('x');
-    const path = document.createElementNS(SVG, 'path');
-    path.setAttribute('fill', 'url(https://evil.test/p.svg#a)');
-    path.setAttribute('filter', 'url(//evil.test/f.svg#b)');
-    path.setAttribute('marker-end', 'url(#r_arrowhead)');
-    svg.querySelector('g')!.append(path);
-    scrubDiagramSvg(svg);
-    expect(path.hasAttribute('fill')).toBe(false);
-    expect(path.hasAttribute('filter')).toBe(false);
-    expect(path.getAttribute('marker-end')).toBe('url(#r_arrowhead)');
-  });
-
-  test('inside a label only Mermaid\'s own classes stay; a class outside the labels is untouched', () => {
-    const svg = label(
-      '<div class="fixed inset-0 z-50 bg-red-500">cover</div><i class="fa fa-car"></i>' +
-        '<span class="katex"><span class="katex-mathml">m</span></span><svg class="fixed w-screen"></svg>',
-    );
-    svg.querySelector('g')!.setAttribute('class', 'node hot fixed');
-    scrubDiagramSvg(svg);
-    const classes = Array.from(svg.querySelectorAll('foreignObject [class]')).map((e) => `${e.localName}.${e.getAttribute('class')}`);
-    expect(classes).toEqual(['span.nodeLabel', 'i.fa fa-car', 'span.katex', 'span.katex-mathml']);
-    expect(svg.querySelector('foreignObject div div, foreignObject p > div')!.hasAttribute('class')).toBe(false);
-    // The node group is svg, outside every label: classDef classes stay.
-    expect(svg.querySelector('g')!.getAttribute('class')).toBe('node hot fixed');
+    expect(style('a')).toBe('inset: 0; z-index: 50');
+    // A custom property alone moves nothing; the declaration that reads it goes.
+    expect(style('b')).toBe('--p: fixed');
+    expect(style('c')).toBe('top: 0');
+    expect(style('d')).toBeNull();
+    expect(style('e')).toBe('color:red;font-size:18px');
   });
 
   test('every captured real diagram comes out with the same elements and attributes', () => {
-    // What regresses: a label rule that touches Mermaid's own output (a class, a style, a reference).
+    // What regresses: a rule here that touches Mermaid's own output (a class, a style, a reference).
     for (const file of readdirSync(FIXTURES).filter((name) => name.endsWith('.svg'))) {
       const markup = readFileSync(join(FIXTURES, file), 'utf8');
       const raw = parseInertSvg(markup)!;
@@ -137,6 +173,10 @@ describe.if(hasDom)('what a label may hold once mounted', () => {
           .filter((e) => e.localName !== 'a')
           .map((e) => `${e.localName} ${Array.from(e.attributes).map((a) => `${a.name}=${a.value}`).sort().join(' ')}`);
       expect([file, shape(clean)]).toEqual([file, shape(raw)]);
+      // The sheet too: the position filter leaves every one of Mermaid's rule bodies whole.
+      const bodies = Array.from(raw.querySelectorAll('style')).flatMap((s) => Array.from((s.textContent ?? '').matchAll(/\{([^{}]*)\}/gu), (m) => m[1] ?? ''));
+      expect(bodies.length).toBeGreaterThan(0);
+      expect([file, bodies.filter((body) => keepContainedDeclarations(body) !== body)]).toEqual([file, []]);
     }
   });
 });

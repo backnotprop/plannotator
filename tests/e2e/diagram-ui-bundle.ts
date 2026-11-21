@@ -1,7 +1,7 @@
 /**
  * The diagram engine Plannotator's apps use (`packages/ui/utils/diagram-render.ts`
- * with real Mermaid and DOMPurify), bundled for a page with no CSP, so a fetch
- * or a navigation that got through would happen. Built with the VS Code Guides
+ * with real Mermaid and DOMPurify), bundled for a page with no CSP, so a
+ * navigation that got through would happen. Built with the VS Code Guides
  * webview's esbuild options (as vscode-guides-sanitize.spec.ts does), with this
  * entry. Used by diagram-label-scrub.spec.ts and diagram-label-scrub-webkit.spec.ts.
  *
@@ -10,10 +10,11 @@
  *   `{ ok, refused, message }`.
  * - `measure(source)`: Mermaid alone, as `renderDiagram` runs it (same runtime,
  *   same config), with no sanitizer after it: what Mermaid's own drawing into
- *   the live page does. The raw svg, or null.
+ *   the live page holds. The raw svg, or null.
  * - `labelRulesChanged(markup)`: what the sanitizer's post-pass changed in the
- *   markup beyond the rules it always had (an `<a>` target, a `<style>` text):
- *   one line per element or attribute that differs from the DOMPurify parse alone.
+ *   markup beyond the rules it always had (an `<a>`'s link, a `<style>`'s text,
+ *   a reference that is not a fragment or http(s)): one line per element or
+ *   attribute that differs from the DOMPurify parse alone.
  */
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -34,9 +35,12 @@ import { loadMermaidRuntime } from ${JSON.stringify(join(UI, 'utils/mermaid.ts')
 import { applyMermaidTheme, mermaidThemeKey } from ${JSON.stringify(join(UI, 'utils/mermaidTheme.ts'))};
 const host = () => document.getElementById('host')!;
 let seq = 0;
+/** A reference the post-pass always dropped (not a fragment, not http(s)). */
+const oldRule = (name: string, value: string) =>
+  ['href', 'xlink:href', 'src'].includes(name) && !/^(#|https?:[/][/]|$)/i.test(value.trim());
 function describe(el: Element): string[] {
   return [el, ...Array.from(el.querySelectorAll('*'))].map((e) => {
-    const attrs = e.localName === 'a' ? [] : Array.from(e.attributes).map((a) => a.name + '=' + a.value).sort();
+    const attrs = e.localName === 'a' ? [] : Array.from(e.attributes).filter((a) => !oldRule(a.name, a.value)).map((a) => a.name + '=' + a.value).sort();
     return e.localName + (e.localName === 'style' ? '' : ' ' + attrs.join(' '));
   });
 }
@@ -91,25 +95,54 @@ await build({ ...options, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoin
 /** The utilities an app's stylesheet carries (Tailwind's own output for these class names). */
 export const APP_UTILITIES = `.fixed{position:fixed}.absolute{position:absolute}.inset-0{inset:0}.top-0{top:0}.left-0{left:0}.z-50{z-index:50}.w-screen{width:100vw}.h-screen{height:100vh}.bg-red-500{background-color:rgb(239 68 68)}`;
 
+/** The Inbox's artifact tile, from its own stylesheet (Artifacts grid and Wall: `ArtifactDiagramFace`). */
+export function artifactTileCss(): string {
+  const css = readFileSync(resolve(__dirname, '../../packages/inbox/inbox.css'), 'utf8');
+  const rules = ['.ib-art-prev {', '.ib-art-svg {', '.ib-art-svg > svg {'].map((head) => css.split('\n').find((line) => line.startsWith(head)));
+  if (rules.some((rule) => rule === undefined)) throw new Error('the artifact tile rules moved in inbox.css');
+  return rules.join('\n');
+}
+
+/** Pictures from this host load (a 1x1 png): a label's picture still shows. */
+export const PICTURE_HOST = 'https://img.test';
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+
+/** Label HTML that would take the tab away, or submit, when clicked. */
+export const NAVIGATING_LABELS = [
+  `<img src='${PICTURE_HOST}/map.png' usemap='#m' width=200 height=40 alt=map><map name='m'><area shape='default' href='https://evil.test/area'></map>`,
+  `<form action='https://evil.test/form'><button>Go</button></form>`,
+  `<form><button formaction='https://evil.test/formaction'>Go</button></form>`,
+  `<form action='https://evil.test/form2'><input type='submit' value='Send'></form>`,
+  `<form action='https://evil.test/form3'><input type='image' src='${PICTURE_HOST}/in.png' width=60 height=20></form>`,
+  `<form action='https://evil.test/form4' target='_top'><input name=q value=x><button type=submit>Find</button></form>`,
+];
+
 /**
- * A page with the app's utilities, a button outside the diagram, and `#host`
- * inside `box` (the box's own CSS): every request that is not this page's is
- * recorded in `requests` and aborted, and every navigation of the page after
- * it loaded is recorded in `navigations`.
+ * A page with the app's utilities, a button above the diagram and one below,
+ * and `#host` inside `#box`: a plain clipped box, or (`tile`) the Inbox's
+ * artifact tile with its real CSS. Pictures from PICTURE_HOST load; every
+ * other request is recorded in `requests` (a form submission as `document`)
+ * and aborted; every navigation of the page after it loaded is recorded in
+ * `navigations`.
  */
-export async function openDiagramPage(page: Page, bundle: string, box = 'position:relative;width:700px;height:450px;overflow:hidden') {
+export async function openDiagramPage(page: Page, bundle: string, options: { tile?: boolean } = {}) {
   const errors: string[] = [];
   const requests: string[] = [];
   const navigations: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.route(/^(?!data:|about:)/, (route) => {
-    requests.push(route.request().url());
+    const url = route.request().url();
+    if (url.startsWith(`${PICTURE_HOST}/`)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
+    requests.push(`${route.request().resourceType()} ${url}`);
     return route.abort();
   });
-  await page.setContent(`<!DOCTYPE html><html><head><style>body{margin:0}${APP_UTILITIES}</style></head><body>
+  const box = options.tile
+    ? `<div class="ib-art-prev" id="box" style="width:240px;margin:20px 0 0 20px"><span class="ib-art-svg" id="host" data-drawn></span></div>`
+    : `<div id="box" style="position:relative;width:700px;height:450px;overflow:hidden"><div id="host" style="position:absolute;inset:0"></div></div>`;
+  await page.setContent(`<!DOCTYPE html><html><head><style>body{margin:0}${APP_UTILITIES}${options.tile ? artifactTileCss() : ''}</style></head><body>
 <div style="height:60px"><button id="app-button">Approve</button></div>
-<div id="box" style="${box}"><div id="host" style="position:absolute;inset:0"></div></div>
-<div style="height:300px;padding-left:300px"><button id="app-below">Send</button></div>
+${box}
+<div style="height:300px;padding:20px 0 0 300px"><button id="app-below">Send</button></div>
 <script>${bundle.replace(/<\/script/gi, '<\\/script')}</script>
 </body></html>`);
   await page.waitForFunction(() => !!(window as any).__d, null, { timeout: 30_000 }).catch(() => {
@@ -119,4 +152,17 @@ export async function openDiagramPage(page: Page, bundle: string, box = 'positio
     if (frame === page.mainFrame()) navigations.push(frame.url());
   });
   return { requests, navigations, errors };
+}
+
+/** Click the middle of every element drawn in a label, then press Enter in each field. */
+export async function clickEveryLabelElement(page: Page): Promise<number> {
+  const points = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('#host foreignObject *'))
+      .map((e) => e.getBoundingClientRect())
+      .filter((b) => b.width > 0 && b.height > 0)
+      .map((b) => [b.x + b.width / 2, b.y + b.height / 2] as const),
+  );
+  for (const [x, y] of points) await page.mouse.click(x, y);
+  for (const field of await page.locator('#host input, #host textarea').all()) await field.press('Enter').catch(() => {});
+  return points.length;
 }

@@ -32,31 +32,23 @@ import type { Mermaid, MermaidConfig } from 'mermaid';
 export const MERMAID_LABEL_WRAP_WIDTH = 140;
 
 /**
- * Elements a label's own HTML may not keep, and attributes no element in it
- * may keep: what loads something (a picture, media, a frame, a stylesheet) or
- * navigates the tab (a form, an image map, a button). Mermaid writes every
- * label into the live page to measure it before `diagram-render` sanitizes the
- * drawn svg, so a picture there is fetched at that moment; this list is what
- * Mermaid's own label pass removes, so nothing in it ever reaches the page.
- * `style` is Mermaid's own default. Text inside a removed element is kept
- * (`<button>Go</button>` leaves "Go").
+ * Elements a label's own HTML may not keep: what navigates the tab or submits
+ * when clicked (an image map, a form and its controls, a `<base>` that would
+ * retarget links). Mermaid writes every label into the live page to measure it
+ * before `diagram-render` sanitizes the drawn svg, so this is what Mermaid's
+ * own label pass removes. The text inside a removed element is kept
+ * (`<button>Go</button>` leaves "Go"). `style` is Mermaid's own default.
+ * What only loads (a picture, media) is not listed: a label draws it as it did,
+ * under the page's own policy.
  */
 export const MERMAID_LABEL_FORBIDDEN_TAGS = [
   'style',
-  'img', 'image', 'picture', 'source', 'track', 'audio', 'video',
-  'iframe', 'frame', 'frameset', 'object', 'embed', 'portal', 'fencedframe',
-  'link', 'meta', 'base',
   'form', 'button', 'input', 'select', 'option', 'optgroup', 'datalist', 'textarea',
-  'map', 'area',
-  'mglyph',
+  'map', 'area', 'base',
 ];
 
-/** See MERMAID_LABEL_FORBIDDEN_TAGS. A label's `<a>` loses its target here too (the canvas owns every click). */
-export const MERMAID_LABEL_FORBIDDEN_ATTRS = [
-  'src', 'srcset', 'imagesrcset', 'href', 'xlink:href', 'background', 'poster', 'ping',
-  'action', 'formaction', 'data', 'cite', 'longdesc', 'usemap', 'manifest', 'codebase',
-  'archive', 'profile', 'lowsrc', 'dynsrc', 'icon', 'srcdoc', 'classid', 'attributionsrc',
-];
+/** See MERMAID_LABEL_FORBIDDEN_TAGS: the attributes that navigate or submit. */
+export const MERMAID_LABEL_FORBIDDEN_ATTRS = ['action', 'formaction', 'ping', 'target', 'usemap'];
 
 /** Mermaid's own secure keys (its default `secure`), which a diagram's directive or front matter cannot change. */
 const MERMAID_DEFAULT_SECURE_KEYS = ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges'];

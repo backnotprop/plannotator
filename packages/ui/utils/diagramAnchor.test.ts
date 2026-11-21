@@ -234,12 +234,12 @@ describe.if(hasDom)('scrubDiagramSvg (the belt over the engine output)', () => {
     expect(svg.querySelector('#x-flowchart-B-1')).not.toBeNull();
     expect(markup).not.toContain('href="#x-flowchart-A-0"');
     expect(markup).toContain('id="x-flowchart-A-0"');
-    // No image keeps a reference that loads: the data: one and the https one
-    // both lose their href (the element stays, inert).
+    // An http(s) image reference is the one external reference that stays;
+    // the data: one before it lost its href.
     const images = Array.from(svg.querySelectorAll('image'));
     expect(images).toHaveLength(2);
     expect(images[0]!.hasAttribute('href')).toBe(false);
-    expect(images[1]!.hasAttribute('href')).toBe(false);
+    expect(images[1]!.getAttribute('href')).toBe('https://example.com/a.png');
   });
 
   test('leaves a real fixture whole (no element, id or label is lost)', () => {

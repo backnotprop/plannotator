@@ -32,15 +32,14 @@
  * in an svg `<a href>`, which would turn the pinpoint click on that node
  * into a navigation. The canvas owns every click.
  *
- * Mermaid writes the diagram into the live page to measure it before this
- * pass runs, so what a label or a style would load is stopped earlier too:
- * Mermaid's own label pass drops what loads or navigates
- * (`MERMAID_LABEL_FORBIDDEN_TAGS` / `_ATTRS` in `./mermaid`, a secure key a
- * directive cannot replace), and a source whose CSS names another host, or
- * that has a picture node, is shown as its source without running Mermaid
- * (`mermaidSourceLoads`). Once drawn, the post-pass removes the same from
- * every element, so a label neither fetches nor navigates nor leaves its
- * diagram (`scrubDiagramSvg`).
+ * A label's own HTML never navigates or submits either: Mermaid's label pass
+ * drops image maps, forms and their controls (`MERMAID_LABEL_FORBIDDEN_TAGS` /
+ * `_ATTRS` in `./mermaid`, a secure key a directive cannot replace), and the
+ * post-pass drops them again for a runtime a host set up itself. And no
+ * style the diagram carries may pin an element to the window
+ * (`position` other than static, relative or absolute), in a `style`
+ * attribute or in a rule of its sheet; every mount outside the canvas also
+ * confines its diagram (`contain: paint`), so nothing drawn leaves its box.
  */
 import DOMPurify from 'dompurify';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -50,7 +49,6 @@ import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } fr
 import { loadMathRenderer } from './math';
 import { getMermaidRetryDelayMs, loadMermaidRuntime, MERMAID_LABEL_FORBIDDEN_ATTRS } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
-import { mermaidSourceLoads } from './mermaidSourceLoads';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
@@ -209,26 +207,15 @@ function sanitizeFor(svg: string, options: DiagramRenderOptions | undefined): SV
 /**
  * What an html label may not hold once drawn, the belt under Mermaid's own
  * label pass (`MERMAID_LABEL_FORBIDDEN_TAGS` in `./mermaid`), for a runtime a
- * host initialized without that config. Removed: what loads or plays
- * something. Unwrapped (the element goes, its text stays): what submits,
- * navigates or takes input.
+ * host initialized without that config: what navigates or submits when
+ * clicked. Removed: the empty ones. Unwrapped (the element goes, its text
+ * stays): the rest.
  */
-const LABEL_REMOVED_ELEMENTS = 'img, picture, source, track, audio, video, frame, frameset, portal, fencedframe, base, input, area, mglyph';
-const LABEL_UNWRAPPED_ELEMENTS = 'form, button, select, option, optgroup, datalist, textarea, map';
+const NAVIGATING_ELEMENTS = 'input, area, base';
+const UNWRAPPED_ELEMENTS = 'form, button, select, option, optgroup, datalist, textarea, map';
 
-/** Attributes that load or navigate, removed from every element whatever their value. `href` and `xlink:href` are read on their own: a `#fragment` stays. */
-const URL_ATTRIBUTES = new Set(MERMAID_LABEL_FORBIDDEN_ATTRS.filter((name) => name !== 'href' && name !== 'xlink:href'));
-
-/**
- * The classes Mermaid 12 itself writes on what it draws inside a
- * `foreignObject` (label wrappers, edge label backgrounds, journey, timeline
- * and venn text, Font Awesome icons from `fa:fa-…`, KaTeX's math labels).
- * Any other class there is the author's, and the page's own stylesheet
- * applies to it: a utility like `fixed inset-0` lifts the label out of the
- * diagram in WebKit, over the app. A Mermaid upgrade that adds a label class
- * adds it here (the e2e regression check renders each family).
- */
-const MERMAID_LABEL_CLASS = /^(?:nodeLabel|edgeLabel|labelBkg|markdown-node-label|label|task|em-box|venn-text-node(?:-fo)?|journey-section|section-type-\d+|label-icon|fa[bdklrs]?|fa-[\w-]+|katex(?:-[\w-]+)?)$/;
+/** Attributes that navigate or submit (`MERMAID_LABEL_FORBIDDEN_ATTRS`), removed from every element. */
+const NAVIGATING_ATTRIBUTES = new Set(MERMAID_LABEL_FORBIDDEN_ATTRS);
 
 /**
  * Step two, in place on the tree that is about to be mounted: the belt that
@@ -236,22 +223,18 @@ const MERMAID_LABEL_CLASS = /^(?:nodeLabel|edgeLabel|labelBkg|markdown-node-labe
  * Forbidden elements go, every `<style>` keeps only rules scoped under the
  * svg's own root id (`scopeDiagramCss`), every `<a>` loses its target (svg `<a>` from a
  * click binding, `<a>` in an html label alike — the element stays so the
- * label text survives), every `on*` attribute goes, `href`/`xlink:href` keep
- * only a `#fragment`, every other attribute that loads or navigates
- * (`src`, `srcset`, `background`, `poster`, `action`, `data`, …) goes, a
- * `style` attribute loses each declaration that fetches (`url(` other than a
- * fragment, `image-set(`, …) or pins it to the window (`position: fixed` /
- * `sticky`), any other attribute that fetches (`fill="url(https://…)"`)
- * goes, and inside a `foreignObject` only Mermaid's own classes stay. A
- * diagram with none of these comes out exactly as before.
+ * label text survives), every `on*` attribute goes, a reference
+ * attribute keeps only a fragment or an http(s) URL, what navigates or
+ * submits goes (an image map, a form and its controls, `action`,
+ * `formaction`, `ping`, `target`, `usemap`), and a `position` other than
+ * static, relative or absolute goes from every `style` attribute and every
+ * kept rule (`keepContainedDeclarations`). A diagram with none of these
+ * comes out exactly as before.
  */
 export function scrubDiagramSvg(root: SVGSVGElement): void {
   for (const el of Array.from(root.querySelectorAll(FORBIDDEN_ELEMENTS))) el.remove();
-  for (const el of Array.from(root.querySelectorAll(LABEL_REMOVED_ELEMENTS))) el.remove();
-  for (const el of Array.from(root.querySelectorAll(LABEL_UNWRAPPED_ELEMENTS)).reverse()) el.replaceWith(...Array.from(el.childNodes));
-  for (const fo of Array.from(root.querySelectorAll('foreignObject, foreignobject'))) {
-    for (const el of Array.from(fo.querySelectorAll('[class]'))) keepMermaidLabelClasses(el);
-  }
+  for (const el of Array.from(root.querySelectorAll(NAVIGATING_ELEMENTS))) el.remove();
+  for (const el of Array.from(root.querySelectorAll(UNWRAPPED_ELEMENTS)).reverse()) el.replaceWith(...Array.from(el.childNodes));
   // A `<style>` inside the svg is a page stylesheet once mounted: it can
   // restyle elements OUTSIDE the diagram and fetch (`@import`, `url(`).
   // Mermaid needs its own scoped sheet, so style elements are not dropped
@@ -281,32 +264,38 @@ function scrubAttributes(el: Element): void {
       el.removeAttribute(attribute.name);
       continue;
     }
-    if ((name === 'href' || name.endsWith(':href')) && !value.startsWith('#') && value !== '') {
+    if (NAVIGATING_ATTRIBUTES.has(name)) {
       el.removeAttribute(attribute.name);
       continue;
     }
-    if (URL_ATTRIBUTES.has(name)) {
+    if (
+      (name === 'href' || name === 'xlink:href' || name === 'src') &&
+      !value.startsWith('#') &&
+      !value.startsWith('http://') &&
+      !value.startsWith('https://') &&
+      value !== ''
+    ) {
       el.removeAttribute(attribute.name);
       continue;
     }
     if (name === 'style') {
-      scrubStyleAttribute(el, attribute.value);
-    } else if (!name.startsWith('data-') && !name.startsWith('aria-') && value.includes('(') && cssFetches(attribute.value)) {
-      // A presentation attribute (`fill`, `filter`, `mask`, `cursor`, …) that fetches.
-      el.removeAttribute(attribute.name);
+      const kept = keepContainedDeclarations(attribute.value);
+      if (kept === null) el.removeAttribute(attribute.name);
+      else if (kept !== attribute.value) el.setAttribute(attribute.name, kept);
     }
   }
 }
 
-function keepMermaidLabelClasses(el: Element): void {
-  const tokens = (el.getAttribute('class') ?? '').split(/\s+/u).filter(Boolean);
-  const kept = tokens.filter((token) => MERMAID_LABEL_CLASS.test(token));
-  if (kept.length === tokens.length) return;
-  if (kept.length === 0) el.removeAttribute('class');
-  else el.setAttribute('class', kept.join(' '));
-}
+/** The only `position` values a diagram's styles may set: none of them takes an element out of its diagram's box. */
+const CONTAINED_POSITIONS = new Set(['static', 'relative', 'absolute']);
 
-/** Split a declaration list on top-level `;` (not inside parens or strings). */
+/**
+ * Split a declaration list where a browser would, on every top-level `;`,
+ * with comments read as a space. A split here is never missed: a quote or a
+ * bracket is tracked as the CSS tokenizer does (a string ends at a newline,
+ * an escape outside a string takes the next character), and any closer
+ * closes, so this splits at least where the browser does.
+ */
 function splitDeclarations(text: string): string[] {
   const out: string[] = [];
   let depth = 0;
@@ -320,10 +309,24 @@ function splitDeclarations(text: string): string[] {
         i += 1;
         continue;
       }
-      if (ch === quote) quote = '';
-    } else if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === '(') depth += 1;
-    else if (ch === ')') depth = Math.max(0, depth - 1);
+      if (ch === quote || ch === '\n' || ch === '\r' || ch === '\f') quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      i = close === -1 ? text.length : close + 1;
+      current += ' ';
+      continue;
+    }
+    if (ch === '\\' && text[i + 1] !== undefined && !/[\n\r\f]/u.test(text[i + 1] as string)) {
+      current += ch + (text[i + 1] as string);
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
     else if (ch === ';' && depth === 0) {
       out.push(current);
       current = '';
@@ -335,23 +338,34 @@ function splitDeclarations(text: string): string[] {
   return out;
 }
 
-/** A declaration that fetches, or that pins its element to the window (out of the diagram). */
-function declarationRefused(declaration: string): boolean {
-  const decoded = decodeCssEscapes(declaration.replace(/\/\*[\s\S]*?\*\//gu, '')).toLowerCase();
-  if (cssFetches(decoded) || /expression\s*\(/u.test(decoded)) return true;
-  const colon = decoded.indexOf(':');
+/**
+ * A declaration that could take its element out of the diagram: a
+ * `position` (escapes decoded, any case) whose value is not one of
+ * CONTAINED_POSITIONS (`fixed`, `sticky`, `var(--p)`, `inherit`, … all
+ * refused), or a nested block (a nested rule in a sheet).
+ */
+function declarationEscapes(declaration: string): boolean {
+  if (/[{}]/u.test(declaration.replace(/"(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*'/gu, '""'))) return true;
+  const colon = declaration.indexOf(':');
   if (colon === -1) return false;
-  return decoded.slice(0, colon).trim() === 'position' && /(?:^|[^\w-])(?:-webkit-)?(?:fixed|sticky)\b/u.test(decoded.slice(colon + 1));
+  if (decodeCssEscapes(declaration.slice(0, colon)).trim().toLowerCase() !== 'position') return false;
+  const value = decodeCssEscapes(declaration.slice(colon + 1)).replace(/!\s*important\s*$/iu, '').trim().toLowerCase();
+  return !CONTAINED_POSITIONS.has(value);
 }
 
-/** Drop the refused declarations; an attribute with none refused is left byte for byte. */
-function scrubStyleAttribute(el: Element, text: string): void {
+/**
+ * A declaration list (a `style` attribute, a rule's body) without the
+ * declarations that could take an element out of the diagram. The text comes
+ * back unchanged, byte for byte, when there are none; null when nothing is left.
+ */
+export function keepContainedDeclarations(text: string): string | null {
   const declarations = splitDeclarations(text);
-  const kept = declarations.filter((declaration) => !declarationRefused(declaration));
-  if (kept.length === declarations.length) return;
-  const rest = kept.map((declaration) => declaration.trim()).filter(Boolean).join('; ');
-  if (rest === '') el.removeAttribute('style');
-  else el.setAttribute('style', rest);
+  if (!declarations.some(declarationEscapes)) return text;
+  const kept = declarations
+    .filter((declaration) => !declarationEscapes(declaration))
+    .map((declaration) => declaration.trim())
+    .filter(Boolean);
+  return kept.length === 0 ? null : kept.join('; ');
 }
 
 /** The attribute an edge's widened hit path carries (its value is the
@@ -579,7 +593,8 @@ export function scopeDiagramCss(css: string, rootId: string): string {
     if (cssFetches(body)) continue;
     const selectors = splitSelectors(prelude);
     if (selectors.length === 0 || !selectors.every(scoped)) continue;
-    out += `${prelude}{${body}}`;
+    const kept = keepContainedDeclarations(body);
+    if (kept !== null) out += `${prelude}{${kept}}`;
   }
   return out;
 }
@@ -724,10 +739,6 @@ async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: str
 const mermaidRenderer: DiagramRenderer = {
   finder: MERMAID_FINDER,
   async render(renderId, source, theme, options) {
-    // Mermaid draws into the live page before the sanitizer runs: a source
-    // whose CSS names another host, or a picture node, would load from the
-    // network right then. Shown as its source instead (`./mermaidSourceLoads`).
-    if (mermaidSourceLoads(source)) return REFUSED_RESULT;
     let runtime: Mermaid;
     try {
       runtime = await loadWithRetry(loadMermaidRuntime, getMermaidRetryDelayMs());
