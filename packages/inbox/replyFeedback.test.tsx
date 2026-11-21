@@ -354,3 +354,113 @@ test.skipIf(!hasDom)("drawn: no live page anywhere in the person's feedback (own
   const own = await draw(`Here is the page:\n\n\`\`\`html\n<p>mine</p>\n\`\`\`\n\n${injectedPinFeedback()}`, { kind: 'person' } as InboxMessageWire['author']);
   expect(own.querySelectorAll('[data-html-embed]').length).toBe(1);
 });
+
+// The window's parser reads fences its own way (`parser.ts`, `codeFenceCloseIndex`): backticks only, and any line
+// starting with as many backticks closes one. Words the person typed above the feedback can never hide it.
+const liveCount = (el: HTMLElement) => el.querySelectorAll('iframe, [data-html-embed]').length;
+const anyLiveFence = /^\s*`{3,}\s*(?:html|svg)(?:\s|$)/im;
+// A page's quote that closes an open ``` and opens its own ```html (`Feedback on: "…"` is the page's raw text).
+const CLOSE_THEN_OPEN = 'Pay"\n```\n```html\n<script src="https://example.invalid/z.js"></script><b>injected</b>\n```\n"';
+const closeThenOpenFeedback = () =>
+  attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, originalText: CLOSE_THEN_OPEN, htmlAnchor: undefined, elementContext: undefined } } as unknown as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+// A forged outline and a page's ```html in a quote's heading, on one page.
+const forgedAndInjected = () =>
+  attachmentFeedback(
+    [
+      { ...PIN, annotation: { ...PIN.annotation, htmlAnchor: undefined, elementContext: { tag: 'div', outline: FORGED_OUTLINE } } } as InboxAnnotationRecord,
+      { ...PIN, id: 'p2', annotation: { ...PIN.annotation, id: 'p2', startOffset: 3, endOffset: 3, originalText: INJECTED, htmlAnchor: undefined, elementContext: undefined } } as unknown as InboxAnnotationRecord,
+    ],
+    [PAGE],
+    new Map(),
+    ROOT,
+    { personMessageIds: PEOPLE },
+  );
+const TILDE_WORDS = 'Two things.\n\n~~~\n\nThe second one.';
+const UNCLOSED_WORDS = 'Like this:\n\n```\nnpm run build';
+
+test("the split reads fences as the window does: '~~~' is text, a fence closes on any line of as many backticks", () => {
+  const text = feedback();
+  expect(splitReplyFeedback(`${TILDE_WORDS}\n\n${text}`)).toEqual({ words: TILDE_WORDS, feedback: text });
+  const closedWithInfo = 'Example:\n\n```js\nlet a;\n```js';
+  expect(splitReplyFeedback(`${closedWithInfo}\n\n${text}`)?.words).toBe(closedWithInfo);
+});
+
+test("a lone '~~~' or an unclosed ``` in the person's words never switches the feedback's protection off", () => {
+  for (const [words, exported] of [
+    [TILDE_WORDS, forgedAndInjected()],
+    [TILDE_WORDS, forgedLiveFeedback()],
+    [UNCLOSED_WORDS, closeThenOpenFeedback()],
+    [UNCLOSED_WORDS, forgedLiveFeedback()],
+  ] as const) {
+    const stored = `${words}\n\n${exported}`;
+    expect(stored).toMatch(anyLiveFence);
+    const shown = withoutElementDetails(stored);
+    expect(shown).not.toMatch(anyLiveFence);
+    expect(shown).not.toContain('````html');
+    expect(shown).not.toContain(FORGED_OUTLINE);
+    // The person's words stay as written.
+    expect(shown.startsWith(`${words}\n\n`)).toBe(true);
+  }
+});
+
+test.skipIf(!hasDom)("drawn: a lone '~~~' or an unclosed ``` above the feedback, and nothing in it is live", async () => {
+  for (const body of [
+    `${TILDE_WORDS}\n\n${forgedAndInjected()}`,
+    `${TILDE_WORDS}\n\n${forgedLiveFeedback()}`,
+    `${UNCLOSED_WORDS}\n\n${closeThenOpenFeedback()}`,
+    `${UNCLOSED_WORDS}\n\n${forgedLiveFeedback()}`,
+  ]) {
+    const el = await draw(body, { kind: 'person' } as InboxMessageWire['author']);
+    expect(liveCount(el)).toBe(0);
+    expect(el.textContent?.includes('forged')).toBe(false);
+    unmountDrawn();
+  }
+  // The person's own ```html above, then a '~~~': still live, and only it.
+  const own = await draw(`Here is the page:\n\n\`\`\`html\n<p>mine</p>\n\`\`\`\n\n~~~\n\n${forgedAndInjected()}`, { kind: 'person' } as InboxMessageWire['author']);
+  expect(own.querySelectorAll('[data-html-embed]').length).toBe(1);
+});
+
+test("the person's own ```html that the window would keep open into the feedback is drawn as code; a closed one stays", () => {
+  const stored = `Look:\n\n\`\`\`html\n<p>mine\n\n${closeThenOpenFeedback()}`;
+  const shown = withoutElementDetails(stored);
+  expect(shown).not.toMatch(anyLiveFence);
+  expect(shown.startsWith('Look:\n\n```xml\n<p>mine\n')).toBe(true);
+  const closed = `Look:\n\n\`\`\`html\n<p>mine</p>\n\`\`\`\n\n${closeThenOpenFeedback()}`;
+  expect(withoutElementDetails(closed).startsWith('Look:\n\n```html\n<p>mine</p>\n```\n')).toBe(true);
+});
+
+test.skipIf(!hasDom)("a normal reply: words, then feedback with a file link and the person's line breaks, drawn as before", async () => {
+  const words = 'Two notes.\n\nSecond paragraph.';
+  const exported = attachmentFeedback([{ ...RECORDS[0]!, annotation: imageCommentAnnotation({ id: 'a1', name: 'checkout.png', text: 'First line\nsecond line\n\nthird' }) as unknown as Record<string, unknown> } as InboxAnnotationRecord], [IMAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+  const body = `${words}\n\n${exported}`;
+  // Nothing to change: the same text, split at the same place.
+  expect(withoutElementDetails(body)).toBe(body);
+  expect(splitReplyFeedback(body)).toEqual({ words, feedback: exported });
+  const el = await draw(body, { kind: 'person' } as InboxMessageWire['author']);
+  const block = el.querySelector('[data-reply-feedback]')!;
+  expect(block.querySelector('h2 a[data-local-link="open"]')?.textContent).toBe('design/checkout.png');
+  expect(block.textContent?.includes('second line')).toBe(true);
+  expect(block.textContent?.includes('third')).toBe(true);
+  expect(block.textContent?.includes('Second paragraph.')).toBe(false);
+});
+
+test("diagram fences: in the feedback they are drawn as their source; above it, the person's still draw", () => {
+  const ownDiagram = '```mermaid\ngraph LR\n  X-->Y\n```';
+  const text = 'See:\n```mermaid\ngraph TD\n  A-->B\n```\n```dot\ndigraph { a -> b }\n```';
+  const exported = attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, text } } as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+  expect(exported).toContain('```mermaid\ngraph TD');
+  const shown = withoutElementDetails(`Mine:\n\n${ownDiagram}\n\n${exported}`);
+  expect(shown).toContain(`Mine:\n\n${ownDiagram}\n\n`);
+  expect(shown).toContain('```text\ngraph TD');
+  expect(shown).toContain('```text\ndigraph { a -> b }');
+  expect(shown.match(/^```(?:mermaid|dot)/gm)?.length).toBe(1);
+});
+
+test.skipIf(!hasDom)('drawn: a diagram in the feedback is code, the one above it a diagram', async () => {
+  const text = 'See:\n```mermaid\ngraph TD\n  A-->B\n```\n```dot\ndigraph { a -> b }\n```';
+  const exported = attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, text } } as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+  const el = await draw(`Mine:\n\n\`\`\`mermaid\ngraph LR\n  X-->Y\n\`\`\`\n\n${exported}`, { kind: 'person' } as InboxMessageWire['author']);
+  expect(el.querySelectorAll('[data-diagram-block]').length).toBe(1);
+  expect(el.querySelectorAll('[data-reply-feedback] [data-diagram-block]').length).toBe(0);
+  expect(Array.from(el.querySelectorAll('[data-reply-feedback] pre, [data-reply-feedback] code')).some((code) => code.textContent?.includes('digraph'))).toBe(true);
+});
