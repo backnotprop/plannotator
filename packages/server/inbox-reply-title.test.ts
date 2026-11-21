@@ -284,8 +284,119 @@ describe("the first message of a thread the person started", () => {
   });
 });
 
-describe("what is not a plain reply keeps the subject, in a named thread too", () => {
+describe("a thread the person started and named: every wake takes the name, a session's first sight of it too", () => {
+  const TITLE = "Webhook retries";
+  /** The person's named thread, its first message delivered to the owner, and the owner's answer in it. */
+  async function personNamed(server: InboxServer, client: Client, project: string, answer = "On it.") {
+    await poll(server, OWNER, project);
+    const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key(), thread_name: TITLE });
+    await delivered(server, OWNER, started.message.id);
+    const sent = await agentSends(client, project, OWNER, answer, { reply_to: started.message.id });
+    return { root: started.message.id as string, ...sent };
+  }
+  const titled = (command: InboxReplyCommand | undefined) => {
+    expect(command!.subject).toBe(TITLE);
+    expect(firstLine(command!)).toBe(`Plannotator Inbox: ${TITLE} (${command!.id})`);
+  };
 
+  test("a New message to a session new to the thread", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    const written = await post(server, `/api/inbox/threads/${sent.thread_id}/message`, { session: OTHER, body: "Pick this up.", idempotency_key: key() });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ type: "message", id: written.message.id });
+    titled(command);
+  });
+
+  test("a tag: the session has never seen the thread", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    await personReplies(server, sent.message_id, "@Claude Code (other) a look?", { tags: [OTHER_TAG] });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ tagged: { owner: "Claude Code" } });
+    titled(command);
+  });
+
+  test("the reply that adds a session to the thread", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    const id = await personReplies(server, sent.message_id, "@Claude Code (other) work on this too.", { tags: [{ ...OTHER_TAG, mode: "add" }] });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ id, added: true });
+    titled(command);
+  });
+
+  test("a hand-off, and the former owner's notice", async () => {
+    const { server, client, project } = await setup(50);
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    await personReplies(server, sent.message_id, "@Claude Code (other) this is yours.", { tags: [{ ...OTHER_TAG, mode: "handoff" }] });
+    const [handed] = await until(() => poll(server, OTHER, project), "the hand-off");
+    expect(handed).toMatchObject({ handoff: { from: "Claude Code" } });
+    titled(handed);
+    const [notice] = await until(() => poll(server, OWNER, project), "the notice");
+    expect(notice).toMatchObject({ handed_away: { to: "Claude Code" } });
+    titled(notice);
+  });
+
+  test("a reply sent on because the session that asked has ended", async () => {
+    const { server, client, project } = await setup();
+    const sent = await personNamed(server, client, project);
+    await poll(server, OTHER, project);
+    const id = await personReplies(server, sent.message_id, "Take this over.", { to: { host: "claude-code", session: OTHER } });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ id, redirected_from: "Claude Code" });
+    titled(command);
+  });
+
+  test("words moved to a session that has seen nothing of the thread", async () => {
+    let now = 1_000_000;
+    const { server, project } = await setup(undefined, () => now);
+    await poll(server, OWNER, project);
+    const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Add a retry budget.", idempotency_key: key(), thread_name: TITLE });
+    await delivered(server, OWNER, started.message.id);
+    const id = await personReplies(server, started.message.id, "And log each retry.");
+    // A move needs the session it waits on to have ended.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(server, OTHER, project);
+    await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "claude-code", session: OTHER } });
+    const [command] = await poll(server, OTHER, project);
+    expect(command).toMatchObject({ id, continues_thread: true });
+    titled(command);
+  });
+
+  test("a 👍", async () => {
+    const { server, client, project } = await setup(50);
+    const sent = await personNamed(server, client, project, "Done, nothing needs you.");
+    await post(server, `/api/inbox/messages/${sent.message_id}/ack`, {});
+    const [command] = await until(() => poll(server, OWNER, project), "the 👍");
+    expect(command).toMatchObject({ ack_of: sent.message_id });
+    titled(command);
+  });
+
+  test("a Mark read note", async () => {
+    const { server, client, project } = await setup(50);
+    const sent = await personNamed(server, client, project, QUESTION);
+    await post(server, `/api/inbox/threads/${sent.thread_id}/read`, {});
+    const [command] = await until(() => poll(server, OWNER, project), "the set-aside note");
+    expect(command!.ack_of).toBeUndefined();
+    titled(command);
+  });
+
+  test("a Re-ask", async () => {
+    const { server, client, project } = await setup();
+    const asking = await personNamed(server, client, project, QUESTION);
+    await post(server, `/api/inbox/messages/${asking.message_id}/reask`, { idempotency_key: key() });
+    const [command] = await poll(server, OWNER, project);
+    expect(command).toMatchObject({ reask: true });
+    titled(command);
+  });
+});
+
+describe("what is not a plain reply keeps the subject, in a thread an agent named too", () => {
   test("a New message, which answers nothing and may reach a session new to the thread", async () => {
     const { server, client, project } = await setup();
     const sent = await asked(client, project);
