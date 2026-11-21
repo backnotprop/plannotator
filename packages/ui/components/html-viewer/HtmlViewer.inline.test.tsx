@@ -166,4 +166,23 @@ describe.if(hasDom)('HtmlViewer inline', () => {
       document.body.replaceChildren();
     }
   });
+  test('only a viewer in the host\'s text asks for markers above their element and rings its pin: an attached page keeps both as they were', async () => {
+    for (const inline of [undefined, { height: 240 }]) {
+      const host = await mount(inline);
+      const frame = host.querySelector('iframe')!;
+      const posted: Record<string, unknown>[] = [];
+      frame.contentWindow!.postMessage = ((message: Record<string, unknown>) => void posted.push(message)) as never;
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: 'plannotator-bridge-ready', protocolVersion: bridgeModule!.BRIDGE_PROTOCOL_VERSION } }));
+      });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+      const asked = posted.filter((message) => message.type === 'plannotator-bridge-set-markers-above');
+      expect(asked).toEqual(inline ? [{ type: 'plannotator-bridge-set-markers-above', active: true }] : []);
+      expect((frame.getAttribute('srcdoc') ?? '').includes('outline-offset:2px')).toBe(!!inline);
+      await act(async () => {
+        for (const root of mountedRoots.splice(0)) root.unmount();
+      });
+      document.body.replaceChildren();
+    }
+  });
 });

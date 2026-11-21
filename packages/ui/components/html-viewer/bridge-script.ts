@@ -938,6 +938,14 @@ ${SANDBOX_SHIM_SCRIPT}
       structuralAnchors = e.data.active === true;
     }
 
+    else if (type === PREFIX + 'set-markers-above') {
+      var above = e.data.active === true;
+      if (above !== markersAbove) {
+        markersAbove = above;
+        renderAnnotationOverlay();
+      }
+    }
+
     else if (type === PREFIX + 'find-and-mark') {
       // The host's word that this document is the one the comment was made on (structural anchors).
       if (e.data.structural === true) structuralAnchors = true;
@@ -1797,6 +1805,11 @@ ${SANDBOX_SHIM_SCRIPT}
   var MARKER_SPREAD_STEP = 12.5;   // horizontal step for coincident markers
   var MARKER_SPREAD_EDGE = 28.5;   // effective edge clamp while spreading
   var MARKER_ASSOC_TOLERANCE = 16; // clamped point must stay this close to the visible target
+  var MARKER_ABOVE_LIFT = 13;      // markersAbove: the bubble's tail just over the element's top edge
+  // The host's opt-in (set-markers-above): an element's marker sits on its
+  // top edge, above it, at the clicked x, so it never covers a small element
+  // (a chart's bar). Where that is not shown, the clicked point, as always.
+  var markersAbove = false;
   var MAX_HIGHLIGHT_RECTS = 48;    // highlight rects drawn per range target
   var MAX_SYNC_ANNOTATIONS = 512;  // parent-synced numbering entries
 
@@ -2909,11 +2922,11 @@ ${SANDBOX_SHIM_SCRIPT}
           var zeroSize = layoutActive() && !(rect.width || 0) && !(rect.height || 0);
           var styleHidden = !zeroSize && targetStyleHidden(el);
           var point = target.point || { x: 0.5, y: 0.5 };
-          var placed = zeroSize || styleHidden ? null : markerViewportPoint(
-            clippedTargetRect(el, rect),
-            rect.left + point.x * (rect.width || 0),
-            rect.top + point.y * (rect.height || 0)
-          );
+          var markerX = rect.left + point.x * (rect.width || 0);
+          var visibleRect = zeroSize || styleHidden ? null : clippedTargetRect(el, rect);
+          var placed = !visibleRect ? null
+            : (markersAbove && markerViewportPoint(visibleRect, markerX, rect.top - MARKER_ABOVE_LIFT))
+              || markerViewportPoint(visibleRect, markerX, rect.top + point.y * (rect.height || 0));
           if (placed && seenRecordElements.indexOf(el) >= 0) placed = null;
           if (placed) {
             seenRecordElements.push(el);
@@ -3328,6 +3341,12 @@ ${SANDBOX_SHIM_SCRIPT}
       if (name.indexOf('data-plannotator-') === 0) continue;
       if (!name || name.length > STRUCTURE_MAX_NAME || attrs.length >= STRUCTURE_MAX_ATTRS) return null;
       var value = String(list[i].value);
+      // The keyboard pinpoint's hover class on the element is the viewer's, not the page's.
+      if (name === 'class' && value.indexOf('plannotator-pinpoint-hover') >= 0) {
+        var own = value.split(/\\s+/).filter(function(c) { return c && c !== 'plannotator-pinpoint-hover'; });
+        if (!own.length) continue;
+        value = own.join(' ');
+      }
       attrs.push(value.length <= STRUCTURE_MAX_VALUE ? [name, value] : [name, structureDigest(value), value.length]);
     }
     attrs.sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });

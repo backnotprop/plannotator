@@ -144,6 +144,21 @@ describe.if(hasDom)('structural anchors (the bridge)', () => {
     expect(bridge.anchorOf(overlay)).toBeNull();
   });
 
+  test("a bar pinned from the keyboard (the viewer's hover class on it) is found again after a reload", () => {
+    const before = load(chart(BARS));
+    const anchor = bridgeIn(before);
+    const pinned = rects(before)[2]!;
+    pinned.classList.add('plannotator-pinpoint-hover');
+    const plain = bridgeIn(load(chart(BARS)));
+    expect(plain.resolve(anchor.anchorOf(pinned)!)).not.toBeNull();
+    const styled = (cls: string) => chart([BARS[0]!, BARS[1]!, BARS[2]!.replace('<rect ', `<rect class="${cls}" `), BARS[3]!]);
+    const own = load(styled('bar'));
+    own.querySelectorAll('rect')[2]!.classList.add('plannotator-pinpoint-hover');
+    const ownAnchor = bridgeIn(own).anchorOf(own.querySelectorAll('rect')[2]!)!;
+    expect(bridgeIn(load(styled('bar'))).resolve(ownAnchor)).not.toBeNull();
+    expect(bridgeIn(load(chart(BARS))).resolve(ownAnchor)).toBeNull();
+  });
+
   test('an element past the caps gets no anchor, and a host that did not ask gets none and resolves none', () => {
     const many = Array.from({ length: constant('STRUCTURE_MAX_ATTRS') + 1 }, (_, i) => `data-a${i}="v"`).join(' ');
     const wide = load(chart([`<rect ${many}/>`]));

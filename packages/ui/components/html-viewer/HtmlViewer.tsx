@@ -566,6 +566,10 @@ export interface HtmlViewerProps {
    *   so it never covers what the host draws under the frame; its header
    *   names the element by tag and label ("rect · Pro, W3"), and the row of
    *   target chips shows only from the second element on;
+   * - the pinned element's box is a ring a little off its edge, and a
+   *   comment's marker sits above its element, on its top edge at the
+   *   clicked x (the clicked point where that edge does not show), so
+   *   neither hides a small element such as a chart's bar;
    * - with Annotate on and focus outside the page, Escape runs
    *   `onAnnotateModeExit` first (capture phase) and is used, so the host's
    *   own Escape (closing what the page sits in) does not also run.
@@ -588,6 +592,9 @@ export interface HtmlViewerProps {
    */
   structuralAnchors?: boolean;
 }
+
+/** `inline`: the pinned element's box, drawn as a ring 2 px off the element instead of a border on its edge. */
+const INLINE_PIN_BOX_CSS = `<style>html [data-plannotator-pinpoint-box][data-pinned]{border-color:transparent;background:transparent;outline:2px solid var(--pn-accent,#d97757);outline-offset:2px}</style>`;
 
 /** How a host draws the viewer in its own text (`HtmlViewer` `inline`). */
 export interface HtmlViewerInline {
@@ -820,7 +827,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         bridgeScriptUrl: bridgeUrl,
         linkKey,
       });
-      const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
+      // In the host's text the pinned element's box is a ring around it, a little off its edge, so it shows
+      // on an element of the accent's own colour (a chart's bar) in either theme.
+      const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), inlineMode ? injection + INLINE_PIN_BOX_CSS : injection);
       // Inline path: history and storage are safe before the page's own head
       // scripts run, and the link guard runs before every script (the shim
       // too). The URL path gets both from the bridge asset.
@@ -828,7 +837,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       // A page its server opened outside the session's roots gets no network.
       const html = hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
       return { html, linkKey };
-    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl, inlineMode]);
     const srcdoc = framedDocument?.html;
 
     useLayoutEffect(() => {
@@ -1549,6 +1558,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       structuralAskedRef.current = active;
       postToBridge({ type: `${PREFIX}set-structural-anchors`, active });
     }, [iframeReadyVersion, structuralAnchors, liveMode]);
+
+    // In the host's text (`inline`) a marker sits above its element, on its top edge, so it never covers a
+    // small one (a chart's bar). Every other viewer never asks: the clicked point, as always.
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !inlineMode) return;
+      postToBridge({ type: `${PREFIX}set-markers-above`, active: true });
+    }, [iframeReadyVersion, inlineMode]);
 
     // The hidden composer's Escape rung: with focus outside the iframe,
     // Escape closes the hidden draft (its text stays in the draft store) and
