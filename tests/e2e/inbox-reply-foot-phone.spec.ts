@@ -197,6 +197,7 @@ for (const width of [390, 320] as const) {
         word: Math.max(word.width, word.height),
       };
     });
+    expect(drawn.sizes, 'four controls in the row').toHaveLength(4);
     for (const v of drawn.sizes.flat()) expect(v, 'every control is drawn 36 px round').toBeCloseTo(36, 0);
     expect(drawn.arrow, 'Send is the arrow').toBe(true);
     expect(drawn.word, 'the word "Send" is not drawn (it is the name)').toBeLessThanOrEqual(1);
