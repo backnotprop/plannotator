@@ -20,8 +20,8 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { contrastRatio, parseCssColor, type RgbColor } from './cssColor';
-import type { MermaidThemeMode, MermaidThemeTokens } from './mermaidTheme';
-import { buildPeleThemeVariables, PELE_BORDER_MIN, PELE_LINE_MIN, PELE_SERIES_COUNT, PELE_TEXT_MIN, type PeleThemeVariables } from './peleTheme';
+import { buildMermaidShadow, buildMermaidThemeVariables, type MermaidThemeMode, type MermaidThemeTokens } from './mermaidTheme';
+import { buildPeleThemeVariables, peleShadowCss, PELE_BORDER_MIN, PELE_LINE_MIN, PELE_SERIES_COUNT, PELE_TEXT_MIN, type PeleThemeVariables } from './peleTheme';
 
 const themesDir = join(import.meta.dir, '..', 'themes');
 const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith('.css')).sort();
@@ -92,5 +92,38 @@ describe('Pele theme adapter', () => {
 
   test('no tokens: no variables, so Pele keeps its own colours', () => {
     expect(buildPeleThemeVariables(undefined, 'dark')).toBeNull();
+  });
+});
+
+// The Diagram Shadow setting under Pele. What regresses: the setting does
+// nothing under Pele, its shadow is not the one Mermaid's nodes get in the same
+// palette and mode, it stays on when the setting is off, or the rule reaches
+// past the one svg.
+describe('the node shadow under Pele', () => {
+  const svg = (cls: string) => ({ getAttribute: (name: string) => (name === 'id' ? 'plannotator-pele-r1' : name === 'class' ? cls : null) }) as unknown as Element;
+  const css = readFileSync(join(themesDir, 'plannotator.css'), 'utf8');
+
+  test("one rule, scoped under the svg's id, on nodes, clusters and notes, with Mermaid's value for the palette and mode", () => {
+    for (const mode of ['dark', 'light'] as MermaidThemeMode[]) {
+      const tokens = tokensFromCss(css, mode === 'dark' ? '.theme-plannotator' : '.theme-plannotator.light')!;
+      const rule = peleShadowCss(svg('pele pele-flowchart'), mode, 0.7, tokens)!;
+      const mermaid = buildMermaidThemeVariables(tokens, mode, { shadowAmount: 0.7 })!.themeVariables.dropShadow as string;
+      expect(rule).toBe(
+        `#plannotator-pele-r1 g.pele-node > :first-child, #plannotator-pele-r1 g.pele-cluster > rect:first-child, #plannotator-pele-r1 g.pele-note > :first-child { filter: ${mermaid}; }`,
+      );
+    }
+    const dark = peleShadowCss(svg('pele pele-flowchart'), 'dark', 1, tokensFromCss(css, '.theme-plannotator'));
+    const light = peleShadowCss(svg('pele pele-flowchart'), 'light', 1, tokensFromCss(css, '.theme-plannotator.light'));
+    expect(dark).not.toBe(light);
+  });
+
+  test('off when the setting is off, and never on a mindmap or gantt chart (Mermaid draws them without one)', () => {
+    expect(peleShadowCss(svg('pele pele-flowchart'), 'light', 0, undefined)).toBeNull();
+    expect(peleShadowCss(svg('pele pele-mindmap'), 'light', 1, undefined)).toBeNull();
+    expect(peleShadowCss(svg('pele pele-gantt'), 'light', 1, undefined)).toBeNull();
+  });
+
+  test('a host without the theme tokens gets the default amount in Mermaid\'s own grey', () => {
+    expect(peleShadowCss(svg('pele pele-sequence'), 'light', undefined, undefined)).toContain(`filter: ${buildMermaidShadow(undefined, 0.7)};`);
   });
 });

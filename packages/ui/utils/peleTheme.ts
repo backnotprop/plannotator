@@ -25,7 +25,9 @@
  * Pure below `readPeleThemeVariables`, which reads the live tokens.
  */
 import {
+  buildMermaidShadow,
   buildMermaidThemeVariables,
+  clampShadowAmount,
   ensureContrast,
   isDarkBackground,
   MERMAID_BORDER_CONTRAST_MIN,
@@ -119,4 +121,30 @@ export function readPeleThemeVariables(mode: MermaidThemeMode, root?: Element | 
 export function applyPeleThemeVariables(el: SVGElement | HTMLElement, vars: PeleThemeVariables | null): void {
   if (vars === null) return;
   for (const [name, value] of Object.entries(vars)) el.style.setProperty(name, value);
+}
+
+/** A shadow value as `buildMermaidShadow` writes it: numbers and one colour, nothing else. */
+const SHADOW_VALUE = /^drop-shadow\((?:-?[\d.]+px ){3}rgba?\([\d.,\s]+\)\)$/u;
+
+/**
+ * The Diagram Shadow setting under Pele: ONE rule, scoped under the svg's own
+ * id, that puts on Pele's nodes, clusters and notes the `drop-shadow` Mermaid's
+ * neo look puts on its nodes, clusters, actors and notes, with the same value
+ * (`buildMermaidThemeVariables`' `dropShadow`: the palette's ground, the
+ * page's polarity, the setting's amount). None when the setting is off, and
+ * none on a mindmap or a gantt chart, which Mermaid draws without one.
+ */
+export function peleShadowCss(
+  svg: Element,
+  mode: MermaidThemeMode,
+  shadowAmount: number | undefined,
+  tokens: MermaidThemeTokens | undefined = readThemeTokens(),
+): string | null {
+  const id = svg.getAttribute('id') ?? '';
+  if (!/^[\w-]+$/u.test(id) || /\bpele-(?:mindmap|gantt)\b/u.test(svg.getAttribute('class') ?? '')) return null;
+  const amount = clampShadowAmount(shadowAmount);
+  const spec = buildMermaidThemeVariables(tokens, mode, { shadowAmount: amount });
+  const shadow = spec === null ? buildMermaidShadow(undefined, amount) : spec.themeVariables.dropShadow;
+  if (typeof shadow !== 'string' || !SHADOW_VALUE.test(shadow)) return null;
+  return `#${id} g.pele-node > :first-child, #${id} g.pele-cluster > rect:first-child, #${id} g.pele-note > :first-child { filter: ${shadow}; }`;
 }

@@ -158,8 +158,8 @@ export const DIAGRAM_FEATURES = {
   htmlLabels: { mermaid: true, pele: true },
   /** An author's `%%{init}%%` theme settings. Pele ignores them. */
   initThemeDirectives: { mermaid: true, pele: false },
-  /** The Diagram Shadow setting. Pele draws no node shadow. */
-  shadowSetting: { mermaid: true, pele: false },
+  /** The Diagram Shadow setting: Mermaid's neo look, and one scoped rule on Pele's nodes (`peleTheme.peleShadowCss`). */
+  shadowSetting: { mermaid: true, pele: true },
   /** `click` links: both engines draw none (the canvas owns every click). */
   clickLinks: { mermaid: false, pele: false },
   /** Whole-diagram comments, popout, the Source pane, export and print, Ask AI, lazy load with Retry: engine-independent. */

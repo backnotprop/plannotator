@@ -102,4 +102,15 @@ describe.if(hasDom)('Pele render integration', () => {
     if (result.ok === true) throw new Error('invalid source rendered');
     expect(result.runtimeUnavailable).toBe(false);
   });
+
+  test('the Diagram Shadow setting draws one scoped rule on the nodes, and none when it is off', async () => {
+    const on = await renderDiagram('mermaid', 'shadow-on', 'flowchart LR\n  A --> B', { ...theme, shadowAmount: 1 });
+    const off = await renderDiagram('mermaid', 'shadow-off', 'flowchart LR\n  A --> B', { ...theme, shadowAmount: 0 });
+    if (on.ok === false || off.ok === false) throw new Error('render failed');
+    const sheets = Array.from(on.svgNode.querySelectorAll('style'), (style) => style.textContent ?? '');
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0]).toStartWith(`#${on.svgNode.id} g.pele-node > :first-child`);
+    expect(sheets[0]).toContain('filter: drop-shadow(');
+    expect(off.svgNode.querySelector('style')).toBeNull();
+  });
 });

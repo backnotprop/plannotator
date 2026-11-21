@@ -46,7 +46,7 @@ import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 import { loadPeleRuntime, PELE_IN_BUILD, PELE_OUTPUT_LIMIT, PELE_SOURCE_LIMIT, peleFonts, peleSvgId, renderPeleSource } from './pele';
 import { finishPeleLabels, needsPeleLabels, pageMathTypesetter, peleLabelMeasurer, preparePeleLabels, restorePeleLabelMessage, type PreparedPeleLabels } from './pele-labels';
-import { applyPeleThemeVariables, readPeleThemeVariables } from './peleTheme';
+import { applyPeleThemeVariables, peleShadowCss, readPeleThemeVariables } from './peleTheme';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
 
@@ -841,6 +841,13 @@ async function renderPele(renderId: string, source: string, theme: DiagramTheme,
     svgNode.id = peleSvgId(renderId);
     scrubFetchingStyles(svgNode);
     applyPeleThemeVariables(svgNode, readPeleThemeVariables(theme.mode));
+    // The Diagram Shadow setting: one rule scoped under this svg (built here, after the sanitizer, from numbers only).
+    const shadow = peleShadowCss(svgNode, theme.mode, theme.shadowAmount);
+    if (shadow !== null) {
+      const sheet = svgNode.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'style');
+      sheet.textContent = scopeDiagramCss(shadow, svgNode.id);
+      if (sheet.textContent !== '') svgNode.prepend(sheet);
+    }
     widenEdgeHitAreas(svgNode);
     return { ok: true, svgNode, findTarget: PELE_FINDER.findTarget };
   } catch (error) {
