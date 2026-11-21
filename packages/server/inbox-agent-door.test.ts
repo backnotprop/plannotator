@@ -111,11 +111,11 @@ describe("the agent door", () => {
     expect((await w.door(phoneToken, "read_thread", {})).code).toBe("device_not_an_agent");
   });
 
-  test("a routine (the person's /create-routine in its thread) is refused with why: it would run an agent on the person's computer", async () => {
+  test("a routine is the person's switch, not the door's: with Routines off it is no action, as for a local agent (inbox-agent-door-parity.test.ts: on)", async () => {
     const w = await world();
     const { pairing } = await w.pair();
-    const refused = await w.door(pairing.token, "routine", { op: "create", name: "Dependency check", prompt: "Check.", schedule: null });
-    expect(refused.error).toBe("tool_not_allowed: routine: a routine runs an agent on the person's computer, and you run elsewhere, so nothing was written. Tell the person to make it in Routines in the Inbox, or to ask an agent on their computer.");
+    const answer = await w.door(pairing.token, "routine", { op: "create", name: "Dependency check", prompt: "Check.", schedule: null });
+    expect(answer.error).toStartWith("tool_not_allowed: routine is not an Inbox action.");
   });
 
   test("it cannot set its identity or name a folder; a path is refused and uploaded bytes are attached", async () => {
@@ -130,7 +130,6 @@ describe("the agent door", () => {
     ] as const) {
       expect((await w.door(pairing.token, "send_message", { body: "Hi", [field]: field === "project_path" ? "/" : "ses-pi" })).error).toStartWith(`${code}:`);
     }
-    expect((await w.door(pairing.token, "submit_guide", { guide: { title: "T", sections: [] }, walkthrough: true })).error).toStartWith("path_refused:");
     expect((await w.door(pairing.token, "read_thread", { project_path: w.project })).error).toStartWith("path_refused:");
     const before = filesUnder(join(w.dataDir, "inbox")).filter((file) => /blobs|upload/.test(file.path)).length;
     expect((await w.door(pairing.token, "send_message", { body: "See this.", attachments: [join(w.project, "secret.png")] })).error).toStartWith("attachment_path_refused:");

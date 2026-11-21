@@ -10,6 +10,21 @@ const BYTES_PER_EXTRA_SECOND = 256 * 1024;
 
 export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps"];
 
+/** A field the call sets: anything but absent or an empty list (a malformed value is the Inbox's to refuse, so it counts). */
+const listed = (value: unknown): boolean => value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0);
+
+/**
+ * Whether a call changes something, by what it does rather than its tool's name: a write waits at the relay while the
+ * person's computer sleeps (applied once when it is back), a read answers at once that it is asleep. `card` with op
+ * list and `thread_pulls` with nothing to add or remove only read, so their result reaches the agent.
+ */
+export function isInboxAgentWrite(tool: string, args: Record<string, unknown>): boolean {
+  if (!INBOX_AGENT_WRITE_ACTIONS.includes(tool)) return false;
+  if (tool === "card") return args.op !== "list";
+  if (tool === "thread_pulls") return listed(args.add) || listed(args.remove);
+  return true;
+}
+
 export type InboxAgentRelayOutcome =
   | { kind: "answer"; status: number; body: string }
   | { kind: "queued"; reason: "offline" | "slow" }
@@ -53,7 +68,7 @@ export async function callInboxThroughRelay(
   const http = options.fetch ?? fetch;
   const keys = await deriveRelayKeys(pairing.secret, pairing.device_id);
   const base = `${pairing.relay.url}/v1/mailboxes/${pairing.relay.mailbox_id}/devices/${pairing.device_id}`;
-  const write = INBOX_AGENT_WRITE_ACTIONS.includes(tool);
+  const write = isInboxAgentWrite(tool, args);
   const unreachable = (error: unknown): InboxAgentRelayOutcome => ({
     kind: "refused",
     code: "relay_unreachable",

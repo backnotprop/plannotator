@@ -305,6 +305,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    */
   findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
   /**
+   * A cloud agent's send (inbox-agent-door.ts): the pictures its body shows, by the src as written, each a file it
+   * attached in the same send (`captureInboxInlineImages` `files`). Set, nothing the body names is read from disk, and
+   * a picture that cannot be shown refuses the send. Absent: pictures are read from where the agent sent from.
+   */
+  inlineImageFiles?: ReadonlyMap<string, { path: string; name: string }>;
+  /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
    * OpenCode session whose bridge polls now (the stdio shim run inside it
@@ -914,8 +920,17 @@ export async function sendAgentMessage(
         anywhere: true,
         sentAt: new Date().toISOString(),
         stage: true,
+        // Every one, past the usual 64 too: what is not captured now would be looked for on disk later.
+        ...(context.inlineImageFiles ? { files: context.inlineImageFiles, max: Number.POSITIVE_INFINITY } : {}),
       })
     : null;
+  // A cloud agent's picture is never read again later from a folder here (inbox-message-images.ts would try the
+  // project's): one that did not take refuses the send, before anything is written.
+  const notTaken = context.inlineImageFiles ? captured?.failures[0] : undefined;
+  if (notTaken) {
+    await captured?.discard();
+    throw new InboxError("image_not_shown", `body: ${notTaken.ref}: the attached file is not a picture the Inbox can show (${notTaken.code}). Nothing was sent.`, { field: "body" });
+  }
   let result: ReturnType<InboxStore["sendMessage"]>;
   try {
     result = store.sendMessage({

@@ -34,7 +34,7 @@ The only limit is the 15-minute rule: a schedule whose runs come closer than 15 
 
 ### Agents
 
-The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it like `card`): `op` create, list, get, update, on, off, run, delete. Paired cloud agents (the agent door) do not get it: a call through the door answers `tool_not_allowed: routine: a routine runs an agent on the person's computer, and you run elsewhere…`, true whether Routines are on or off (the person can still pick `/create-routine` in a cloud agent's thread).
+The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it like `card`): `op` create, list, get, update, on, off, run, delete. Paired cloud agents (the agent door) get it as a local agent does (the owner, 2026-11-21: "Allow fully, same as a local agent."), with the same rules and the same `/create-routine` grant in their own thread; with Routines off it is no action for them either. A create with no folder runs in the project `project` names, else in a new scratch folder (they have no folder of their own here); `folder.path` names a folder on the person's computer, under the same rules (never home, `/` or a hidden folder); a routine's `attachments` are refused through the door (`attachment_path_refused`: paths on the person's computer). `plannotator routine` with `PLANNOTATOR_PAIRING` goes through the pairing.
 
 | Surface | Form |
 | --- | --- |
