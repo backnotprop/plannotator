@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { startInboxServer } from "../../packages/server/inbox";
 import { refuseRealDataDir } from "../helpers/real-data-dir";
+import { E2E_GROUP_TIP_SEEN } from "./inbox-scratch";
 
 const [root] = process.argv.slice(2);
 if (!root) throw new Error("usage: stale-page-inbox.ts <root>");
@@ -39,6 +40,7 @@ writeFileSync(
     favicon: "glass",
     // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
+    inboxReveals: { ...E2E_GROUP_TIP_SEEN },
   }),
 );
 

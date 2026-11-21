@@ -26,7 +26,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -704,6 +704,7 @@ test('set up with nothing ranked: no agent starts; once ranking lands a dialog o
   const was = (config.inboxPullRisk ?? {}) as Record<string, unknown>;
   config.inboxCodeReview = true;
   config.inboxPullRisk = { ...was, rules: RULES, provider: 'pi-sdk', auto: { level: 'high', make: 'guide' } };
+  config.inboxReveals = { ...E2E_GROUP_TIP_SEEN, ...((config.inboxReveals as Record<string, unknown> | undefined) ?? {}) };
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify(config));
   for (const name of ['pull-risk.json', 'pull-risk-auto.json']) rmSync(join(dataDir, 'inbox', name), { force: true });
   const base = 600 + 10 * lineRound++;
