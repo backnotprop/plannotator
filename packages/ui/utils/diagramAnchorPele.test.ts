@@ -235,6 +235,33 @@ describe.if(hasDom)('Pele finders make the anchors Mermaid makes', () => {
     expect(targets.every((t) => t.kind !== 'edge' || (t.from !== undefined && t.to !== undefined))).toBe(true);
   });
 
+  // Comments saved before these finders carry the anchor main's Mermaid
+  // finder made (read off it running on these fixtures, source line from
+  // main's core): a stick-figure actor labelled by its id, a frame with no
+  // label keeping Mermaid's zero-width space, a class or requirement
+  // labelled by its type line, twin relations, and source lines that main
+  // numbered differently. Each must still restore onto the part it was made
+  // on, under either engine, or old comments land on another part or list
+  // as unanchored.
+  test('anchors saved by the earlier Mermaid finder restore on the same part under either engine', async () => {
+    const cases: ReadonlyArray<readonly [string, DiagramTarget, readonly [number, number], DiagramTarget]> = [
+      ['25-sequence-frames-multiline', { family: 'sequence', kind: 'cluster', id: 'frame-3', label: 'loop ​' }, [12, 12], { family: 'sequence', kind: 'cluster', id: 'frame-3', label: 'loop' }],
+      ['20-sequence-parts', { family: 'sequence', kind: 'node', id: 'C', label: 'C' }, [4, 4], { family: 'sequence', kind: 'node', id: 'C', label: 'Charlie Dunn' }],
+      // Main numbered frames as drawn (the nested opt first) but gave frame-1 the loop's line.
+      ['20-sequence-parts', { family: 'sequence', kind: 'cluster', id: 'frame-1', label: 'opt [busy]' }, [9, 9], { family: 'sequence', kind: 'cluster', id: 'frame-1', label: 'opt [busy]' }],
+      ['27-class-namespace-annotation', { family: 'class', kind: 'node', id: 'Shape', label: '«interface»' }, [6, 6], { family: 'class', kind: 'node', id: 'Shape', label: 'Shape' }],
+      ['24-requirement-parts', { family: 'requirement', kind: 'node', id: 'r1', label: '<<Requirement>>' }, [2, 2], { family: 'requirement', kind: 'node', id: 'r1', label: 'r1' }],
+      // The second `User --> Order`; main gave it the first one's line.
+      ['22-class-parts', { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'owns' }, [7, 7], { family: 'class', kind: 'edge', from: 'User', to: 'Order', label: 'owns' }],
+    ];
+    for (const [fixture, made, sourceLine, part] of cases) {
+      const svgs = await drawn(fixture);
+      const saved: DiagramTarget = { v: 1, ...made, sourceLine } as DiagramTarget;
+      expect({ fixture, made, mermaid: restoredAs(svgs.mermaid, MERMAID_FINDER, saved, RENDER_ID) }).toEqual({ fixture, made, mermaid: part });
+      expect({ fixture, made, pele: restoredAs(svgs.pele, PELE_FINDER, saved, PELE_ID) }).toEqual({ fixture, made, pele: part });
+    }
+  });
+
   // A wrong end restores a comment onto another message of the same label,
   // so a point two actors could claim names neither, as it did before.
   test('sequence: a message end two actors could claim names neither', () => {
