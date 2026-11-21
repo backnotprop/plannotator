@@ -27,6 +27,7 @@ import {
   inboxScheduleWords,
   SCHEDULED_LATE_MS,
   SCHEDULED_TICK_MS,
+  routineLineText,
 } from "@plannotator/core/inbox-scheduled";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
@@ -240,9 +241,12 @@ export function createInboxScheduled(deps: {
 
   // ── What an agent's change says in its thread ──
 
-  const linkOf = (record: InboxScheduledThread) => `[${record.name.replace(/[[\]]/g, "")}](#routine=${record.id})`;
-  const folderWords = (folder: InboxScheduledFolder) =>
-    "scratch" in folder ? "a new scratch folder" : "path" in folder ? deps.displayFolder(folder.path) : (store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root)) || "a folder that is gone";
+  const linkOf = (record: InboxScheduledThread) => `[${routineLineText(record.name.replace(/[[\]]/g, ""))}](#routine=${record.id})`;
+  const folderWords = (folder: InboxScheduledFolder) => {
+    if ("scratch" in folder) return "a new scratch folder";
+    const words = "path" in folder ? deps.displayFolder(folder.path) : store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root);
+    return words ? routineLineText(words) : "a folder that is gone";
+  };
   const agentWords = (agent: string) => INBOX_HOST_NAMES[agent] ?? agent;
   const scheduleSentence = (schedule: InboxScheduledSchedule) => (schedule ? inboxScheduleWords(schedule).replace(/^Every /, "every ").replace(/^Once /, "once ").replace(/^On the /, "on the ") : "only when someone runs it");
   const fence = (lines: string[]) => {
@@ -275,7 +279,7 @@ export function createInboxScheduled(deps: {
     if (fields.includes("schedule")) out.push(`It now runs ${scheduleSentence(after.schedule)} (was ${scheduleSentence(before.schedule)}).`);
     if (fields.includes("folder")) out.push(`It now works in ${folderWords(after.folder)} (was ${folderWords(before.folder)}).`);
     if (fields.includes("agent")) out.push(`It now uses ${agentWords(after.agent)} (was ${agentWords(before.agent)}).`);
-    if (fields.includes("name")) out.push(`Its name was ${before.name}.`);
+    if (fields.includes("name")) out.push(`Its name was ${routineLineText(before.name)}.`);
     const rest = fields.filter((f) => !["schedule", "folder", "agent", "name", "prompt"].includes(f));
     if (rest.length > 0) out.push(`Also changed: ${rest.join(", ").replace(/_/g, " ")}.`);
     if (fields.includes("prompt")) out.push(`The prompt:\n\n${fence([...before.prompt.split("\n").map((l) => `- ${l}`), ...after.prompt.split("\n").map((l) => `+ ${l}`)])}`);
@@ -595,7 +599,7 @@ export function createInboxScheduled(deps: {
       const running = runningOf(record);
       if (running) await stopRunning(running.message_id);
       save(found(id), { deleted_at: iso() });
-      return { told: await tell(by, record, `Deleted the routine ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
+      return { told: await tell(by, record, `Deleted the routine ${routineLineText(record.name)}. Its thread and past runs stay.`, { op: "delete" }) };
     },
 
     /** The window's Undo of a delete: back as it was, counting from now (nothing due meanwhile is caught up). */

@@ -9,8 +9,6 @@ const SEES: { host: string; why: string }[] = [
 const CANNOT: { icon: IconName; label: string }[] = [
   { icon: 'questionBubble', label: 'Answer your questions' },
   { icon: 'checkCircle', label: 'Approve anything' },
-  { icon: 'terminal', label: 'Run anything on your computer' },
-  { icon: 'folder', label: 'Open your files' },
 ];
 
 export function HowLimits() {

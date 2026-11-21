@@ -109,7 +109,7 @@ dialog.ib-dlg.ib-chow[open] { display: flex; flex-direction: column; }
 .ib-chow-seal svg.ib-ic { stroke-width: 2; }
 .ib-chow-relay .ib-chow-wire { margin-top: 10px; }
 
-.ib-chow-limits { gap: 32px; align-items: flex-start; padding-top: 28px; }
+.ib-chow-limits { gap: 32px; align-items: flex-start; padding-top: 56px; }
 .ib-chow-col { display: flex; flex-direction: column; gap: 10px; }
 .ib-chow-col-t { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--foreground); }
 .ib-chow-threads { display: flex; flex-direction: column; gap: 6px; width: 220px; flex: none; }
@@ -153,7 +153,7 @@ dialog.ib-dlg.ib-chow[open] { display: flex; flex-direction: column; }
   .ib-chow-limits { flex-direction: column; align-items: center; gap: 16px; padding-top: 18px; }
   .ib-chow-limits > .ib-chow-col { width: 100%; max-width: 320px; }
   .ib-chow-threads { width: 100%; }
-  .ib-chow-cannot { grid-template-columns: repeat(4, minmax(0, 72px)); gap: 8px; }
+  .ib-chow-cannot { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .ib-chow-replies { padding: 14px 12px; }
   .ib-chow-lane-r { padding: 8px 10px; }
   .ib-chow-lane .ib-chow-wire { min-width: 32px; margin: 0 6px; }

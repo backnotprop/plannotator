@@ -1,0 +1,37 @@
+/**
+ * A routine's name in an agent's change line, as the window draws it (core `routineLineText`, written into the lines
+ * by packages/server/inbox-scheduled.ts). The failures these guard: a name drawn as a picture, a tag, a link, a
+ * mention or an issue ref, and a name that does not read as it was typed (character references or backslashes shown).
+ */
+import { describe, expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { routineLineText } from '@plannotator/core/inbox-scheduled';
+import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
+
+const NAMES = ["Maya's triage", 'Deps: weekly', "@maya's sweep", 'snake_case_name', '2 * 3 * 4', 'Scan <img src=scan.png>', 'Scan ![x](/p.png)', 'Fix #123 now', 'See https://e.co', 'a `tick` and ``two``', '`edge`'];
+
+/** The lines a change writes with a name in them, as inbox-scheduled.ts writes them. */
+const linesOf = (name: string) => [
+  `Made the routine [${routineLineText(name.replace(/[[\]]/g, ''))}](#routine=sch_1), which runs only when someone runs it.`,
+  `Renamed the routine [Plain](#routine=sch_1). Its name was ${routineLineText(name)}.`,
+  `Deleted the routine ${routineLineText(name)}. Its thread and past runs stay.`,
+];
+
+/** The text of drawn HTML, as the person reads it. */
+const textOf = (html: string) =>
+  html.replace(/<[^>]*>/g, '').replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+describe("a routine's name in a change line, in the window", () => {
+  test('reads as typed, and is no picture, tag, link, mention or issue ref (with a repository, so #123 and @maya could link)', () => {
+    for (const name of NAMES) {
+      for (const line of linesOf(name)) {
+        const html = renderToStaticMarkup(<InlineMarkdown text={line} githubRepo="acme/api" />);
+        const tags = html.match(/<(img|a|script|iframe)\b[^>]*>/g) ?? [];
+        expect([name, tags.filter((tag) => !tag.includes('href="#routine=sch_1"'))]).toEqual([name, []]);
+        // A link's words drop [ and ] (as on main: they would end the link), and read as typed otherwise.
+        const words = line.startsWith('Made') ? name.replace(/[[\]]/g, '') : name;
+        expect([name, textOf(html).includes(words)]).toEqual([name, true]);
+      }
+    }
+  });
+});

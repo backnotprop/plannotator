@@ -41,7 +41,7 @@ const PANELS: Panel[] = [
   {
     id: 'limits',
     picture: <HowLimits />,
-    seen: 'The agent sees every thread: its own, other agents’ and those in other projects. It cannot answer your questions, approve anything, run anything on your computer or open your files.',
+    seen: 'The agent sees every thread: its own, other agents’ and those in other projects. It can do in this Inbox whatever an agent on your computer can: read every thread and file, send files from this computer, start reviews, and make and run routines. It cannot answer your questions or approve anything for you.',
     title: 'It works across your whole Inbox',
     line: 'Any thread in any project: it reads, searches and posts there, always under its own name.',
   },
