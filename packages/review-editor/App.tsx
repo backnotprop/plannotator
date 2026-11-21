@@ -6436,6 +6436,7 @@ const ReviewApp: React.FC = () => {
                 onOpenSavedGuide={handleOpenGuide}
                 launchOff={!aiUIEnabled}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
+                viewedReady={reviewProgressStatus !== 'loading'}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}
                 barSlot={guideBarSlot}
