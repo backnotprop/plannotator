@@ -28,8 +28,8 @@ import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOS
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
-import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
-import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { bodyShowsLocalImages, captureInboxInlineImages, INBOX_INLINE_IMAGES_MAX, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
+import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { inboxInlineMediaKind } from "@plannotator/core/inbox-inline-media";
 import { MEDIA_NOT_SHOWN_MAX, mediaNotShown, mediaNotShownText, type MediaNotShown } from "./inbox-media-not-shown";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
@@ -41,8 +41,10 @@ import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpener
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
-import type { InboxAttachment, InboxListRow, InboxLiveSiteRef } from "@plannotator/core/inbox-types";
+import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxMessageWire } from "@plannotator/core/inbox-types";
+import { inboxAgentFilesOf } from "./inbox-agent-files";
 import { registerInboxGuideTools } from "./inbox-guides";
+import { inboxSendUploadPictures, type InboxSendUpload } from "./inbox-cloud-pictures";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { registerInboxSearchTool } from "./inbox-mcp-search";
@@ -304,6 +306,11 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * project for a path.
    */
   findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
+  /**
+   * A cloud agent's call (inbox-agent-door.ts): the files it attached as bytes in this send. A picture the body names
+   * by one of their names shows that file (inbox-cloud-pictures.ts); every other picture is read as for any agent.
+   */
+  inlineImageFiles?: readonly InboxSendUpload[];
   /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
@@ -883,11 +890,14 @@ export async function sendAgentMessage(
   // Where relative paths start: the folder the agent works in, when its connection says (a cd away from its project).
   const working = !!input.working_folder && isAbsolute(input.working_folder);
   const here = working ? input.working_folder : input.project_path;
+  // Pictures sent as bytes in this send (a cloud agent's, inbox-cloud-pictures.ts): each shows in the body, not again below it.
+  const uploaded = context.inlineImageFiles?.length ? inboxSendUploadPictures(input.body, context.inlineImageFiles, input.attachments) : null;
+  const attachmentInput = uploaded ? uploaded.attachments : input.attachments;
+  const base = here && isAbsolute(here) ? here : project.root;
   let attachments: InboxAttachment[] | undefined;
-  if (input.attachments && input.attachments.length > 0) {
+  if (attachmentInput && attachmentInput.length > 0) {
     if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
-    const base = here && isAbsolute(here) ? here : project.root;
-    attachments = await context.recordAttachments(input.attachments, project, base);
+    attachments = await context.recordAttachments(attachmentInput, project, base);
   }
   // The question blocks inside attached Markdown files (issue #2828): answerable in the window like the body's.
   const attachmentQuestions = attachments && attachments.length > 0 ? await readInboxAttachmentQuestions(store.dir, attachments) : [];
@@ -906,6 +916,8 @@ export async function sendAgentMessage(
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
+  // Pictures sent as bytes go first, so each is taken now: their bytes are not on disk for a later read to find.
+  const fromBytes = uploaded && uploaded.pictures.size > 0 ? [...uploaded.pictures.keys()] : null;
   const captured = bodyShowsLocalImages(input.body)
     ? await captureInboxInlineImages(store.dir, {
         body: input.body,
@@ -914,8 +926,25 @@ export async function sendAgentMessage(
         anywhere: true,
         sentAt: new Date().toISOString(),
         stage: true,
+        ...(uploaded && fromBytes
+          ? {
+              files: uploaded.pictures,
+              refs: [...fromBytes, ...inboxMessageImageRefsInOrder(input.body).filter((ref) => !uploaded.pictures.has(ref))],
+              max: Math.max(INBOX_INLINE_IMAGES_MAX, fromBytes.length),
+            }
+          : {}),
       })
     : null;
+  // A picture sent as bytes that could not be shown is attached below the message instead, so its file is kept.
+  const notShownUploads = uploaded ? [...new Set((captured?.failures ?? []).flatMap((failure) => uploaded.pictures.get(failure.ref)?.id ?? []))] : [];
+  if (notShownUploads.length > 0) {
+    try {
+      attachments = [...(attachments ?? []), ...(await context.recordAttachments!(notShownUploads, project, base))];
+    } catch (error) {
+      await captured?.discard();
+      throw error;
+    }
+  }
   let result: ReturnType<InboxStore["sendMessage"]>;
   try {
     result = store.sendMessage({
@@ -1449,7 +1478,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             );
           }
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
-          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null, names: context.sessionName }, url);
+          // Through the agent door each file is listed with its path here and the command that fetches its bytes.
+          const filesOf = context.cloudAgent ? (message: InboxMessageWire) => inboxAgentFilesOf(store.dir, message) : undefined;
+          const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null, names: context.sessionName, filesOf }, url);
           if (!guest) {
             store.markAgentChecked(threadId, readThrough, undefined, reader);
             store.settleReadPast(threadId, reader, shown);

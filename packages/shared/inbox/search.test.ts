@@ -586,6 +586,17 @@ describe("text in every script", () => {
     expect(search(index, "決済サービス").groups!.projects!.map((p) => p.id)).toEqual([ja.id]);
   });
 
+  test("a word pasted with a soft hyphen inside is found by either spelling; marks select the original word", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "notes", root: "/w/notes" });
+    const plain = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "The finance review moved to Friday." }).message;
+    const pasted = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "b", body: "The fi\u00adnance review moved to Friday." }).message;
+    const index = await built(store);
+    for (const q of ["finance", "fi\u00adnance"]) expect(messageIds(search(index, q)).sort()).toEqual([plain.id, pasted.id].sort());
+    const row = search(index, "finance").groups!.messages!.find((m) => m.id === pasted.id) as InboxSearchMessageRow;
+    expect(marked(row.snippet.text, row.snippet.marks)).toEqual(["fi\u00adnance"]);
+  });
+
   test("two projects with one name are told apart by their parent folder", async () => {
     const store = open();
     store.ensureProject({ name: "api", root: "/home/me/work/api" });

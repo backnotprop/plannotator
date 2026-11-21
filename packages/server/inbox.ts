@@ -4974,7 +4974,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       .list()
       .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
   };
-  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext });
+  // `route`: the window routes a paired agent's `inbox rows`, `projects`, `icon` and `export-decisions` use, answered by
+  // this listener's own handler as the same commands on this computer are (inbox-agent-routes.ts).
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext, route: (req) => handle(req, "local") });
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
