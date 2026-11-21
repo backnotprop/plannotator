@@ -619,6 +619,12 @@ export function computePlanDiff(
   oldText: string,
   newText: string
 ): { blocks: PlanDiffBlock[]; stats: PlanDiffStats } {
+  // CRLF (a plan saved on Windows) and LF read the same to a person; diffLines does not know that and would
+  // report every line as changed. Compare both sides with CRLF as LF. A lone CR is left
+  // alone: inside a code fence it is content, and rewriting it would hide a real change.
+  oldText = oldText.replace(/\r\n/g, "\n");
+  newText = newText.replace(/\r\n/g, "\n");
+
   // Pre-pass: collapse every fenced code block to a single-line sentinel
   // so diffLines treats each whole fence atomically. See the comment on
   // FENCE_BLOCK_PATTERN for the failure this prevents.
