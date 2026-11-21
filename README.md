@@ -2,6 +2,9 @@
   <img src=".github/assets/banner.webp" alt="Plannotator" width="640" />
 </p>
 
+<p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 
 <p align="center">
