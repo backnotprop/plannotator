@@ -178,6 +178,13 @@ describe("a routine's name or folder in a change line", () => {
       "no\u00a0break",
       "\u202eevil", // a right-to-left override
       "a\u2066b", // a direction isolate
+      "\u3164", // a Hangul filler: a letter that draws nothing
+      "Triage\u115F", // a filler inside a name
+      "a\u034Fb", // a combining grapheme joiner
+      "x\uFE00", // a variation selector with no emoji
+      "\u0301\u0301", // only combining marks
+      "a \u0301b", // a mark with no letter under it
+      "\u200D", // only a joiner
       "Wait...",
       "a..b",
       "a--b",

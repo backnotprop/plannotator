@@ -272,6 +272,10 @@ function isPlainLineText(text: string, kind: "name" | "path"): boolean {
   // The Linear linker's shape (`linearCards.tsx` MAYBE_IDENTIFIER), without its end check: wider, never narrower.
   if (/(?<![\w/.-])[A-Za-z][A-Za-z0-9]{0,9}-[1-9]/.test(text)) return false;
   if (kind === "path" && /(?<![A-Za-z0-9_])_/.test(text)) return false;
+  // Nothing invisible: a filler letter or a selector with no emoji to sit on would leave the line reading as empty.
+  if (/\p{Default_Ignorable_Code_Point}/u.test(text.replace(/[\u200D\uFE0F]/gu, ""))) return false;
+  // A mark needs a letter to sit on: no name made only of marks, none starting a word.
+  if (!/[^\p{M}\u200D\uFE0F]/u.test(text) || /(^| )\p{M}/u.test(text)) return false;
   return true;
 }
 
