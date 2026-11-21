@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ChatWindowStore, useChatFrameFocusReturn } from '@plannotator/ui/components/chat';
+import { ChatFrameLauncher, ChatWindowStore, useChatFrameFocusReturn } from '@plannotator/ui/components/chat';
 import type { InboxAskChat, InboxAskConversationWire, InboxAskModel } from '../api';
 import { useOpenInCodeRegion } from '../components/OpenIn';
 import { AskChat } from './AskChat';
@@ -8,6 +8,7 @@ import { readAsk } from './askReads';
 import { askUnseen } from './askModel';
 import { sideQuote } from './askWords';
 import { sideButtonFor, type SideButton } from './sideButton';
+import { SideChatCorner, takeSideFlight, type SideFlight } from './SideChatCorner';
 
 export interface InboxAskOptions {
   /** The settings are read, and not the tour: while false nothing is read and nothing shows. */
@@ -54,17 +55,19 @@ export interface InboxAskParts {
 }
 
 /**
- * Ask's window as the corner sees it (approval "inbox-reply-floaters"): the corner's list holds this thread's chat
- * while its window is minimized, and a floating draft's window opens beside Ask's window.
+ * Ask's window as the corner sees it (approval "inbox-reply-floaters"): a floating draft's window opens beside Ask's
+ * window. The minimized chat itself is the circle in the window's corner (SideChatCorner), drawn by this hook.
  */
 export interface AskCorner {
   on: boolean;
   /** The thread whose chat the window shows, or null. */
   threadId: string | null;
-  /** The open thread has a chat (a first Ask AI happened): its row shows in the corner. */
+  /** The open thread has a chat (a first Ask AI happened): minimized, it is the circle in the window's corner. */
   hasChat: boolean;
-  /** An answer the person has not seen: a dot on its row. */
+  /** An answer the person has not seen: a dot on the minimized chat's circle. */
   unseen: boolean;
+  /** The agent is answering a question in this chat (the Inbox's `running`): an arc turns on the circle. */
+  answering: boolean;
   host: string | null;
   subject: string | null;
   minimized: boolean;
@@ -184,6 +187,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     threadId: askFor,
     hasChat: (model?.conversation?.turns.length ?? 0) > 0,
     unseen: askUnseen(model?.conversation ?? null) !== null,
+    answering: (model?.running ?? null) !== null,
     host: model?.agent?.host ?? null,
     subject: model?.subject ?? null,
     minimized,
@@ -206,6 +210,10 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
 
   const sideHost = model?.agent?.host ?? null;
   const sideButton = useMemo(() => sideButtonFor(sideHost), [sideHost]);
+
+  // The minimized chat's circle (the owner, 2026-11-20): this thread has a chat, on a computer (no Ask on phones).
+  const flight = useRef<SideFlight | null>(null);
+  const showCircle = corner.on && corner.hasChat && !phone;
 
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
@@ -235,12 +243,19 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
           onPick={pick}
           onLeave={() => {
             openChats.current.delete(askFor);
+            // Still in the page: the minimize's own handler runs before the re-render that removes the window.
+            flight.current = takeSideFlight();
           }}
           onConversation={adopt}
           onReload={reload}
           onReply={(words) => replyInThread(askFor, words)}
         />
         {region.window}
+        {showCircle && (
+          <ChatFrameLauncher store={store}>
+            <SideChatCorner host={corner.host} unseen={corner.unseen} answering={corner.answering} onOpen={corner.open} flight={flight} />
+          </ChatFrameLauncher>
+        )}
       </div>
     ) : null,
   };

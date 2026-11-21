@@ -11,7 +11,8 @@
  *   takes no Escape, and this is Ask's window); the bin working while a Send is on its way;
  * - Ask's return arrow pressable with nothing to ask, or not turning into Stop while an answer runs;
  * - a draft floating while "Float reply drafts" is off (the default, the owner 2026-11-08), or a draft that floated
- *   before staying in the corner once it is known to be off; no Ask row in the corner.
+ *   before staying in the corner once it is known to be off; no Ask row in the drafts' corner (the minimized chat is
+ *   Ask's own circle in the window's corner, ask/sideCorner.test.tsx).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -176,7 +177,7 @@ async function until(check: () => boolean, what: string, ms = 3000) {
 
 function fakeAsk(over: Partial<import('../ask/useInboxAsk').AskCorner> = {}): import('../ask/useInboxAsk').AskCorner {
   const store = new ChatWindowStore();
-  return { on: true, threadId: null, hasChat: false, unseen: false, host: 'claude-code', subject: null, minimized: true, store, open: () => {}, minimize: () => {}, ...over };
+  return { on: true, threadId: null, hasChat: false, unseen: false, answering: false, host: 'claude-code', subject: null, minimized: true, store, open: () => {}, minimize: () => {}, ...over };
 }
 
 let setThreadId: (id: string | null) => void = () => {};
@@ -532,7 +533,8 @@ test('"Float reply drafts" off (the default): typing and leaving floats nothing,
   expect(floating()).toEqual([]);
   expect(document.querySelector('[data-rf-card][data-kind="draft"]')).toBeNull();
   expect(document.querySelector('[data-rf-box]')).toBeNull();
-  // Ask minimized has no row in the corner: nothing is there.
+  // The drafts' corner has no Ask row: a minimized chat is the circle in the window's corner, which Ask draws itself
+  // (ask/SideChatCorner.tsx, the owner's decision of 2026-11-20; proved in ask/sideCorner.test.tsx), never a row here.
   expect(document.querySelectorAll('[data-rf-card], [data-rf-corner]').length).toBe(0);
   // Turned on (0.28.54's behaviour): typing and leaving floats again.
   act(() => setFloatDrafts(true));
