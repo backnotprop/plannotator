@@ -19,6 +19,7 @@ function stub(status: number, body: unknown, seen?: Array<{ url: string; auth: s
 }
 
 const okCheck = stub(200, { result: { answers: { q: { noul: 0.97 } } } });
+const openAICheck = stub(200, { answers: [{ type: "predicate", name: "q", probability: 0.99 }] });
 const candidate = { kind: "extract", helper: "subtotal", caller: "checkout", file: "src/checkout.ts", code: { helper: "function subtotal() {}", caller: "a", callerNew: "b" } };
 const route = (pathname: string, method: string, body: unknown, f: typeof fetch) => answerSemDiffOpinionRequest(pathname, method, async () => body, dir, f);
 
@@ -61,5 +62,71 @@ describe("Power Up key and opinion routes", () => {
     expect((await route("/api/sem-diff/opinion", "POST", { candidates: [{ ...other, helper: "third" }] }, stub(402, {}))).body).toMatchObject({ state: "noCredit" });
     expect((await route("/api/sem-diff/opinion", "POST", { candidates: "x" }, okCheck)).body).toMatchObject({ state: "failed" });
     expect((await route("/api/sem-diff/opinion", "GET", null, okCheck)).status).toBe(405);
+  });
+
+  test("OpenAI is selected by an explicit save and sees only the probe or the candidate snippets", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const settings = "/api/sem-diff/opinion/settings";
+    const opinion = "/api/sem-diff/opinion";
+    expect((await route(opinion, "POST", { candidates: [candidate] }, openAICheck)).body).toMatchObject({ state: "off" });
+    const requests: Array<{ url: string; key: string | null; body: Record<string, unknown> }> = [];
+    const decisions = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url: String(input), key: new Headers(init?.headers).get("authorization"), body });
+      return body.questions[0].type === "predicate"
+        ? Response.json({ answers: [{ type: "predicate", name: "q", probability: 0.99 }] })
+        : Response.json({ answers: [{
+            type: "choice", name: "q", choice: "moved", probabilities: [{ value: "moved", probability: 0.97 }],
+          }] });
+    }) as typeof fetch;
+    const saved = await route(settings, "POST", { provider: "openai", apiKey: KEY }, decisions);
+    const asked = await route(opinion, "POST", { candidates: [candidate, { ...candidate, kind: "inline" }] }, decisions);
+    expect(saved.body).toMatchObject({ ok: true, provider: "openai" });
+    expect(asked.body).toMatchObject({ ok: true, answers: [
+      { accept: true, band: "likely", model: "gpt-6-luna", answer: "moved" },
+      { accept: true, band: "likely", model: "gpt-6-luna", answer: "moved" },
+    ] });
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      expect(request.url).toBe("https://api.openai.com/v1/decisions");
+      expect(request.key).toBe(`Bearer ${KEY}`);
+      expect(request.body.model).toBe("gpt-6-luna");
+    }
+    expect(requests[0]?.body.input).toBe("A red apple.");
+    expect(requests[1]?.body.input).toContain(candidate.code.helper);
+    expect(requests[1]?.body.questions).toMatchObject([{ type: "choice", name: "q", choices: [
+      { value: "moved" }, { value: "new" }, { value: "rewritten" }, { value: "elsewhere" },
+    ] }]);
+    expect(requests[2]?.body.questions).toMatchObject([{ choices: [
+      { value: "moved" }, { value: "deleted" }, { value: "rewritten" }, { value: "elsewhere" },
+    ] }]);
+    expect(JSON.stringify([saved.body, asked.body])).not.toContain(KEY);
+  });
+
+  test("a failed OpenAI key check keeps the active provider and distinguishes throttling from quota", async () => {
+    dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
+    const settings = "/api/sem-diff/opinion/settings";
+    const secret = { provider: "openai", apiKey: KEY };
+    await route(settings, "POST", { provider: "jev", apiKey: KEY }, okCheck);
+    for (const [response, failure] of [
+      [stub(401, {}), "refused"],
+      [stub(429, { error: { code: "project_spend_limit_exceeded" } }), "noCredit"],
+      [stub(429, { error: { code: "rate_limit_exceeded" } }), "noAnswer"],
+      [stub(200, { answers: [{ type: "refusal", name: "q" }] }), "noAnswer"],
+    ] as const) {
+      expect((await route(settings, "POST", secret, response)).body).toMatchObject({ ok: false, failure });
+      expect((await route(settings, "GET", null, response)).body).toEqual({ configured: true, provider: "jev" });
+    }
+    expect((await route(settings, "POST", secret, openAICheck)).body).toMatchObject({ ok: true });
+    const opinion = "/api/sem-diff/opinion";
+    const refused = stub(200, { answers: [{ type: "refusal", name: "q" }] });
+    const malformed = stub(200, { answers: [{ type: "choice", name: "q", choice: "moved", probabilities: [{ value: "moved", probability: 2 }] }] });
+    for (const response of [refused, malformed]) {
+      expect((await route(opinion, "POST", { candidates: [candidate] }, response)).body).toMatchObject({ ok: true, answers: [{ accept: false }] });
+    }
+    const rateLimited = stub(429, { error: { code: "slow_down", message: KEY } });
+    const reply = await route(opinion, "POST", { candidates: [candidate] }, rateLimited);
+    expect(reply.body).toMatchObject({ ok: false, state: "failed" });
+    expect(JSON.stringify(reply.body)).not.toContain(KEY);
   });
 });
