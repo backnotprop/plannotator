@@ -215,11 +215,14 @@ describe.if(hasDom)('contents rail annotation marks', () => {
     expect(marks(2).map((mark) => mark.dataset.markId)).toEqual(['c2', 'c3']);
     expect(more(2)!.getAttribute('aria-label')).toBe('2 more annotations in Risks');
     expect(marks(3)).toHaveLength(0);
-    // Beside the tick's line, on its row: 5 px slots from 21 px into the 36 px dock; the last runs to its edge.
-    expect(marks(1).map((mark) => [mark.style.top, mark.style.right, mark.style.width])).toEqual([
-      ['16px', '10px', '5px'],
-      ['16px', '0px', '10px'],
+    // Beside the tick's line, on its row: 5 px slots each (the rest of the row is the tick's).
+    // (Their inline placement is logical, which this DOM does not keep; the built page's pictures show it.)
+    expect(marks(1).map((mark) => [mark.style.top, mark.style.width])).toEqual([
+      ['16px', '5px'],
+      ['16px', '5px'],
     ]);
+    // A row with marks says so to its tick (its grown line stops before them); one without does not.
+    expect(ticks().map((tick) => tick.dataset.marks)).toEqual(['', '', '', undefined, undefined]);
 
     // Open: the row's dots at its end, seven at most; the label makes room for them.
     act(() => ticks()[0]!.click());
@@ -237,6 +240,7 @@ describe.if(hasDom)('contents rail annotation marks', () => {
     fixture.render({ annotations: ANNOTATIONS, onSelectAnnotation: select, selectedAnnotationId: 'c1' });
     await settle();
     expect(marks(1).map((mark) => mark.dataset.selected)).toEqual(['', undefined]);
+    expect(marks(1).map((mark) => mark.getAttribute('aria-current'))).toEqual(['true', null]);
     act(() => marks(1)[1]!.click());
     expect(select).toHaveBeenLastCalledWith('d1');
     // A dot never opens the panel.
@@ -297,7 +301,8 @@ describe.if(hasDom)('contents rail annotation marks', () => {
     expect(c1.dataset.highlighted).toBe('');
     const shown = card()!;
     expect(shown.getAttribute('role')).toBe('tooltip');
-    expect(c1.getAttribute('aria-describedby')).toBe(shown.id);
+    // The dot's name already says what the card does: it is not read twice.
+    expect(c1.hasAttribute('aria-describedby')).toBe(false);
     expect(shown.textContent).toContain('Comment');
     expect(shown.querySelector('[data-annotation-author]')!.textContent).toBe('Ada');
     expect(shown.querySelector('[data-annotation-time]')!.textContent).toBe('2m');
@@ -325,6 +330,101 @@ describe.if(hasDom)('contents rail annotation marks', () => {
     expect(nav()!.dataset.revealed).toBeUndefined();
     expect(nav()!.contains(document.activeElement)).toBe(false);
     expect(card()).toBeNull();
+    act(() => fixture.root.unmount());
+  });
+
+  test('a comment covered by a later one keeps its place and its dot', async () => {
+    const fixture = mountRail();
+    // B over words containing A: the highlighter labels the span B and moves A into data-highlight-id-extra.
+    const covered = [
+      note('a-inner', AnnotationType.COMMENT, 'retry', 'Inner.'),
+      note('b-outer', AnnotationType.COMMENT, 'the retry rate', 'Outer.'),
+      note('c-third', AnnotationType.COMMENT, 'retry', 'Third.'),
+    ];
+    const mark = document.createElement('mark');
+    mark.dataset.highlightId = 'b-outer';
+    mark.dataset.highlightIdExtra = 'a-inner;c-third';
+    mark.textContent = 'the retry rate';
+    fixture.viewport.querySelectorAll('p')[3]!.append(mark);
+    fixture.render({ annotations: covered, onSelectAnnotation: () => {} });
+    await settle();
+    expect(marks(3).map((entry) => entry.dataset.markId)).toEqual(['b-outer', 'a-inner', 'c-third']);
+    act(() => fixture.root.unmount());
+  });
+
+  test('a comment and its replies are one dot, the comment’s; a reply to a global comment adds none', async () => {
+    const fixture = mountRail();
+    const replies = Array.from({ length: 6 }, (_, index) =>
+      note(`c1-r${index}`, AnnotationType.COMMENT, 'Four workers to start', `Reply ${index}.`, { inReplyTo: 'c1' }),
+    );
+    const threaded = [...ANNOTATIONS, ...replies, note('g1-r', AnnotationType.COMMENT, '', 'Agreed.', { inReplyTo: 'g1' })];
+    const select = mock((_id: string) => {});
+    fixture.render({ annotations: threaded, onSelectAnnotation: select, selectedAnnotationId: 'c1-r4' });
+    await settle();
+    expect(marks(0).map((mark) => mark.dataset.markId)).toEqual(['g1']);
+    expect(marks(1).map((mark) => mark.dataset.markId)).toEqual(['c1', 'd1']);
+    // A selected reply marks its thread's dot; the card is the root's.
+    expect(marks(1)[0]!.getAttribute('aria-current')).toBe('true');
+    act(() => void marks(1)[0]!.dispatchEvent(new Event('pointerover', { bubbles: true })));
+    expect(card()!.querySelector('.pn-contents-rail-card-text')!.textContent).toBe('Four is a guess. Size it from the peak retry rate.');
+    act(() => marks(1)[0]!.click());
+    expect(select).toHaveBeenLastCalledWith('c1');
+    act(() => ticks()[0]!.click());
+    expect(marks(1).map((mark) => mark.dataset.markId)).toEqual(['c1', 'd1']);
+    expect(marks(0).map((mark) => mark.dataset.markId)).toEqual(['g1']);
+    act(() => fixture.root.unmount());
+  });
+
+  test('a dot focused in the closed rail leaves no card when a tick opens the panel', async () => {
+    const fixture = mountRail();
+    fixture.render({ annotations: ANNOTATIONS, onSelectAnnotation: () => {} });
+    await settle();
+    act(() => marks(1)[0]!.focus());
+    expect(card()).not.toBeNull();
+    // The tick's press keeps focus where it is; the panel opens and the dots move under the list.
+    act(() => void ticks()[0]!.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true })));
+    act(() => ticks()[0]!.click());
+    await settle();
+    expect(nav()!.dataset.revealed).toBe('');
+    expect(card()).toBeNull();
+    expect(marks().filter((mark) => mark.dataset.highlighted !== undefined)).toHaveLength(0);
+    act(() => fixture.root.unmount());
+  });
+
+  test('Escape dismisses the closed rail’s hover card, and is left to the host when no card is up', async () => {
+    const fixture = mountRail();
+    fixture.render({ annotations: ANNOTATIONS, onSelectAnnotation: () => {} });
+    await settle();
+    const escape = () => {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      act(() => void document.body.dispatchEvent(event));
+      return event.defaultPrevented;
+    };
+    expect(escape()).toBe(false);
+    act(() => void marks(1)[0]!.dispatchEvent(new Event('pointerover', { bubbles: true })));
+    expect(card()).not.toBeNull();
+    expect(escape()).toBe(true);
+    expect(card()).toBeNull();
+    expect(escape()).toBe(false);
+    act(() => fixture.root.unmount());
+  });
+
+  test('open, a row’s “+N” is named as its tick, with the count; it goes to the heading', async () => {
+    const fixture = mountRail();
+    const many = Array.from({ length: 9 }, (_, index) => note(`m${index}`, AnnotationType.COMMENT, `risk ${index}`, `Risk ${index}.`));
+    for (const annotation of many) {
+      const mark = document.createElement('mark');
+      mark.dataset.highlightId = annotation.id;
+      fixture.viewport.querySelectorAll('p')[2]!.append(mark);
+    }
+    fixture.render({ annotations: many, onSelectAnnotation: () => {} });
+    await settle();
+    act(() => ticks()[0]!.click());
+    const plus = more(2)!;
+    expect(plus.textContent).toBe('+2');
+    expect(plus.getAttribute('aria-label')).toBe('Go to Overview / Planning / Risks, 2 more annotations');
+    act(() => plus.click());
+    expect(ticks()[2]!.getAttribute('aria-current')).toBe('location');
     act(() => fixture.root.unmount());
   });
 

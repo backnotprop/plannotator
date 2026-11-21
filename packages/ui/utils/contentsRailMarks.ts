@@ -9,12 +9,14 @@
  *   before its first rendered highlight; one before the first heading belongs
  *   to the first.
  * - A global comment (no position) goes on the first row.
+ * - A comment and its replies are one mark: the root's.
  * - A closed-rail row is a span of headings (more than ten are sampled into
  *   ten spans): its dots are every annotation in the span, so a heading
  *   sampled away folds its dots into the row that stands for it.
  * - Closed: at most three dots; more than three is two dots and a "more".
- *   Open panel: at most seven dots, then "+N".
+ *   Open panel: at most seven dots, then "+N" (a long "+N" gives back dots).
  */
+import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { AnnotationType, type Annotation } from '../types';
 
 /** Dots a closed-rail row draws before the third becomes a "more". */
@@ -28,9 +30,8 @@ export interface ContentsRailMarkPlace {
   readonly order: number;
 }
 
-/** One rendered rail row: the item it shows and the span of items it stands for. */
+/** One rendered rail row: the span of items it stands for (an open row: its one item). */
 export interface ContentsRailMarkRow {
-  readonly itemIndex: number;
   readonly rangeStart: number;
   readonly rangeEnd: number;
 }
@@ -94,59 +95,125 @@ export function placeContentsRailMarks(
   return places;
 }
 
-/** A reply sits where the comment it answers sits. */
-function placeOf(
-  annotation: Annotation,
-  places: ReadonlyMap<string, ContentsRailMarkPlace>,
-  byId: ReadonlyMap<string, Annotation>,
-): ContentsRailMarkPlace | undefined {
-  let current: Annotation | undefined = annotation;
-  const seen = new Set<string>();
-  while (current !== undefined && !seen.has(current.id)) {
-    const place = places.get(current.id);
-    if (place !== undefined) return place;
-    seen.add(current.id);
-    current = current.inReplyTo === undefined ? undefined : byId.get(current.inReplyTo);
-  }
-  return undefined;
+/**
+ * The document's annotations by thread, grouped once per measure (linear):
+ * a comment and its replies are one mark, the root's (its kind, its place),
+ * by the shared threading rule (resolveReplyParents). Global threads, in
+ * their order, go on the row that starts the document; the rest by the
+ * section their root is in (else the first placed reply's), in document
+ * order. A thread with no place (no rendered highlight, not global) is not
+ * drawn. `rootOf` is each annotation's thread root (a selected reply
+ * selects its thread's mark).
+ */
+export interface ContentsRailMarkGroups {
+  readonly globals: readonly Annotation[];
+  readonly byItem: ReadonlyMap<number, readonly Annotation[]>;
+  readonly rootOf: ReadonlyMap<string, string>;
 }
 
+export function groupContentsRailMarks(
+  annotations: readonly Annotation[],
+  places: ReadonlyMap<string, ContentsRailMarkPlace>,
+): ContentsRailMarkGroups {
+  const parents = resolveReplyParents(annotations);
+  const rootOf = new Map<string, string>();
+  const rootIdOf = (id: string): string => {
+    const path: string[] = [];
+    let current = id;
+    let root: string | undefined;
+    while (root === undefined) {
+      const known = rootOf.get(current);
+      if (known !== undefined) {
+        root = known;
+        break;
+      }
+      path.push(current);
+      const parent = parents.get(current) ?? null;
+      // resolveReplyParents leaves no cycle: every chain ends at a root.
+      if (parent === null) root = current;
+      else current = parent;
+    }
+    for (const entry of path) rootOf.set(entry, root);
+    return root;
+  };
+  const threadPlace = new Map<string, ContentsRailMarkPlace>();
+  for (const annotation of annotations) {
+    const root = rootIdOf(annotation.id);
+    const place = places.get(annotation.id);
+    if (place === undefined) continue;
+    const held = threadPlace.get(root);
+    // The root's own place wins; else the earliest placed reply's.
+    if (held === undefined || annotation.id === root || (places.get(root) === undefined && place.order < held.order)) {
+      threadPlace.set(root, place);
+    }
+  }
+  const globals: Annotation[] = [];
+  const placed: Array<{ annotation: Annotation; place: ContentsRailMarkPlace }> = [];
+  for (const annotation of annotations) {
+    if (rootOf.get(annotation.id) !== annotation.id) continue;
+    if (annotation.type === AnnotationType.GLOBAL_COMMENT) {
+      globals.push(annotation);
+      continue;
+    }
+    const place = threadPlace.get(annotation.id);
+    if (place !== undefined) placed.push({ annotation, place });
+  }
+  placed.sort((a, b) => a.place.order - b.place.order);
+  const byItem = new Map<number, Annotation[]>();
+  for (const { annotation, place } of placed) {
+    const list = byItem.get(place.itemIndex);
+    if (list === undefined) byItem.set(place.itemIndex, [annotation]);
+    else list.push(annotation);
+  }
+  return { globals, byItem, rootOf };
+}
+
+/** An open-panel dot's slot, px. */
+export const CONTENTS_RAIL_OPEN_MARK_WIDTH = 8;
+
+/** The open panel's "+N" slot, px: its characters at 10 px tabular digits (6.5 px each, the widest common mono) and 4 px. */
+export function contentsRailMoreWidth(more: number): number {
+  return Math.ceil((String(more).length + 1) * 6.5) + 4;
+}
+
+/** An open row's dots and "+N" never take more than seven dots and a two-digit "+N". */
+export const CONTENTS_RAIL_OPEN_MARKS_SPAN =
+  CONTENTS_RAIL_OPEN_MARKS * CONTENTS_RAIL_OPEN_MARK_WIDTH + contentsRailMoreWidth(99);
+
 /**
- * Each rendered row's marks. `open`: the open panel's caps (seven, then
- * "+N"), else the closed rail's (three; more is two and a "more"). Global
- * comments come first on the row that starts the document; the rest follow
- * in document order. An annotation with no place (no rendered highlight, and
- * not global) is not drawn.
+ * Each rendered row's marks, from the groups. `open`: the open panel's caps
+ * (seven, then "+N"; a "+N" of three digits or more gives back a dot so the
+ * row's marks stay in their span), else the closed rail's (three; more is
+ * two and a "more"). Rows are spans of items that do not overlap, so this is
+ * linear in the rows and the marks.
  */
 export function layoutContentsRailMarks(
   rows: readonly ContentsRailMarkRow[],
-  annotations: readonly Annotation[],
-  places: ReadonlyMap<string, ContentsRailMarkPlace>,
+  groups: ContentsRailMarkGroups,
   open: boolean,
 ): ContentsRailRowMarks[] {
-  const byId = new Map(annotations.map((annotation) => [annotation.id, annotation]));
-  const globals = annotations.filter((annotation) => annotation.type === AnnotationType.GLOBAL_COMMENT && annotation.inReplyTo === undefined);
-  const placed: Array<{ annotation: Annotation; place: ContentsRailMarkPlace }> = [];
-  for (const annotation of annotations) {
-    if (annotation.type === AnnotationType.GLOBAL_COMMENT && annotation.inReplyTo === undefined) continue;
-    const place = placeOf(annotation, places, byId);
-    if (place !== undefined) placed.push({ annotation, place });
-  }
-  // Document order; a reply after the comment it answers (a stable sort keeps their input order).
-  placed.sort((a, b) => a.place.order - b.place.order);
   const firstRow = rows.findIndex((row) => row.rangeStart === 0);
   const cap = open ? CONTENTS_RAIL_OPEN_MARKS : CONTENTS_RAIL_CLOSED_MARKS;
 
   return rows.map((row, rowIndex) => {
-    const marks = [
-      ...(rowIndex === firstRow ? globals : []),
-      ...placed
-        .filter(({ place }) => place.itemIndex >= row.rangeStart && place.itemIndex <= row.rangeEnd)
-        .map(({ annotation }) => annotation),
-    ];
+    const marks: Annotation[] = rowIndex === firstRow ? [...groups.globals] : [];
+    for (let item = row.rangeStart; item <= row.rangeEnd; item++) {
+      const list = groups.byItem.get(item);
+      if (list !== undefined) marks.push(...list);
+    }
     if (marks.length <= cap) return { shown: marks, more: 0, total: marks.length };
-    // Closed: the third dot is the "more". Open: seven dots, then "+N".
-    const shownCount = open ? cap : cap - 1;
+    if (!open) {
+      // Closed: the third dot is the "more".
+      const shownCount = cap - 1;
+      return { shown: marks.slice(0, shownCount), more: marks.length - shownCount, total: marks.length };
+    }
+    let shownCount = cap;
+    while (
+      shownCount > 1 &&
+      shownCount * CONTENTS_RAIL_OPEN_MARK_WIDTH + contentsRailMoreWidth(marks.length - shownCount) > CONTENTS_RAIL_OPEN_MARKS_SPAN
+    ) {
+      shownCount--;
+    }
     return { shown: marks.slice(0, shownCount), more: marks.length - shownCount, total: marks.length };
   });
 }

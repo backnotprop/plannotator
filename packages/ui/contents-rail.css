@@ -326,6 +326,7 @@
   top: 0;
   right: 0;
   bottom: 0;
+  box-sizing: border-box;
   width: var(--pn-contents-dock-width);
   pointer-events: none;
 }
@@ -339,6 +340,7 @@
   position: absolute;
   z-index: 2;
   display: block;
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
   border: 0;
@@ -348,17 +350,18 @@
   outline: none;
 }
 
-/* The dot: centred in the slot's first 5 px (a row's last slot runs on to the dock's edge). */
+/* The dot: 3 px, centred in its 5 px slot (logical, as the slot's placement). */
 .pn-contents-rail-mark::after,
 .pn-contents-rail-more::after {
   content: '';
   position: absolute;
-  top: 50%;
-  left: 2.5px;
+  box-sizing: border-box;
+  inset-block: 0;
+  inset-inline-start: 1px;
   width: 3px;
   height: 3px;
+  margin-block: auto;
   border-radius: 50%;
-  translate: -50% -50%;
   background: var(--pn-contents-mark-comment);
   pointer-events: none;
 }
@@ -374,8 +377,15 @@
 .pn-contents-rail-mark[data-highlighted]::after,
 .pn-contents-rail-mark[data-selected]::after,
 .pn-contents-rail-mark:focus-visible::after {
+  inset-inline-start: 0;
   width: 5px;
   height: 5px;
+}
+
+/* Focused, a dot is drawn in the foreground, as a focused tick's line is:
+ * a hairline ring round it, so its kind's colour stays. */
+.pn-contents-rail-mark:focus-visible::after {
+  box-shadow: 0 0 0 1px var(--foreground);
 }
 
 /* The overflow: a quiet dot in the ticks' own colour. */
@@ -385,9 +395,34 @@
 }
 
 .pn-contents-rail-more:focus-visible::after {
+  inset-inline-start: 0;
   width: 5px;
   height: 5px;
+  background: var(--foreground);
   opacity: 1;
+}
+
+/* Closed, a row with marks: a tick's line, grown (hovered, focused or the
+ * lens beside one), stops before its first mark (20 px into the dock, where
+ * an H1's line ends at rest). The cap is 16 px of each level's line. */
+.pn-contents-rail:not([data-revealed]) .pn-contents-rail-marker[data-marks] {
+  --pn-contents-line-cap: 0.6154;
+}
+
+.pn-contents-rail:not([data-revealed]) .pn-contents-rail-marker[data-marks][data-level="2"] {
+  --pn-contents-line-cap: 0.7273;
+}
+
+.pn-contents-rail:not([data-revealed]) .pn-contents-rail-marker[data-marks][data-level="3"] {
+  --pn-contents-line-cap: 0.8889;
+}
+
+.pn-contents-rail:not([data-revealed]) .pn-contents-rail-marker[data-marks][data-level="4"] {
+  --pn-contents-line-cap: 1;
+}
+
+.pn-contents-rail:not([data-revealed]) .pn-contents-rail-marker[data-marks] .pn-contents-rail-line {
+  transform: scaleX(min(calc(0.6154 + 0.3846 * var(--marker-progress)), var(--pn-contents-line-cap)));
 }
 
 /* Open: at the end of the row, a little larger; they come in with the labels. */
@@ -398,9 +433,10 @@
 }
 
 .pn-contents-rail[data-revealed] .pn-contents-rail-mark::after {
-  left: 50%;
+  inset-inline: 0;
   width: 5px;
   height: 5px;
+  margin-inline: auto;
 }
 
 .pn-contents-rail[data-revealed] .pn-contents-rail-mark[data-highlighted]::after,
@@ -410,13 +446,16 @@
   height: 7px;
 }
 
+/* "+N": its slot is sized to its digits (the component's); the text keeps to the slot's end. */
 .pn-contents-rail[data-revealed] .pn-contents-rail-more {
+  overflow: hidden;
   color: var(--muted-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   line-height: 16px;
-  text-align: right;
+  text-align: end;
+  white-space: nowrap;
 }
 
 .pn-contents-rail[data-revealed] .pn-contents-rail-more::after {
@@ -429,12 +468,14 @@
 
 /* A mark's card: the panel's floating surface holding the annotation panel
  * card's parts (AnnotationCardParts). Where the closed panel would be, or left
- * of the open one; placed by the component. */
+ * of the open one; placed (and narrowed, or moved below its row, in a narrow
+ * pane) by the component. */
 .pn-contents-rail-card {
   position: absolute;
   z-index: 3;
   top: 0;
   left: 0;
+  box-sizing: border-box;
   width: var(--pn-contents-panel-width);
   padding: 10px 12px;
   border-radius: var(--geometry-floating-radius, 10px);
