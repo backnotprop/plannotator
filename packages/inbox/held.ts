@@ -91,6 +91,14 @@ function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, o
 }
 
 /**
+ * The thread's row now (`current`) carries agent activity the row drawn on screen (`drawn`) does not show: that news
+ * waits behind "N new · Show". Mark all as read (markAllRead.ts) leaves such a thread out, so it stays new.
+ */
+export function waitsBehindShow(drawn: InboxListRow, current: InboxListRow): boolean {
+  return hasNewAgentActivity(drawn, current);
+}
+
+/**
  * The thread the held list treats as open (design record
  * "inbox-new-in-open-thread", approved 2026-10-12): the thread the person
  * has open, or the one they just closed until the list settles. While it is

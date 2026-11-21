@@ -55,6 +55,9 @@ interface WorldOptions {
 
 /** An Inbox with Snooze and the rest of the line behind the person, so only Bro mode can be next. */
 async function world(options: WorldOptions = {}) {
+  // The view choice (reveals.ts `view_choice`: five threads, no tenure, `ahead`) shown 3 days ago, merged into any
+  // `inboxReveals` a case brings: with these worlds' threads it would otherwise be next where Bro mode is not.
+  const { inboxReveals, ...config } = options.config ?? {};
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-bro-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -82,7 +85,8 @@ async function world(options: WorldOptions = {}) {
       inboxTool: { openclaw: true },
       // Priority (after Snooze in the line): settled by a thread once added to Priority.
       inboxPriorityIntro: { usedAt: new Date(Date.now() - 3 * DAY).toISOString() },
-      ...options.config,
+      inboxReveals: { view_choice: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() }, ...(inboxReveals as Record<string, unknown> | undefined) },
+      ...config,
     }),
   );
   // What the person read: heavy use counts the dates of the agent messages they looked at.

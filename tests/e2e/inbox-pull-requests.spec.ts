@@ -942,9 +942,21 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
     }
     // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator(PHONE_TARGETS).evaluateAll(touchTargets)) {
-      expect(box.right).toBeLessThanOrEqual(390);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+    let measured = '';
+    await expect
+      .poll(
+        async () => {
+          const now = JSON.stringify(await page.locator(PHONE_TARGETS).evaluateAll(touchTargets));
+          const same = now === measured && now !== '[]';
+          measured = now;
+          return same;
+        },
+        { timeout: 15_000, intervals: [150, 250, 500] },
+      )
+      .toBe(true);
+    for (const box of JSON.parse(measured) as ReturnType<typeof touchTargets>) {
+      expect(box.right, box.what).toBeLessThanOrEqual(390);
+      expect(box.height, box.what).toBeGreaterThanOrEqual(44);
     }
     await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
     await shot(page, name, schemes);
@@ -961,10 +973,13 @@ const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-launc
  * (New review's Start on a phone is 36 px to the eye and 44 px or more to the touch).
  */
 const touchTargets = (els: Element[]) =>
-  els.map((el) => {
-    const box = el.getBoundingClientRect();
-    return { right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
-  });
+  els
+    .filter((el) => el.checkVisibility())
+    .map((el) => {
+      const box = el.getBoundingClientRect();
+      const what = `${el.outerHTML.slice(0, 160)} in ${el.parentElement?.className ?? ''}`;
+      return { what, right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
+    });
 
 test('one PR with no review thread, on its launchpad: Guided review, the New review box, "on its way", the guided review arriving, the thread line, and Open the diff in each', async ({ browser }) => {
   const { page } = world;

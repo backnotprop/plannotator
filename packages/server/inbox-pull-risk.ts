@@ -555,9 +555,12 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     assess(pulls, read = {}) {
       const repos = new Set(read.covered ?? []);
       if (read.board) {
-        const keys = new Set(pulls.map((pull) => pull.key));
-        listed = [...listed.filter((pull) => !keys.has(pull.key) && !repos.has(inboxPullRepoKey(pull.host, pull.repo))), ...pulls];
-        for (const repo of repos) covered.add(repo);
+        const named = new Set([...repos, ...pulls.map((pull) => inboxPullRepoKey(pull.host, pull.repo))]);
+        listed = [...listed.filter((pull) => !named.has(inboxPullRepoKey(pull.host, pull.repo))), ...pulls];
+        for (const repo of named) {
+          if (repos.has(repo)) covered.add(repo);
+          else covered.delete(repo);
+        }
       } else {
         listed = pulls;
         covered = repos;

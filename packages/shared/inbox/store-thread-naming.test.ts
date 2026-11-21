@@ -356,3 +356,38 @@ describe("a retried reply whose `thread` could not name anything", () => {
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: person.id, thread: "Other", idempotency_key: "r2" }).message.id).toBe(r.message.id);
   });
 });
+
+describe("the title a thread the person started reaches an agent with (agentTitle)", () => {
+  test("its first message: the name the person typed; with no name, or compose's suggestion, the body's first words", () => {
+    const { store, project } = world();
+    const { message: typed } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k1", thread_name: "Retry budget" });
+    expect(store.agentTitle(typed, "ses_live")).toBe("Retry budget");
+    const { message: bare } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k2" });
+    expect(bare.subject).not.toBeNull();
+    expect(store.agentTitle(bare, "ses_live")).toBe(bare.subject);
+    const { message: auto } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k3", thread_name: "Board ideas", thread_name_auto: true });
+    expect(auto.thread_name).toBe("Board ideas");
+    expect(store.agentTitle(auto, "ses_live")).toBe(auto.subject);
+    // An agent's own thread, named by it: the root's subject, as before.
+    const own = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "status", subject: "Nightly status", thread: "Nightly" }).message;
+    expect(store.agentTitle(own, "ses_a")).toBe("Nightly status");
+  });
+
+  test("a session's first sight of it (a New message to a session new to it, a reply sent on to another session) takes the name too; an unnamed one keeps the subject", () => {
+    const { store, project } = world();
+    const other = { host: "claude-code", session: "ses_other" };
+    for (const [name, title] of [["Retry budget", "Retry budget"], [null, null]] as const) {
+      const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: `root-${name}`, ...(name ? { thread_name: name } : {}) });
+      const expected = title ?? root.subject;
+      const answer = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "On it.", reply_to: root.id }).message;
+      const fresh = store.sendNewMessage(root.id, { body: "Pick this up too.", to: other, idempotency_key: `new-${name}` }).message;
+      expect(store.agentTitle(fresh, "ses_other")).toBe(expected);
+      const sentOn = store.sendReply(answer.id, { words: "Take this over.", to: other, idempotency_key: `on-${name}` }).reply;
+      expect(store.redirectedFrom(sentOn)).not.toBeNull();
+      expect(store.agentTitle(sentOn, "ses_other")).toBe(expected);
+      // A plain reply to the session that has it: the name, or none (`a reply`), as before.
+      const plain = store.sendReply(answer.id, { words: "Thanks.", idempotency_key: `plain-${name}` }).reply;
+      expect(store.agentTitle(plain, "ses_live")).toBe(title);
+    }
+  });
+});

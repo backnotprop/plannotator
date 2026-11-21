@@ -172,8 +172,16 @@ export interface SpaceShareRecord {
   /** Per local comment id (`anno_…`): the hosted comment or reply, or why it stays here. */
   comments: Record<string, { remote_id: string; reply?: true } | { left: string }>;
   approval: { document_id: string; version_number: number } | null;
-  /** The space did not take the approval: not asked again, and not shown. */
-  approval_refused: boolean;
+  /**
+   * Old records only, from the tool's own approval call (a space always refuses it; no longer made). Nothing in the
+   * product reads or writes it now: a record that carries it still loads, and keeps it as it was.
+   */
+  approval_refused?: boolean;
+  /**
+   * The approval sent with the last Keep (the space's sign-in page records it with the claim) and what the page did
+   * with it: `recorded`, `moved` (the page had moved on there: not recorded) or `none`. Kept for the panel; not shown yet.
+   */
+  keep_approval?: { outcome: "recorded" | "moved" | "none"; document_id: string; version_number: number; version: string; at: string };
   /** The first share that finished, and the last run that did. */
   shared_at: string | null;
   updated_at: string;
@@ -210,7 +218,6 @@ export function newSpaceShareRecord(input: { host: string; space_id: string; nam
     files: {},
     comments: {},
     approval: null,
-    approval_refused: false,
     shared_at: null,
     updated_at: input.at,
     job: null,
@@ -316,15 +323,14 @@ export type SpaceShareStep =
   /** A file a hosted space takes only as a page (its extension is a page's). */
   | { kind: "file-page"; path: string }
   | { kind: "comment"; id: string }
-  | { kind: "reply"; id: string; parent: string }
-  | { kind: "approval"; doc: string; version: number };
+  | { kind: "reply"; id: string; parent: string };
 
 /** The Details view: what goes up, and what stays on this computer. A row with nothing in it is not shown. */
 export interface SpaceShareDetails {
   pages: number;
   files: number;
   comments: number;
-  /** The version whose approval goes (or went) up; null: none. */
+  /** The version whose approval is up in the space (recorded with Keep, the page not saved since); null: none. */
   approval: number | null;
   not: {
     sent_comments: number;
@@ -572,20 +578,33 @@ export function planSpaceShare(local: LocalSpace, record: SpaceShareRecord | nul
     changed.add(`comment:${comment.id}`);
   }
 
-  // The approval last (a save clears it there), and only into a space that is the person's own.
+  // The approval goes up only with Keep (the space's sign-in page records it); a tool's own approval call is always
+  // refused, so none is planned. Details lists it only while it is up: the person's approval of the version the space
+  // holds, recorded there, the page not saved since (a save clears it there) nor changed there.
   const approval = local.approval;
   const primary = local.documents.find((d) => d.id === local.primary_doc_id);
-  if (approval && primary && isSpacePageKind(primary.kind) && !record?.approval_refused) {
+  if (approval && primary && isSpacePageKind(primary.kind) && kept) {
     const head = primary.versions.find((v) => v.version_number === approval.version_number);
-    // Listed in Details only where it goes: never for a space nobody kept.
-    if (kept && head && up.get(primary.id)?.has(head.version) && !record?.pages[primary.id]?.stopped) {
-      details.approval = approval.version_number;
-      const there = record?.approval?.document_id === approval.document_id && record.approval.version_number === approval.version_number && !primarySaved;
-      if (!there) steps.push({ kind: "approval", doc: approval.document_id, version: approval.version_number });
-    }
+    const recorded = record?.approval?.document_id === approval.document_id && record.approval.version_number === approval.version_number;
+    if (head && recorded && !primarySaved && up.get(primary.id)?.has(head.version) && !record?.pages[primary.id]?.stopped) details.approval = approval.version_number;
   }
 
   return { steps, details, changes: changed.size, file_bytes: fileBytes, paths, file_paths: filePaths };
+}
+
+/**
+ * The approval that goes with Keep this space, on the space's sign-in page: the person's approval of the main page's
+ * newest version, when that version is the one the space holds (the last that went up, the page not changed there).
+ * Null when there is none to send, or the space is not known yet (nothing made, or someone else kept it).
+ */
+export function spaceKeepApproval(local: LocalSpace, record: SpaceShareRecord | null): { document_id: string; version_number: number; remote_document: string; remote_version: string } | null {
+  const approval = local.approval;
+  if (!approval || !record || !record.created || record.refused) return null;
+  const page = record.pages[approval.document_id];
+  if (!page || page.lane !== "page" || !page.remote_id || page.stopped) return null;
+  const last = page.pushed[page.pushed.length - 1];
+  if (!last || last.local !== approval.version_number || !last.remote) return null;
+  return { document_id: approval.document_id, version_number: approval.version_number, remote_document: page.remote_id, remote_version: last.remote };
 }
 
 // ─────────────────────────────── What the page is told ───────────────────────────────

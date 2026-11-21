@@ -60,7 +60,7 @@ describe("its place in the line", () => {
     expect(revealNext(state({ open: only("tab_icon", "theme_chooser", "snooze", "board") }), now)).toBe("tab_icon");
     expect(revealMayClaim("theme_chooser", state({ open: only("tab_icon", "theme_chooser") }), now)).toBe(false);
     // The tab icon dialog done (or never theirs): it is next, ahead of Snooze, the Board and the rest.
-    expect(revealNext(state({ open: only("theme_chooser", "snooze", "bro", "board", "steps", "list_view") }), now)).toBe("theme_chooser");
+    expect(revealNext(state({ open: only("theme_chooser", "snooze", "bro", "board", "steps", "view_choice") }), now)).toBe("theme_chooser");
     // Not for them (another theme): the line is as it was.
     expect(revealNext(state({ open: only("snooze", "board") }), now)).toBe("snooze");
   });

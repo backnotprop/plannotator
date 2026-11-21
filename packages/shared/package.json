@@ -191,6 +191,7 @@
     "./inbox/reveals": "./inbox/reveals.ts",
     "./inbox/launch-tip": "./inbox/launch-tip.ts",
     "./inbox/sidebar-tip": "./inbox/sidebar-tip.ts",
+    "./inbox/band-tip": "./inbox/band-tip.ts",
     "./inbox/grill-me-tip": "./inbox/grill-me-tip.ts",
     "./inbox/routines-intro": "./inbox/routines-intro.ts",
     "./inbox/theme-chooser": "./inbox/theme-chooser.ts",
