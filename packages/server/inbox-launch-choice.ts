@@ -54,15 +54,19 @@ export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOIC
   return Promise.race([answer.catch(() => null), late]).finally(() => clearTimeout(timer));
 }
 
-/** `key` is the CLI's path and version: a help read costs a process, and compose asks every few seconds. */
-export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now) {
+/**
+ * `key` is the CLI's path and version (OpenCode adds its config and sign-in files' change times): a help read costs a
+ * process, and compose asks every few seconds. `failedAgainMs`: how long a key whose read failed is not read again.
+ */
+export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now, options: { failedAgainMs?: number } = {}) {
+  const failedAgainMs = options.failedAgainMs ?? FAILED_AGAIN_MS;
   let kept: { key: string; value: LaunchChoiceLists } | null = null;
   let failed: { key: string; at: number } | null = null;
   let reading: { key: string; answer: Promise<LaunchChoiceLists | null> } | null = null;
   const read = (key: string | null): Promise<LaunchChoiceLists | null> => {
     if (key === null) return Promise.resolve(null);
     if (kept?.key === key) return Promise.resolve(kept.value);
-    if (failed?.key === key && now() - failed.at < FAILED_AGAIN_MS) return Promise.resolve(null);
+    if (failed?.key === key && now() - failed.at < failedAgainMs) return Promise.resolve(null);
     if (reading?.key === key) return reading.answer;
     const answer = load()
       .catch(() => null)

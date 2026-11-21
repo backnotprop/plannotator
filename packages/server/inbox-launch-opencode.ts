@@ -1,17 +1,18 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { inboxLaunchTokenOk, openCodeSessionModel, parseOpenCodeAgents, parseOpenCodeModels } from "@plannotator/core/inbox-launch-choice";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
-import { agentVersionRun, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
+import { agentVersionRun, createAgentEnvironmentFor, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext, type LaunchStartFailure } from "./inbox-launch-host";
 import { createOpenCodePermissions, OPENCODE, OPENCODE_NAME, type OpenCodePermissionAsked } from "./inbox-launch-opencode-permission";
+import { openCodeConfigFiles } from "./inbox-restart";
 
 export { OPENCODE, OPENCODE_NAME };
 export const OPENCODE_LAUNCH_MIN_VERSION = "2.0.19";
@@ -87,6 +88,52 @@ export function openCodeAttachCommand(bin: string, folder: string, session: stri
 
 export function openCodeHandoffCommand(bin: string, folder: string, session: string, pid: number, dataDir: string | null = null): string {
   return `/bin/sh -c ${shellQuote(`cd ${shellQuote(folder)} || exit 1; while kill -0 ${pid} 2>/dev/null; do sleep 0.2; done; ${openCodeTerminalRun(bin, session, dataDir)}`)}`;
+}
+
+/**
+ * The words of a failed turn's error: a string as it is; OpenCode's nested error (`{ name, data: { message } }`) by
+ * `data.message`, then `message`, then `name`. Never "[object Object]": empty when none of them is words.
+ */
+export function openCodeErrorText(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return "";
+  const e = error as { name?: unknown; message?: unknown; data?: unknown };
+  const nested = e.data && typeof e.data === "object" ? (e.data as { message?: unknown }).message : undefined;
+  for (const text of [nested, e.message, e.name]) if (typeof text === "string" && text.trim()) return text;
+  return "";
+}
+
+/** What each list read keeps of OpenCode's output: a gateway provider (Vercel's, OpenRouter) lists hundreds of models. */
+export const OPENCODE_LIST_OUTPUT_CAP = 16 * 1024 * 1024;
+/** A list read that failed (a slow first run, a config mid-edit) is tried again this soon, not in 5 minutes. */
+const LIST_FAILED_AGAIN_MS = 15_000;
+
+/**
+ * The env OpenCode's lists are read with: the session's own (`openCodeSpawnEnv` over the login env), so a key or an
+ * `OPENCODE_CONFIG` the person's shell sets counts as it does in the session. Without the server sign-in and the
+ * launch markers, which a list read has no use for.
+ */
+export function openCodeListEnv(login: Readonly<LaunchEnv>, dataDir: string | null): LaunchEnv {
+  return Object.fromEntries(Object.entries(openCodeSpawnEnv(login, dataDir, null, "")).filter(([name]) => !name.startsWith("OPENCODE_SERVER_") && name !== OPENCODE_LAUNCH_ENV));
+}
+
+/**
+ * What OpenCode's lists depend on besides its binary: its config files (`OPENCODE_CONFIG`, then the global folder's)
+ * and its sign-in file. Only their change time and size, from `stat`: the sign-in file is never read.
+ */
+export function openCodeListStamp(e: AgentEnvironment): string {
+  const data = e.env.XDG_DATA_HOME?.trim();
+  const dataHome = data && isAbsolute(data) ? data : join(e.homeDir, ".local", "share");
+  return [...openCodeConfigFiles(e), join(dataHome, "opencode", "auth.json")]
+    .map((file) => {
+      try {
+        const stat = statSync(file);
+        return `${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        return "-";
+      }
+    })
+    .join(",");
 }
 
 export function openCodeTurnErrorNote(error: string): string {
@@ -182,7 +229,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
         return;
       case "session.execution.failed": {
         s.busySince = null;
-        const text = String(data.error?.message ?? data.error ?? data.message ?? "");
+        const text = openCodeErrorText(data.error) || openCodeErrorText(data.message);
         if (existsSync(ctx.launchDir(s.launchId))) ctx.startLog(s.launchId, `opencode ${s.session}: the turn ended with an error: ${text.slice(0, 2000)}`);
         note(s.launchId, s.session, openCodeTurnErrorNote(text), `opencode-error-${s.launchId}-${Date.now()}-${++notes}`);
         threads?.onChange();
@@ -365,12 +412,14 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     const e = await ctx.environment();
     const path = binOf(e);
     if (!path) return null;
+    // Read with the session's env (the login shell's, filtered as for a start): the keys and OPENCODE_CONFIG it sets
+    // decide which providers OpenCode lists. A login read that fails falls back to the Inbox's env, as a start does.
+    const login = await ctx.loginEnv().catch((): LaunchEnv => ({}));
+    const env = openCodeListEnv(login.PATH ? login : (e.env as LaunchEnv), dataDirArg());
+    const read = (route: string) => e.run([path, "--standalone", "api", "GET", route], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true, outputCap: OPENCODE_LIST_OUTPUT_CAP });
     // The models, and OpenCode's own agents (build, plan, …) a session can start as: an agent list that can't be
     // read leaves no Agent column, never the models.
-    const [listed, agents] = await Promise.all([
-      e.run([path, "--standalone", "api", "GET", "/api/model"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir }),
-      e.run([path, "--standalone", "api", "GET", "/api/agent"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir }).catch(() => null),
-    ]);
+    const [listed, agents] = await Promise.all([read("/api/model"), read("/api/agent").catch(() => null)]);
     if (listed.exitCode !== 0 || listed.timedOut) return null;
     let models: ReturnType<typeof parseOpenCodeModels>;
     try {
@@ -386,12 +435,12 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       primary = null;
     }
     return primary && primary.length > 0 ? { ...models, primary_agents: primary } : models;
-  });
+  }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS });
 
   return {
     agent: OPENCODE,
     name: OPENCODE_NAME,
-    shellNames: ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR"],
+    shellNames: ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"],
 
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
@@ -407,7 +456,13 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return { ok: true, version };
     },
 
-    choices: () => choiceLists(choiceKey),
+    // Read again when OpenCode's config or sign-in file changes (where the login shell says they are), not only on a new
+    // binary or version: a provider added or signed in to shows on the next read, with no Inbox restart.
+    choices: () => {
+      if (choiceKey === null) return choiceLists(null);
+      const where = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...ctx.ownEnv(), ...(ctx.shell() ?? {}) } });
+      return choiceLists(`${choiceKey}|${openCodeListStamp(where)}`);
+    },
 
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
     trusts: () => true,

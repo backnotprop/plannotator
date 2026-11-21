@@ -61,3 +61,24 @@ test("the lists never hold up an offer: a slow CLI is waited on a moment only, a
   void read("pi@1.5");
   expect(calls).toBe(2);
 });
+
+test("a host that asks for a shorter wait (OpenCode) reads again after a failed read that soon, and a good read is kept", async () => {
+  let clock = 0;
+  let answer: { models: string[]; efforts: string[]; effort_word: string } | null = null;
+  let calls = 0;
+  const read = launchChoiceCache(async () => {
+    calls++;
+    return answer;
+  }, () => clock, { failedAgainMs: 15_000 });
+  expect(await read("opencode2@2.2.7")).toBeNull();
+  clock += 10_000;
+  expect(await read("opencode2@2.2.7")).toBeNull();
+  expect(calls).toBe(1);
+  answer = { models: ["ollama/qwen"], efforts: [], effort_word: "Variant" };
+  clock += 6_000;
+  expect((await read("opencode2@2.2.7"))?.models).toEqual(["ollama/qwen"]);
+  expect(calls).toBe(2);
+  clock += 60 * 60_000;
+  expect((await read("opencode2@2.2.7"))?.models).toEqual(["ollama/qwen"]);
+  expect(calls).toBe(2);
+});
