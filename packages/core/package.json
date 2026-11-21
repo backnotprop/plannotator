@@ -108,6 +108,7 @@
     "./inbox-system-setup": "./inbox-system-setup.ts",
     "./inbox-system": "./inbox-system.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
+    "./html-block-anchor": "./html-block-anchor.ts",
     "./image-region": "./image-region.ts",
     "./open-in-apps": "./open-in-apps.ts",
     "./project": "./project.ts",
