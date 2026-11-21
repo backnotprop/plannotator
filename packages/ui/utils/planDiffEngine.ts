@@ -11,6 +11,7 @@
  */
 
 import { diffLines, diffWordsWithSpace, type Change } from "diff";
+import { planTextLines } from "@plannotator/core/plans";
 import { parseMarkdownToBlocks } from "./parser";
 import type { Block } from "../types";
 
@@ -619,18 +620,24 @@ export function computePlanDiff(
   oldText: string,
   newText: string
 ): { blocks: PlanDiffBlock[]; stats: PlanDiffStats } {
+  // A plan read from disk keeps whatever line endings it was written with, and
+  // the editor gives back `\n`; left alone, a plan whose only change is CRLF
+  // vs LF diffs as a whole-file replace. Compare as a person reads it.
+  const oldLines = planTextLines(oldText);
+  const newLines = planTextLines(newText);
+
   // Pre-pass: collapse every fenced code block to a single-line sentinel
   // so diffLines treats each whole fence atomically. See the comment on
   // FENCE_BLOCK_PATTERN for the failure this prevents.
   const fenceMap = new Map<string, string>();
   const fenceToId = new Map<string, number>();
   const substOld = substituteQuotedFenceRuns(
-    substituteFencedBlocks(oldText, fenceMap, fenceToId),
+    substituteFencedBlocks(oldLines, fenceMap, fenceToId),
     fenceMap,
     fenceToId,
   );
   const substNew = substituteQuotedFenceRuns(
-    substituteFencedBlocks(newText, fenceMap, fenceToId),
+    substituteFencedBlocks(newLines, fenceMap, fenceToId),
     fenceMap,
     fenceToId,
   );
