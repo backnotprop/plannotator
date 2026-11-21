@@ -10,6 +10,8 @@ const ID = 'side-circle';
 export interface SideCircleMenuProps {
   /** The circle, the button a right-click, a long press or the menu key opens this on. */
   button: () => HTMLElement | null;
+  /** The circle as drawn (its 28 px disc): the menu sits just above it, right edges aligned, whatever opened it. */
+  anchor: () => HTMLElement | null;
   /** Close: the circle goes for this thread, the conversation stays (data/sideCircleClosed.ts). */
   onClose: () => void;
   /** The menu is open: the circle's tooltip stays shut under it. */
@@ -23,8 +25,10 @@ export interface SideCircleMenuProps {
  * the Inbox's menu (`.ib-pm`) with one item, Close. The trigger's rules are the thread rows' (useContextMenuTrigger,
  * `longPress`): a right-click is never a click, the lift after a long press opens nothing, and a tap is a tap. No
  * shortcut of its own. The trigger draws no box (`display: contents`), so the circle keeps its place and hit area.
+ * The menu is anchored to the circle, not to the pointer (a right-click's menu would cover the circle it belongs to):
+ * above it, its right edge on the circle's, the dropdowns' 4 px gap, for a right-click, a long press and a key alike.
  */
-export function SideCircleMenu({ button, onClose, onOpenChange, children }: SideCircleMenuProps) {
+export function SideCircleMenu({ button, anchor, onClose, onOpenChange, children }: SideCircleMenuProps) {
   const body = useRef<HTMLDivElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(body.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
@@ -47,7 +51,7 @@ export function SideCircleMenu({ button, onClose, onOpenChange, children }: Side
         {children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal container={portal ?? undefined}>
-        <ContextMenu.Positioner className="ib-pm-pos">
+        <ContextMenu.Positioner className="ib-pm-pos" anchor={anchor} side="top" align="end" sideOffset={4}>
           <ContextMenu.Popup className="ib-pm" aria-label="Side chat" data-side-circle-menu="" {...menu.popup}>
             <Menu.Item
               className="ib-pmi"

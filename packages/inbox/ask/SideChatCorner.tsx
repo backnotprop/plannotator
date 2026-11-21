@@ -374,7 +374,7 @@ export function SideChatCorner({ host, unseen, answering, onOpen, flight, opener
 
   return (
     <div ref={rootRef} className="ib-sc" data-side-corner="" hidden={covered}>
-      <SideCircleMenu button={() => buttonRef.current} onClose={() => closeCircle(onClose, opener, paneRef.current)} onOpenChange={setMenuOpen}>
+      <SideCircleMenu button={() => buttonRef.current} anchor={() => dotRef.current} onClose={() => closeCircle(onClose, opener, paneRef.current)} onOpenChange={setMenuOpen}>
         <Tip content="Side chat" side="left" wide={false} when={() => !menuOpen}>
           <button
             ref={buttonRef}
