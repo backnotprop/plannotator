@@ -630,7 +630,7 @@ export function PullsCard({
               setText(e.target.value);
               setError(null);
             }}
-            placeholder="Add a PR: owner/repo#123 or its link"
+            placeholder="Add a PR: owner/repo#123 or its link. Forgejo: the full link"
             aria-label="Add a pull request to this thread"
             aria-invalid={error ? true : undefined}
             spellCheck={false}
