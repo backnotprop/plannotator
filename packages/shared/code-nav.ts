@@ -413,9 +413,17 @@ export function parseRgJsonOutput(
   const locations: CodeNavLocation[] = [];
   const originLocations: CodeNavLocation[] = [];
   const lines = stdout.split("\n");
+  // The origin path as it appears inside rg's JSON, so lines past the cap that
+  // cannot be the origin file are skipped without being parsed.
+  const originInJson = originFilePath
+    ? JSON.stringify(originFilePath).slice(1, -1)
+    : "";
 
   for (const line of lines) {
-    if (!originFilePath && locations.length >= PARSE_CAP) break;
+    if (locations.length >= PARSE_CAP) {
+      if (!originFilePath) break;
+      if (!line.includes(originInJson)) continue;
+    }
     if (!line.trim()) continue;
 
     let parsed: { type: string; data: RgMatchData };
