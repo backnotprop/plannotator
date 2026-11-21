@@ -4959,6 +4959,18 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-lchopt .ib-cp-lchname { display: flex; align-items: baseline; gap: 0.5em; }
 .ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+/* OpenCode's default named on the button, "Default (big-pickle) · build": only the name gives way, the brackets and the rest stay whole. */
+.ib-cp-lchbtn > .ib-cp-lchw { display: inline-flex; min-width: 0; overflow: hidden; }
+.ib-cp-lchw > span { flex: none; white-space: nowrap; }
+.ib-cp-lchw > .ib-cp-lchdn { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; }
+/* The menu's Default row with OpenCode's default and its provider: drops to a second line in a narrow column, never cut. */
+.ib-cp-lchopt .ib-cp-lchname.ib-cp-lchdef { flex-wrap: wrap; row-gap: 1px; line-height: 1.3; }
+.ib-cp-lchname.ib-cp-lchdef > span:first-child { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt:has(.ib-cp-lchdef) { padding-top: 8px; padding-bottom: 8px; }
+/* OpenCode's list being read or not readable: under Default, the menu's notice row (a spinner while it is read). */
+.ib-cp-picker.ib-cp-lch .ib-cp-opt.ib-cp-fnotice { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
+.ib-cp-picker.ib-cp-lch .ib-cp-fnotice > svg.ib-ic { margin-top: 2px; }
+.ib-cp-picker.ib-cp-lch .ib-cp-fnotice > .ib-spin { flex: none; margin: 3px 2px 0 1px; }
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
 /* OpenCode's Agent column (build, plan) beside the model and the variant: the same room as a filterable list. */
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-compose-choice-menu="primary_agent"]) { width: min(480px, calc(100% - 28px)); }
@@ -9631,6 +9643,31 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .ib-rto-slot { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: end; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 260px; margin-left: 6px; margin-right: -6px; }
 .ib-rto-slot > * { grid-area: 1 / 1; }
 .pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
+/* The chip at the start of the words (approval "inbox-reply-target-chip", option B, 2026-11-20): who gets the reply in a
+   thread with several agents, on a computer (the pill above stays for a PR's new thread; a phone keeps its control in
+   the box's row, phoneComposer.css). A filled
+   token laid over the first line's indent: FieldLead.tsx places it and sets `--ib-lead`, which indents the field and
+   its painted mirror alike, so the words, the caret and the placeholder start after it and later lines wrap under it.
+   Capped at 40% of the first line (`--ib-lead-max`, FieldLead.tsx, from the textarea's content box) so the first line
+   always keeps room for the caret; a longer name gives way with "…". In the narrowest panes (a split view's 400 px) it drops "to" when
+   that lets the whole name fit, or when beside it too little of the name would show (`data-tight`, RecipientChip):
+   the mark and the chevron still say what it is, and its accessible name still starts "To". */
+.ib-cfield:has(> .ib-flead) :is(.ib-rtext, .ib-rmirror) { text-indent: var(--ib-lead, 0px); }
+.ib-flead { position: absolute; top: 0; left: 0; z-index: 1; display: flex; min-width: 0; max-width: var(--ib-lead-max, min(240px, 40%)); }
+.pn-inbox .ib-rto-chip { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 23px; min-width: 0; max-width: 100%; padding: 0 6px 0 7px; border: 0; border-radius: 7px; background: var(--ib-fill, color-mix(in oklch, var(--foreground) 7%, transparent)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1; white-space: nowrap; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-rto-chip:hover, .pn-inbox .ib-rto-chip[aria-expanded="true"] { background: color-mix(in oklch, var(--foreground) 11%, transparent); color: var(--foreground); }
+.pn-inbox .ib-rto-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-rto-chip .ib-atile { width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); background: transparent; }
+.ib-rto-chip .ib-tg-stack .ib-mk { width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); box-shadow: 0 0 0 1.5px var(--card); }
+.ib-rto-chip .ib-tg-stack .ib-mk > svg, .ib-rto-chip .ib-tg-stack .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
+.pn-inbox .ib-rto-chip[data-ended] .ib-atile { opacity: 0.55; }
+.pn-inbox .ib-rto-chip[data-ended] .ib-rto-n { color: var(--muted-foreground); }
+/* A narrow field (480 px or less, measured by RecipientChip so its accessible name can say what shows) names the
+   agent as a narrow row did: the short name, the folder alone. */
+.ib-rto-chip[data-narrow] .ib-rto-full { display: none; }
+.ib-rto-chip[data-narrow] .ib-rto-short { display: block; }
+.ib-rto-chip[data-tight] .ib-rto-l { display: none; }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-rto-chip { transition: none; } }
 /* The list: the `@` list's box and tiles, over the pill's right end. */
 .ib-tg-menu.ib-rpick { left: auto; right: 0; bottom: calc(100% + 6px); margin: 0; width: 300px; max-width: calc(100vw - 24px); padding: 6px; }
 /* Room for the start row's "+", mark, "New Claude Code session" and "in ledger" on one line. */
