@@ -331,6 +331,9 @@ export interface SessionInfo {
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
   title?: () => string | Promise<string>
+  model?: () => Promise<string | null>
+  effort?: () => string | null
+  contextPercent?: () => Promise<number | null>
   /** The session's first start, given the link's (`InboxLinkOptions.firstStart`). */
   firstStart?: (startedAt: number) => Promise<number>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
@@ -438,6 +441,9 @@ export class PlannotatorMod {
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
           ...(session.title ? { title: session.title } : {}),
+          ...(session.model ? { model: session.model } : {}),
+          ...(session.effort ? { effort: session.effort } : {}),
+          ...(session.contextPercent ? { contextPercent: session.contextPercent } : {}),
           ...(session.firstStart ? { firstStart: session.firstStart } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
           ...(session.place ? { place: session.place } : {}),

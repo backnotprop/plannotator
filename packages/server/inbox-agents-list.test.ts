@@ -64,6 +64,38 @@ describe("who is listed, and how", () => {
     expect(group.agents[1]).toMatchObject({ host: "claude-code", label: "Fix login redirect", project: { id: "prj_ledger", name: "ledger" }, waiting: 0 });
   });
 
+  test("a live session carries its model and effort from its latest poll; a bad value, an older connection or an ended session carries none", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-set", { model: "claude-opus-5-5", effort: "high" });
+    await poll(live, "ses-odd", { model: "<b>opus</b>", effort: "turbo" });
+    await poll(live, "ses-old");
+    const facts = () => Object.fromEntries(inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents.map((agent) => [agent.id, [agent.model, agent.effort]]));
+    expect(facts()).toEqual({ "ses-set": ["claude-opus-5-5", "high"], "ses-odd": [undefined, undefined], "ses-old": [undefined, undefined] });
+    await poll(live, "ses-set", { model: "claude-haiku-5-5" });
+    expect(facts()["ses-set"]).toEqual(["claude-haiku-5-5", undefined]);
+    clock.t += 60 * 60_000;
+    await poll(live, "ses-other");
+    expect(facts()["ses-set"]).toEqual([undefined, undefined]);
+  });
+
+  test("a live session carries its context window's fill from its latest poll; a bad figure, an older connection or an ended session carries none", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-full", { context: 63 });
+    await poll(live, "ses-odd", { context: 140 });
+    await poll(live, "ses-old");
+    let agents = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents;
+    expect(Object.fromEntries(agents.map((agent) => [agent.id, agent.context]))).toEqual({ "ses-full": 63, "ses-odd": undefined, "ses-old": undefined });
+    await poll(live, "ses-full");
+    agents = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents;
+    expect(agents.find((agent) => agent.id === "ses-full")!.context).toBeUndefined();
+    await poll(live, "ses-full", { context: 91 });
+    clock.t += 60 * 60_000;
+    await poll(live, "ses-other");
+    agents = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)) })).agents;
+    expect(agents.find((agent) => agent.id === "ses-full")).toMatchObject({ state: "ended" });
+    expect(agents.find((agent) => agent.id === "ses-full")!.context).toBeUndefined();
+  });
+
   test("a session that ended today is listed as ended and counted; one last heard yesterday is not", async () => {
     const { live, clock } = liveSessions();
     clock.t -= 13 * 60 * 60_000; // Yesterday, 11 PM.
@@ -513,6 +545,18 @@ describe("the cap", () => {
 });
 
 describe("linked machines", () => {
+  test("another machine's agent keeps its model, effort and context; a value a poll here would refuse is dropped", () => {
+    const base = { host: "claude-code", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null };
+    const far = inboxPeerAgentsGroup([{ agents: [
+      { ...base, id: "ses-set", session: "ses-set", model: "claude-opus-5-5", effort: "high", context: 63 },
+      { ...base, id: "ses-odd", session: "ses-odd", model: "<b>opus</b>", effort: "turbo", context: 140 },
+    ], total: 2, ended_today: 0 }], "ibx_far")!;
+    expect(far.agents.map((agent) => [agent.id, agent.model, agent.effort, agent.context])).toEqual([
+      ["ses-set", "claude-opus-5-5", "high", 63],
+      ["ses-odd", undefined, undefined, undefined],
+    ]);
+  });
+
   test("the merged view: this Inbox's group first, named by its id, then each machine's from its list, named and capped", () => {
     const own = inboxAgentsGroup(evidence({ sessions: [{ session: "ses-here", host: "pi", root: null, startedAt: 1, lastSeen: 2, live: true, busy: false, label: null }] }));
     const farAgents = Array.from({ length: 100 }, (_, i) => ({ id: `ses-${i}`, session: `ses-${i}`, host: "codex", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null }));
@@ -585,6 +629,18 @@ describe("what tells the windows (`event: deliveries`' `agents`)", () => {
     expect(moved()).toBe(true);
     await poll(live, "ses-a", { busy: false, label: "Renamed" });
     expect(moved()).toBe(false);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "high" });
+    expect(moved()).toBe(true);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max" });
+    expect(moved()).toBe(true);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max" });
+    expect(moved()).toBe(false);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max", context: 61 });
+    expect(moved()).toBe(true);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max", context: 63 });
+    expect(moved()).toBe(false);
+    await poll(live, "ses-a", { busy: false, label: "Renamed", model: "claude-opus-5-5", effort: "max", context: 66 });
+    expect(moved()).toBe(true);
     clock.t += 31_000; // Past the live window: it ended.
     expect(moved()).toBe(true);
     expect(live.agentSessions(since()).map((entry) => [entry.session, entry.live])).toEqual([["ses-a", false]]);

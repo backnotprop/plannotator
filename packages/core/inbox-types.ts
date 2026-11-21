@@ -3671,6 +3671,9 @@ export interface InboxAgent {
   started_at: string | null;
   /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
   last_seen_at: string | null;
+  model?: string;
+  effort?: string;
+  context?: number;
   /** Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive. */
   place?: InboxAgentPlace;
   /**
