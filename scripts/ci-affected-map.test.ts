@@ -23,15 +23,20 @@
  *    everything (the "paths built from parts" rows and the real-graph rows);
  *  - the smoke skipping a file the binary is built from, a manual preview's
  *    partial Semgrep scan reaching main's alerts or cancelling its scan, or
- *    deploy.yml taking a preview for a passed Test run.
+ *    deploy.yml taking a preview for a passed Test run;
+ *  - a push to main planning from anything but the last passed main commit
+ *    (deploy.yml's base), planning a range that changes more than the site and
+ *    docs, or planning at all when that base cannot be read (the "a push to
+ *    main" rows).
  */
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import {
-  CORE_GUARDS, GATES, GATE_JOB, HEAVY_FAIL_SAFE, JOB_MAP, KNOWN_TOP, RUN_ALL, SMOKE_ROOTS, buildGraph, builtPathRefs, ciChanges, decideGates, gatePaths,
-  knownKind, listsCheckout, nativeAppFile, pathReasons, plan, preloadClosure, repoRoot, semgrepPlan, type Change, type Graph, type Node, type PathRead,
+  CORE_GUARDS, GATES, GATE_JOB, HEAVY_FAIL_SAFE, JOB_MAP, KNOWN_TOP, PASSED_MAIN_RUNS, RUN_ALL, SMOKE_ROOTS, buildGraph, builtPathRefs, ciChanges, decideGates, gatePaths,
+  knownKind, lastPassedSha, listsCheckout, nativeAppFile, pathReasons, plan, preloadClosure, pushChanges, pushLight, repoRoot, semgrepPlan,
+  type Change, type Graph, type Node, type PathRead, type RepoApi,
 } from './ci-affected';
 import { HEAVY_LANES, domList, laneNames } from './ci-test-lane';
 
@@ -561,6 +566,115 @@ describe('gates', () => {
   });
 });
 
+describe('a push to main', () => {
+  const RUN = 500;
+  const sha = (c: string) => c.repeat(40);
+
+  test("its base is the newest passed main run older than this one, as deploy.yml's BEFORE_SHA; anything else is no base", () => {
+    const runs = { workflow_runs: [{ id: 700, head_sha: sha('c') }, { id: RUN, head_sha: sha('b') }, { id: 420, head_sha: sha('a') }, { id: 300, head_sha: sha('9') }] };
+    expect(lastPassedSha(runs, RUN), 'a newer run and this one are left out').toBe(sha('a'));
+    expect(lastPassedSha({ workflow_runs: [{ id: 700, head_sha: sha('c') }] }, RUN), 'the first run on main').toBeNull();
+    expect(lastPassedSha({ workflow_runs: [{ id: 400, head_sha: 'main' }] }, RUN), 'not a commit id').toBeNull();
+    for (const odd of [null, {}, { workflow_runs: 'x' }, { message: 'Bad credentials' }]) expect(lastPassedSha(odd, RUN)).toBeNull();
+    // deploy.yml reads the same list and takes the same run, so the plan starts where the last deploy came from.
+    const deploy = readFileSync(join(WF_DIR, 'deploy.yml'), 'utf8');
+    expect(deploy).toContain(`repos/\${REPOSITORY}/${PASSED_MAIN_RUNS}`);
+    expect(deploy).toContain('BEFORE_SHA="$(jq -r "[.workflow_runs[] | select(.id < ${TEST_RUN_ID})] | first | .head_sha // empty" <<< "$RUNS")"');
+  });
+
+  test('only the marketing site, the docs and root Markdown are light; product code, skills, workflows and manifests are not', () => {
+    for (const f of ['apps/marketing/src/styles/spaces/page.css', 'apps/marketing/src/pages/index.astro', 'apps/marketing/public/assets/x.png', 'docs/agent-guides/inbox.md', 'adr/0001-x.md', 'README.md', 'AGENTS.md', 'LICENSE-MIT', '.github/assets/shot.png', 'apps/mobile/ios/App.swift']) {
+      expect(pushLight(f), f).toBe(true);
+    }
+    for (const f of ['packages/server/inbox.ts', 'apps/hook/server/index.ts', 'apps/skills/core/plannotator/SKILL.md', 'apps/opencode-plugin/commands/plannotator-review.md', 'packages/ui/README.md', '.github/workflows/test.yml', 'bun.lock', 'package.json', 'scripts/ci-affected.ts', 'apps/portal/index.html', 'apps/mobile/ios/ci.sh']) {
+      expect(pushLight(f), f).toBe(false);
+    }
+  });
+
+  // A throwaway main with history: base (code, site, docs), then the pushes.
+  const dir = mkdtempSync(join(tmpdir(), 'ci-affected-push-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'ci', GIT_AUTHOR_EMAIL: 'ci@example.invalid', GIT_COMMITTER_NAME: 'ci', GIT_COMMITTER_EMAIL: 'ci@example.invalid' };
+  const git = (...args: string[]) => {
+    const r = Bun.spawnSync(['git', ...args], { cwd: dir, env: gitEnv });
+    if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.toString().trim();
+  };
+  let writes = 0;
+  const commit = (...files: string[]) => {
+    for (const f of files) { mkdirSync(dirname(join(dir, f)), { recursive: true }); writeFileSync(join(dir, f), `${f} ${writes++}\n`); }
+    git('add', '-A');
+    git('commit', '-q', '-m', files.join(' '));
+    return git('rev-parse', 'HEAD');
+  };
+  git('init', '-q', '-b', 'main');
+  const base = commit('packages/server/x.ts', 'apps/marketing/src/styles/page.css', 'docs/guide.md', 'README.md');
+  const site = commit('apps/marketing/src/styles/page.css');
+  const code = commit('packages/server/x.ts');
+  const site2 = commit('apps/marketing/src/styles/page.css');
+  const docs = commit('README.md', 'docs/guide.md');
+
+  /** The plan's view of a push of HEAD, with main's passed runs and the compare answer faked (no network, no gh). */
+  const at = async (head: string, passed: string | null, opts: { env?: Record<string, string>; compare?: string; fails?: boolean } = {}) => {
+    git('checkout', '-q', '--detach', head);
+    const calls: string[] = [];
+    const api: RepoApi = async (p) => {
+      calls.push(p);
+      if (opts.fails) throw new Error('GitHub API 502');
+      if (p === PASSED_MAIN_RUNS) return { workflow_runs: [{ id: RUN + 1, head_sha: head }, ...(passed ? [{ id: RUN - 1, head_sha: passed }] : [])] };
+      const [from, to] = p.replace(/^compare\//, '').split('...');
+      if (opts.compare) return { status: opts.compare };
+      return { status: from === to ? 'identical' : Bun.spawnSync(['git', 'merge-base', '--is-ancestor', from!, to!], { cwd: dir }).exitCode === 0 ? 'ahead' : 'behind' };
+    };
+    const env = { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_RUN_ID: String(RUN), ...opts.env } as NodeJS.ProcessEnv;
+    return { got: await pushChanges(env, api, dir), calls };
+  };
+
+  test('a site-only range plans from the last passed commit, over every commit since, never just the parent', async () => {
+    const one = (await at(site, base)).got;
+    expect(one).toMatchObject({ base, docsOnly: false, changes: [{ status: 'M', path: 'apps/marketing/src/styles/page.css' }] });
+    // site2's parent is code: a run that diffed from the parent would skip code's tests if code's own run was replaced.
+    const replaced = (await at(site2, site)).got;
+    expect('why' in replaced && replaced.why).toContain('packages/server/x.ts');
+    expect((await at(site2, code)).got).toMatchObject({ base: code, changes: [{ path: 'apps/marketing/src/styles/page.css' }] });
+    expect((await at(docs, site2)).got, 'docs only').toMatchObject({ docsOnly: true });
+  });
+
+  test('a code range runs everything, whichever commit holds the code', async () => {
+    for (const [head, passed] of [[code, site], [code, base], [site2, base], [docs, site]] as const) {
+      const got = (await at(head, passed)).got;
+      expect('why' in got && got.why, `${head.slice(0, 7)} from ${passed.slice(0, 7)}`).toContain('change more than the site and docs (packages/server/x.ts)');
+    }
+  });
+
+  test('no base, an API error, a rewritten history, CI_AFFECTED=off or another branch runs everything', async () => {
+    const why = async (...args: Parameters<typeof at>) => { const got = (await at(...args)).got; return 'why' in got ? got.why : 'planned'; };
+    expect(await why(site, null)).toContain('no earlier passed Test run');
+    expect(await why(site, base, { fails: true })).toContain('could not be read: GitHub API 502');
+    expect(await why(site, base, { compare: 'diverged' })).toContain('diverged');
+    expect(await why(site, site), 'the same commit again: an empty range').toContain('identical');
+    expect(await why(site, base, { env: { CI_AFFECTED: 'off' } })).toBe('the repo variable CI_AFFECTED is off');
+    expect(await why(site, base, { env: { GITHUB_REF: 'refs/heads/other' } })).toContain('not a pull_request run or a push to main');
+    expect(await why(site, base, { env: { GITHUB_RUN_ID: '' } })).toContain('without a run id');
+    expect((await at(site, base, { env: { CI_AFFECTED: 'off' } })).calls, 'off asks nothing').toEqual([]);
+  });
+
+  test('a light range still gets every safety valve of the plan', () => {
+    // pushChanges only lets the range through; plan() still runs everything on a manifest, a tsconfig or deleted code there.
+    expect(run([ch('apps/marketing/package.json', 'M', ['"astro": "6"'], ['"astro": "5"'])]).mode).toBe('all');
+    expect(run([ch('apps/marketing/tsconfig.json')]).mode).toBe('all');
+    expect(run([ch('apps/marketing/src/lib/x.ts', 'D')]).mode).toBe('all');
+  });
+
+  test('the plan job reads runs with a read-only token, handed only to the picker and only on a push', () => {
+    const job = workflow('test.yml').jobs.plan! as Job & { permissions?: Record<string, string> };
+    expect(job.permissions).toEqual({ contents: 'read', actions: 'read' });
+    const picker = job.steps!.find((s) => s.run?.includes('ci-affected.ts')) as Step & { env?: Record<string, string> };
+    expect(picker.env?.GH_TOKEN).toBe("${{ github.event_name == 'push' && github.token || '' }}");
+    for (const s of job.steps!) if (s !== picker) expect(JSON.stringify(s), s.name ?? s.run).not.toContain('github.token');
+  });
+});
+
 // The real graph of this checkout: needs `bun install` and vendor.sh (the Checks job runs both first).
 describe('the real graph', () => {
   const generated = existsSync(join(repoRoot, 'apps/pi-extension/generated'));
@@ -631,6 +745,14 @@ describe('the real graph', () => {
     for (const changed of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts', 'packages/server/inbox-devices.ts', 'packages/core/inbox-delivery-line.ts', 'packages/inbox/api.ts', 'packages/inbox/sharedEvents.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) {
       expect(picks(changed), changed).toEqual([]);
     }
+  });
+
+  test('a site-only push plans the light set: no full lane, no OpenCode 2 package, no mod harness, no UI smoke', () => {
+    const p = plan(g, { changes: [ch('apps/marketing/src/styles/spaces/page.css')], docsOnly: false });
+    expect(p.mode).toBe('subset');
+    expect(p.unit.files.length).toBeLessThan(p.total / 5);
+    expect(p.unit.lanes.every((l) => l.startsWith('unit-')), 'no heavy lane').toBe(true);
+    expect(p.gates.filter((d) => d.run).map((d) => d.key)).toEqual([]);
   });
 
   test('the tree-scanning set includes the guards that read the whole tree', () => {
