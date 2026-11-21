@@ -33,7 +33,9 @@ Use the CLI only when you have no such tool, or for what the tool does not do: `
 | Browse past plan decisions | `plannotator archive` |
 | Export or share a Guided Review | `plannotator guide export` / `plannotator guide share` |
 | Reopen or list live sessions | `plannotator sessions` |
+| Make Plannotator use their own colour theme file | `plannotator theme --help` |
 | Ask the person something they can answer later, without blocking | The `plannotator_inbox` tool when you have it, else the Inbox's MCP server (`plannotator inbox mcp`) |
+| Have work run on its own on a schedule, reporting in the Inbox (a routine) | `plannotator routine --help` |
 
 ## Session model
 
@@ -83,7 +85,7 @@ Plain `annotate` is feedback-only: it shows **Close** but no **Approve** button.
 Targets:
 
 - Markdown and text files: `.md`, `.mdx`, `.txt`.
-- Plain-text config and data files, rendered as text: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, `.env.example`. `.env` itself is deliberately refused (it commonly holds secrets, and annotate history copies file contents). Source-code files belong to `plannotator review`, not annotate.
+- Plain-text config and data files, rendered as text: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, `.env.example`. A `.env` file opens only on its own, by its explicit path, and nothing of it is kept in Plannotator's data folder; open one only when the person asks for that file. Source-code files belong to `plannotator review`, not annotate.
 - Diagram sources, opened in the full diagram viewer (zoom, pan, popout, click a node/edge/cluster to comment): `.mmd`, `.mermaid` (Mermaid) and `.dot`, `.gv` (Graphviz). The file is the whole diagram — no fence needed — and comments carry the part's id plus its real file line.
 - AsciiDoc files: `.adoc`, `.asciidoc`.
 - HTML files (`.html`, `.htm`): rendered as the raw page by default; `--markdown` converts to markdown instead. `--render-html` is accepted for compatibility; raw rendering is already the default.
@@ -185,11 +187,14 @@ plannotator inbox status [--json] | stop | restart
 The Plannotator Inbox is one local window per machine where you leave the person messages, `:::question` blocks they answer with a click, files to annotate and guided reviews. Nothing blocks: you send, then keep working or end your turn.
 
 - Use it for a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary with its pictures in place, `![alt](path)` in the body where you write about each, and the files to look at in `attachments`), or when they ask. One thread per work stream, unless the person says otherwise. A decision you sent to the Inbox stays there: when the person writes in the chat, say there what waits (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask. Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
+- When the person picks between looks (designs, variants, today's screen against a redesign), write about the options inside the question, not above it: each option is a picture choice, `- [ ] A · Label — ![alt](path) what it means`, its own picture inside it and what you would say about it as its description; a choice with nothing to show (both, none yet) stays plain text. When another agent designs the options for you, ask it for, per option: a label, one screenshot, one HTML file that shows only that option, what it means, pros and cons; when it returns a report, send its options as one question as above, not the report.
+- A question that proposes a change (words, a screen, code, a setting) shows it: `Where: <what it is and where the person sees it>`, then `Before:` and `After:`, each the whole sentence, paragraph or screenshot it sits in (the card marks the change; `Before: none` when nothing is there). Several places: repeat the three lines per place. A choice that is its own version or change gets its own `After:` (and `Before:`) under it. A new feature or a prototype skips these (send pictures), and so does a choice the person never sees, such as a library. More forms (several places, pictures, a version per choice): `plannotator inbox --help before-after`.
 - If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. When send_message says the person's reply arrives in this session by itself, end your turn instead of waiting; otherwise go on with your work and read the thread later with read_thread.
 - For many Inbox calls in a row (a tidy above all), `plannotator inbox call` runs any action from a script and prints its result as JSON; `plannotator inbox --help` says how.
+- To put a thread's decisions on its pull request, run `plannotator inbox export-decisions --thread <id> --pr <ref>`: updated in place when run again.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
-- Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
-- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
+- Never run `plannotator inbox` just to send: once the person has turned the Inbox on here (their own `plannotator inbox`), calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. Until they have, a call answers that the Inbox is off: ask them in the chat instead. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
+- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. The first time, it also turns the Inbox on and connects the agents it finds, within half a minute. Tell them the address.
 
 ## plannotator t3
 
@@ -216,6 +221,7 @@ plannotator data-dir
 plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'PLANNOTATOR_FEEDBACK_END'
 <the message, exactly as the person approved it>
 PLANNOTATOR_FEEDBACK_END
+plannotator theme add <file> | use <id> [--light | --dark] | list [--json] | remove <id>
 plannotator update [--check]
 plannotator uninstall [--purge] [--yes] [--dry-run]
 plannotator improve-context
@@ -224,6 +230,7 @@ plannotator improve-context
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
 - `data-dir` prints the absolute path of Plannotator's data directory (plans, history, drafts, `config.json`, `hooks/`) and creates nothing. Run it whenever you need a file in that folder, and use the path it prints. Never write a path such as `~/.plannotator/...` from memory: an install can keep its data under `$XDG_DATA_HOME/plannotator`, and a new `~/.plannotator` can hide that data from Plannotator. If it prints nothing or fails (an older Plannotator, before 0.28.41), use `$PLANNOTATOR_DATA_DIR` when it is set; otherwise the home folder's `.plannotator` if it exists, else `$XDG_DATA_HOME/plannotator` when `XDG_DATA_HOME` is set, else the home folder's `.plannotator`.
 - `feedback` sends the person's feedback about Plannotator to its maintainers and prints `Sent` (the message, the category and contact if given, the version, the OS name and that it came from the CLI; nothing else). Only when the person asks you to send feedback: show them the exact text first and run it only after they say yes. Pass the message on stdin with a quoted heredoc (`<<'PLANNOTATOR_FEEDBACK_END'`, quotes included; pick another end word if a line of the message is exactly that), never inside double quotes in any shell, where `$VAR`, backticks and `$(...)` are expanded and change the approved text. Fill in or leave out the bracketed options (`--category idea`), and put a contact in single quotes. In PowerShell, set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` and pipe a single-quoted here-string (`@'` … `'@ | plannotator feedback --stdin`). Exit 0 sent, 1 not sent, 2 usage.
+- `plannotator theme` gives Plannotator the person's own colour theme (a VS Code theme, a base16 scheme, or Plannotator's own format): run `plannotator theme --help` for the commands and the format.
 - `update` installs the newest release now (the install script, with the choices from the last install); `--check` only reports whether one exists. Run it only when the person asks you to update Plannotator: it replaces the binary. Exit 0 up to date or updated, 1 failed, 2 usage, 130 interrupted.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
 - `improve-context` and `install-runtime` are internal integration commands (hook plumbing and managed runtime install). Never run `improve-context` directly; `plannotator install-runtime agent-terminal` exists for reinstalling the optional annotate-terminal runtime and is normally run by the installer.
@@ -285,5 +292,5 @@ Recommended: Local only, purged after 30 days
 - Do not use `--hook` outside a real hook context; use `--json` when you need structured output.
 - Do not run bare `plannotator` interactively; it is the hook entry point.
 - Do not guess flags. Run `plannotator <command> --help` when unsure; unknown dashed tokens make annotate fail on purpose.
-- Do not point `plannotator annotate` at source-code files or `.env` files; code goes through `plannotator review`, and `.env` is refused.
+- Do not point `plannotator annotate` at source-code files; code goes through `plannotator review`. Open a `.env` file only when the person asks for that file by name: it may hold secrets.
 - Do not start a strict gate (`--require-approval`) unless a human is actually there to review; the session blocks until they act.

@@ -15,11 +15,14 @@ import {
   INBOX_TIDY_INSTRUCTION,
   INBOX_TIDY_OPEN_ITEM_MS,
   INBOX_TIDY_PERSON_LAST_MS,
+  INBOX_TIDY_PICKED_INSTRUCTION,
   INBOX_TIDY_RUN_SHOWN_MS,
   inboxAgentName,
   inboxSessionRef,
   inboxStepsProgress,
   inboxTidySessionLine,
+  inboxTidyWordsLine,
+  isInboxCombineRun,
   isInboxNote,
   type InboxCard,
   type InboxCardColumn,
@@ -55,6 +58,11 @@ export interface InboxTidyOptions {
    * null: the person's switch is off, and Tidy says nothing of steps.
    */
   stepsStale?: ((record: InboxSteps) => boolean) | null;
+  /**
+   * Threads the person picked (approval "inbox-multi-select"): only these are looked at, Board cards are not, and
+   * each one its owner can be asked about is listed, flagged or not. Absent or null: the list's or the Board's Tidy.
+   */
+  threadIds?: ReadonlySet<string> | null;
 }
 
 /** One item with what its wake lists. */
@@ -72,6 +80,8 @@ export interface InboxTidyPlanAgent extends Omit<InboxTidyAgent, "items"> {
 
 export interface InboxTidyPlanResult {
   agents: InboxTidyPlanAgent[];
+  /** Picked threads (`threadIds`) no agent is asked about: no reachable owner (`ended`), or its owner cooling (`asked`). */
+  unreached?: { ended: number; asked: number };
 }
 
 /** "45 min", "6 h", "2 days". */
@@ -134,7 +144,8 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       for (const id of card.threads) boardThreads.add(id);
     }
   }
-  const inScope = (session: string | null) => options.surface === "list" || (session !== null && boardSessions.has(session));
+  const picked = options.threadIds ?? null;
+  const inScope = (session: string | null) => picked !== null || options.surface === "list" || (session !== null && boardSessions.has(session));
 
   // A thread's item for a session (created on first use).
   const threadItem = (session: string, host: string | null, name: string, reach: InboxTidyReach, threadId: string, messages: readonly InboxMessage[]) =>
@@ -165,8 +176,12 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
   for (const threadId of store.threadIds()) {
     const root = store.message(threadId);
     if (!root || root.resolved_at !== null) continue;
-    if (projectId && !store.sameProject(root.project_id, projectId)) continue;
-    if (options.surface === "board" && !boardThreads.has(threadId)) continue;
+    if (picked) {
+      if (!picked.has(threadId)) continue;
+    } else {
+      if (projectId && !store.sameProject(root.project_id, projectId)) continue;
+      if (options.surface === "board" && !boardThreads.has(threadId)) continue;
+    }
     const messages = store.threadMessageIds(threadId).map((id) => store.message(id)!).filter(Boolean);
     const reasked = store.reaskListedIds(threadId);
 
@@ -235,8 +250,23 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
     }
   }
 
-  // Board cards of a session that have not moved in a while.
-  for (const card of cards) {
+  // Picked threads: each one its owner can be asked about, flagged or not (the person chose it).
+  const ownerOf = new Map<string, string | null>();
+  if (picked) {
+    for (const threadId of picked) {
+      const root = store.message(threadId);
+      if (!root || root.thread_id !== threadId || root.resolved_at !== null) continue;
+      const owner = store.threadOwner(threadId);
+      const reach = owner ? options.reachOf(owner.session) : null;
+      ownerOf.set(threadId, owner && reach ? owner.session : null);
+      if (!owner || !reach) continue;
+      const messages = store.threadMessageIds(threadId).map((id) => store.message(id)!).filter(Boolean);
+      threadItem(owner.session, owner.host, hostName(owner.host), reach, threadId, messages);
+    }
+  }
+
+  // Board cards of a session that have not moved in a while (not for picked threads).
+  for (const card of picked ? [] : cards) {
     if (!TIDY_CARD_COLUMNS.has(card.column) || card.agent?.kind !== "agent" || !card.agent.session) continue;
     const idle = now - Date.parse(card.moved_at);
     if (idle < INBOX_TIDY_CARD_IDLE_MS) continue;
@@ -274,9 +304,17 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
   // A session asked a moment ago is not asked again, unless the person wrote to it since.
   for (const session of [...agents.keys()]) if (cooling(store, session, now)) agents.delete(session);
 
-  return {
-    agents: [...agents.values()].sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name)),
-  };
+  const sorted = [...agents.values()].sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name));
+  if (!picked) return { agents: sorted };
+  // A picked thread no agent is asked about: why, counted once each.
+  const unreached = { ended: 0, asked: 0 };
+  const listed = new Set(sorted.flatMap((agent) => agent.items.flatMap((item) => (item.thread_id ? [item.thread_id] : []))));
+  for (const [threadId, owner] of ownerOf) {
+    if (listed.has(threadId)) continue;
+    if (owner === null) unreached.ended += 1;
+    else unreached.asked += 1;
+  }
+  return { agents: sorted, unreached };
 }
 
 function openThreadInScope(store: InboxStore, threadId: string, projectId: string | null): boolean {
@@ -297,7 +335,7 @@ function cardLine(card: InboxCard, idle: number): string {
 function cooling(store: InboxStore, session: string, now: number): boolean {
   const last = store
     .tidyNotes()
-    .filter((m) => m.tidy?.wake && m.to?.session === session)
+    .filter((m) => m.tidy?.wake && !isInboxCombineRun(m.tidy.id) && m.to?.session === session)
     .pop();
   if (!last) return false;
   if (!last.delivery) return true;
@@ -364,8 +402,11 @@ export function inboxTidyStepsOnlyWakes(store: InboxStore): InboxMessage[] {
   return store.tidyNotes().filter((note) => note.tidy?.wake && note.to && !note.delivery && inboxTidyIsStepsOnly(note.body));
 }
 
-/** The body of a session's Tidy notes: the instruction, what tidying can mean, then the numbered list. */
-export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
+/**
+ * The body of a session's Tidy notes: the instruction (for picked threads, INBOX_TIDY_PICKED_INSTRUCTION), the
+ * person's own words when they gave any, what tidying can mean, then the numbered list.
+ */
+export function inboxTidyBody(agent: InboxTidyPlanAgent, options: { picked?: boolean; words?: string } = {}): string {
   const items = agent.items.map((item, i) => {
     const head =
       item.thread_id !== null
@@ -374,7 +415,12 @@ export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
     return [head, ...item.lines.map((line) => `   ${line.startsWith("  ") ? `  ${line.trim()}` : `- ${line}`}`)].join("\n");
   });
   const ref = inboxSessionRef(agent.host, agent.session);
-  return [INBOX_TIDY_INSTRUCTION, ref ? `${INBOX_TIDY_HOW} ${inboxTidySessionLine(ref)}` : INBOX_TIDY_HOW, ...items].join("\n\n");
+  return [
+    options.picked ? INBOX_TIDY_PICKED_INSTRUCTION : INBOX_TIDY_INSTRUCTION,
+    ...(options.words ? [inboxTidyWordsLine(options.words)] : []),
+    ref ? `${INBOX_TIDY_HOW} ${inboxTidySessionLine(ref)}` : INBOX_TIDY_HOW,
+    ...items,
+  ].join("\n\n");
 }
 
 /**
@@ -406,7 +452,8 @@ export function inboxTidyRun(
   store: InboxStore,
   options: { now: number; idleSince: (session: string) => number | null; reachOf: (session: string) => InboxTidyReach | null },
 ): InboxTidyRun | null {
-  const notes = store.tidyNotes();
+  // A Combine's wake travels as a Tidy note (inbox-combine.ts) but is no Tidy run.
+  const notes = store.tidyNotes().filter((m) => !isInboxCombineRun(m.tidy?.id));
   const lastNote = notes[notes.length - 1];
   if (!lastNote?.tidy || options.now - Date.parse(lastNote.created_at) > INBOX_TIDY_RUN_SHOWN_MS) return null;
   const runId = lastNote.tidy.id;

@@ -2,8 +2,6 @@
 set -e
 
 REPO="backnotprop/plannotator"
-SEM_REPO="Ataraxy-Labs/sem"
-SEM_VERSION="v0.8.0"
 INSTALL_DIR="$HOME/.local/bin"
 
 # First plannotator release that carries SLSA build-provenance attestations.
@@ -70,7 +68,7 @@ MODEL_INVOCABLE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
-# no persistent state elsewhere — no sem sidecar, no CallDiff or agent-terminal runtime, no
+# no persistent state elsewhere — no CallDiff or agent-terminal runtime, no
 # skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
 # Gemini, Kiro, Vibe, Qwen Code). Set by --minimal (1) / --no-minimal (0); -1 =
 # neither flag given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved
@@ -141,8 +139,8 @@ Options:
                          (e.g. plannotator-review,plannotator-compound), or
                          "none". Skills are user-invoked-only by default.
   --minimal              Install only the plannotator binary (aliased
-                         --binary-only). Skips the sem semantic-diff sidecar,
-                         the CallDiff runtime, the agent-terminal runtime, and every per-agent
+                         --binary-only). Skips the CallDiff runtime, the
+                         agent-terminal runtime, and every per-agent
                          integration (skills, hooks, slash commands, and config
                          for Claude, Codex, OpenCode, Gemini, Kiro, and Vibe). No
                          persistent state is written outside $HOME/.local/bin
@@ -224,11 +222,6 @@ gh login is required. The credential-free path needs one JSON tool on PATH
 (node, python3, or jq) to extract the bundle; without one, and whenever the
 public bundle fetch or bundle verification does not complete, gh's
 authenticated fetch runs as the fallback.
-
-The optional semantic-diff sidecar (the 'sem' binary, used by code review) is
-installed after Plannotator itself. Skip it by exporting
-PLANNOTATOR_SKIP_SEM_INSTALL=1. Its download is time-bounded, so a slow network
-never blocks an otherwise-complete install.
 
 The optional annotate agent terminal runtime is installed after Plannotator
 itself. Skip it by exporting PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL=1. If
@@ -423,7 +416,7 @@ done
 
 # Resolve binary-only mode. Precedence: --minimal / --no-minimal flag >
 # PLANNOTATOR_MINIMAL env var > default (off). The env var lets `curl ... | bash`
-# runs opt in without a flag, matching how PLANNOTATOR_SKIP_SEM_INSTALL et al.
+# runs opt in without a flag, matching how PLANNOTATOR_SKIP_SKILLS_INSTALL et al.
 # work; --no-minimal lets a flag override an env var that enables it.
 minimal=0
 case "${PLANNOTATOR_MINIMAL:-}" in
@@ -845,14 +838,51 @@ if [ "$verify_attestation" -eq 1 ]; then
     fi
 fi
 
-binary_url="https://github.com/${REPO}/releases/download/${latest_tag}/${binary_name}"
+release_download_url_allowed() {
+    local url="$1" authority host
+    case "$url" in
+        https://*) authority="${url#https://}" ;;
+        http://*) authority="${url#http://}" ;;
+        *) return 1 ;;
+    esac
+    authority="${authority%%[/?#]*}"
+    case "$authority" in
+        ""|*@*) return 1 ;;
+    esac
+    case "$url" in
+        https://*) return 0 ;;
+    esac
+    host="$(printf '%s' "$authority" | tr '[:upper:]' '[:lower:]')"
+    case "$host" in
+        "[::1]"|"[::1]:"*) return 0 ;;
+    esac
+    host="${host%%:*}"
+    [ "$host" = "localhost" ] && return 0
+    [[ "$host" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]
+}
+
+release_download_base="https://github.com/${REPO}/releases/download"
+release_download_override="${PLANNOTATOR_RELEASE_DOWNLOAD_URL:-}"
+# Read the value as update-prepare does (trim, then drop trailing slashes), so
+# the binary and the checksum Plannotator pinned come from the same place.
+release_download_override="${release_download_override#"${release_download_override%%[![:space:]]*}"}"
+release_download_override="${release_download_override%"${release_download_override##*[![:space:]]}"}"
+while [ "${release_download_override%/}" != "$release_download_override" ]; do
+    release_download_override="${release_download_override%/}"
+done
+if [ -n "$release_download_override" ] && release_download_url_allowed "$release_download_override"; then
+    release_download_base="$release_download_override"
+fi
+
+binary_url="${release_download_base}/${latest_tag}/${binary_name}"
 checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
 
-# Release downloads retry a dropped connection (#2788): the binary is about
-# 200 MB, and one HTTP/2 reset or timeout used to fail the whole install or
-# update. --retry-all-errors (curl 7.71+) also retries the errors plain
+# Release downloads retry a dropped connection (#2788): one HTTP/2 reset or
+# timeout used to fail the whole install or update. This is for the small
+# .sha256; the binary resumes instead (download_release_binary below).
+# --retry-all-errors (curl 7.71+) also retries the errors plain
 # --retry treats as final, such as an HTTP/2 stream error (curl 92); an older
 # curl rejects the option, so it gets --retry alone. The probe puts the
 # option before --version, which ends curl's option parsing.
@@ -880,20 +910,76 @@ download_release_file() {
     return "$_dl_status"
 }
 
-tmp_file=$(mktemp)
-# Six hours per attempt, and no retry starts after an hour: a link at about
-# 0.08 Mbit/s (10 KB/s) still finishes the ~200 MB binary (a slow update must
-# still succeed; a retry starts again from zero, so it never helps a slow
-# link), and a connection that only trickles stops instead of holding the
-# update without end. Exit 1, not curl's code: the updater gives some codes a
-# meaning.
-binary_status=0
-download_release_file "$binary_url" "$tmp_file" 21600 3600 || binary_status=$?
-if [ "$binary_status" -ne 0 ]; then
-    rm -f "$tmp_file"
-    echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
-    exit 1
-fi
+# download_release_binary <url> <file>: the binary download continues where a
+# dropped or stalled connection stopped, instead of starting the ~200 MB again
+# from zero. Each attempt is one curl run: the first starts at byte 0, each
+# later one asks for the rest with a Range request (curl -C -), always from
+# <url> again (a github.com URL that redirects to a signed one that expires,
+# so the redirected URL is never reused). curl's own --retry is not used here:
+# it throws away the bytes of the attempt it retries. Bounds: at most 30
+# attempts, at most 4 in a row that add no bytes, 2 s apart, and nothing runs
+# past 6 hours from the start, so a link at about 10 KB/s still finishes the
+# binary and a dead or trickling one stops. A stall (below 1 byte/s for 60 s)
+# ends an attempt and the next one continues. A server that ignores the Range
+# (curl exit 33) gets the whole file again, and later attempts start from zero.
+# After an HTTP/2 error (curl 92) the attempts go over HTTP/1.1. curl's error
+# is printed only when it gives up, and the status is its last exit code. The
+# SHA-256 check below still covers the whole file.
+# PLANNOTATOR_DOWNLOAD_STALL_SECONDS and PLANNOTATOR_DOWNLOAD_RETRY_DELAY are
+# internal knobs for the tests.
+download_release_binary() {
+    _db_url="$1"
+    _db_file="$2"
+    _db_stall="${PLANNOTATOR_DOWNLOAD_STALL_SECONDS:-60}"
+    case "$_db_stall" in ''|*[!0-9]*|0) _db_stall=60 ;; esac
+    _db_delay="${PLANNOTATOR_DOWNLOAD_RETRY_DELAY:-2}"
+    case "$_db_delay" in ''|*[!0-9]*) _db_delay=2 ;; esac
+    _db_deadline=$((SECONDS + 21600))
+    _db_attempt=0
+    _db_idle=0
+    _db_range=1
+    _db_http=()
+    while :; do
+        _db_attempt=$((_db_attempt + 1))
+        _db_resume=()
+        _db_have=$(wc -c < "$_db_file" 2>/dev/null | tr -d ' ') || _db_have=0
+        case "$_db_have" in ''|*[!0-9]*) _db_have=0 ;; esac
+        if [ "$_db_have" -gt 0 ]; then
+            if [ "$_db_range" -eq 1 ]; then
+                _db_resume=(-C -)
+            else
+                : > "$_db_file"
+                _db_have=0
+            fi
+        fi
+        _db_left=$((_db_deadline - SECONDS))
+        [ "$_db_left" -ge 1 ] || _db_left=1
+        _db_status=0
+        _db_err=$(curl -fsSL ${_db_http[@]+"${_db_http[@]}"} ${_db_resume[@]+"${_db_resume[@]}"} \
+            --connect-timeout 30 --max-time "$_db_left" --speed-limit 1 --speed-time "$_db_stall" \
+            -o "$_db_file" "$_db_url" 2>&1) || _db_status=$?
+        [ "$_db_status" -ne 0 ] || return 0
+        if [ "$_db_status" -eq 33 ]; then
+            _db_range=0
+        fi
+        if [ "$_db_status" -eq 92 ] && [ "${#_db_http[@]}" -eq 0 ]; then
+            echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
+            _db_http=(--http1.1)
+        fi
+        _db_now=$(wc -c < "$_db_file" 2>/dev/null | tr -d ' ') || _db_now=0
+        case "$_db_now" in ''|*[!0-9]*) _db_now=0 ;; esac
+        if [ "$_db_now" -gt "$_db_have" ]; then
+            _db_idle=0
+        else
+            _db_idle=$((_db_idle + 1))
+        fi
+        if [ "$_db_attempt" -ge 30 ] || [ "$_db_idle" -ge 4 ] || [ "$SECONDS" -ge "$_db_deadline" ]; then
+            [ -z "$_db_err" ] || printf '%s\n' "$_db_err" >&2
+            return "$_db_status"
+        fi
+        sleep "$_db_delay"
+    done
+}
 
 # Safe updates (step 1): `plannotator update`, Update now and auto-update run
 # this script after the running Plannotator downloaded it, and the .sha256 of
@@ -929,7 +1015,7 @@ else
     checksum_status=0
     download_release_file "$checksum_url" "$checksum_file" 120 || checksum_status=$?
     if [ "$checksum_status" -ne 0 ]; then
-        rm -f "$checksum_file" "$tmp_file"
+        rm -f "$checksum_file"
         echo "Could not download the checksum for ${binary_name} ${latest_tag} (curl exit ${checksum_status}). Nothing was changed; try again later." >&2
         exit 1
     fi
@@ -941,17 +1027,73 @@ else
         *[!0123456789abcdef]*) expected_checksum="" ;;
     esac
     if [ "${#expected_checksum}" -ne 64 ]; then
-        rm -f "$tmp_file"
         echo "The checksum file for ${binary_name} ${latest_tag} is not a SHA-256 checksum. Nothing was changed; try again later." >&2
         exit 1
     fi
 fi
 
-if [ "$(uname -s)" = "Darwin" ]; then
-    actual_checksum=$(shasum -a 256 "$tmp_file" | cut -d' ' -f1)
-else
-    actual_checksum=$(sha256sum "$tmp_file" | cut -d' ' -f1)
+sha256_of() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        sha256sum "$1" | cut -d' ' -f1
+    fi
+}
+
+packed_suffixes=".tar.xz .gz"
+case "${PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD:-}" in
+    1|true|yes|TRUE|YES|True|Yes) packed_suffixes="" ;;
+esac
+
+can_unpack() {
+    case "$1" in
+        .tar.xz) command -v tar >/dev/null 2>&1 && { [ "$(uname -s)" = "Darwin" ] || command -v xz >/dev/null 2>&1; } ;;
+        .gz) command -v gzip >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+unpack_release_asset() {
+    case "$1" in
+        .tar.xz) tar -xJOf "$2" "$binary_name" ;;
+        .gz) gzip -dc < "$2" ;;
+    esac > "$3" 2>/dev/null
+}
+
+tmp_file=$(mktemp)
+taken=""
+actual_checksum=""
+for packed_suffix in $packed_suffixes; do
+    can_unpack "$packed_suffix" || continue
+    curl -fsSLI -o /dev/null --connect-timeout 30 --max-time 60 "${binary_url}${packed_suffix}" 2>/dev/null || continue
+    packed_file=$(mktemp)
+    if download_release_binary "${binary_url}${packed_suffix}" "$packed_file" 2>/dev/null &&
+        unpack_release_asset "$packed_suffix" "$packed_file" "$tmp_file"; then
+        actual_checksum=$(sha256_of "$tmp_file")
+        if [ "$actual_checksum" = "$expected_checksum" ]; then
+            taken="${binary_name}${packed_suffix}"
+        fi
+    fi
+    rm -f "$packed_file"
+    [ -z "$taken" ] || break
+    : > "$tmp_file"
+    actual_checksum=""
+done
+
+if [ -z "$taken" ]; then
+    # Exit 1, not curl's code: the updater gives some codes a meaning.
+    binary_status=0
+    download_release_binary "$binary_url" "$tmp_file" || binary_status=$?
+    if [ "$binary_status" -ne 0 ]; then
+        rm -f "$tmp_file"
+        echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
+        exit 1
+    fi
+    taken="$binary_name"
 fi
+echo "Downloaded ${taken}."
+
+[ -n "$actual_checksum" ] || actual_checksum=$(sha256_of "$tmp_file")
 
 if [ "$actual_checksum" != "$expected_checksum" ]; then
     rm -f "$tmp_file"
@@ -1271,113 +1413,6 @@ if [ "$T3_HOOK_FLAG" -ne -1 ]; then
     fi
 fi
 
-# The sem archives' SHA-256 for SEM_VERSION, pinned here instead of read from
-# the release's checksums.txt, which would come over the same connection as
-# the archive. Bump them with SEM_VERSION (keep install.ps1 / install.cmd in step).
-sem_sha256_for_asset() {
-    case "$1" in
-        sem-darwin-arm64.tar.gz) echo "a98235ac9f8fae93364ddb7c681036fbe33af756db40e067331ef2091ecc8e6a" ;;
-        sem-linux-arm64.tar.gz)  echo "c0d4ccede55e166481358013c397f2772e4d76b72df45d567c45792b8033aec9" ;;
-        sem-linux-x86_64.tar.gz) echo "d3476497d8e5648ddb4aa6f82f75ad1a21d0155a5941744c744f464109928707" ;;
-        *)                       return 1 ;;
-    esac
-}
-
-sem_asset_for_platform() {
-    case "$platform" in
-        darwin-arm64) echo "sem-darwin-arm64.tar.gz" ;;
-        linux-arm64)  echo "sem-linux-arm64.tar.gz" ;;
-        linux-x64)    echo "sem-linux-x86_64.tar.gz" ;;
-        *)            return 1 ;;
-    esac
-}
-
-install_sem_sidecar() {
-    case "${PLANNOTATOR_SKIP_SEM_INSTALL:-}" in
-        1|true|yes|TRUE|YES|True|Yes)
-            echo "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
-            return 0
-            ;;
-    esac
-
-    sem_asset="$(sem_asset_for_platform 2>/dev/null || true)"
-    if [ -z "$sem_asset" ]; then
-        echo "Skipping semantic diff sidecar install (sem does not publish ${platform})"
-        return 0
-    fi
-
-    sem_dir="${_config_dir}/vendor/sem/${SEM_VERSION}"
-    sem_bin="${sem_dir}/sem"
-    if [ -x "$sem_bin" ] && "$sem_bin" --version 2>/dev/null | grep -q '^sem '; then
-        echo "Semantic diff sidecar already installed at ${sem_bin}"
-        return 0
-    fi
-
-    tmp_sem_dir="$(mktemp -d)"
-    sem_archive="${tmp_sem_dir}/${sem_asset}"
-    sem_base_url="https://github.com/${SEM_REPO}/releases/download/${SEM_VERSION}"
-
-    # Bounded so a slow/hung download of this optional sidecar can't wedge an
-    # install where plannotator itself already landed. On timeout curl fails and
-    # we skip gracefully. Opt out entirely with PLANNOTATOR_SKIP_SEM_INSTALL=1.
-    if ! curl -fsSL --connect-timeout 10 --max-time 120 -o "$sem_archive" "${sem_base_url}/${sem_asset}"; then
-        echo "Skipping semantic diff sidecar install (download failed)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-
-    expected_sem_checksum="$(sem_sha256_for_asset "$sem_asset" 2>/dev/null || true)"
-    if [ -z "$expected_sem_checksum" ]; then
-        echo "Skipping semantic diff sidecar install (checksum missing for ${sem_asset})"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-
-    if [ "$(uname -s)" = "Darwin" ]; then
-        actual_sem_checksum="$(shasum -a 256 "$sem_archive" | cut -d' ' -f1)"
-    else
-        actual_sem_checksum="$(sha256sum "$sem_archive" | cut -d' ' -f1)"
-    fi
-
-    if [ "$actual_sem_checksum" != "$expected_sem_checksum" ]; then
-        echo "Skipping semantic diff sidecar install (checksum mismatch)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-
-    if ! tar -xzf "$sem_archive" -C "$tmp_sem_dir"; then
-        echo "Skipping semantic diff sidecar install (extract failed)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-
-    extracted_sem="$(find "$tmp_sem_dir" -type f -name sem -print -quit)"
-    if [ -z "$extracted_sem" ]; then
-        echo "Skipping semantic diff sidecar install (binary missing from archive)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-
-    if ! mkdir -p "$sem_dir"; then
-        echo "Skipping semantic diff sidecar install (directory creation failed)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-    if ! cp "$extracted_sem" "$sem_bin"; then
-        echo "Skipping semantic diff sidecar install (copy failed)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-    if ! chmod +x "$sem_bin"; then
-        echo "Skipping semantic diff sidecar install (chmod failed)"
-        rm -f "$sem_bin"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
-    rm -rf "$tmp_sem_dir"
-    echo "Semantic diff sidecar installed to ${sem_bin}"
-}
-
 install_agent_terminal_runtime() {
     case "${PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL:-}" in
         1|true|yes|TRUE|YES|True|Yes)
@@ -1404,7 +1439,6 @@ install_call_flow_runtime() {
     fi
 }
 
-install_sem_sidecar
 install_agent_terminal_runtime
 install_call_flow_runtime
 
@@ -1722,6 +1756,8 @@ CLAUDE_PLUGIN_REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_pl
 # | no-marketplace (the plannotator marketplace is gone; re-add it)
 claude_plugin_state="none"
 claude_plugin_version=""
+# The installed plugin's version before this run (for notify_claude_plugin_reload).
+claude_plugin_from_version=""
 
 # The registry value for plannotator@plannotator (a JSON array of per-scope
 # install records; an object in the older v1 file), or nothing.
@@ -1834,10 +1870,28 @@ print_claude_plugin_marketplace_readd() {
     echo "  claude plugin update ${CLAUDE_PLUGIN_ID} --scope user"
 }
 
+# The claude CLI: on PATH, else in Claude Code's own install folders (its
+# native installer's ~/.local/bin, the older ~/.claude/local), the folders the
+# Inbox's launcher also looks in. An update the Inbox or a review window starts
+# runs with that process's PATH, which often lacks ~/.local/bin (an Inbox
+# started outside a login shell), and the plugin was then never updated.
+find_claude_cli() {
+    command -v claude 2>/dev/null && return 0
+    for _fc_dir in "$HOME/.local/bin" "$HOME/.claude/local"; do
+        if [ -f "$_fc_dir/claude" ] && [ -x "$_fc_dir/claude" ]; then
+            printf '%s\n' "$_fc_dir/claude"
+            return 0
+        fi
+    done
+    return 1
+}
+
 update_claude_plugin_if_installed() {
     _cp_record=$(claude_plugin_user_record)
     [ -n "$_cp_record" ] || return 0
-    if ! command -v claude >/dev/null 2>&1; then
+    claude_plugin_from_version=$(claude_plugin_field "$_cp_record" version)
+    _cp_claude=$(find_claude_cli) || _cp_claude=""
+    if [ -z "$_cp_claude" ]; then
         claude_plugin_state="manual"
         return 0
     fi
@@ -1856,10 +1910,14 @@ update_claude_plugin_if_installed() {
         echo "Claude Code plugin: not updated: pinned to ${latest_tag}; updating would install the newest plugin."
         return 0
     fi
-    # Seconds per command. Internal knob for the tests; the default covers a
-    # slow git fetch of the marketplace clone.
-    _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-120}"
-    case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=120 ;; esac
+    # Seconds per command. Internal knob for the tests. Claude Code stops its
+    # own git clone or fetch of the marketplace after 120 s unless
+    # CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS says otherwise, which failed updates on
+    # slow links: the commands get 10 minutes for git (a value the person set
+    # is kept), and 11 for the whole command.
+    _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-660}"
+    case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=660 ;; esac
+    _cp_git_ms="${CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS:-600000}"
     # One private directory for claude's output and the timeout marker.
     _cp_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-claude-plugin.XXXXXX" 2>/dev/null) || _cp_tmp=""
     if [ -z "$_cp_tmp" ] || [ ! -d "$_cp_tmp" ]; then
@@ -1878,9 +1936,9 @@ update_claude_plugin_if_installed() {
     for _cp_step in marketplace plugin; do
         _cp_rc=0
         if [ "$_cp_step" = "marketplace" ]; then
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS="$_cp_git_ms" "$_cp_claude" plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
         else
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS="$_cp_git_ms" "$_cp_claude" plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
         fi
         if [ "$_cp_rc" -eq 124 ]; then
             _cp_failed="timed out after ${_cp_secs}s"
@@ -3547,3 +3605,126 @@ fi
 
 # The full install completed: remember its command-line flags for auto-update.
 write_install_flags
+
+# When Claude Code sessions that are open right now cannot load the plugin by
+# themselves, tell the person the one thing to do, even when this ran in the
+# background (Update now in the Inbox, auto-update): one operating-system
+# notification, and the plugin-update page on plannotator.ai in the default
+# browser, which says what happened and shows the commands to copy. Two cases:
+# - updated, from a plugin older than 0.28.52, the first release whose mod
+#   reloads itself after an update (#2356, auto-reload): open sessions run that
+#   older mod, so /reload-plugins must be typed once in each (state=reload).
+# - manual / failed / no-marketplace, while the installed plugin is older than
+#   this release: the plugin could not be updated at all (state=manual).
+# The page URL carries only the case and the two versions:
+#   https://plannotator.ai/plugin-update?state=reload|manual[&from=X.Y.Z][&to=X.Y.Z]
+# Never on a fresh install, an opted-out or pinned plugin (skipped), or a
+# current one; never when no Claude Code session is open (no live pid among
+# Claude Code's sessions/<pid>.json); never in CI, over SSH, without a desktop
+# session or under the test sandbox (PLANNOTATOR_TEST_SANDBOX); once per run
+# (it runs once, here). Opt out of both with PLANNOTATOR_INSTALL_NOTIFY=0;
+# PLANNOTATOR_BROWSER is honored for the page as everywhere else (a "none"
+# value opens no page, a path is run with the URL). Uses only what the system
+# has (osascript and open on macOS, notify-send and xdg-open on Linux), each
+# time-bounded, and never fails the install. install.ps1 / install.cmd carry
+# the same rule.
+CLAUDE_PLUGIN_SELF_RELOAD_VERSION="0.28.52"
+CLAUDE_PLUGIN_UPDATE_PAGE="https://plannotator.ai/plugin-update"
+claude_code_session_open() {
+    _cs_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
+    [ -d "$_cs_dir" ] || return 1
+    for _cs_file in "$_cs_dir"/*.json; do
+        [ -f "$_cs_file" ] || continue
+        _cs_pid=$(basename "$_cs_file" .json)
+        case "$_cs_pid" in ''|*[!0-9]*) continue ;; esac
+        kill -0 "$_cs_pid" 2>/dev/null && return 0
+    done
+    return 1
+}
+# A plain X.Y.Z (a leading v dropped), or nothing: only versions go in the URL.
+plain_version() {
+    _pv="${1#v}"
+    case "$_pv" in
+        ''|*[!0123456789.]*|.*|*.|*..*|*.*.*.*) return 0 ;;
+        *.*.*) printf '%s' "$_pv" ;;
+    esac
+}
+notify_claude_plugin_reload() {
+    case "${PLANNOTATOR_INSTALL_NOTIFY:-}" in
+        0|false|no|off|disabled|FALSE|NO|OFF|False|No|Off) return 0 ;;
+    esac
+    [ -z "${PLANNOTATOR_TEST_SANDBOX:-}" ] || return 0
+    [ -z "${CI:-}" ] || return 0
+    [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}" ] || return 0
+    _nt_from=$(plain_version "$claude_plugin_from_version")
+    [ -n "$_nt_from" ] || return 0
+    case "$claude_plugin_state" in
+        updated)
+            oc2_version_at_least "$_nt_from" "$CLAUDE_PLUGIN_SELF_RELOAD_VERSION" && return 0
+            _nt_state="reload"
+            _nt_to=$(plain_version "$claude_plugin_version")
+            [ -n "$_nt_to" ] || _nt_to=$(plain_version "$latest_tag")
+            _nt_title="Plannotator updated its Claude Code plugin"
+            _nt_body="Type /reload-plugins in each open Claude Code session to load it."
+            ;;
+        manual|failed|no-marketplace)
+            oc2_version_at_least "$_nt_from" "$latest_tag" && return 0
+            _nt_state="manual"
+            _nt_to=$(plain_version "$latest_tag")
+            _nt_title="Plannotator could not update its Claude Code plugin"
+            _nt_body="See Settings > Agents in the Plannotator Inbox for the two commands to run."
+            ;;
+        *) return 0 ;;
+    esac
+    claude_code_session_open || return 0
+    _nt_url="${CLAUDE_PLUGIN_UPDATE_PAGE}?state=${_nt_state}&from=${_nt_from}${_nt_to:+&to=${_nt_to}}"
+    _nt_browser="${PLANNOTATOR_BROWSER:-}"
+    _nt_browser_trim=$(printf '%s' "$_nt_browser" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    case "$_nt_browser_trim" in
+        none|false|0|off|no|true|1|:) _nt_page=0 ;;
+        *) _nt_page=1 ;;
+    esac
+    _nt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-notify.XXXXXX" 2>/dev/null) || return 0
+    case "$(uname -s)" in
+        Darwin)
+            if command -v osascript >/dev/null 2>&1; then
+                # The words go in as arguments, never into the script text.
+                run_with_time_limit 10 "$_nt_tmp/timed-out" osascript \
+                    -e 'on run argv' \
+                    -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+                    -e 'end run' "$_nt_title" "$_nt_body" >/dev/null 2>&1 || true
+            fi
+            if [ "$_nt_page" -eq 1 ]; then
+                case "$_nt_browser" in
+                    '') run_with_time_limit 10 "$_nt_tmp/timed-out" open "$_nt_url" >/dev/null 2>&1 || true ;;
+                    */*) run_with_time_limit 10 "$_nt_tmp/timed-out" "$_nt_browser" "$_nt_url" >/dev/null 2>&1 || true ;;
+                    *) run_with_time_limit 10 "$_nt_tmp/timed-out" open -a "$_nt_browser" "$_nt_url" >/dev/null 2>&1 || true ;;
+                esac
+            fi
+            ;;
+        Linux)
+            # A desktop session: a display (and, for the notification, a session bus).
+            if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+                if command -v notify-send >/dev/null 2>&1; then
+                    if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+                        DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+                        export DBUS_SESSION_BUS_ADDRESS
+                    fi
+                    if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+                        run_with_time_limit 10 "$_nt_tmp/timed-out" notify-send -a Plannotator \
+                            "$_nt_title" "$_nt_body" >/dev/null 2>&1 || true
+                    fi
+                fi
+                if [ "$_nt_page" -eq 1 ]; then
+                    _nt_opener="${_nt_browser:-xdg-open}"
+                    if command -v "$_nt_opener" >/dev/null 2>&1; then
+                        run_with_time_limit 10 "$_nt_tmp/timed-out" "$_nt_opener" "$_nt_url" >/dev/null 2>&1 || true
+                    fi
+                fi
+            fi
+            ;;
+    esac
+    rm -rf "$_nt_tmp" 2>/dev/null || true
+    return 0
+}
+notify_claude_plugin_reload || true

@@ -1,11 +1,33 @@
 /**
  * A thread's PRs in the window (approval "inbox-pr-binding", 2026-11-08):
- * the words the row mark, the thread's button and the popover share, and the
- * bus that tells them a thread's PRs changed. Pure but for the bus.
+ * the words the row mark, the thread's button and the popover share, where a
+ * row's review link goes, and the bus that tells them a thread's PRs changed.
+ * Pure but for the bus.
  */
 
-import type { InboxThreadPullState, InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary } from '@plannotator/core/inbox-types';
-import { inboxThreadPullHeadline } from '@plannotator/core/inbox-types';
+import type { InboxPullsAnswer, InboxReviewsAnswer, InboxThreadPullState, InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullStacks, inboxThreadPullHeadline } from '@plannotator/core/inbox-types';
+import { linkAgentName } from '../pulls/model';
+import { stackLink } from '../pulls/topology';
+import { problemOf } from '@plannotator/core/problem';
+
+/** A PR's problem (newer servers) is kept only when it reads as one; an older server sends none. */
+function withProblemChecked(pull: InboxThreadPullWire): InboxThreadPullWire {
+  if (!pull || typeof pull !== 'object' || !('problem' in pull)) return pull;
+  const { problem, ...rest } = pull;
+  const checked = problemOf(problem);
+  return checked ? { ...rest, problem: checked } : rest;
+}
+
+/** A thread's PRs answer as the window uses it (api.ts reads it with this): anything missing reads as none. */
+export function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
+  const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
+  return {
+    pulls: Array.isArray(value.pulls) ? value.pulls.map(withProblemChecked) : [],
+    groups: Array.isArray(value.groups) ? value.groups : [],
+    removed: Array.isArray(value.removed) ? value.removed : [],
+  };
+}
 
 /** What a change names: one thread, or every thread (a reconnect, a catch-up). */
 export type ThreadPullsChange = string | '*';
@@ -76,6 +98,43 @@ export function pullsMarkWords(summary: InboxThreadPullsSummary, headlineLabel: 
 export function labelOfKey(key: string): string | null {
   const match = /#(\d+)(:pull)?$/.exec(key);
   return match ? `${match[2] ? '!' : '#'}${match[1]}` : null;
+}
+
+/**
+ * Where a PR row's "Open review thread" goes: its review thread in the Inbox (`thread`, with the agent the launchpad
+ * names), or, with none yet, the PR's page in Reviews (`launchpad`, the stack's id; a stack of several opens its
+ * stack page there).
+ */
+export type PullReviewLink = { kind: 'thread'; threadId: string; agent: { host: string | null; name: string } | null } | { kind: 'launchpad'; stackId: string };
+
+/**
+ * Each PR row's review link, read from Reviews' own list the way its launchpad reads it (PullsPage `StackView`): the
+ * stack's link (`stackLink`) is its review thread unless that thread only named the PR (its Reviews row is not
+ * `reviewed`). Null, no link: a PR that is not open or a draft, one Reviews does not list (no list read yet, a
+ * repository that is no project, Bitbucket), and the row whose review thread is `here`, the thread the list is in.
+ * A hidden PR (the lists leave it out) keeps its review thread, from its hidden record (`hidden`, its `thread_id`).
+ */
+export function pullReviewLinks(model: Pick<InboxPullsAnswer, 'pulls' | 'links' | 'hidden'> | null, reviews: Pick<InboxReviewsAnswer, 'rows'> | null): (pull: Pick<InboxThreadPullWire, 'pull' | 'state'>, here: string) => PullReviewLink | null {
+  if (!model) return () => null;
+  const stacks = inboxPullStacks(model.pulls);
+  return (pull, here) => {
+    if (pull.state !== 'open' && pull.state !== 'draft') return null;
+    const stack = stacks.find((s) => s.layers.some((l) => l.key === pull.pull && inboxPullIsOpen(l)));
+    if (!stack) {
+      const hidden = model.hidden?.find((h) => h.key === pull.pull)?.thread_id;
+      if (!hidden || hidden === here) return null;
+      const link = model.links[pull.pull];
+      const name = link?.thread_id === hidden ? linkAgentName(link) : null;
+      return { kind: 'thread', threadId: hidden, agent: name ? { host: link?.agent?.host ?? null, name } : null };
+    }
+    const link = stackLink(stack, model.links);
+    const ended = link?.agent?.ended === true;
+    const mentioned = !!link && !ended && reviews?.rows.find((row) => row.stacks.some((s) => s.id === stack.id))?.reviewed === false;
+    if (!link || mentioned) return { kind: 'launchpad', stackId: stack.id };
+    if (link.thread_id === here) return null;
+    const name = linkAgentName(link);
+    return { kind: 'thread', threadId: link.thread_id, agent: name ? { host: link.agent?.host ?? null, name } : null };
+  };
 }
 
 /** The popover's head: the repository (or "3 repositories") and the count ("Stack of 3", "5 pull requests"). */

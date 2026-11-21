@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import { DiagramSvgAcceptContext } from '../diagramSvgAccept';
 import {
   renderDiagram,
   type DiagramKind,
@@ -26,6 +27,10 @@ export interface DiagramRenderState {
     readonly line: number | null;
     /** The engine could not be loaded: a Retry can change this one. */
     readonly runtimeUnavailable: boolean;
+    /** A diagram-type chunk did not load: the block offers Reload. */
+    readonly chunkFailed?: boolean;
+    /** The host's check refused the drawn svg (`DiagramSvgAcceptContext`): the block shows the source. */
+    readonly refused?: boolean;
   } | null;
   readonly pending: boolean;
 }
@@ -47,6 +52,7 @@ export function useDiagramRender(
   options?: { readonly retryToken?: number },
 ): DiagramRenderState {
   const retryToken = options?.retryToken ?? 0;
+  const accept = useContext(DiagramSvgAcceptContext);
   const [state, setState] = useState<DiagramRenderState>({
     svgNode: null,
     renderId: null,
@@ -66,10 +72,16 @@ export function useDiagramRender(
       const error = current.error?.runtimeUnavailable ? null : current.error;
       return current.pending && error === current.error ? current : { ...current, error, pending: true };
     });
-    void renderDiagram(kind, renderId, source, theme).then((result: DiagramRenderResult) => {
+    void renderDiagram(kind, renderId, source, theme, accept ? { accept } : undefined).then((result: DiagramRenderResult) => {
       if (cancelled) return;
       if (isRenderError(result)) {
-        const error = { message: result.message, line: result.line, runtimeUnavailable: result.runtimeUnavailable };
+        const error = {
+          message: result.message,
+          line: result.line,
+          runtimeUnavailable: result.runtimeUnavailable,
+          ...(result.chunkFailed ? { chunkFailed: true } : {}),
+          ...(result.refused ? { refused: true } : {}),
+        };
         setState((current) => ({ ...current, error, pending: false }));
         return;
       }
@@ -85,7 +97,7 @@ export function useDiagramRender(
     return () => {
       cancelled = true;
     };
-  }, [documentId, kind, source, theme, retryToken]);
+  }, [documentId, kind, source, theme, retryToken, accept]);
 
   return state;
 }

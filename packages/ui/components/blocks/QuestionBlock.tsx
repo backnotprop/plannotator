@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
@@ -13,9 +13,12 @@ import {
 } from '@plannotator/core/question-block';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { QuestionContext } from './QuestionContext';
+import { QuestionChangeGroups, QuestionChoiceChange, QuestionWhere, questionChoiceHasChange, type QuestionChangeHost } from './QuestionChange';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
+import type { Block } from '../../types';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import {
   questionChoiceWords,
   questionPictureShape,
@@ -218,6 +221,7 @@ export type QuestionSaveResult = void | Promise<unknown>;
 
 export interface QuestionBlockProps {
   blockId: string;
+  sourceBlock?: Block;
   indexed: IndexedQuestion;
   /** How many question blocks the document has (for "Question N of M"). */
   total: number;
@@ -310,7 +314,34 @@ export interface QuestionBlockProps {
    *  carry it for the host's CSS (see `QuestionPictureTiles`); nothing is drawn
    *  differently without host CSS. */
   pictureSize?: (url: string) => QuestionPictureSize | null;
+  /** Accept recommended, gentler (opt-in; the Plannotator Inbox). Absent: today's button. */
+  acceptBehavior?: QuestionAcceptBehavior;
 }
+
+/** `QuestionBlockProps.acceptBehavior`. Each part is off when absent. */
+export interface QuestionAcceptBehavior {
+  /** The button is not drawn while a text field in the card has focus (the
+   *  note, Other…, a text question's answer); it is back once focus leaves it. */
+  asideWhileTyping?: boolean;
+  /** Pick any: words typed under Other… stay in the answer beside the
+   *  recommended ticks, and the button is offered until the ticks alone are
+   *  the recommended ones. */
+  keepOther?: boolean;
+  /** After a tap. `undo` puts back the answer from before it (picks, ticks,
+   *  Other words, Skip; the note as it is now), and does nothing once the
+   *  answer has changed since the tap. `accepted` names the question and the
+   *  answer the tap set, so a host can tell when it is no longer current. */
+  onAccepted?: (undo: () => void, accepted: { key: string; answer: QuestionAnswer }) => void;
+}
+
+/** A field a person types in: a textarea or a text input (not a choice's radio or checkbox). */
+const isTypingField = (el: EventTarget | null): boolean =>
+  el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && ['text', 'search', ''].includes(el.type));
+
+/** The parts of an answer Accept recommended sets (the note is not one). */
+export const sameAnswerParts = (a: QuestionAnswer, b: QuestionAnswer): boolean =>
+  a.selected.length === b.selected.length && a.selected.every((l, i) => l === b.selected[i])
+  && (a.other ?? '') === (b.other ?? '') && (a.text ?? '') === (b.text ?? '') && !!a.skipped === !!b.skipped;
 
 /** The picture tile's label (`pictureBadge`): a small dark chip over the picture's top-left corner. */
 const PICTURE_BADGE_STYLE: React.CSSProperties = {
@@ -346,8 +377,26 @@ const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.Re
     <>{children}</>
   );
 
+/**
+ * Fits the Other field to its lines: one at least (`rows={1}`: its height, padding, border and any min-height
+ * as a one-line field), its CSS max-height at most, scrolling past that. Returns where the "+" mark goes
+ * beside a field of several lines (centred on the first line, where a one-line field centres it), else null.
+ */
+function fitOtherField(field: HTMLTextAreaElement): number | null {
+  field.style.height = '';
+  field.style.overflowY = '';
+  const one = field.offsetHeight;
+  // Its border (no scrollbar while it is one line or growing: its overflow is hidden).
+  const full = field.scrollHeight + (field.offsetHeight - field.clientHeight);
+  if (full <= one + 1) return null;
+  field.style.height = `${full}px`;
+  if (field.scrollHeight > field.clientHeight + 1) field.style.overflowY = 'auto';
+  return one > 15 ? (one - 15) / 2 : null;
+}
+
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
+  sourceBlock,
   indexed,
   total,
   answer: storedAnswer,
@@ -374,6 +423,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   pictureBadge,
   onZoomChoice,
   pictureSize,
+  acceptBehavior,
 }) => {
   const { question, number } = indexed;
   const resolveImage = useImageResolver();
@@ -464,6 +514,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const promptId = `q-prompt-${uid}`;
   const contextId = `q-context-${uid}`;
   const stakesId = `q-stakes-${uid}`;
+  const whereId = `q-where-${uid}`;
   const suggestId = `q-suggest-${uid}`;
   const noteLabelId = `q-note-${uid}`;
   // null = follow the answer (open while a note exists); a click pins it.
@@ -484,6 +535,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   // the recommendation is "Yes".
   const [otherBy, setOtherBy] = useState<'row' | 'field' | null>(null);
   const [otherFocused, setOtherFocused] = useState(false);
+  // A text field of the card has focus (acceptBehavior.asideWhileTyping).
+  const [typing, setTyping] = useState(false);
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
   // Pick any: the reviewer's own Other text the recommended row replaced when
   // ticked, put back when it is unticked (the answer has one Other field).
   const replacedOtherRef = useRef<string | null>(null);
@@ -523,11 +578,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       && question.choices.some((c) => c.recommended)
       && !question.choices.some((c) => c.settled)
       && !isRecommendedQuestionAnswer(
-        answer!,
+        acceptBehavior?.keepOther ? { ...answer!, other: undefined } : answer!,
         question.choices.filter((c) => c.recommended).map((c) => c.label),
         question.suggestedText,
       ))
   );
+  const showAccept = offerAccept && !(acceptBehavior?.asideWhileTyping && typing);
   const selected = answered || skipped ? answer!.selected : settledLabels;
   const base = answer ?? emptyQuestionAnswer(indexed);
 
@@ -611,12 +667,25 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const acceptRecommended = () => {
-    const next = recommendedQuestionAnswer(indexed, base);
-    if (!next) return;
+    const recommended = recommendedQuestionAnswer(indexed, base);
+    if (!recommended) return;
+    const keptOther = acceptBehavior?.keepOther && question.kind === 'multi' && recommended.selected.length > 0 && base.other?.trim() ? base.other : undefined;
+    const next = keptOther ? { ...recommended, other: keptOther } : recommended;
+    const before = answer;
     replacedOtherRef.current = null;
-    if (next.other) setOtherBy('row');
+    if (next.other && !keptOther) setOtherBy('row');
     focusAfterAcceptRef.current = true;
     commit(next);
+    const onAccepted = acceptBehavior?.onAccepted;
+    if (!onAccepted) return;
+    onAccepted(() => {
+      const now = answerRef.current;
+      if (!now || !sameAnswerParts(now, next)) return;
+      const { note: _n, ...was } = before ?? emptyQuestionAnswer(indexed);
+      replacedOtherRef.current = null;
+      setOtherBy(was.other ? 'field' : null);
+      commit({ ...was, ...(now.note ? { note: now.note } : {}) });
+    }, { key: question.key, answer: next });
   };
   // Runs after the render that drew the accepted answer (and once more at
   // most, should the host not redraw it): the first checked choice, else the
@@ -688,6 +757,43 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     && (otherBy === 'row' || (otherBy === null && !otherFocused));
   const other = suggestionPicked ? '' : storedOther;
   const otherOn = other.trim() !== '';
+  // The Other field holds as many lines as its words take (typed or wrapped),
+  // from one (its height when it was a one-line field) up to its cap: fitted
+  // on each change, and again when its width changes (its words re-wrap).
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  const [otherGlyphTop, setOtherGlyphTop] = useState<number | null>(null);
+  const otherWidthRef = useRef(-1);
+  const fitOther = () => {
+    const field = otherRef.current;
+    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    otherWidthRef.current = field ? field.clientWidth : -1;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => fitOther(), [other, readOnly, otherOn]);
+  useEffect(() => {
+    const field = otherRef.current;
+    if (!field || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const refit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitOther);
+    };
+    // Only a new width re-wraps; the heights this fit sets come back here too.
+    const watch = new ResizeObserver(() => {
+      if (field.clientWidth !== otherWidthRef.current) refit();
+    });
+    watch.observe(field);
+    // A web font that arrives late re-wraps the words at the same width.
+    let live = true;
+    document.fonts?.ready.then(() => live && refit(), () => {});
+    return () => {
+      live = false;
+      cancelAnimationFrame(frame);
+      watch.disconnect();
+    };
+    // fitOther reads only refs; the field is new when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, otherOn]);
   // Picture choices: each choice's picture URL (null: none, or not shown).
   const pictures = question.choices.map((c) => (c.image ? pictureSrc(c.image.src) : null));
   const showTiles = pictureChoices
@@ -713,7 +819,47 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     ? (recordingOn ? 'on' : 'off')
     : undefined;
 
-  const describedBy = [question.stakes ? stakesId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
+  // A question that proposes a change (change lines): its Where, its places, and the pictures they open.
+  const change = question.change;
+  const changeHost: QuestionChangeHost | null = change || question.choices.some((c) => c.before || c.after || c.places)
+    ? { inline, pictureSrc, heldPlaceholder, failed: failedPictures, onPictureError: markPictureFailed, onOpenPicture: onImageClick }
+    : null;
+  // The `Shows:` picture is the place: with a Where it opens from "See it" there (with its `Source:`), not from the chip.
+  const firstWhere = change ? change.where ?? change.groups.find((g) => g.where !== undefined)?.where : undefined;
+  const place = firstWhere !== undefined && question.shows?.kind === 'image' && showsSrc && onImageClick
+    ? { url: showsSrc, alt: [question.shows.label || 'The place', change!.source].filter(Boolean).join(' · ') }
+    : null;
+
+  // A `Source:` the parser took with the place picture, shown as written when that picture cannot open here.
+  const changeSource = change?.source && !place ? change.source : undefined;
+  // A choice's own change: its words, outside its label, describe its input.
+  const choiceChanges = changeHost ? question.choices.map((c, i) => questionChoiceHasChange(question, c, i)) : null;
+  const choiceChangeId = (index: number) => `${groupName}-change-${index}`;
+  /** A click on a choice's own change picks it, as a click on its row does (never while selecting words or on a double-click). */
+  const onChoiceChangeClick = (event: React.MouseEvent<HTMLDivElement>, label: string) => {
+    onRowClick(event, label);
+    if (event.defaultPrevented || readOnly) return;
+    const holder = event.currentTarget.closest('[data-question-option-with-change], [data-question-tile]');
+    holder?.querySelector<HTMLInputElement>('input[data-question-control]')?.click();
+  };
+  const choiceChange = (index: number, layout: 'row' | 'tile') => {
+    const choice = question.choices[index];
+    if (!changeHost || !choice || !choiceChanges?.[index]) return null;
+    return (
+      <QuestionChoiceChange
+        question={question}
+        choice={choice}
+        index={index}
+        host={changeHost}
+        spokenId={choiceChangeId(index)}
+        layout={layout}
+        readOnly={readOnly}
+        onClick={(event) => onChoiceChangeClick(event, choice.label)}
+      />
+    );
+  };
+
+  const describedBy = [question.stakes ? stakesId : null, change?.where ? whereId : null, question.context ? contextId : null, question.kind === 'text' && question.suggestedText && !answered ? suggestId : null]
     .filter(Boolean)
     .join(' ') || undefined;
 
@@ -730,7 +876,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     <fieldset
       ref={cardRef}
       className={cx(
-        'question-block my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
+        'question-block relative my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
         // A size container: the card's own width lays out its footer (FOOT_BUTTON).
         '@container/qcard',
         // Native radios/checkboxes follow the theme's mode. ThemeProvider marks
@@ -745,11 +891,14 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       data-directive-kind={question.directiveKind}
       data-question-key={question.key}
       data-question-status={status}
+      onFocus={acceptBehavior?.asideWhileTyping ? (event) => setTyping(isTypingField(event.target)) : undefined}
+      onBlur={acceptBehavior?.asideWhileTyping ? (event) => setTyping(isTypingField(event.relatedTarget) && !!cardRef.current?.contains(event.relatedTarget as Node)) : undefined}
       aria-labelledby={promptId}
       aria-describedby={describedBy}
       aria-disabled={readOnly || undefined}
       data-question-decision={question.decision ? 'recorded' : question.decisionOnAnswer ? 'on-answer' : undefined}
       data-question-decision-recording={recordingAttr}
+      {...sourceLineAttrs(sourceBlock)}
     >
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
@@ -833,7 +982,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {inline(question.stakes)}
         </p>
       )}
-      {question.shows && (
+      {changeHost && change?.where !== undefined && <QuestionWhere id={whereId} where={change.where} host={changeHost} place={place} source={changeSource} />}
+      {question.shows && !place && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px]" data-question-shows="">
           <span className="annotation-exclude select-none text-muted-foreground" data-pinpoint-ignore="">Shows</span>
           {question.shows.kind === 'image' ? (
@@ -904,6 +1054,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           repoHost={repoHost}
         />
       )}
+      {/* The Where is the first thing under the prompt; the places' Now and After follow the context that explains them. */}
+      {changeHost && change && <QuestionChangeGroups question={question} host={changeHost} place={place} source={change.where === undefined ? changeSource : undefined} />}
 
       {question.kind === 'text' ? (
         <>
@@ -954,18 +1106,32 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 pictureBadge={pictureBadge}
                 // Asked by the picture's own URL, loaded or not: a picture that fails keeps the set's layout.
                 pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
+                {...(choiceChanges?.some(Boolean)
+                  ? {
+                    inputProps: (label: string) => {
+                      const index = question.choices.findIndex((c) => c.label === label);
+                      return choiceChanges[index] ? { 'aria-describedby': choiceChangeId(index) } : {};
+                    },
+                    renderBelow: (_choice: unknown, index: number) => choiceChange(index, 'tile'),
+                  }
+                  : {})}
               />
             ) : (
-              question.choices.map((choice) => {
+              question.choices.map((choice, choiceIndex) => {
                 const checked = selected.includes(choice.label);
-                return (
+                const hasChange = !!choiceChanges?.[choiceIndex];
+                // A choice with a change of its own: the row and its change take the tint (hover, picked) as one.
+                const tint = cx('rounded-[7px] transition-colors', !readOnly && 'hover:bg-muted/45', checked && 'bg-primary/12 hover:bg-primary/12');
+                const row = (
                   <label
                     key={choice.label}
-                    className={cx(
-                      'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
-                      readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
-                      checked && 'bg-primary/12 hover:bg-primary/12',
-                    )}
+                    className={hasChange
+                      ? cx('flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5', readOnly ? 'cursor-default' : 'cursor-pointer')
+                      : cx(
+                        'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
+                        readOnly ? 'cursor-default' : 'cursor-pointer hover:bg-muted/45',
+                        checked && 'bg-primary/12 hover:bg-primary/12',
+                      )}
                     data-question-option=""
                     onPointerDown={onRowPointerDown}
                     onClickCapture={(event) => onRowClick(event, choice.label)}
@@ -978,6 +1144,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                       className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                       data-question-control=""
                       disabled={readOnly}
+                      aria-describedby={hasChange ? choiceChangeId(choiceIndex) : undefined}
                     />
                     <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
                       <span className="font-[550]">{inline(choice.label)}</span>
@@ -989,6 +1156,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     </span>
                   </label>
                 );
+                // A choice's own change (its version, its pictures, or today's words): under its row, outside its label.
+                return hasChange ? (
+                  <div key={choice.label} className={tint} data-question-option-with-change="" data-question-option-checked={checked ? '' : undefined} onPointerDown={onRowPointerDown}>
+                    {row}
+                    {choiceChange(choiceIndex, 'row')}
+                  </div>
+                ) : row;
               })
             )}
             {suggestionRow && (
@@ -1032,11 +1206,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
                     otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
                   )}
+                  // Several lines: the mark stays beside the first, where one line centres it.
+                  style={otherGlyphTop === null ? undefined : { alignSelf: 'flex-start', marginTop: otherGlyphTop }}
                 >
                   {otherOn ? <CheckGlyph /> : '+'}
                 </span>
-                <input
-                  type="text"
+                {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
+                    Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                <textarea
+                  ref={otherRef}
+                  rows={1}
                   value={other}
                   onChange={(e) => setOther(e.target.value)}
                   onFocus={() => {
@@ -1049,7 +1228,11 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   disabled={readOnly}
                   placeholder={readOnly ? '' : 'Other…'}
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-                  className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+                  data-question-other=""
+                  className={cx(
+                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    !readOnly && 'max-h-48',
+                  )}
                 />
               </div>
             )}
@@ -1177,7 +1360,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {/* Plannotator's own footer (no host actions, no save bar) keeps the
               Accept button as the one right-aligned item. */}
           {!hasHostFooter && !dirty ? (
-            offerAccept && (
+            showAccept && (
               <button
                 type="button"
                 onClick={acceptRecommended}
@@ -1188,7 +1371,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             )
           ) : (
             <div className={cx(FOOT_OWN_ROW, 'ml-auto rtl:ml-0 rtl:mr-auto flex min-w-0 flex-wrap items-center justify-end gap-1')}>
-              {offerAccept && (
+              {showAccept && (
                 <button
                   type="button"
                   onClick={acceptRecommended}
@@ -1259,6 +1442,8 @@ export interface QuestionPictureTilesProps {
   inputProps?: (label: string) => React.InputHTMLAttributes<HTMLInputElement>;
   /** What sits under a choice's words (default: its Recommended tag). */
   renderBadges?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
+  /** What a tile draws under its label, outside it (the card: a choice's own version); null or absent draws nothing. */
+  renderBelow?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
   /** A small label over a tile's picture, top left (the card's `pictureBadge`); null or absent draws none. */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
   /** Each choice's picture size in pixels by its place in `choices`, when the host knows it before the picture loads
@@ -1289,6 +1474,7 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   labelProps,
   inputProps,
   renderBadges,
+  renderBelow,
   pictureBadge,
   pictureSize,
 }) => {
@@ -1404,6 +1590,7 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
                 </span>
               </span>
             </label>
+            {renderBelow?.(choice, index)}
             {shown && onZoom && (
               <button
                 type="button"

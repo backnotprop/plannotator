@@ -7,7 +7,8 @@
  * `query` (the module refuses to load otherwise); it is the endpoint `gh pr
  * view` reads too. Nothing runs until a person rests on a link long enough for
  * the card to open, or opens a thread's Links (the rows on screen read their
- * state), so drawing a message costs nothing.
+ * state), so drawing a message costs nothing. The Inbox also reads one after
+ * an agent's send names a number it does not know (inbox-pull-lookups.ts).
  *
  * - GitHub: `issueOrPullRequest` answers both kinds in one call. When GitHub
  *   refuses the account in use (404/401/403/SAML), every other account signed
@@ -16,6 +17,10 @@
  *   it (memory only; a token is never logged).
  * - GitLab: the `issue` or `mergeRequest` of a project (GitLab numbers them
  *   apart, so the link's kind decides). glab holds one login per host.
+ * - Bitbucket Cloud: pull requests only, through the REST API with the
+ *   review app's credentials (`fetchBbPRCard` in pr-bitbucket.ts), when the
+ *   host passes a `bitbucket` reader. Without one, or for an issue, the
+ *   answer is `unsupported` and nothing runs.
  * - Hosts: github.com and gitlab.com, plus the hosts this computer's own gh
  *   or glab is signed in to (`gh auth status`, `glab auth status`, read once
  *   per `REF_AUTH_HOSTS_MS`): GitHub Enterprise and self-managed GitLab. Any
@@ -40,6 +45,8 @@
 import {
   FORGE_REF_BODY_MAX,
   FORGE_REF_COMMENT_MAX,
+  forgePullUrl,
+  forgeHostTrusted,
   forgeRefKey,
   parseForgeRefUrl,
   type ForgeRef,
@@ -50,15 +57,30 @@ import {
   type ForgeRefLinked,
   type ForgeRefPerson,
 } from "@plannotator/core/forge-ref-card";
+import type { ProblemDiag } from "@plannotator/core/problem";
+import { cardErrorOfToolState, toolProblem, type ToolState } from "@plannotator/core/problem-words";
 import { ghTokenEnvVar, parseGhAuthStatusJson, parseGhAuthStatusText } from "./pr-github-account";
 import { isSameOriginOrNoOrigin } from "./request-origin";
+import { createToolStatus, tokenEnvFor, toolDiagOf, toolStateOfRun, type ToolStatus } from "./tool-state";
 
 export const REF_FRESH_MS = 60_000;
 export const REF_FAILURE_MS = 30_000;
 export const REF_STALE_MAX_MS = 15 * 60_000;
 export const REF_RATE_LIMIT_MS = 60_000;
+/** A CLI's hard deadline: then it and everything it started are ended, and the runner answers at once. */
 export const REF_TIMEOUT_MS = 8_000;
+/** After TERM at the deadline, KILL to whatever is still there (a CLI that catches TERM, as glab does). */
+export const REF_KILL_GRACE_MS = 1_000;
+/** A CLI that exited while something it started still holds its output: how long that leftover may hold it. */
+export const REF_DRAIN_MS = 500;
 export const REF_MAX_CONCURRENT = 2;
+/**
+ * A slot is given back after this whatever its job does, so one stuck job can never hold it forever (a job may run
+ * several CLIs in turn, each under REF_TIMEOUT_MS).
+ */
+export const REF_SLOT_HOLD_MS = 30_000;
+/** With lookups waiting and no slot given back for this long, the waiting ones are answered (unavailable) and dropped. */
+export const REF_QUEUE_STALL_MS = 20_000;
 export const REF_AUTH_HOSTS_MS = 5 * 60_000;
 /** Refs kept in the cache (an answer, or a failure being held). */
 export const REF_CACHE_MAX = 500;
@@ -99,9 +121,99 @@ export interface RefCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** The runner's deadline ended it (both runners set it; a fake or older runner may not: stderr says so too). */
+  timedOut?: boolean;
 }
-/** Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. */
+/**
+ * Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. Always settles by
+ * REF_TIMEOUT_MS (exit 1, stderr `<cli>: timed out`), whatever the CLI and its children do.
+ */
 export type RefRunner = (cli: RefCli, args: string[], env?: Record<string, string>) => Promise<RefCommandResult>;
+
+/**
+ * End a CLI at its deadline, both runtimes: TERM, then KILL after REF_KILL_GRACE_MS to what is left. `signal` sends
+ * one signal (to the CLI's process group on POSIX); a first TERM that finds nothing (ESRCH) sends nothing more, so a
+ * reused pid is never signalled.
+ */
+export function refRunnerKill(signal: (signal: "SIGTERM" | "SIGKILL") => void, graceMs: number = REF_KILL_GRACE_MS): void {
+  try {
+    signal("SIGTERM");
+  } catch {
+    return;
+  }
+  const timer = setTimeout(() => {
+    try {
+      signal("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }, graceMs);
+  (timer as { unref?: () => void }).unref?.();
+}
+
+/** Thrown by a slot that cannot be had: too many waiting, or the queue stalled. Callers answer `unavailable`. */
+export const REF_SLOT_BUSY: unique symbol = Symbol("ref slot busy");
+
+/**
+ * At most `max` jobs at once, the others waiting in turn. Never stuck: a job's slot is given back after `holdMs`
+ * whatever the job does, and when nothing has been given back for `stallMs` the waiting jobs are refused
+ * (REF_SLOT_BUSY), as is one past `maxWaiting`.
+ */
+export function createRefSlots(
+  max: number,
+  options: { maxWaiting?: number; holdMs?: number; stallMs?: number } = {},
+): { run<T>(job: () => Promise<T>): Promise<T>; waiting(): number; running(): number } {
+  const maxWaiting = options.maxWaiting ?? REF_MAX_WAITING;
+  const holdMs = options.holdMs ?? REF_SLOT_HOLD_MS;
+  const stallMs = options.stallMs ?? REF_QUEUE_STALL_MS;
+  let running = 0;
+  const waiting: { go: () => void; refuse: () => void }[] = [];
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const watch = () => {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    if (waiting.length === 0) return;
+    watchdog = setTimeout(() => {
+      watchdog = null;
+      for (const entry of waiting.splice(0)) entry.refuse();
+    }, stallMs);
+    (watchdog as { unref?: () => void }).unref?.();
+  };
+  const release = () => {
+    const next = waiting.shift();
+    if (next) next.go();
+    else running--;
+    // A slot was given back: the queue moves, so the stall clock starts again.
+    watch();
+  };
+  return {
+    async run(job) {
+      if (running >= max) {
+        if (waiting.length >= maxWaiting) throw REF_SLOT_BUSY;
+        await new Promise<void>((resolve, reject) => {
+          waiting.push({ go: resolve, refuse: () => reject(REF_SLOT_BUSY) });
+          if (!watchdog) watch();
+        });
+      } else running++;
+      let held = true;
+      const giveBack = () => {
+        if (!held) return;
+        held = false;
+        clearTimeout(hold);
+        release();
+      };
+      const hold = setTimeout(giveBack, holdMs);
+      (hold as { unref?: () => void }).unref?.();
+      try {
+        return await job();
+      } finally {
+        giveBack();
+      }
+    },
+    waiting: () => waiting.length,
+    running: () => running,
+  };
+}
 
 // --- the queries ---
 
@@ -352,13 +464,20 @@ export function parseGitlabRefAnswer(stdout: string, host: string, kind: ForgeRe
   };
 }
 
+/** The page of an issue, pull or merge request on its forge. */
+function refPageUrl(ref: ForgeRef): string {
+  if (ref.kind === "pull") return forgePullUrl(ref);
+  return `https://${ref.host}/${ref.owner}/${ref.repo}/${ref.platform === "gitlab" ? "-/" : ""}issues/${ref.number}`;
+}
+
 /** What a failed CLI answer means; `refused` is GitHub saying no (another account may see it). */
 export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardError | "refused" {
   const err = `${result.stderr}\n${result.stdout}`;
   if (result.exitCode === 127 || /executable file not found|command not found|^(gh|glab): not found$/im.test(err)) return "cli_missing";
-  if (/rate limit|\b429\b|RATE_LIMITED|Too Many Requests/i.test(err)) return "rate_limited";
+  // A status in the tool's own shape, never a bare number (a PR numbered 429, a project called svc-401).
+  if (/rate limit|\bHTTP 429\b|\b429 Too Many|\(429\)|RATE_LIMITED|Too Many Requests/i.test(err)) return "rate_limited";
   if (/not logged in|auth login|authentication required|not authenticated|has not been authenticated/i.test(err)) return "signed_out";
-  if (cli === "glab" && /\b401\b|Unauthorized/i.test(err)) return "signed_out";
+  if (cli === "glab" && /\bHTTP 401\b|\b401 Unauthorized\b|\(401\)|\bUnauthorized\b/i.test(err)) return "signed_out";
   if (/Could not resolve to|NOT_FOUND|\bHTTP (404|401|403)\b|\b404\b|Not Found|Bad credentials|SAML|\b403\b|Forbidden/i.test(err)) return "refused";
   return "unavailable";
 }
@@ -371,31 +490,59 @@ export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardE
  * no hosts.
  */
 export async function readSignedInHosts(run: RefRunner, cli: RefCli): Promise<Set<string>> {
-  const hosts = new Set<string>();
-  const fromText = (text: string) => {
-    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+)/g)) hosts.add(m[1].toLowerCase());
+  return (await readCliHosts(run, cli)).signedIn;
+}
+
+/**
+ * What a CLI's own configuration says, lowercased (never a token): `signedIn`, the hosts it can read now (as
+ * readSignedInHosts); `configured`, every host it has a login for in any state (an expired or unchecked one too);
+ * `missing`, the CLI is not installed.
+ */
+export interface CliHosts {
+  signedIn: Set<string>;
+  configured: Set<string>;
+  missing: boolean;
+}
+
+const HOST = "[A-Za-z0-9.-]+\\.[A-Za-z]{2,}(?::\\d+)?";
+
+export async function readCliHosts(run: RefRunner, cli: RefCli): Promise<CliHosts> {
+  const out: CliHosts = { signedIn: new Set(), configured: new Set(), missing: false };
+  const fromText = (raw: string) => {
+    const text = raw.replace(/\u001b\[[0-9;]*m/g, "");
+    for (const m of text.matchAll(/Logged in to ([A-Za-z0-9.-]+(?::\d+)?)/g)) {
+      out.signedIn.add(m[1]!.toLowerCase());
+      out.configured.add(m[1]!.toLowerCase());
+    }
+    // Every host the CLI lists (a heading line of its own, or "log in to <host>" in a failed account's line).
+    for (const m of text.matchAll(new RegExp(`^(${HOST})\\s*$`, "gm"))) out.configured.add(m[1]!.toLowerCase());
+    for (const m of text.matchAll(new RegExp(`log(?:ged)? in(?:to)? to (${HOST})`, "gi"))) out.configured.add(m[1]!.toLowerCase());
   };
+  const notFound = (r: RefCommandResult) => r.exitCode === 127 || /executable file not found|command not found/i.test(r.stderr);
   if (cli === "gh") {
     const json = await run("gh", ["auth", "status", "--json", "hosts"]);
-    if (json.exitCode === 0) {
+    if (notFound(json)) return { ...out, missing: true };
+    if (json.exitCode === 0 || json.stdout.trim().startsWith("{")) {
       try {
         const parsed = JSON.parse(json.stdout) as { hosts?: Record<string, { state?: string }[]> };
         for (const [host, accounts] of Object.entries(parsed.hosts ?? {})) {
+          out.configured.add(host.toLowerCase());
           // Only an account gh says is signed in: every gh with `--json hosts` writes `state`, so one without it is not trusted.
-          if (Array.isArray(accounts) && accounts.some((a) => a?.state === "success")) hosts.add(host.toLowerCase());
+          if (Array.isArray(accounts) && accounts.some((a) => a?.state === "success")) out.signedIn.add(host.toLowerCase());
         }
-        return hosts;
+        return out;
       } catch {
         // Not that JSON: read the text form below.
       }
     }
     const text = await run("gh", ["auth", "status"], { NO_COLOR: "1" });
     fromText(`${text.stdout}\n${text.stderr}`);
-    return hosts;
+    return out;
   }
   const status = await run("glab", ["auth", "status"], { NO_COLOR: "1" });
+  if (notFound(status)) return { ...out, missing: true };
   fromText(`${status.stdout}\n${status.stderr}`);
-  return hosts;
+  return out;
 }
 
 /** Fetch a small avatar and inline it. Null on any failure: the card draws the initial. */
@@ -416,8 +563,15 @@ export async function fetchAvatarDataUri(url: string, fetchImpl: typeof fetch = 
 // --- the cache and the fetch ---
 
 export interface RefCards {
-  /** The card for a link, or null when the link is not an issue / pull / merge request link. */
-  get(href: string): Promise<ForgeRefCardResult | null>;
+  /**
+   * The card for a link, or null when the link is not an issue / pull / merge request link. `retry`: the person
+   * asked again (Try again), so a failure still being held is asked again now.
+   */
+  get(href: string, options?: { retry?: boolean }): Promise<ForgeRefCardResult | null>;
+  /** The gh / glab status check these cards share (tool-state.ts), for readers that refine a failure. */
+  tools?: ToolStatus;
+  /** What the tool printed for a failed card (never sent): its last line, exit, how long it ran. */
+  diagOf?(result: ForgeRefCardResult): ProblemDiag | undefined;
 }
 
 /** How much `createRefCards` holds now (tests and diagnostics). */
@@ -431,16 +585,36 @@ export interface RefCardsSizes {
   waiting: number;
 }
 
-/** Thrown by a full queue: answered `unavailable`, never cached. */
-const QUEUE_FULL = Symbol("ref-cards queue full");
+
+/**
+ * Reads one Bitbucket Cloud pull request's card; a thrown error's numeric `status` is the HTTP status. `signal` aborts
+ * when the read is given up on (`bitbucketTimeoutMs`): its requests stop with it.
+ */
+export type BitbucketRefReader = (ref: { workspace: string; repo: string; number: number }, signal?: AbortSignal) => Promise<ForgeRefCardData>;
+
+/** A Bitbucket reader's failure as a card error. */
+export function bitbucketRefErrorOf(error: unknown): ForgeRefCardError {
+  const status = typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : 0;
+  if (status === 401) return "signed_out";
+  if (status === 403 || status === 404) return "not_found";
+  if (status === 429) return "rate_limited";
+  return "unavailable";
+}
 
 export function createRefCards(options: {
   /** How `gh` / `glab` run (Bun: `refCliRunner` in packages/server; Node: `nodeRefCliRunner`). */
   run: RefRunner;
+  /** Bitbucket Cloud pull requests (absent: they answer `unsupported`). */
+  bitbucket?: BitbucketRefReader;
+  /**
+   * A Bitbucket read is given up on after this (default `REF_TIMEOUT_MS`, a CLI's limit): its requests are aborted, its
+   * slot is given back and the card says it couldn't load. Tests pass a short one.
+   */
+  bitbucketTimeoutMs?: number;
   now?: () => number;
   /** Avatar URL → data URI (default: `fetchAvatarDataUri`). */
   avatar?: (url: string) => Promise<string | null>;
-}): RefCards & { sizes(): RefCardsSizes } {
+}): RefCards & { sizes(): RefCardsSizes; cached(key: string): ForgeRefCardData | null } {
   const run = options.run;
   const now = options.now ?? Date.now;
   const avatarOf = options.avatar ?? fetchAvatarDataUri;
@@ -454,22 +628,9 @@ export function createRefCards(options: {
   const rateLimitedUntil = new Map<string, number>();
   /** A stale answer whose refresh failed: not asked again before this. */
   const retryAt = new Map<string, number>();
-  let running = 0;
-  const waiting: (() => void)[] = [];
-
-  const slot = async <T>(job: () => Promise<T>): Promise<T> => {
-    if (running >= REF_MAX_CONCURRENT) {
-      if (waiting.length >= REF_MAX_WAITING) throw QUEUE_FULL;
-      await new Promise<void>((r) => waiting.push(r));
-    } else running++;
-    try {
-      return await job();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else running--;
-    }
-  };
+  // At most REF_MAX_CONCURRENT CLIs; never stuck (createRefSlots): a full or stalled queue answers at once.
+  const slots = createRefSlots(REF_MAX_CONCURRENT, { maxWaiting: REF_MAX_WAITING });
+  const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
   const dropAvatar = (_url: string, entry: { bytes: number }) => {
     avatarBytes -= entry.bytes;
@@ -524,43 +685,97 @@ export function createRefCards(options: {
    * that). No host at all (the CLI failed, timed out, or is signed in nowhere) is kept only for
    * REF_FAILURE_MS, so one slow `auth status` does not hide enterprise hosts for minutes.
    */
-  const authHosts = new Map<RefCli, { at: number; ttl: number; hosts: Promise<Set<string>> }>();
-  const signedInHosts = (cli: RefCli): Promise<Set<string>> => {
+  const authHosts = new Map<RefCli, { at: number; ttl: number; hosts: Promise<CliHosts> }>();
+  const cliHosts = (cli: RefCli): Promise<CliHosts> => {
     const hit = authHosts.get(cli);
     if (hit && now() - hit.at < hit.ttl) return hit.hosts;
-    const hosts = readSignedInHosts(run, cli).catch(() => new Set<string>());
+    const hosts = readCliHosts(run, cli).catch((): CliHosts => ({ signedIn: new Set(), configured: new Set(), missing: false }));
     const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, hosts };
     authHosts.set(cli, entry);
-    void hosts.then((set) => {
-      if (set.size === 0) entry.ttl = REF_FAILURE_MS;
+    void hosts.then((found) => {
+      if (found.signedIn.size === 0) entry.ttl = REF_FAILURE_MS;
     });
     return hosts;
   };
-  /** github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it. */
+  const signedInHosts = async (cli: RefCli): Promise<Set<string>> => (await cliHosts(cli)).signedIn;
+  /**
+   * github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it.
+   * Bitbucket Cloud pull requests when the host passed a reader.
+   */
   const fetchesFrom = async (ref: ForgeRef): Promise<boolean> => {
-    if (ref.host === (ref.platform === "github" ? "github.com" : "gitlab.com")) return true;
-    return (await signedInHosts(ref.platform === "github" ? "gh" : "glab")).has(ref.host);
+    if (ref.platform === "bitbucket") return !!options.bitbucket && ref.host === "bitbucket.org" && ref.kind === "pull";
+    if (forgeHostTrusted(ref, new Set())) return true;
+    return forgeHostTrusted(ref, await signedInHosts(ref.platform === "github" ? "gh" : "glab"));
   };
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });
+  const tools = createToolStatus({ run, now });
+  const diags = new WeakMap<ForgeRefCardResult, ProblemDiag>();
+  /**
+   * A failed run as a card: the older error code (what every window reads) and the problem in the one table's words.
+   * The status check's cached answer refines it (no login for that host, not installed) without waiting; a check not
+   * cached yet starts behind, for the next read.
+   */
+  const failRun = (error: ForgeRefCardError, ref: ForgeRef, result: RefCommandResult, startedAt: number, forced?: ToolState): ForgeRefCardResult => {
+    const cli = ref.platform === "github" ? "gh" : "glab";
+    let state = forced ?? toolStateOfRun(cli, result);
+    if (state === "refused" || state === "timed_out" || state === "failed") {
+      const auth = tools.peek(cli, ref.host);
+      if (auth === undefined) void tools.check(cli, ref.host);
+      else if (auth === "missing" || auth === "signed_out") state = auth;
+    }
+    const problem = toolProblem(state, { cli, host: ref.host, kind: ref.kind, url: refPageUrl(ref), trusted: true, envToken: state === "signed_out" ? tokenEnvFor(cli, ref.host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(now()));
+    // Older windows read `error` only: a sign-in found later (a refused token) says so there too.
+    const card: ForgeRefCardResult = { ok: false, error: state === "signed_out" || state === "missing" ? cardErrorOfToolState(state) : error, problem, fetchedAt: now() };
+    diags.set(card, toolDiagOf(result, now() - startedAt));
+    return card;
+  };
+
+  const bitbucketTimeoutMs = options.bitbucketTimeoutMs ?? REF_TIMEOUT_MS;
+  const fetchBitbucket = async (ref: ForgeRef, read: BitbucketRefReader): Promise<ForgeRefCardResult> => {
+    // The same limit as a CLI's: past it the requests are aborted and the slot is free again. The race also covers a
+    // wait the signal cannot stop (a token command still running answers its later reads from its own cache).
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("Bitbucket did not answer in time"));
+        controller.abort();
+      }, bitbucketTimeoutMs);
+    });
+    try {
+      const data = await Promise.race([read({ workspace: ref.owner, repo: ref.repo, number: ref.number }, controller.signal), late]).finally(() => clearTimeout(timer));
+      await inlineAvatars(data);
+      return { ok: true, data, fetchedAt: now() };
+    } catch (error) {
+      const code = bitbucketRefErrorOf(error);
+      if (code === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
+      return fail(code);
+    }
+  };
 
   const fetchOnce = async (ref: ForgeRef): Promise<ForgeRefCardResult> => {
-    if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) return fail("rate_limited");
+    if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) {
+      return ref.platform === "bitbucket" ? fail("rate_limited") : failRun("rate_limited", ref, { stdout: "", stderr: "", exitCode: 1 }, now(), "rate_limited");
+    }
+    if (ref.platform === "bitbucket") return options.bitbucket ? fetchBitbucket(ref, options.bitbucket) : fail("unsupported");
     const { cli, args } = queryArgs(ref);
+    const startedAt = now();
     const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
     const known = accountFor.get(repoKey);
     if (known) touch(accountFor, repoKey, known);
     const tries: (Record<string, string> | undefined)[] = [known];
+    let last: RefCommandResult = { stdout: "", stderr: "", exitCode: 1 };
     for (let i = 0; i < tries.length; i++) {
       const result = await run(cli, args, tries[i]);
       if (result.exitCode === 0) {
         const data = ref.platform === "github" ? parseGithubRefAnswer(result.stdout) : parseGitlabRefAnswer(result.stdout, ref.host, ref.kind);
-        if (data === "not_found") return fail("not_found");
+        if (data === "not_found") return failRun("not_found", ref, result, startedAt, "refused");
         if (!data) {
           // GraphQL errors come back with exit 0 from some CLIs: read them like stderr.
           const error = refErrorOf(cli, { ...result, exitCode: 1 });
           if (error === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
-          return fail(error === "refused" ? "not_found" : error);
+          return failRun(error === "refused" ? "not_found" : error, ref, { ...result, exitCode: 1 }, startedAt);
         }
         if (tries[i]) remember(accountFor, repoKey, tries[i]!, REF_REPO_ACCOUNTS_MAX);
         await inlineAvatars(data);
@@ -568,8 +783,9 @@ export function createRefCards(options: {
       }
       const error = refErrorOf(cli, result);
       if (error === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
-      if (error !== "refused") return fail(error);
-      if (ref.platform !== "github") return fail("not_found");
+      last = result;
+      if (error !== "refused") return failRun(error, ref, result, startedAt);
+      if (ref.platform !== "github") return failRun("not_found", ref, result, startedAt);
       // The first refusal: try each other signed-in account once.
       if (i === 0) {
         accountFor.delete(repoKey);
@@ -577,7 +793,7 @@ export function createRefCards(options: {
         tries.push(...(await otherGithubAccounts(ref.host)));
       }
     }
-    return fail("not_found");
+    return failRun("not_found", ref, last, startedAt);
   };
 
   /**
@@ -601,12 +817,12 @@ export function createRefCards(options: {
     const inFlight = pending.get(key);
     if (inFlight) return inFlight;
     const job = slot(() => fetchOnce(ref))
-      .catch((error): ForgeRefCardResult | typeof QUEUE_FULL => (error === QUEUE_FULL ? QUEUE_FULL : fail("unavailable")))
+      .catch((error): ForgeRefCardResult | typeof REF_SLOT_BUSY => (error === REF_SLOT_BUSY ? REF_SLOT_BUSY : fail("unavailable")))
       .then((result) => {
         const prev = cache.get(key);
         const prevShowable = prev?.ok === true && now() - prev.fetchedAt < REF_STALE_MAX_MS;
         // Too many lookups waiting: answer at once and keep nothing, so the next hover asks again.
-        if (result === QUEUE_FULL) return prevShowable ? prev! : fail("unavailable");
+        if (result === REF_SLOT_BUSY) return prevShowable ? prev! : fail("unavailable");
         prune();
         // A failure never replaces an answer still worth showing; it only holds off the next refresh.
         if (!result.ok && prevShowable) {
@@ -623,12 +839,33 @@ export function createRefCards(options: {
   };
 
   return {
-    async get(href) {
+    tools,
+    diagOf: (result) => diags.get(result),
+    async get(href, { retry = false } = {}) {
       const ref = parseForgeRefUrl(href);
       if (!ref) return null;
-      if (!(await fetchesFrom(ref))) return fail("unsupported");
+      // Try again after signing in or installing: what the CLI said about its hosts, and its status check for this
+      // host, are read again now, not after their cache period.
+      if (retry && ref.platform !== "bitbucket") {
+        const cli = ref.platform === "github" ? "gh" : "glab";
+        authHosts.delete(cli);
+        tools.forget(cli, ref.host);
+      }
+      if (!(await fetchesFrom(ref))) {
+        // Not installed says so on any host (its words name no host); otherwise nothing runs for a host the CLI does not read.
+        if (ref.platform !== "bitbucket" && (await cliHosts(ref.platform === "github" ? "gh" : "glab")).missing) {
+          const problem = toolProblem("missing", { cli: ref.platform === "github" ? "gh" : "glab", host: ref.host, kind: ref.kind }, new Date(now()));
+          return { ok: false, error: "cli_missing", problem, fetchedAt: now() };
+        }
+        return fail("unsupported");
+      }
       const key = forgeRefKey(ref);
       const hit = cache.get(key);
+      // Try again: a failure still being held is asked again now (one person's click; hovers never pass it).
+      if (hit && retry && !hit.ok) {
+        cache.delete(key);
+        return refresh(key, ref);
+      }
       if (hit) {
         touch(cache, key, hit);
         const age = now() - hit.fetchedAt;
@@ -640,6 +877,11 @@ export function createRefCards(options: {
       }
       return refresh(key, ref);
     },
+    /** The card a read already holds for a `forgeRefKey`, still showable; never fetches. */
+    cached(key) {
+      const hit = cache.get(key);
+      return hit?.ok && now() - hit.fetchedAt < REF_STALE_MAX_MS ? hit.data : null;
+    },
     sizes() {
       return {
         refs: cache.size,
@@ -648,7 +890,7 @@ export function createRefCards(options: {
         rateLimitedHosts: rateLimitedUntil.size,
         avatars: avatars.size,
         avatarBytes,
-        waiting: waiting.length,
+        waiting: slots.waiting(),
       };
     },
   };

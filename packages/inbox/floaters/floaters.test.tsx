@@ -11,7 +11,8 @@
  *   takes no Escape, and this is Ask's window); the bin working while a Send is on its way;
  * - Ask's return arrow pressable with nothing to ask, or not turning into Stop while an answer runs;
  * - a draft floating while "Float reply drafts" is off (the default, the owner 2026-11-08), or a draft that floated
- *   before staying in the corner once it is known to be off; no Ask row in the corner.
+ *   before staying in the corner once it is known to be off; no Ask row in the drafts' corner (the minimized chat is
+ *   Ask's own circle in the window's corner, ask/sideCorner.test.tsx).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -176,7 +177,7 @@ async function until(check: () => boolean, what: string, ms = 3000) {
 
 function fakeAsk(over: Partial<import('../ask/useInboxAsk').AskCorner> = {}): import('../ask/useInboxAsk').AskCorner {
   const store = new ChatWindowStore();
-  return { on: true, threadId: null, hasChat: false, unseen: false, host: 'claude-code', subject: null, minimized: true, store, open: () => {}, minimize: () => {}, ...over };
+  return { on: true, threadId: null, hasChat: false, unseen: false, answering: false, host: 'claude-code', subject: null, minimized: true, circle: false, store, open: () => {}, minimize: () => {}, ...over };
 }
 
 let setThreadId: (id: string | null) => void = () => {};
@@ -379,15 +380,44 @@ function typeInto(el: HTMLTextAreaElement, value: string) {
   });
 }
 
-async function openFloating(id: string, words: string, files: InboxReplyDraft['files'] = []) {
+async function openFloating(id: string, words: string, files: InboxReplyDraft['files'] = [], ask = fakeAsk()) {
   fake.threads.set(id, thread(id));
   fake.drafts.set(id, { ...draft(id, words), files });
   mods.floatThread(id, Date.now() - 10_000);
-  await act(async () => root!.render(<Harness start={null} rows={[row(id)]} ask={fakeAsk()} />));
+  await act(async () => root!.render(<Harness start={null} rows={[row(id)]} ask={ask} />));
   await until(() => card(id) !== null, 'the corner');
   act(() => card(id)!.click());
   await until(() => field(id)?.value === words, 'the words in the window');
 }
+
+/** The draft's window: its offsets from the viewport's right and bottom, as ChatFrame places it. */
+function windowAt(id: string) {
+  const win = box(id)!.closest<HTMLElement>('[data-chat-window]') ?? box(id)!;
+  return { right: win.style.right, bottom: win.style.bottom };
+}
+
+test("a draft's window rests clear of the minimized chat's circle, and above it if moved onto it", async () => {
+  if (!hasDom) return;
+  // The circle shows (a thread's chat minimized): the window opens lifted clear of the circle's 44 px corner box.
+  const circle = fakeAsk({ threadId: 'thr_x', hasChat: true, minimized: true, circle: true });
+  await openFloating('thr_a', 'Key the retry on invoice_id alone', [], circle);
+  expect(windowAt('thr_a')).toEqual({ right: '16px', bottom: '52px' });
+  expect(document.querySelector('[data-rf-layer]')!.hasAttribute('data-rf-over-circle')).toBe(true);
+  // No circle: the plain corner, and Ask's layer stays above.
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
+  await until(() => box('thr_a') === null, 'the window minimized');
+  const plain = fakeAsk();
+  await act(async () => root!.render(<Harness start={null} rows={[row('thr_a')]} ask={plain} />));
+  await until(() => card('thr_a') !== null, 'the corner');
+  act(() => card('thr_a')!.click());
+  await until(() => box('thr_a') !== null, 'the window again');
+  expect(windowAt('thr_a')).toEqual({ right: '16px', bottom: '16px' });
+  expect(document.querySelector('[data-rf-layer]')!.hasAttribute('data-rf-over-circle')).toBe(false);
+  // The circle comes while the window rests on the corner (another thread's chat minimized): the window moves up.
+  await act(async () => root!.render(<Harness start={null} rows={[row('thr_a')]} ask={{ ...plain, threadId: 'thr_x', hasChat: true, circle: true }} />));
+  await until(() => windowAt('thr_a').bottom === '52px', 'the window lifted');
+  expect(windowAt('thr_a').right).toBe('16px');
+});
 
 test('Discard while a file still uploads: the upload stops and no draft comes back', async () => {
   if (!hasDom) return;
@@ -532,7 +562,8 @@ test('"Float reply drafts" off (the default): typing and leaving floats nothing,
   expect(floating()).toEqual([]);
   expect(document.querySelector('[data-rf-card][data-kind="draft"]')).toBeNull();
   expect(document.querySelector('[data-rf-box]')).toBeNull();
-  // Ask minimized has no row in the corner: nothing is there.
+  // The drafts' corner has no Ask row: a minimized chat is the circle in the window's corner, which Ask draws itself
+  // (ask/SideChatCorner.tsx, the owner's decision of 2026-11-20; proved in ask/sideCorner.test.tsx), never a row here.
   expect(document.querySelectorAll('[data-rf-card], [data-rf-corner]').length).toBe(0);
   // Turned on (0.28.54's behaviour): typing and leaving floats again.
   act(() => setFloatDrafts(true));

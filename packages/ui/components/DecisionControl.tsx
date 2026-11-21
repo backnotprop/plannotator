@@ -77,6 +77,9 @@ export interface DecisionControlProps {
    */
   drafts?: Record<string, string>;
   onDraftsChange?: (drafts: Record<string, string>) => void;
+  /** Bumped by the host's Mod+Shift+Enter: opens the first note composer
+   *  (e.g. "Send with a note") so a note needs no mouse. */
+  openNoteRequest?: number;
 }
 
 const NOTE_MAX_HEIGHT_PX = 144;
@@ -287,6 +290,7 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
   menuFooter,
   drafts: hostDrafts,
   onDraftsChange,
+  openNoteRequest,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -408,6 +412,18 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
     closePopover();
     handlers[item.id]?.();
   }, [closePopover, handlers]);
+
+  // Starts at the value seen at mount: a control mounted after a request (a
+  // layout switch remounts the header's) must not take it as a new one.
+  const handledNoteRequest = useRef(openNoteRequest);
+  useEffect(() => {
+    if (openNoteRequest === handledNoteRequest.current) return;
+    handledNoteRequest.current = openNoteRequest;
+    if (!openNoteRequest || busy) return;
+    const item = spec.items.find((candidate) => candidate.composer && !candidate.muted);
+    if (item) selectItem(item);
+    // Only a new request opens the composer, never a spec or busy change.
+  }, [openNoteRequest]);
 
   const submitComposer = useCallback(() => {
     if (!activeItem) return;

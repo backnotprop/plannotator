@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useState, type ReactNode } from 'react';
 import {
   INBOX_AGENT_LABELS,
   inboxToolCostText,
@@ -15,10 +15,20 @@ import { CURSOR_RULES_PLACE, noteCopiedByHand, noteWithoutMarkers } from '../age
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { LaunchSettingsFile } from './LaunchSettingsFile';
+import { T3AgentGroup } from './T3AgentGroup';
 import { CommandLine, CopyCommand, Fold, OpenCodeQuiet, OpenCodeWords, openCodeCommand, ReloadCopy, ReloadLead, type ReloadSpec } from './RestartNote';
 import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
 import { codexAccountLine } from '../codexAccount';
+import { hostLabel } from '../compose/model';
+import { launchStartIn } from '../data/actions/launchStartIn';
+import { INBOX_REX_SERVER_AWAY_SETTINGS, INBOX_REX_SHARED_AGAIN } from '@plannotator/core/inbox-run-line';
+
+/** The agents New message starts, as Settings names them in "Start new agents in". */
+const REX_LAUNCH_AGENTS = ['claude-code', 'pi', 'codex', 'opencode'];
+/** "Claude Code and Pi", "Codex, OpenCode and Pi". */
+const listWords = (names: readonly string[]) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 
 /** Whether any host has an open session that needs a restart or an update: Settings' Agents dot. */
 export function agentsNeedRestart(model: InboxAgentsModel | null | undefined): boolean {
@@ -247,10 +257,19 @@ function viaOf(row: InboxAgentRow): string {
   return 'connected yourself';
 }
 
+/** Words a group's head and its "Your replies" row share with the T3 Code group (T3AgentGroup.tsx). */
+export const agentWords = {
+  connected: 'Connected',
+  notConnected: 'Not connected',
+  replies: 'Your replies',
+  repliesWake: 'arrive as a new turn',
+  repliesCheck: "seen when it checks the Inbox; it can't be woken",
+} as const;
+
 function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad' } {
   switch (row.reach.state) {
     case 'connected':
-      return { text: 'Connected', tone: 'on' };
+      return { text: agentWords.connected, tone: 'on' };
     case 'removed':
       return { text: 'Removed outside Plannotator', tone: 'bad' };
     case 'elsewhere':
@@ -262,7 +281,7 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
     case 'manual':
       return { text: 'Connect yourself', tone: 'off' };
     case 'not_connected':
-      return { text: 'Not connected', tone: 'off' };
+      return { text: agentWords.notConnected, tone: 'off' };
     default:
       return { text: 'Off', tone: 'off' };
   }
@@ -280,17 +299,18 @@ export function repliesOf(row: InboxAgentRow): { text: string; wakes: boolean } 
   if (row.reach.kind === 'tool') {
     if (row.tool?.mod_off) return null;
     if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
-    return { text: 'arrive as a new turn', wakes: true };
+    return { text: agentWords.repliesWake, wakes: true };
   }
   // Codex: the Inbox wakes it itself (`codex queue`) when it found a Codex that can (the server's `wakes`).
-  if (row.reach.kind === 'mcp' && row.wakes === true) return { text: 'arrive as a new turn', wakes: true };
-  if (row.reach.kind === 'mcp') return { text: "seen when it checks the Inbox; it can't be woken", wakes: false };
+  if (row.reach.kind === 'mcp' && row.wakes === true) return { text: agentWords.repliesWake, wakes: true };
+  if (row.reach.kind === 'mcp') return { text: agentWords.repliesCheck, wakes: false };
   return null;
 }
 
 /** Agents whose instructions live in their own settings, not a file. */
 const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
   kiro: 'Kiro CLI has no global instructions file, so there is no file to add a note to.',
+  muse: "Muse Code's user rules file has no documented place, so there is no file to add a note to.",
 };
 
 /**
@@ -310,7 +330,7 @@ export const offWords = {
 
 type OffKind = 'reach' | 'tool' | 'reminder' | 'note';
 
-function Row({
+export function Row({
   k,
   v,
   r,
@@ -419,7 +439,7 @@ function AgentGroup({
   // computer"), and only once that is known and settled: never in, then out.
   const offLine = (kind: OffKind, text: string) => (row.detected === true && !settling ? { kind, text } : null);
   // DeepSeek Harness decides once, when it starts (its plugin), never per session.
-  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : `${row.label}'s next session`;
+  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : row.id === 'openclaw' ? "OpenClaw's next message" : `${row.label}'s next session`;
   const reach = row.reach;
   const reachValue =
     reach.kind === 'tool' ? (
@@ -522,7 +542,7 @@ function AgentGroup({
           ) : null
         }
       />
-      {replies && <Row k="Your replies" v={replies.text} data={{ 'data-agent-replies': replies.wakes ? 'wake' : 'check' }} />}
+      {replies && <Row k={agentWords.replies} v={replies.text} data={{ 'data-agent-replies': replies.wakes ? 'wake' : 'check' }} />}
       {row.tool && reach.kind !== 'tool' && (
         <Row
           k="The Inbox tool"
@@ -632,7 +652,8 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
+  // `rex_here` (and `rex_shared` with it) comes only from this pane's own read (the window's settings model never asks Rex): kept across the model's changes.
+  useEffect(() => setLaunchState((was) => (launch ? { ...launch, rex_here: was?.rex_here, rex_shared: was?.rex_shared } : null)), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
   // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
     if (!launch) return;
@@ -645,6 +666,8 @@ export function AgentsSettings({
       live = false;
     };
   }, [launch?.enabled]);
+  /** A save's answer: it never asks Rex (`rex_here` absent), so the pane keeps what its own read said. */
+  const takeLaunch = (next: InboxLaunchSettings) => setLaunchState((was) => (next.rex_here !== undefined ? next : { ...next, rex_here: was?.rex_here, rex_shared: was?.rex_shared }));
   // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
   const toggleEnabled = async () => {
     if (!launchState || launchBusy) return;
@@ -652,7 +675,7 @@ export function AgentsSettings({
     setError(null);
     try {
       const next = (await inboxApi.launchEnabled(!launchState.enabled)).launch;
-      setLaunchState(next);
+      takeLaunch(next);
       // Turned on: the full-permissions row as a launch would start now (the login shell, read once it was on).
       if (next.enabled) {
         void inboxApi
@@ -666,16 +689,62 @@ export function AgentsSettings({
       setLaunchBusy(false);
     }
   };
+  // "Start new agents in" (`inboxLaunch.startIn`): in the background, or Rex. Rex is offered while it is on that
+  // computer (`rex_here`: a Mac's app attached there; on Linux or FreeBSD, `rex_headless`, this account's own Rex
+  // server answering), or while it is the choice (so it can be turned back); the agents that can't run in Rex say so.
+  const pickStartIn = async (next: 'inbox' | 'rex') => {
+    if (!launchState || launchBusy || launchState.start_in === next) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      takeLaunch((await launchStartIn(next)).launch);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const inRex = launchState?.start_in === 'rex';
+  const rexNames = (launchState?.rex_agents ?? []).map(hostLabel);
+  const notRexNames = REX_LAUNCH_AGENTS.filter((id) => !(launchState?.rex_agents ?? []).includes(id)).map(hostLabel);
+  const startInRow =
+    launchState?.enabled && rexNames.length > 0 && (launchState.rex_here || inRex) ? (
+      <Row
+        k="Start new agents in"
+        v={
+          <span className="ib-seg" role="group" aria-label="Start new agents in">
+            {(['inbox', 'rex'] as const).map((where) => (
+              <button key={where} type="button" className="ib-seg-o" aria-pressed={(launchState.start_in ?? 'inbox') === where} data-on={(launchState.start_in ?? 'inbox') === where ? '' : undefined} disabled={launchBusy} onClick={() => void pickStartIn(where)} data-launch-start-in={where}>
+                {where === 'inbox' ? 'In the background' : 'Rex'}
+              </button>
+            ))}
+          </span>
+        }
+        sub={
+          <>
+            In Rex, each new agent runs in its own tab of a Rex session for its project, and keeps running there after the Inbox closes. {listWords(rexNames)} can start in Rex
+            {notRexNames.length > 0 ? `; ${listWords(notRexNames)} always ${notRexNames.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
+            {inRex && launchState.rex_here === false && (
+              <span className="block" data-launch-rex-away="">
+                {launchState.rex_shared ? INBOX_REX_SHARED_AGAIN : launchState.rex_headless ? INBOX_REX_SERVER_AWAY_SETTINGS : "Rex isn't open on this computer now, so new agents start in the background until it is."}
+              </span>
+            )}
+          </>
+        }
+        data={{ 'data-launch-start-in-row': launchState.start_in ?? 'inbox' }}
+      />
+    ) : null;
   // Windows (`unsupported`): no switch; launch there is config.json only.
   const enabledRow = launchState && !launchState.unsupported ? (
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
       <Row
         k="Start agents from New message"
-        v="Claude Code, Codex and Pi"
-        sub="New message can start Claude Code, Codex or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        v="Claude Code, Codex, OpenCode and Pi"
+        sub="New message can start Claude Code, Codex, OpenCode or Pi in a folder you pick. Turn off to only message sessions that are already running."
         data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
         r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
       />
+      {startInRow}
     </div>
   ) : null;
   const toggleFull = async () => {
@@ -683,7 +752,7 @@ export function AgentsSettings({
     setLaunchBusy(true);
     setError(null);
     try {
-      setLaunchState((await inboxApi.launchSettings(!launchState.full_permissions)).launch);
+      takeLaunch((await inboxApi.launchSettings(!launchState.full_permissions)).launch);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -725,7 +794,7 @@ export function AgentsSettings({
     setLaunchBusy(true);
     setError(null);
     try {
-      setLaunchState((await inboxApi.launchScratchDir(scratchEdit.trim() || null)).launch);
+      takeLaunch((await inboxApi.launchScratchDir(scratchEdit.trim() || null)).launch);
       setScratchEdit(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -793,6 +862,8 @@ export function AgentsSettings({
   const shown = model.agents.filter((row) => row.detected || row.tool);
   const detected = model.agents.filter((row) => row.detected);
   const undetected = model.agents.filter((row) => !row.detected && !row.tool);
+  // T3 Code runs Claude and Codex threads: its group follows theirs.
+  const t3After = (shown.find((row) => row.id === 'codex') ?? shown.find((row) => row.id === 'claude-code'))?.id;
 
   const change = async (agent: InboxAgentId, input: Change) => {
     if (busy.has(agent)) return;
@@ -849,18 +920,20 @@ export function AgentsSettings({
       <div className="ib-agents">
         {enabledRow}
         {shown.map((row) => (
+          <Fragment key={row.id}>
           <AgentGroup
-            key={row.id}
             row={row}
             noteText={model.note_text}
             pending={pending}
             busy={busy.has(row.id)}
             settling={model.connecting}
             onChange={(input) => void change(row.id, input)}
-            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{launchState?.enabled && <LaunchSettingsFile launch={launchState} busy={launchBusy} onLaunch={takeLaunch} onError={setError} />}{scratchRow}</> } : {})}
             {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
+          {row.id === t3After && model.t3 && <T3AgentGroup t3={model.t3} />}
+          </Fragment>
         ))}
         {detected.length === 0 && (
           <div className="ib-agrow ib-agna">

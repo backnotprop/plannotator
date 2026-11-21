@@ -4,10 +4,12 @@
  * and the feedback text a Send carries after the picks.
  */
 
-import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
+import { indexQuestionBlocks, type IndexedQuestion } from '@plannotator/core/question-block';
 import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
+import { htmlBlockAnchorLines, parseHtmlBlockAnchor } from '@plannotator/core/html-block-anchor';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
 import { cutText, sliceText } from '@plannotator/core/inbox-questions';
 import {
@@ -19,9 +21,11 @@ import {
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
+import type { FitAxis } from '@plannotator/ui/components/imageZoom';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
-import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
+import { additionalTargetsExportBlock, diagramDocumentBlocks, elementContextExportBlock, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
+import { pictureLines, withPictureFiles } from './commentPictureFiles';
 import type { PrototypeNames } from './prototypes';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
@@ -138,6 +142,16 @@ export function annotationQuote(annotation: Annotation): string {
   return annotation.originalText ?? '';
 }
 
+/**
+ * The words of a comment on an element of a live html block: the element's text, or its label when it has no
+ * text (a chart's bar). The page's bridge writes such a label as `[element: Pro, W3]`; here it reads "Pro, W3".
+ */
+export function htmlBlockQuote(annotation: Pick<Annotation, 'originalText'>): string {
+  const words = annotation.originalText ?? '';
+  const label = /^\[element: ([^\]]*)\]$/.exec(words.trim());
+  return label ? label[1]!.trim() || words : words;
+}
+
 /** A file's path as the agent knows it: an image in a message's text by its src as written; an attached file relative to its project when inside it, else the absolute path it attached. */
 export function attachmentLabel(attachment: Pick<InboxAttachmentState, 'path' | 'name' | 'ref'>, projectRoot: string): string {
   if (attachment.ref !== undefined) return attachment.ref;
@@ -168,6 +182,17 @@ export function attachmentPageUrl(attachment: Pick<InboxAttachmentState, 'id'>, 
 
 /** Wider than this width-to-height ratio, an image is a panorama: the gallery crops it from the left, the viewer scrolls it sideways. */
 export const WIDE_IMAGE_RATIO = 4;
+
+/**
+ * How Fit fits an image of this size, in the viewer and in the swipe's neighbour picture alike (one rule, so a
+ * picture never slides in at one Fit and snaps to another): a panorama keeps a readable height (read from the left),
+ * except on a phone, where it fits whole (its height there would crop most of it off the right; a pinch reads it
+ * closer); a tall screenshot (taller than twice its width) fits its width (read from the top); anything else fits whole.
+ */
+export function imageFitAxis(natural: { width: number; height: number }, phone: boolean): FitAxis {
+  if (natural.width > natural.height * WIDE_IMAGE_RATIO) return phone ? 'contain' : 'height';
+  return natural.height > natural.width * 2 ? 'width' : 'contain';
+}
 
 /**
  * Whether an image fits in a `box`-pixel square at its own size, by the size
@@ -219,6 +244,24 @@ export function codeHash(text: string): string {
 export function codeRangeMatches(range: InboxCodeRange, lines: string): boolean {
   if (range.hash !== undefined) return lines.length === range.length && codeHash(lines) === range.hash;
   return lines === range.code;
+}
+
+/**
+ * Where a kept line comment's lines are in the file now: where they were when they still read the same, else the
+ * nearest place they do (the file was edited above them), else null (they changed: the words wait, on nothing).
+ */
+export function relocateCodeRange(range: InboxCodeRange, text: string): { lineStart: number; lineEnd: number } | null {
+  const lines = text.split('\n');
+  const count = range.lineEnd - range.lineStart + 1;
+  const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
+  // Every start, nearest first: a file cut far shorter still finds lines that moved a long way up.
+  const reach = Math.max(range.lineStart, lines.length);
+  for (let distance = 0; distance <= reach; distance++) {
+    for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
+      if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
+    }
+  }
+  return null;
 }
 
 type CodeCommentAnnotation = Annotation & { inboxCode?: InboxCodeRange };
@@ -373,7 +416,13 @@ export function isGuideGlobalComment(record: InboxAnnotationRecord): boolean {
 export function recordTag(record: InboxAnnotationRecord): string | null {
   if (isGuideGlobalComment(record)) return 'global';
   if (record.guide) return lineRangeLabel(record.guide.line_start, record.guide.line_end);
-  // A comment on a message's words has no tag; one on a diagram part in the message names the part.
+  // A comment on a message's words has no tag; one on a diagram part in the message names the part, and one on an
+  // element of a live html block names the element ("HTML · rect").
+  if (record.message && annotationOf(record).htmlBlockAnchor != null) {
+    const tag = annotationTag(annotationOf(record));
+    // No-break spaces: the tag stays on one line in a narrow list (a phone), and the name beside it is cut instead.
+    return tag ? `HTML\u00a0·\u00a0${tag}` : 'HTML';
+  }
   if (record.message && annotationOf(record).diagramAnchor == null) return null;
   return annotationTag(annotationOf(record));
 }
@@ -381,6 +430,7 @@ export function recordTag(record: InboxAnnotationRecord): string | null {
 /** The quoted text a row shows: a guided-review comment's first commented line, else the annotation's quote. */
 export function recordQuote(record: InboxAnnotationRecord): string {
   const comment = guideCommentOf(record);
+  if (!comment && record.message && annotationOf(record).htmlBlockAnchor != null) return htmlBlockQuote(annotationOf(record));
   if (!comment) return annotationQuote(annotationOf(record));
   const lines = (comment.selectedText ?? comment.anchorText ?? comment.originalCode ?? '').split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
@@ -469,6 +519,7 @@ export function guideCommentSections(comments: readonly CodeAnnotation[]): strin
       const prefix = conventionalPrefix(comment);
       if (comment.text) output += `${prefix}${comment.text}\n`;
       else if (prefix) output += `${prefix.trimEnd()}\n`;
+      output += pictureLines(comment);
       output += '\n';
     }
   }
@@ -606,13 +657,86 @@ export const MESSAGE_FEEDBACK_HEADING = {
   intro: 'The following feedback is on the text of your messages in this thread, one section per message. Each quote is the words I selected (as shown on screen) in your message.',
   /** Added to the intro only when a comment is on a diagram part. */
   diagrams: 'A quote with a "Diagram" line under it is a part of a diagram in the message; its lines count from the top of the message.',
+  /** Added to the intro only when a comment is on an element of a live html block. */
+  htmlBlocks: 'A quote with an "HTML block" line under it is an element of an HTML block in the message; its lines count from the top of the message.',
 };
+
+/** Where a comment on an element of a live html block sits: "HTML block 2 in the message, lines 14–31". A malformed anchor prints none. */
+export function messageHtmlBlockLocation(annotation: Annotation): string | null {
+  const anchor = annotation.htmlBlockAnchor === undefined ? null : parseHtmlBlockAnchor(annotation.htmlBlockAnchor);
+  if (anchor === null) return null;
+  const lines = htmlBlockAnchorLines(anchor);
+  return `HTML block ${anchor.index} in the message${lines ? `, ${lines}` : ''}`;
+}
 
 /** A Delete on a message's words, as plan review's export words one ("Remove this", "I don't want this in the plan."). */
 export const MESSAGE_DELETION = {
   heading: 'Remove this',
   line: "I don't want this in your message.",
 };
+
+/**
+ * The person's notes on their OWN earlier messages (approval "inbox-annotate-own-and-questions", words approved
+ * "Yes, as written"): a section of their own, after the one on the agent's messages.
+ */
+export const OWN_MESSAGE_FEEDBACK = {
+  title: INBOX_OWN_MESSAGE_FEEDBACK_TITLE,
+  intro: 'The following are notes on what I wrote earlier in this thread, one section per message. Each quote is the words I selected in my own message.',
+  /** Each message's heading (after "## "): "Feedback on my message from 9:58 AM (msg_…)". */
+  label: (at: string, id: string) => `Feedback on my message${at ? ` from ${at}` : ''} (${id})`,
+  /** Each note's heading: `### 1. Note on: "…"`. */
+  entry: 'Note on',
+} as const;
+
+/** The person-facing name of a note on their own message in the reply box's list: "Your message, 9:58 AM". */
+export const OWN_MESSAGE_COMMENT_ROW = 'Your message,';
+
+/**
+ * The line under a comment on a question's words (approval "inbox-annotate-own-and-questions", words approved "Yes,
+ * as written"): which question it is in, and which choice when its words are a choice's.
+ */
+export const QUESTION_COMMENT_LINE = {
+  question: (number: number, prompt: string) => `In question ${number}: "${prompt}"`,
+  choice: (number: number, label: string) => `In question ${number}, choice "${label}":`,
+} as const;
+
+/** Text as a comparison key: no markup characters, no whitespace (a selection reads the rendered text). */
+function plainKey(text: string): string {
+  return text.replace(/[*_`~\\]/g, '').replace(/\s+/g, '');
+}
+
+/** One line of a question's own words, for the line under a comment: no markup, one line, cut. */
+function questionWords(text: string): string {
+  return cutText(text.replace(/[*_`~]/g, '').replace(/\s+/g, ' ').replace(/"/g, "'").trim(), 300);
+}
+
+/**
+ * Where a comment on a message's text sits when it is in a question (the whole card takes comments): its line,
+ * "In question 1: "<prompt>"", or "In question 1, choice "<label>":" when the words are one choice's (its label
+ * or description) and not the prompt's or its context's. Null when the comment is not in a question. The question
+ * is the one in the comment's block; when no block matches (the body was drawn otherwise), the one question whose
+ * words hold the comment's.
+ */
+export function questionCommentLine(annotation: Pick<Annotation, 'blockId' | 'originalText'>, body: string): string | null {
+  const words = plainKey(annotation.originalText ?? '');
+  if (words === '' || !body.includes(':::question')) return null;
+  let indexed: IndexedQuestion[];
+  try {
+    indexed = indexQuestionBlocks(parseMarkdownToBlocks(body, { frontmatter: false }), { decisionLines: false });
+  } catch {
+    return null;
+  }
+  const own = (q: IndexedQuestion) => plainKey(`${q.question.prompt} ${q.question.context ?? ''}`);
+  const choiceText = (c: IndexedQuestion['question']['choices'][number]) => plainKey(`${c.label} — ${c.description ?? ''}`);
+  const holds = (q: IndexedQuestion) => own(q).includes(words) || q.question.choices.some((c) => choiceText(c).includes(words));
+  const inBlock = indexed.find((q) => q.blockId === annotation.blockId);
+  const candidates = indexed.filter(holds);
+  const question = inBlock ?? (candidates.length === 1 ? candidates[0] : undefined);
+  if (!question) return null;
+  const choices = own(question).includes(words) ? [] : question.question.choices.filter((c) => choiceText(c).includes(words));
+  if (choices.length === 1) return QUESTION_COMMENT_LINE.choice(question.number, questionWords(choices[0]!.label));
+  return QUESTION_COMMENT_LINE.question(question.number, questionWords(question.question.prompt));
+}
 
 /** The location a comment on a diagram part prints: core's line on one line, as ui's export writes it. A malformed anchor prints none. */
 function messageDiagramLocation(annotation: Annotation): string | null {
@@ -635,25 +759,34 @@ export function messageFeedbackLabel(record: Pick<InboxAnnotationRecord, 'messag
  * several lines go in a fenced block no line of theirs can close
  * (`codeFenceFor`, as the guided-review export quotes code), so nothing in
  * them reads as a heading or leaves a fence open. A comment on a diagram part
- * has the part's label for its words, and its location line under them.
+ * has the part's label for its words, and its location line under them. A
+ * comment on an element of a live html block has the element's label for its
+ * words, then its block's location line and the element as Plannotator's
+ * export describes one on an attached page (`elementContextExportBlock`: the
+ * fenced outline, the selector and the identity lines), then the comment.
  */
-function messageCommentEntry(annotation: Annotation, number: number): string {
-  const words = annotation.originalText ?? '';
+function messageCommentEntry(annotation: Annotation, number: number, options: { entry?: string; question?: string | null } = {}): string {
+  const words = annotation.htmlBlockAnchor != null ? htmlBlockQuote(annotation) : (annotation.originalText ?? '');
   // A Delete on the words (approval "inbox-toolbar-delete"): plan review's "Remove this", and its "I don't want this" line.
   const deletion = annotation.type === AnnotationType.DELETION;
   const label = annotation.isQuickLabel && annotation.text ? `[${annotation.text}] ` : '';
   const multiline = /[\r\n]/.test(words);
-  let out = `### ${number}. ${label}${deletion ? MESSAGE_DELETION.heading : 'Feedback on'}${multiline ? ':' : `: "${words}"`}\n`;
+  let out = `### ${number}. ${label}${deletion ? MESSAGE_DELETION.heading : (options.entry ?? 'Feedback on')}${multiline ? ':' : `: "${words}"`}\n`;
   if (multiline) {
     const fence = codeFenceFor(words);
     out += `${fence}\n${words.replace(/\r\n?/g, '\n')}\n${fence}\n`;
   }
   const location = messageDiagramLocation(annotation);
   if (location !== null) out += `${location}\n\n`;
+  const htmlBlock = messageHtmlBlockLocation(annotation);
+  if (htmlBlock !== null) out += `${htmlBlock}\n${elementContextExportBlock(annotation, { includeRoute: false })}${additionalTargetsExportBlock(annotation)}\n`;
+  // A comment on a question's words: which question, and which choice (approval "inbox-annotate-own-and-questions").
+  if (options.question) out += `${options.question}\n`;
   // A label's words are its heading; its tip is quoted under it, as the main export writes it (#2626).
   if (annotation.isQuickLabel) out += quickLabelTipLine(annotation);
   else if (annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
   else if (deletion) out += `> ${MESSAGE_DELETION.line}\n`;
+  out += pictureLines(annotation);
   return `${out}\n`;
 }
 
@@ -669,7 +802,16 @@ function compareInMessage(a: Annotation, b: Annotation): number {
  * each comment quoting the words selected, then the comment. No line
  * numbers: the words are what find the place.
  */
-export function messageFeedback(records: readonly InboxAnnotationRecord[], time: (iso: string) => string = whenTime): string {
+export function messageFeedback(
+  records: readonly InboxAnnotationRecord[],
+  time: (iso: string) => string = whenTime,
+  options: {
+    /** The person's own messages: their notes go in a section of their own (approval "inbox-annotate-own-and-questions"). */
+    personMessageIds?: ReadonlySet<string>;
+    /** Each message's body by id: a comment on a question's words names the question (and the choice). */
+    bodies?: ReadonlyMap<string, string>;
+  } = {},
+): string {
   const messages = records.filter((record) => record.message);
   if (messages.length === 0) return '';
   const byMessage = new Map<string, { at: string; annotations: Annotation[] }>();
@@ -679,17 +821,37 @@ export function messageFeedback(records: readonly InboxAnnotationRecord[], time:
     byMessage.set(record.message_id, entry);
   }
   const ordered = [...byMessage].sort(([idA, a], [idB, b]) => a.at.localeCompare(b.at) || idA.localeCompare(idB));
-  const onDiagrams = ordered.some(([, entry]) => entry.annotations.some((annotation) => messageDiagramLocation(annotation) !== null));
-  let out = `# ${MESSAGE_FEEDBACK_HEADING.title}\n\n${MESSAGE_FEEDBACK_HEADING.intro}${onDiagrams ? ` ${MESSAGE_FEEDBACK_HEADING.diagrams}` : ''}\n\n`;
-  for (const [id, entry] of ordered) {
-    const list = [...entry.annotations].sort(compareInMessage);
-    out += `## ${messageFeedbackLabel({ message_id: id, message: { at: entry.at } }, time)}\n\n`;
-    out += `I've reviewed this message and have ${list.length} piece${list.length === 1 ? '' : 's'} of feedback:\n\n`;
-    list.forEach((annotation, index) => {
-      out += messageCommentEntry(annotation, index + 1);
-    });
+  const mine = (id: string) => options.personMessageIds?.has(id) === true;
+  const theirs = ordered.filter(([id]) => !mine(id));
+  const own = ordered.filter(([id]) => mine(id));
+  const sections: string[] = [];
+  if (theirs.length > 0) {
+    const onDiagrams = theirs.some(([, entry]) => entry.annotations.some((annotation) => messageDiagramLocation(annotation) !== null));
+    const onHtmlBlocks = theirs.some(([, entry]) => entry.annotations.some((annotation) => messageHtmlBlockLocation(annotation) !== null));
+    let out = `# ${MESSAGE_FEEDBACK_HEADING.title}\n\n${MESSAGE_FEEDBACK_HEADING.intro}${onDiagrams ? ` ${MESSAGE_FEEDBACK_HEADING.diagrams}` : ''}${onHtmlBlocks ? ` ${MESSAGE_FEEDBACK_HEADING.htmlBlocks}` : ''}\n\n`;
+    for (const [id, entry] of theirs) {
+      const list = [...entry.annotations].sort(compareInMessage);
+      const body = options.bodies?.get(id);
+      out += `## ${messageFeedbackLabel({ message_id: id, message: { at: entry.at } }, time)}\n\n`;
+      out += `I've reviewed this message and have ${list.length} piece${list.length === 1 ? '' : 's'} of feedback:\n\n`;
+      list.forEach((annotation, index) => {
+        out += messageCommentEntry(annotation, index + 1, { question: body === undefined ? null : questionCommentLine(annotation, body) });
+      });
+    }
+    sections.push(`${out}---`);
   }
-  return `${out}---`;
+  if (own.length > 0) {
+    let out = `# ${OWN_MESSAGE_FEEDBACK.title}\n\n${OWN_MESSAGE_FEEDBACK.intro}\n\n`;
+    for (const [id, entry] of own) {
+      const at = time(entry.at);
+      out += `## ${OWN_MESSAGE_FEEDBACK.label(at, id)}\n\n`;
+      [...entry.annotations].sort(compareInMessage).forEach((annotation, index) => {
+        out += messageCommentEntry(annotation, index + 1, { entry: OWN_MESSAGE_FEEDBACK.entry });
+      });
+    }
+    sections.push(`${out}---`);
+  }
+  return sections.join('\n\n');
 }
 
 export const ATTACHMENT_FEEDBACK_HEADING = {
@@ -732,6 +894,8 @@ export function attachmentFeedback(
   /** The person's own messages (their images are named "image in my … message"). */
   options: {
     personMessageIds?: ReadonlySet<string>;
+    /** Each message's body by id: a comment on a question's words names the question and the choice (`questionCommentLine`). */
+    messageBodies?: ReadonlyMap<string, string>;
     /**
      * The names of the agents a comment tags with `@` (approval "inbox-tag-agents"): the export marks
      * which comment carried a tag ("Tagged Pi"). Absent: tags are not named.
@@ -745,7 +909,7 @@ export function attachmentFeedback(
   } = {},
 ): string {
   if (records.length === 0) return '';
-  const messages = messageFeedback(records);
+  const messages = messageFeedback(records, whenTime, { personMessageIds: options.personMessageIds, bodies: options.messageBodies });
   let inlineImages = false;
   const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[]; video?: { durationMs?: number } }>();
   for (const record of records) {
@@ -760,7 +924,7 @@ export function attachmentFeedback(
       const group = groups.get(label) ?? { annotations: [], blocks: [] };
       groups.set(label, group);
       const { exportLocation: _dropped, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
-      group.annotations.push(annotation as Annotation);
+      group.annotations.push(withPictureFiles(annotation as Annotation));
       continue;
     }
     if (attachment.ref !== undefined) inlineImages = true;
@@ -784,7 +948,7 @@ export function attachmentFeedback(
     }
     // Never a client's `exportLocation` (a record from before the store dropped it): only the line computed below prints.
     const { exportLocation: _stored, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
-    group.annotations.push(annotation as Annotation);
+    group.annotations.push(withPictureFiles(annotation as Annotation));
   }
   for (const group of groups.values()) {
     const code = codeCommentBlocks(group.annotations);

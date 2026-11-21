@@ -13,8 +13,12 @@ function getWrappedMatchIndex(matchCount: number, currentIndex: number, directio
   return (currentIndex + direction + matchCount) % matchCount;
 }
 
-export function isTypingTarget(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
+export function eventOrigin(event: Event): EventTarget | null {
+  return event.composedPath?.()[0] ?? event.target;
+}
+
+export function isTypingTarget(source: Event | EventTarget | null): boolean {
+  const element = (source && 'composedPath' in source ? eventOrigin(source as Event) : source) as HTMLElement | null;
   if (!element) return false;
   const tagName = element.tagName;
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || element.isContentEditable;

@@ -33,7 +33,7 @@ import {
   readInboxPermissionBody,
   type InboxPermissionBody,
 } from '@plannotator/core/inbox-permission';
-import { inboxAgentName, type InboxMessageWire, type InboxQuestion, type InboxRun } from '@plannotator/core/inbox-types';
+import { inboxAgentName, inboxRunInRex, type InboxMessageWire, type InboxQuestion, type InboxRun } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
@@ -343,7 +343,6 @@ export function PermissionCard({
   followUp,
   terminal,
   fullUsed,
-  guest = false,
   machine = null,
   onChanged,
 }: {
@@ -362,8 +361,6 @@ export function PermissionCard({
   terminal: PermissionTerminal | null;
   /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
   fullUsed: boolean;
-  /** A tailnet guest's page (`tailnetGuest`): no Stop in the header, as the server answers it `owner_only`. */
-  guest?: boolean;
   /** Another machine's thread (remote launch): its Stop goes there, and Claude's own dialog is on that machine's screen. */
   machine?: { id: string; name: string } | null;
   onChanged: () => void | Promise<void>;
@@ -485,7 +482,7 @@ export function PermissionCard({
           {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}
         </span>
         <span className="pc-sp" />
-        {run && !guest && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (
+        {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (!inboxRunInRex(run) || run.rex?.stops) && (
           <button
             type="button"
             className="pc-stop"

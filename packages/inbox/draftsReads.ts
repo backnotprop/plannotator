@@ -58,6 +58,6 @@ export function replyDraftsDiffer(
 export function draftsReadOwed(batch: RecordBatch, holding: Iterable<string>): boolean {
   if (batch.any) return true;
   // An own pick save changes the thread's unsent work as any record of it does.
-  for (const threadId of holding) if (batch.threads.has(threadId) || batch.own.has(threadId)) return true;
+  for (const threadId of holding) if (batch.threads.has(threadId) || batch.applied.has(threadId) || batch.own.has(threadId)) return true;
   return false;
 }

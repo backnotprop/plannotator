@@ -28,6 +28,7 @@ import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-a
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
+import { T3_THREAD_ID_FORMS } from "../../../tests/helpers/fake-t3";
 import { INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { type CallCommandDeps, inboxCallerOf, parseCallCommand, runInboxCallCommand } from "./inbox-call-command";
 
@@ -75,6 +76,7 @@ function sandbox() {
     ...agents.env,
     HOME: join(root, "home"),
     TMPDIR: tmpdir(),
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: "0",
@@ -97,6 +99,7 @@ async function world() {
     binaryPath: null,
     board: true,
     steps: true,
+    scheduled: true,
     storeNow: () => new Date(Date.now() - clock.behind),
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: agentsHome, env: { HOME: agentsHome, PATH: "" } }),
     codexWake: { extraClis: [] },
@@ -214,7 +217,9 @@ describe("what a script gets", () => {
 
   test("an Inbox started without the test sandbox still reaches only a stub", async () => {
     const box = sandbox();
-    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...env } = box.env;
+    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...rest } = box.env;
+    // Without the sandbox marker only the test knob makes this scratch data dir count as turned on (turned-on.ts).
+    const env = { ...rest, PLANNOTATOR_TEST_INBOX_ON: "1" };
     const sent = await cli({ ...box, env }, ["send_message", '{"body":"From a Codex thread."}'], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
     const inbox = inboxEntryOf(box.dataDir);
     if (inbox) detached.push({ entry: inbox, root: box.root });
@@ -468,11 +473,16 @@ describe("who is calling", () => {
     expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD })).toBe("session_ambiguous");
     // The wake's own value settles it.
     expect(caller(`t3:${T3_THREAD}`, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" })).toEqual(t3);
-    // A thread T3 made through MCP, a delegated or a forked one is not a UUID: no T3 session, never a guess.
-    for (const id of [`mcp:${T3_THREAD}`, "thread:mcp:abc:1", `${T3_THREAD}:fork`, "not-a-uuid"]) {
+    // A launched, scheduled, delegated or provider thread is the thread too, from the variable and from the wake's value.
+    for (const id of Object.values(T3_THREAD_ID_FORMS)) {
+      expect(caller(null, { T3CODE_THREAD_ID: id, CLAUDECODE: "1" })).toEqual({ ...t3, session: id });
+      expect(caller(`t3:${id}`, { T3CODE_THREAD_ID: id, CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" })).toEqual({ ...t3, session: id });
+    }
+    // Nothing T3 would give a thread: no T3 session, never a guess.
+    for (const id of [`:${T3_THREAD}`, `${T3_THREAD} x`, "thread/../x"]) {
       expect(caller(null, { T3CODE_THREAD_ID: id, CLAUDECODE: "1" })).toBeNull();
     }
-    expect(caller("t3:not-a-uuid", {})).toBe("invalid_session");
+    expect(caller("t3:not a thread", {})).toBe("invalid_session");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.

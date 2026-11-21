@@ -72,6 +72,7 @@ import {
   UPDATE_PREPARE_FAILED,
 } from "./auto-update";
 import { listSessions as defaultListSessions, type SessionInfo } from "./sessions";
+import { syncSection } from "./inbox-perf";
 import { lastRunLog, stagingFailureIn, tlsFailureIn, type UpdateTlsFailure } from "./update-log";
 import { fetchReleaseImagesFor, storedReleaseImageSources } from "./inbox-whats-new-images";
 import {
@@ -202,6 +203,12 @@ export interface InboxUpdatesOptions {
   /** The fetch the release notes' images go through (inbox-whats-new-images.ts). Default: global fetch. */
   fetchImage?: typeof fetch;
   launchInstaller?: (launch: InstallerLaunch) => void;
+  /**
+   * Folders the installer gets after this process's PATH (the last login
+   * shell's, from the launcher), so an Inbox started without the person's
+   * shell setup still finds `claude` and nvm's `node` on Update now.
+   */
+  installerPath?: () => readonly string[];
   isManaged?: () => boolean;
   listSessions?: () => SessionInfo[];
   probeVersion?: (binaryPath: string) => Promise<string | null>;
@@ -277,7 +284,7 @@ export async function probeBinaryVersion(binaryPath: string): Promise<string | n
     };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binaryPath, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+      child = spawn(binaryPath, ["--version"], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
     } catch {
       resolve(null);
       return;
@@ -585,7 +592,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     if (!stopped && (next?.state === "updating" || restartWanted) && !fastTimer) {
       fastTimer = setTimeout(() => {
         fastTimer = null;
-        void tick();
+        syncSection("timer:update", () => void tick());
       }, INBOX_UPDATING_TICK_MS);
       (fastTimer as { unref?: () => void }).unref?.();
     }
@@ -671,8 +678,11 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
           if (version && hasReleaseNotesContent(readReleaseNotes(version, options.dataDir))) void ensureImages(version);
         }
       }
-      refresh();
-      settleMachineUpdate();
+      // Named in the Inbox debug log's loop_stall line, like the other timers.
+      syncSection("timer:update", () => {
+        refresh();
+        settleMachineUpdate();
+      });
     } catch {
       // A tick never throws.
     } finally {
@@ -687,7 +697,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       now,
       platform: process.platform,
       isManaged,
-      launchInstaller: options.launchInstaller ?? defaultLaunchInstaller,
+      launchInstaller: (launch) => (options.launchInstaller ?? defaultLaunchInstaller)({ ...launch, extraPath: options.installerPath?.() ?? [] }),
     });
     refresh();
     return outcome;
@@ -758,7 +768,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       // Every start asks (unless someone asked in the last minute): a restart
       // never waits out an old answer.
       void tick(RELEASE_CHECK_ON_START_MS);
-      tickTimer = setInterval(() => void tick(), options.healthTickMs);
+      tickTimer = setInterval(() => syncSection("timer:update", () => void tick()), options.healthTickMs);
     },
     /**
      * A page load: ask when the answer is over a minute old. Fire-and-forget;

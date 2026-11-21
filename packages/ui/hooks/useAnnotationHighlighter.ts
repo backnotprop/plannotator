@@ -20,8 +20,11 @@ import {
 import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
+import { quoteVariantsAsRendered } from '../utils/footnotes';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
-import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
+import { useHighlightCopy } from '../utils/highlightCopy';
+import { TOUCH_PRIMARY_QUERY, touchHighlightDueAt } from '../utils/touchSelection';
+import { restoreSelection, sameSelection, saveSelection, type SavedSelection } from '../utils/selectionTextOffsets';
 import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
 import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
 
@@ -38,6 +41,11 @@ export interface ToolbarState {
    *  marks; a 1px anchor over an HTML frame). The touch toolbar goes below it
    *  (`AnnotationToolbar` `touchAnchorRect`). Absent: `element`'s rect. */
   getAnchorRect?: () => ToolbarRect | null;
+  /** A selection made with a finger whose END was the one moving: the touch
+   *  toolbar goes above it when there is room, clear of the end handle and of
+   *  the lines the finger may drag on to (`AnnotationToolbar` `touchSide`).
+   *  Absent: below, as before. */
+  touchSide?: 'above';
 }
 
 export interface CommentPopoverState {
@@ -728,6 +736,9 @@ const restoreBoundariesCross = (start: RestoreBoundary, end: RestoreBoundary): b
 interface RangeTextPiece {
   text: string;
   excluded: boolean;
+  /** An excluded run that sits inside a sentence (a footnote reference's
+   *  number): the white space after it is the sentence's own and stays. */
+  inline?: boolean;
 }
 
 /**
@@ -764,7 +775,10 @@ const rangeTextPieces = (range: Range): RangeTextPiece[] | null => {
     const from = text === startContainer ? startOffset : 0;
     const to = text === endContainer ? endOffset : text.length;
     const slice = (text.textContent ?? '').slice(from, to);
-    if (slice) pieces.push({ text: slice, excluded: isAnnotationExcludedTextNode(text) });
+    if (slice) {
+      const excluded = isAnnotationExcludedTextNode(text);
+      pieces.push(excluded && text.parentElement?.closest('[data-footnote-ref-mark]') ? { text: slice, excluded, inline: true } : { text: slice, excluded });
+    }
     if (text === endContainer) return pieces;
   }
   return null;
@@ -803,12 +817,12 @@ const quoteWithoutExcludedText = (
   if (!pieces || !pieces.some(piece => piece.excluded)) return selectionText;
 
   // Excluded spans in compacted (whitespace-free) coordinates.
-  const spans: { start: number; end: number }[] = [];
+  const spans: { start: number; end: number; inline?: boolean }[] = [];
   let compactLength = 0;
   for (const piece of pieces) {
     const length = compactText(piece.text).length;
     if (piece.excluded && length > 0) {
-      spans.push({ start: compactLength, end: compactLength + length });
+      spans.push({ start: compactLength, end: compactLength + length, ...(piece.inline ? { inline: true } : {}) });
     }
     compactLength += length;
   }
@@ -824,7 +838,7 @@ const quoteWithoutExcludedText = (
       // Whitespace has no compacted position of its own: drop it only when it
       // sits inside an excluded run or immediately after one, so removing
       // "Tip:" takes the space that followed it with it.
-      if (!spans.some(span => cursor > span.start && cursor <= span.end)) quote += char;
+      if (!spans.some(span => !span.inline && cursor > span.start && cursor <= span.end)) quote += char;
       continue;
     }
     if (!spans.some(span => cursor >= span.start && cursor < span.end)) quote += char;
@@ -1069,6 +1083,19 @@ export function useAnnotationHighlighter({
   const paintShelvedDraftsRef = useRef<() => void>(() => {});
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
 
+  // Ctrl+C / Cmd+C while the highlight stands in for the selection: the
+  // toolbar is up (web-highlighter cleared the selection on mouseup), or that
+  // selection's composer is open (its textarea has the focus). The words go
+  // into the copy event as plain text (`utils/highlightCopy`); the person's
+  // own selection, in a field or in the page, copies natively. Every host of
+  // this hook gets it (the Viewer, code review's markdown preview, PR
+  // description and PR artifacts). A host that composes elsewhere
+  // (`onHostDraft`) owns its composer, so only the toolbar stage copies there.
+  useHighlightCopy(
+    toolbarState?.selectionText
+      || (commentPopover && onHostDraft === undefined ? commentPopover.selectedText : null),
+  );
+
   // Keep refs in sync
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onAddAnnotationRef.current = onAddAnnotation; }, [onAddAnnotation]);
@@ -1122,16 +1149,29 @@ export function useAnnotationHighlighter({
 
   // --- Helpers ---
 
-  const findTextInDOM = useCallback((searchText: string): Range | null => {
+  /**
+   * Where a quote is on the page, by its text. With `blockId` (the block the
+   * comment was made in), that block is searched first: a sentence written
+   * twice must come back to the copy the reviewer chose when the stored
+   * positions no longer lead there (a footnote's paragraph moved to the end,
+   * a character reference shortened the text before it, a new link
+   * renumbered the links after it). Otherwise the whole document: when it
+   * holds the quote more than once, the copy nearest the stored block's
+   * place (its position in the page, or where its `block-N` number falls
+   * when it is gone; a tie goes to the later copy, as text inserted above a
+   * comment pushes its words down). With no block to go by, the first copy.
+   */
+  const findTextInDOM = useCallback((searchText: string, blockId?: string): Range | null => {
     if (!containerRef.current) return null;
 
-    // Search for an exact substring match inside the container's text tree.
+    // Search for an exact substring match inside `root`'s text tree.
     // Falls back to a multi-text-node walk when the match spans siblings.
-    const searchOnce = (needle: string): Range | null => {
-      if (!needle || !containerRef.current) return null;
+    // `all`: every copy (up to 100), not only the first.
+    const searchOnce = (needle: string, root: Element, all = false): Range[] => {
+      if (!needle) return [];
 
       const walker = document.createTreeWalker(
-        containerRef.current,
+        root,
         NodeFilter.SHOW_TEXT,
         {
           acceptNode: (node) => isAnnotationExcludedTextNode(node)
@@ -1221,47 +1261,98 @@ export function useAnnotationHighlighter({
         };
       };
 
-      for (const node of textNodes) {
-        const text = node.textContent || '';
-        const index = text.indexOf(needle);
-        if (index !== -1) {
-          const range = document.createRange();
-          range.setStart(node, index);
-          range.setEnd(node, index + needle.length);
-          return range;
+      if (!all) {
+        for (const node of textNodes) {
+          const text = node.textContent || '';
+          const index = text.indexOf(needle);
+          if (index !== -1) {
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + needle.length);
+            return [range];
+          }
         }
       }
 
       const fullText = textNodes.map((node) => node.textContent ?? '').join('');
-      const searchIndex = fullText.indexOf(needle);
-      if (searchIndex !== -1) {
-        return rangeFromTextOffsets(searchIndex, searchIndex + needle.length);
+      const ranges: Range[] = [];
+      for (let at = fullText.indexOf(needle); at !== -1 && ranges.length < 100; at = all ? fullText.indexOf(needle, at + 1) : -1) {
+        const range = rangeFromTextOffsets(at, at + needle.length);
+        if (range) ranges.push(range);
       }
+      if (ranges.length > 0) return ranges;
 
       const haystack = normalizeWithMap(fullText, blockBoundaryOffsets(textNodes));
       const normalizedNeedle = normalizeWithMap(needle).text;
-      const normalizedIndex = haystack.text.indexOf(normalizedNeedle);
-      if (normalizedNeedle && normalizedIndex !== -1) {
-        const originalStart = haystack.map[normalizedIndex];
-        const originalEnd = haystack.map[normalizedIndex + normalizedNeedle.length - 1] + 1;
-        return rangeFromTextOffsets(originalStart, originalEnd);
+      if (!normalizedNeedle) return [];
+      for (let at = haystack.text.indexOf(normalizedNeedle); at !== -1 && ranges.length < 100; at = all ? haystack.text.indexOf(normalizedNeedle, at + 1) : -1) {
+        const originalStart = haystack.map[at];
+        const originalEnd = haystack.map[at + normalizedNeedle.length - 1] + 1;
+        const range = rangeFromTextOffsets(originalStart, originalEnd);
+        if (range) ranges.push(range);
       }
-
-      return null;
+      return ranges;
     };
 
-    // First try the literal text. If that misses, re-try with the same
-    // transform the renderer applies to plain text (emoji shortcodes +
-    // smart punctuation) so annotations made before those transforms
-    // shipped can still re-bind to their target after reload.
-    const direct = searchOnce(searchText);
-    if (direct) return direct;
-
-    const transformed = transformPlainText(searchText);
-    if (transformed !== searchText) {
-      return searchOnce(transformed);
+    // The quote as saved; then with the transform the renderer applies to
+    // plain text (emoji shortcodes, smart punctuation), so annotations made
+    // before those transforms shipped re-bind; then as the page draws a quote
+    // saved before footnote references and character references were drawn
+    // (`claim.[^1]`, `&amp;`, a definition's `[^1]:` marker).
+    const candidates: string[] = [];
+    const add = (text: string) => {
+      if (text && !candidates.includes(text)) candidates.push(text);
+    };
+    add(searchText);
+    add(transformPlainText(searchText));
+    for (const variant of quoteVariantsAsRendered(searchText, containerRef.current)) {
+      add(variant);
+      add(transformPlainText(variant));
     }
 
+    const container = containerRef.current;
+    const stored = blockId
+      ? container.querySelector<HTMLElement>(`[data-block-id="${escapeAttrValue(blockId)}"]`)
+      : null;
+    if (stored) {
+      for (const candidate of candidates) {
+        const [found] = searchOnce(candidate, stored);
+        if (found) return found;
+      }
+    }
+    for (const candidate of candidates) {
+      const copies = searchOnce(candidate, container, Boolean(blockId));
+      if (copies.length === 0) continue;
+      if (copies.length === 1 || !blockId) return copies[0]!;
+      // Several copies: the one nearest the stored block's place.
+      const order = Array.from(container.querySelectorAll<HTMLElement>('[data-block-id]'));
+      const indexOf = new Map(order.map((el, i) => [el, i]));
+      const numberOf = (id: string | undefined) => {
+        const m = id ? /^block-(\d+)/.exec(id) : null;
+        return m ? Number(m[1]) : null;
+      };
+      let place: number | null = stored ? indexOf.get(stored) ?? null : null;
+      if (place === null) {
+        const wanted = numberOf(blockId);
+        if (wanted === null) return copies[0]!;
+        const after = order.findIndex((el) => (numberOf(el.dataset.blockId) ?? -1) >= wanted);
+        place = after === -1 ? order.length : after - 0.5;
+      }
+      let best = copies[0]!;
+      let bestDistance = Infinity;
+      let bestAt = -Infinity;
+      for (const copy of copies) {
+        const block = blockElementOf(copy.startContainer);
+        const at = block ? indexOf.get(block) ?? -1 : -1;
+        const distance = Math.abs(at - place);
+        if (distance < bestDistance || (distance === bestDistance && at > bestAt)) {
+          best = copy;
+          bestDistance = distance;
+          bestAt = at;
+        }
+      }
+      return best;
+    }
     return null;
   }, []);
 
@@ -1474,7 +1565,11 @@ export function useAnnotationHighlighter({
     // document, or a quote that also appears in the stored block — so the
     // stored id (and the export built from it) stays exactly as it was.
     const noteAnchor = (ann: Annotation, firstDom: Node | null | undefined, positionsStale: boolean) => {
-      if (!ann.blockId) return;
+      // No block: an annotation that came with none (a share link's, which
+      // has no positions either) keeps none. One a restore left unanchored
+      // keeps its saved positions (below); when its words come back and it
+      // paints, it takes the block it painted in again, and its line label.
+      if (!ann.blockId && !(ann.startMeta && ann.endMeta)) return;
       const blockEl = blockElementOf(firstDom);
       const blockId = blockEl?.dataset.blockId;
       if (!blockEl || !blockId || blockId === ann.blockId) return;
@@ -1491,6 +1586,28 @@ export function useAnnotationHighlighter({
       });
     };
 
+    // Stored positions that paint the right words in a block other than the
+    // comment's own, while its own block holds them too: they lead to the
+    // other copy of a repeated sentence.
+    //
+    // Only on a page with a notes list: drawing a document's notes at its end
+    // takes their paragraphs out of the flow and shifts every later `<p>`
+    // count, while block ids stay. The same on a page with raw HTML the
+    // sanitizer drops (`[data-html-dropped]`, HtmlBlock): such a line used to
+    // print as a paragraph of text, so every later `<p>` count is one lower.
+    // Anywhere else the positions win, as they always did: after an edit above
+    // two copies, the stored block id names the wrong copy and the positions
+    // the right one.
+    const hasNotes = Boolean(containerRef.current?.querySelector('[data-footnotes], [data-html-dropped]'));
+    const paintedOutsideStoredBlock = (ann: Annotation, firstDom: Node | null | undefined): boolean => {
+      if (!hasNotes || !ann.blockId) return false;
+      const painted = blockElementOf(firstDom)?.dataset.blockId;
+      if (!painted || painted === ann.blockId) return false;
+      const own = containerRef.current?.querySelector(`[data-block-id="${escapeAttrValue(ann.blockId)}"]`);
+      const quote = compactText(ann.originalText);
+      return Boolean(own && quote && compactText(own.textContent ?? '').includes(quote));
+    };
+
     anns.forEach(ann => {
       if (ann.type === AnnotationType.GLOBAL_COMMENT) return;
       // Diff-view comments (`diff-block-N`, drawn by the diff view) and
@@ -1504,6 +1621,10 @@ export function useAnnotationHighlighter({
       // verdict, so it is neither attempted nor unanchored here (the same
       // rule the raw-HTML pinpoints follow on their surface).
       if (ann.diagramAnchor) return;
+      // A comment on an element of a live html block is restored inside that
+      // block's own page, by the block (html-embed), which reports its own
+      // verdict: neither attempted nor unanchored here.
+      if (ann.htmlBlockAnchor != null) return;
       // A comment on part of an image has no text either: the image viewer
       // draws its box, and the Viewer reports it unanchored when its image is
       // gone from the document.
@@ -1557,9 +1678,12 @@ export function useAnnotationHighlighter({
             const restoredText = paintedTextOf(restoredDoms as HTMLElement[]);
             if (
               verifyRestoredContent &&
-              compactText(restoredText) !== compactText(ann.originalText)
+              (compactText(restoredText) !== compactText(ann.originalText) ||
+                paintedOutsideStoredBlock(ann, restoredDoms[0] as Node))
             ) {
-              // Positions resolved, but onto the WRONG text — remove the bad
+              // Positions resolved, but onto the WRONG text (or onto the same
+              // words in another block, while the comment's own block still
+              // holds them: a sentence written twice) — remove the bad
               // highlight and fall through to the text-search fallback.
               try { highlighter.remove(ann.id); } catch {}
               rejectedRestoreText = restoredText;
@@ -1576,7 +1700,7 @@ export function useAnnotationHighlighter({
         } catch {}
       }
 
-      const range = findTextInDOM(ann.originalText);
+      const range = findTextInDOM(ann.originalText, ann.blockId || undefined);
       if (!range) {
         if (rejectedRestoreText !== null) {
           onRestoreMismatchRef.current?.(ann, rejectedRestoreText);
@@ -1586,7 +1710,10 @@ export function useAnnotationHighlighter({
         // painted above is anchored, whatever its quote search says.
         if (!paintedMath) {
           unanchored.push(ann.id);
-          moved.push({ id: ann.id, blockId: '', positionsStale: true });
+          // No block (so the export prints no line label for it) but its
+          // words and stored positions stay, for a later restore to try again
+          // (the positions are verified before they paint).
+          moved.push({ id: ann.id, blockId: '', positionsStale: !(ann.startMeta && ann.endMeta) });
         }
         console.warn(`Could not find text for annotation ${ann.id}: "${ann.originalText.slice(0, 50)}..."`);
         return;
@@ -1772,6 +1899,8 @@ export function useAnnotationHighlighter({
 
     /** The selection string of a drag let go outside the document, while its highlight is made. */
     let releasedOutsideQuote: string | null = null;
+    /** While the touch bridge paints a finger's selection: where its toolbar goes first (ToolbarState.touchSide). */
+    let touchSideForCreate: 'above' | undefined;
 
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
@@ -1879,6 +2008,7 @@ export function useAnnotationHighlighter({
               getAnchorRect: () => unionToolbarRect(
                 marks.filter((m) => m.isConnected).flatMap((m) => Array.from(m.getClientRects())),
               ),
+              ...(touchSideForCreate ? { touchSide: touchSideForCreate } : {}),
             });
           }
         }
@@ -1898,11 +2028,32 @@ export function useAnnotationHighlighter({
     // the range it paints and quotes has to be corrected before that handler
     // runs: registered on the capture phase of the same element, and before
     // `run()` so registration order settles the at-target case too.
-    const handlePointerEndCapture = () => {
+    // The library's handler sits out one release (a listener removed during
+    // dispatch never runs) and listens again on the next task.
+    const sitOutThisRelease = () => {
+      if (!listening) return;
+      highlighter.stop();
+      listening = false;
+      window.setTimeout(() => {
+        if (disposed) return;
+        highlighter.run();
+        listening = true;
+      }, 0);
+    };
+    const handlePointerEndCapture = (event: Event) => {
       const container = containerRef.current;
       const selection = window.getSelection();
       if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
         pendingRangeRunsRef.current = null;
+        return;
+      }
+      // On a touch screen a finger's selection is the touch bridge's (below):
+      // highlighted once it is finished, with the selection kept. The library
+      // would paint it at the lift and take the selection away, and paint
+      // again a selection the bridge has already highlighted.
+      if (touchBridgeOwnsRelease(event, selection)) {
+        pendingRangeRunsRef.current = null;
+        sitOutThisRelease();
         return;
       }
       const range = selection.getRangeAt(0).cloneRange();
@@ -1924,18 +2075,9 @@ export function useAnnotationHighlighter({
         // card under text comments, a diagram): the selection is the
         // person's to copy. The library's own pointer-end handler paints
         // nothing for it and then removes the DOM selection anyway, so it
-        // sits this one event out (a listener removed during dispatch never
-        // runs) and listens again on the next task.
+        // sits this one event out.
         pendingRangeRunsRef.current = null;
-        if (listening) {
-          highlighter.stop();
-          listening = false;
-          window.setTimeout(() => {
-            if (disposed) return;
-            highlighter.run();
-            listening = true;
-          }, 0);
-        }
+        sitOutThisRelease();
         return;
       }
       if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
@@ -2299,7 +2441,6 @@ export function useAnnotationHighlighter({
     containerRef.current.addEventListener('mouseup', handleMathMouseUp, true);
 
     // Mobile bridge
-    let selectionTimer: ReturnType<typeof setTimeout>;
     // The page's selection, painted as a pending highlight; false when there is none to take.
     const takeTouchSelection = (): boolean => {
       const sel = window.getSelection();
@@ -2325,16 +2466,148 @@ export function useAnnotationHighlighter({
       }
     };
     takeTouchSelectionRef.current = takeTouchSelection;
+
+    // --- Touch: a finger's selection is highlighted once it is finished, and stays selected ---
+    // The rules and their reasons: utils/touchSelection.ts. While the finger is
+    // on the screen nothing is painted; every change to the selection starts
+    // the wait again; the highlight is painted under the selection and the
+    // selection is put back over the same words (utils/selectionTextOffsets.ts),
+    // so its handles stay and a handle dragged later makes one new highlight,
+    // replacing this one, once that drag is finished too.
+    const clock = () => performance.now();
+    let touches = 0;
+    const pointersDown = new Set<number>();
+    let lastTouchAt = 0;
+    let liftAt: number | null = null;
+    let lastChangeAt = 0;
+    let restTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The selection as it was put back over the highlight just painted: not painted again while it is the same. */
+    let committed: { saved: SavedSelection; sourceId: string } | null = null;
+    const fingerDown = () => touches > 0 || pointersDown.size > 0;
+    const dueAt = () => touchHighlightDueAt({ fingerDown: fingerDown(), lastTouchAt, liftAt, lastChangeAt });
+    const committedStillSelected = (selection: Selection): boolean => {
+      const root = containerRef.current;
+      if (!committed || !root) return false;
+      // Its highlight was closed, made into an annotation or replaced: the selection is new again.
+      if (pendingSourceRef.current?.id !== committed.sourceId) {
+        committed = null;
+        return false;
+      }
+      return sameSelection(root, selection, committed.saved);
+    };
+    const touchBridgeOwnsRelease = (event: Event, selection: Selection) =>
+      isTouchPrimary && !hostComposesRef.current && (event.type === 'touchend' || committedStillSelected(selection));
+    /** Which end of the selection the finger moved last: the toolbar keeps clear of it. */
+    const movedEnd = (saved: SavedSelection | null): 'start' | 'end' => {
+      const order = (s: SavedSelection) => {
+        const { offset: a } = s.anchor;
+        const { offset: f } = s.focus;
+        return a === null || f === null ? null : { start: Math.min(a, f), end: Math.max(a, f), focusAtEnd: f >= a };
+      };
+      const now = saved ? order(saved) : null;
+      if (!now) return 'end';
+      const before = committed ? order(committed.saved) : null;
+      if (before && now.start !== before.start && now.end === before.end) return 'start';
+      if (before && now.end !== before.end) return 'end';
+      return now.focusAtEnd ? 'end' : 'start';
+    };
+    const commitTouchSelection = () => {
+      const root = containerRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      if (committedStillSelected(selection)) return;
+      const saved = saveSelection(root, selection);
+      const before = pendingSourceRef.current;
+      touchSideForCreate = movedEnd(saved) === 'end' ? 'above' : undefined;
+      let took = false;
+      try {
+        took = takeTouchSelection();
+      } finally {
+        touchSideForCreate = undefined;
+      }
+      const created = pendingSourceRef.current;
+      // Nothing painted, or painted straight into an annotation (redline): nothing to keep selected.
+      if (!took || !saved || !created || created === before || typeof created.id !== 'string') {
+        committed = null;
+        return;
+      }
+      if (!restoreSelection(root, selection, saved)) {
+        committed = null;
+        return;
+      }
+      const kept = saveSelection(root, selection);
+      committed = kept ? { saved: kept, sourceId: created.id } : null;
+    };
+    const armTouchHighlight = () => {
+      clearTimeout(restTimer);
+      if (disposed || hostComposesRef.current) return;
+      restTimer = setTimeout(onTouchRest, Math.max(0, dueAt() - clock()));
+    };
+    const onTouchRest = () => {
+      restTimer = undefined;
+      if (disposed || hostComposesRef.current) return;
+      // A finger went down, or the selection changed, since this was armed.
+      if (dueAt() > clock()) {
+        armTouchHighlight();
+        return;
+      }
+      commitTouchSelection();
+    };
     const handleSelectionChange = isTouchPrimary
       ? () => {
-          clearTimeout(selectionTimer);
-          if (hostComposesRef.current) return;
-          selectionTimer = setTimeout(takeTouchSelection, TOUCH_SELECTION_SETTLE_MS);
+          if (hostComposesRef.current) {
+            clearTimeout(restTimer);
+            return;
+          }
+          const selection = window.getSelection();
+          if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+            // Nothing selected: nothing to paint, and a later selection of the same words is new.
+            clearTimeout(restTimer);
+            committed = null;
+            return;
+          }
+          lastChangeAt = clock();
+          armTouchHighlight();
         }
       : null;
+    /** A finger is up when the last one lifts; a lift (not a cancel) is the person letting go. */
+    const fingersChanged = (wasDown: boolean, lifted: boolean) => {
+      if (!wasDown || fingerDown()) return;
+      if (lifted) liftAt = lastTouchAt;
+      armTouchHighlight();
+    };
+    const handleTouch = (event: TouchEvent) => {
+      lastTouchAt = clock();
+      const wasDown = fingerDown();
+      touches = event.touches?.length ?? 0;
+      // The touch list is every finger on the screen: no pointer is still down without one.
+      if (touches === 0) pointersDown.clear();
+      fingersChanged(wasDown, event.type === 'touchend');
+    };
+    const handlePointer = (event: PointerEvent) => {
+      if (event.type === 'pointermove' && !pointersDown.has(event.pointerId)) return;
+      lastTouchAt = clock();
+      const wasDown = fingerDown();
+      if (event.type === 'pointerdown') pointersDown.add(event.pointerId);
+      else if (event.type !== 'pointermove') pointersDown.delete(event.pointerId);
+      fingersChanged(wasDown, event.type === 'pointerup');
+    };
+    /** The page put away (another app, another tab): no finger is on it any more. */
+    const forgetFingers = () => {
+      const wasDown = fingerDown();
+      touches = 0;
+      pointersDown.clear();
+      fingersChanged(wasDown, false);
+    };
+    const TOUCH_EVENTS = ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const;
+    const POINTER_EVENTS = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const;
+    const watching = { capture: true, passive: true } as const;
 
     if (handleSelectionChange) {
       document.addEventListener('selectionchange', handleSelectionChange);
+      for (const type of TOUCH_EVENTS) document.addEventListener(type, handleTouch, watching);
+      for (const type of POINTER_EVENTS) document.addEventListener(type, handlePointer, watching);
+      window.addEventListener('blur', forgetFingers);
     }
 
     // Visible drafts waiting from another mount of this document come back as draft marks.
@@ -2346,8 +2619,11 @@ export function useAnnotationHighlighter({
 
     return () => {
       if (handleSelectionChange) {
-        clearTimeout(selectionTimer);
+        clearTimeout(restTimer);
         document.removeEventListener('selectionchange', handleSelectionChange);
+        for (const type of TOUCH_EVENTS) document.removeEventListener(type, handleTouch, watching);
+        for (const type of POINTER_EVENTS) document.removeEventListener(type, handlePointer, watching);
+        window.removeEventListener('blur', forgetFingers);
       }
       containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
@@ -2833,7 +3109,7 @@ export function useAnnotationHighlighter({
         try { highlighter.remove(id); } catch {}
       }
     }
-    const range = findTextInDOM(annotation.originalText);
+    const range = findTextInDOM(annotation.originalText, annotation.blockId || undefined);
     if (!range) {
       onMissing?.();
       return;

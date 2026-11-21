@@ -145,6 +145,52 @@ describe('DecisionControl', () => {
     }
   });
 
+  // Guards the keyboard path to a note: a bumped openNoteRequest opens the
+  // first composer straight away, and the initial value opens nothing.
+  test.skipIf(!hasDom)('openNoteRequest opens the note composer', async () => {
+    const handlers = makeHandlers();
+    await mountControl(REVIEW_FEEDBACK, handlers, { openNoteRequest: 0 });
+    expect(popover()).toBeNull();
+
+    await act(async () => {
+      root!.render(
+        <DecisionControl
+          spec={buildDecisionSpec(REVIEW_FEEDBACK)}
+          handlers={handlers}
+          busy={false}
+          isLoading={false}
+          openNoteRequest={1}
+        />,
+      );
+    });
+    expect(popover()?.dataset.decisionPopover).toBe('composer');
+
+    await typeNote('ship it');
+    await pressKey(noteInput(), { key: 'Enter', ctrlKey: true });
+    expect(handlers['note-with-feedback']).toHaveBeenCalledWith('ship it');
+  });
+
+  // Guards a host that remounts the control (a layout switch) after one
+  // request: the count it mounts with is old and opens nothing.
+  test.skipIf(!hasDom)('a control mounted with a bumped openNoteRequest opens nothing until the next bump', async () => {
+    const handlers = makeHandlers();
+    await mountControl(REVIEW_FEEDBACK, handlers, { openNoteRequest: 1 });
+    expect(popover() === null).toBe(true);
+
+    await act(async () => {
+      root!.render(
+        <DecisionControl
+          spec={buildDecisionSpec(REVIEW_FEEDBACK)}
+          handlers={handlers}
+          busy={false}
+          isLoading={false}
+          openNoteRequest={2}
+        />,
+      );
+    });
+    expect(popover()?.dataset.decisionPopover).toBe('composer');
+  });
+
   // Guards both throwing away a half-typed note and hijacking the host app's
   // own Escape ladder.
   test.skipIf(!hasDom)('Escape ladder: composer keeps the draft, menu consumes, closed propagates', async () => {

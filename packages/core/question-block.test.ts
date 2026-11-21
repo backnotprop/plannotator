@@ -152,7 +152,6 @@ iOS background execution is unreliable.
     expect(parseQuestionBlock("question", "")).toBeNull();
     expect(parseQuestionBlock("question", "- [ ] only choices\n- [ ] no prompt")).toBeNull();
     expect(parseQuestionBlock("question", "Recommended: nothing to ask")).toBeNull();
-    expect(parseQuestionBlock("question", `Q?\n${"x".repeat(25_000)}`)).toBeNull();
     expect(parseQuestionBlock("question", undefined as unknown as string)).toBeNull();
   });
 });
@@ -540,11 +539,13 @@ describe("parseQuestionAnswer", () => {
     }
   });
 
-  test("truncates to the caps", () => {
-    const parsed = parseQuestionAnswer(answer({ prompt: "p".repeat(900), text: "t".repeat(9000), selected: Array.from({ length: 30 }, (_, i) => `c${i}`) }))!;
+  test("keeps the person's long answer, Other and note whole; only the prompt copy is cut", () => {
+    const long = "t".repeat(50_000);
+    const parsed = parseQuestionAnswer(answer({ prompt: "p".repeat(900), text: long, other: long, note: long }))!;
     expect(parsed.prompt.length).toBe(400);
-    expect(parsed.text!.length).toBe(4000);
-    expect(parsed.selected.length).toBe(20);
+    expect(parsed.text).toBe(long);
+    expect(parsed.other).toBe(long);
+    expect(parsed.note).toBe(long);
   });
 
   test("never cuts a prompt inside an emoji, and the Inbox's check cuts it the same way", () => {
@@ -658,6 +659,36 @@ Answer:
     expect(multi).toContain("Answer: Nowhere\nNote:\n> First line.\n> Second line.\n");
     const single = formatQuestionAnswersSection(items, [answer({ key: key(1), prompt: "Where", selected: ["Nowhere"], note: "one line" })]);
     expect(single).toContain("Answer: Nowhere\nNote: one line\n");
+  });
+
+  test("a multi-line Other answer keeps its line breaks, quoted the way a multi-line note is", () => {
+    const three = "Keep the loser locally.\nShow it under History.\nPurge it after a week.";
+    const single = formatQuestionAnswersSection(items, [answer({ key: key(2), prompt: "Background sync?", other: three })]);
+    expect(single).toContain(
+      "### Q2. Background sync? (line 34)\nAnswer: Other:\n> Keep the loser locally.\n> Show it under History.\n> Purge it after a week.\n\n",
+    );
+    // A blank line inside it and Windows line ends: still one quote, never a blank line that would end the block.
+    const gaps = formatQuestionAnswersSection(items, [answer({ key: key(2), prompt: "Background sync?", other: "First.\r\n\r\nThird." })]);
+    expect(gaps).toContain("Answer: Other:\n> First.\n> \n> Third.\n\n");
+    // With picks (pick any): the quote sits under its bullet, Other last as today.
+    const picks = formatQuestionAnswersSection(items, [
+      answer({ key: key(3), kind: "multi", prompt: "Which indicators?", selected: ["Dot"], other: "A sound\nOnly when muted" }),
+    ]);
+    expect(picks).toContain("### Q3. Which indicators? (line 45)\nAnswer:\n- Dot\n- Other:\n  > A sound\n  > Only when muted\n\n");
+    // With a multi-line note too: each keeps its own quote.
+    const both = formatQuestionAnswersSection(items, [
+      answer({ key: key(2), prompt: "Background sync?", other: "One.\nTwo.", note: "Why.\nBecause." }),
+    ]);
+    expect(both).toContain("Answer: Other:\n> One.\n> Two.\nNote:\n> Why.\n> Because.\n");
+  });
+
+  test("a one-line Other answer reads exactly as before, whatever spaces or a last Enter it carries", () => {
+    for (const other of ["foreground only", "foreground  only", "foreground only\n", "\n  foreground\tonly  \n\n"]) {
+      const out = formatQuestionAnswersSection(items, [answer({ key: key(2), prompt: "Background sync?", other })]);
+      expect(out).toContain("### Q2. Background sync? (line 34)\nAnswer: Other: foreground only\n\n");
+    }
+    const picks = formatQuestionAnswersSection(items, [answer({ key: key(3), kind: "multi", prompt: "Which indicators?", selected: ["Dot"], other: "A sound\n" })]);
+    expect(picks).toContain("Answer:\n- Dot\n- Other: A sound\n\n");
   });
 
   test("no reportable answer means no section", () => {
@@ -790,9 +821,15 @@ describe("long task-list choices (picked as written)", () => {
     expect(canonicalQuestionAnswer(q, cutLoose)).toBe(cutLoose);
   });
 
-  test("selected stays bounded: a label longer than any block body is cut", () => {
-    const parsed = parseQuestionAnswer(answer({ selected: ["x".repeat(30_000)] }))!;
-    expect(parsed.selected[0].length).toBe(20_000);
+  test("a question over 20,000 characters with 25 choices keeps every choice, and each can be picked whole", () => {
+    const labels = Array.from({ length: 25 }, (_, i) => `Option ${i + 1} ${"x".repeat(1_000)}`);
+    const q = parseQuestionBlock("question-multi", `Which ones?\n\n${labels.map((l) => `- [ ] ${l}`).join("\n")}`)!;
+    expect(q).not.toBeNull();
+    expect(q.choices.map((c) => c.label)).toEqual(labels);
+    const plain = parseQuestionBlock("question", `Which one?\n\n${labels.map((l) => `- ${l.slice(0, 20)}`).join("\n")}`)!;
+    expect(plain.choices).toHaveLength(25);
+    const parsed = parseQuestionAnswer(answer({ kind: "multi", selected: labels }))!;
+    expect(parsed.selected).toEqual(labels);
   });
 });
 

@@ -15,7 +15,7 @@ import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type In
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
-import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+import { deliveryLine, handedItem, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
 export const TAG_LABEL_MAX = 40;
@@ -30,6 +30,10 @@ export interface TagOption {
   host: string | null;
   /** Its readable label: the `@<label>` token and the chip. */
   label: string;
+  /** The name the person gave it in the Inbox: what the picker row leads with. Never in the token (an agent never sees it). */
+  name?: string;
+  /** The label with its session's whole title, for the row's hover: `label` cuts a long one. Null when untitled. */
+  full?: string | null;
   /** The agent's own name ("Claude Code", "Pi", an MCP agent's name). */
   agent: string;
   /** The picker row's second line: "billing-api · working · since 9:14 AM". */
@@ -120,6 +124,7 @@ export function tagOptions(model: TaggableModel | null, ownerSession: string | n
       id: s.session,
       host: s.host,
       label,
+      full: own ? sanitizeMentionLabel(s.label as string) + label.slice(own.length) : null,
       agent,
       detail: stateWords(s, time),
       group: groupOf(s),
@@ -180,7 +185,7 @@ export interface TagModeLine {
 export function tagModeLine(tagged: readonly TagOption[], chosen: TagMode): TagModeLine | null {
   const others = tagged.filter((t) => !t.owner);
   if (others.length === 0) return null;
-  const names = namesList(others.map((t) => t.label));
+  const names = shortNamesList(others.map((t) => t.label));
   const canAdd = others.every((t) => t.wakes && t.taggable);
   const canHandOff = canAdd && others.length === 1;
   const mode = effectiveTagMode(tagged, chosen);
@@ -190,7 +195,7 @@ export function tagModeLine(tagged: readonly TagOption[], chosen: TagMode): TagM
   const after =
     asleep.length === 0
       ? ''
-      : ` · ${namesList(asleep.map((t) => t.label))} ${asleep.length === 1 ? "isn't" : "aren't"} woken: ${asleep.length === 1 ? 'it sees' : 'they see'} your reply the next time ${asleep.length === 1 ? 'it reads' : 'they read'} this thread`;
+      : ` · ${shortNamesList(asleep.map((t) => t.label))} ${asleep.length === 1 ? "isn't" : "aren't"} woken: ${asleep.length === 1 ? 'it sees' : 'they see'} your reply the next time ${asleep.length === 1 ? 'it reads' : 'they read'} this thread`;
   return {
     mode,
     lead: 'Asks',
@@ -261,6 +266,15 @@ export function tagName(tag: Pick<InboxTag, 'host' | 'name' | 'session' | 'label
 }
 
 /** "Pi", "Pi and Codex", "Pi, Codex and OpenCode". */
+/**
+ * The names on the reply box's one line: all of them up to three, else the first two and how many more ("Pi, Codex
+ * and 10 more"). Every tag is a chip in the box itself; the line stays one line on a phone however many are tagged.
+ */
+export function shortNamesList(names: readonly string[]): string {
+  if (names.length <= 3) return namesList(names);
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+}
+
 export function namesList(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
@@ -298,6 +312,7 @@ export function tagDeliveryLine(
     wakes: true,
     sendingNow: !!tag.deliver_now_at,
     connection,
+    handed: !!messageId && handedItem(connection, messageId),
     ...(messageId ? waitInputs(connection, messageId, { ...tag, into_turn: tag.delivery?.into_turn ?? null }) : {}),
   });
 }
@@ -323,19 +338,6 @@ export function threadParticipants(thread: InboxThread): InboxParticipant[] {
     for (const tag of messageTags(message)) add(tag.host, tag.session, tag.name);
   }
   return out;
-}
-
-/**
- * The names of a thread's participants, for the head ("Claude Code and Pi"):
- * each agent once, two sessions of one agent named once.
- */
-export function participantsWords(participants: readonly InboxParticipant[]): string {
-  const names: string[] = [];
-  for (const p of participants) {
-    const name = agentName(p.host, p.name);
-    if (!names.includes(name)) names.push(name);
-  }
-  return namesList(names);
 }
 
 /**

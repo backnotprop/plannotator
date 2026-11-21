@@ -1,0 +1,168 @@
+/*
+ * The card's motions, in one place. Each is named and exported (motions.tsx):
+ *   arrive  a change landing in the preview: the new line opens in place, tinted for a moment
+ *   breathe the agent mark while it works; the only loop, in phase across cards
+ *   settle  a new card comes to rest once, and its unread dot appears; settleBatch slides a re-sort
+ *   fan     hover or focus fans the sheet behind a document a little further; the front lifts
+ *   open    the preview grows into the page, as a shared-element view transition
+ * Idle, nothing moves except `breathe`. Under reduced motion nothing moves at all.
+ * The timings are custom properties so they can be tuned here in one place.
+ */
+:root {
+  --frame-card-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --frame-card-back-rest: translate(2%, -5%) rotate(1.4deg);
+  --frame-card-back-fan: translate(3.5%, -7%) rotate(2.6deg);
+  --frame-card-lift: translateY(-3px);
+  --frame-card-press: translateY(-1px) scale(0.985);
+  --frame-card-fan-duration: 240ms;
+  --frame-card-ring-duration: 200ms;
+  --frame-card-breathe-duration: 4.8s;
+  --frame-card-breathe-low: 0.35;
+  --frame-card-arrive-open-duration: 260ms;
+  --frame-card-arrive-fade-duration: 200ms;
+  --frame-card-arrive-fade-delay: 60ms;
+  --frame-card-arrive-tint-duration: 1600ms;
+  --frame-card-arrive-tint: color-mix(in oklch, var(--primary) 18%, transparent);
+  --frame-card-settle-duration: 320ms;
+  --frame-card-settle-offset: -4px;
+  --frame-card-open-duration: 280ms;
+  --frame-card-open-out-duration: 120ms;
+  --frame-card-open-in-duration: 200ms;
+  --frame-card-open-in-delay: 60ms;
+}
+
+/* the ring and shadow fade on hover and focus */
+[data-frame-card] {
+  transition: box-shadow var(--frame-card-ring-duration) var(--frame-card-ease);
+}
+
+/* fan, with the front's lift and press */
+.frame-card-fan,
+[data-frame-card-hero] {
+  transition: transform var(--frame-card-fan-duration) var(--frame-card-ease);
+}
+[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) .frame-card-fan {
+  transform: var(--frame-card-back-fan);
+}
+[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) [data-frame-card-hero] {
+  transform: var(--frame-card-lift);
+}
+@media (hover: hover) {
+  [data-frame-card]:hover .frame-card-fan {
+    transform: var(--frame-card-back-fan);
+  }
+  [data-frame-card]:hover [data-frame-card-hero] {
+    transform: var(--frame-card-lift);
+  }
+}
+[data-frame-card]:active [data-frame-card-hero] {
+  transform: var(--frame-card-press);
+}
+
+/* breathe */
+.frame-card-breathe {
+  animation: frame-card-breathe var(--frame-card-breathe-duration) ease-in-out infinite;
+}
+@keyframes frame-card-breathe {
+  50% {
+    opacity: var(--frame-card-breathe-low);
+  }
+}
+
+/* arrive: animations from a hidden start to the line's own state, so a line whose animation never runs is still shown */
+.frame-card-arrive {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: frame-card-arrive-open var(--frame-card-arrive-open-duration) var(--frame-card-ease) both;
+}
+.frame-card-arrive > * {
+  min-height: 0;
+  overflow: hidden;
+  animation: frame-card-fade-in var(--frame-card-arrive-fade-duration) ease-out var(--frame-card-arrive-fade-delay) both;
+}
+.frame-card-arrive .frame-card-arrive-tint {
+  animation: frame-card-landed var(--frame-card-arrive-tint-duration) ease-out;
+}
+@keyframes frame-card-arrive-open {
+  from {
+    grid-template-rows: 0fr;
+  }
+}
+@keyframes frame-card-landed {
+  from {
+    background-color: var(--frame-card-arrive-tint);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+/* settle */
+.frame-card-settle {
+  animation: frame-card-settle var(--frame-card-settle-duration) var(--frame-card-ease);
+}
+.frame-card-settle [data-frame-card-dot] {
+  animation: frame-card-dot var(--frame-card-settle-duration) var(--frame-card-ease);
+}
+@keyframes frame-card-settle {
+  from {
+    transform: translateY(var(--frame-card-settle-offset));
+  }
+}
+@keyframes frame-card-dot {
+  from {
+    opacity: 0;
+  }
+}
+
+/* open: the host gives the page it opens the same view-transition-name and this class */
+.frame-card-open {
+  view-transition-class: frame-card-open;
+}
+::view-transition-group(*.frame-card-open) {
+  animation-duration: var(--frame-card-open-duration);
+  animation-timing-function: var(--frame-card-ease);
+}
+::view-transition-old(*.frame-card-open) {
+  animation: frame-card-fade-out var(--frame-card-open-out-duration) ease-out both;
+}
+::view-transition-new(*.frame-card-open) {
+  animation: frame-card-fade-in var(--frame-card-open-in-duration) ease-out var(--frame-card-open-in-delay) both;
+}
+@keyframes frame-card-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes frame-card-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frame-card-fan,
+  [data-frame-card-hero],
+  [data-frame-card] {
+    transition: none;
+  }
+  [data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) .frame-card-fan,
+  [data-frame-card]:active .frame-card-fan {
+    transform: var(--frame-card-back-rest);
+  }
+  [data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) [data-frame-card-hero],
+  [data-frame-card]:active [data-frame-card-hero] {
+    transform: none;
+  }
+  .frame-card-breathe,
+  .frame-card-arrive,
+  .frame-card-arrive > *,
+  .frame-card-arrive .frame-card-arrive-tint,
+  .frame-card-settle,
+  .frame-card-settle [data-frame-card-dot],
+  ::view-transition-group(*.frame-card-open),
+  ::view-transition-old(*.frame-card-open),
+  ::view-transition-new(*.frame-card-open) {
+    animation: none;
+  }
+}

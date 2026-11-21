@@ -22,7 +22,19 @@ import {
   type InboxPullsAnswer,
 } from '@plannotator/core/inbox-types';
 import { repoLabels } from '../pulls/labels';
+import { pullInProject } from '../pulls/model';
 import { person, wordsText, type Words } from '../pulls/words';
+
+/**
+ * A tile's click (the owner, 2026-11-11: "the launchpad everywhere a single PR is clicked"): a single open PR opens its
+ * launchpad in Reviews (`launchpad`, the stack's id), once Reviews' own list (`reviews`, the scoped read) has it, since
+ * the launchpad is drawn from that list. Else the PR view as before (`pull`): a layer of a stack of several, a merged
+ * PR, or a PR in a repository that is no project (the board reads everywhere; Reviews only the projects' ones).
+ */
+export function tileOpens(pull: Pick<InboxPull, 'key' | 'state'>, stack: Pick<InboxPullStack, 'id' | 'layers'>, reviews: Pick<InboxPullsAnswer, 'pulls'> | null): { launchpad: string } | 'pull' {
+  if (stack.layers.length !== 1 || !inboxPullIsOpen(pull)) return 'pull';
+  return reviews?.pulls.some((p) => p.key === pull.key) ? { launchpad: stack.id } : 'pull';
+}
 
 /** A stack folds to one strip on the Sheet past this many PRs (the owner's answer, q-f1451f8d). */
 export const FOLD_OVER = 8;
@@ -171,6 +183,16 @@ export interface SheetModel {
 
 const isMergedWithin = (pull: InboxPull, now: number, ms: number) => pull.state === 'merged' && !!pull.merged_at && now - Date.parse(pull.merged_at) <= ms;
 
+/**
+ * The board as Reviews' project filter shows it: only that project's PRs, by Reviews' own rule (`pullInProject`), so
+ * its sections, its Merged view and its head line count only those.
+ * No project: the answer as it is.
+ */
+export function boardInProject<T extends Pick<InboxPullsAnswer, 'pulls' | 'projects'> & { links?: InboxPullsAnswer['links'] }>(answer: T, project: string | null): T {
+  if (!project) return answer;
+  return { ...answer, pulls: answer.pulls.filter((pull) => pullInProject(pull, project, answer.projects, answer.links?.[pull.key]?.project_id)) };
+}
+
 /** The Open view: a section per repository with an open PR, the repositories with the most on you first. */
 export function sheetModel(answer: Pick<InboxPullsAnswer, 'pulls' | 'projects'>, now: number, risk: RiskLevels = {}): SheetModel {
   const stacks = inboxPullStacks(answer.pulls).filter((stack) => stack.layers.some(inboxPullIsOpen));
@@ -306,4 +328,13 @@ export function closedLinks(hosts: readonly { host: string; cli: 'gh' | 'glab' }
 /** The stack's layers in the stack view's order: the top of the stack first, the base branch below the last. */
 export function topFirst(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
   return [...stack.layers].reverse();
+}
+
+/**
+ * The filtered project's name for the board ("Nothing open in checkout-web"): from the list's threads (`names`), else
+ * from the Inbox's projects, so a project whose every thread is hidden (or never had one) is still named.
+ */
+export function boardProjectName(project: string | null, names: ReadonlyMap<string, string>, projects: readonly { id: string; name: string }[]): string | null {
+  if (!project) return null;
+  return names.get(project) ?? projects.find((p) => p.id === project)?.name ?? null;
 }

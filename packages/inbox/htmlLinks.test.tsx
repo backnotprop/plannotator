@@ -2,8 +2,8 @@
  * Links inside an attached HTML page: the whole window (InboxApp) over a REAL
  * Inbox server in a temp data dir (its own process,
  * tests/helpers/inbox-dom-server.ts in its `html-links` mode). The page's
- * bridge is played by a `link-click` message from the page's own frame, as
- * the bridge posts it in Interact. What is proved: a sibling page that is not
+ * bridge is played by a `link-click` on the port the viewer hands the frame,
+ * as the bridge posts it in Interact. What is proved: a sibling page that is not
  * attached opens read-only over the page with Back, the note and Open in new
  * tab, and Back returns; a link to another attachment of the thread opens it
  * in the pane as a new history entry; an image in the folder that is not
@@ -23,12 +23,12 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../../tests/helpers/no-browser';
+import { followLinkInFrame } from '../ui/test-setup/bridgeLinkPort';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
-const LINK_CLICK = 'plannotator-bridge-link-click';
 
 type World = { project: string; htmlLinks: { thread: string; ids: Record<string, string> } };
 
@@ -44,9 +44,12 @@ let savedEventSource: unknown;
 let savedOpen: typeof window.open;
 let opened: string[] = [];
 
-function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
+function loopback(path: string, method = 'GET', body?: string | Uint8Array, encoding?: string | null): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
-    const req = request({ host: '127.0.0.1', port, path, method, headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` } }, (res) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` };
+    // The window sends a page gzipped (api.ts `post`, `gzip: true`): its bytes and their encoding go through as they are.
+    if (encoding) headers['Content-Encoding'] = encoding;
+    const req = request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => done({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
@@ -101,7 +104,9 @@ beforeEach(() => {
   world = worlds.shift()!;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    const raw = init?.body;
+    const body = raw === undefined || raw === null ? undefined : typeof raw === 'string' ? raw : new Uint8Array(await new Response(raw).arrayBuffer());
+    const answer = await loopback(String(input), init?.method ?? 'GET', body, new Headers(init?.headers).get('content-encoding'));
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -154,11 +159,9 @@ async function renderSheet() {
   return host;
 }
 
-/** The page's bridge relaying a link click (in Interact), from the frame it lives in. */
+/** The page's bridge relaying a link click (in Interact), on the port the viewer handed it. */
 async function clickLink(frame: HTMLIFrameElement, href: string) {
-  await act(async () => {
-    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: LINK_CLICK, href } }));
-  });
+  await followLinkInFrame(frame, href);
 }
 
 const sheetFrame = (el: ParentNode) => el.querySelector<HTMLIFrameElement>('.ib-view .ib-htmlframe iframe')!;

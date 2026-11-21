@@ -14,7 +14,7 @@
  * F is full screen for now (never saved as the view files open in); S2 also
  * takes the Full screen button, by Tab, which is a choice that is saved.
  */
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createKeyboardWorld, type KeyboardWorld } from './inbox-keyboard-world';
@@ -363,7 +363,7 @@ test('S1: deep work in one thread, a detour, and back', async () => {
   await press(']', ']', '[');
   await expect.poll(fileName).toContain(world.files.planPage);
   await focusHeld();
-  // On an HTML page the first Escape leaves Annotate for Interact (the viewer's own layer); then full screen goes.
+  // An HTML page in Annotate takes one Escape to Interact first (the viewer's own layer); then full screen goes.
   for (let i = 0; i < 3 && (await page.locator('[data-attachment-pane][data-full-view]').count()) > 0; i++) await press('Escape');
   await viewIs('side');
   await press('Escape');

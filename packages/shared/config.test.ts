@@ -10,6 +10,9 @@ import {
   readFileSync,
   readdirSync,
   chmodSync,
+  symlinkSync,
+  lstatSync,
+  renameSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,13 +49,14 @@ import {
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
+  __setConfigWriteForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
 describe("resolveInboxLaunch", () => {
   test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
     // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
-    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, scratchDir: null });
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null, startIn: "inbox" });
     // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
     const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
     expect(on({ inboxLaunch: {} })).toBe(true);
@@ -68,7 +72,10 @@ describe("resolveInboxLaunch", () => {
     expect(on({}, "win32")).toBe(false);
     expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
     expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
-    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null, startIn: "inbox" });
+    // Rex only when it says exactly that: anything else starts in the background.
+    expect(resolveInboxLaunch({ inboxLaunch: { startIn: "rex" } }).startIn).toBe("rex");
+    for (const startIn of ["REX", "inbox", true, 1, null]) expect(resolveInboxLaunch({ inboxLaunch: { startIn } } as unknown as PlannotatorConfig).startIn).toBe("inbox");
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
     expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
@@ -148,21 +155,56 @@ describe("reviewDefaults persistence", () => {
   });
 });
 
+describe("annotateView (the view an annotate session opens in)", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-annotate-view-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const advertised = (raw: unknown): unknown => {
+    writeFileSync(join(tempDir, "config.json"), JSON.stringify({ annotateView: raw }));
+    return getServerConfig(null).annotateView;
+  };
+
+  test("each of the toolbar's three views is served to the page as written", () => {
+    expect(advertised("wide")).toBe("wide");
+    expect(advertised("focus")).toBe("focus");
+    expect(advertised("edit")).toBe("edit");
+  });
+
+  test("a value the toolbar does not offer is left out, so the page keeps today's default", () => {
+    for (const raw of ["Focus", " focus", "zen", "", 1, true, null, ["focus"], { view: "focus" }]) {
+      expect(advertised(raw)).toBeUndefined();
+    }
+  });
+
+  test("unset is left out", () => {
+    writeFileSync(join(tempDir, "config.json"), JSON.stringify({ displayName: "x" }));
+    expect("annotateView" in getServerConfig(null)).toBe(false);
+  });
+});
+
 describe("parseReviewAnalysisConfig", () => {
   test("accepts independent boolean analysis flags", () => {
     expect(parseReviewAnalysisConfig({ semanticDiff: false })).toEqual({ semanticDiff: false });
     expect(parseReviewAnalysisConfig({ callFlow: true })).toEqual({ callFlow: true });
-    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({
-      semanticDiff: true,
-      callFlow: false,
-    });
+    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({ semanticDiff: true, callFlow: false });
   });
 
   test("rejects non-object and non-boolean settings", () => {
     expect(parseReviewAnalysisConfig(null)).toBeUndefined();
     expect(parseReviewAnalysisConfig([])).toBeUndefined();
-    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
     expect(parseReviewAnalysisConfig({ callFlow: 1 })).toBeUndefined();
+    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
   });
 
   test("ignores unknown keys instead of persisting them", () => {
@@ -787,6 +829,7 @@ describe("saveConfig never writes over a config.json it could not read", () => {
   });
 
   afterEach(() => {
+    __setConfigWriteForTest(null);
     process.stderr.write = savedWrite;
     if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
     else delete process.env.PLANNOTATOR_DATA_DIR;
@@ -802,10 +845,153 @@ describe("saveConfig never writes over a config.json it could not read", () => {
     expect(warnings).toEqual([]);
   });
 
-  test("an empty config.json holds nothing to lose and is written", () => {
-    writeFileSync(configPath(), "  \n");
-    expect(saveConfig({ displayName: "x" })).toBe(true);
-    expect(loadConfig().displayName).toBe("x");
+  test("an empty config.json (zero bytes or only whitespace) holds nothing to lose: it reads as defaults and a save writes it", () => {
+    for (const bytes of ["", "  \n"]) {
+      writeFileSync(configPath(), bytes);
+      expect(loadConfig()).toEqual({});
+      warnings = [];
+      expect(saveConfig({ displayName: "x" })).toBe(true);
+      expect(JSON.parse(raw())).toEqual({ displayName: "x" });
+      expect(warnings).toEqual([]);
+    }
+  });
+
+  test("a save whose rename fails leaves config.json byte for byte, says so, and leaves no temp file", () => {
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" }, null, 2) + "\n";
+    writeFileSync(configPath(), bytes);
+    // ENOSPC stands in for a disk that filled up; EPERM for a lock that never lets go.
+    for (const code of ["ENOSPC", "EPERM"]) {
+      let calls = 0;
+      const waits: number[] = [];
+      let lockHeldWhileWaiting = true;
+      __setConfigWriteForTest({
+        rename: () => {
+          calls++;
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+        sleep: (ms) => {
+          waits.push(ms);
+          lockHeldWhileWaiting &&= existsSync(join(tempDir, "config.json.lock"));
+        },
+      });
+      try {
+        warnings = [];
+        expect(saveConfig({ displayName: "Grace" })).toBe(false);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain("failed to write config.json");
+      expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+      // A disk error is not retried; a Windows lock error is, with backoff, for about 2 s, under the config lock.
+      const waited = waits.reduce((a, b) => a + b, 0);
+      if (code === "ENOSPC") {
+        expect(calls).toBe(1);
+        expect(waits).toEqual([]);
+      } else {
+        expect(calls).toBe(waits.length + 1);
+        expect(waited).toBeGreaterThanOrEqual(1800);
+        expect(waited).toBeLessThanOrEqual(2500);
+        expect(waits[0]).toBeLessThan(waits[waits.length - 1]);
+        expect(lockHeldWhileWaiting).toBe(true);
+      }
+    }
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" });
+  });
+
+  test("a rename held for a while by another program (Windows) is retried and lands", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    let calls = 0;
+    __setConfigWriteForTest({
+      rename: (from, to) => {
+        if (++calls <= 6) throw Object.assign(new Error("EBUSY: simulated"), { code: "EBUSY" });
+        renameSync(from, to);
+      },
+      sleep: () => {},
+    });
+    try {
+      expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    } finally {
+      __setConfigWriteForTest(null);
+    }
+    expect(JSON.parse(raw())).toEqual({ displayName: "Ada", favicon: "yellow" });
+    expect(warnings).toEqual([]);
+  });
+
+  test("an fsync error (a full disk or quota that shows up only there) stops the write before the rename; only 'no fsync here' is ignored", () => {
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" } });
+    writeFileSync(configPath(), bytes);
+    for (const code of ["ENOSPC", "EDQUOT", "EIO"]) {
+      let renamed = false;
+      __setConfigWriteForTest({
+        fsync: () => {
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+        rename: (from, to) => {
+          renamed = true;
+          renameSync(from, to);
+        },
+      });
+      try {
+        warnings = [];
+        expect(saveConfig({ displayName: "Grace" })).toBe(false);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(renamed).toBe(false);
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain(code);
+      expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+    }
+    for (const [code, favicon] of [["EINVAL", "yellow"], ["ENOTSUP", "blue"]]) {
+      __setConfigWriteForTest({
+        fsync: () => {
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+      });
+      try {
+        expect(saveConfig({ favicon } as Partial<PlannotatorConfig>)).toBe(true);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(JSON.parse(raw()).favicon).toBe(favicon);
+    }
+    expect(JSON.parse(raw())).toEqual({ displayName: "Ada", theme: { mode: "dark" }, favicon: "blue" });
+  });
+
+  test("a folder that is not writable: the save fails and config.json keeps its bytes (never written in place)", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" } });
+    writeFileSync(configPath(), bytes);
+    chmodSync(tempDir, 0o555);
+    try {
+      expect(saveConfig({ displayName: "Grace" })).toBe(false);
+    } finally {
+      chmodSync(tempDir, 0o700);
+    }
+    expect(raw()).toBe(bytes);
+    expect(warnings.join("")).toContain("failed to write config.json");
+  });
+
+  test("a symlinked config.json in a folder that is not writable still saves: the temp file goes beside the link's target", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const dotfiles = mkdtempSync(join(tmpdir(), "plannotator-config-dotfiles-"));
+    try {
+      const target = join(dotfiles, "config.json");
+      writeFileSync(target, JSON.stringify({ displayName: "Ada" }));
+      symlinkSync(target, configPath());
+      chmodSync(tempDir, 0o555);
+      try {
+        expect(saveConfig({ favicon: "yellow" })).toBe(true);
+      } finally {
+        chmodSync(tempDir, 0o700);
+      }
+      expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ displayName: "Ada", favicon: "yellow" });
+      expect(readdirSync(dotfiles)).toEqual(["config.json"]);
+    } finally {
+      rmSync(dotfiles, { recursive: true, force: true });
+    }
   });
 
   test("config.json that is not valid JSON is kept byte for byte, and the save says so", () => {
@@ -1192,5 +1378,308 @@ describe("experimental features", () => {
       warn.mockRestore();
     }
     expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"))).toMatchObject({ usageCounts: false, usageCountsNotice: { decisionMode: 1 }, inboxTextSize: 13 });
+  });
+});
+
+describe("machine state lives in state.json, not config.json (#2852)", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let root: string;
+  let tempDir: string;
+  let warnings: string[];
+  let warn: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "plannotator-config-state-"));
+    tempDir = join(root, "data");
+    mkdirSync(tempDir);
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+    warnings = [];
+    warn = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      warnings.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+    __setConfigSaveMergeWindowHookForTest(null);
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    chmodSync(root, 0o700);
+    for (const name of readdirSync(root)) chmodSync(join(root, name), 0o700);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const configPath = () => join(tempDir, "config.json");
+  const statePath = () => join(tempDir, "state.json");
+  const json = (file: string) => JSON.parse(readFileSync(file, "utf-8"));
+  /** Both files as given (state.json only when given). */
+  const seed = (config: Record<string, unknown>, state?: Record<string, unknown>) => {
+    writeFileSync(configPath(), JSON.stringify(config));
+    if (state) writeFileSync(statePath(), JSON.stringify(state));
+  };
+
+  test("a dialog record lands in state.json and config.json keeps only settings", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }, null, 2) + "\n");
+    expect(saveConfig({ inboxListIntro: { dueAt: "2026-11-05T00:00:00.000Z" }, inboxReveals: { lastShownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { enabled: false, dialogShownFor: "0.28.35" } })).toBe(true);
+    expect(json(configPath())).toEqual({ displayName: "Ada", inboxSound: { enabled: false } });
+    expect(json(statePath())).toEqual({
+      inboxListIntro: { dueAt: "2026-11-05T00:00:00.000Z" },
+      inboxReveals: { lastShownAt: "2026-11-06T00:00:00.000Z" },
+      inboxSound: { dialogShownFor: "0.28.35" },
+    });
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", inboxSound: { enabled: false, dialogShownFor: "0.28.35" } });
+    expect(warnings).toEqual([]);
+  });
+
+  test("a fresh machine gets no config.json from a dialog record alone", () => {
+    expect(saveConfig({ starAsk: { shownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(existsSync(configPath())).toBe(false);
+    expect(loadConfig().starAsk).toEqual({ shownAt: "2026-11-06T00:00:00.000Z" });
+  });
+
+  test("records an older version left in config.json are read, never removed, and config.json is never rewritten for them", () => {
+    const bytes = JSON.stringify({
+      theme: { mode: "dark" },
+      inboxSnoozeIntro: { firstUseAt: "2026-10-29T00:00:00.000Z" },
+      inboxTour: { version: 2, seen_at: "2026-10-01T00:00:00.000Z" },
+      inboxSound: { volume: 30, dialogShownFor: "0.28.20" },
+    });
+    writeFileSync(configPath(), bytes);
+    const before = lstatSync(configPath()).mtimeMs;
+    expect(loadConfig()).toMatchObject({ inboxSnoozeIntro: { firstUseAt: "2026-10-29T00:00:00.000Z" }, inboxSound: { volume: 30, dialogShownFor: "0.28.20" } });
+
+    expect(saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: "2026-11-07T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, dialogShownFor: "0.29.0" } })).toBe(true);
+    // Both saves name only machine state (the sound's settings are unchanged), so config.json is never opened for
+    // writing: no crash between two writes can leave it half moved.
+    expect(readFileSync(configPath(), "utf-8")).toBe(bytes);
+    expect(lstatSync(configPath()).mtimeMs).toBe(before);
+    expect(json(statePath())).toEqual({
+      inboxSnoozeIntro: { firstUseAt: "2026-10-29T00:00:00.000Z", shownAt: "2026-11-07T00:00:00.000Z" },
+      inboxSound: { dialogShownFor: "0.29.0" },
+    });
+    expect(loadConfig().inboxSound).toEqual({ volume: 30, dialogShownFor: "0.29.0" });
+
+    // A setting changed beside them: config.json is rewritten with the old records still in it.
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, volume: 40 } })).toBe(true);
+    expect(json(configPath()).inboxSound).toEqual({ volume: 40, dialogShownFor: "0.28.20" });
+    expect(json(configPath()).inboxTour).toEqual({ version: 2, seen_at: "2026-10-01T00:00:00.000Z" });
+    expect(loadConfig().inboxSound).toEqual({ volume: 40, dialogShownFor: "0.29.0" });
+  });
+
+  test("two machines sharing one config.json: one saving its records takes nothing from the other, and a note choice is kept", () => {
+    // The reporter's setup: config.json in a dotfiles repo, linked into each machine's data dir.
+    const dotfiles = join(root, "dotfiles");
+    mkdirSync(dotfiles);
+    const shared = join(dotfiles, "config.json");
+    writeFileSync(shared, JSON.stringify({
+      displayName: "Ada",
+      inboxAgentNotes: { offered: true, asked: ["codex", "gemini"] },
+      inboxReveals: { lastShownAt: "2026-11-01T00:00:00.000Z", board: { shownAt: "2026-11-01T00:00:00.000Z" } },
+      inboxSound: { dialogShownFor: "0.28.35" },
+    }));
+    const machineB = join(root, "machine-b");
+    mkdirSync(machineB);
+    symlinkSync(shared, configPath());
+    symlinkSync(shared, join(machineB, "config.json"));
+    const sharedBytes = readFileSync(shared, "utf-8");
+
+    // Machine A: a new agent asked, a reveal stamped, the sound dialog shown for a new version.
+    const notes = loadConfig().inboxAgentNotes!;
+    expect(saveConfig({ inboxAgentNotes: { ...notes, asked: [...notes.asked!, "pi"] } })).toBe(true);
+    expect(saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, notNowAt: "2026-11-08T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, dialogShownFor: "0.29.0" } })).toBe(true);
+    expect(readFileSync(shared, "utf-8")).toBe(sharedBytes);
+
+    // Machine B (its own data dir, no state.json yet) still reads every record and choice from the shared file.
+    process.env.PLANNOTATOR_DATA_DIR = machineB;
+    const onB = loadConfig();
+    expect(onB.inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini"] });
+    expect(onB.inboxReveals?.board?.shownAt).toBe("2026-11-01T00:00:00.000Z");
+    expect(onB.inboxSound).toEqual({ dialogShownFor: "0.28.35" });
+  });
+
+  test("an older version writing a record back to config.json after the move: the more protective copy wins, with no ping-pong", () => {
+    // The new Inbox checked the star ask (still open) and asked about Codex.
+    seed({}, { starAsk: { checkedAt: "2026-11-05T00:00:00.000Z" }, inboxAgentNotes: { offered: true, asked: ["codex"] } });
+    // Then an older Pi extension showed the star ask and got Not now; a downgraded Inbox turned Gemini's note off.
+    seed({
+      starAsk: { shownAt: "2026-11-06T00:00:00.000Z", surface: "plan", answer: "not-now", answeredAt: "2026-11-06T00:00:01.000Z" },
+      inboxAgentNotes: { offered: true, asked: ["gemini"] },
+    });
+    expect(loadConfig().starAsk).toMatchObject({ answer: "not-now", surface: "plan" });
+    expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex", "gemini"]);
+    // The new version saves the merged record back: state.json takes it, config.json stays as the older one wrote it.
+    const configBytes = readFileSync(configPath(), "utf-8");
+    expect(saveConfig({ inboxAgentNotes: loadConfig().inboxAgentNotes, starAsk: loadConfig().starAsk })).toBe(true);
+    expect(json(statePath()).inboxAgentNotes.asked).toEqual(["codex", "gemini"]);
+    expect(json(statePath()).starAsk.answer).toBe("not-now");
+    expect(readFileSync(configPath(), "utf-8")).toBe(configBytes);
+    expect(saveConfig({ inboxAgentNotes: loadConfig().inboxAgentNotes, starAsk: loadConfig().starAsk })).toBe(true);
+    expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex", "gemini"]);
+    expect(loadConfig().starAsk?.answer).toBe("not-now");
+  });
+
+  describe("each record that both files hold follows its own rule", () => {
+    const merged = (key: string, fromConfig: unknown, fromState: unknown) => {
+      seed({ [key]: fromConfig }, { [key]: fromState });
+      return (loadConfig() as Record<string, unknown>)[key];
+    };
+
+    test("inboxAgentNotes: asked is the union, offered either; auto (notes not said yet) is state.json's", () => {
+      expect(merged("inboxAgentNotes", { offered: true, asked: ["codex"], auto: [{ agent: "codex", path: "~/.codex/AGENTS.md" }] }, { asked: ["gemini"] }))
+        .toEqual({ offered: true, asked: ["gemini", "codex"] });
+    });
+
+    test("inboxTour: the higher version whole; the same version merges stamps, notify_again from state.json", () => {
+      expect(merged("inboxTour", { version: 1, finished_at: "2026-10-01T00:00:00.000Z" }, { version: 2, seen_at: "2026-11-01T00:00:00.000Z" }))
+        .toEqual({ version: 2, seen_at: "2026-11-01T00:00:00.000Z" });
+      expect(merged("inboxTour", { version: 2, skipped_at: "2026-11-02T00:00:00.000Z", notify_again: true }, { version: 2, seen_at: "2026-11-01T00:00:00.000Z", skipped_at: null, notify_again: false }))
+        .toEqual({ version: 2, seen_at: "2026-11-01T00:00:00.000Z", skipped_at: "2026-11-02T00:00:00.000Z", notify_again: false });
+    });
+
+    test("inboxListIntro: the higher version whole (none is version 1); the same version merges stamps", () => {
+      expect(merged("inboxListIntro", { shownAt: "2026-10-01T00:00:00.000Z" }, { version: 2, dueAt: "2026-11-01T00:00:00.000Z" }))
+        .toEqual({ version: 2, dueAt: "2026-11-01T00:00:00.000Z" });
+      expect(merged("inboxListIntro", { version: 2, shownAt: "2026-11-03T00:00:00.000Z" }, { version: 2, dueAt: "2026-11-01T00:00:00.000Z" }))
+        .toEqual({ version: 2, dueAt: "2026-11-01T00:00:00.000Z", shownAt: "2026-11-03T00:00:00.000Z" });
+    });
+
+    test("starAsk: the copy further along wins whole (answered, shown, checked); a tie goes to the later one", () => {
+      expect(merged("starAsk", { checkedAt: "2026-11-09T00:00:00.000Z" }, { shownAt: "2026-11-01T00:00:00.000Z", surface: "inbox" }))
+        .toEqual({ shownAt: "2026-11-01T00:00:00.000Z", surface: "inbox" });
+      expect(merged("starAsk", { answer: "opened", answeredAt: "2026-11-03T00:00:00.000Z" }, { answer: "not-now", answeredAt: "2026-11-02T00:00:00.000Z" }))
+        .toEqual({ answer: "opened", answeredAt: "2026-11-03T00:00:00.000Z" });
+    });
+
+    test("inboxReveals: the later spacing clocks, the earliest waitingSince, a claim anywhere kept, shownFor the union", () => {
+      expect(merged(
+        "inboxReveals",
+        { lastShownAt: "2026-11-05T00:00:00.000Z", waitingSince: { board: "2026-11-01T00:00:00.000Z" }, board: { shownAt: "2026-11-02T00:00:00.000Z" }, agentNote: { shownFor: ["codex"] } },
+        { lastShownAt: "2026-11-04T00:00:00.000Z", waitingSince: { board: "2026-11-03T00:00:00.000Z", steps: "2026-11-03T00:00:00.000Z" }, agentNote: { shownFor: ["pi"] } },
+      )).toEqual({
+        lastShownAt: "2026-11-05T00:00:00.000Z",
+        waitingSince: { board: "2026-11-01T00:00:00.000Z", steps: "2026-11-03T00:00:00.000Z" },
+        board: { shownAt: "2026-11-02T00:00:00.000Z" },
+        agentNote: { shownFor: ["pi", "codex"] },
+      });
+    });
+
+    test("inboxSnoozeIntro: stamps kept from either, the earliest firstUseAt", () => {
+      expect(merged("inboxSnoozeIntro", { firstUseAt: "2026-09-01T00:00:00.000Z", snoozedAt: "2026-10-01T00:00:00.000Z" }, { firstUseAt: "2026-10-29T00:00:00.000Z", shownAt: "2026-11-07T00:00:00.000Z" }))
+        .toEqual({ firstUseAt: "2026-09-01T00:00:00.000Z", snoozedAt: "2026-10-01T00:00:00.000Z", shownAt: "2026-11-07T00:00:00.000Z" });
+    });
+
+    test("inboxBoardIntro, inboxVoiceIntro, inboxThemeChooser, inboxPriorityIntro: shown, skipped, used or not needed anywhere stays so", () => {
+      expect(merged("inboxBoardIntro", { shownAt: "2026-11-01T00:00:00.000Z" }, {})).toEqual({ shownAt: "2026-11-01T00:00:00.000Z" });
+      expect(merged("inboxVoiceIntro", { skippedAt: "2026-11-02T00:00:00.000Z" }, { dueAt: "2026-11-01T00:00:00.000Z" }))
+        .toEqual({ dueAt: "2026-11-01T00:00:00.000Z", skippedAt: "2026-11-02T00:00:00.000Z" });
+      expect(merged("inboxThemeChooser", { notNeededAt: "2026-11-02T00:00:00.000Z" }, { dueAt: "2026-11-01T00:00:00.000Z" }))
+        .toEqual({ dueAt: "2026-11-01T00:00:00.000Z", notNeededAt: "2026-11-02T00:00:00.000Z" });
+      expect(merged("inboxPriorityIntro", { usedAt: "2026-11-02T00:00:00.000Z" }, {})).toEqual({ usedAt: "2026-11-02T00:00:00.000Z" });
+    });
+
+    test("inboxSound: an old dialogShownFor in config.json never hides a dialog that is due; a newer one does", () => {
+      expect(merged("inboxSound", { volume: 30, dialogShownFor: "0.28.35" }, { dialogDueFor: "0.29.0" })).toEqual({ volume: 30, dialogDueFor: "0.29.0" });
+      expect(merged("inboxSound", { dialogShownFor: "0.29.1" }, { dialogDueFor: "0.29.0" })).toEqual({ dialogShownFor: "0.29.1" });
+      expect(merged("inboxSound", { dialogDueFor: "0.28.10" }, { dialogShownFor: "0.28.10" })).toEqual({ dialogShownFor: "0.28.10" });
+      // Builds that are not versions: state.json's own fields.
+      expect(merged("inboxSound", { dialogShownFor: "tidy-e2e" }, { dialogDueFor: "0.0.0-dev" })).toEqual({ dialogDueFor: "0.0.0-dev" });
+    });
+  });
+
+  test("a save with no settings change leaves config.json byte for byte, hand formatting included", () => {
+    const bytes = '{\n    "displayName": "Ada",\n    "theme": {"mode": "dark"}\n}\n';
+    writeFileSync(configPath(), bytes);
+    const before = lstatSync(configPath()).mtimeMs;
+    expect(saveConfig({ inboxReveals: { lastShownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { dialogShownFor: "0.29.0" } })).toBe(true);
+    expect(saveConfig({ displayName: "Ada" })).toBe(true);
+    expect(readFileSync(configPath(), "utf-8")).toBe(bytes);
+    expect(lstatSync(configPath()).mtimeMs).toBe(before);
+  });
+
+  test("a read-only config.json that still holds old records: saving those records succeeds with no warning", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    // A home-manager style link into a store nothing may write.
+    const store = join(root, "store");
+    mkdirSync(store);
+    const bytes = JSON.stringify({ displayName: "Ada", inboxTour: { version: 2, seen_at: "2026-10-01T00:00:00.000Z" }, inboxSound: { volume: 30, dialogShownFor: "0.28.20" } });
+    writeFileSync(join(store, "config.json"), bytes);
+    symlinkSync(join(store, "config.json"), configPath());
+    chmodSync(join(store, "config.json"), 0o444);
+    chmodSync(store, 0o555);
+    expect(saveConfig({ inboxTour: { ...loadConfig().inboxTour, finished_at: "2026-11-01T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, dialogShownFor: "0.29.0" } })).toBe(true);
+    expect(warnings).toEqual([]);
+    expect(readFileSync(configPath(), "utf-8")).toBe(bytes);
+    expect(loadConfig()).toMatchObject({ inboxTour: { finished_at: "2026-11-01T00:00:00.000Z" }, inboxSound: { volume: 30, dialogShownFor: "0.29.0" } });
+  });
+
+  test("a corrupt or unreadable state.json is kept aside (never deleted) with one warning before a new one is written; settings never suffer", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    const cases: [string, () => void][] = [["{not json", () => {}], ["[1,2]", () => {}]];
+    if (process.platform !== "win32" && process.getuid?.() !== 0) cases.push(['{"inboxTour":{"version":2}}', () => chmodSync(statePath(), 0o000)]);
+    for (const [bytes, spoil] of cases) {
+      for (const name of readdirSync(tempDir)) if (name.startsWith("state.json")) rmSync(join(tempDir, name));
+      writeFileSync(statePath(), bytes);
+      spoil();
+      warnings = [];
+      expect(loadConfig().displayName).toBe("Ada");
+      expect(saveConfig({ favicon: "yellow" })).toBe(true);
+      expect(warnings).toEqual([]);
+      expect(saveConfig({ inboxTour: { version: 3 } })).toBe(true);
+      expect(json(statePath())).toEqual({ inboxTour: { version: 3 } });
+      const aside = readdirSync(tempDir).filter((name) => name.startsWith("state.json.corrupt-"));
+      expect(aside).toHaveLength(1);
+      chmodSync(join(tempDir, aside[0]), 0o600);
+      expect(readFileSync(join(tempDir, aside[0]), "utf-8")).toBe(bytes);
+      expect(warnings.filter((line) => line.includes("state.json"))).toHaveLength(1);
+      expect(warnings.join("")).toContain(aside[0]);
+      expect(json(configPath())).toEqual({ displayName: "Ada", favicon: "yellow" });
+    }
+  });
+
+  test("state.json as a folder: the warning names state.json, the record save says it failed, and the sound's settings still save", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    mkdirSync(statePath());
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(saveConfig({ inboxTour: { version: 2 } })).toBe(false);
+    expect(warnings.join("")).toContain("not saving state.json because it is a folder");
+    expect(warnings.join("")).not.toContain("config.json");
+    saveConfig({ inboxSound: { enabled: false, volume: 40, dialogShownFor: "0.29.0" } });
+    expect(loadConfig().inboxSound).toMatchObject({ enabled: false, volume: 40 });
+    expect(json(configPath()).inboxSound).toEqual({ enabled: false, volume: 40 });
+    expect(lstatSync(statePath()).isDirectory()).toBe(true);
+  });
+
+  test("a symlinked config.json (a dotfiles repo) is written through for settings, and machine state never lands in it", () => {
+    const dotfiles = join(root, "dotfiles");
+    mkdirSync(dotfiles);
+    const target = join(dotfiles, "plannotator-config.json");
+    writeFileSync(target, JSON.stringify({ displayName: "Ada" }));
+    symlinkSync(target, configPath());
+    expect(saveConfig({ inboxListIntro: { shownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+    expect(json(target)).toEqual({ displayName: "Ada", favicon: "yellow" });
+    expect(json(statePath())).toEqual({ inboxListIntro: { shownAt: "2026-11-06T00:00:00.000Z" } });
+  });
+
+  test("a state save runs under the config lock and is refused with config.json when that file is unreadable", () => {
+    let lockHeld = false;
+    __setConfigSaveMergeWindowHookForTest(() => {
+      lockHeld = existsSync(join(tempDir, "config.json.lock"));
+    });
+    expect(saveConfig({ inboxPriorityIntro: { usedAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    __setConfigSaveMergeWindowHookForTest(null);
+    expect(lockHeld).toBe(true);
+
+    writeFileSync(configPath(), "{ broken");
+    expect(saveConfig({ inboxPriorityIntro: { usedAt: "later" } })).toBe(false);
+    expect(readFileSync(configPath(), "utf-8")).toBe("{ broken");
+    expect(json(statePath())).toEqual({ inboxPriorityIntro: { usedAt: "2026-11-06T00:00:00.000Z" } });
   });
 });

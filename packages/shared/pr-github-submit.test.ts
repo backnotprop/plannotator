@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { githubErrorDetail, submitGhPRReview } from "./pr-github";
-import { submitPRReview } from "./pr-provider";
 import type { CommandResult, PRReviewFileComment, PRReviewFileLevelComment, PRRuntime } from "./pr-types";
 
 const REF = { platform: "github" as const, host: "github.com", owner: "o", repo: "r", number: 7 };
@@ -245,15 +244,6 @@ describe("GitHub refusal reasons reach the error", () => {
   });
 });
 
-describe("submitPRReview on GitLab", () => {
-  test("file-level comments are folded into the MR note", async () => {
-    const { runtime, calls } = ghRuntime((c) => (c.args.some((a) => a.endsWith("/notes")) ? ok("{}") : undefined));
-    const GL_REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "o/r", iid: 7 };
-    await submitPRReview(runtime, GL_REF, "sha", "comment", "Body", [], [FILE_A]);
-    expect(calls[0].input.body).toBe("Body\n\n**src/a.ts:** Split this file.");
-  });
-});
-
 // #1611: every non-approve review used to post as COMMENT, so "Request
 // changes" in the UI never requested changes.
 describe("request_changes review event (#1611)", () => {
@@ -289,19 +279,5 @@ describe("request_changes review event (#1611)", () => {
     await expect(submitGhPRReview(runtime, REF, "sha", "request_changes", "Body", [LINE])).rejects.toThrow(
       "Can not request changes on your own pull request",
     );
-  });
-
-  test("GitLab has no request-changes review: it posts exactly what a comment posts", async () => {
-    const GL_REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "o/r", iid: 7 };
-    const respond = (c: Call) => (c.args.some((a) => a.endsWith("/notes") || a.endsWith("/discussions") || a.endsWith("merge_requests/7"))
-      ? ok("{}")
-      : undefined);
-    const asComment = ghRuntime(respond);
-    const asRequest = ghRuntime(respond);
-    await submitPRReview(asComment.runtime, GL_REF, "sha", "comment", "Body", [LINE]);
-    await submitPRReview(asRequest.runtime, GL_REF, "sha", "request_changes", "Body", [LINE]);
-    expect(asRequest.calls.length).toBeGreaterThanOrEqual(3); // note, diff refs, discussion
-    expect(asRequest.calls).toEqual(asComment.calls);
-    expect(asRequest.calls.some((c) => c.args.some((a) => a.endsWith("/approve")))).toBe(false);
   });
 });

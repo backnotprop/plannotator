@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Routines editor, option A</title>
+<style>
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif; background: #111; color: #ddd; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+
+/* Theme: packages/ui/themes/plannotator.css (dark, then .light) */
+.theme-plannotator { --background: oklch(0.15 0.02 260); --foreground: oklch(0.90 0.01 260); --card: oklch(0.22 0.02 260); --popover: oklch(0.28 0.025 260); --primary: oklch(0.75 0.18 280); --primary-foreground: oklch(0.15 0.02 260); --muted: oklch(0.26 0.02 260); --muted-foreground: oklch(0.72 0.02 260); --destructive: oklch(0.65 0.20 25); --border: oklch(0.35 0.02 260); --ring: oklch(0.75 0.18 280); --success: oklch(0.72 0.17 150); color-scheme: dark; }
+.theme-plannotator.light { --background: oklch(0.97 0.005 260); --foreground: oklch(0.18 0.02 260); --card: oklch(1 0 0); --popover: oklch(1 0 0); --primary: oklch(0.50 0.25 280); --primary-foreground: oklch(1 0 0); --muted: oklch(0.92 0.01 260); --muted-foreground: oklch(0.40 0.02 260); --destructive: oklch(0.50 0.25 25); --border: oklch(0.88 0.01 260); --ring: oklch(0.50 0.25 280); --success: oklch(0.45 0.20 150); color-scheme: light; }
+.pn-inbox { --ib-hair: color-mix(in oklch, var(--border) 55%, transparent); --ib-line: color-mix(in oklch, var(--border) 70%, transparent); --ib-badge-stop-fg: color-mix(in oklab, var(--destructive) 70%, var(--foreground)); --ib-sel: color-mix(in oklch, var(--primary) 15%, transparent); color: var(--foreground); font-size: 14px; }
+
+/* Mock page chrome (not product UI) */
+.band { padding: 22px 24px 26px; background: var(--background); }
+.band + .band { border-top: 1px solid var(--border); }
+.band-h { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; }
+.band-h h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+.band-h span { font-size: 13px; color: var(--muted-foreground); }
+.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.cap { min-height: 74px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.cap small { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; line-height: 1.45; }
+.frame { border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent), 0 10px 30px -12px rgba(0,0,0,.45); height: 760px; display: flex; }
+.states { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 16px; font-size: 12.5px; color: var(--muted-foreground); align-items: center; }
+.states .lbl { color: var(--foreground); font-weight: 600; }
+.states .chipbox { display: inline-flex; align-items: center; height: 46px; padding: 0 12px; border-radius: 8px; background: var(--card); box-shadow: 0 0 0 1px var(--ib-hair); gap: 8px; }
+
+/* Real rules: packages/inbox/inbox.css and scheduled/scheduled.css */
+.ib-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--card); position: relative; }
+.ib-phead { height: 46px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--ib-hair); }
+.ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-phsubj-t { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-iconbtn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--muted-foreground); }
+.ib-vsep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+.ib-pbody { flex: 1; min-height: 0; overflow: hidden; padding: 18px 26px 18px; }
+.st-body .st-title { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); outline: none; margin-bottom: 8px; line-height: 1.3; }
+.st-title.ph { color: var(--muted-foreground); font-weight: 650; }
+.ib-tmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: -4px 0 12px; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-tmeta > * { white-space: nowrap; }
+.st-meta { align-items: center; margin: 0 0 4px; }
+.st-meta > .st-wrap { white-space: normal; }
+.ib-tdot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+.ib-sw { width: 34px; height: 20px; border-radius: 999px; background: var(--muted); position: relative; border: 1px solid var(--border); flex: none; margin-right: 2px; }
+.ib-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.ib-sw[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
+.ib-sw[aria-checked="true"]::after { left: 16px; background: #fff; }
+.ib-sw[disabled] { opacity: .5; }
+.ib-sgroup { margin-top: 22px; }
+.ib-sgroup > h2 { font-size: 13.5px; font-weight: 600; margin: 0 0 8px; }
+.st-sched { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; min-height: 46px; border: 1px solid var(--border); border-radius: 8px; font-size: 13.5px; }
+.st-sched > svg.ib-ic { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
+.st-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font-size: 13.5px; line-height: 1; white-space: nowrap; }
+.st-pick svg.ib-ic { color: var(--muted-foreground); }
+.st-w { color: var(--muted-foreground); }
+.st-tz { display: inline-flex; align-items: center; height: 28px; padding: 0 4px; color: var(--muted-foreground); }
+.st-next { margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+.st-miss { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted-foreground); }
+.ib-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--muted); border: 1px solid var(--border); }
+.ib-seg-o { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--muted-foreground); white-space: nowrap; }
+.ib-seg-o[data-on] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.st-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 14px 12px; }
+.st-k { font-size: 13.5px; color: var(--muted-foreground); line-height: 28px; }
+.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 13px; color: var(--foreground); }
+.st-chip svg.ib-ic { color: var(--muted-foreground); flex: none; }
+.st-add { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; font-size: 13px; color: var(--muted-foreground); border-radius: 6px; }
+.st-box { position: relative; border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 12px 14px 8px; }
+.st-box.focus { border-color: color-mix(in oklch, var(--ring) 70%, var(--border)); }
+.st-prompt { min-height: 92px; font-size: 14px; line-height: 22px; color: var(--foreground); white-space: pre-wrap; }
+.st-prompt.ph { color: var(--muted-foreground); }
+.caret { display: inline-block; width: 1.5px; height: 17px; background: var(--foreground); vertical-align: -3px; margin-left: 1px; }
+.st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 10px -6px 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.st-lbl { font-size: 12.5px; color: var(--muted-foreground); margin: 0 4px 0 6px; }
+.st-gh { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--foreground); }
+.st-gh svg.ib-ic { width: 11px; height: 11px; color: var(--muted-foreground); }
+.st-sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
+.ib-pfoot { flex: none; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); padding: 12px 26px 14px; background: var(--card); }
+.st-pfoot { display: flex; align-items: center; gap: 10px; }
+.ib-btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); font-size: 13.5px; font-weight: 500; white-space: nowrap; color: var(--foreground); }
+.ib-btn.ib-pri { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.ib-btn.ib-ghost { border-color: transparent; background: transparent; color: var(--muted-foreground); }
+.ib-btn:disabled { opacity: .5; }
+.ib-btn svg.ib-ic { width: 12px; height: 12px; }
+
+/* Proposed (new) rules */
+.st-saved { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+.st-saved svg.ib-ic { color: var(--muted-foreground); }
+.st-saved[data-bad] { color: var(--ib-badge-stop-fg); }
+.st-saved[data-bad] svg.ib-ic { color: currentColor; }
+.st-footline { flex: 1; min-width: 0; font-size: 13px; color: var(--muted-foreground); line-height: 18px; }
+.st-footline b { font-weight: 550; color: var(--foreground); }
+.st-footline[data-bad] { color: var(--ib-badge-stop-fg); }
+.st-footline .st-ok { display: inline-flex; vertical-align: -2px; margin-right: 4px; color: var(--muted-foreground); }
+.st-footline .st-ok svg.ib-ic { width: 13px; height: 13px; }
+</style></head><body>
+<div class="pn-inbox theme-plannotator band">
+  <div class="band-h"><h1>A · Autosave made visible</h1><span>Dark · Saved / Saving… in the header; Turn on is the filled step, Run once now is quiet</span></div>
+  <div class="cols"><div><p class="cap">Creating a new routine<small>Nothing is written yet: it needs a name and a prompt. The header says so; the foot's one button is the next step, dimmed until it can be taken.</small></p><div class="frame">
+<div class="ib-pane st-pane">
+  <div class="ib-phead">
+    <span class="ib-phsubj"><span class="ib-phsubj-t">New routine</span></span>
+    <span class="st-saved" role="status">Not saved yet</span>
+    <button class="ib-iconbtn" aria-label="More"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <span class="ib-vsep"></span>
+    <button class="ib-iconbtn" aria-label="Close"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="ib-pbody st-body">
+    <div class="st-title ph">Name</div>
+    <div class="ib-tmeta st-meta"><span class="ib-sw" role="switch" aria-checked="false" disabled></span><span>Off</span><span class="ib-tdot"></span><span class="st-wrap">Runs on this computer while the Inbox is running</span></div>
+    <section class="ib-sgroup st-group">
+      <h2>Schedule</h2>
+      <div class="st-sched"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="st-pick">Every day <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-w">at</span><span class="st-pick">07:00 PM</span><span class="st-tz">EST</span><span class="st-next">Next run Mon, Nov 16 at 7:00 PM EST</span></div>
+      <div class="st-miss"><span>If a run is missed:</span><span class="ib-seg"><span class="ib-seg-o" data-on>Run once when I'm back</span><span class="ib-seg-o">Skip it</span></span></div>
+    </section>
+    <section class="ib-sgroup st-group st-kv">
+      <span class="st-k">Repo or folder</span><span><span class="st-chip"><svg class="ib-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg><span>plannotator</span><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+      <span class="st-k">Files</span><span class="st-chips"><span class="st-add"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add file</span></span>
+    </section>
+    <section class="ib-sgroup st-group">
+      <h2>Prompt</h2>
+      <div class="st-box focus">
+        <div class="st-prompt">Read this week's Inbox feedback threads and the usage export. Write a short summary of what people<span class="caret"></span></div>
+        <div class="st-foot"><span class="st-lbl">Runs as</span><span class="st-gh">Claude Code <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-sep"></span><span class="st-gh">Opus · high <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div>
+      </div>
+    </section>
+  </div>
+  <div class="ib-pfoot st-pfoot"><span class="st-footline">Saves by itself once it has a name and a prompt.</span><button class="ib-btn ib-pri" disabled>Turn on</button></div>
+</div></div></div><div><p class="cap">Just after an edit<small>Typing saves after a short pause (and on refresh or close). The header reads Saving… then Saved. It is On, so the foot shows the next run and a quiet Run once now.</small></p><div class="frame">
+<div class="ib-pane st-pane">
+  <div class="ib-phead">
+    <span class="ib-phsubj"><span class="ib-phsubj-t">Inbox Usage Data and Feedback</span></span>
+    <span class="st-saved" role="status">Saving…</span>
+    <button class="ib-iconbtn" aria-label="More"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <span class="ib-vsep"></span>
+    <button class="ib-iconbtn" aria-label="Close"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="ib-pbody st-body">
+    <div class="st-title">Inbox Usage Data and Feedback</div>
+    <div class="ib-tmeta st-meta"><span class="ib-sw" role="switch" aria-checked="true"></span><span>On</span><span class="ib-tdot"></span><span class="st-wrap">Runs on this computer while the Inbox is running</span></div>
+    <section class="ib-sgroup st-group">
+      <h2>Schedule</h2>
+      <div class="st-sched"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="st-pick">Every day <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-w">at</span><span class="st-pick">07:00 PM</span><span class="st-tz">EST</span><span class="st-next">Next run today at 7:00 PM EST</span></div>
+      <div class="st-miss"><span>If a run is missed:</span><span class="ib-seg"><span class="ib-seg-o" data-on>Run once when I'm back</span><span class="ib-seg-o">Skip it</span></span></div>
+    </section>
+    <section class="ib-sgroup st-group st-kv">
+      <span class="st-k">Repo or folder</span><span><span class="st-chip"><svg class="ib-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg><span>plannotator</span><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+      <span class="st-k">Files</span><span class="st-chips"><span class="st-add"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add file</span></span>
+    </section>
+    <section class="ib-sgroup st-group">
+      <h2>Prompt</h2>
+      <div class="st-box focus">
+        <div class="st-prompt">Read this week's Inbox feedback threads and the usage export. Write a short summary of what people asked for most, what broke, and three things worth fixing next. Post it in this thread. Link each item to its thread.<span class="caret"></span></div>
+        <div class="st-foot"><span class="st-lbl">Runs as</span><span class="st-gh">Claude Code <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-sep"></span><span class="st-gh">Opus · high <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div>
+      </div>
+    </section>
+  </div>
+  <div class="ib-pfoot st-pfoot"><span class="st-footline">On · next run <b>today at 7:00 PM</b></span><button class="ib-btn"><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M8 5.5v13l10.5-6.5z"/></svg>Run once now</button></div>
+</div></div></div><div><p class="cap">Idle, saved (still off)<small>Made, saved, off. "Saved" sits quietly in the header. The filled button is the step the person came to take: Turn on. Run once now is there, but not filled.</small></p><div class="frame">
+<div class="ib-pane st-pane">
+  <div class="ib-phead">
+    <span class="ib-phsubj"><span class="ib-phsubj-t">Inbox Usage Data and Feedback</span></span>
+    <span class="st-saved" role="status"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Saved</span>
+    <button class="ib-iconbtn" aria-label="More"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <span class="ib-vsep"></span>
+    <button class="ib-iconbtn" aria-label="Close"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="ib-pbody st-body">
+    <div class="st-title">Inbox Usage Data and Feedback</div>
+    <div class="ib-tmeta st-meta"><span class="ib-sw" role="switch" aria-checked="false"></span><span>Off</span><span class="ib-tdot"></span><span class="st-wrap">Runs on this computer while the Inbox is running</span></div>
+    <section class="ib-sgroup st-group">
+      <h2>Schedule</h2>
+      <div class="st-sched"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="st-pick">Every day <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-w">at</span><span class="st-pick">07:00 PM</span><span class="st-tz">EST</span><span class="st-next">Next run Mon, Nov 16 at 7:00 PM EST</span></div>
+      <div class="st-miss"><span>If a run is missed:</span><span class="ib-seg"><span class="ib-seg-o" data-on>Run once when I'm back</span><span class="ib-seg-o">Skip it</span></span></div>
+    </section>
+    <section class="ib-sgroup st-group st-kv">
+      <span class="st-k">Repo or folder</span><span><span class="st-chip"><svg class="ib-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg><span>plannotator</span><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+      <span class="st-k">Files</span><span class="st-chips"><span class="st-add"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add file</span></span>
+    </section>
+    <section class="ib-sgroup st-group">
+      <h2>Prompt</h2>
+      <div class="st-box">
+        <div class="st-prompt">Read this week's Inbox feedback threads and the usage export. Write a short summary of what people asked for most, what broke, and three things worth fixing next. Post it in this thread.</div>
+        <div class="st-foot"><span class="st-lbl">Runs as</span><span class="st-gh">Claude Code <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-sep"></span><span class="st-gh">Opus · high <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div>
+      </div>
+    </section>
+  </div>
+  <div class="ib-pfoot st-pfoot"><span class="st-footline">Off, so it won't run on its own.</span><button class="ib-btn"><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M8 5.5v13l10.5-6.5z"/></svg>Run once now</button><button class="ib-btn ib-pri">Turn on</button></div>
+</div></div></div></div>
+  
+<div class="states"><span class="lbl">Header status, every state:</span>
+<span class="chipbox"><span class="st-saved" role="status">Not saved yet</span></span>
+<span class="chipbox"><span class="st-saved" role="status">Saving…</span></span>
+<span class="chipbox"><span class="st-saved" role="status"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Saved</span></span>
+<span class="chipbox"><span class="st-saved" role="status" data-bad><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 8v5M12 16.5v.01"/><circle cx="12" cy="12" r="8.5"/></svg>Couldn't save · retrying</span></span>
+<span>The red one stays until a write lands; the words stay in the field.</span></div>
+</div>
+<div class="pn-inbox theme-plannotator light band">
+  <div class="band-h"><h1>A · Autosave made visible</h1><span>Light · Saved / Saving… in the header; Turn on is the filled step, Run once now is quiet</span></div>
+  <div class="cols"><div><p class="cap">Creating a new routine<small>Nothing is written yet: it needs a name and a prompt. The header says so; the foot's one button is the next step, dimmed until it can be taken.</small></p><div class="frame">
+<div class="ib-pane st-pane">
+  <div class="ib-phead">
+    <span class="ib-phsubj"><span class="ib-phsubj-t">New routine</span></span>
+    <span class="st-saved" role="status">Not saved yet</span>
+    <button class="ib-iconbtn" aria-label="More"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <span class="ib-vsep"></span>
+    <button class="ib-iconbtn" aria-label="Close"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="ib-pbody st-body">
+    <div class="st-title ph">Name</div>
+    <div class="ib-tmeta st-meta"><span class="ib-sw" role="switch" aria-checked="false" disabled></span><span>Off</span><span class="ib-tdot"></span><span class="st-wrap">Runs on this computer while the Inbox is running</span></div>
+    <section class="ib-sgroup st-group">
+      <h2>Schedule</h2>
+      <div class="st-sched"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="st-pick">Every day <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-w">at</span><span class="st-pick">07:00 PM</span><span class="st-tz">EST</span><span class="st-next">Next run Mon, Nov 16 at 7:00 PM EST</span></div>
+      <div class="st-miss"><span>If a run is missed:</span><span class="ib-seg"><span class="ib-seg-o" data-on>Run once when I'm back</span><span class="ib-seg-o">Skip it</span></span></div>
+    </section>
+    <section class="ib-sgroup st-group st-kv">
+      <span class="st-k">Repo or folder</span><span><span class="st-chip"><svg class="ib-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg><span>plannotator</span><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+      <span class="st-k">Files</span><span class="st-chips"><span class="st-add"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add file</span></span>
+    </section>
+    <section class="ib-sgroup st-group">
+      <h2>Prompt</h2>
+      <div class="st-box focus">
+        <div class="st-prompt">Read this week's Inbox feedback threads and the usage export. Write a short summary of what people<span class="caret"></span></div>
+        <div class="st-foot"><span class="st-lbl">Runs as</span><span class="st-gh">Claude Code <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-sep"></span><span class="st-gh">Opus · high <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div>
+      </div>
+    </section>
+  </div>
+  <div class="ib-pfoot st-pfoot"><span class="st-footline">Saves by itself once it has a name and a prompt.</span><button class="ib-btn ib-pri" disabled>Turn on</button></div>
+</div></div></div><div><p class="cap">Just after an edit<small>Typing saves after a short pause (and on refresh or close). The header reads Saving… then Saved. It is On, so the foot shows the next run and a quiet Run once now.</small></p><div class="frame">
+<div class="ib-pane st-pane">
+  <div class="ib-phead">
+    <span class="ib-phsubj"><span class="ib-phsubj-t">Inbox Usage Data and Feedback</span></span>
+    <span class="st-saved" role="status">Saving…</span>
+    <button class="ib-iconbtn" aria-label="More"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <span class="ib-vsep"></span>
+    <button class="ib-iconbtn" aria-label="Close"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="ib-pbody st-body">
+    <div class="st-title">Inbox Usage Data and Feedback</div>
+    <div class="ib-tmeta st-meta"><span class="ib-sw" role="switch" aria-checked="true"></span><span>On</span><span class="ib-tdot"></span><span class="st-wrap">Runs on this computer while the Inbox is running</span></div>
+    <section class="ib-sgroup st-group">
+      <h2>Schedule</h2>
+      <div class="st-sched"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="st-pick">Every day <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-w">at</span><span class="st-pick">07:00 PM</span><span class="st-tz">EST</span><span class="st-next">Next run today at 7:00 PM EST</span></div>
+      <div class="st-miss"><span>If a run is missed:</span><span class="ib-seg"><span class="ib-seg-o" data-on>Run once when I'm back</span><span class="ib-seg-o">Skip it</span></span></div>
+    </section>
+    <section class="ib-sgroup st-group st-kv">
+      <span class="st-k">Repo or folder</span><span><span class="st-chip"><svg class="ib-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg><span>plannotator</span><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+      <span class="st-k">Files</span><span class="st-chips"><span class="st-add"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add file</span></span>
+    </section>
+    <section class="ib-sgroup st-group">
+      <h2>Prompt</h2>
+      <div class="st-box focus">
+        <div class="st-prompt">Read this week's Inbox feedback threads and the usage export. Write a short summary of what people asked for most, what broke, and three things worth fixing next. Post it in this thread. Link each item to its thread.<span class="caret"></span></div>
+        <div class="st-foot"><span class="st-lbl">Runs as</span><span class="st-gh">Claude Code <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-sep"></span><span class="st-gh">Opus · high <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div>
+      </div>
+    </section>
+  </div>
+  <div class="ib-pfoot st-pfoot"><span class="st-footline">On · next run <b>today at 7:00 PM</b></span><button class="ib-btn"><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M8 5.5v13l10.5-6.5z"/></svg>Run once now</button></div>
+</div></div></div><div><p class="cap">Idle, saved (still off)<small>Made, saved, off. "Saved" sits quietly in the header. The filled button is the step the person came to take: Turn on. Run once now is there, but not filled.</small></p><div class="frame">
+<div class="ib-pane st-pane">
+  <div class="ib-phead">
+    <span class="ib-phsubj"><span class="ib-phsubj-t">Inbox Usage Data and Feedback</span></span>
+    <span class="st-saved" role="status"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Saved</span>
+    <button class="ib-iconbtn" aria-label="More"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    <span class="ib-vsep"></span>
+    <button class="ib-iconbtn" aria-label="Close"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="ib-pbody st-body">
+    <div class="st-title">Inbox Usage Data and Feedback</div>
+    <div class="ib-tmeta st-meta"><span class="ib-sw" role="switch" aria-checked="false"></span><span>Off</span><span class="ib-tdot"></span><span class="st-wrap">Runs on this computer while the Inbox is running</span></div>
+    <section class="ib-sgroup st-group">
+      <h2>Schedule</h2>
+      <div class="st-sched"><svg class="ib-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="st-pick">Every day <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-w">at</span><span class="st-pick">07:00 PM</span><span class="st-tz">EST</span><span class="st-next">Next run Mon, Nov 16 at 7:00 PM EST</span></div>
+      <div class="st-miss"><span>If a run is missed:</span><span class="ib-seg"><span class="ib-seg-o" data-on>Run once when I'm back</span><span class="ib-seg-o">Skip it</span></span></div>
+    </section>
+    <section class="ib-sgroup st-group st-kv">
+      <span class="st-k">Repo or folder</span><span><span class="st-chip"><svg class="ib-ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg><span>plannotator</span><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+      <span class="st-k">Files</span><span class="st-chips"><span class="st-add"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add file</span></span>
+    </section>
+    <section class="ib-sgroup st-group">
+      <h2>Prompt</h2>
+      <div class="st-box">
+        <div class="st-prompt">Read this week's Inbox feedback threads and the usage export. Write a short summary of what people asked for most, what broke, and three things worth fixing next. Post it in this thread.</div>
+        <div class="st-foot"><span class="st-lbl">Runs as</span><span class="st-gh">Claude Code <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span><span class="st-sep"></span><span class="st-gh">Opus · high <svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div>
+      </div>
+    </section>
+  </div>
+  <div class="ib-pfoot st-pfoot"><span class="st-footline">Off, so it won't run on its own.</span><button class="ib-btn"><svg class="ib-ic" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M8 5.5v13l10.5-6.5z"/></svg>Run once now</button><button class="ib-btn ib-pri">Turn on</button></div>
+</div></div></div></div>
+  
+<div class="states"><span class="lbl">Header status, every state:</span>
+<span class="chipbox"><span class="st-saved" role="status">Not saved yet</span></span>
+<span class="chipbox"><span class="st-saved" role="status">Saving…</span></span>
+<span class="chipbox"><span class="st-saved" role="status"><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Saved</span></span>
+<span class="chipbox"><span class="st-saved" role="status" data-bad><svg class="ib-ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 8v5M12 16.5v.01"/><circle cx="12" cy="12" r="8.5"/></svg>Couldn't save · retrying</span></span>
+<span>The red one stays until a write lands; the words stay in the field.</span></div>
+</div></body></html>

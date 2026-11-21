@@ -1,11 +1,11 @@
 /**
  * The agent marks' face picker (FaceFan.tsx, opened from AgentMark.tsx) and where its choices sit (fanLayout.ts).
  *
- * What this catches: a pointer only passing over a mark opening the picker (or a rest on it not opening it); a choice
- * not kept for its agent or not shown on the mark; the picker staying open after Escape or after the pointer has left
- * the mark and the fan; the keys not opening it or not moving along its arcs; a long press on a touch screen stepping
- * the cycle instead of opening it; reduced motion still moving the choices; a choice placed off the window or two
- * choices closer than a target and its gap.
+ * What this catches: a pointer only passing over a mark opening the picker (or a rest on it not opening it); a click or
+ * a tap not opening it, changing the face, or a second click not closing it; a choice not kept for its agent or not
+ * shown on the mark; the picker staying open after Escape or after the pointer has left the mark and the fan; the keys
+ * not opening it or not moving along its arcs; a long press on a touch screen not opening it; reduced motion still
+ * moving the choices; a choice placed off the window or two choices closer than a target and its gap.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server, no fetch.
  */
@@ -88,6 +88,8 @@ const leave = (el: Element) => {
   Object.assign(event, { pointerType: 'mouse', relatedTarget: document.body });
   act(() => void el.dispatchEvent(event));
 };
+// A pointer's click (detail 1); element.click() is a key's or a screen reader's (detail 0).
+const press = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
 const key = (el: Element, k: string) => act(() => void el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
 
 test.skipIf(!hasDom)('a rest of the pointer on the mark opens the picker; a pointer only passing over opens nothing', async () => {
@@ -106,8 +108,8 @@ test.skipIf(!hasDom)('a rest of the pointer on the mark opens the picker; a poin
   // A labelled radio group: every face, the one shown checked; nothing took focus from where it was.
   expect(group()!.getAttribute('aria-label')).toBe('Icon for Invoice retries');
   const radios = [...group()!.querySelectorAll('[role="radio"]')];
-  // Along the arcs: the kinds inside (the agent's own mark, Transparent, Face), then the Glass colours.
-  expect(radios.map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent', 'transparent', 'totman', ...motion.AGENT_FACES.filter((f) => f.startsWith('glass') || f === 'yellow')]);
+  // Along the arcs: the kinds inside (the agent's own mark, Transparent, Face, "Your own…", "Sets"), then the Glass colours.
+  expect(radios.map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent', 'transparent', 'totman', 'own', 'sets', ...motion.AGENT_FACES.filter((f) => f.startsWith('glass') || f === 'yellow')]);
   expect(choice('agent')!.getAttribute('aria-checked')).toBe('true');
   expect(choice('agent')!.getAttribute('aria-label')).toBe('Claude Code');
   expect(choice('glass-blue')!.getAttribute('aria-label')).toBe('Blue glass');
@@ -218,21 +220,87 @@ test.skipIf(!hasDom)('keyboard: Enter on the mark opens it on the face shown; th
   await until(() => document.activeElement === icon, 'focus back on the mark');
 });
 
-test.skipIf(!hasDom)('a click still steps the cycle and never opens the picker; a long press on a touch screen opens it and its lift steps nothing', async () => {
+// The owner, 2026-11-12: "clicking should just open the sundial too". A click never changes the face.
+test.skipIf(!hasDom)('a click opens the picker and changes no face; a second click on the mark (or on the plate over it) closes it, and it stays closed while the pointer rests there', async () => {
   const icon = mount();
-  act(() => icon.click());
-  expect(faces.agentFaceOf('ses_1')).toBe('glass');
+  act(() => faces.keepAgentFace('ses_1', 'glass-blue'));
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click to open it');
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  expect(faces.agentFaceOf('ses_1')).toBe('glass-blue');
+  expect(choice('glass-blue')!.getAttribute('aria-checked')).toBe('true');
+  // A second click on the mark itself: closed, nothing chosen.
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'a second click to close it');
+  expect(faces.agentFaceOf('ses_1')).toBe('glass-blue');
+  // The pointer resting and moving on the mark opens nothing again until it leaves.
+  pointer(icon, 'pointermove', { x: 30, y: 385 });
   await wait(fan.FAN_DWELL_MS + 60);
-  expect(group()).toBeNull();
+  expect(icon.getAttribute('aria-expanded')).toBe('false');
+  // Open again; the plate lies over the mark, so a click there (on no choice) is the mark's own second click.
+  press(icon);
+  await until(() => group() !== null && icon.getAttribute('aria-expanded') === 'true', 'a click to open it again');
+  const plate = document.querySelector('.am-fan')!;
+  act(() => void plate.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 29, clientY: 384 })));
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'a click on the plate over the mark to close it');
+  expect(faces.agentFaceOf('ses_1')).toBe('glass-blue');
+});
+
+test.skipIf(!hasDom)('a click on a picker the pointer opened by resting keeps it open (the click the rest beat); the next click closes it', async () => {
+  const icon = mount();
+  enter(icon);
+  await until(() => group() !== null, 'the picker');
+  press(icon);
+  await wait(40);
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  press(icon);
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'the next click to close it');
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+});
+
+test.skipIf(!hasDom)("a tap opens the finger's picker and changes no face; a long press opens it too and its lift does not close it", async () => {
+  const icon = mount();
   // A touch: no hover opening, ever.
   enter(icon, 'touch');
   await wait(fan.FAN_DWELL_MS + 60);
   expect(group()).toBeNull();
   pointer(icon, 'pointerdown', { kind: 'touch', x: 29, y: 384 });
-  await until(() => group() !== null, 'a long press to open it');
   pointer(icon, 'pointerup', { kind: 'touch', x: 29, y: 384 });
-  act(() => icon.click());
-  expect(faces.agentFaceOf('ses_1')).toBe('glass');
+  press(icon);
+  await until(() => group() !== null, 'a tap to open it');
+  expect(document.querySelector('.am-fan')!.hasAttribute('data-touch')).toBe(true);
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+  key(document.body, 'Escape');
+  await until(() => icon.getAttribute('aria-expanded') === 'false', 'Escape to close it');
+  pointer(icon, 'pointerdown', { kind: 'touch', x: 29, y: 384 });
+  await until(() => icon.getAttribute('aria-expanded') === 'true', 'a long press to open it');
+  pointer(icon, 'pointerup', { kind: 'touch', x: 29, y: 384 });
+  press(icon);
+  await wait(40);
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+});
+
+// A slow phone's second tap landed on Ice glass while it still travelled out over the mark (a 240 ms clock had said
+// the choices were in place): a press that began before they rest chooses nothing.
+test.skipIf(!hasDom)('a tap that began before the choices rest chooses nothing; once they rest, a tap on one chooses it', async () => {
+  const icon = mount();
+  pointer(icon, 'pointerdown', { kind: 'touch', x: 29, y: 384 });
+  pointer(icon, 'pointerup', { kind: 'touch', x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a tap to open it');
+  expect(document.querySelector('.am-fan')!.hasAttribute('data-opening')).toBe(true);
+  pointer(choice('glass-ice')!, 'pointerdown', { kind: 'touch' });
+  press(choice('glass-ice')!);
+  await wait(40);
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  await until(() => !document.querySelector('.am-fan')!.hasAttribute('data-opening'), 'the choices to rest');
+  pointer(choice('glass-ice')!, 'pointerdown', { kind: 'touch' });
+  press(choice('glass-ice')!);
+  await until(() => faces.agentFaceOf('ses_1') === 'glass-ice', 'the tap to choose Ice glass');
 });
 
 test.skipIf(!hasDom)('reduced motion: the choices appear in place, with no travel', async () => {
@@ -315,4 +383,70 @@ test("a finger's fan has finger-sized room: neighbours on an arc 44 px apart, in
       expect(cy + s.y).toBeLessThanOrEqual(844 - 27.5);
     }
   }
+});
+
+test.skipIf(!hasDom)("a 44 px face (the list's Agents view) draws at 44, and its picker's plate and arcs move out with it", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="ib-agh"><AgentMark id="ses_big" host="claude-code" name="Ops" size={44} /></div>));
+  const icon = document.querySelector<HTMLButtonElement>('[data-agent-icon="ses_big"]')!;
+  expect(icon.querySelector('.am')!.getAttribute('data-size')).toBe('44');
+  icon.getBoundingClientRect = () => ({ left: 8, top: 362, width: 44, height: 44, right: 52, bottom: 406, x: 8, y: 362, toJSON: () => ({}) }) as DOMRect;
+  pointer(icon, 'pointerdown', { x: 30, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the big face to open its picker');
+  // The plate's hole and the dial's arcs grow by half of what the face gained over the sidebar's 28 px button.
+  expect((document.querySelector<HTMLElement>('.am-fan-dial')!.style.getPropertyValue('--grow'))).toBe('8px');
+  const near = (spots: { x: number; y: number }[][]) => Math.min(...spots[0]!.map((s) => Math.hypot(s.x, s.y)));
+  expect(near(fan.fanArcs(30, 384, 1024, 768, false, true, false, 8).spots)).toBeGreaterThan(near(fan.fanArcs(30, 384, 1024, 768).spots) + 7);
+});
+
+test.skipIf(!hasDom)("a face in the list keeps its fan inside the list's pane: the first agent at the pane's top left spills nothing over the sidebar", async () => {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="ib-listcol"><div className="ib-agh"><AgentMark id="ses_top" host="claude-code" name="Ops" size={44} /></div></div>));
+  const pane = document.querySelector<HTMLElement>('.ib-listcol')!;
+  // A 1024 × 768 window, the list's pane from x 240 to 620; the face 18 px in from its left and 72 px down.
+  pane.getBoundingClientRect = () => ({ left: 240, top: 0, width: 380, height: 768, right: 620, bottom: 768, x: 240, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const icon = document.querySelector<HTMLButtonElement>('[data-agent-icon="ses_top"]')!;
+  icon.getBoundingClientRect = () => ({ left: 258, top: 72, width: 44, height: 44, right: 302, bottom: 116, x: 258, y: 72, toJSON: () => ({}) }) as DOMRect;
+  pointer(icon, 'pointerdown', { x: 280, y: 94 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the face to open its picker');
+  const spots = [...document.querySelectorAll<HTMLElement>('.am-fan-i')].map((el) => ({ x: 280 + parseFloat(el.style.getPropertyValue('--x')), y: 94 + parseFloat(el.style.getPropertyValue('--y')) }));
+  expect(spots.length).toBeGreaterThan(10);
+  const pad = FAN_OPTIONS.margin + FAN_OPTIONS.item / 2 - 0.5;
+  for (const s of spots) {
+    expect(s.x).toBeGreaterThanOrEqual(240 + pad);
+    expect(s.x).toBeLessThanOrEqual(620 - pad);
+    expect(s.y).toBeGreaterThanOrEqual(pad);
+  }
+  // No choice on the face itself.
+  for (const s of spots) expect(Math.hypot(s.x - 280, s.y - 94)).toBeGreaterThan(22 + FAN_OPTIONS.item / 2);
+  expectNothingStopsTheBlur();
+});
+
+/** Nothing from the fan up is clipped, filtered or masked: any of them would leave the plate's blur nothing to blur. */
+function expectNothingStopsTheBlur() {
+  const plate = document.querySelector<HTMLElement>('.am-fan-plate');
+  expect(plate).not.toBeNull();
+  for (let el: HTMLElement | null = document.querySelector<HTMLElement>('.am-fan'); el; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    for (const prop of ['clip-path', 'filter', 'mask', 'mask-image', '-webkit-mask-image']) {
+      const value = el.style.getPropertyValue(prop) || style.getPropertyValue(prop);
+      expect(value === '' || value === 'none' ? '' : `${el.className} ${prop}: ${value}`).toBe('');
+    }
+  }
+}
+
+test.skipIf(!hasDom)("the sidebar's fan: nothing above its plate is clipped, filtered or masked while it shows", async () => {
+  const icon = mount();
+  pointer(icon, 'pointerdown', { x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a click on the mark to open its picker');
+  expectNothingStopsTheBlur();
 });

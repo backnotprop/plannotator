@@ -8,14 +8,16 @@ import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTi
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { ArtifactPinMenuItem } from './ArtifactPinButton';
+import { artifactPinnable } from '../artifactPins';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { InboxApiError, inboxApi, type OpenInFileCode, type OpenInFileScope } from '../api';
+import { InboxApiError, inboxApi } from '../api';
+import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
-import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
-import { attachmentDownloadUrl, readableVersion } from '../attachments';
+import { newTabUrl, onAnotherMachine, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
+import { readableVersion } from '../attachments';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
@@ -79,14 +81,25 @@ function useOpenInActions(path: string | null, open: (id: string) => Promise<{ o
   return { busy, status, launch, copyPath, flash };
 }
 
-/** Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no list is read, no menu. */
+/**
+ * Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no
+ * list is read, no menu. A file on another machine (`here: false`): no list is read either, and the menu is what
+ * works from here (`openInMenu`).
+ */
 function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent', enabled = true) {
+  const here = !onAnotherMachine(attachment);
   // A read that did not answer (a restarting Inbox) is asked again for the next file.
-  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, enabled, attachment.id);
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, enabled && here, attachment.id);
   const [remembered, remember] = useRememberedOpenInApp();
-  const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
+  const menu: OpenInMenu | null = !enabled
+    ? null
+    : !here
+      ? openInMenu(attachment, [], 'linux', remembered, version)
+      : answer?.available
+        ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version)
+        : null;
   const actions = useOpenInActions(attachment.path, (id) => inboxApi.openIn(attachment.id, id), remember);
-  return { answer, menu, ...actions };
+  return { here, answer, menu, ...actions };
 }
 
 function ItemIcon({ item, kind }: { item: OpenInItem; kind: unknown }) {
@@ -185,11 +198,28 @@ function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmen
 }
 
 function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean }) {
-  const { answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
+  const { here, answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
+  // A file on another machine with nothing but Copy path: a plain button, not a one-item list.
+  if (!here && menu && menu.items.length === 0) return <CopyPathButton id={attachment.id} status={status} copyPath={copyPath} />;
+  if (!here && menu) return <SplitButton id={attachment.id} kind={attachment.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
   if (!answer) return null;
   // A server without the local app list (an older Inbox): a new tab is all there is.
   if (!menu) return <NewTabButton attachment={attachment} version={version} big={false} />;
   return <SplitButton id={attachment.id} kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
+}
+
+/** Copy path alone (a file on another machine that has no new tab): one action, one button. */
+function CopyPathButton({ id, status, copyPath }: { id: string; status: { text: string; error: boolean } | null; copyPath: () => Promise<void> }) {
+  return (
+    <span className="ib-openin" data-open-in={id}>
+      <Tip content="Copy path">
+        <button type="button" className="ib-iconbtn" onClick={() => void copyPath()} aria-label="Copy path" data-open-in-copy-path="">
+          <Icon name="copy" size={16} />
+        </button>
+      </Tip>
+      <Status status={status} />
+    </span>
+  );
 }
 
 /** The split button: the app's icon (and "Open"), and a caret for the list. */
@@ -673,12 +703,13 @@ function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
   );
 }
 
-/** The list a tile's ⋯ and its right-click menu show: Open side by side / full screen, Download, then the apps and Copy path. */
+/** The list a tile's ⋯ and its right-click menu show: Open side by side / full screen, Download, Pin, then the apps and Copy path. */
 function TileMenuItems({
   attachment,
   version,
   onOpenAs,
   download,
+  pin,
   onCopyImage,
   menu,
   onLaunch,
@@ -688,6 +719,8 @@ function TileMenuItems({
   version: 'current' | 'sent';
   onOpenAs?: (view: 'full' | 'side') => void;
   download: string | null;
+  /** Pin / Unpin beside Download (the viewer's, ArtifactPinMenuItem); null: no pin. */
+  pin: { threadId: string; key: string } | null;
   /** An image: Copy image, what the browser's own Copy Image leaves (copyImage.ts). */
   onCopyImage: (() => void) | null;
   menu: OpenInMenu | null;
@@ -707,7 +740,7 @@ function TileMenuItems({
             <Icon name="frame" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">Open full screen</span>
           </DropdownMenuItem>
-          {(download || onCopyImage || menu) && <DropdownMenuSeparator />}
+          {(download || pin || onCopyImage || menu) && <DropdownMenuSeparator />}
         </>
       )}
       {download && (
@@ -719,13 +752,14 @@ function TileMenuItems({
           </DropdownMenuItem>
         </>
       )}
+      {pin && <ArtifactPinMenuItem threadId={pin.threadId} artifactKey={pin.key} name={attachment.name} separator={false} />}
       {onCopyImage && (
         <DropdownMenuItem className="text-xs" onClick={onCopyImage} data-tile-copy-image={attachment.id}>
           <Icon name="copy" size={15} className="ib-appi ib-glyph" />
           <span className="flex-1">Copy image</span>
         </DropdownMenuItem>
       )}
-      {(download || onCopyImage) && menu && <DropdownMenuSeparator />}
+      {(download || pin || onCopyImage) && menu && <DropdownMenuSeparator />}
       {menu && <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={onLaunch} onCopyPath={onCopyPath} />}
     </>
   );
@@ -746,7 +780,8 @@ const NO_SLOT = { order: [], fallback: () => null };
  * always on a touch screen). A right-click anywhere on the tile opens the same
  * list at the pointer, here and through the tailnet alike: Open side by side /
  * Open full screen, Download (the version the tile opens, as the file's own
- * name), then the apps and Copy path on this computer. The trigger's rules are
+ * name), Pin / Unpin (a thread of this machine, as the viewer's pin), then the
+ * apps and Copy path on this computer. The trigger's rules are
  * `useContextMenuTrigger`'s (rows, cards): a touch never opens it (no long
  * press), and with nothing to list (the tour writes nothing) the browser's
  * own menu shows. No key of its own: the hook's Shift+F10 is left off.
@@ -762,11 +797,14 @@ export function TileMenu({
   attachment,
   surface,
   onOpenAs,
+  pin: pinOf,
   render,
 }: {
   attachment: InboxAttachmentState;
   surface?: OpenInSurface;
   onOpenAs?: (view: 'full' | 'side') => void;
+  /** The file's pin (its thread and artifact key); absent (the tour): none. */
+  pin?: { threadId: string; key: string };
   render: (more: ReactNode, status: ReactNode) => ReactElement;
 }) {
   const version = readableVersion(attachment);
@@ -782,7 +820,8 @@ export function TileMenu({
     source.writes && readInboxAttachmentKind(attachment.kind) === 'image'
       ? () => void copyImageToClipboard(source.imageUrl(attachment, version), attachment.name).then((ok) => flash(ok ? 'Image copied' : 'Could not copy the image', !ok))
       : null;
-  const empty = !onOpenAs && !download && !menu;
+  const pin = pinOf && artifactPinnable(pinOf.threadId) ? pinOf : null;
+  const empty = !onOpenAs && !download && !pin && !menu;
   // The wrapper `render` draws, or the tile's own button or link when it draws no wrapper (typed as Base UI's div).
   const trigger = useRef<HTMLDivElement>(null);
   const control = (): HTMLElement | null => {
@@ -803,7 +842,7 @@ export function TileMenu({
   // Shift+F10 stays the rows', cards' and messages' (no new shortcut): the platform's own context-menu key still sends `contextmenu`.
   const { onKeyDown: _key, ...triggerProps } = context.trigger;
   const items = (
-    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} pin={pin} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
   );
   // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet; a press arms its message and opens
   // the menu. Only the ⋯ changes: the tile (and its right-click menu) stays the same element, so arming never remounts
@@ -907,7 +946,8 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
 function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNode }) {
   const { attachment, version } = props;
   // A source that writes nothing (the tour): no Open in, no Download; the menu says so.
-  const { writes } = useInboxFileSource();
+  const source = useInboxFileSource();
+  const { writes } = source;
   // Through the tailnet or on a phone (or a server without the app list): a new tab, for HTML and images.
   const tab = writes && props.openIn === null && props.surface !== undefined ? newTabUrl(attachment, version) : null;
   const named = [props.openIn || tab ? 'open in' : null, writes ? 'download' : null, props.versionAction ? 'versions' : null].filter(Boolean).join(', ') || 'not in the tour';
@@ -929,7 +969,7 @@ function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNo
         )}
         {writes && (props.openIn || tab) && <DropdownMenuSeparator />}
         {writes ? (
-          <DropdownMenuItem className="text-xs" render={<a href={attachmentDownloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
+          <DropdownMenuItem className="text-xs" render={<a href={source.downloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
             <Icon name="download" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
           </DropdownMenuItem>

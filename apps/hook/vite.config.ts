@@ -23,6 +23,11 @@ export default defineConfig({
       // Pierre's shared highlighter through CodeFilePopout and the fence
       // highlighter. See build/shiki-wasm-stub.ts.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
+      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
+      // highlights with Shiki. See build/pierre-highlights-stub.ts.
+      '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/patches': path.resolve(__dirname, '../../build/pierre-patches-stub.ts'),
       '@': path.resolve(__dirname, '.'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),

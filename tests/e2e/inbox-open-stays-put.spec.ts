@@ -28,7 +28,7 @@
  * light and dark PNGs) lands in .local/proof/open-stays-put/.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -79,7 +79,7 @@ test.beforeAll(async () => {
   const stubs = join(root, 'bin');
   mkdirSync(stubs, { recursive: true });
   for (const name of ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor-agent', 'amp']) writeFileSync(join(stubs, name), '#!/bin/sh\necho "this stub never runs" >&2\nexit 1\n', { mode: 0o755 });
-  const env = { PATH: `${stubs}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: `${stubs}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -199,7 +199,7 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
 
   // An agent writes while the person reads: it waits behind "1 new".
   const late = await world.agent.send({ project_path: path, subject: 'Payout export', body: 'The payout export is ready to review.', agent_session: 'ses_desk_late' } as Parameters<SimAgent['send']>[0]);
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText('New from Claude Code: “Payout export”');
   expect(await rowsOf(page)).toEqual(before);
   await shot(page, '03-two-read-and-an-agent-wrote');
 
@@ -236,7 +236,7 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   expect(await sectionOf(page, second)).toBeNull();
   const slot = before.slice(before.indexOf(second) + 1).find((rowId) => last.order.includes(rowId))!;
   expect(await focused(page)).toBe(slot);
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText('New from Claude Code: “Payout export”');
   expect(await sectionOf(page, String(late.thread_id))).toBeNull();
   await shot(page, '04-after-close');
 
@@ -410,9 +410,9 @@ for (const layout of [
       await expect.poll(() => isBold(page, first)).toBe(false);
       await back(page);
       expect(await sectionOf(page, first)).toBe('new');
-      // The agent asks four questions there that hold up work: the list holds still, the news waits behind "1 new".
+      // The agent asks four questions there that hold up work: the list holds still, the news waits behind "… asked in “…”".
       await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_${layout.key}_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
-      await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
+      await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ asked in “/);
       expect(await sectionOf(page, first)).toBe('new');
       // The person opens it and reads the questions (the look is recorded), then goes Back.
       await open(page, first);
@@ -512,9 +512,9 @@ test('a thread opened wide, its window narrowed to stacked while it is open: Bac
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     await page.waitForTimeout(BEAT_MS + 300);
     expect(await drawnIn(page, first)).toBe('quiet');
-    // The agent asks there: held behind "1 new". The person opens it from Quiet, wide, and reads it.
+    // The agent asks there: held behind "… asked in “…”". The person opens it from Quiet, wide, and reads it.
     await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_resized_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
-    await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
+    await expect(page.locator('[data-inbox-notice]')).toContainText(/^.+ asked in “/);
     await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
     await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
     await expect.poll(() => serverRow(first)).toEqual({ section: 'holding', unseen: 0 });
@@ -579,20 +579,19 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   const before = await rowsOf(page);
   const first = before[0]!;
   const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
-  const header = page.locator('section.ib-pane [data-mark-read]');
-  const headerUnread = page.locator('section.ib-pane [data-mark-unread]');
   const more = page.locator('section.ib-pane [data-thread-more]');
   const quietCount = page.locator('[data-section-id="quiet"] .ib-n');
   await openWithKeyboard(page, first);
   expect(await sectionOf(page, first)).toBe('new');
   await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
   await shot(page, 'seen-held-01-opened');
-  // Read by opening it: the header says Mark unread in Mark read's place, as the row does.
-  await expect(headerUnread).toBeEnabled();
-  await expect(header).toHaveCount(0);
   await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
   await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
-  const markUnreadBox = (await headerUnread.boundingBox())!;
+  // Read by opening it: the header's ⋯ offers Mark unread, as the row does.
+  await more.click();
+  await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-thread-menu]')).toHaveCount(0);
   const moreBox = (await more.boundingBox())!;
 
   // E: the row moves to Quiet now, the toast says so with Undo; nothing in the header moves.
@@ -602,16 +601,13 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await expect(quietCount).toHaveText('1');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
   await expect(page.locator('[data-toast-undo]')).toBeVisible();
-  await expect(headerUnread).toBeEnabled();
-  expect(await headerUnread.boundingBox()).toEqual(markUnreadBox);
   expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-02-moved');
   // Undo: back between the same neighbours.
   await page.locator('[data-toast-undo]').click();
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
-  await expect(headerUnread).toBeEnabled();
-  expect(await headerUnread.boundingBox()).toEqual(markUnreadBox);
+  expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-03-undone');
 
   // E, then Z.

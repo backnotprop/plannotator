@@ -1,0 +1,756 @@
+{
+  "about": "Invented list rows, as GET threads answers them with no query (archived threads in Quiet, snoozed ones in their sections with `snoozed`), plus the pin order. scripts/mobile/vectors.ts runs the window's own rules over them (packages/core/inbox-snooze.ts, packages/inbox/held.ts, tabCount.ts, markRead.ts, rowMenu.ts, rowSwipe.ts, pins.ts, priority.ts, packages/shared/inbox/list.ts) and writes vectors/rows.json.",
+  "now": "2026-11-18T15:30:00.000Z",
+  "pins": [
+    "msg_R0000000000000000000000008",
+    "msg_R0000000000000000000000003",
+    "msg_R0000000000000000000000014"
+  ],
+  "rows": [
+    {
+      "thread_id": "msg_R0000000000000000000000001",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Run the schema migration on staging?",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0001"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T14:50:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "stopped",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": true,
+      "waiting_since": null,
+      "questions": {
+        "open": 1,
+        "picked": 0,
+        "stopped": true,
+        "holds_up": [],
+        "prompt": "Run the migration?"
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "note": "stopped on a question"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000002",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Which cache backend for sessions",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0002"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T13:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "holding",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": true,
+      "waiting_since": null,
+      "questions": {
+        "open": 2,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [
+          "deploy"
+        ],
+        "prompt": "Redis or Memcached?",
+        "actions": 1
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "note": "holds up work, one action item"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000003",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Pick a name for the retry flag",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0003"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T12:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "waiting",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": true,
+      "waiting_since": null,
+      "questions": {
+        "open": 1,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": "--retries or --attempts?"
+      },
+      "priority": {
+        "person": true,
+        "at": "2026-11-18T12:05:00.000Z",
+        "ask": null
+      },
+      "snoozed": null,
+      "read_at": null,
+      "note": "in Priority"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000004",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Lint pass finished",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0004"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T11:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "new",
+      "sent": null,
+      "unread": true,
+      "unseen": 2,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "note": "agent news not looked at"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000005",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Draft reply about the changelog",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0005"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T10:30:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "new",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "unsent": {
+        "reply_at": "2026-11-18T10:31:00.000Z",
+        "picks": 0,
+        "comments": 0
+      },
+      "note": "in New for the person's own draft"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000006",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Asked for the flaky test list",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0006"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T10:00:00.000Z",
+      "last_author": "person",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "sent",
+      "sent": {
+        "at": "2026-11-18T10:00:00.000Z",
+        "checked_at": null
+      },
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "note": "the person replied last"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000007",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Bump the toolchain",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0007"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T09:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": "2026-11-18T09:30:00.000Z",
+      "note": "marked read, an agent wrote last"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000008",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Old billing export",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0008"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-10T09:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": "2026-11-12T09:00:00.000Z",
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "pinned_at": "2026-11-11T09:00:00.000Z",
+      "note": "archived and starred"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000009",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Agent wrote after the archive",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0009"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T08:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": "2026-11-15T09:00:00.000Z",
+      "section": "new",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "back_from_archive": true,
+      "note": "back from the archive"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000010",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Review the rollout plan",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0010"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T07:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "waiting",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": true,
+      "waiting_since": null,
+      "questions": {
+        "open": 1,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": "Ship Friday?"
+      },
+      "priority": null,
+      "snoozed": {
+        "until": "2026-11-19T16:00:00.000Z",
+        "at": "2026-11-18T07:30:00.000Z"
+      },
+      "read_at": null,
+      "note": "snoozed until tomorrow"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000011",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Nightly report",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0011"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-17T06:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": {
+        "until": "2026-11-18T14:00:00.000Z",
+        "at": "2026-11-17T06:30:00.000Z"
+      },
+      "read_at": null,
+      "note": "a Quiet thread whose snooze ended an hour ago"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000012",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Benchmarks are in",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0012"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T06:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "new",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": {
+        "person": true,
+        "at": "2026-11-18T06:05:00.000Z",
+        "ask": null
+      },
+      "snoozed": {
+        "until": "2026-11-18T16:30:00.000Z",
+        "at": "2026-11-18T06:10:00.000Z"
+      },
+      "read_at": null,
+      "note": "snoozed and in Priority: the band wins"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000013",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Archived with a priority mark",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0013"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-09T06:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": "2026-11-14T06:00:00.000Z",
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": {
+        "person": true,
+        "at": "2026-11-09T07:00:00.000Z",
+        "ask": null
+      },
+      "snoozed": null,
+      "read_at": null,
+      "note": "archived: never in Priority, Remove only"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000014",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Docs build is green",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0014"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T05:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "note": "quiet, seen, nothing waits"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000015",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Pick the deploy window",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0015"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T13:30:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "holding",
+      "sent": null,
+      "unread": true,
+      "unseen": 1,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": true,
+      "waiting_since": null,
+      "questions": {
+        "open": 1,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [
+          "release"
+        ],
+        "prompt": "Tonight or tomorrow?"
+      },
+      "priority": {
+        "person": true,
+        "at": "2026-11-18T13:31:00.000Z",
+        "ask": null
+      },
+      "snoozed": null,
+      "read_at": null,
+      "note": "in Priority, newer than the other"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000016",
+      "project_id": "prj_lighthouse",
+      "project": {
+        "id": "prj_lighthouse",
+        "name": "lighthouse-web"
+      },
+      "subject": "Dependency bump PRs",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0016"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-18T04:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": null,
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "hide_pulls": [
+        "https://example.com/acme/harbor-api/pull/12"
+      ],
+      "note": "open pull requests not hidden"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000017",
+      "project_id": "prj_harbor",
+      "project": {
+        "id": "prj_harbor",
+        "name": "harbor-api"
+      },
+      "subject": "Old archived spike",
+      "thread_name": null,
+      "author": {
+        "kind": "agent",
+        "host": "claude-code",
+        "session": "ses_0017"
+      },
+      "created_at": "2026-11-16T09:00:00.000Z",
+      "last_at": "2026-11-08T04:00:00.000Z",
+      "last_author": "agent",
+      "message_count": 4,
+      "resolved_at": "2026-11-12T09:00:00.000Z",
+      "section": "quiet",
+      "sent": null,
+      "unread": false,
+      "unseen": 0,
+      "answered_not_sent": false,
+      "guide": false,
+      "waiting_on_person": false,
+      "waiting_since": null,
+      "questions": {
+        "open": 0,
+        "picked": 0,
+        "stopped": false,
+        "holds_up": [],
+        "prompt": null
+      },
+      "priority": null,
+      "snoozed": null,
+      "read_at": null,
+      "note": "archived at the same moment as another: the id breaks the tie"
+    }
+  ],
+  "drawn": [
+    {
+      "thread_id": "msg_R0000000000000000000000014",
+      "drawn": "new",
+      "note": "a seen update the list still holds in New"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000008",
+      "drawn": "archived",
+      "note": "in the Archived group"
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000013",
+      "drawn": "archived",
+      "note": "in the Archived group, with a priority mark"
+    }
+  ],
+  "moves": [
+    {
+      "thread_id": "msg_R0000000000000000000000003",
+      "by": -1
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000008",
+      "by": -1
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000008",
+      "by": 1
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000014",
+      "by": 1
+    },
+    {
+      "thread_id": "msg_R0000000000000000000000004",
+      "by": 1
+    }
+  ]
+}

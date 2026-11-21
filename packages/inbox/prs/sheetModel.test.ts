@@ -4,7 +4,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull } from '@plannotator/core/inbox-types';
-import { FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, topFirst } from './sheetModel';
+import { listProjectOf, routeOf } from '../app/route';
+import { hashOf } from '../app/writeRoute';
+import { boardInProject, boardProjectName, FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
 
 const NOW = Date.parse('2026-11-09T12:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -169,4 +171,92 @@ describe('sheetModel', () => {
     expect(model.sections.map((s) => [s.label, s.pulls.map((p) => p.number)])).toEqual([['ledger', [one.number, two.number]]]);
     expect(model.quiet).toEqual(['docs']);
   });
+});
+
+describe('a tile opens the launchpad for a single open PR Reviews lists (the owner, 2026-11-11), else the PR view', () => {
+  test('a single open or draft PR in Reviews opens its launchpad; a layer of a stack, a merged PR or one Reviews lacks opens the PR view', () => {
+    const one = pr({ number: 7001 });
+    const draft = pr({ number: 7002, state: 'draft' });
+    const merged = pr({ number: 7003, state: 'merged', merged_at: day(1) });
+    const low = pr({ number: 7004, head: 'low' });
+    const high = pr({ number: 7005, base: 'low', head: 'high' });
+    const elsewhere = pr({ number: 7006, repo: 'northwind/not-a-project' });
+    const all = [one, draft, merged, low, high, elsewhere];
+    const stacks = inboxPullStacks(all);
+    const stackOf = (p: InboxPull) => stacks.find((s) => s.layers.some((l) => l.key === p.key))!;
+    const reviews = { pulls: [one, draft, merged, low, high] };
+    expect(tileOpens(one, stackOf(one), reviews)).toEqual({ launchpad: stackOf(one).id });
+    expect(tileOpens(draft, stackOf(draft), reviews)).toEqual({ launchpad: stackOf(draft).id });
+    expect(tileOpens(merged, { id: merged.key, layers: [merged] }, reviews)).toBe('pull');
+    expect(stackOf(high).layers).toHaveLength(2);
+    expect(tileOpens(high, stackOf(high), reviews)).toBe('pull');
+    expect(tileOpens(elsewhere, stackOf(elsewhere), reviews)).toBe('pull');
+    // Reviews not read yet: the PR view, never a blank pane.
+    expect(tileOpens(one, stackOf(one), null)).toBe('pull');
+  });
+});
+
+describe('the board in a Reviews project filter (boardInProject)', () => {
+  const answer = {
+    pulls: [
+      pr({ repo: 'northwind/ledger', requested: true }),
+      pr({ repo: 'northwind/ledger', checks: 'failure' }),
+      pr({ repo: 'northwind/web', requested: true }),
+      pr({ repo: 'outside/tool' }),
+      pr({ repo: 'northwind/ledger', state: 'merged', merged_at: day(2) }),
+      pr({ repo: 'northwind/web', state: 'merged', merged_at: day(2) }),
+    ],
+    projects: { 'github.com/northwind/ledger': ['prj_ledger', 'prj_ledger_2'], 'github.com/northwind/web': ['prj_web'] },
+  };
+
+  test("only that project's repositories, and the head line counts only those; Merged too", () => {
+    const shown = boardInProject(answer, 'prj_ledger');
+    const sheet = sheetModel(shown, NOW);
+    expect(sheet.sections.map((section) => section.key)).toEqual(['github.com/northwind/ledger']);
+    expect(sheet.head).toEqual({ open: 2, repos: 1, needYou: 1, failing: 1, landedWeek: 1 });
+    expect(mergedModel(shown, NOW).sections.map((section) => section.key)).toEqual(['github.com/northwind/ledger']);
+    // A second clone of the same origin is a project with that repository too.
+    expect(sheetModel(boardInProject(answer, 'prj_ledger_2'), NOW).head.repos).toBe(1);
+  });
+
+  test('no filter is everything, "not a project" repositories included', () => {
+    expect(boardInProject(answer, null)).toBe(answer);
+    expect(sheetModel(boardInProject(answer, null), NOW).head).toMatchObject({ open: 4, repos: 3 });
+  });
+
+  test("Reviews' own rule: a PR whose thread is in the project, or whose head is the project's fork, is in it too", () => {
+    const handed = pr({ repo: 'outside/tool' });
+    const fork = pr({ repo: 'upstream/lib', head_repo: 'dana/lib' });
+    const withLinks = {
+      ...answer,
+      pulls: [...answer.pulls, handed, fork],
+      projects: { ...answer.projects, 'github.com/dana/lib': ['prj_lib'] },
+      links: { [handed.key]: { via: 'owner' as const, thread_id: 'thr_1', thread_subject: null, project_id: 'prj_ledger', agent: null, last: null, guide: null } },
+    };
+    expect(boardInProject(withLinks, 'prj_ledger').pulls).toContain(handed);
+    expect(boardInProject(withLinks, 'prj_lib').pulls).toEqual([fork]);
+    expect(boardInProject(withLinks, 'prj_web').pulls).not.toContain(handed);
+  });
+
+  test('a project with no repository on the board shows nothing, rather than everything', () => {
+    expect(sheetModel(boardInProject(answer, 'prj_gone'), NOW).sections).toEqual([]);
+  });
+});
+
+test("the board's own page (a phone's) keeps Reviews' project filter in its address, so a reload still shows that project", () => {
+  const route = routeOf('#prs&project=prj_ledger&state=merged');
+  expect(route).toMatchObject({ page: 'prs', project: 'prj_ledger', prsView: 'merged' });
+  expect(routeOf(hashOf(route))).toMatchObject({ page: 'prs', project: 'prj_ledger', prsView: 'merged' });
+  expect(routeOf('#prs').project).toBeNull();
+  // It is the board's filter, never the Inbox list's.
+  expect(listProjectOf(route)).toBeNull();
+  expect(listProjectOf(routeOf('#reviews&project=prj_ledger'))).toBeNull();
+  expect(listProjectOf(routeOf('#project=prj_ledger'))).toBe('prj_ledger');
+});
+
+test("the board names a filtered project whose threads are all hidden, from the Inbox's projects", () => {
+  const projects = [{ id: 'prj_web', name: 'checkout-web' }];
+  expect(boardProjectName('prj_web', new Map(), projects)).toBe('checkout-web');
+  expect(boardProjectName('prj_web', new Map([['prj_web', 'web (list)']]), projects)).toBe('web (list)');
+  expect(boardProjectName(null, new Map(), projects)).toBeNull();
 });

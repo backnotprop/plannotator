@@ -63,9 +63,12 @@ describe('classic.PermissionRequest registration', () => {
   })
 
   test('no classic.* glob or wildcard hook selects other tools\' permission prompts', () => {
-    const events = registrations().map((hook) => hook.event)
+    const hooks = registrations()
 
-    expect(events.filter((event) => event === '*' || event.endsWith('.*') || event.startsWith('!'))).toEqual([])
+    // The one glob is `tool.*`, the mod's tool.run hook (early-run.ts: an engine before 2.1.326 refuses a module
+    // naming tool.run), matched on Bash and the mod's own tool; never a classic event.
+    expect(hooks.map((hook) => hook.event).filter((event) => event === '*' || event.startsWith('!') || (event.endsWith('.*') && event !== 'tool.*'))).toEqual([])
+    expect(hooks.filter((hook) => hook.event === 'tool.*').map((hook) => Array.isArray((hook.matcher as { tool?: unknown } | undefined)?.tool))).toEqual([true])
   })
 })
 

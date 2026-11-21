@@ -18,7 +18,8 @@ import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramC
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import type { DiagramReopenRequest } from './diagram/reopen';
 import { useTheme } from './ThemeProvider';
-import { LazyBlockBoundary } from './LazyBlockBoundary';
+import { sourceLineAttrs } from '../utils/sourceLineAttrs';
+import { LazyBlockBoundary, LazyLoadNotice } from './LazyBlockBoundary';
 
 /**
  * A diagram fence in the document: the fence's language picks the engine
@@ -345,6 +346,18 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
+      // A diagram-type chunk that did not load: the source, readable, under
+      // the same quiet Reload line as any other part that could not load.
+      if (state.error?.chunkFailed) {
+        return (
+          <>
+            <LazyLoadNotice error={state.error.message} />
+            <DiagramInlineSource block={block} kind={kind} />
+          </>
+        );
+      }
+      // Refused by the host's check before it reached the page: the source, as code.
+      if (state.error?.refused) return <DiagramInlineSource block={block} kind={kind} />;
       if (state.error !== null && sourceOnError && !state.error.runtimeUnavailable) {
         return <DiagramInlineSource block={block} kind={kind} />;
       }
@@ -400,7 +413,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       {/* `annotation-exclude`: the text highlighter never enters a diagram,
           so a text restore (a reply that lost its anchor, a quote that also
           appears in a node label) can never wrap a <mark> inside the svg. */}
-      <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
+      <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind} {...sourceLineAttrs(block)}>
         {svgReady && !showSource && (
           <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             <CopySourceButton source={block.content} />
@@ -456,6 +469,10 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
+              // In the document a plain wheel scrolls the page past the
+              // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
+              // (below) zooms on a plain wheel.
+              wheelZoom="modifier"
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}

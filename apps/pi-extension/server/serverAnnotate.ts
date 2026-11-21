@@ -1,7 +1,7 @@
 import { piUpdateAdvert } from "./update-advert.ts";
 import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
-import { annotateDocumentRenderKind } from "../generated/annotatable.ts";
+import { annotateDocumentRenderKind, isSecretEnvPath } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import { createServer } from "node:http";
@@ -56,12 +56,15 @@ import {
 } from "../generated/source-save-node.ts";
 
 import {
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
+	sendMissingDraft,
 	readDraftGenerationFromUrl,
 	handleSaveNotesRequest,
 	handleUploadRequest,
@@ -96,6 +99,7 @@ import {
 	HTML_ASSET_DOCUMENT_CSP,
 	HTML_ASSET_ERROR_CSP,
 	HTML_ASSET_ROUTE_PREFIX,
+	prependNoNetworkMarker,
 	buildHtmlAssetErrorDocument,
 	encodeHtmlAssetPath,
 	htmlAssetBaseHref,
@@ -197,18 +201,21 @@ function createHtmlAssetRegistry(
 
 	function rewriteHtml(htmlContent: string, htmlFilePath: string): string {
 		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
+		// Outside the session's roots the viewer's srcdoc frame gets no network
+		// either (HTML_NO_NETWORK_MARKER), as the asset route's document does (mirrors the Bun registry).
+		const outside = isOutside(htmlFilePath);
 		try {
 			const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
-			const token = register(root, docDir, isOutside(htmlFilePath));
+			const token = register(root, docDir, outside);
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
 				// Root-relative on purpose: a srcdoc document resolves its own
 				// <base href> against the PARENT's URL, which is this server.
-				{ baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath },
+				{ baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath, noNetwork: outside },
 			);
 		} catch {
-			return htmlContent;
+			return outside ? prependNoNetworkMarker(htmlContent) : htmlContent;
 		}
 	}
 
@@ -528,7 +535,9 @@ export async function startAnnotateServer(options: {
 	// when headings change. Diff content is the markdown, or the raw HTML source
 	// when rendering HTML. Only single local files (not URLs/folders/messages).
 	const annotateProjectName = options.project ?? "_unknown";
-	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+	// A `.env` file the person named (isSecretEnvPath) keeps nothing in the data
+	// dir: no version copy, no submit record, no feedback archive entry.
+	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig()) && !((options.mode ?? "annotate") === "annotate" && isSecretEnvPath(options.filePath));
 	// Single local file sessions are the only ones this eager gate covers.
 	// URL, agent-message, and live-app sessions never write session content to
 	// the data dir. Folder sessions do participate in per-file version history,
@@ -716,6 +725,8 @@ export async function startAnnotateServer(options: {
 		enabled: false,
 		reason: "unsupported-runtime",
 	};
+	// Per request once the bridge exists: an SSH session offers the terminal to its own tunnel only.
+	let agentTerminalCapabilityFor = (_req: IncomingMessage): AgentTerminalCapability => agentTerminalCapability;
 
 	// The fallback is silent to the reviewer, so the reason is logged once per
 	// process: a genuine bug in the read must not hide behind the snapshot.
@@ -910,7 +921,7 @@ export async function startAnnotateServer(options: {
 	let liveSessionToken = "";
 	let liveAppUrl = "";
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
@@ -987,7 +998,7 @@ export async function startAnnotateServer(options: {
 				projectRoot: process.cwd(),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
-				agentTerminal: agentTerminalCapability,
+				agentTerminal: agentTerminalCapabilityFor(req),
 				feedbackTemplates: {
 					fileFeedback: getAnnotateFileFeedbackTemplate(
 						(options.origin ?? "pi") as PromptRuntime,
@@ -1067,7 +1078,7 @@ export async function startAnnotateServer(options: {
 				...(annotateDrafts.documentsEnabled ? { documentDrafts: true } : {}),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
-				agentTerminal: agentTerminalCapability,
+				agentTerminal: agentTerminalCapabilityFor(req),
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 				// Resolved copy-wrapper templates (config-aware, placeholders
 				// intact) so clipboard Copy matches what Send Feedback produces
@@ -1261,7 +1272,7 @@ export async function startAnnotateServer(options: {
 			} else {
 				const loaded = annotateDrafts.load();
 				if (loaded.found) json(res, loaded.draft);
-				else json(res, { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) }, 404);
+				else sendMissingDraft(res, loaded.draftGeneration);
 			}
 		} else if (url.pathname === "/api/draft/document") {
 			if (req.method === "GET") {
@@ -1415,6 +1426,9 @@ export async function startAnnotateServer(options: {
 			return;
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			// Exit posts carry no body: the nonce rides the query string.
 			if (checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, serverSession) === "mismatch") {
@@ -1580,9 +1594,10 @@ export async function startAnnotateServer(options: {
 		throw error;
 	}
 	agentTerminalCapability = agentTerminal.capability;
+	agentTerminalCapabilityFor = agentTerminal.capabilityFor;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 
 	if (options.liveApp) {
 		// Compose the proxy-served bridge body via the shared assembly (config

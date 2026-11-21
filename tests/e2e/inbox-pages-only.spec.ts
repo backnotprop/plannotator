@@ -17,8 +17,10 @@
  * - A message whose text names web pictures (three Mermaid ways: an image
  *   node, an `<img>` in a label, a background in a label's style; a markdown
  *   image; a raw `<img>`; a protocol-relative one) makes zero requests: the
- *   window's CSP is `img-src 'self' data: blob:` (the review of #2722 found a
- *   Mermaid diagram reaching the web while that policy was widened).
+ *   window's CSP is `img-src 'self' data: blob:` plus one folder of the
+ *   site's own pictures, `https://plannotator.ai/assets/hosted/`, for the
+ *   personal agents dialog's banner (the review of #2722 found a Mermaid
+ *   diagram reaching the web while that policy was widened further).
  * - Annotation still works in the served page: a click pins its paragraph, the
  *   comment saves, and the page draws its highlight.
  * - Only the window can keep a page: a POST to /api/inbox/pages from another
@@ -30,7 +32,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-pages-only.spec.ts`.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { createServer as createHttpServer, type Server } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
@@ -89,6 +91,7 @@ test('an attached page shows its web pictures; the window asks the web for none,
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: '1',
@@ -164,7 +167,9 @@ test('an attached page shows its web pictures; the window asks the web for none,
 
       // The window's own policy, as served.
       const window = await context.request.get(url);
-      expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob:;");
+      // One web folder is allowed, and only that: the site's own hand-uploaded pictures, for the personal agents
+      // dialog's banner (owner, 2026-11-13). Every other web picture stays blocked, as the requests below prove.
+      expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob: https://plannotator.ai/assets/hosted/;");
 
       // Only the window may keep a page: the listener's cross-origin guard runs before the route.
       // Another site (or an opaque-origin page, `Origin: null`) cannot get HTML served from the Inbox.
@@ -190,10 +195,12 @@ test('an attached page shows its web pictures; the window asks the web for none,
       await tab.goto(`${url}#thread=${page.thread_id}`);
       await tab.locator(`button[data-attachment-id="${pageId}"]`).first().click();
       const frameEl = tab.locator('.ib-htmlframe iframe');
-      await expect(frameEl).toHaveAttribute('src', /^\/api\/inbox\/pages\/[0-9a-f]{32}$/);
+      // The kept page's address, with this load's link key (`__pnk`, linkGuard.ts), which the page never sees.
+      await expect(frameEl).toHaveAttribute('src', /^\/api\/inbox\/pages\/[0-9a-f]{32}\?__pnk=[0-9a-f]{32}$/);
       await expect(frameEl).toHaveAttribute('sandbox', 'allow-scripts allow-modals');
       const frame = tab.frameLocator('.ib-htmlframe iframe');
       await expect(frame.locator('h1')).toHaveText('Pictures from the web');
+      expect(await frame.locator('body').evaluate(() => location.search)).toBe('');
       const width = (id: string) => frame.locator(`#${id}`).evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : -1));
       await expect.poll(() => width('web')).toBe(2);
       await expect.poll(() => width('far')).toBe(2);

@@ -13,8 +13,11 @@
  * Every request on that listener passes, in order:
  *  1. Host is the served MagicDNS name and port (what a browser sends);
  *  2. `Tailscale-User-Login` (set by serve, never forgeable through it) is the
- *     machine owner's login or one in config.json `inboxTailscaleAllow`; a
- *     tagged peer (no login) and a funnel request are refused;
+ *     login that owns this machine (single player: nobody else; only a tagged
+ *     machine, which has no owner, names its owner in config.json
+ *     `inboxTailscaleAllow`); another account gets the refusal page
+ *     (`@plannotator/shared/inbox/tailnet-refusal`), a tagged peer (no login)
+ *     and a funnel request are refused;
  *  3. no cross-site or same-site `Sec-Fetch-Site` except a top-level
  *     navigation and the attachment asset route (the identity is ambient);
  * then it is handed to the window's handler marked as tailnet, which refuses
@@ -35,13 +38,21 @@
  * Tailscale missing, stopped or signed out never stops the Inbox: the reason
  * is kept for Settings, inbox.json and stderr.
  *
+ * Publishing again by itself. While the switch is on and the last publish
+ * failed, a timer looks again: with Tailscale not ready then (not running,
+ * signed out, starting, or nobody to let in), `tailscale status --json` alone
+ * every 30 s, backing off to every 5 minutes, and the publish as soon as it
+ * is ready; with Tailscale ready and the publish still failing (a mapping on
+ * the port, a refused serve), the whole publish once every 30 minutes. It
+ * stops once published, switched off, stopping, or with no `tailscale` CLI
+ * at all; no timer runs otherwise. A publish it makes tells the windows.
+ *
  * The prototype relay (`openRelay`, inbox-live-relay.ts). A question's
  * running-app prototype is proxied on a loopback port of its own, which a
  * phone cannot reach. While published, the owner's first open of one makes a
  * second mapping, `https://<MagicDNS name>:<R>` to a loopback listener on
  * port R, and every request there passes the same Host and owner checks as
- * the window's (only the machine's owner, never a login the allowlist adds)
- * before the relay sees it. It is recorded (`relay_port`) before it is made,
+ * the window's before the relay sees it. It is recorded (`relay_port`) before it is made,
  * taken down with the window's mapping, and a run's leftover is taken down at
  * the next start, as the window's is.
  */
@@ -55,17 +66,21 @@ import {
   type InboxTailscaleSource,
 } from "@plannotator/shared/config";
 import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
-import { checkTailnetIdentity, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed } from "@plannotator/shared/inbox/tailnet";
+import { checkTailnetIdentity, fromOwnTailnetNode, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed, type TailnetCheck } from "@plannotator/shared/inbox/tailnet";
+import { allowIgnoredLine, tailnetNotOwnerResponse } from "@plannotator/shared/inbox/tailnet-refusal";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import {
   describeTailscaleFailure,
+  parseTailscaleSelfAddresses,
   parseTailscaleSelfIdentity,
   runTailscale,
+  serveStatusProxy,
   serveStatusRoutes,
   serveTargetIsLoopbackPort,
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunner,
+  type TailscaleRunResult,
 } from "@plannotator/shared/tailscale";
 import {
   enableServeSteps,
@@ -78,13 +93,42 @@ import {
   type TailscaleRunnerAsync,
   type TailscaleStep,
   type TailscaleSteps,
+  type TakeDownAnswer,
 } from "./tailscale-serve";
-import { runTailscaleQuietly } from "./inbox-pairing-checks";
+import { parseTailscaleBackend, runTailscaleQuietly } from "./inbox-pairing-checks";
 import { syncSection } from "./inbox-perf";
-import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE } from "./inbox-tailnet-door";
+import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE, loopbackPortRefused } from "./inbox-tailnet-door";
+
+/** How many proxy ports the record keeps as the Inbox's own (`made`), for its one https port. */
+export const WINDOW_PROXY_PORTS_KEPT = 3;
 
 /** The ports the device door may take (inbox-tailnet-door.ts, 8443 to 8450): the window's mapping never takes one. */
 export const isDoorTailnetPort = (port: number): boolean => INBOX_TAILNET_HTTPS_PORTS.includes(port);
+
+/**
+ * Publishing again by itself while the switch is on and the last publish failed. Tailscale not ready: a status
+ * read after each wait in turn, the last one repeated. Ready but the publish still failed: the next try after
+ * `stuckMs`, since the reason (a mapping on the port, a refused serve) is not Tailscale's state.
+ */
+export const INBOX_TAILSCALE_REPUBLISH = {
+  waitMs: [30_000, 60_000, 120_000, 240_000, 300_000] as readonly number[],
+  stuckMs: 30 * 60_000,
+};
+
+/** The retry's clock: tests pass their own. The default never keeps the process alive. */
+export interface InboxTailscaleTimers {
+  set: (fn: () => void, ms: number) => unknown;
+  clear: (handle: unknown) => void;
+}
+
+const defaultTimers: InboxTailscaleTimers = {
+  set: (fn, ms) => {
+    const timer = setTimeout(fn, ms);
+    timer.unref?.();
+    return timer;
+  },
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 /** A serve route that points at the window's own port: it hands the tailnet the whole Inbox, `/mcp` included. */
 export interface InboxTailnetExposure {
@@ -106,7 +150,7 @@ export interface InboxTailscaleState {
   error: string | null;
   /** The Tailscale login that owns this machine, as of the last publish. */
   owner: string | null;
-  /** Every login let in: the owner, then config.json `inboxTailscaleAllow`. */
+  /** Every login let in: the owner alone, or on a tagged machine (no owner) config.json `inboxTailscaleAllow`. */
   allowed: string[];
   /** Serve routes that point at the window's own port (the manual workaround): each exposes the whole Inbox. */
   exposed: InboxTailnetExposure[];
@@ -118,8 +162,11 @@ export interface InboxTailscaleContext {
   port: () => number;
   /** This run's registry entry (written in place, then saved). */
   registry: () => InboxRegistryEntry;
-  /** The window's handler, for a request that passed the tailnet checks. */
-  dispatch: (req: Request) => Promise<Response>;
+  /**
+   * The window's handler, for a request that passed the tailnet checks. `ownNode`: opened by this computer itself
+   * on its tailnet address (`fromOwnTailnetNode`), so it is this computer's own window, not another computer's.
+   */
+  dispatch: (req: Request, from?: { ownNode: boolean }) => Promise<Response>;
   /** Tests: a scripted `tailscale`. Default: the CLI, as a child process on the request paths (never blocking the Inbox). */
   tailscale?: TailscaleRunner;
   /** `plannotator inbox --tailscale`: on for this run unless PLANNOTATOR_INBOX_TAILSCALE turns it off. */
@@ -127,8 +174,10 @@ export interface InboxTailscaleContext {
   /** A terminal closing a foreground Inbox (SIGHUP) while published: stop cleanly, then exit. */
   onHangup?: () => void;
   maxRequestBodySize?: number;
-  /** The tailnet listener just opened: the window starts compressing its page for it (#2032). */
-  onListen?: () => void;
+  /** Published by itself, after an earlier publish failed (Tailscale came back): the windows hear the new state. */
+  onRepublished?: () => void;
+  /** Tests: the retry's clock. Default: unref'd timers. */
+  timers?: InboxTailscaleTimers;
 }
 
 /** The words for a route that exposes the window's own port, for Settings and stderr. */
@@ -154,6 +203,15 @@ function refusal(path: string, status: number, code: string, message: string): R
   return new Response(`${message}\n`, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 }
 
+/**
+ * Another Tailscale account (or a tagged device with none): the refusal page for a browser, the same words as JSON
+ * for an API call, the event stream or `/mcp`. A funnel request keeps its own words (the Inbox is never public).
+ */
+function refuseIdentity(path: string, identity: Extract<TailnetCheck, { ok: false }>): Response {
+  if (identity.code === "tailnet_funnel_refused") return refusal(path, identity.status, identity.code, identity.message);
+  return tailnetNotOwnerResponse("Inbox", path, identity.login ?? null, identity.code);
+}
+
 export function createInboxTailscale(context: InboxTailscaleContext) {
   // The same command sequences run two ways (tailscale-serve.ts): at once at the start, the stop and the exit, and
   // without blocking the event loop for the window's switch, `--tailscale` against a running Inbox, and a served
@@ -167,6 +225,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   let servedHostname: string | null = null;
   let httpsPort: number | null = null;
   let warnedExposure = false;
+  let warnedAllowIgnored = false;
   /** The prototype relay's listener (port R, also its tailnet HTTPS port) and its origin while mapped. */
   let relayListener: ReturnType<typeof Bun.serve> | null = null;
   let relayOrigin: string | null = null;
@@ -177,6 +236,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     error: null as string | null,
     owner: null as string | null,
     allowed: [] as string[],
+    /** This machine's own tailnet addresses, as of the last publish: a request from one is this computer's own window. */
+    self: [] as string[],
     exposed: [] as InboxTailnetExposure[],
   };
 
@@ -205,10 +266,13 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * one that started since, nor make a removed data folder again.
    */
   const save = (value: InboxRegistryEntry["tailscale"] | undefined) => {
+    // The ports this Inbox mapped ride every save while publishing is on, so a take-down that read an empty `serve
+    // status` (Tailscale stopped) never forgets a mapping that comes back with Tailscale.
+    const made = value && !value.made && record()?.made ? { made: record()!.made } : {};
     const apply = (target: InboxRegistryEntry) => {
       // The relay's record rides every save while its mapping may exist.
       const relay = relayKept !== null ? { relay_port: relayKept } : {};
-      if (value) target.tailscale = { ...value, ...relay };
+      if (value) target.tailscale = { ...value, ...made, ...relay };
       else if (relayKept !== null) target.tailscale = { url: null, error: null, ...relay };
       else delete target.tailscale;
     };
@@ -234,9 +298,15 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (port === null) return true;
     relayKept = port;
     const result = yield* takeDownOwnServeSteps(port, [`http://127.0.0.1:${port}`]);
-    if (result === "failed") return false;
+    if (result === "failed" || result === "later") return false;
     saveRelay(null);
     return true;
+  };
+
+  /** A take-down still owed (Tailscale was not running): the record keeps its ports, and no words of its own. */
+  const keepOwed = () => {
+    const kept = record();
+    save({ url: null, error: null, ...(kept?.https_port ? { https_port: kept.https_port, proxy_port: kept.proxy_port } : {}) });
   };
 
   /** The record with its ports kept (a mapping may exist), and why. */
@@ -245,9 +315,52 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     save({ url: null, error, ...(kept?.https_port ? { https_port: kept.https_port, proxy_port: kept.proxy_port } : {}) });
   };
 
-  /** Proxy targets a mapping of this Inbox's own points at: this run's listener, or the one inbox.json names. */
-  const ownTargets = () =>
-    [listener?.port, record()?.proxy_port].filter((p): p is number => typeof p === "number" && p > 0).map((p) => `http://127.0.0.1:${p}`);
+  /**
+   * Proxy ports this Inbox mapped before (`made`) that a connect found dead just before a publish (`probeLeftover`,
+   * without blocking): a mapping a crash or an unclean stop left on one of them is still the Inbox's.
+   */
+  const deadPorts = new Set<number>();
+
+  /**
+   * Proxy targets a mapping of this Inbox's own points at: this run's listener, the one inbox.json names, and a port it
+   * mapped before on this https port (`made`) found dead (`deadPorts`). A port found alive, or never probed, is not.
+   */
+  const ownTargets = () => {
+    const mine = listener?.port;
+    const kept = record();
+    const ports = [mine, kept?.proxy_port].filter((p): p is number => typeof p === "number" && p > 0);
+    if (kept?.made && kept.made.https_port === context.port()) for (const p of kept.made.proxy_ports) if (!ports.includes(p) && deadPorts.has(p)) ports.push(p);
+    return ports.map((p) => `http://127.0.0.1:${p}`);
+  };
+  /** `made` for the https port `port` with `proxies` added at the end, the newest `WINDOW_PROXY_PORTS_KEPT`; another https port starts over. */
+  const madeWith = (port: number, ...proxies: (number | undefined)[]): { https_port: number; proxy_ports: number[] } => {
+    const kept = record()?.made;
+    const out = (kept && kept.https_port === port ? kept.proxy_ports : []).filter((p) => !proxies.includes(p));
+    for (const p of proxies) if (typeof p === "number" && p > 0 && !out.includes(p)) out.push(p);
+    return { https_port: port, proxy_ports: out.slice(-WINDOW_PROXY_PORTS_KEPT) };
+  };
+  /**
+   * Before a publish, without blocking: the mapping on the Inbox's port, when it points at a proxy port this Inbox made
+   * (not this run's listener), is probed; a refused connect puts it in `deadPorts`.
+   */
+  const probeLeftover = async () => {
+    deadPorts.clear();
+    const kept = record()?.made;
+    const port = context.port();
+    if (!kept || kept.https_port !== port || kept.proxy_ports.length === 0) return;
+    let serve: TailscaleRunResult;
+    try {
+      serve = await runAsync(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+    } catch {
+      return;
+    }
+    if (serve.error || serve.status !== 0) return;
+    const mapped = serveStatusProxy(serve.stdout, port);
+    const proxy = mapped.state === "mapped" ? /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(mapped.proxy)?.[1] : undefined;
+    const leftover = proxy === undefined ? null : Number(proxy);
+    if (leftover === null || leftover === listener?.port || !kept.proxy_ports.includes(leftover)) return;
+    if (await loopbackPortRefused(leftover)) deadPorts.add(leftover);
+  };
 
   // ── The tailnet-only listener ──
 
@@ -262,11 +375,11 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       return refusal(path, 403, "forbidden_host", "This address answers only its tailnet name.");
     }
     const identity = checkTailnetIdentity(req.headers, state.allowed);
-    if (!identity.ok) return refusal(path, identity.status, identity.code, identity.message);
+    if (!identity.ok) return refuseIdentity(path, identity);
     if (!tailnetFetchSiteAllowed(req.method, path, req.headers)) {
       return refusal(path, 403, "cross_site", "Requests from other sites are not accepted.");
     }
-    return context.dispatch(req);
+    return context.dispatch(req, { ownNode: fromOwnTailnetNode(req.headers, state.self) });
   };
 
   const openListener = (): number => {
@@ -278,7 +391,6 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       maxRequestBodySize: context.maxRequestBodySize,
       fetch: listenerFetch,
     } as Parameters<typeof Bun.serve>[0]);
-    context.onListen?.();
     return listener.port as number;
   };
 
@@ -374,15 +486,52 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     return `Tailscale could not publish the Inbox. ${detail}`;
   };
 
-  /** Who may use the published Inbox: the owner of this machine plus the allowlist. Throws the reason when nobody may. */
-  const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[] }> {
+  // ── Publishing again by itself (INBOX_TAILSCALE_REPUBLISH) ──
+
+  const timers = context.timers ?? defaultTimers;
+  let retryTimer: unknown = null;
+  /** "wait": Tailscale was not ready at the last try, so only its status is read. "stuck": it was, and the publish failed anyway. */
+  let retryMode: "wait" | "stuck" | "owed" = "wait";
+  let retryStep = 0;
+  /** A publish found another mapping on the port that may be a dead one of this Inbox's own: look at once. */
+  let probeSoon = false;
+  /** The look is probing and publishing: a conflict it meets is final for this round. */
+  let probing = false;
+  /** Tailscale was ready (`ready`) when the last publish was tried: its failure was for another reason. */
+  let triedReady = false;
+  /** No `tailscale` command at all: nothing to wait for, as before this retry existed. */
+  let cliMissing = false;
+
+  /** Running, and someone may be let in (the owner, or a login in `inboxTailscaleAllow`). */
+  const ready = (status: TailscaleRunResult): boolean => {
+    if (status.error || status.status !== 0) return false;
+    const backend = parseTailscaleBackend(status.stdout);
+    if (backend.state !== "running") return false;
+    return backend.login !== null || resolveInboxTailscaleAllow(loadConfig()).length > 0;
+  };
+  const observe = (status: TailscaleRunResult) => {
+    cliMissing = (status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+    triedReady = ready(status);
+  };
+
+  /**
+   * Who may use the published Inbox: the Tailscale login that owns this machine, and nobody else (single player).
+   * Only where Tailscale names no owner (a tagged device) does config.json `inboxTailscaleAllow` say who the owner is;
+   * on a machine with an owner it is ignored, said once on stderr. Throws the reason when nobody may.
+   */
+  const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[]; self: string[] }> {
     const status = yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+    observe(status);
     if (status.error || status.status !== 0) throw new Error(describeTailscaleFailure(status));
     const identity = parseTailscaleSelfIdentity(status.stdout);
     if (!identity) throw new Error("Could not read `tailscale status --json`.");
     const owner = identity.login ? normalizeTailnetLogin(identity.login) : null;
     const extra = resolveInboxTailscaleAllow(loadConfig());
-    const allowed = owner ? [owner, ...extra.filter((login) => login !== owner)] : extra;
+    if (owner && extra.some((login) => login !== owner) && !warnedAllowIgnored) {
+      warnedAllowIgnored = true;
+      process.stderr.write(`[plannotator] ${allowIgnoredLine(owner)}\n`);
+    }
+    const allowed = owner ? [owner] : extra;
     if (allowed.length === 0) {
       throw new Error(
         identity.tagged
@@ -390,7 +539,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
           : "Tailscale did not say who owns this machine. Add your Tailscale login to inboxTailscaleAllow in config.json.",
       );
     }
-    return { owner, allowed };
+    return { owner, allowed, self: parseTailscaleSelfAddresses(status.stdout) };
   };
 
   /**
@@ -408,17 +557,22 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     const kept = record();
     if (!kept?.https_port || !kept.proxy_port || kept.proxy_port === listener?.port) return true;
     const result = yield* takeDownOwnServeSteps(kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
+    // Tailscale not running: nothing to take down yet. The record stays as it is, without words of its own; the
+    // publish that follows says why it could not publish, as it always has, and the take-down runs once Tailscale does.
+    if (result === "later") return true;
     if (result === "failed") {
       state.error = `Could not remove the tailnet address an earlier run left; it is retried at the next start. Or run "tailscale serve --https=${kept.https_port} off".`;
       keepRecord(state.error);
       return false;
     }
-    save({ url: null, error: null });
+    // The port stays known as one this Inbox made (`made`), so a mapping that is still there later is known as its own.
+    save({ url: null, error: null, made: madeWith(kept.https_port, kept.proxy_port) });
     return true;
   };
 
-  /** Publish the mapping. Never throws: a failure is kept as `error`. */
-  const publish = function* (): TailscaleSteps<boolean> {
+  /** Publish the mapping. Never throws: a failure is kept as `error`. `seenReady`: Tailscale was just read as ready. */
+  const publish = function* (seenReady = false): TailscaleSteps<boolean> {
+    triedReady = seenReady;
     const port = context.port();
     if (!(yield* reconcile())) return false;
     try {
@@ -426,12 +580,13 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       const who = yield* readAllowed();
       state.owner = who.owner;
       state.allowed = who.allowed;
+      state.self = who.self;
       state.exposed = (yield* scanExposure()) ?? state.exposed;
       warnExposure();
       if (state.exposed.some((e) => e.https_port === port)) throw new Error(exposureWarning(state.exposed));
       const proxyPort = openListener();
       // Recorded before it exists, so a crash between here and a clean stop always leaves a record to take down.
-      save({ url: null, error: null, https_port: port, proxy_port: proxyPort });
+      save({ url: null, error: null, https_port: port, proxy_port: proxyPort, made: madeWith(port, record()?.https_port === port ? record()?.proxy_port : undefined, proxyPort) });
       const { url } = yield* enableServeSteps(proxyPort, { httpsPort: port, ownTargets: ownTargets(), persist: true });
       servedHostname = new URL(url).hostname.toLowerCase();
       httpsPort = port;
@@ -443,20 +598,28 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     } catch (error) {
       state.url = null;
       state.error = failureWords(error, port);
+      // Another mapping on the port, perhaps a dead one of this Inbox's own: a look without blocking can tell (`probeLeftover`).
+      const made = record()?.made;
+      const mine = listener?.port;
+      if (error instanceof TailscaleServeError && error.code === "conflict" && !probing && made?.https_port === port && made.proxy_ports.some((p) => p !== mine)) probeSoon = true;
       const targets = ownTargets();
       closeListener();
       httpsPort = null;
       guardProcess(false);
       // The mapping may have been made before the failure (no URL in serve's answer): take it down, or keep the record.
       const taken = record()?.https_port ? yield* takeDownOwnServeSteps(port, targets) : "none";
-      if (taken === "failed") keepRecord(state.error);
+      if (taken === "failed" || taken === "later") keepRecord(state.error);
       else save({ url: null, error: state.error });
       return false;
     }
   };
 
-  /** Take this Inbox's own mapping down (never someone else's). "failed" leaves the listener up and the record kept. */
-  const unpublish = function* (later = false): TailscaleSteps<"removed" | "none" | "failed"> {
+  /**
+   * Take this Inbox's own mapping down (never someone else's). "failed" leaves the listener up and the record kept.
+   * "later" (Tailscale not running) closes the listener (a mapping Tailscale brings back answers 502); the caller keeps
+   * the record as a take-down still owed (`owedTakeDown`).
+   */
+  const unpublish = function* (later = false): TailscaleSteps<TakeDownAnswer> {
     // The relay goes with the window's address; a failure keeps its record for the next start.
     if (relayListener || relayKept !== null) yield* takeDownRelay();
     const port = httpsPort ?? record()?.https_port ?? null;
@@ -474,15 +637,128 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * then publish when the switch is on. A take-down that fails keeps the
    * record (never forgotten), and nothing is published over it this run.
    */
-  const start = () =>
+  const start = () => {
+    triedReady = false;
     runTailscaleSteps(
       (function* () {
         if (!(yield* reconcile())) return;
         if (resolve().on) yield* publish();
+        else if (owedTakeDown()) keepOwed();
         else if (record()) save(undefined);
       })(),
       run,
     );
+    afterAttempt();
+  };
+
+  const cancelRetry = () => {
+    if (retryTimer !== null) timers.clear(retryTimer);
+    retryTimer = null;
+  };
+  /** Worth looking again: on, not published, not stopping, and a `tailscale` to ask. */
+  const retryWanted = () => !stopped && !state.url && !cliMissing && resolve().on;
+  /**
+   * A mapping of this Inbox's own may still exist (the record keeps a port that is not this run's listener, or the
+   * relay's), from a switch-off, stop or start while Tailscale was not running.
+   */
+  const owedTakeDown = () => {
+    const kept = record();
+    return !!kept && ((!!kept.https_port && !!kept.proxy_port && kept.proxy_port !== listener?.port) || !!kept.relay_port);
+  };
+  /** The switch is off and a take-down is owed: a status-only look until Tailscale runs, then the take-down. */
+  const owedWanted = () => !stopped && !cliMissing && !resolve().on && owedTakeDown();
+  const arm = (ms: number) => {
+    cancelRetry();
+    retryTimer = timers.set(() => {
+      retryTimer = null;
+      void serial(retry).catch(() => {});
+    }, ms);
+  };
+  /** After every publish (or a change that may have made one): the next look, or none. */
+  const afterAttempt = () => {
+    cancelRetry();
+    const soon = probeSoon;
+    probeSoon = false;
+    if (!retryWanted()) {
+      if (owedWanted()) {
+        retryMode = "owed";
+        retryStep = 0;
+        arm(INBOX_TAILSCALE_REPUBLISH.waitMs[0]!);
+      }
+      return;
+    }
+    if (soon) {
+      // Once, at once: the look probes the mapping on the port, then publishes.
+      retryMode = "stuck";
+      arm(0);
+    } else if (triedReady) {
+      retryMode = "stuck";
+      arm(INBOX_TAILSCALE_REPUBLISH.stuckMs);
+    } else {
+      retryMode = "wait";
+      retryStep = 0;
+      arm(INBOX_TAILSCALE_REPUBLISH.waitMs[0]!);
+    }
+  };
+  /** One look, one at a time with the switch's changes. Quiet while Tailscale is not ready: nothing saved, nothing printed. */
+  const retry = async () => {
+    if (retryMode === "owed") return owedLook();
+    if (!retryWanted()) return;
+    if (retryMode === "wait") {
+      let status: TailscaleRunResult;
+      try {
+        status = await runAsync(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+      } catch (error) {
+        status = { status: null, stdout: "", stderr: "", error: error instanceof Error ? error : new Error(String(error)) };
+      }
+      cliMissing = (status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+      if (!retryWanted()) return;
+      if (!ready(status)) {
+        const waits = INBOX_TAILSCALE_REPUBLISH.waitMs;
+        retryStep = Math.min(retryStep + 1, waits.length - 1);
+        arm(waits[retryStep]!);
+        return;
+      }
+    }
+    let published = false;
+    probing = true;
+    try {
+      await probeLeftover();
+      if (!retryWanted()) return;
+      published = await runTailscaleStepsAsync(publish(true), runAsync);
+    } finally {
+      probing = false;
+      deadPorts.clear();
+      afterAttempt();
+    }
+    if (published) context.onRepublished?.();
+  };
+
+  /** One look for a take-down still owed: only the status while Tailscale is not running, then the take-down. */
+  const owedLook = async () => {
+    if (!owedWanted()) return;
+    let status: TailscaleRunResult;
+    try {
+      status = await runAsync(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+    } catch (error) {
+      status = { status: null, stdout: "", stderr: "", error: error instanceof Error ? error : new Error(String(error)) };
+    }
+    cliMissing = (status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+    if (!owedWanted()) return;
+    const waits = INBOX_TAILSCALE_REPUBLISH.waitMs;
+    if (!ready(status)) {
+      retryStep = Math.min(retryStep + 1, waits.length - 1);
+      return arm(waits[retryStep]!);
+    }
+    await runTailscaleStepsAsync(reconcile(), runAsync);
+    if (resolve().on) return afterAttempt();
+    if (!owedTakeDown()) {
+      if (record()) save(undefined);
+      return;
+    }
+    // Still owed with Tailscale running: the take-down failed (its words are kept); the slow look.
+    if (owedWanted()) arm(INBOX_TAILSCALE_REPUBLISH.stuckMs);
+  };
 
   // ── The request paths' changes, one at a time ──
 
@@ -515,12 +791,19 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    */
   const stop = (): { failedPort: number | null } => {
     stopped = true;
+    cancelRetry();
     return stopNow();
   };
   const stopNow = (): { failedPort: number | null } => {
     if (httpsPort === null && !listener && !record()) return { failedPort: null };
     const port = httpsPort ?? record()?.https_port ?? null;
-    if (runTailscaleSteps(unpublish(), run) === "failed") {
+    const result = runTailscaleSteps(unpublish(), run);
+    // Tailscale not running: the record keeps its ports, and the next start (or its look) takes the mapping down.
+    if (result === "later") {
+      keepOwed();
+      return { failedPort: null };
+    }
+    if (result === "failed") {
       keepRecord(`Could not take the tailnet address down; run "tailscale serve --https=${port} off".`);
       closeListener();
       httpsPort = null;
@@ -531,6 +814,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     // A change still running may publish after this: its record stays for the next start until it is down.
     if (record()) {
       if (pending > 0) keepRecord(`Stopped while publishing; the tailnet address is taken down at the next start, or run "tailscale serve --https=${port} off".`);
+      // Taken down, or found gone while Tailscale runs: nothing is left to know ("later" kept the record above).
       else save(undefined);
     }
     return { failedPort: null };
@@ -538,14 +822,18 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
 
   /** The window's switch: saved to config.json, applied now. `via`: the request came through the tailnet. */
   const set = (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean } = {}): Promise<InboxTailscaleState> =>
-    serial(() => runTailscaleStepsAsync(setSteps(on, options), runAsync));
+    serial(() => runTailscaleStepsAsync(setSteps(on, options), runAsync).finally(afterAttempt));
   const setSteps = function* (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean }): TailscaleSteps<InboxTailscaleState> {
     const env = parseInboxTailscaleEnv();
     if (env !== undefined) {
       throw new InboxError("tailscale_env_decides", `PLANNOTATOR_INBOX_TAILSCALE is set in this Inbox's environment, so it stays ${env ? "on" : "off"}.`);
     }
+    let owed = false;
     if (!on) {
-      if ((yield* unpublish(options.via === "tailnet")) === "failed") {
+      const result = yield* unpublish(options.via === "tailnet");
+      // Tailscale not running: the switch turns off all the same; the take-down is owed (`owedLook`).
+      owed = result === "later";
+      if (result === "failed") {
         throw new InboxError(
           "tailscale_unavailable",
           `Tailscale could not take the Inbox's tailnet address down. Try again, or run "tailscale serve --https=${context.port()} off".`,
@@ -570,6 +858,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     // The saved switch decides from now on, not this run's flag.
     runFlag = false;
     if (on) yield* publish();
+    else if (owed) keepOwed();
     else save(undefined);
     return snapshot();
   };
@@ -584,7 +873,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
           return snapshot();
         })(),
         runAsync,
-      ),
+      ).finally(afterAttempt),
     );
 
   /**
@@ -609,8 +898,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
                 return refusal("/", 403, "forbidden_host", "This address answers only its tailnet name.");
               }
               const identity = checkTailnetIdentity(req.headers, state.allowed);
-              if (!identity.ok) return refusal("/", identity.status, identity.code, identity.message);
-              if (!isOwner(req.headers)) return refusal("/", 403, "owner_only", "A prototype opens only for this computer's owner.");
+              if (!identity.ok) return refuseIdentity("/", identity);
               return handlers.fetch(req, srv);
             },
             websocket: handlers.websocket,
@@ -632,12 +920,6 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       ),
     );
 
-  const isOwner = (headers: Headers): boolean => {
-    const identity = checkTailnetIdentity(headers, state.allowed);
-    if (!identity.ok) return false;
-    return state.owner === null || normalizeTailnetLogin(identity.login) === state.owner;
-  };
-
   return {
     start,
     stop,
@@ -652,18 +934,10 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     state: snapshot,
     /** Published only because this run was started (or asked) with `--tailscale`: a restart must pass it on. */
     runOnly: () => runFlag && resolve().source === "flag",
+    /** A retry is waiting to look again (tests). */
+    retrying: () => retryTimer !== null,
     /** The tailnet-only listener's port while published (tests). */
     listenerPort: () => (listener ? (listener.port as number) : null),
-    /**
-     * A request the listener let in came from the machine's owner, not a login
-     * config.json `inboxTailscaleAllow` added: only the owner may send
-     * Feedback (inbox-feedback.ts). A machine Tailscale names no owner for (a
-     * tagged device, or an untagged one whose owner `tailscale status` does
-     * not report) is published only for its allowlist, the person who uses
-     * it: there every allowed login is the owner. "Ask this session" follows
-     * the same rule (`readTailnetOwners` in session-tailnet.ts).
-     */
-    isOwnerRequest: isOwner,
   };
 }
 
@@ -685,6 +959,7 @@ export function takeDownInboxTailscale(dataDir: string, run: TailscaleRunner = r
   // The prototype relay's mapping too (its target is the loopback listener on the same port number).
   const relay = kept?.relay_port ? takeDownOwnServeMapping(run, kept.relay_port, [`http://127.0.0.1:${kept.relay_port}`]) : "none";
   const window = kept?.https_port && kept.proxy_port ? takeDownOwnServeMapping(run, kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]) : "none";
-  if (relay === "failed" || window === "failed") return "failed";
+  // Tailscale not running: the uninstall cannot wait for it, so it says as for a failure.
+  if (relay === "failed" || window === "failed" || relay === "later" || window === "later") return "failed";
   return relay === "removed" || window === "removed" ? "removed" : "none";
 }

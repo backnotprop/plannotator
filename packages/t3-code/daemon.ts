@@ -90,7 +90,7 @@ async function ensureDaemon(options: AdapterOptions, thread: string): Promise<Re
           try {
             const [executable, ...prefix] = options.workerCommand;
             const cliOverride = options.command.length === 1 ? ["--plannotator", options.command[0]!] : [];
-            const child = spawn(executable!, [...prefix, "serve", "--url", options.endpoint.href, "--thread", thread, "--data-dir", options.dataDir, ...cliOverride], { detached: true, stdio: ["ignore", log, log] });
+            const child = spawn(executable!, [...prefix, "serve", "--url", options.endpoint.href, "--thread", thread, "--data-dir", options.dataDir, ...cliOverride], { detached: true, stdio: ["ignore", log, log], windowsHide: true });
             let failure: Error | undefined;
             child.once("error", (error) => { failure = error; });
             child.unref();

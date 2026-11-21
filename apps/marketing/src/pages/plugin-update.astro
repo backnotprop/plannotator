@@ -1,0 +1,294 @@
+---
+// https://plannotator.ai/plugin-update/ — opened by the install script when an
+// update left the Claude Code plugin behind. See src/lib/plugin-update.ts for
+// how the query picks the variant (on the client only, nothing sent anywhere).
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import {
+  PLUGIN_UPDATE_COPY_SCRIPT,
+  PLUGIN_UPDATE_HEAD_SCRIPT,
+  PLUGIN_UPDATE_VERSIONS_SCRIPT,
+} from '../lib/plugin-update';
+
+const MARKETPLACE_UPDATE = 'claude plugin marketplace update plannotator';
+const PLUGIN_UPDATE = 'claude plugin update plannotator@plannotator --scope user';
+const RELOAD = '/reload-plugins';
+
+const RELEASE_NOTES = 'https://github.com/backnotprop/plannotator/releases/tag/v0.28.61';
+const ISSUES = 'https://github.com/backnotprop/plannotator/issues';
+---
+<Base
+  title="One thing left to do · Plannotator"
+  description="Some Plannotator updates left the Claude Code plugin on an older version. Here is the one step that brings it up to date."
+  noindex
+>
+  <Fragment slot="head">
+    <script is:inline set:html={PLUGIN_UPDATE_HEAD_SCRIPT} />
+    <noscript><style>.pu-copy{display:none!important}</style></noscript>
+  </Fragment>
+
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+    <main class="pu-page max-w-2xl mx-auto px-5 sm:px-8 pt-24 sm:pt-28 pb-20">
+      <div class="pu-alert" role="status">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <p>
+          <strong>Action needed.</strong>
+          <span class="pu-v pu-v-general">Your Claude Code plugin may be out of date.</span>
+          <span class="pu-v pu-v-reload">Your open Claude Code sessions still run the old plugin.</span>
+          <span class="pu-v pu-v-manual">Your Claude Code plugin was not updated.</span>
+        </p>
+      </div>
+
+      <h1 class="font-display pu-heading">
+        <span class="pu-v pu-v-general">One thing left to do</span>
+        <span class="pu-v pu-v-reload">One thing left: reload Claude Code</span>
+        <span class="pu-v pu-v-manual">One thing left: update the Claude Code plugin</span>
+      </h1>
+
+      <section aria-labelledby="pu-what" class="pu-section">
+        <h2 id="pu-what" class="pu-h2">What happened</h2>
+        <p>
+          A recent update left the Claude Code plugin on an older version on some computers. The app is
+          fine and nothing was lost.
+        </p>
+        <p class="pu-versions pu-v pu-v-reload" hidden>
+          Plugin updated from <span class="pu-ver" data-pu-version="from"></span> to <span class="pu-ver" data-pu-version="to"></span>.
+        </p>
+        <p class="pu-versions pu-v pu-v-manual" hidden>
+          Your plugin is on <span class="pu-ver" data-pu-version="from"></span>. The current one is <span class="pu-ver" data-pu-version="to"></span>.
+        </p>
+        <script is:inline set:html={PLUGIN_UPDATE_VERSIONS_SCRIPT} />
+      </section>
+
+      <section aria-labelledby="pu-do" class="pu-section">
+        <h2 id="pu-do" class="pu-h2">What to do</h2>
+        <ol class="pu-steps">
+          <li class="pu-step pu-v pu-v-general pu-v-manual">
+            <h3 class="pu-h3">Update the plugin</h3>
+            <p class="pu-v pu-v-manual">Run these in a terminal:</p>
+            <p class="pu-v pu-v-general">Run these in a terminal. They do no harm if the plugin is already current.</p>
+            <div class="pu-cmd">
+              <span class="pu-line"><span class="pu-prompt" aria-hidden="true">$ </span><code>{MARKETPLACE_UPDATE}</code></span>
+              <button type="button" class="pu-copy" aria-label={`Copy ${MARKETPLACE_UPDATE}`}>
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                <span class="pu-copy-label">Copy</span>
+              </button>
+            </div>
+            <div class="pu-cmd">
+              <span class="pu-line"><span class="pu-prompt" aria-hidden="true">$ </span><code>{PLUGIN_UPDATE}</code></span>
+              <button type="button" class="pu-copy" aria-label={`Copy ${PLUGIN_UPDATE}`}>
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                <span class="pu-copy-label">Copy</span>
+              </button>
+            </div>
+          </li>
+          <li class="pu-step">
+            <h3 class="pu-h3">Reload Claude Code</h3>
+            <p>Type this in each open Claude Code session, or restart Claude Code.</p>
+            <div class="pu-cmd">
+              <span class="pu-line"><span class="pu-prompt" aria-hidden="true">&gt; </span><code>{RELOAD}</code></span>
+              <button type="button" class="pu-copy" aria-label={`Copy ${RELOAD}`}>
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                <span class="pu-copy-label">Copy</span>
+              </button>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section aria-labelledby="pu-done" class="pu-section">
+        <h2 id="pu-done" class="pu-h2">How to tell it worked</h2>
+        <p>
+          The Inbox sidebar no longer shows “Reload Claude Code”, and Settings → Agents no longer says
+          “plugin needs an update”. Features that need a current plugin work again, such as Side (Ask AI)
+          in the Inbox and session names.
+        </p>
+      </section>
+
+      <p class="pu-more">
+        <a href={RELEASE_NOTES} target="_blank" rel="noopener noreferrer">Read the release notes</a>
+        <a href={ISSUES} target="_blank" rel="noopener noreferrer">Something else wrong? Open an issue</a>
+      </p>
+
+      <div id="pu-live" class="sr-only" role="status" aria-live="polite"></div>
+    </main>
+    <Footer />
+  </div>
+  <script is:inline set:html={PLUGIN_UPDATE_COPY_SCRIPT} />
+</Base>
+
+<style is:global>
+  /* The variant: chosen in <head> from ?state=, before the body is drawn.
+     No attribute (JavaScript off) shows the general variant. */
+  .pu-page .pu-v { display: none; }
+  html:not([data-pu-state]) .pu-page .pu-v-general,
+  html[data-pu-state='general'] .pu-page .pu-v-general,
+  html[data-pu-state='reload'] .pu-page .pu-v-reload,
+  html[data-pu-state='manual'] .pu-page .pu-v-manual { display: revert; }
+  .pu-page h1 .pu-v { display: none; }
+  html:not([data-pu-state]) .pu-page h1 .pu-v-general,
+  html[data-pu-state='general'] .pu-page h1 .pu-v-general,
+  html[data-pu-state='reload'] .pu-page h1 .pu-v-reload,
+  html[data-pu-state='manual'] .pu-page h1 .pu-v-manual { display: inline; }
+  .pu-page .pu-versions[hidden] { display: none !important; }
+
+  .pu-alert {
+    --pu-amber: oklch(0.7 0.17 65);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.75rem 0.9rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid oklch(from var(--pu-amber) l c h / 0.6);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    background: oklch(from var(--pu-amber) l c h / 0.14);
+    color: var(--foreground);
+    font-size: 0.975rem;
+    line-height: 1.5;
+  }
+  .pu-alert svg { flex: none; margin-top: 0.15rem; color: var(--pu-amber); }
+  .pu-alert p { margin: 0; }
+  .pu-alert strong { font-weight: 700; }
+  .pu-heading {
+    font-size: clamp(1.75rem, 5vw, 2.5rem);
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .pu-section { margin-top: 2.25rem; }
+  .pu-section p,
+  .pu-step p {
+    font-size: 0.975rem;
+    line-height: 1.65;
+    color: var(--muted-foreground);
+    margin-top: 0.625rem;
+  }
+  .pu-page p code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--muted);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    color: var(--foreground);
+  }
+  .pu-page .pu-status { color: var(--foreground); }
+  .pu-ver {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--foreground);
+  }
+  .pu-h2 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .pu-h3 {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .pu-steps {
+    list-style: none;
+    counter-reset: pu-step;
+    margin-top: 1rem;
+    display: grid;
+    gap: 1.5rem;
+  }
+  .pu-step {
+    counter-increment: pu-step;
+    position: relative;
+    padding-left: 2.25rem;
+  }
+  .pu-step::before {
+    content: counter(pu-step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary);
+    background: oklch(from var(--primary) l c h / 0.12);
+    border: 1px solid oklch(from var(--primary) l c h / 0.35);
+  }
+  .pu-cmd {
+    margin-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.5;
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.625rem 0.625rem 0.625rem 1rem;
+  }
+  .pu-line {
+    flex: 1;
+    min-width: 0;
+  }
+  .pu-cmd code {
+    color: var(--foreground);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    user-select: all;
+  }
+  .pu-prompt {
+    color: var(--muted-foreground);
+    user-select: none;
+  }
+  .pu-copy {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 5.75rem;
+    justify-content: center;
+    padding: 0.375rem 0.625rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted-foreground);
+    font-family: var(--font-sans, inherit);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .pu-copy:hover { color: var(--foreground); background: var(--muted); }
+  .pu-copy:focus-visible,
+  .pu-more a:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .pu-copy[data-copied] { color: var(--success); border-color: oklch(from var(--success) l c h / 0.5); }
+  .pu-more {
+    margin-top: 2.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid oklch(from var(--border) l c h / 0.6);
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+  }
+  .pu-more a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    border-radius: 2px;
+  }
+  @media (max-width: 480px) {
+    .pu-cmd { font-size: 0.8125rem; padding-left: 0.75rem; }
+    .pu-step { padding-left: 2rem; }
+  }
+</style>

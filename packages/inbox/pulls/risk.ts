@@ -69,8 +69,22 @@ export function rowStack(row: Pick<InboxReviewRow, 'stacks'>): Pick<InboxPullSta
   return row.stacks.length === 1 ? row.stacks[0]! : { layers: row.stacks.flatMap((stack) => stack.layers) };
 }
 
+/**
+ * A row's judgment: its PRs' (`stackRisk`), else, for a branch an agent reported (Branch reviews), the one its report
+ * was given. A local review has neither.
+ */
+export function rowRisk(row: Pick<InboxReviewRow, 'stacks' | 'started'>, judgments: RiskJudgments): InboxPullRiskJudgment | null {
+  return stackRisk(rowStack(row), judgments) ?? (row.started?.kind === 'branch' ? (row.started.report?.risk ?? null) : null);
+}
+
+/** Why a row can't be given a level: its PRs' reason, else its reported branch's. */
+export function rowRiskFailure(row: Pick<InboxReviewRow, 'stacks' | 'started'>, judgments: RiskJudgments, failed: RiskFailures): string | null {
+  if (rowRisk(row, judgments)) return null;
+  return stackRiskFailure(rowStack(row), judgments, failed) ?? (row.started?.kind === 'branch' ? (row.started.report?.risk_failed ?? null) : null);
+}
+
 const rankOf = (row: InboxReviewRow, judgments: RiskJudgments) => {
-  const found = stackRisk(rowStack(row), judgments)?.level;
+  const found = rowRisk(row, judgments)?.level;
   return found ? RANK[found] : -1;
 };
 
@@ -89,7 +103,7 @@ export function filterReviewRows(
 ): { rows: readonly InboxReviewRow[]; notJudged: number; notRanked: InboxReviewRow[] } {
   if (filter === 'all') return { rows, notJudged: 0, notRanked: [] };
   const isFailed = (row: InboxReviewRow) => stackRiskFailure(rowStack(row), judgments, failed) !== null;
-  const kept = (row: InboxReviewRow) => passes(stackRisk(rowStack(row), judgments)?.level, filter) || (filter !== 'high' && isFailed(row));
+  const kept = (row: InboxReviewRow) => passes(rowRisk(row, judgments)?.level, filter) || (filter !== 'high' && isFailed(row));
   // A run still going counts too: the count only ever goes down as answers come in, and nothing hides without a word.
   const hidden = rows.filter((row) => !kept(row) && (isFailed(row) || openLayers(rowStack(row)).some((layer) => !judgments[layer.key])));
   return {

@@ -18,12 +18,13 @@
  */
 
 import { markTourDecided } from '../helpers/tour-decided';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { turnedOnCases } from './inbox-turned-on.cases';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -101,7 +102,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
   // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
   // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
-  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
+  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -534,7 +535,7 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const before = await rowOrder(page);
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText(/^New from Codex: “/);
   // Held: nothing moved, and the new thread is not on screen yet.
   await page.waitForTimeout(500);
   expect(await rowOrder(page)).toEqual(before);
@@ -584,10 +585,10 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
-  await nav.getByRole('link', { name: 'Agents' }).click();
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Remote devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
+  await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
-  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
   const claudeSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Claude Code' });
   const piSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Pi' });
@@ -615,7 +616,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // Delete from Inbox, on threads and projects, is live since step 2 (proved in inbox-attachments.spec.ts).
   await expect(store.locator('[data-store-project="billing-svc"]').getByRole('button', { name: 'Delete from Inbox: billing-svc' })).toBeEnabled();
 
-  await nav.getByRole('link', { name: 'Agents' }).click();
+  await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText("Pi's next session").first()).toBeVisible();
@@ -958,3 +959,6 @@ test('the Update button follows health ("ready"), and pressing it brings the new
   await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.ib-upd')).toHaveCount(0);
 });
+
+// The Inbox turns on only when the person runs it, with the real rule (inbox-turned-on.cases.ts).
+turnedOnCases(builtBinary);

@@ -45,6 +45,7 @@ beforeEach(() => {
     XDG_CONFIG_HOME: path.join(root, "config"),
     XDG_CACHE_HOME: path.join(root, "cache"),
     XDG_DATA_HOME: path.join(root, "data"),
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: path.join(root, "pn"),
     PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
     PLANNOTATOR_REMOTE: "0",

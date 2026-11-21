@@ -11,6 +11,7 @@ import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { hasSetPicture, useKnownProjects } from '../projectPictures';
+import { useProjectTagSwap } from './ProjectTagMenu';
 
 export interface ProjectRowProps {
   project: ProjectFolder;
@@ -49,7 +50,7 @@ export interface ProjectRowProps {
   /**
    * "+" beside ⋯ (approval "launch-create-clone", F1-F7): opens New message with a new session in this project. `tip`
    * is its tip and name ("New session in billing-svc", with the machine, and "starts when it's back" while asleep).
-   * Absent: no "+" (launch is off, or a guest's page).
+   * Absent: no "+" (launch is off).
    */
   newSession?: { tip: string; onPress: () => void };
 }
@@ -115,6 +116,7 @@ export function ProjectRow(props: ProjectRowProps) {
   );
   const items = (
     <ProjectMenuItems
+      projectId={project.id}
       name={project.name}
       readable={props.readable}
       rename={onRename !== undefined}
@@ -237,10 +239,12 @@ export function ProjectRow(props: ProjectRowProps) {
 type ProjectMenuAction = ProjectAction | 'rename' | 'reset' | 'picture' | 'unpicture';
 
 /**
- * The items, no descriptions: the two batches, then (this machine's projects) Rename… and, once a name is
- * set, Reset name. The phone's sheet draws its title (the project) above them.
+ * The items, no descriptions: the two batches, then Add tag (ProjectTagMenu.tsx: the tags swap in place), then (this
+ * machine's projects) Rename… and, once a name is set, Reset name. The phone's sheet draws its title (the project)
+ * above them.
  */
 function ProjectMenuItems(props: {
+  projectId: string;
   name: string;
   readable: boolean;
   rename: boolean;
@@ -250,12 +254,24 @@ function ProjectMenuItems(props: {
   onAction: (action: ProjectMenuAction) => void;
 }) {
   const { name, readable, onAction } = props;
+  const tags = useProjectTagSwap(props.projectId);
+  // The popup is named by the project already (aria-label): the title is for the eye only.
+  const title = (
+    <div className="ib-pm-title" dir="auto" aria-hidden="true">
+      {name}
+    </div>
+  );
+  if (tags.list) {
+    return (
+      <>
+        {title}
+        {tags.list}
+      </>
+    );
+  }
   return (
     <>
-      {/* The popup is named by the project already (aria-label): the title is for the eye only. */}
-      <div className="ib-pm-title" dir="auto" aria-hidden="true">
-        {name}
-      </div>
+      {title}
       <Menu.Item className="ib-pmi" label="Mark all as read" disabled={!readable} onClick={() => onAction('read')} data-project-action="read">
         <Icon name="checkCircle" size={15} />
         Mark all as read
@@ -264,6 +280,7 @@ function ProjectMenuItems(props: {
         <Icon name="archive" size={15} />
         Archive all
       </Menu.Item>
+      {tags.item}
       {/* Only while project marks show (Settings → Rows), so it is not there by default. */}
       {props.picture && (
         <>
@@ -317,8 +334,11 @@ function folderName(root: string): string {
  * (approval "project-combine"): one line under the field, Cancel and Combine, no Keep both. Enter combines and
  * Escape cancels. A name several projects answer to ("acme", two clones) offers one button for each, and
  * Enter leaves the choice to the person.
+ *
+ * An agent's sidebar row uses it too (agents/AgentsSection.tsx): `label` names the field, nothing combines, and
+ * `emptyResets` saves an empty name as "" instead of refusing it.
  */
-function ProjectNameField(props: {
+export function ProjectNameField(props: {
   name: string;
   folder: string;
   announce?: (text: string) => void;
@@ -326,6 +346,10 @@ function ProjectNameField(props: {
   onCombine?: (into: LabeledProject) => Promise<boolean>;
   onSave: (name: string) => Promise<boolean>;
   onCancel: (refocus: boolean) => void;
+  /** The field's spoken name; "Project name" when absent. */
+  label?: string;
+  /** An empty name is saved (as "") rather than refused. */
+  emptyResets?: boolean;
 }) {
   const [value, setValue] = useState(props.name);
   const [busy, setBusy] = useState(false);
@@ -370,7 +394,7 @@ function ProjectNameField(props: {
     }
   };
   const save = async () => {
-    if (typed === '') return refuse('A name cannot be empty.');
+    if (typed === '' && !props.emptyResets) return refuse('A name cannot be empty.');
     if ([...typed].length > INBOX_PROJECT_NAME_MAX) return refuse(`A name can be at most ${INBOX_PROJECT_NAME_MAX} characters.`);
     if (typed === props.name) return close(true);
     if (matches.length === 1) return combine(matches[0]!);
@@ -407,7 +431,7 @@ function ProjectNameField(props: {
         ref={input}
         type="text"
         className="ib-proj-rename"
-        aria-label="Project name"
+        aria-label={props.label ?? 'Project name'}
         aria-describedby={hint}
         aria-invalid={refused ? true : undefined}
         placeholder={props.folder}

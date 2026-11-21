@@ -27,6 +27,7 @@ import {
   type InboxListRow,
 } from '@plannotator/core/inbox-types';
 import type { SkillCatalogEntry, SkillReferenceToken } from '@plannotator/ui/utils/skillReferences';
+import { replaceUndoably } from '@plannotator/ui/utils/undoableEdit';
 import type { TaggedThreads } from './initiativePeek';
 
 export interface InitiativeTags {
@@ -38,18 +39,34 @@ export interface InitiativeTags {
   cards: readonly InboxCardWire[];
   /** The list's rows by thread id (sections, snoozed, pinned): the preview's thread names and who waits. */
   rows: ReadonlyMap<string, InboxListRow>;
-  /** Project names by id: the preview's "Initiative · plannotator, workspaces". */
+  /** Project names by id: the preview's "Tag · plannotator, workspaces". */
   projects: ReadonlyMap<string, string>;
   /** Per initiative, the latest threads a message tags it in and how many in all (the cards payload's `initiative_threads`). */
   mentions: ReadonlyMap<string, TaggedThreads>;
   /** Read the cards again (an opened preview does, so the threads tagged since are in it). */
   refresh?: () => void;
+  /**
+   * Where a sent tag links: absent, the Board filtered to it (`initiativeHref`); with the Board off, the tag's list in
+   * the Inbox (threadTags.ts `tagHref`, approval "inbox-thread-tags").
+   */
+  href?: (id: string) => string;
 }
 
 const NONE: InitiativeTags = { initiatives: [], counts: new Map(), cards: [], rows: new Map(), projects: new Map(), mentions: new Map() };
-/** App provides the Board's initiatives (read with the cards while the Board is on; off, `#` is plain text). */
+/**
+ * App provides the Board's initiatives (read with the cards while the Board is on). With the Board off, the list's tags
+ * (approval "inbox-thread-tags"), each counted by its threads, and `href` to their lists; an Inbox that keeps no
+ * tags gives none, and `#` is plain text.
+ */
 export const InitiativeTagsContext = createContext<InitiativeTags>(NONE);
 export const useInitiativeTags = () => useContext(InitiativeTagsContext);
+/**
+ * Only the live initiatives, for what draws tag links (every message body): the list's rows and the cards change the
+ * tags above on each read, and a body that read them would draw again with every message that arrives. App provides
+ * the same array while the initiatives' ids and names stay.
+ */
+export const LiveInitiativesContext = createContext<Pick<InitiativeTags, 'initiatives' | 'href'>>(NONE);
+export const useLiveInitiatives = () => useContext(LiveInitiativesContext);
 
 /** The list's rows, shaped as the skill list's (the menu is reused as is; inbox.css swaps the icon and drops the source). */
 export function hashtagRows(initiatives: readonly InboxInitiative[], counts: ReadonlyMap<string, number>): SkillCatalogEntry[] {
@@ -157,21 +174,29 @@ export function useHashtagPicker(options: {
       const end = trigger.start + 1 + trigger.query.length;
       let next: string;
       let at: number;
+      /** What the pick replaces (`[from, end)`) and with what. */
+      let from: number;
+      let insert: string;
       if (onPick) {
         // New card: the `#query` leaves the text (and one space with it); the card's initiative says it.
         const before = text.slice(0, trigger.start).replace(/ $/, '');
         const after = text.slice(end);
-        next = before + (before && after && !/^\s/.test(after) ? ' ' : '') + after;
+        from = before.length;
+        insert = before && after && !/^\s/.test(after) ? ' ' : '';
+        next = before + insert + after;
         at = before.length;
         onPick(picked);
       } else {
         const tag = inboxInitiativeTag(picked.name);
         const after = text.slice(end);
         const space = /^\s/.test(after) ? '' : ' ';
+        from = trigger.start;
+        insert = tag + space;
         next = text.slice(0, trigger.start) + tag + space + after;
         at = trigger.start + tag.length + space.length;
       }
-      setText(next);
+      // The browser's own edit, one ⌘Z step of its own (ui's utils/undoableEdit.ts); else written as before.
+      if (el.value !== text || !replaceUndoably(el, from, end, insert)) setText(next);
       setCaret(at);
       setActiveIndex(null);
       setDismissedStart(trigger.start);
@@ -285,9 +310,9 @@ export function initiativeHref(id: string): string {
 /**
  * A message's text with each tag that names a live initiative made a link to
  * the Board filtered to it (`[#Shape](#board&initiative=ini_…)`; display
- * only). Tags in code, or naming nothing, stay as written.
+ * only), or where `href` says (the tag's list, with the Board off). Tags in code, or naming nothing, stay as written.
  */
-export function linkHashtags(text: string, initiatives: readonly InboxInitiative[]): string {
+export function linkHashtags(text: string, initiatives: readonly InboxInitiative[], href: (id: string) => string = initiativeHref): string {
   if (initiatives.length === 0 || !text.includes('#')) return text;
   // A markdown link's own text (`[part of #Shape](…)`): a link inside a link is none. Its destination holds no
   // tag at all (core blanks it).
@@ -298,7 +323,7 @@ export function linkHashtags(text: string, initiatives: readonly InboxInitiative
     const initiative = inboxInitiativeOfTag(tag.key, initiatives);
     if (!initiative) continue;
     if (linkTexts.some(([from, to]) => tag.start > from && tag.end < to)) continue;
-    out += text.slice(last, tag.start) + `[#${tag.tag}](${initiativeHref(initiative.id)})`;
+    out += text.slice(last, tag.start) + `[#${tag.tag}](${href(initiative.id)})`;
     last = tag.end;
   }
   return out + text.slice(last);

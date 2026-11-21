@@ -15,7 +15,7 @@
  * full screen keeps the file beside the thread with `‹ Inbox` leading its
  * header, which closes the file and brings the list back (focus on its row); a node
  * comment on a Mermaid diagram; the file edited on disk and the changed line,
- * with "Open the version it sent" showing the bytes sent; Send carrying the
+ * with "View sent version" showing the bytes sent; Send carrying the
  * picks and the annotations, read back by read_thread; a path outside the
  * project, a symlink retargeted to a directory, `.env` and a request by path
  * each refused; delete thread removing its blobs and the store size falling.
@@ -25,7 +25,7 @@
  * .local/proof/attachments/ with a contact sheet.
  */
 
-import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -202,7 +202,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
-  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -453,7 +453,7 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   await page.getByRole('button', { name: 'Open admin-view.html' }).click();
   const pane = page.locator(`[data-attachment-pane="${world.attachments.html}"]`);
   await expect(pane).toBeVisible();
-  // HTML opens in the annotation mode by default: full screen, Side by side offered.
+  // HTML opens full screen by default, Side by side offered.
   await expect(pane).toHaveClass(/ib-full/);
   await expect(pane.getByRole('button', { name: 'Side by side' })).toBeVisible();
   const frame = pageFrame(page);
@@ -467,7 +467,10 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   // The page's script could not read the Inbox API from its sandboxed frame.
   await expect(frame.locator('#probe')).toHaveText('inbox api refused');
 
-  // Pinpoint is armed: a click on the button pins a comment to it.
+  // It opens in Interact; with Annotate on, a click on the button pins a comment to it.
+  await expect(page.locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('[data-full-view-pen]').click();
+  await expect(page.locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'true');
   await frame.locator('#retry-all').click();
   await composer(page).fill('Retry all should ask first. Forty charges at once is a lot to undo.');
   await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
@@ -895,7 +898,7 @@ test('a click on the tile itself, its name rather than Open, opens the file', as
   await expect(pane).toHaveCount(0);
 });
 
-test('the agent edits the plan on disk: the changed line, the annotations survive, and "Open the version it sent" shows the bytes sent', async () => {
+test('the agent edits the plan on disk: the changed line, the annotations survive, and "View sent version" shows the bytes sent', async () => {
   const page = world.page;
   appendFileSync(join(world.billing, 'docs', 'retry-plan.md'), '\n## Open questions\n\nHow long does Stripe keep a key in flight?\n');
   await page.goto(`${world.url}#thread=${world.threads.billing}`);
@@ -903,8 +906,8 @@ test('the agent edits the plan on disk: the changed line, the annotations surviv
   await page.getByRole('button', { name: 'Open retry-plan.md' }).click();
   const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
   const line = pane.locator('[data-changed-line]');
-  await expect(line).toContainText('Changed since Claude Code sent it at');
-  await expect(line).toContainText('Edited');
+  await expect(line).toContainText('Viewing the current file (edited ');
+  await expect(line).toContainText('. Claude Code sent an earlier version at ');
   await expect(pane.locator('.ib-docscroll')).toContainText('How long does Stripe keep a key in flight?');
   // Both comments still sit on their text in the edited file.
   await expect(pane.locator('.ib-apanel')).toContainText('One by one is right');
@@ -913,9 +916,9 @@ test('the agent edits the plan on disk: the changed line, the annotations surviv
   await expect(pane.locator('.ib-docscroll mark, .ib-docscroll [data-highlight-id]').first()).toBeVisible();
   await shot('2.2-changed-line');
 
-  await line.getByRole('button', { name: 'Open the version it sent' }).click();
+  await line.getByRole('button', { name: 'View sent version' }).click();
   await expect(pane).toHaveAttribute('data-version', 'sent');
-  await expect(pane.locator('[data-changed-line]')).toContainText('The version Claude Code sent at');
+  await expect(pane.locator('[data-changed-line]')).toContainText('Viewing the version Claude Code sent at');
   await expect(pane.locator('.ib-docscroll')).toContainText('Refund handling and the 402 path stay as they are.');
   await expect(pane.locator('.ib-docscroll')).not.toContainText('How long does Stripe keep a key in flight?');
   expect(page.url()).toContain('v=sent');
@@ -923,7 +926,7 @@ test('the agent edits the plan on disk: the changed line, the annotations surviv
   expect(await (await inboxFetch(`/api/inbox/attachments/${world.attachments.plan}?version=sent`)).text()).toBe(PLAN);
   expect(await (await inboxFetch(`/api/inbox/attachments/${world.attachments.plan}`)).text()).toContain('## Open questions');
   await shot('2.2-the-version-it-sent');
-  await pane.locator('[data-changed-line]').getByRole('button', { name: 'Open the file as it is now' }).click();
+  await pane.locator('[data-changed-line]').getByRole('button', { name: 'View current file' }).click();
   await expect(pane).toHaveAttribute('data-version', 'current');
   await pane.getByRole('button', { name: 'Close retry-plan.md' }).click();
 });
@@ -960,6 +963,10 @@ test('the header says the message has files: its count opens the same tiles unde
   // The keyboard opens it again; a tile there opens the file beside the thread, as the foot's does.
   await page.keyboard.press('Enter');
   await expect(band).toBeVisible();
+  // The band slides in (`ib-hatts-in`, 180 ms). A click while it moves finds the tile "not stable", and Playwright's
+  // fourth try scrolls it to the top of the thread first (`block: 'start'`), the sender row out of view, before the
+  // file opens (#3528 CI: scrollTop 17 to 62, no scroll by the page). Settled, the click is a person's: nothing scrolls.
+  await band.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
   await band.getByRole('button', { name: 'Open retry-plan.md' }).click();
   const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
   await expect(pane).toBeVisible();

@@ -19,6 +19,7 @@ import type { GuideGlobalComments } from '@plannotator/guide-viewer/host';
 import { GuideExportButton } from './GuideExportButton';
 import { GuideDiffControls, nextGuideCollapseAll, type GuideCollapseAll } from './GuideDiffControls';
 import { filesViewedByTickingSection } from '../../utils/guideReviewedViewed';
+import { resumeFile } from '../../utils/guidesListModel';
 
 interface GuideScreenProps {
   /** Latest completed guide job id (or the demo guide id in standalone mode).
@@ -51,6 +52,8 @@ interface GuideScreenProps {
    *  The guide hides the dock, and with it the dock strip's controls; an open
    *  guide draws Split/Unified, Collapse all and the gear here instead. */
   barSlot?: HTMLElement | null;
+  /** AI features are off: the landing page lists the saved guides only, with no launch. */
+  launchOff?: boolean;
 }
 
 /**
@@ -72,6 +75,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   onClose,
   onOpenFixedGuide,
   onOpenSavedGuide,
+  launchOff = false,
   onMarkFilesViewed,
   onAddGlobalComment,
   onShowGlobalComment,
@@ -222,7 +226,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
     );
   }
 
-  return <GuideEmptyState capabilities={capabilities} launchJob={launchJob} onBack={onClose} onOpenSavedGuide={onOpenSavedGuide} />;
+  return <GuideEmptyState capabilities={capabilities} launchJob={launchJob} onBack={onClose} onOpenSavedGuide={onOpenSavedGuide} launchOff={launchOff} />;
 };
 
 function ActiveGuide({
@@ -336,6 +340,16 @@ function ActiveGuide({
     const firstResolvable = allRefs.find((ref) => filePathsInDiff.has(ref.file));
     if (firstResolvable) setFocusedFile(firstResolvable.file);
   }, [guide, focusedFile, state.files]);
+
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !guide || reviewed.length === 0) return;
+    resumedRef.current = true;
+    const file = resumeFile(guide.sections, reviewed, filesInDiff);
+    if (!file) return;
+    setFocusedFile(file);
+    state.onGuideRevealFile?.(file);
+  }, [guide, reviewed, filesInDiff, state.onGuideRevealFile]);
 
   const handleFixOutput = async () => {
     if (!failedJob || repairing) return;

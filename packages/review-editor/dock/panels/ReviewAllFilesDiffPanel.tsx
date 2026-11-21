@@ -1,22 +1,46 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useContext, useLayoutEffect, useMemo, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { MarkdownPreviewFailed } from '../../components/DiffViewer';
 import { AllFilesCodeView } from '../../components/AllFilesCodeView';
 import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeader';
 import { ImageDiffPreview } from '../../components/ImageDiffPreview';
+import { ImageViewMenu } from '../../components/image-diff/ImageViewMenu';
+import { differencesSupported } from '../../components/image-diff/differences';
+import { isSvgPath, setSvgView, svgViewOf, useSvgView, useSvgViewVersion } from '../../components/image-diff/svgView';
+import { peekImageSizes, useImageSizesReady } from '../../components/image-diff/imageSizes';
+import { imagePreviewHeight } from '../../components/image-diff/previewHeight';
+import { imageDiffSettings } from '../../components/image-diff/imageDiffSettings';
+import { COMPACT_FILE_HEADER_HEIGHT, FILE_HEADER_HEIGHT } from '../../utils/diffChromeMetrics';
+import { isImagePreviewCandidate } from '@plannotator/core/diff-paths';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 import { PackageChangesCard } from '../../components/PackageChangesCard';
+import { useCommitFolding } from './commitFolding';
 // Lazy: loaded the first time a Markdown file is previewed.
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
 import { useReviewState, useReviewStateOptional } from '../ReviewStateContext';
+import { PaneSlotContext, usePaneDiffStyle } from '../../workspace/paneContext';
 
 /**
  * A Markdown card's view control. Reads review state itself: Pierre's header
  * slot republishes only on updateItem, but a context consumer inside it still
  * re-renders, so Changes <-> Read updates the label without touching the item.
  */
+function SvgViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
+  const view = useSvgView(file.path);
+  return (
+    <ImageViewMenu
+      filePath={file.path}
+      comparable={file.status !== 'added' && file.status !== 'deleted'}
+      differencesAvailable={differencesSupported()}
+      source={{ active: view === 'source', onChoose: (source) => setSvgView(file.path, source ? 'source' : 'image') }}
+      iconOnly={iconOnly}
+      touch={touch}
+    />
+  );
+}
+
 function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) {
   const preview = useReviewStateOptional()?.markdownPreview;
   if (!preview) return null;
@@ -34,8 +58,27 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
   );
 }
 
+const IMAGE_PREVIEW_INSET = 32;
+
+function usePaneWidth(enabled: boolean): number {
+  const slot = useContext(PaneSlotContext);
+  const element = slot ? slot.store.paneElement(slot.paneIndex) : null;
+  const [width, setWidth] = useState(() => (enabled ? element?.clientWidth ?? 0 : 0));
+  useLayoutEffect(() => {
+    if (!enabled || !element) return;
+    const read = () => setWidth(element.clientWidth);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [enabled, element]);
+  return enabled && width === 0 && element ? element.clientWidth : width;
+}
+
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
+  const paneDiffStyle = usePaneDiffStyle(state.diffStyle);
   // Comments outside the diff live in whole-file views, not on the diff.
   const diffOnlyAnnotations = useMemo(
     () => (state.allAnnotations.some((a) => a.outsideDiff) ? state.allAnnotations.filter((a) => !a.outsideDiff) : state.allAnnotations),
@@ -47,6 +90,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   // file list the shape, and each file expands on demand. The card rides
   // INSIDE the scroller (leadingContent), so it scrolls away with the diff.
   const commitInfo = state.commitInfo;
+  // Folded per commit, unless Expand all was pressed on a commit: then the next commit opens expanded too.
+  const commitFolding = useCommitFolding(commitInfo?.sha ?? null);
   // Before/After previews for changed images (#1598), only when the server
   // advertised it. Stable per snapshot so header slots do not churn.
   const snapshotId = state.snapshotId;
@@ -59,6 +104,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
               key={`${snapshotId ?? ''}:${file.path}`}
               filePath={file.path}
               status={file.status}
+              patch={file.patch}
               snapshotId={snapshotId}
               variant="all-files"
               compact={compact}
@@ -73,6 +119,22 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
 
   // Package changes under each package.json and lockfile header, wherever
   // the server can read the files behind the diff (never a static patch).
+  const renderImageViewControl = useMemo(
+    () =>
+      state.imagePreviewAvailable
+        ? ({ file, iconOnly, touch }: { file: DiffFile; iconOnly: boolean; touch: boolean }) => (
+            <ImageViewMenu
+              filePath={file.path}
+              comparable={file.status !== 'added' && file.status !== 'deleted'}
+              differencesAvailable={differencesSupported()}
+              iconOnly={iconOnly}
+              touch={touch}
+            />
+          )
+        : undefined,
+    [state.imagePreviewAvailable],
+  );
+
   const packageReviewBase = state.reviewBase;
   const renderPackageChanges = useMemo(
     () =>
@@ -98,7 +160,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const reviewBase = state.reviewBase;
   const reviewSnapshotId = state.feedbackDiffContext?.snapshotId;
   const imagesAvailable = state.imagePreviewAvailable === true;
-  const markdownPreview = useMemo(
+  const baseMarkdownPreview = useMemo(
     () =>
       preview
         ? {
@@ -137,15 +199,85 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   // Stable element identity per commit — an inline JSX literal would be a new
   // object every context re-render and churn the measuring ResizeObserver in
   // AllFilesCodeView (leadingContent is in its effect deps).
+  const svgVersion = useSvgViewVersion();
+  const svgFiles = useMemo(
+    () => (imagesAvailable ? state.files.filter((file) => isSvgPath(file.path) || isSvgPath(file.oldPath)) : []),
+    [imagesAvailable, state.files],
+  );
+  const markdownPreview = useMemo(() => {
+    if (svgFiles.length === 0) return baseMarkdownPreview;
+    const isSvg = (file: DiffFile) => isSvgPath(file.path) || isSvgPath(file.oldPath);
+    const svgImagePaths = svgFiles.filter((file) => svgViewOf(file.path) === 'image').map((file) => file.path);
+    return {
+      previewedPaths: new Set([...(baseMarkdownPreview?.previewedPaths ?? []), ...svgImagePaths]),
+      isPreviewable: (file: DiffFile) => isSvg(file) || (baseMarkdownPreview?.isPreviewable(file) ?? false),
+      show: (filePath: string, view: Parameters<NonNullable<typeof baseMarkdownPreview>['show']>[1]) => {
+        if (isSvgPath(filePath)) setSvgView(filePath, view === 'source' ? 'source' : 'image');
+        else baseMarkdownPreview?.show(filePath, view);
+      },
+      onEditingFileChange: baseMarkdownPreview?.onEditingFileChange,
+      registerViewTarget: baseMarkdownPreview?.registerViewTarget,
+      renderViewControl: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) =>
+        isSvg(args.file) ? <SvgViewControl {...args} /> : baseMarkdownPreview?.renderViewControl(args) ?? null,
+      render: (args: { file: DiffFile; onHeightChange: () => void }) =>
+        isSvg(args.file) ? (
+          <ImageDiffPreview
+            key={`${snapshotId ?? ''}:${args.file.path}`}
+            filePath={args.file.path}
+            status={args.file.status}
+            patch={args.file.patch}
+            snapshotId={snapshotId}
+            variant="all-files"
+            compact={compact}
+            fallback={null}
+            onHeightChange={args.onHeightChange}
+          />
+        ) : (
+          baseMarkdownPreview?.render(args) ?? null
+        ),
+    };
+  }, [baseMarkdownPreview, svgFiles, svgVersion, snapshotId, compact]);
+
   const leadingContent = useMemo(
     () => (commitInfo ? <CommitDescriptionHeader key={commitInfo.sha} info={commitInfo} /> : undefined),
     [commitInfo],
   );
 
+  const hasImages = useMemo(
+    () => imagesAvailable && state.files.some((file) => isImagePreviewCandidate(file.patch, file.path, file.oldPath) || isSvgPath(file.path)),
+    [imagesAvailable, state.files],
+  );
+  const imageSizesReady = useImageSizesReady(snapshotId, hasImages);
+  const paneWidth = usePaneWidth(hasImages);
+  const filesByPath = useMemo(() => new Map(state.files.map((file) => [file.path, file])), [state.files]);
+  const headerHeightHint = useCallback(
+    (_itemId: string, path: string) => {
+      if (!hasImages || paneWidth <= 0) return undefined;
+      const file = filesByPath.get(path);
+      if (!file) return undefined;
+      const svg = isSvgPath(file.path) || isSvgPath(file.oldPath);
+      if (svg ? svgViewOf(file.path) !== 'image' : !isImagePreviewCandidate(file.patch, file.path, file.oldPath)) return undefined;
+      const settings = imageDiffSettings();
+      const preview = imagePreviewHeight({
+        sizes: peekImageSizes(snapshotId)?.[path],
+        status: file.status,
+        width: paneWidth - IMAGE_PREVIEW_INSET,
+        mode: settings.mode,
+        zoom: settings.zoom,
+        dpr: typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1,
+      });
+      return preview == null ? undefined : (compact ? COMPACT_FILE_HEADER_HEIGHT : FILE_HEADER_HEIGHT) + preview;
+    },
+    [hasImages, paneWidth, filesByPath, snapshotId, compact, svgVersion],
+  );
+  if (!imageSizesReady) return null;
+
   return (
+    <>
     <AllFilesCodeView
       files={state.files}
-      diffStyle={state.diffStyle}
+      {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}
+      diffStyle={paneDiffStyle}
       diffOverflow={state.diffOverflow}
       diffIndicators={state.diffIndicators}
       lineDiffType={state.lineDiffType}
@@ -160,8 +292,13 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
+      semDiffClient={state.semDiffClient}
+      lineTarget={state.allFilesLineTarget}
+      powerUp={state.powerUp}
+      onPowerUpStatus={state.onPowerUpStatus}
       contextExpansionAvailable={state.contextExpansionAvailable}
       renderImagePreview={renderImagePreview}
+      renderImageViewControl={renderImageViewControl}
       renderPackageChanges={renderPackageChanges}
       markdownPreview={markdownPreview}
       compactTouchLayout={state.isCompactTouchLayout}
@@ -210,14 +347,18 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       isAILoading={state.isAILoading}
       onViewAIResponse={state.onViewAIResponse}
       getAIHistoryForFile={state.getAIHistoryForFile}
-      defaultCollapsed={!!commitInfo}
+      defaultCollapsed={commitFolding.defaultCollapsed}
+      onCollapseAllPressed={commitFolding.onCollapseAllPressed}
       leadingContent={leadingContent}
+      minimap
       // EXPERIMENTAL edit-to-suggestion mode. This plain all-files panel is
       // the ONLY surface that opts in (Guided Review's viewport manager
       // evicts CodeViews, which would destroy an active editor session).
       enableEditSuggestions={state.editSuggestionsEnabled}
       onAddSuggestionsForFile={state.onAddSuggestionsForFile}
       onAddEditorCommentForFile={state.onAddEditorCommentForFile}
+      headerHeightHint={headerHeightHint}
     />
+    </>
   );
 };

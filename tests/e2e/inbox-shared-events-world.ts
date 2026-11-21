@@ -84,7 +84,7 @@ export function stubPage(options: { noLocks?: boolean } = {}): void {
   // The sound: counted, never played.
   const sound = { oscillators: 0 };
   window.__sound = sound;
-  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
   class CountingAudioContext {
     state = 'running';
     currentTime = 0;
@@ -136,6 +136,7 @@ export async function newWorld(browser: Browser, options: { binary?: string; noL
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: home,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
