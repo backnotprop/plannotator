@@ -577,13 +577,14 @@ export const INBOX_ASK_RECOGNISE_RULE = 'Ask only about things the person would 
 
 /**
  * Closing out threads whose questions moved (the owner, 2026-11-20: "if it combines any previous threads, then it
- * should like close out the previous threads on its own"; DRAFT words, awaiting the owner's OK): an agent that
+ * should like close out the previous threads on its own"; approved 2026-11-21, the last sentence DRAFT): an agent that
  * gathers questions from other threads into one archives each old thread with resolve_message's `moved_to`, which
- * writes nothing in it, instead of a withdrawal message that makes every old thread "New since you looked". On
- * every copy of send_message's `supersedes`, and in --help.
+ * writes nothing in it, instead of a withdrawal message that makes every old thread "New since you looked"; the
+ * Inbox tells those threads' agents quietly, and it passes the person's answers on. On every copy of send_message's
+ * `supersedes`, and in --help.
  */
 export const INBOX_MOVED_TO_RULE =
-  'When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it.'
+  "When you gather questions from other threads into one thread, archive each old thread with resolve_message and moved_to instead of writing a withdrawal into it. Pass the person's answers on to the agents whose threads you archived this way."
 
 /** resolve_message's `moved_to` (DRAFT words, with INBOX_MOVED_TO_RULE): the MCP field, so every host's copy, and --help. */
 export const INBOX_MOVED_TO_FIELD_DESCRIPTION =

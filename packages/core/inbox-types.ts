@@ -324,6 +324,7 @@ export type InboxAuthor =
 export function isInboxNote(message: {
   author: { kind: string };
   set_aside?: readonly string[] | null;
+  moved_note?: { thread_id: string } | null;
   reopened?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
@@ -332,6 +333,7 @@ export function isInboxNote(message: {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      !!message.moved_note ||
       (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
@@ -524,6 +526,12 @@ export interface InboxMovedTo {
   name?: string | null;
 }
 
+/** `InboxMessage.moved_note`: the thread the questions went to, and the question ids (`<message id>/<key>`) it named. */
+export interface InboxMovedNote {
+  thread_id: string;
+  questions: string[];
+}
+
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
@@ -577,6 +585,14 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   set_aside?: string[];
+  /**
+   * On the Inbox's note to an agent whose questions another session moved
+   * (resolve_message's `moved_to`, the owner 2026-11-21: "The Inbox tells it,
+   * quietly"): the thread they went to and the questions it names. A person
+   * note, a reply to that agent's asking message, delivered like a reply and
+   * never listed in the thread (as the 👍's note). Absent otherwise.
+   */
+  moved_note?: InboxMovedNote | null;
   /**
    * On a person's reopened note: the questions an Undo of Mark read opened
    * again after a set-aside note had named them. Absent on every other message.
@@ -3305,11 +3321,12 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * +525 bytes on the entry as the tool builds it from the default tool list (14,696 → 15,221), Board on the same +525.
  * Estimated, not measured on Pi; added here so the skip sentence's 162 and this stay inside the 5%. Tokens scaled at
  * the entry's bytes per token (3.7), +142. The `moved_to` field's next draft words: +24 more (15,221 → 15,245 on the
- * same build), +6 tokens, Board on the same.
+ * same build), +6 tokens, Board on the same. The rule's last sentence (pass the answers on, 2026-11-21): +80 more
+ * (15,245 → 15,325), +22 tokens; the description stays 1,948 (2,039 with steps and the Board on).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 15071, tokens: 4054 };
+const INBOX_TOOL_COST_NOW = { bytes: 15151, tokens: 4076 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17000, tokens: 4640 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 17080, tokens: 4662 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

@@ -94,6 +94,10 @@ describe('one stream record on a held thread', () => {
 describe("an archived root's moved_to (the read serves the target's name and whether it is open)", () => {
   const moved = { thread_id: 'msg_BRIEF', subject: 'Morning brief' };
   const archived = model([msg(T, { seq: 1, resolved_at: at, moved_to: { ...moved, open: true, name: 'Thursday brief' } })]);
+  test("the Inbox's quiet note to the moved agent is never drawn in the thread", () => {
+    const note = msg('msg_NOTE', { author: person, reply_to: T, moved_note: { thread_id: 'msg_BRIEF', questions: [`${T}/q1`] } });
+    expect(applyRecord(archived, message(43, note)).kind).toBe('none');
+  });
   test('gained or dropped (the agent wrote again): the thread is read', () => {
     expect(applyRecord(held, message(40, msg(T, { moved_to: moved }), false)).kind).toBe('reread');
     expect(applyRecord(archived, message(41, msg(T, { resolved_at: at, moved_to: null }), false)).kind).toBe('reread');

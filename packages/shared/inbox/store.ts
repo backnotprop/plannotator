@@ -20,6 +20,7 @@ import {
   composeInboxReplyBody,
   composeInboxReopenedBody,
   composeInboxSetAsideBody,
+  composeInboxMovedNoteBody,
   inboxSkipAnswer,
   deriveInboxSubject,
   derivePersonThreadSubject,
@@ -579,6 +580,19 @@ function lastNonNote(messages: readonly InboxMessage[]): InboxMessage | undefine
 /** The note that carries a 👍 Looks good to the agent (`ack_of`): never listed in a thread, the ack on its message says it. */
 function isAckNote(message: InboxMessage): boolean {
   return message.author.kind === "person" && typeof message.ack_of === "string" && message.ack_of !== "";
+}
+
+/**
+ * The Inbox's note to an agent whose questions another session moved (`moved_note`): never listed in a thread
+ * either (nothing is written there for the person); it reaches that agent only as a reply's wake.
+ */
+function isMovedNote(message: InboxMessage): boolean {
+  return message.author.kind === "person" && !!message.moved_note;
+}
+
+/** A note a thread never lists: the 👍's note and the moved-questions note. */
+function isUnlistedNote(message: InboxMessage): boolean {
+  return isAckNote(message) || isMovedNote(message);
 }
 
 /** Two tray reactions are the same emoji with the same name (null is 👍 Looks good). */
@@ -1454,7 +1468,7 @@ export class InboxStore {
    * The note carrying a 👍 is left out, as the thread the window reads leaves it out.
    */
   threadArtifactRefs(threadId: string): InboxArtifactRef<InboxMessage>[] {
-    return inboxThreadArtifactRefs(this.threadMessages(threadId).filter((m) => !isAckNote(m)));
+    return inboxThreadArtifactRefs(this.threadMessages(threadId).filter((m) => !isUnlistedNote(m)));
   }
 
   /**
@@ -2083,7 +2097,7 @@ export class InboxStore {
     let latest: InboxMessage | null = null;
     const answered = new Set<string>();
     for (const member of this.threadMessages(message.thread_id)) {
-      if (!isAckNote(member)) messages += 1;
+      if (!isUnlistedNote(member)) messages += 1;
       if (session && member.author.kind === "agent" && member.author.session === session) latest = member;
       const ids = this.messageQuestions.get(member.id);
       if (!ids) continue;
@@ -2252,7 +2266,7 @@ export class InboxStore {
       resolved_at: root.resolved_at,
       // The note carrying a 👍 to the agent is not listed: the ack on the message it marks says it.
       messages: this.threadMessages(threadId)
-        .filter((m) => !isAckNote(m))
+        .filter((m) => !isUnlistedNote(m))
         .map((m) => this.wire(m)),
     };
   }
@@ -2291,7 +2305,7 @@ export class InboxStore {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId || root.taken_back_at) return null;
     // The note carrying a 👍 is not a message of the thread as the person sees it.
-    const messages = this.threadMessages(threadId).filter((m) => !isAckNote(m));
+    const messages = this.threadMessages(threadId).filter((m) => !isUnlistedNote(m));
     // A Tidy note never moves the row: its time and author are the message before it.
     const last = [...messages].reverse().find((m) => !m.tidy) ?? root;
     // The Inbox's own notes are not the person's reply: the last word is the last other message's.
@@ -2429,7 +2443,7 @@ export class InboxStore {
         : null;
     const participants = this.participantsOf(messages);
     const waits = summary.questions.stopped || summary.questions.holds_up.length > 0
-      ? inboxRowWaits(messages.filter((m) => !isAckNote(m)).flatMap((m) => this.questionsOf(m.id)))
+      ? inboxRowWaits(messages.filter((m) => !isUnlistedNote(m)).flatMap((m) => this.questionsOf(m.id)))
       : [];
     // An agent wrote after the person archived the thread (mail apps' rule):
     // it comes back to the list while something there waits (an agent
@@ -2971,7 +2985,7 @@ export class InboxStore {
     const archiveSeq = this.archiveSeq(root.id);
     if (archiveSeq !== null && readSeq <= archiveSeq) return null;
     for (const message of messages) {
-      if ((message.set_aside || isAckNote(message)) && message.author.kind === "person") continue;
+      if ((message.set_aside || isUnlistedNote(message)) && message.author.kind === "person") continue;
       if ((this.messageSeq.get(message.id) ?? 0) > readSeq) return null;
     }
     return root.person_read_at ?? null;
@@ -3965,7 +3979,7 @@ export class InboxStore {
    * same on every read, so a reader new to the thread is another agent.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
-    if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
+    if (message.to || hasTags(message) || message.delivery || isUnlistedNote(message) || message.taken_back_at) return false;
     if (message.tidy && !message.tidy.wake) return false;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
@@ -5267,7 +5281,7 @@ export class InboxStore {
     const { of, words: selected, time } = raw as Record<string, unknown>;
     if (typeof of !== "string" || !isInboxId("msg", of)) throw new InboxError("validation_error", "quote.of: a message id.", { field: "quote.of" });
     const target = this.messages.get(of);
-    if (!target || target.thread_id !== message.thread_id || isAckNote(target)) {
+    if (!target || target.thread_id !== message.thread_id || isUnlistedNote(target)) {
       throw new InboxError("validation_error", "quote.of: a message of this thread.", { field: "quote.of" });
     }
     if (selected !== undefined && (typeof selected !== "string" || selected.trim() === "" || selected.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX)) {
@@ -5652,8 +5666,11 @@ export class InboxStore {
     const isResolved = root.resolved_at !== null;
     if (moved && (!isResolved || JSON.stringify(root.moved_to ?? null) !== JSON.stringify(moved))) {
       // The archive line itself carries where the questions went (or, on an archived thread, one more root line).
+      // Who waits on them is read first: the archive closes them.
+      const waiting = this.movedNoteRecipients(root.id, movedTo!.session!.trim());
       const at = this.stamp();
       this.appendMessage({ ...root, resolved_at: root.resolved_at ?? at, moved_to: moved }, at);
+      this.tellMoved(root, moved, movedTo!.session!.trim(), waiting);
     } else if (isResolved !== resolved) {
       const at = this.stamp();
       // Unarchive drops a Mark read made while the thread was archived (on
@@ -5677,6 +5694,69 @@ export class InboxStore {
     if (resolved && !isResolved) this.endPriority(root.id);
     if (!resolved && isResolved) this.endLapsedSnooze(root.id);
     return this.threadSummary(root.id)!;
+  }
+
+  /**
+   * The other agent sessions still waiting on a question of this thread (open or picked, never withdrawn, never an
+   * action item), each with its latest asking message and those questions, leaving out the caller and any session
+   * an earlier moved note of this thread already told.
+   */
+  private movedNoteRecipients(threadId: string, caller: string): Map<string, { asking: InboxMessage; questions: string[] }> {
+    const members = this.threadMessages(threadId);
+    const told = new Set<string>();
+    for (const m of members) {
+      if (!isMovedNote(m) || !m.reply_to) continue;
+      const asked = this.messages.get(m.reply_to);
+      if (asked?.author.kind === "agent" && asked.author.session) told.add(asked.author.session);
+    }
+    const out = new Map<string, { asking: InboxMessage; questions: string[] }>();
+    for (const m of members) {
+      const session = m.author.kind === "agent" ? m.author.session : null;
+      if (!session || session === caller || told.has(session)) continue;
+      const open = this.questionsOf(m.id).filter((q) => q.kind !== "action" && (q.state === "open" || q.state === "picked"));
+      if (open.length === 0) continue;
+      const entry = out.get(session);
+      out.set(session, { asking: m, questions: [...(entry?.questions ?? []), ...open.map((q) => `${m.id}/${q.key}`)] });
+    }
+    return out;
+  }
+
+  /**
+   * Tell each agent whose questions moved, quietly (the owner, 2026-11-21: "The Inbox tells it, quietly"): one
+   * unlisted person note per session (`moved_note`), a reply to its latest asking message, delivered like a reply
+   * (the wake). Nothing the person sees: never listed in the thread, not a look, no push, nothing new.
+   */
+  private tellMoved(root: InboxMessage, moved: InboxMovedTo, caller: string, waiting: Map<string, { asking: InboxMessage; questions: string[] }>): void {
+    if (waiting.size === 0) return;
+    const target = this.messages.get(moved.thread_id);
+    const callerAuthor = [...this.threadMessages(moved.thread_id)].reverse().find((m) => m.author.kind === "agent" && m.author.session === caller)?.author;
+    const agent = callerAuthor ? inboxAgentName(callerAuthor) : "another agent";
+    const body = composeInboxMovedNoteBody({
+      from: this.threadSubject(root.id),
+      from_id: root.id,
+      agent,
+      to: (target?.thread_name || this.threadSubject(moved.thread_id)) ?? moved.subject,
+      to_id: moved.thread_id,
+    });
+    for (const { asking, questions } of waiting.values()) {
+      const at = this.stamp();
+      this.appendMessage(
+        {
+          id: inboxId("msg"),
+          project_id: asking.project_id,
+          thread_id: root.id,
+          reply_to: asking.id,
+          author: { kind: "person" },
+          subject: null,
+          body,
+          created_at: at,
+          resolved_at: null,
+          idempotency_key: null,
+          moved_note: { thread_id: moved.thread_id, questions },
+        },
+        at,
+      );
+    }
   }
 
   /** resolveThread's `movedTo`, checked: the thread it names and its subject, or a refusal (nothing written). */

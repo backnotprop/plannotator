@@ -1110,6 +1110,22 @@ export function composeInboxSetAsideBody(questions: readonly (Pick<InboxQuestion
   return [INBOX_SET_ASIDE_HEADING, "", ...lines, "", "The person closed them unanswered in the Inbox. Ask again if you still need an answer to go on."].join("\n");
 }
 
+/**
+ * The Inbox's note to an agent whose open questions another session moved into its own thread and then archived
+ * this one (resolve_message's `moved_to`; the owner 2026-11-21: "The Inbox tells it, quietly"). DRAFT words, the
+ * owner approves them. `{from}` / `{to}`: the threads' names in quotes, `{from_id}` / `{to_id}` their ids (so the
+ * agent can read_thread the other), `{agent}` the session that moved them.
+ */
+export const INBOX_MOVED_NOTE_TEMPLATE =
+  "Your questions in {from} ({from_id}) were moved to another thread by {agent}: {to} ({to_id}). Don't wait on them here. The person answers there, and {agent} gets the answer.";
+
+/** INBOX_MOVED_NOTE_TEMPLATE filled in. A thread with no name reads "your thread" / "a thread". */
+export function composeInboxMovedNoteBody(v: { from: string | null; from_id: string; agent: string; to: string | null; to_id: string }): string {
+  const named = (name: string | null, none: string) => (name && name.trim() ? JSON.stringify(name.replace(/\s+/g, " ").trim()) : none);
+  const values: Record<string, string> = { from: named(v.from, "your thread"), from_id: v.from_id, agent: v.agent, to: named(v.to, "a thread"), to_id: v.to_id };
+  return INBOX_MOVED_NOTE_TEMPLATE.replace(/\{(from|from_id|agent|to|to_id)\}/g, (_, key: string) => values[key]!);
+}
+
 /** The first line of the note an Undo of Mark read sends once the agent was told. */
 export const INBOX_REOPENED_HEADING = "The person reopened these:";
 

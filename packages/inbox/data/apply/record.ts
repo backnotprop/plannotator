@@ -55,6 +55,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     const record = event.message;
     if (record.thread_id !== thread.thread_id) return NONE;
     if (isAckNote(record)) return REREAD;
+    // The Inbox's quiet note to an agent whose questions moved: never listed in the thread (the read leaves it out).
+    if (record.author.kind === 'person' && record.moved_note) return NONE;
     const at = thread.messages.findIndex((m) => m.id === record.id);
     const before = at >= 0 ? thread.messages[at]! : undefined;
     if ((model.applied?.[record.id] ?? -1) >= event.seq) return NONE;

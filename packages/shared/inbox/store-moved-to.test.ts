@@ -85,8 +85,8 @@ describe("resolve_message with moved_to", () => {
     const unseenBefore = store.listRow(old.id)!.unseen;
     const cursor = store.cursor();
     store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
-    // One line only: the root's archive line, which carries where the questions went.
-    expect(store.cursor()).toBe(cursor + 1);
+    // The root's archive line, which carries where the questions went, and the sub-agent's quiet note (below).
+    expect(store.cursor()).toBe(cursor + 2);
     expect(store.thread(old.id)!.messages.length).toBe(messagesBefore);
     expect(store.message(old.id)!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
     expect(store.questionsOf(old.id).map((q) => q.state)).toEqual(["closed"]);
@@ -95,7 +95,7 @@ describe("resolve_message with moved_to", () => {
     // The row counts no question waiting (the list and Settings' Archived block read this).
     expect(row.questions).toMatchObject({ open: 0, picked: 0 });
     expect(row.unseen).toBe(unseenBefore);
-    expect(store.pendingReplies(SUB.session!)).toEqual([]);
+    expect(store.pendingReplies(SUB.session!)).toHaveLength(1);
     expect(store.pendingReplies(ORCH.session!)).toEqual([]);
     // The brief is untouched and still open.
     expect(store.listRow(brief.id)!.resolved_at).toBeNull();
@@ -257,5 +257,97 @@ describe("resolve_message with moved_to", () => {
     store.resolveThread(brief.id, true, "person");
     expect(store.messageWire(old.id)!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
     expect(store.thread(old.id)!.messages[0]!.moved_to).toEqual({ thread_id: brief.id, subject: "Morning brief" });
+  });
+});
+
+describe("the Inbox tells the agents whose questions moved, quietly", () => {
+  const ANSWER = (record: { key: string; prompt: string }) => ({ v: 1 as const, key: record.key, kind: "single" as const, prompt: record.prompt, selected: ["Yes"] });
+
+  test("a sub-agent waiting there gets one note naming both threads; the caller gets none", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    const [note, ...more] = store.pendingReplies(SUB.session!);
+    expect(more).toEqual([]);
+    expect(note!.body).toBe(
+      `Your questions in "Retry policy" (${old.id}) were moved to another thread by Claude Code: "Morning brief" (${brief.id}). Don't wait on them here. The person answers there, and Claude Code gets the answer.`,
+    );
+    expect(note).toMatchObject({ author: { kind: "person" }, thread_id: old.id, reply_to: old.id, moved_note: { thread_id: brief.id, questions: [`${old.id}/${store.questionsOf(old.id)[0]!.key}`] } });
+    expect(store.pendingReplies(ORCH.session!)).toEqual([]);
+  });
+
+  test("nothing for the person: the thread lists no new message, nothing is new or waiting, the row's last word is unchanged", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.markSeen(old.id);
+    const listed = store.thread(old.id)!.messages.map((m) => m.id);
+    const before = store.listRow(old.id)!;
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.thread(old.id)!.messages.map((m) => m.id)).toEqual(listed);
+    expect(store.agentThread(old.id)!.messages.map((m) => m.id)).toEqual(listed);
+    const row = store.listRow(old.id)!;
+    expect(row.unseen).toBe(0);
+    expect(row.message_count).toBe(before.message_count);
+    expect(row).toMatchObject({ agent_after_archive: false, back_from_archive: false });
+    expect(inboxRowArchived(row)).toBe(true);
+  });
+
+  test("a session whose question was answered and sent, or withdrawn, gets none", () => {
+    const { store } = open();
+    const { project, old, brief } = world(store);
+    // Another sub-agent whose question the person answered and sent.
+    const answeredBy = agent("ses_answered");
+    const answered = store.sendMessage({ project_id: project.id, author: answeredBy, body: ASK("Also refunds?"), reply_to: old.id }).message;
+    const [record] = store.questionsOf(answered.id);
+    store.sendReply(answered.id, { idempotency_key: "k-a", questions: [{ key: record!.key, revision: 0, answer: ANSWER(record!) }] });
+    // And one that withdrew its own question.
+    const withdrewBy = agent("ses_withdrew");
+    const asked = store.sendMessage({ project_id: project.id, author: withdrewBy, body: ASK("Weekly digest?"), reply_to: old.id }).message;
+    store.sendMessage({ project_id: project.id, author: withdrewBy, body: "Never mind.", reply_to: asked.id, supersedes: [asked.id] });
+    const waitingBefore = (session: string) => store.pendingReplies(session).length;
+    const answeredBefore = waitingBefore(answeredBy.session!);
+    const withdrewBefore = waitingBefore(withdrewBy.session!);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(waitingBefore(answeredBy.session!)).toBe(answeredBefore);
+    expect(waitingBefore(withdrewBy.session!)).toBe(withdrewBefore);
+    expect(store.pendingReplies(SUB.session!)).toHaveLength(1);
+  });
+
+  test("once per session and thread: a second resolve, or Unarchive and moved_to again, sends nothing more", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    store.resolveThread(old.id, false, "person");
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    const notes = store.threadMessages(old.id).filter((m) => m.moved_note);
+    expect(notes).toHaveLength(1);
+  });
+
+  test("nothing later is sent for it: Unarchive or the agent writing again write no note", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    store.resolveThread(old.id, false, "person");
+    store.resolveThread(old.id, true, "person");
+    store.sendMessage({ project_id: old.project_id, author: SUB, body: "Still here.", reply_to: old.id });
+    expect(store.threadMessages(old.id).filter((m) => m.moved_note)).toHaveLength(1);
+  });
+
+  test("a refused moved_to sends nothing", () => {
+    const { store } = open();
+    const { old } = world(store);
+    const cursor = store.cursor();
+    refusal(() => store.resolveThread(old.id, true, "agent", { to: old.id, session: ORCH.session }));
+    refusal(() => store.resolveThread(old.id, true, "agent", { to: "msg_00000000000000000000000000", session: ORCH.session }));
+    expect(store.cursor()).toBe(cursor);
+    expect(store.pendingReplies(SUB.session!)).toEqual([]);
+  });
+
+  test("a plain archive by another session (no moved_to) tells nobody, as before", () => {
+    const { store } = open();
+    const { old } = world(store);
+    store.resolveThread(old.id, true, "agent");
+    expect(store.pendingReplies(SUB.session!)).toEqual([]);
   });
 });

@@ -469,6 +469,10 @@
     "InboxMessageWireThreadNaming": [
       "status"
     ],
+    "InboxMovedNote": [
+      "questions",
+      "thread_id"
+    ],
     "InboxMovedTo": [
       "subject",
       "thread_id"
