@@ -491,11 +491,12 @@ test.skipIf(!hasDom)('a Send answering two sessions: `to` rides only the ended a
       ? Response.json({ error: 'That session is not live any more.', code: 'session_not_live' }, { status: 409 })
       : Response.json({ reply: {}, questions: [], replayed: false });
   const el = await render({ ...threadOf(other, mine), thread_id: M0 });
-  // The pill names the ended asker (it wrote last): Send opens its list, and a live session is picked there.
-  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
+  // The asker wrote last but ended: the chip follows the other agent (thread/replyAim.ts), and a live session is
+  // picked in its list.
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Edit draft').click());
   await settle();
+  act(() => (el.querySelector('[data-recipient]') as HTMLButtonElement).click());
   await settle();
-  expect(replies()).toEqual([]);
   pickOnly(el, 'ses_other');
   await settle();
   act(() => button(el, 'Send').click());
