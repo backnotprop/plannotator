@@ -394,7 +394,7 @@ function ProviderPill({ provider, engine, model }: { provider: string; engine?: 
   }
   return (
     <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
-      provider === 'guide' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
+      provider === 'guide' ? 'bg-accent/10 text-accent-text' : 'bg-muted text-muted-foreground'
     }`}>
       {label}
     </span>
@@ -483,7 +483,7 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
           </>
         )}
         {ann.reviewProfileLabel && (
-          <span className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent/90 flex-shrink-0">
+          <span className="px-1.5 py-0.5 rounded text-xs bg-accent/10 text-accent-text/90 flex-shrink-0">
             {ann.reviewProfileLabel}
           </span>
         )}

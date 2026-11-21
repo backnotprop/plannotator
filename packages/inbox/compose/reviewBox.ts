@@ -1,5 +1,5 @@
 import { inboxPullStacks, type InboxPull, type InboxPullStack, type InboxReviewChanges, type InboxReviewChangesAnswer, type InboxReviewLinkAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle } from '../pulls/model';
+import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle, type PullHandoffAsk } from '../pulls/model';
 
 /**
  * New review (approval "inbox-reviews-page", DESIGN r2 section 2): the New message dialog with rows above To. This is
@@ -18,7 +18,10 @@ export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
   /** Branch reviews' safety net: a local branch nobody reported, reviewed whole against its base, in its project. */
   branch?: ReviewBoxBranch | null;
+  ask?: 'picture_it';
 }
+
+export const reviewBoxPullAsk = (ask: ReviewBoxRequest['ask'], body: string): PullHandoffAsk => (ask === 'picture_it' ? { kind: 'picture_it', words: body } : body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' });
 
 export interface ReviewBoxBranch {
   name: string;
@@ -132,10 +135,11 @@ const CHANGES_WORDS: Record<InboxReviewChanges, string> = {
 };
 
 /** The hand-off for local changes. The person's words sit with the ask; the second line is what feedback means here. */
-export function localReviewMessage(input: { changes: InboxReviewChanges; project: string | null; branch: string | null; base: string | null; words: string }): string {
+export function localReviewMessage(input: { changes: InboxReviewChanges; project: string | null; branch: string | null; base: string | null; words: string; ask?: ReviewBoxRequest['ask'] }): string {
   const where = input.project ? ` in ${input.project}` : '';
   const on = input.branch ? (input.changes === 'branch' && input.base ? ` (${input.branch}, against ${input.base})` : ` (on ${input.branch})`) : '';
   const words = input.words.trim();
+  if (input.ask === 'picture_it') return [`Please send me a Picture page of ${CHANGES_WORDS[input.changes]}${where}${on}, using /picture-it.`, words, 'If I ask for changes, make them and send me the updated page in this thread.'].filter(Boolean).join('\n\n');
   return [`Please send me a guided review of ${CHANGES_WORDS[input.changes]}${where}${on}, using /review-curate.`, words, 'If I ask for changes, make them and send me the updated review in this thread.']
     .filter(Boolean)
     .join('\n\n');

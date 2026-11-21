@@ -34,8 +34,6 @@ const aboveInbox = (name: string) => (el: HTMLElement | null) => (el ? holdPageM
 export const markDecisionPill = aboveInbox('data-ib-dm-pill');
 /** `.ib-imgcompose`: `.pn-inbox:has(.ib-imgcompose)`. */
 export const markImageComposer = aboveInbox('data-ib-imgcompose');
-/** `.ib-fcomp`: `.pn-inbox:has(.ib-fcomp)`. */
-export const markFullScreenComposer = aboveInbox('data-ib-fcomp');
 /** `.ib-rpick`: `.pn-inbox:has(.ib-rpick)`. */
 export const markRecipientList = aboveInbox('data-ib-rpick');
 

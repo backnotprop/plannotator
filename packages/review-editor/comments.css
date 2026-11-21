@@ -282,7 +282,7 @@
 }
 
 .cc-blocking-toggle.is-on {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* --- Inline badge on rendered annotation comments --- */

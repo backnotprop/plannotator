@@ -547,6 +547,97 @@ export interface HtmlViewerProps {
    * the host's policy. Ignored in live (`src`) mode. Absent → srcdoc, unchanged.
    */
   frameUrl?: (document: string) => Promise<string | null>;
+  /**
+   * Opt-in: the page sits in the host's own text, as tall as the host says,
+   * with none of the viewer's own chrome around it (the Plannotator Inbox: a
+   * live `html` block of a message, commented in place). With it:
+   * - no card (background, rounded corners, shadow), no bar above the frame
+   *   (the global Comment button, attachments, the diff toggle) and no ring
+   *   while Annotate is armed: the host shows the mode itself;
+   * - the frame is `height` pixels tall. The host measures the page (its own
+   *   script in the document reports it) and the bridge's own measure is
+   *   not used, so the frame is exactly as tall as the host's other frame of
+   *   the same page;
+   * - the frame's `color-scheme` is `colorScheme`, and its background is
+   *   transparent: a page with a transparent background shows the host's
+   *   text behind it only when the two schemes match.
+   * - a pin's comment box opens beside its element and ends above the
+   *   frame's foot (`CommentPopover` `placement: 'side'` with `keepAbove`),
+   *   so it never covers what the host draws under the frame; its header
+   *   names the element by tag and label ("rect · Pro, W3"), and the row of
+   *   target chips shows only from the second element on;
+   * - the pinned element's box is a ring a little off its edge, and a
+   *   comment's marker sits above its element, on its top edge at the
+   *   clicked x (the clicked point where that edge does not show), so
+   *   neither hides a small element such as a chart's bar;
+   * - with Annotate on and focus outside the page, Escape runs
+   *   `onAnnotateModeExit` first (capture phase) and is used, so the host's
+   *   own Escape (closing what the page sits in) does not also run; while the
+   *   host has a dialog, sheet, menu, list of choices or popover open
+   *   anywhere in the window, Escape is left to the host (a side window,
+   *   `data-chat-window`, only while focus is in it).
+   * Ignored with `fullViewport` and in live (`src`) mode. Absent → unchanged.
+   */
+  inline?: HtmlViewerInline;
+  /**
+   * Opt-in, and a promise the host makes: the document shown is, byte for
+   * byte, the one every annotation in `annotations` was made on (the
+   * Plannotator Inbox checks a live `html` block's source hash before it
+   * hands a comment over). Then an element with no text and no stable id (an
+   * SVG chart's bar) is anchored by its place in the document, a child-index
+   * path from the root element, together with its signature (tag, namespace,
+   * its own attributes): `HtmlElementAnchor.structure`. Restore follows the
+   * path and takes the element only when the signature is exactly the same;
+   * otherwise the comment is unanchored. It never takes an element nearby.
+   * A page that builds its DOM differently on each load fails the check and
+   * is unanchored. Absent → such an element gets no anchor, as before, and a
+   * `structure` a page posts is dropped.
+   */
+  structuralAnchors?: boolean;
+}
+
+/** `inline`: the pinned element's box, drawn as a ring 2 px off the element instead of a border on its edge. */
+const INLINE_PIN_BOX_CSS = `<style>html [data-plannotator-pinpoint-box][data-pinned]{border-color:transparent;background:transparent;outline:2px solid var(--pn-accent,#d97757);outline-offset:2px}</style>`;
+
+/** What a host may have open over its text (`inline`'s Escape steps aside for it): a dialog, modal or not, a sheet, a
+ *  menu, a list of choices, an open popover. */
+const HOST_OVERLAYS = [
+  'dialog[open]',
+  '[aria-modal="true"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '[aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"]',
+  '[data-popover-layer]',
+].join(', ');
+
+/** A window that stays open beside the host's text (an Ask AI window, a floating draft), as hosts mark it. */
+const SIDE_WINDOW = '[data-chat-window]';
+
+/** Something of the host's is open: modal to the page, or holding the focus. A side window (`SIDE_WINDOW`) the
+ *  person is not in does not count: it may stay open beside the text for as long as they like. */
+function hostOverlayOpen(): boolean {
+  const active = document.activeElement;
+  const counts = (el: Element) => {
+    const side = el.closest(SIDE_WINDOW);
+    return !side || (active !== null && side.contains(active));
+  };
+  for (const el of Array.from(document.querySelectorAll(HOST_OVERLAYS))) if (counts(el)) return true;
+  try {
+    for (const el of Array.from(document.querySelectorAll(':popover-open'))) if (counts(el)) return true;
+  } catch {
+    // An engine with no `:popover-open`: nothing is open that way.
+  }
+  return false;
+}
+
+/** How a host draws the viewer in its own text (`HtmlViewer` `inline`). */
+export interface HtmlViewerInline {
+  /** The frame's height, in pixels. */
+  height: number;
+  /** The frame's `color-scheme`. Absent: `auto`, as without `inline`. */
+  colorScheme?: "light" | "dark";
 }
 
 /** What a host's served frame document says when it is no longer kept (`frameUrl`). */
@@ -669,6 +760,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       frameUrl,
       pageNavigation = false,
       frameStart,
+      inline,
+      structuralAnchors = false,
     },
     ref,
   ) => {
@@ -737,6 +830,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
     }, []);
 
+    // In the host's own text (`inline`), never with `fullViewport` or in live mode.
+    const inlineMode = !fullViewport && !liveMode && !!inline;
+
     // Host theming is opt-in per document (Plannotator-generated artifacts tag
     // themselves); arbitrary HTML renders untouched, like a standalone tab.
     const hostTheme = useMemo(() => !liveMode && hasHostThemeOptIn(rawHtml), [liveMode, rawHtml]);
@@ -767,7 +863,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         bridgeScriptUrl: bridgeUrl,
         linkKey,
       });
-      const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
+      // In the host's text the pinned element's box is a ring around it, a little off its edge, so it shows
+      // on an element of the accent's own colour (a chart's bar) in either theme.
+      const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), inlineMode ? injection + INLINE_PIN_BOX_CSS : injection);
       // Inline path: history and storage are safe before the page's own head
       // scripts run, and the link guard runs before every script (the shim
       // too). The URL path gets both from the bridge asset.
@@ -775,7 +873,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       // A page its server opened outside the session's roots gets no network.
       const html = hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
       return { html, linkKey };
-    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl, inlineMode]);
     const srcdoc = framedDocument?.html;
 
     useLayoutEffect(() => {
@@ -1032,6 +1130,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onContentWidth,
       onPageScrollUp,
       onPageTap,
+      structuralAnchors: structuralAnchors && !liveMode,
+      anchorSize: inlineMode,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
     armLinkOfferRef.current = hook.armLinkOffer;
@@ -1094,6 +1194,21 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         excerpt: t.text.replace(/\s+/g, " ").trim().slice(0, 80),
       }));
     }, [hook.draftTargets]);
+
+    // In the host's text (`inline`): a pin on one element is named in the box's header by its tag and its
+    // label ("rect · Pro, W3"; the bridge's quote for an element with no text is "[element: Pro, W3]"), and
+    // the row of chips shows only once a second element is added (shift-click).
+    const inlinePinHeader = useMemo(() => {
+      const first = hook.draftTargets[0];
+      if (!inlineMode || !first) return undefined;
+      const tag = (first.context?.tag ?? first.anchor?.tagName ?? "").toLowerCase();
+      const words = first.text.replace(/\s+/g, " ").trim();
+      const named = /^\[element: ([^\]]*)\]$/.exec(words);
+      const label = (named ? named[1]!.trim() : words) || first.label || "";
+      const short = label.length > 80 ? `${label.slice(0, 80)}…` : label;
+      return [tag, short].filter(Boolean).join(" · ") || undefined;
+    }, [inlineMode, hook.draftTargets]);
+    const shownChips = inlineMode && (targetChips?.length ?? 0) < 2 ? undefined : targetChips;
 
     // Ask AI from a pinpoint draft: which element(s) the question is about,
     // in the identity lines the feedback export prints (no outline).
@@ -1470,6 +1585,23 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}set-touch-selection`, active: touchSelection });
     }, [iframeReadyVersion, touchSelection]);
 
+    // Structural anchors (`structuralAnchors`): the bridge builds one for an element it could not anchor
+    // otherwise. A viewer that never asked posts nothing. (Restore carries its own flag on each message.)
+    const structuralAskedRef = useRef(false);
+    useEffect(() => {
+      const active = structuralAnchors && !liveMode;
+      if (iframeReadyVersion === 0 || (!active && !structuralAskedRef.current)) return;
+      structuralAskedRef.current = active;
+      postToBridge({ type: `${PREFIX}set-structural-anchors`, active });
+    }, [iframeReadyVersion, structuralAnchors, liveMode]);
+
+    // In the host's text (`inline`) a marker sits above its element, on its top edge, so it never covers a
+    // small one (a chart's bar). Every other viewer never asks: the clicked point, as always.
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !inlineMode) return;
+      postToBridge({ type: `${PREFIX}set-markers-above`, active: true });
+    }, [iframeReadyVersion, inlineMode]);
+
     // The hidden composer's Escape rung: with focus outside the iframe,
     // Escape closes the hidden draft (its text stays in the draft store) and
     // is used, so the next press reaches the rest of the ladder. Capture
@@ -1507,14 +1639,24 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         const target = e.target as HTMLElement | null;
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
         if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return;
+        if (inlineMode) {
+          // In the host's text: something of the host's that is open anywhere in the window (a menu, a list, a
+          // dialog, a sheet, a popover) closes first, wherever the focus is.
+          if (e.isComposing || hostOverlayOpen()) return;
+          // This Escape is used: the host's own ladder (the thread under the page) does not also run.
+          e.preventDefault();
+          e.stopPropagation();
+        }
         onAnnotateModeExit();
       };
-      window.addEventListener('keydown', onKeyDown);
-      return () => window.removeEventListener('keydown', onKeyDown);
+      // In the host's text the rung runs first (capture), ahead of the host's own window listeners.
+      window.addEventListener('keydown', onKeyDown, inlineMode);
+      return () => window.removeEventListener('keydown', onKeyDown, inlineMode);
     }, [
       readOnly,
       annotateModeActive,
       onAnnotateModeExit,
+      inlineMode,
       hook.toolbarState,
       hook.commentPopover,
       hook.quickLabelPicker,
@@ -1636,7 +1778,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       if (readOnly) setGlobalCommentPopover(null);
     }, [readOnly]);
 
-    const hasActionButtons = !readOnly || Boolean(diffAvailable && onToggleDiff);
+    // In the host's text (`inline`): no chrome of the viewer's own.
+    const inlineFrame = !fullViewport && !liveMode && inline ? inline : null;
+    const hasActionButtons = !inlineFrame && (!readOnly || Boolean(diffAvailable && onToggleDiff));
 
     // Document-level controls (attachments + global comment). Shared between the
     // normal layout (bar above the card) and full-viewport (floating overlay), so
@@ -1703,14 +1847,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
           <article
             data-print-region="article"
-            className={fullViewport ? "relative overflow-hidden w-full flex-1" : "relative bg-card rounded-xl shadow-xl overflow-hidden w-full"}
+            className={fullViewport ? "relative overflow-hidden w-full flex-1" : inlineFrame ? "relative overflow-hidden w-full" : "relative bg-card rounded-xl shadow-xl overflow-hidden w-full"}
           >
             {/* Armed affordance: a subtle accent ring floats over the iframe
                 while Annotate is armed (hosts that wire the toggle only).
                 Overlaid + pointer-transparent, so it never shifts layout and
                 never eats a click; an inset shadow on the article itself
                 would paint UNDER the covering iframe. */}
-            {!readOnly && annotateModeActive && (onAnnotateModeExit || onAnnotateModeToggle) && (
+            {!readOnly && !inlineFrame && annotateModeActive && (onAnnotateModeExit || onAnnotateModeToggle) && (
               <div
                 aria-hidden
                 data-print-hide
@@ -1778,11 +1922,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",
-                height: fullViewport ? "100%" : `${iframeHeight}px`,
-                ...(!liveMode ? { "--pn-html-print-height": `${iframeHeight}px` } : {}),
+                height: fullViewport ? "100%" : `${inlineFrame ? inlineFrame.height : iframeHeight}px`,
+                ...(!liveMode ? { "--pn-html-print-height": `${inlineFrame ? inlineFrame.height : iframeHeight}px` } : {}),
                 border: "none",
                 display: "block",
-                colorScheme: "auto",
+                colorScheme: inlineFrame?.colorScheme ?? "auto",
+                ...(inlineFrame ? { background: "transparent" } : {}),
                 outline: !readOnly && vimModeEnabled ? "none" : undefined,
               }}
               title={title}
@@ -1868,6 +2013,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
               allowImages={allowCommentImages}
+              // In the host's text the box opens beside the element (right, else left), not under it over the
+              // lines the host draws below the frame.
+              placement={inlineFrame ? "side" : undefined}
+              // ...and it ends above the frame's foot: what the host draws there (the block's caption and its
+              // pen) is never under the box.
+              keepAbove={inlineFrame ? iframeRef.current : undefined}
+              // One element: the header names it ("rect · Pro, W3"). The chips are for a comment on several.
+              headerText={inlineFrame ? inlinePinHeader : undefined}
               mentionSource={mentionSource}
               // A pinpoint click opens this composer directly (never the
               // selection toolbar), so it carries the surface's one-click 👍.
@@ -1883,7 +2036,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 text: hook.commentPopover.selectedText ?? hook.commentPopover.contextText,
                 ...(askAIElementDetail ? { detail: askAIElementDetail } : {}),
               }}
-              targetChips={targetChips}
+              targetChips={shownChips}
               onRemoveTargetChip={targetChips ? hook.removeDraftTarget : undefined}
               onHoverTargetChip={targetChips ? hook.flashDraftTarget : undefined}
               refocusToken={targetChips ? hook.composerFocusToken : undefined}

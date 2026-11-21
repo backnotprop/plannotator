@@ -2,6 +2,7 @@
 
 import type { ConnectContext } from '../harnesses';
 import { modalOpen } from '../shortcuts/guards';
+import { rowSwipeInHand } from '../rowSwipe';
 import { replyBeingWritten, unsentReply } from '../unsent';
 import { isPhone } from '../phone';
 import { backTo } from '../history';
@@ -95,9 +96,10 @@ export function replyInProgress(): boolean {
 /**
  * The list options dialog waits (its claim unspent, or a claimed one unopened) while anything else is over the page or
  * a reply is under way: another dialog, a modal panel ui draws (`aria-modal`), an image opened full size, a pinned
- * reference card, a reply being typed, or a reply box left open with words or files in it, wherever focus is.
+ * reference card, a reply being typed, a reply box left open with words or files in it, wherever focus is, or a row
+ * being swiped or resting open on its action (rowSwipe.ts `rowSwipeInHand`: never a dialog under a finger).
  */
 export function listIntroHeldBack(): boolean {
-  if (modalOpen() || replyInProgress() || replyBeingWritten()) return true;
+  if (modalOpen() || replyInProgress() || replyBeingWritten() || rowSwipeInHand()) return true;
   return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
 }

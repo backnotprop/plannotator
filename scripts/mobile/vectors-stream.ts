@@ -6,7 +6,7 @@
  *
  * The app reads the stream in pieces as they arrive; for the same bytes cut at
  * any of the fixture's points it must give these frames. Its own generator and
- * test (tests/mobile-stream-vectors.test.ts) because it imports the window's
+ * run (all.ts and check.ts call it apart) because it imports the window's
  * reader: a window change re-checks this suite, not the rest of the contract.
  */
 import { parseEventStreamText } from '../../packages/inbox/sharedEvents';

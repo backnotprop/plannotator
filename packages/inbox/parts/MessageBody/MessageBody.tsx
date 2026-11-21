@@ -3,7 +3,7 @@
  * it, and its pictures. Drawn inside parts/MessageView.tsx, which draws it again only when what it draws from changed.
  * Its pieces are hooks beside it, called in the order its effects always ran.
  */
-import { useCallback, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
@@ -12,6 +12,7 @@ import type { Block } from '@plannotator/ui/types';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext } from '@plannotator/ui/components/ImageResolverContext';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
+import { ImageRowsContext } from '@plannotator/ui/components/imageRow';
 import { useRefRepo } from '../../links';
 import { OpenInCodeSpans } from '../../components/OpenIn';
 import { FileRefCodeSpans } from '../../components/FileRefSpan';
@@ -47,6 +48,7 @@ export function MessageBody({
   renderReplacedCard,
   renderReplacesLine,
   renderActions,
+  renderRunBlock,
   comments,
   sentAnswers,
   sentActions,
@@ -87,9 +89,11 @@ export function MessageBody({
   const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
   const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
-  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
+  const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
-  const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion } = useBodyComments({ comments, message, blocks, onPick });
+  const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion, embedAnnotate } = useBodyComments({ comments, message, blocks, onPick, pictures });
+  // The message's live html blocks take comments on their elements where its text takes them (the pen under a block).
+  const annotatableEmbeds = useMemo(() => (embedAnnotate ? { ...htmlEmbeds, annotate: embedAnnotate } : htmlEmbeds), [htmlEmbeds, embedAnnotate]);
 
   /** The sent reply's parts after the words (the rest, the feedback): read-only text. */
   const readOnlyViewer = (parts: Block[], markdown: string) => (
@@ -136,6 +140,8 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    {/* The body fits its pictures itself (images.ts, `.ib-body img[data-ib-fit]`): no image rows from ui. */}
+    <ImageRowsContext.Provider value={false}>
     <SoftLineBreaksContext.Provider value={ownReply}>
     <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
     <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
@@ -173,7 +179,7 @@ export function MessageBody({
         resolveLocalLink={resolveLocalLink}
         refRepo={refRepo}
         answerOnly
-        htmlEmbeds={htmlEmbeds}
+        htmlEmbeds={annotatableEmbeds}
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}
@@ -186,6 +192,8 @@ export function MessageBody({
         // Option lines (`Pros:`, `Cons:`, `Prototype:`) are read, not shown in the meaning line: the card draws the
         // Trade-offs table and the Try prototype tab (approval "inbox-question-tradeoffs").
         questionOptionLines
+        // Change lines (`Where:`, `Before:`, `After:`): the card draws the place and each version (approval "before-after").
+        questionChangeLines
         renderQuestionAfterChoices={onTryPrototype ? afterChoices : undefined}
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
@@ -194,7 +202,7 @@ export function MessageBody({
         questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
-        renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
+        renderDirectiveBlock={renderActions || renderRunBlock || noteBlocks.length > 0 ? directiveBlock : undefined}
       />
       )}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
@@ -218,6 +226,7 @@ export function MessageBody({
     </FileRefCodeSpans>
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
+    </ImageRowsContext.Provider>
     </ImageResolverContext.Provider>
   );
 }

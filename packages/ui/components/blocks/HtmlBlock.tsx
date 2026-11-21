@@ -1,13 +1,16 @@
 import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
-import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
+import { sanitizeBlockHtml, sanitizedHtmlDrawsNothing } from "../../utils/sanitizeHtml";
+import { holdsDroppedHtmlTag, opensDroppedHtmlTag } from "../../utils/inlineHtmlTags";
+import { SourceLikeInlineContext } from "../InlineMarkdown";
 import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
+import { htmlBlockPlayer, htmlBlockPlayersIn, keepHtmlBlockPlayers, wireHtmlBlockPlayers } from "./htmlBlockMedia";
 
 interface HtmlBlockProps {
   block: Block;
@@ -80,6 +83,10 @@ function resolveHostMedia(
     const resolved = resolveImage(src);
     if (resolved?.kind === 'unavailable') {
       img.replaceWith(unavailableMedia(doc, alt, resolved.title));
+      return;
+    }
+    if (resolved?.kind === 'src' && resolved.media) {
+      img.replaceWith(htmlBlockPlayer(doc, resolved.src, img.getAttribute('alt') ?? '', src, resolved.media));
       return;
     }
     if (resolved?.kind === 'src') {
@@ -261,31 +268,56 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     () => sanitizeBlockHtml(block.content),
     [block.content],
   );
+  // Hidden only when the sanitizer emptied it by dropping such a tag (`<iframe>`, `<div><script>…</div>`); a
+  // spacer (`<p>&nbsp;</p>`, `<br>`) or an empty `<div></div>` draws as it always did.
+  // In a view of the source (the rendered diff) nothing is hidden: the block draws as it did before.
+  const sourceLike = useContext(SourceLikeInlineContext);
+  const drawsNothing = React.useMemo(
+    () => !sourceLike && holdsDroppedHtmlTag(block.content) && sanitizedHtmlDrawsNothing(sanitized),
+    [sourceLike, block.content, sanitized],
+  );
+  // Opened by a tag the sanitizer drops (`<iframe>`, `<script>`): before these
+  // were HTML blocks the line printed as a paragraph of text, so the page has
+  // one `<p>` fewer than when such a comment was saved (see
+  // useAnnotationHighlighter's restore, which checks for this mark). Only
+  // these are marked: a block that was HTML before (`<div>…</div>`) moved nothing.
+  const opensDropped = React.useMemo(() => opensDroppedHtmlTag(block.content), [block.content]);
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current || drawsNothing) return;
     if (resolveImage) {
       // Decide every media URL on an inert template first (nothing loads
       // there), then insert the result.
       const template = ref.current.ownerDocument.createElement('template');
       template.innerHTML = sanitized;
       resolveHostMedia(template.content, ref.current.ownerDocument, resolveImage, preserveVideos, responsiveImages);
+      const earlier = htmlBlockPlayersIn(ref.current);
       ref.current.replaceChildren(template.content);
+      keepHtmlBlockPlayers(ref.current, earlier);
     } else if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }
     const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink);
     const stopColors = paintAuthorColors(ref.current);
+    const stopPlayers = wireHtmlBlockPlayers(ref.current);
     return () => {
       cleanup();
+      stopPlayers();
       stopColors();
     };
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink, preserveVideos, responsiveImages]);
+  }, [sanitized, drawsNothing, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, matchLocalLink, preserveVideos, responsiveImages]);
+  if (drawsNothing) {
+    // Nothing the sanitizer kept is drawn (an embed, a script, a form with no
+    // words): no gap in the page. The block keeps its id, so the document's
+    // block order is the same.
+    return <div hidden data-block-id={block.id} data-block-type="html" data-html-dropped={opensDropped ? "" : undefined} {...sourceLineAttrs(block)} />;
+  }
   return (
     <div className="relative my-4" {...sourceLineAttrs(block)}>
       <div
         ref={ref}
         data-block-id={block.id}
         data-block-type="html"
+        data-html-dropped={opensDropped ? "" : undefined}
         className="html-block text-[15px] leading-relaxed text-foreground/90"
       />
     </div>
