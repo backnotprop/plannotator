@@ -459,9 +459,20 @@ test('the bottom of the viewport: above the first selected line, not on them, in
     await page.setViewportSize(size);
     await setStyle(page, style);
     // The last selected line is the last on screen: lines near the top of a file the page has only begun to show.
-    await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().scrollIntoViewIfNeeded();
-    await expect(line(page, NEXT, 5)).toBeVisible({ timeout: 30_000 });
-    await line(page, NEXT, 5).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    // The diff draws only the rows near the page's place, so a row drawn now can be dropped a frame later (the file's
+    // box scrolled to its middle, the layout just flipped). The file's top goes to the top of the page first, where
+    // its first rows are drawn, then line 5 to the bottom; again until the line is there and on screen.
+    await expect(async () => {
+      await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      const at = await line(page, NEXT, 5).evaluate((el) => {
+        el.scrollIntoView({ block: 'end' });
+        const r = el.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, height: innerHeight };
+      }, undefined, { timeout: 2_000 });
+      // A pixel either way: scrolled to the bottom, a row can end half a pixel past it.
+      expect(at.top, 'line 5 on screen').toBeGreaterThanOrEqual(-1);
+      expect(at.bottom, 'line 5 on screen').toBeLessThanOrEqual(at.height + 1);
+    }).toPass({ timeout: 30_000 });
     await page.waitForTimeout(300);
     await lineAtBottom(page, NEXT, 5);
     await select(page, NEXT, 3, 5);

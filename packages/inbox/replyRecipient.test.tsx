@@ -1,14 +1,13 @@
 /**
- * Who gets the reply (approval "inbox-reply-recipient", option E): in a thread
- * with more than one agent, a pill under the reply box names the recipient;
- * its list switches it, adds a second one ("2 agents"), and the Reply arrow on
- * an older message aims it. The failure this catches: a reply that goes to
- * another agent than the one the pill names, a pill that moves when an agent
- * writes, or a one-agent thread that grows new UI.
+ * Who gets the reply (approval "inbox-reply-recipient"; placed by "inbox-reply-target-chip", option B, 2026-11-20): in
+ * a thread with more than one agent, a chip at the start of the words' first line names the recipient; its list
+ * switches it, adds a second one ("2 agents"), and the Reply arrow on an older message aims it. The failure this
+ * catches: a reply that goes to another agent than the one the chip names, a chip that moves when an agent writes,
+ * one that becomes part of the words (Backspace, the field's name, the tab order), or a one-agent thread that grows
+ * new UI.
  *
- * A phone (approval "inbox-phone-composer-picker"): under the same rule as a
- * computer's pill (a one-agent thread has none), the control is in the box's
- * row after Skills, and its list is a bottom sheet; the last cases here.
+ * A phone (approval "inbox-phone-composer-picker"; kept by the owner, 2026-11-20): under the same rule (a one-agent
+ * thread has none), the control is in the box's row after Skills, and its list is a bottom sheet; the last cases here.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -19,6 +18,9 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
 import { setSessionLabels } from './sessionLabels';
+import { setAgentNames } from './agents/agentNames';
+import { firstLineRtl } from './components/FieldLead';
+import { chipDropsTo, saysWords } from './components/ReplyRecipient';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -218,6 +220,9 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   const text = await write(el, 'Ship it.');
   await settle(1100);
   expect(pill(el)).toBeNull();
+  // No chip and no indent: the field is the field as ever.
+  expect(el.querySelector('[data-field-lead]')).toBeNull();
+  expect((el.querySelector('.ib-cfield') as HTMLElement).style.getPropertyValue('--ib-lead')).toBe('');
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
   const leaves = [...el.querySelectorAll('.ib-pfoot *')].filter((n) => n.children.length === 0).map((n) => n.textContent ?? '');
   expect(leaves.some((t) => t.startsWith('Reply to'))).toBe(false);
@@ -226,6 +231,96 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
+});
+
+/** The reply box's controls a Tab reaches, in order. */
+const tabStops = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.ib-rbox button, .ib-rbox textarea')].filter((n) => n.tabIndex >= 0 && !(n as HTMLButtonElement).disabled);
+
+test.skipIf(!hasDom)('several agents, a computer: the chip is at the start of the words, in the field before the textarea, not in the row; it is no part of the field\'s name, and a Tab reaches it before the words', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const text = await write(el, '');
+  const chip = pill(el)!;
+  const field = el.querySelector('.ib-cfield') as HTMLElement;
+  expect(chip.hasAttribute('data-recipient-chip')).toBe(true);
+  expect(chip.hasAttribute('data-narrow')).toBe(false);
+  expect(chip.closest('[data-field-lead]')?.parentElement).toBe(field);
+  expect(chip.closest('[data-reply-row]')).toBeNull();
+  // The pill in the row is gone: the chip replaces it.
+  expect(el.querySelector('.ib-rto, .ib-rto-slot, [data-reply-row] [data-recipient]')).toBeNull();
+  expect(chip.querySelector('.ib-rto-l')?.textContent).toBe('to');
+  expect(pillName(el)).toBe('Pi');
+  expect(chip.getAttribute('aria-label')).toBe('To Pi. Change who gets this reply');
+  // The words start after it: the first line is indented by its width (FieldLead sets it on the field), the
+  // placeholder is the field's own.
+  expect(field.style.getPropertyValue('--ib-lead')).toMatch(/^\d+px$/);
+  expect(text.placeholder).toBe('Write a reply. Type / for a skill');
+  // Not part of the field: the field's name is its own, and the chip comes first in the tab order.
+  expect(text.getAttribute('aria-label')).toBe('Reply to Pi');
+  expect(text.hasAttribute('aria-labelledby')).toBe(false);
+  expect(chip.closest('label')).toBeNull();
+  const stops = tabStops(el);
+  expect(stops.indexOf(chip)).toBeGreaterThanOrEqual(0);
+  expect(stops.indexOf(chip)).toBeLessThan(stops.indexOf(text));
+  expect(stops.indexOf(text) - stops.indexOf(chip)).toBe(1);
+});
+
+test.skipIf(!hasDom)('the chip opens the list the pill opened, over the words, and a press on it leaves the caret in the words', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const text = await write(el, 'Use the old totals.');
+  act(() => text.focus());
+  const chip = pill(el)!;
+  // The press keeps focus in the words.
+  const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+  act(() => {
+    chip.dispatchEvent(press);
+  });
+  expect(press.defaultPrevented).toBe(true);
+  await openList(el);
+  const list = el.querySelector('[data-recipient-list]') as HTMLElement;
+  expect(list.classList.contains('ib-rpick')).toBe(true);
+  expect(chip.getAttribute('aria-expanded')).toBe('true');
+  expect(chip.getAttribute('aria-controls')).toBe(list.id);
+  expect(rows(el)).toEqual([
+    ['Claude Code', null],
+    ['Pi', null],
+  ]);
+  await only(el, 'ses_claude');
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  expect(pillName(el)).toBe('Claude Code');
+  expect(document.activeElement).toBe(text);
+});
+
+test.skipIf(!hasDom)('words that start right to left move the chip to the right end of the first line, where the browser indents them', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const lead = () => el.querySelector('[data-field-lead]') as HTMLElement;
+  await write(el, 'مرحبا، هل انتهيت؟');
+  expect(lead().getAttribute('data-field-lead')).toBe('rtl');
+  // Placed from the right end: its inline `left` gives way to inbox.css's `left: 0`, or the chip would sit at the left.
+  expect(lead().style.left).toBe('auto');
+  expect(lead().style.right).toMatch(/^-?\d+px$/);
+  await write(el, 'Done? مرحبا');
+  expect(lead().getAttribute('data-field-lead')).toBe('ltr');
+  expect(lead().style.right).toBe('auto');
+  expect(lead().style.left).toMatch(/^-?\d+px$/);
+});
+
+test('saysWords: the chip\'s name keeps its words alone when the name already says them as words of its own', () => {
+  expect(saysWords('Pi', 'Pi')).toBe(true);
+  expect(saysWords('Claude Code (plannotator)', 'plannotator')).toBe(true);
+  expect(saysWords('Pipeline fixes', 'Pi')).toBe(false);
+  expect(saysWords('Copy pass on the order summary', 'Pi')).toBe(false);
+  expect(saysWords('aaa b', 'aa')).toBe(false);
+  expect(saysWords('PiPi Pi', 'Pi')).toBe(true);
+});
+
+test('firstLineRtl: the first strong letter of the first paragraph decides; numbers and marks do not, and a later paragraph never does', () => {
+  expect(firstLineRtl('')).toBe(false);
+  expect(firstLineRtl('Ship it')).toBe(false);
+  expect(firstLineRtl('שלום')).toBe(true);
+  expect(firstLineRtl('12, "مرحبا"')).toBe(true);
+  expect(firstLineRtl('12 Ship مرحبا')).toBe(false);
+  expect(firstLineRtl('\nمرحبا')).toBe(false);
+  expect(firstLineRtl('42\nמה')).toBe(false);
 });
 
 test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside the box\'s row', async () => {
@@ -359,7 +454,8 @@ test.skipIf(!hasDom)('a long title: the row holds it whole for its hover, and th
     const el = await render(threadOf(agentMessage(M1, PI, 41), agentMessage(M2, CLAUDE, 45)));
     await write(el, 'Use the old totals.');
     expect(pillName(el)).toBe('Claude Code');
-    expect(pill(el)!.getAttribute('aria-label')).toBe(`To ${long}. Change who gets this reply`);
+    // Its name starts with the words it shows (label in name), then the title.
+    expect(pill(el)!.getAttribute('aria-label')).toBe(`To Claude Code · ${long}. Change who gets this reply`);
     await openList(el);
     expect(named(el)).toEqual([
       ['Pi', 'superfans', null],
@@ -783,4 +879,84 @@ test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no cont
   await send(el);
   expect(el.querySelector('[data-recipient-list]')).toBeNull();
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
+});
+
+test.skipIf(!hasDom)('three Pi sessions in one folder, one renamed in the sidebar: the chip and its row show that name alone, the others read "Pi" and "Pi 2"; a phone\'s sheet names them alike', async () => {
+  const PI2 = { kind: 'agent' as const, host: 'pi', session: 'ses_pi2', name: null };
+  const PI3 = { kind: 'agent' as const, host: 'pi', session: 'ses_pi3', name: null };
+  taggable = [tagged('ses_pi', 'pi'), tagged('ses_pi2', 'pi'), tagged('ses_pi3', 'pi')];
+  const thread = threadOf(agentMessage(M1, PI, 41), agentMessage(M2, PI3, 43), agentMessage(M3, PI2, 45));
+  try {
+    act(() => setAgentNames(new Map([['ses_pi2', 'Billing review']])));
+    const el = await render(thread);
+    await write(el, 'Use the old totals.');
+    const chip = pill(el)!;
+    expect(chip.getAttribute('data-recipient-chosen')).toBe('ses_pi2');
+    expect(pillName(el)).toBe('Billing review');
+    expect(chip.querySelector('.ib-rto-short')?.textContent).toBe('Billing review');
+    expect(chip.getAttribute('aria-label')).toBe('To Billing review. Change who gets this reply');
+    await openList(el);
+    expect(named(el).map((r) => r[0])).toEqual(['Pi', 'Pi 2', 'Billing review']);
+    act(() => root?.unmount());
+    host?.remove();
+    const phone = await render(thread, true);
+    await write(phone, 'Use the old totals.');
+    await openList(phone);
+    expect(sheetRows(phone).map((r) => r[1])).toEqual(['Pi', 'Pi 2', 'Billing review']);
+  } finally {
+    // The names are global: clear them inside act, while the pane is still mounted.
+    act(() => setAgentNames(new Map()));
+  }
+});
+
+test.skipIf(!hasDom)('two sessions renamed alike: the chip and the rows add the names they had before, so the two read and are heard apart', async () => {
+  taggable.push(tagged('ses_claude2', 'claude-code'));
+  const thread = threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 45));
+  try {
+    act(() => setAgentNames(new Map([['ses_claude', 'Reviewer'], ['ses_claude2', 'Reviewer']])));
+    const el = await render(thread);
+    await write(el, 'Use the old totals.');
+    expect(pill(el)!.getAttribute('aria-label')).toBe('To Reviewer (Claude Code 2). Change who gets this reply');
+    await openList(el);
+    expect(named(el).map((r) => r[0])).toEqual(['Reviewer (Claude Code)', 'Reviewer (Claude Code 2)']);
+    await only(el, 'ses_claude');
+    expect(pill(el)!.getAttribute('aria-label')).toBe('To Reviewer (Claude Code). Change who gets this reply');
+  } finally {
+    act(() => setAgentNames(new Map()));
+  }
+});
+
+test('chipDropsTo: at every width near the edge, from either state and with the word\'s measure a pixel off either way, the chip settles in two steps and never flips back and forth', () => {
+  const max = 94;
+  // A chip near its widest: padding, the mark, the chevron and their gaps; the word and its gap.
+  const fixed = 49;
+  const to = 17.4;
+  for (let tenth = -20; tenth <= 20; tenth += 1) {
+    const withTo = max + tenth / 10;
+    const name = withTo - fixed - to;
+    for (const start of [false, true]) {
+      for (const off of [-1, 0, 1]) {
+        // While the word shows, its measure may be a whole pixel off what it is with the word gone.
+        const step = (tight: boolean) => chipDropsTo({ fixed, to, name: name + (tight ? 0 : off), max }, tight);
+        const states = [start];
+        for (let i = 0; i < 6; i += 1) states.push(step(states.at(-1)!));
+        expect(states.slice(2).every((s) => s === states[2]), `withTo ${withTo.toFixed(1)}, start ${start}, off ${off}: ${states.join(' ')}`).toBe(true);
+        const flips = states.slice(1).filter((s, i) => s !== states[i]).length;
+        expect(flips, `withTo ${withTo.toFixed(1)}, start ${start}, off ${off}: ${states.join(' ')}`).toBeLessThanOrEqual(1);
+      }
+    }
+  }
+});
+
+test('chipDropsTo: the word goes for a short name that then fits whole, or for a long one with under 48 px beside it; it stays for a long name with room, and comes back when everything fits with 2 px to spare', () => {
+  // "to Codex" needs 108 of 94; without the word 90.6 fits.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 94 }, false)).toBe(true);
+  // A long name in a narrow pane: beside the word 27.6 px of it would show.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 94 }, false)).toBe(true);
+  // A long name with more room: 55.6 px of it shows beside the word, so the word stays and the name is cut.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 122 }, false)).toBe(false);
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 400, max: 122 }, true)).toBe(false);
+  // Dropped, then the field grows: back only with 2 px to spare.
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 109 }, true)).toBe(true);
+  expect(chipDropsTo({ fixed: 49, to: 17.4, name: 41.6, max: 110 }, true)).toBe(false);
 });

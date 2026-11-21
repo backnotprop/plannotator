@@ -27,7 +27,8 @@
  * plan() for the list; a picker error, a run that is not a pull_request, or the
  * repo variable CI_AFFECTED=off also give `all`. A docs-only change (the
  * allowlist of scripts/ci-docs-only.sh) gives `docs`: only the plan job and
- * Gitleaks run.
+ * Gitleaks run. The native app's files (apps/mobile/ios, apps/mobile/android:
+ * nativeAppFile) are left out of every plan: only mobile-ios.yml builds them.
  *
  * scripts/ci-affected-map.test.ts holds the workflows to this map: every job has
  * an entry, every gated job reads its gate so that a failed gate runs it, and
@@ -49,6 +50,7 @@ export const RUN_ALL: { glob: string; why: string }[] = [
   { glob: '**/bunfig.toml', why: 'a bunfig (test preloads and loaders)' },
   { glob: '**/tsconfig*.json', why: 'a tsconfig (how imports resolve)' },
   { glob: 'patches/**', why: 'a dependency patch' },
+  { glob: 'vendor/**', why: 'a vendored dependency' },
   { glob: 'tests/setup/**', why: 'the test preloads' },
   { glob: 'tests/helpers/**', why: 'a shared test helper' },
   { glob: 'packages/ui/test-setup/**', why: 'the DOM test setup' },
@@ -74,7 +76,7 @@ export const CORE_GUARDS = [
 
 /** Top-level entries the picker knows. A change under any other one runs everything. */
 export const KNOWN_TOP = [
-  'apps', 'packages', 'scripts', 'tests', 'build', 'docs', 'adr', 'spec', 'bin', 'patches', '.github', '.agents',
+  'apps', 'packages', 'scripts', 'tests', 'build', 'docs', 'adr', 'spec', 'bin', 'patches', 'vendor', '.github', '.agents',
   '.claude-plugin', '.factory-plugin', '.product', '.adr-dir', '.gitignore', '.gitattributes', '.gitleaks.toml', '.semgrep.yml', '.semgrepignore',
   'AGENTS.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'README.md', 'SECURITY.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'bun.lock', 'bunfig.toml',
   'openpackage.yml', 'package.json',
@@ -84,13 +86,41 @@ export const KNOWN_TOP = [
 const KNOWN_EXT = new Set([
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'md', 'mdx', 'json', 'jsonc', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'txt',
   'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'woff', 'woff2', 'mp4', 'webm',
-  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin',
+  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz',
 ]);
-const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
+// Package.resolved: a Swift lockfile (the native app's), data no Bun test reads; it plans like any data file.
+const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|Package\.resolved|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
+
+/**
+ * The native app's own file kinds (apps/mobile/ios, apps/mobile/android):
+ * Swift, Xcode project, settings and asset files, Kotlin, Java and Gradle
+ * files that no Bun test reads. Only .github/workflows/mobile-ios.yml builds
+ * them, on its own path filter, so the picker drops them from a plan: a PR
+ * that changes only these runs no test lane and no Checks. The kinds are
+ * listed, because skipping is the risky direction: anything else there (a
+ * shell script, a tsconfig, a lockfile such as Package.resolved, .ts or
+ * package.json) keeps the ordinary rules. A `.gitignore` there is one of the
+ * kinds: it names Swift's and Xcode's own build output and no test reads it.
+ */
+const NATIVE_IOS = /^apps\/mobile\/ios\/(([^/]+\/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|([^/]+\/)*[^/]+\.xcassets\/([^/]+\/)*Contents\.json|([^/]+\/)*\.gitignore)$/;
+const NATIVE_ANDROID = /^apps\/mobile\/android\/(([^/]+\/)*[^/]+\.(kt|kts|java|gradle|pro|md|png|webp|jpe?g|svg)|([^/]+\/)*res\/([^/]+\/)*[^/]+\.xml|([^/]+\/)*AndroidManifest\.xml|gradle\.properties|gradle\/wrapper\/gradle-wrapper\.(jar|properties))$/;
+
+export function nativeAppFile(path: string): boolean {
+  return NATIVE_IOS.test(path) || NATIVE_ANDROID.test(path);
+}
+
+/**
+ * The app contract's number (apps/mobile/contract/VERSION) and generated
+ * native sources (apps/mobile/contract/generated): data the contract tests read
+ * by name and check for staleness, so a change reaches those tests like any
+ * data file.
+ */
+const CONTRACT_GENERATED = /^apps\/mobile\/contract\/(VERSION|generated\/([^/]+\/)*[^/]+\.(swift|kt|xcstrings|strings))$/;
 
 export function knownKind(path: string): boolean {
   const base = path.split('/').pop()!;
   if (KNOWN_BARE.test(base)) return true;
+  if (CONTRACT_GENERATED.test(path)) return true;
   const ext = extname(base).slice(1).toLowerCase();
   return ext !== '' && KNOWN_EXT.has(ext);
 }
@@ -235,7 +265,8 @@ export const GATE_JOB: Record<string, string> = { 'test.yml': 'plan', 'browser-s
  *  - `paths`: the workflow's own `pull_request.paths` (a heavy suite);
  *  - `slice`: the browser slice (e2e-slice.yml, its own picker);
  *  - `label`: the full browser suite, on a PR only with `ci:e2e` / `ci:e2e-all`;
- *  - `tag`: release tags only; `no-pr`: the workflow never runs on a PR.
+ *  - `tag`: release tags only; `no-pr`: the job never runs on a PR (the
+ *    workflow has no pull_request trigger, or the job's `if` names only other events).
  */
 export const JOB_MAP: Record<string, Record<string, string>> = {
   'test.yml': {
@@ -257,6 +288,8 @@ export const JOB_MAP: Record<string, Record<string, string>> = {
   'inbox-pi.yml': { 'inbox-pi': 'paths' },
   'inbox-claude-code.yml': { 'inbox-claude-code': 'paths' },
   'relay.yml': { relay: 'paths' },
+  'mobile-ios.yml': { ios: 'paths', 'ios-nightly': 'no-pr' },
+  'mobile-contract.yml': { contract: 'paths', ledger: 'paths' },
   'e2e-slice.yml': { plan: 'slice', slice: 'slice' },
   'inbox-e2e.yml': { head: 'label', build: 'label', plan: 'label', 'inbox-window-e2e': 'label', blame: 'label', 'full-ci': 'label' },
   'dast.yml': { 'passive-baseline': 'no-pr' },
@@ -735,6 +768,7 @@ const allLanes = () => ({
 export function pathReasons(changes: Change[]): string[] {
   const reasons: string[] = [];
   for (const c of changes) {
+    if (nativeAppFile(c.path)) continue;
     const top = c.path.split('/')[0]!;
     const all = runAllReason(c.path);
     if (all) reasons.push(`${c.path}: ${all.why}`);
@@ -767,12 +801,13 @@ export type PlanInput = {
 };
 
 export function plan(g: Graph, input: PlanInput): Plan {
-  const { changes } = input;
   const all = testFiles(g);
   const notes: string[] = [];
   const reasons: string[] = input.forceAll ? [input.forceAll] : [];
-  if (!input.forceAll && !changes.length) reasons.push('the diff is empty');
-  const docs = !reasons.length && input.docsOnly;
+  if (!input.forceAll && !input.changes.length) reasons.push('the diff is empty');
+  // The native app's files reach no Bun test: the rest of the change is planned alone.
+  const changes = input.changes.filter((c) => !nativeAppFile(c.path));
+  const docs = !reasons.length && (input.docsOnly || !changes.length);
   if (!reasons.length && !docs) {
     reasons.push(...pathReasons(changes));
     for (const c of changes) {
@@ -865,7 +900,7 @@ export function plan(g: Graph, input: PlanInput): Plan {
   const affected = new Set(tests.filter((t) => t.why !== 'scanner').map((t) => t.path));
   return {
     mode, reasons, notes, tests, total: all.length,
-    changed: changes.map((c) => `${c.status}\t${c.path}`),
+    changed: input.changes.map((c) => `${c.status}\t${c.path}`),
     unit, dom,
     gates: decideGates('test.yml', mode, reasons, changes, affected, g),
     semgrep: semgrepPlan(mode, changes),

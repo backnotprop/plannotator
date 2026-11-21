@@ -34,23 +34,24 @@ export const CommentMeta: React.FC<CommentMetaProps> = ({
   createdAt,
 }) => (
   <div className="review-comment-header">
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
       {leading}
       {conventionalLabel && (
         <ConventionalLabelBadge label={conventionalLabel} decorations={decorations} />
       )}
       {reviewProfileLabel ? (
-        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/10 text-accent/90 truncate max-w-[140px]">
+        <span className="flex-none text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent-text/90 truncate max-w-[45%]" title={reviewProfileLabel}>
           {reviewProfileLabel}
         </span>
       ) : source ? (
-        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80 truncate max-w-[140px]">
+        <span className="flex-none text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80 truncate max-w-[45%]" title={source}>
           {source}
         </span>
       ) : null}
       {author && (
         <span
-          className={`text-[10px] truncate max-w-[120px] ${
+          title={isCurrentUser(author) ? `${author} (me)` : author}
+          className={`min-w-0 text-xs truncate ${
             isCurrentUser(author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'
           }`}
         >
@@ -60,7 +61,7 @@ export const CommentMeta: React.FC<CommentMetaProps> = ({
       )}
     </div>
     {createdAt != null && (
-      <span className="ml-auto flex-none text-[10px] text-muted-foreground/50">
+      <span className="ml-auto flex-none text-xs text-muted-foreground/50">
         {formatRelativeTime(createdAt)}
       </span>
     )}

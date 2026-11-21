@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { mp4 } from "../../../tests/helpers/video-fixtures";
 import { inboxBlobPath, inboxBlobsDir } from "./attachments";
 import { InboxError } from "./schema";
 import { InboxStore } from "./store";
@@ -36,6 +37,17 @@ const stream = (...parts: string[]) =>
 const at = (ms: number) => new Date(ms).toISOString();
 
 describe("uploads", () => {
+  test("uploaded MP4s keep the track type, duration and video dimensions when sent", async () => {
+    const { inbox } = world();
+    const video = mp4({ duration: 8, width: 1280, height: 720, mdatBytes: 200_000 });
+    const audio = mp4({ duration: 12, tracks: ["soun"], mdatBytes: 200_000 });
+    const film = await receiveInboxUpload(inbox, "walkthrough.mp4", new Blob([new Uint8Array(video)]).stream(), { at: at(0) });
+    const recording = await receiveInboxUpload(inbox, "voice.mp4", new Blob([new Uint8Array(audio)]).stream(), { at: at(0) });
+    const [sentFilm, sentRecording] = await inboxUploadAttachments(inbox, [film.upload_id, recording.upload_id], at(1));
+    expect(sentFilm).toMatchObject({ kind: "video", media_type: "video/mp4", duration_ms: 8_000, width: 1280, height: 720 });
+    expect(sentRecording).toMatchObject({ kind: "audio", media_type: "audio/mp4", duration_ms: 12_000 });
+  });
+
   test("a body over the cap is refused and leaves no temp file or blob", async () => {
     const { inbox } = world();
     const error = await receiveInboxUpload(inbox, "big.log", stream("1234", "5678", "9"), { at: at(0), maxBytes: 8 }).catch((e) => e);

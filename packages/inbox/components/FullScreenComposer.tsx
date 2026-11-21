@@ -54,15 +54,22 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { CORNERS, useComposerDrag } from '../composerDrag';
 import { openItemsLabel } from '../openQuestions';
-import { markFullScreenComposer } from '../pageMarks';
 import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
+import { useReplyTextOr, type ReplyText } from '../replyText';
 
 /** The thread's reply, as the composer's Reply tab shows and sends it (Thread.tsx builds it). */
 export interface FullScreenReply {
   /** Who the reply goes to ("Claude Code", or the agent the thread was handed to). */
   to: string;
-  /** The thread's reply words: the open reply box's, else the kept draft's. */
+  /** The thread's reply words while the reply box is closed: the kept draft's. Read through `words` when that is given. */
   value: string;
+  /**
+   * The open reply box's words (replyText.ts), which the card reads itself: a key re-renders the card and not the
+   * thread pane that builds this. Absent: `value`.
+   */
+  words?: ReplyText;
+  /** Whether the reply holds more than spaces (the toolbar's draft dot), kept by the pane as the words change. Absent: from `value`. */
+  hasWords?: boolean;
   /** The reply box's own change: the box takes the words and the draft saves them. */
   onChange: (text: string) => void;
   /** What can be done about `error`, drawn after its words. */
@@ -290,21 +297,20 @@ export function FullScreenComposer({
 }) {
   const { reply, phone, threadId } = value;
   const takesComments = comment !== null;
-  const hasDraft = reply.value.trim() !== '';
+  const replyWords = useReplyTextOr(reply.words, reply.value);
+  const hasDraft = replyWords.trim() !== '';
   const state = useComposerState(threadId, hasDraft, takesComments, foldedByDefault);
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
   // The card moves out of the way by its tray, for this file only (composerDrag.ts). A phone's card is docked: no move.
   const { attach: attachDrag, handle: dragHandle, resizable, narrow, corner } = useComposerDrag(!phone, value.fileKey);
-  // `.ib-fcomp` in the page: each `.pn-inbox` above it carries `data-ib-fcomp` (pageMarks.ts).
+  // (A phone's toast measures the card to stay above it: Toast.tsx `PHONE_FLOOR`; no page mark.)
   const cardRefMarked = useCallback((el: HTMLDivElement | null) => {
     cardRef.current = el;
     attachDrag(el);
-    const release = markFullScreenComposer(el);
     return () => {
       cardRef.current = null;
       attachDrag(null);
-      release?.();
     };
   }, [attachDrag]);
   const pillRef = useRef<HTMLButtonElement | null>(null);
@@ -681,7 +687,7 @@ export function FullScreenComposer({
               tags={reply.tags}
               skillFilter={reply.skillFilter}
               mentionThread={threadId}
-              value={reply.value}
+              value={replyWords}
               onChange={(text) => {
                 // Writing here keeps the card on Reply for the thread (a draft emptied never flips it back).
                 state.setMode('reply');

@@ -202,6 +202,7 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * the bordered box, as before.
    */
   flushFiles?: boolean;
+  keepsFileOrder?: boolean;
   /**
    * Fold or open every file's diff at once (a host bar's Collapse all). Each new `token` applies `collapsed` to every
    * card again; a file folded or opened by hand after that keeps its own state. Absent: each card keeps its own.

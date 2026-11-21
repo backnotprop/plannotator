@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from '@plannotator/review-editor';
 import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
 import '@plannotator/review-editor/styles';
+import '@plannotator/review-editor/tree-styles';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

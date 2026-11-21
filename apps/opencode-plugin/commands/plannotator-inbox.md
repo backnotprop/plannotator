@@ -2,7 +2,7 @@
 description: Open the Plannotator Inbox in the browser, show its address, and learn how to use the Inbox
 ---
 
-Run `plannotator inbox --open` with Bash. It opens the Plannotator Inbox in the browser, starting it in the background when it is not running, prints the address and returns at once.
+Run `plannotator inbox --open` with Bash. It opens the Plannotator Inbox in the browser, starting it in the background when it is not running, prints the address and returns at once. The first time, it also turns the Inbox on and connects the agents it finds, within half a minute.
 
 Tell the user the address in one sentence; when it also says no browser opened (a remote session), pass on how it says to reach the Inbox. If it fails, tell the user what it says; `Unknown inbox option: --open` means their Plannotator is older than this command (update with `plannotator update`, or run `plannotator inbox` in a terminal).
 

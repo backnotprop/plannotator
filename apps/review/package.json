@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && bun diagram-engine/build.ts",
+    "build": "vite build && bun diagram-engine/build.ts && sem-jiff-copy-wasm dist/sem-diff",
     "serve": "bun run server/index.ts"
   },
   "dependencies": {
     "@plannotator/review-editor": "workspace:*",
+    "@plannotator/sem-jiff": "0.2.0",
     "@plannotator/server": "workspace:*",
+    "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "@pierre/diffs": "1.6.4",
+    "@pierre/diffs": "1.7.0-beta.3",
     "dompurify": "^3.4.17",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

@@ -5,6 +5,7 @@ import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEv
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 import { scheduledFrame } from './scheduled/store';
+import { readRunStateFrame, runEvents } from './data/runEvents';
 
 
 export interface MachineRecordFrame {
@@ -20,7 +21,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -37,6 +38,8 @@ export interface InboxEventHandlers {
   onDrafts?: (threadId: string | null) => void;
   onAsk?: (threadId: string) => void;
   onPins?: () => void;
+  /** Hidden PRs changed (the server's inbox-pull-hidden.ts): the list, Reviews and the board read again. */
+  onPullsHidden?: () => void;
   onPriority?: () => void;
   onArtifactPins?: () => void;
   onTags?: () => void;
@@ -46,12 +49,14 @@ export interface InboxEventHandlers {
   onSnoozes?: () => void;
   onThreadPulls?: (threadIds: string[]) => void;
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
+  /** The sound's switch, volume or choice was saved in any window: its settings as the Inbox now has them. */
+  onSound?: (sound: unknown, rev?: number) => void;
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
   /** The list's "Show archived" was saved here, in another window or on a linked machine: `{ on, rev }`. */
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; split_view?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean } }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onShapes?: (ids: string[]) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
@@ -107,6 +112,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'pins':
       handlers.onPins?.();
       return;
+    case 'pulls-hidden':
+      handlers.onPullsHidden?.();
+      return;
     case 'priority':
       handlers.onPriority?.();
       return;
@@ -130,6 +138,12 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'snoozes':
       handlers.onSnoozes?.();
       return;
+    case 'runs': {
+      // A run card's state changed here: the run store reads those cards again (data/runEvents.ts).
+      const change = readRunStateFrame(frame.data);
+      if (change) runEvents.emit(change);
+      return;
+    }
     case 'thread-pulls':
       try {
         const data = JSON.parse(frame.data) as { thread_ids?: unknown };
@@ -142,6 +156,13 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
         handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
+      } catch {
+      }
+      return;
+    case 'sound':
+      try {
+        const data = JSON.parse(frame.data) as { sound?: unknown; rev?: unknown };
+        handlers.onSound?.(data.sound, typeof data.rev === 'number' ? data.rev : undefined);
       } catch {
       }
       return;
@@ -173,13 +194,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; split_view?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown }; plans?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
           ...(typeof data.bro?.on === 'boolean' ? { bro: { on: data.bro.on } } : {}),
           ...(typeof data.float_drafts?.on === 'boolean' ? { float_drafts: { on: data.float_drafts.on } } : {}),
           ...(typeof data.mark_read_warning?.on === 'boolean' ? { mark_read_warning: { on: data.mark_read_warning.on } } : {}),
+          ...(typeof data.split_view?.on === 'boolean' ? { split_view: { on: data.split_view.on } } : {}),
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),

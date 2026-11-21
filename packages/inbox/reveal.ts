@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { InboxListRow, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type InboxRevealClaimId, type InboxRevealId } from './api';
 import { LIST_INTRO_SETTLED_MS } from './listIntro';
+import type { ListView } from './listView';
 import { newUuid } from './uuid';
 
 /** The page's thresholds, ms, shared by every reveal. A test shrinks them (and puts them back). */
@@ -59,11 +60,11 @@ export const REVEAL_TIMES = {
  * person who keeps a thread open beside the list never makes: App counts idle only while one of them is armed (and
  * the list options' update-day dialog, which waits for the list the same way).
  */
-export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro', 'grill_me_tip', 'personal_agents', 'priority']);
+export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['view_choice', 'board', 'steps', 'bro', 'grill_me_tip', 'personal_agents', 'priority', 'routines']);
 
 /**
- * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
- * `ahead`), or the list options' update-day dialog is due.
+ * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or the view
+ * choice `ahead`), or the list options' update-day dialog is due.
  */
 export function idleClockArmed(armed: (Pick<RevealArmed, 'next' | 'ahead'> & { aside?: readonly InboxRevealId[] }) | null, listIntroDue: boolean): boolean {
   if (armed === null) return false;
@@ -593,7 +594,7 @@ export function useStepsReveal(input: StepsRevealInput) {
 /** What a registered offer of the line brings: its id, its moment and its need (the line does the rest). */
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
-  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip' | 'sidebar_tip'>;
+  id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note' | 'launch_tip' | 'sidebar_tip' | 'band_tip'>;
   /**
    * The Inbox has it for this page, as the load's latch holds it (`useLineLatch`): `reveal.next === id`, or (an `ahead` offer such as List view)
    * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.
@@ -704,45 +705,43 @@ export function useStarReveal(input: StarRevealInput) {
 }
 
 /**
- * List view's moment, as registered with the line (approval "inbox-one-time-dialogs", the change): leaving a thread
- * for the list itself (not for another thread). The page going idle is its moment too, in every layout (App passes
- * `idle`): someone who keeps a thread open beside the list never leaves to it (the owner, 2026-11-08).
+ * Who "Which view do you prefer?" is for (reveals.ts `view_choice`), read on the page because the view is each
+ * browser's own: everyone once, but someone already on the Agents view. NOT DECIDED YET (a switch): to offer it to
+ * people on Agents too, return true here; the dialog then marks Agents "In use" for them.
  */
-export function listViewRevealLeaveCounts(next: string | null): boolean {
+export function viewChoiceWanted(view: ListView): boolean {
+  return view !== 'agents';
+}
+
+/**
+ * The view choice's moment: leaving a thread for the list itself (not for another thread). The page going idle is
+ * its moment too, in every layout (App passes `idle`): someone who keeps a thread open beside the list never leaves
+ * to it (the owner, 2026-11-08).
+ */
+export function viewChoiceRevealLeaveCounts(next: string | null): boolean {
   return next === null;
 }
 
-/** What List view's need reads at a settled moment. */
-export interface ListViewRevealGate {
+/** What the view choice's need reads at a settled moment. */
+export interface ViewChoiceRevealGate {
   listLoaded: boolean;
   firstRun: boolean;
-  /** The list draws its groups (Smart groups): the choice is for someone who has not picked Simple list. */
-  grouped: boolean;
-  /** The list on screen is taller than the screen (`listTallerThanScreen`). */
-  taller: boolean;
+  /** The view the list draws now (`viewChoiceWanted`). */
+  view: ListView;
 }
 
 /**
- * List view's need (approval "inbox-one-time-dialogs": "once the person's list has grown taller than the screen, on
- * Grouped, at the next calm moment"): the list loaded and not the first-run screen, the page old enough, on Smart
- * groups, and taller than the screen. The line decides the day (`reveal.next`, or `reveal.ahead` at its moment).
+ * The view choice's need: the list loaded and not the first-run screen, the page old enough, and the dialog for this
+ * view (`viewChoiceWanted`). The line decides the day (`reveal.next`, or `reveal.ahead` at its moment).
  */
-export function listViewRevealMayClaim(gate: ListViewRevealGate, pageAge: number): boolean {
-  return gate.listLoaded && !gate.firstRun && gate.grouped && gate.taller && pageAge >= REVEAL_TIMES.pageAgeMs;
+export function viewChoiceRevealMayClaim(gate: ViewChoiceRevealGate, pageAge: number): boolean {
+  return gate.listLoaded && !gate.firstRun && viewChoiceWanted(gate.view) && pageAge >= REVEAL_TIMES.pageAgeMs;
 }
 
 /**
- * Where List view's dialog may open: the Inbox page clear and the list itself (no thread open), or any thread while the
+ * Where the view choice may open: the Inbox page clear and the list itself (no thread open), or any thread while the
  * page is idle (the thread kept open beside the list, or a phone's thread).
  */
-export function listViewRevealClear(pageClear: boolean, thread: string | null, idle: boolean): boolean {
+export function viewChoiceRevealClear(pageClear: boolean, thread: string | null, idle: boolean): boolean {
   return pageClear && (thread === null || idle);
-}
-
-/**
- * The list's scrolling body holds more than it shows: the list is taller than the screen. Beside an open thread it is
- * the list's own column (settle.ts `listBody`), so the check reads the list pane the person sees.
- */
-export function listTallerThanScreen(body: Element | null): boolean {
-  return body !== null && body.scrollHeight > body.clientHeight;
 }
