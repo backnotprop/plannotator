@@ -12,6 +12,7 @@ import type { Block } from '@plannotator/ui/types';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext } from '@plannotator/ui/components/ImageResolverContext';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
+import { ImageRowsContext } from '@plannotator/ui/components/imageRow';
 import { useRefRepo } from '../../links';
 import { OpenInCodeSpans } from '../../components/OpenIn';
 import { FileRefCodeSpans } from '../../components/FileRefSpan';
@@ -139,6 +140,8 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    {/* The body fits its pictures itself (images.ts, `.ib-body img[data-ib-fit]`): no image rows from ui. */}
+    <ImageRowsContext.Provider value={false}>
     <SoftLineBreaksContext.Provider value={ownReply}>
     <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
     <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
@@ -223,6 +226,7 @@ export function MessageBody({
     </FileRefCodeSpans>
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
+    </ImageRowsContext.Provider>
     </ImageResolverContext.Provider>
   );
 }
