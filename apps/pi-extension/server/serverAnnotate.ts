@@ -56,6 +56,8 @@ import {
 } from "../generated/source-save-node.ts";
 
 import {
+	handleCustomThemesScript,
+	customThemesPage,
 	handleFavicon,
 	handleImageRequest,
 	handleStarAskRequest,
@@ -921,7 +923,7 @@ export async function startAnnotateServer(options: {
 	let liveSessionToken = "";
 	let liveAppUrl = "";
 
-	const app = openPackedApp(options.htmlContent);
+	const app = openPackedApp(options.htmlContent, { page: (html) => customThemesPage(html) });
 	const requestHostGuard = createRequestHostGuard();
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
@@ -1426,6 +1428,9 @@ export async function startAnnotateServer(options: {
 			return;
 		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
 			handleFavicon(res, url.pathname);
+		} else if (url.pathname === "/plannotator-themes.js" && req.method === "GET") {
+			// The person's own themes, for the page's first frame (packages/shared/theme-files.ts).
+			handleCustomThemesScript(res, url.searchParams);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			// Exit posts carry no body: the nonce rides the query string.
 			if (checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, serverSession) === "mismatch") {
@@ -1594,7 +1599,7 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapabilityFor = agentTerminal.capabilityFor;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.page(), likelyAppHtmlEncoding(false));
 
 	if (options.liveApp) {
 		// Compose the proxy-served bridge body via the shared assembly (config

@@ -159,6 +159,15 @@ describe("createMachinePulls", () => {
     expect(old.asked).toEqual([]);
   });
 
+  test("a PR another machine's board links to a thread counts as having one there, from the board as last read", async () => {
+    const linked = { via: "owner", thread_id: B_THREAD, project_id: B_PROJECT, thread_subject: null, agent: null, last: null, guide: null };
+    const b = peer(B, { board: { pulls: [pull("northwind/api", 7), pull("northwind/api", 8)], links: { "github.com/northwind/api#7": linked }, projects: {}, cards: {}, hosts: [] } });
+    const pulls = createMachinePulls({ peers: () => [b.link] });
+    expect(pulls.linkedThere("github.com/northwind/api#7")).toBe(false);
+    await readAll(pulls, false);
+    expect([pulls.linkedThere("github.com/northwind/api#7"), pulls.linkedThere("github.com/northwind/api#8")]).toEqual([true, false]);
+  });
+
   test("asleep: nothing is asked and its rows stay as last read; back, it is read again", async () => {
     const b = peer(B);
     const pulls = createMachinePulls({ peers: () => [b.link] });

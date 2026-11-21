@@ -10,7 +10,7 @@ import { PILL_BAND_PX, atEnd } from '../seenOnSight';
 import type { AskingSession } from '../components/ReplyRoute';
 import type { ReviewOutcome } from '../components/ReviewCard';
 import type { SentAnswerGroup } from '../sentReply';
-import { routeSendAnnotations, sendTargetsOf } from '../sendTargets';
+import { answersItself, routeSendAnnotations, sendTargetsOf } from '../sendTargets';
 
 export const noop = () => {};
 export const NO_ANNOTATIONS: never[] = [];
@@ -115,7 +115,7 @@ export function askingSessionOf(thread: InboxThread, options: { skip: ReadonlySe
   // inbox-delivery), plus the questions the person chose to skip, when any.
   const message = options.carries
     ? sendTargetsOf(thread, options.skip).at(-1)!.message
-    : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false));
+    : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false, answersItself));
   if (!message) return null;
   if (message.author.kind !== 'agent' || !message.author.session) return null;
   return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };

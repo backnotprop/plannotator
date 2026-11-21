@@ -85,6 +85,24 @@ export function isServedTailnetHost(hostHeader: string | null, servedHostname: s
 }
 
 /**
+ * Whether a request that came through serve was opened by this computer itself (a browser here on the tailnet
+ * address). Serve sets `X-Forwarded-For` to the connection's source address and never passes a client's own on
+ * (ipn/ipnlocal/serve.go, `addProxyForwardedHeaders` with `Header.Set`, inside a `httputil.ReverseProxy`
+ * `Rewrite`, which drops any incoming `X-Forwarded-*` first). It is the very address serve's WhoIs reads for
+ * `Tailscale-User-Login`, so it is as sure as the owner check: a connection from this computer's own node (its
+ * kernel listener on the node's address, used exactly for "connections from the machine itself") carries one of
+ * its own addresses (`selfAddresses`, `Self.TailscaleIPs`). Anything else (no header, several, another address)
+ * is not this computer.
+ */
+export function fromOwnTailnetNode(headers: Headers, selfAddresses: readonly string[]): boolean {
+  const raw = headers.get("x-forwarded-for");
+  if (raw === null || raw.includes(",")) return false;
+  let address = raw.trim().toLowerCase();
+  if (address.startsWith("::ffff:") && address.includes(".")) address = address.slice("::ffff:".length);
+  return address !== "" && selfAddresses.includes(address);
+}
+
+/**
  * The tailnet identity is ambient, like a cookie: any page the owner opens
  * on another device could make their browser send a request here. Such a
  * page's requests carry `Sec-Fetch-Site: cross-site` (or `same-site` from

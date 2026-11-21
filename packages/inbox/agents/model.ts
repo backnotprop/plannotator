@@ -60,7 +60,7 @@ export function agentThread(agent: InboxAgent, machine: string | null, self: str
 }
 
 /** An agent's sessions: the one it runs as and those its conversation had before, but for the ones in `others` (listed as agents of their own). */
-function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
+export function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
   return [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
 }
 
@@ -109,6 +109,14 @@ function sectionGroups(groups: readonly InboxAgentsGroup[] | null, machines: Mac
   const self = machines.self;
   if (machines.all.length === 0) return [{ group: groups?.find((g) => !g.machine || g.machine === self), machine: null, view: null }];
   return machines.all.map((view) => ({ group: groups?.find((g) => (g.machine ?? self) === view.id), machine: view.id, view }));
+}
+
+/**
+ * Every agent the list names, the ended ones too, per group the section draws (`sectionGroups`): the list's Agents
+ * view (agentsView/model.ts) groups threads under them. `machine` null: no machine linked.
+ */
+export function namedAgents(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel): { machine: string | null; view: MachineView | null; known: boolean; agents: readonly InboxAgent[] }[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine, view, known: group !== undefined, agents: group?.agents ?? [] }));
 }
 
 /** `entry` is the older session of `later`'s conversation and opens the same thread: one row, `later`'s. */

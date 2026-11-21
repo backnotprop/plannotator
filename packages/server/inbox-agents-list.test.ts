@@ -1,7 +1,7 @@
 /**
  * Each machine's agents for the sidebar's Agents section (inbox-agents-list.ts). The failures this catches: a live
  * session missing or in the wrong state, a session that still owns a thread waiting on the person dropped because it
- * ended, a session that ended yesterday still listed (or one that ended today dropped), a launched agent that is only
+ * ended, a session that ended yesterday counted as ended today (or one that ended today dropped, or the week the window reads lost), a launched agent that is only
  * stopped read as ended, a list that grows without bound, another machine's agents lost or unnamed on the merged view,
  * and an Agents change that no `event: deliveries` would tell a window about.
  *
@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_AGENTS_LISTED_MAX, type InboxAgentsGroup } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
+import { inboxAgentsEndedSince, inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
 import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
@@ -79,6 +79,30 @@ describe("who is listed, and how", () => {
     ]);
     expect(group.ended_today).toBe(1);
     expect(group.agents[1]!.live).toBe(false);
+  });
+
+  test("the window's read keeps a week of ended sessions (the list's Agents view names their threads' agent); only today's count as ended today", async () => {
+    const { live, clock } = liveSessions();
+    const noon = clock.t;
+    clock.t = noon - 6 * 24 * 60 * 60_000 - 11 * 60 * 60_000; // Six days ago, 1 AM: the first day kept.
+    await poll(live, "ses-six-days");
+    clock.t = noon - 7 * 24 * 60 * 60_000; // A week ago, noon: before the first day kept.
+    await poll(live, "ses-a-week");
+    clock.t = noon - 13 * 60 * 60_000; // Yesterday, 11 PM.
+    await poll(live, "ses-yesterday");
+    clock.t = noon - 10 * 60 * 60_000; // Today, 2 AM.
+    await poll(live, "ses-today");
+    clock.t = noon;
+    await poll(live, "ses-live");
+    const group = inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxAgentsEndedSince(clock.t)), today: inboxStartOfDay(clock.t) }));
+    expect(group.agents.map((agent) => [agent.id, agent.state])).toEqual([
+      ["ses-live", "idle"],
+      ["ses-today", "ended"],
+      ["ses-yesterday", "ended"],
+      ["ses-six-days", "ended"],
+    ]);
+    expect(group.ended_today).toBe(1);
+    expect(group.total).toBe(4);
   });
 
   test("a session that owns a thread waiting on the person stays listed, waiting with its count, ended or not", () => {

@@ -5,6 +5,7 @@ import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEv
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 import { scheduledFrame } from './scheduled/store';
+import { readRunStateFrame, runEvents } from './data/runEvents';
 
 
 export interface MachineRecordFrame {
@@ -20,7 +21,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'runs', 'rows', 'sound', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -137,6 +138,12 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'snoozes':
       handlers.onSnoozes?.();
       return;
+    case 'runs': {
+      // A run card's state changed here: the run store reads those cards again (data/runEvents.ts).
+      const change = readRunStateFrame(frame.data);
+      if (change) runEvents.emit(change);
+      return;
+    }
     case 'thread-pulls':
       try {
         const data = JSON.parse(frame.data) as { thread_ids?: unknown };

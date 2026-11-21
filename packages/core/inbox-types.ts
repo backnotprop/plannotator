@@ -1590,8 +1590,13 @@ export interface InboxActionFacts {
 
 /** What came of an action item (`InboxQuestionRecord.action_result`). */
 export interface InboxActionResult {
-  outcome: "done" | "cant";
-  /** The person's note with Done, or the reason with Can't do it; null for none. */
+  /**
+   * The person's mark: Done, Can't do it (with a reason), or Skip (they chose
+   * not to do it; approval "action-item-skip", option A). A record stored
+   * before Skip only ever holds "done" or "cant".
+   */
+  outcome: "done" | "cant" | "skip";
+  /** The person's note with Done, or the reason with Can't do it; null for none (always for Skip). */
   note: string | null;
   at: string;
   by: "person" | "agent";
@@ -1609,8 +1614,11 @@ export interface InboxActionResult {
    * (approval "inbox-action-items-in-reply", Q3). When it carries a note, the
    * note still goes with the person's next Send (`inboxActionInDraft`).
    */
-  person?: { outcome: "done" | "cant"; note: string | null; at: string } | null;
+  person?: { outcome: "done" | "cant" | "skip"; note: string | null; at: string } | null;
 }
+
+/** The person's mark on an action item (`InboxActionResult.outcome`). */
+export type InboxActionOutcome = InboxActionResult["outcome"];
 
 /**
  * An action item whose result waits in the person's reply draft (approval
@@ -1629,7 +1637,7 @@ export function inboxActionInDraft(
 }
 
 /** The person's own mark on an action item in their draft or sent: their staged mark, or the one the agent's done settled. */
-export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: "done" | "cant"; note: string | null; at: string } | null {
+export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: InboxActionOutcome; note: string | null; at: string } | null {
   if (!result) return null;
   if (result.by === "person") return { outcome: result.outcome, note: result.note, at: result.at };
   return result.person ?? null;
@@ -3271,6 +3279,7 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * measured by inbox-board-switch.test.ts's request shape at 16,451 (it had drifted about 330 bytes before this).
  * Tokens scaled at the entry's bytes per token (3.7), not counted on Pi.
  */
+/* Skip on action items (the action guide's sentence, and the connection's short `body` wording, 2026-11-19): +162 bytes, estimated (not measured), inside the 5%; the constants stay. */
 const INBOX_TOOL_COST_NOW = { bytes: 14522, tokens: 3906 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
 export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 16451, tokens: 4492 } as const;
@@ -3360,6 +3369,8 @@ export interface InboxRowUnsent {
   done?: number;
   /** Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none. */
   cant?: number;
+  /** Action items skipped waiting in the reply draft ("Draft · 1 skipped"; approval "action-item-skip"). Absent: none. */
+  skipped?: number;
 }
 
 /**
@@ -3375,7 +3386,7 @@ export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_f
 
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
-  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0);
+  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0 || (unsent.skipped ?? 0) > 0);
 }
 
 /**
@@ -3610,8 +3621,9 @@ export interface InboxComposeProject {
 
 /**
  * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
- * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
- * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ * `agents`; packages/server/inbox-agents-list.ts) and the list's Agents view. An agent is a live session, a session
+ * that owns a thread waiting on the person (ended or not), a session that ended in the last seven days
+ * (`INBOX_AGENTS_ENDED_DAYS`), or a session the Inbox launched (a stopped one is idle).
  */
 export interface InboxAgent {
   /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */

@@ -19,7 +19,7 @@ final class FirstSliceTests: XCTestCase {
     // The list: the computer's sections, in its order, under the product's names.
     XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 10))
     for section in ["Stopped on you", "Holding up work", "Waiting on you"] {
-      XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "\(section), ")).firstMatch.exists, section)
+      XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "\(section), ")).firstMatch.exists, section)
     }
 
     // A tap on a row opens the thread, with its question as a card.
@@ -47,7 +47,7 @@ final class FirstSliceTests: XCTestCase {
 
     // Back in the list the thread has moved to Sent.
     app.navigationBars.buttons.firstMatch.tap()
-    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Sent, ")).firstMatch.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Sent, ")).firstMatch.waitForExistence(timeout: 5))
   }
 
   /// An action item is done on the phone, and a permission prompt is answered with one touch and shrinks to a line.
@@ -115,6 +115,53 @@ final class FirstSliceTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(prompt.frame.minY, bar, "the card's top is under the title bar, not behind it")
     XCTAssertNotNil(skip, "the card's last row is built")
     XCTAssertLessThanOrEqual(skip?.frame.maxY ?? .infinity, foot.frame.minY, "the card ends above the foot")
+  }
+
+  /// At the largest text size the rows above the newest message measure themselves again while the thread lands
+  /// (the question's place reaches the page a moment after the message's), and once more when something reads
+  /// the whole page, as this test does and VoiceOver does: the page still rests on the question, every time the
+  /// thread opens. It did not, about one opening in three, when the landing watched the message's place alone and
+  /// nothing kept the page's place afterwards. Opened several times: one opening can land right by luck.
+  @MainActor
+  func testAThreadLandsOnItsQuestionAtTheLargestTextSize() {
+    for run in 1...5 {
+      let app = XCUIApplication()
+      app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-open", "msg_STANDIN0000000000000003"]
+      app.launch()
+      // Nothing is asked of the app while it lands, as when a person opens it: asking makes it measure again.
+      sleep(6)
+      let prompt = app.staticTexts["How should this roll out?"]
+      XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+      // Reading the page built the rows above: the page is given a moment to take its place again.
+      sleep(1)
+      let bar = app.navigationBars.firstMatch.frame.maxY
+      let foot = app.buttons["1 open question"].frame.minY
+      XCTAssertGreaterThanOrEqual(prompt.frame.minY, bar, "opening \(run): the question is above the page")
+      XCTAssertLessThan(prompt.frame.minY, foot, "opening \(run): the question is below the page")
+      app.terminate()
+    }
+  }
+
+  /// The place a landed thread keeps is the person's to take: a tap on the status bar sends the page to the top
+  /// (no finger drags it, and the rows above are built and measured on the way), and the page stays where it was
+  /// sent. It is never pulled back to the question.
+  @MainActor
+  func testALandedThreadLetsGoWhenThePageIsMoved() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-open", "msg_STANDIN0000000000000003"]
+    app.launch()
+    sleep(6)
+    let prompt = app.staticTexts["How should this roll out?"]
+    XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+    sleep(1)
+    let foot = app.buttons["1 open question"].frame.minY
+    XCTAssertLessThan(prompt.frame.minY, foot, "landed on the question")
+    // The status bar, over the clock's side of the island.
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.03)).tap()
+    sleep(2)
+    XCTAssertGreaterThan(prompt.frame.minY, foot, "the page went to the top: the question is below it")
+    sleep(2)
+    XCTAssertGreaterThan(prompt.frame.minY, foot, "and it stayed there")
   }
 
   /// A Can't do it reason being typed on the newest message survives the agent writing again meanwhile: the

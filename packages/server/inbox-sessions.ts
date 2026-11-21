@@ -67,7 +67,7 @@ export interface InboxLiveSession {
   label?: string;
 }
 
-/** A session the Agents section may list (`agentSessions`): live, or ended and heard from today. Times in ms. */
+/** A session the Agents section may list (`agentSessions`): live, or ended and heard from since a day's start. Times in ms. */
 export interface InboxAgentSession {
   session: string;
   host: string;
@@ -934,7 +934,8 @@ export function createInboxLiveSessions(options: {
 
   /**
    * The sessions the Agents section can list (packages/server/inbox-agents-list.ts): every live one, and every one
-   * last heard at or after `since` (the start of today) that has ended. In memory, so a restart forgets the ended.
+   * last heard at or after `since` (the start of the first day the list keeps, inbox-agents-list.ts
+   * `inboxAgentsEndedSince`) that has ended. In memory, so a restart forgets the ended.
    * A launch's permission prompt (`perm:…`) is no session of its own.
    */
   const agentSessions = (since: number): InboxAgentSession[] => {

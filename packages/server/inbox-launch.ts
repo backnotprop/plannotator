@@ -84,7 +84,7 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { LaunchChoiceError, launchChoicesReadable, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
 import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
@@ -337,7 +337,9 @@ export function createInboxLaunch(options: {
    * composer's "Start Claude Code" while the switch was never set (what it follows), and by each start for
    * its own env, after the Send answered. One read at a time: callers meanwhile share it. Of a read only its
    * PATH (for the plain env) and the names the hosts keep (`shellNames`: Claude Code's skip-permissions
-   * export and CLAUDE_CONFIG_DIR) are kept; the env itself is never held for a launch.
+   * export and CLAUDE_CONFIG_DIR) are kept here. A start never uses a held env: each start reads its own. The
+   * whole env goes to the hosts' `loginRead`; only OpenCode's keeps it, in memory, for its model-list reads (a key
+   * exported in the shell rc decides which providers OpenCode lists), never for a start.
    */
   let shell: { kept: LaunchEnv; at: number } | null = null;
   /** Settings → Agents reads the shell again only when its last read is older than this. */
@@ -357,6 +359,12 @@ export function createInboxLaunch(options: {
         // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
         for (const name of hostList.flatMap((host) => host.shellFlags ?? [])) if (login[name]) kept[name] = "1";
         shell = { kept, at: now() };
+        for (const host of hostList) {
+          // A host's own hook: one that throws never fails the login read (or the start waiting on it).
+          try {
+            host.loginRead?.(login);
+          } catch {}
+        }
         return login;
       } finally {
         reading = null;
@@ -908,7 +916,8 @@ export function createInboxLaunch(options: {
     memo.seenLive = false;
     starting.add(launch.id);
     try {
-      // The person's login env, read for this start only (after the Send answered; never kept).
+      // The person's login env, read for this start (after the Send answered). This start never uses an older one; the
+      // read also reaches the hosts' `loginRead` (OpenCode keeps it in memory for its model lists only).
       const login = await readLogin();
       await trustMadeFolder(launch, host);
       // A reply's launch takes its thread's name.
@@ -1630,8 +1639,6 @@ ${result.text}`);
     // The switch governs new starts only (the folder list above, compose's `to.launch` and block): an agent already
     // started keeps Stop, Open, Delete, Try again and Trust folder while it is off, and Settings → Agents' read and switch answer.
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
-    // Rex is asked whether its app is attached only for this computer's own window (inbox-rex.ts reads its socket).
-    const here = via === "local" && !door;
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
       // Never another site's page: a read here may start the person's login shell.
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
@@ -1639,11 +1646,12 @@ ${result.text}`);
       // person's rc counts for that Send. One read at a time either way.
       const ahead = new URL(req.url).searchParams.get("ahead") === "1";
       if (enabled() && config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
-      // Settings → Agents' own read (not New message's `ahead`): whether Rex's app is here, read now if stale.
-      // A headless Rex (a server with no app on this computer, inbox-rex-where.ts) answers any window of this Inbox:
-      // such a machine is used from another computer, and the row has to show there for Rex to be chosen at all.
-      const rexAsked = here || (options.rex?.headless === true && !door);
-      const rexHere = rexAsked && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
+      // Settings → Agents' own read (not New message's `ahead`): whether Rex is here on this Inbox's computer (on a
+      // Mac its app attached over this computer's socket, inbox-rex.ts; a headless Rex, its server answering), read
+      // now if stale. Asked for any window of this Inbox, this computer's own or the tailnet's: a Send from either
+      // starts in Rex here, and the row has to show where the person is for Rex to be chosen at all (a window on
+      // this computer opened on its tailnet address too). Never for the device door (a phone's or a linked machine's read).
+      const rexHere = !door && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
       return json({ launch: settingsState(rexHere, rexHere === false && options.rex?.shared?.() === true) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -1938,6 +1946,8 @@ ${result.text}`);
    */
   const networkSeen = new Map<string, { at: number; exists: boolean; slow: boolean; reading: boolean }>();
   const NETWORK_LOOK_MS = 10_000;
+  /** `root` is on a network drive (one that may not answer: never read in process). */
+  const onNetworkDrive = (root: string, mounted: readonly { path: string; network?: true }[]) => mounted.some((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
   const projectThere = (root: string, mounted: readonly { path: string; network?: true }[]): { exists: boolean; slow?: true } => {
     const drive = mounted.find((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
     if (!drive) return { exists: isFolder(root) };
@@ -2030,7 +2040,7 @@ ${result.text}`);
      */
     async prepare(
       target: InboxLaunchTarget,
-      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null; background?: boolean },
+      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null; background?: boolean; keepLastChoice?: boolean },
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
@@ -2104,7 +2114,7 @@ ${result.text}`);
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
       // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
-      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      const lists = host.choices ? launchChoicesReadable(await withinLaunchWait(host.choices())) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
@@ -2190,7 +2200,9 @@ ${result.text}`);
         // always runs in the background: no new tab per run.
         ...(config().startIn === "rex" && host.rexCommand && input.background !== true ? { rex: {} } : {}),
       };
-      if (host.choices) {
+      // Default sent while the lists were being read or could not be read (no menu to pick from): the saved pick stays.
+      const picked = !!(target.choice?.model || target.choice?.effort || target.choice?.primary_agent);
+      if (host.choices && input.keepLastChoice !== true && (lists || picked)) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {
@@ -2241,7 +2253,8 @@ ${result.text}`);
     /**
      * `GET /api/inbox/sessions`'s `launch` block: the agents To offers, the projects the folder menu lists.
      * `owner`: the owner's window asks, so each agent says which folders it would Trust and start. That read is
-     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read.
+     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read (Trust and
+     * start's facts, and OpenCode's project config for its default's name). Null (another site, the device door): none.
      */
     async composeBlock(owner: { pick: { agent: string; project: string } | null } | null = null): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
@@ -2290,9 +2303,23 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
-          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
-          const choices = lists ? { ...lists, ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) } : null;
+          // Its default model is named for the folder picked in To, for the owner's own window only (`owner.pick`, as
+          // Trust and start's facts): a project here (in home, there, not on a network drive, whose config files are
+          // read as data) or the scratch pick (the home folder: the scratch folder is not made yet). Any other folder,
+          // another site's page, the device door, or none picked: no default, so no name that may be wrong.
+          const namedHere = owner?.pick?.agent === host.agent ? owner.pick.project : null;
+          const namedProject =
+            namedHere && namedHere !== INBOX_SCRATCH_PICK
+              ? projects.find((p) => p.id === namedHere && p.exists && !p.slow && !onNetworkDrive(p.root, mounted) && !outsideHome(options.homeDir, p.root))
+              : null;
+          const defaultIn = namedHere === INBOX_SCRATCH_PICK ? null : namedProject ? namedProject.root : undefined;
+          // A list still being read past the wait, or one that could not be read: compose has Default and says so
+          // (OpenCode), with no last pick (Default stays picked).
+          const lists = host.choices ? await withinLaunchWait(host.choices(defaultIn === undefined ? {} : { defaultIn }), undefined, host.choicesWhileReading ?? null) : null;
+          const last = launchChoicesReadable(lists) ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const choices = lists
+            ? { ...lists, ...(lists.default_model && namedHere ? { default_for: namedHere } : {}), ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) }
+            : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );
