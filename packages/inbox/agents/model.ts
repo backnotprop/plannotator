@@ -218,7 +218,6 @@ export interface AgentFacts {
   rows: [string, string][];
 }
 
-/** A Claude model's id by its family and version ("claude-opus-5-5" → "Opus 5.5"); any other id as it is. */
 export function modelName(id: string): string {
   const parts = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id);
   if (!parts) return id;

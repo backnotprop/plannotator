@@ -228,19 +228,13 @@ function readEngineVersion($: Engine): Promise<string | null> {
   return engineVersion
 }
 
-/** The main loop's model id, as `/model` shows it; null when the engine does not say. */
 async function readModel($: Engine): Promise<string | null> {
   const model = await $.session.model()
   return typeof model === 'string' && model ? model : null
 }
 
-/** The main loop's latest request's effort (`turn.step`): the engine has no call that reads it. */
 let mainEffort: string | null = null
 
-/**
- * How full the context window is, as the status line has it (`$.session.usage()`'s `context.percent`, free to
- * read), on an engine that has the call (SESSION_USAGE_MIN_ENGINE); null otherwise or before a first response.
- */
 async function readContextPercent($: Engine): Promise<number | null> {
   if (!engineAtLeast(await readEngineVersion($), SESSION_USAGE_MIN_ENGINE)) return null
   const usage = await $.session.usage()

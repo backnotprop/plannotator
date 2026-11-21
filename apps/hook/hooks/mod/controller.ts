@@ -331,10 +331,8 @@ export interface SessionInfo {
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
   title?: () => string | Promise<string>
-  /** The model and the latest request's effort, read for each Inbox poll (`InboxLinkOptions.model`, `.effort`). */
   model?: () => Promise<string | null>
   effort?: () => string | null
-  /** How full the context window is, read for each Inbox poll (`InboxLinkOptions.contextPercent`). */
   contextPercent?: () => Promise<number | null>
   /** The session's first start, given the link's (`InboxLinkOptions.firstStart`). */
   firstStart?: (startedAt: number) => Promise<number>

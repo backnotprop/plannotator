@@ -283,7 +283,6 @@ export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines:
   return [{ machine: self, ...own }, ...machines.filter((group) => group.machine !== self)];
 }
 
-/** Another machine's agent's model, effort and context, each kept only when a poll here would keep it. */
 function sessionFactsChecked(agent: InboxAgent): InboxAgent {
   const { model, effort, context, ...rest } = agent;
   const checked = { model: modelIdOf(model), effort: effortLevelOf(effort), context: contextPercentOf(context) };

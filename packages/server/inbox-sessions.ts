@@ -49,17 +49,14 @@ import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
-/** A poll's `model`: an id such as `claude-opus-5-5` or a provider's, else null. */
 export function modelIdOf(value: unknown): string | null {
   return typeof value === "string" && /^[\w.:/@\[\]-]{1,120}$/.test(value) ? value : null;
 }
 
-/** A poll's `effort`: one of INBOX_EFFORT_LEVELS, else null. */
 export function effortLevelOf(value: unknown): string | null {
   return typeof value === "string" && (INBOX_EFFORT_LEVELS as readonly string[]).includes(value) ? value : null;
 }
 
-/** A poll's `context`: a whole percentage, 0 to 100, else null. */
 export function contextPercentOf(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100 ? value : null;
 }
@@ -102,10 +99,8 @@ export interface InboxAgentSession {
    */
   blocked?: InboxBlockedKind | null;
   label: string | null;
-  /** Its model id and latest request's effort (live only); null when its connection does not say. */
   model: string | null;
   effort: string | null;
-  /** How full its context window is, 0 to 100 (live only); null when its connection does not say. */
   context: number | null;
   /** The title its host generated (INBOX_TITLE_POLL_FIELD); null when it sent none. */
   title: string | null;
@@ -219,10 +214,8 @@ interface SeenSession {
   plugin: LoadedPlugin | null;
   /** Claude Code's version (`engine`); null when it sent none. */
   engine: string | null;
-  /** Its model id (`model`) and latest request's effort (`effort`); null when its latest poll sent none. */
   model: string | null;
   effort: string | null;
-  /** How full its context window is, 0 to 100 (`context`); null when its latest poll sent none. */
   context: number | null;
   /**
    * Where its latest poll said it lives (INBOX_PLACE_POLL_FIELD: a Rex pane's ids). A hint, never shown as it is:
@@ -1010,8 +1003,6 @@ export function createInboxLiveSessions(options: {
   const agentsSignature = (since: number): string =>
     agentSessions(since)
       // Which ids its conversation continues: an agent is listed once for them all (inbox-agents-list.ts).
-      // The context's fill in 5-point steps: it can move with every response of a turn, and each change has every
-      // window read the list again.
       .map((entry) => `${entry.session}:${entry.live ? (entry.busy === true ? "b" : entry.busy === false ? "i" : "n") : "e"}${entry.blocked ? `!${entry.blocked}` : ""}:${entry.root ?? ""}:${entry.model ?? ""}:${entry.effort ?? ""}:${entry.context === null ? "" : Math.floor(entry.context / 5)}${entry.live ? continuations.lineOf(entry.session).map((old) => `>${old}`).join("") : ""}`)
       .join("|") + `#${continuations.signature()}#k${agentChanges}`;
 

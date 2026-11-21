@@ -332,12 +332,10 @@ describe('what the poll says', () => {
     }
   })
 
-  // Internal builds can send a numeric effort: only a named level is kept.
   test('only a named effort level is kept from a model request', () => {
     expect(['high', 'xhigh', 7, 'turbo', undefined].map(effortLevelOf)).toEqual(['high', 'xhigh', null, null, null])
   })
 
-  // Same rule as `continues`: the latest figure on every poll, none when the host cannot say.
   test("the context window's fill rides on every poll; none when the engine says nothing or the read fails", async () => {
     for (const poll of await pollsOf(undefined, async () => 63)) expect(poll[INBOX_CONTEXT_POLL_FIELD]).toBe(63)
     for (const poll of await pollsOf(undefined, async () => null)) expect(INBOX_CONTEXT_POLL_FIELD in poll).toBe(false)

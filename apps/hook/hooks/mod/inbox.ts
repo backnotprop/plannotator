@@ -118,14 +118,8 @@ import type { TurnTracker } from './turns'
  */
 export const SESSION_APPEND_MIN_ENGINE = '2.1.301'
 
-/**
- * The first Claude Code whose hooks-module API documents `$.session.usage()`
- * (the 2.1.322 plugin-authoring types): the oldest engine the context window's
- * fill is read from. Older or unknown engines report none.
- */
 export const SESSION_USAGE_MIN_ENGINE = '2.1.322'
 
-/** Whether an engine version (`$.session.version()`'s `base`, else `version`) is at least `min`. */
 export function engineAtLeast(version: string | null | undefined, min: string): boolean {
   const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof version === 'string' ? version.trim() : '')
   if (!parts) return false
@@ -137,12 +131,11 @@ export function engineAtLeast(version: string | null | undefined, min: string): 
   return true
 }
 
-/** Whether an engine version is at least SESSION_APPEND_MIN_ENGINE. */
+/** Whether an engine version (`$.session.version()`'s `base`, else `version`) is at least SESSION_APPEND_MIN_ENGINE. */
 export function engineHasSessionAppend(version: string | null | undefined): boolean {
   return engineAtLeast(version, SESSION_APPEND_MIN_ENGINE)
 }
 
-/** A model request's `effort` when it is one of INBOX_EFFORT_LEVELS, else null. */
 export function effortLevelOf(value: unknown): string | null {
   return typeof value === 'string' && (INBOX_EFFORT_LEVELS as readonly string[]).includes(value) ? value : null
 }
@@ -1156,15 +1149,8 @@ export interface InboxLinkOptions {
   label?: () => string | Promise<string>
   /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
-  /** The model id, sent as INBOX_MODEL_POLL_FIELD on every poll; null or a rejection sends none. */
   model?: () => Promise<string | null>
-  /** The latest main-loop request's effort, sent as INBOX_EFFORT_POLL_FIELD; null sends none. */
   effort?: () => string | null
-  /**
-   * How full the session's context window is (0 to 100), read for every poll
-   * and sent as INBOX_CONTEXT_POLL_FIELD. Null or a rejection: nothing sent.
-   * Set by the host, never by the model. Absent: never sent.
-   */
   contextPercent?: () => Promise<number | null>
   /**
    * The session's first start, given this link's (`STORE_INBOX_SESSION_STARTS`): earlier when an earlier link of the

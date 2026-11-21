@@ -31,7 +31,6 @@ describe('engineHasSessionAppend', () => {
   })
 })
 
-// The context window's fill is read only where `$.session.usage()` exists: an older engine reports none.
 describe('engineAtLeast for $.session.usage', () => {
   test('2.1.322 and later read it; older, unreadable and unknown versions do not', () => {
     expect(SESSION_USAGE_MIN_ENGINE).toBe('2.1.322')
