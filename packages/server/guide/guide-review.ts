@@ -723,8 +723,8 @@ export function createGuideSession(): GuideSession {
           const thinking = "minimal";
           const nonce = makeMarkerNonce();
           const markerPrompt = composeGuideMarkerRepairPrompt(repair.payload, nonce);
-          const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
-          return { command, prompt: markerPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: markerEngine.id, model, thinking };
+          const { command, stdinPrompt } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
+          return { command, ...(stdinPrompt !== undefined && { stdinPrompt }), prompt: markerPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: markerEngine.id, model, thinking };
         }
 
         const repairPrompt = buildGuideRepairPrompt(repair.payload);
@@ -765,8 +765,8 @@ export function createGuideSession(): GuideSession {
         const thinking = typeof config?.thinking === "string" && config.thinking ? config.thinking : undefined;
         const nonce = makeMarkerNonce();
         const markerPrompt = composeGuideMarkerPrompt(userMessage, nonce, extraInstructions);
-        const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
-        return { command, prompt: markerPrompt, cwd, label: "Guided Review", captureStdout: true, engine: markerEngine.id, model, thinking };
+        const { command, stdinPrompt } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
+        return { command, ...(stdinPrompt !== undefined && { stdinPrompt }), prompt: markerPrompt, cwd, label: "Guided Review", captureStdout: true, engine: markerEngine.id, model, thinking };
       }
 
       const prompt = composeGuideMethodology(extraInstructions) + "\n\n---\n\n" + userMessage;

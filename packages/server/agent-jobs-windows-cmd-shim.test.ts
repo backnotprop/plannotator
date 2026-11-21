@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
-import { fakePiCmdPath, HOSTILE_MODEL, HOSTILE_PROMPT, writeFakePiCmd, type FakePiCmd } from "../../tests/helpers/fake-pi-cmd";
+import { fakePiCmdPath, HOSTILE_MODEL, HOSTILE_PROMPT, writeFakeCmdShim, writeFakePiCmd, type FakePiCmd } from "../../tests/helpers/fake-pi-cmd";
 import { buildMarkerCommand, MARKER_ENGINES } from "./marker-review";
 import { createAgentJobHandler } from "./agent-jobs";
 
@@ -115,6 +115,42 @@ describe.skipIf(process.platform !== "win32")("Bun server: a Pi installed as pi.
       );
       expect(res?.status).toBe(200);
       await until(() => (isAlive(pid) ? undefined : true), "the stub to end", 10_000);
+    } finally {
+      handler.killAll();
+    }
+  }, 40_000);
+});
+
+describe.skipIf(process.platform !== "win32")("Bun server: Copilot CLI installed as copilot.cmd (#3798)", () => {
+  test("a large hostile prompt (>32k chars) arrives intact on stdin and permission flags survive cmd.exe", async () => {
+    const copilotStub = writeFakeCmdShim(root, "copilot");
+    const largeHostilePrompt = `${HOSTILE_PROMPT}\n${"+line of diff\n".repeat(3_000)}`;
+    expect(largeHostilePrompt.length).toBeGreaterThan(32_767);
+    const { command, stdinPrompt } = buildMarkerCommand(MARKER_ENGINES.copilot, largeHostilePrompt, HOSTILE_MODEL, join(root, "cwd"));
+    const handler = createAgentJobHandler({
+      mode: "review",
+      getServerUrl: () => "http://localhost:1234",
+      getCwd: () => join(root, "cwd"),
+      buildCommand: async () => ({ command, stdinPrompt, cwd: join(root, "cwd"), captureStdout: true, prompt: largeHostilePrompt }),
+    });
+    try {
+      const res = await handler.handle(new Request("http://localhost/api/agents/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: "copilot" }),
+      }), new URL("http://localhost/api/agents/jobs"));
+      expect(res?.status).toBe(201);
+      const record = await until(
+        () => (existsSync(copilotStub.record) ? (JSON.parse(readFileSync(copilotStub.record, "utf8")) as { argv: string[]; stdin: string }) : undefined),
+        "the copilot stub's record",
+      );
+      expect(record.stdin).toBe(largeHostilePrompt);
+      expect(record.argv).toEqual(command.slice(1));
+      expect(record.argv).not.toContain("-p");
+      expect(record.argv).toContain("--deny-tool=shell(git push)");
+      expect(record.argv).toContain("--allow-tool=shell(git:*)");
+      expect(record.argv).toContain(HOSTILE_MODEL);
+      expect(existsSync(join(root, "cwd", "broke"))).toBe(false);
     } finally {
       handler.killAll();
     }
