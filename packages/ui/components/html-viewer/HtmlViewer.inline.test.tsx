@@ -173,6 +173,39 @@ describe.if(hasDom)('HtmlViewer inline', () => {
     }
   });
 
+  test("an Ask AI window or a floating draft open beside the text, focus not in it: Escape still turns the pen off and is used; with focus in it, it is the window's", async () => {
+    let exits = 0;
+    await mount({ height: 240 }, false, { onAnnotateModeExit: () => (exits += 1) });
+    const press = async (from: Element = document.body) => {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      await act(async () => {
+        from.dispatchEvent(event);
+      });
+      return event;
+    };
+    const sides = [
+      '<aside aria-label="Ask AI: the chart" data-chat-window data-popover-layer data-ask-window="t1"><button>Send</button></aside>',
+      '<div role="dialog" aria-modal="true" aria-label="Draft reply" data-popover-layer data-chat-window><textarea></textarea><button>Minimize</button></div>',
+    ];
+    for (const markup of sides) {
+      const holder = document.createElement('div');
+      holder.innerHTML = markup;
+      document.body.appendChild(holder);
+      const before = exits;
+      // Open, unfocused: the pen goes off.
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      expect((await press()).defaultPrevented).toBe(true);
+      expect(exits).toBe(before + 1);
+      // Focus in it: its Escape.
+      const button = holder.querySelector('button')!;
+      button.focus();
+      expect((await press(button)).defaultPrevented).toBe(false);
+      expect(exits).toBe(before + 1);
+      button.blur();
+      holder.remove();
+    }
+  });
+
   test('structural anchors are opt-in: without the prop a posted one is dropped and restore is not flagged', async () => {
     const structure = { path: [1, 0], ns: 'http://www.w3.org/1999/xhtml', attrs: [['class', 'bar']] };
     const saved = { id: 'a1', blockId: '', startOffset: 0, endOffset: 0, type: 'COMMENT', text: 'w', originalText: '[element: bar]', createdA: 1, htmlAnchor: { selector: 'div', tagName: 'div', structure } };

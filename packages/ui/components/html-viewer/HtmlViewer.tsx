@@ -574,7 +574,8 @@ export interface HtmlViewerProps {
    *   `onAnnotateModeExit` first (capture phase) and is used, so the host's
    *   own Escape (closing what the page sits in) does not also run; while the
    *   host has a dialog, sheet, menu, list of choices or popover open
-   *   anywhere in the window, Escape is left to the host.
+   *   anywhere in the window, Escape is left to the host (a side window,
+   *   `data-chat-window`, only while focus is in it).
    * Ignored with `fullViewport` and in live (`src`) mode. Absent → unchanged.
    */
   inline?: HtmlViewerInline;
@@ -611,13 +612,24 @@ const HOST_OVERLAYS = [
   '[data-popover-layer]',
 ].join(', ');
 
+/** A window that stays open beside the host's text (an Ask AI window, a floating draft), as hosts mark it. */
+const SIDE_WINDOW = '[data-chat-window]';
+
+/** Something of the host's is open: modal to the page, or holding the focus. A side window (`SIDE_WINDOW`) the
+ *  person is not in does not count: it may stay open beside the text for as long as they like. */
 function hostOverlayOpen(): boolean {
-  if (document.querySelector(HOST_OVERLAYS)) return true;
+  const active = document.activeElement;
+  const counts = (el: Element) => {
+    const side = el.closest(SIDE_WINDOW);
+    return !side || (active !== null && side.contains(active));
+  };
+  for (const el of Array.from(document.querySelectorAll(HOST_OVERLAYS))) if (counts(el)) return true;
   try {
-    return document.querySelector(':popover-open') !== null;
+    for (const el of Array.from(document.querySelectorAll(':popover-open'))) if (counts(el)) return true;
   } catch {
-    return false;
+    // An engine with no `:popover-open`: nothing is open that way.
   }
+  return false;
 }
 
 /** How a host draws the viewer in its own text (`HtmlViewer` `inline`). */

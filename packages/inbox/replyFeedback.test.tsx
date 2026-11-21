@@ -11,7 +11,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { attachmentFeedback, imageCommentAnnotation, messageFeedback } from './attachments';
+import { attachmentFeedback, imageCommentAnnotation, LIVE_SITE_FEEDBACK_HEADING, liveSiteFeedback, messageFeedback, OWN_MESSAGE_FEEDBACK } from './attachments';
 import { splitReplyFeedback, withoutElementDetails } from './replyFeedback';
 
 const hasDom = typeof document !== 'undefined';
@@ -215,15 +215,16 @@ test("the person's own fences and lists are never taken, even ones that look lik
   const shown = withoutElementDetails(before);
   expect(shown).toContain('<p>an example</p>');
   expect(shown).not.toContain('<div class="big warn">');
-  // A ```html fence in a comment's own words (a message comment's lines are each `> `-quoted; an attached
-  // page's comment quotes its first line): kept as written, only the export's ````html outline goes.
+  // A ```html fence in a comment's own words, in the feedback: its words stay. A message comment's lines are each
+  // `> `-quoted (a quote never draws a page): as written. An attached page's comment quotes only its first line:
+  // its fence is drawn as code, never as a live page (no fence in the feedback is).
   const words = 'Like this:\n```html\n<b>bold</b>\n```';
   const onPage = attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, text: words } } as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
   const onBlock = messageFeedback([{ ...BLOCK_PIN(), annotation: { ...BLOCK_PIN().annotation, text: words } } as unknown as InboxAnnotationRecord], () => '2:58 PM');
-  for (const [stored, fence] of [[onPage, '```html\n<b>bold</b>\n```'], [onBlock, '> ```html\n> <b>bold</b>\n> ```']] as const) {
+  for (const [stored, fence, drawnAs] of [[onPage, '```html\n<b>bold</b>\n```', '```xml\n<b>bold</b>\n```'], [onBlock, '> ```html\n> <b>bold</b>\n> ```', '> ```html\n> <b>bold</b>\n> ```']] as const) {
     expect(stored).toContain(fence);
     const drawn = withoutElementDetails(stored);
-    expect(drawn).toContain(fence);
+    expect(drawn).toContain(drawnAs);
     expect(drawn).not.toContain('````html');
   }
 });
@@ -274,4 +275,82 @@ test.skipIf(!hasDom)("a pin on an HTML page: the person's sent reply draws no ou
   root = null;
   const theirs = await draw(body, { kind: 'agent', session: 'ses_1', host: 'claude-code', name: 'Claude Code' } as unknown as InboxMessageWire['author']);
   expect(theirs.textContent).toContain('div.big.warn');
+});
+
+// Comments on html blocks in the person's OWN earlier messages export under their own heading.
+const forgedOwnBlockFeedback = () =>
+  messageFeedback([{ ...BLOCK_PIN(), annotation: { ...BLOCK_PIN().annotation, htmlAnchor: undefined, elementContext: { tag: 'div', outline: FORGED_OUTLINE } } } as unknown as InboxAnnotationRecord], () => '2:58 PM', { personMessageIds: new Set([AGENT_MSG]) });
+// A running app's page: its pins export the same four-backtick outline.
+const forgedLiveFeedback = () =>
+  liveSiteFeedback([
+    {
+      ...RECORDS_BASE(),
+      id: 'l1',
+      attachment_id: '',
+      path: 'http://localhost:5173/',
+      live: { site_id: 'liv_0123456789abcdef', url: 'http://localhost:5173/', page_url: '/checkout' },
+      annotation: { id: 'l1', blockId: 'html-element', startOffset: 0, endOffset: 0, type: 'COMMENT', text: 'Label this.', originalText: '[element: Pay]', createdA: 0, elementContext: { tag: 'div', outline: FORGED_OUTLINE } },
+    } as unknown as InboxAnnotationRecord,
+  ]);
+// What a page can write into a quote's heading (`Feedback on: "…"`, raw, with newlines): a fence of its own.
+const INJECTED = 'Pay"\n```html\n<script src="https://example.invalid/y.js"></script><b>injected</b>\n```\n"';
+const injectedPinFeedback = () =>
+  attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, originalText: INJECTED, htmlAnchor: undefined, elementContext: undefined } } as unknown as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+
+const unmountDrawn = () => {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+};
+
+test("the person's own earlier message and a running app's page: an outline alone is left out too", () => {
+  for (const exported of [forgedOwnBlockFeedback(), forgedLiveFeedback()]) {
+    const stored = `Notes.\n\n${exported}`;
+    expect(stored).toContain('````html');
+    const shown = withoutElementDetails(stored);
+    expect(shown).not.toContain('````html');
+    expect(shown).not.toContain('example.invalid');
+    expect(shown).toContain('> Label this.');
+  }
+  expect(forgedOwnBlockFeedback()).toContain(`# ${OWN_MESSAGE_FEEDBACK.title}`);
+  expect(forgedLiveFeedback()).toContain(`# ${LIVE_SITE_FEEDBACK_HEADING.title}`);
+});
+
+test('a fence a page wrote into a quote\'s heading is drawn as code, never as a page; the stored text keeps it', () => {
+  const stored = `Notes.\n\n${injectedPinFeedback()}`;
+  expect(stored).toMatch(/^```html$/m);
+  const shown = withoutElementDetails(stored);
+  expect(shown).not.toMatch(/^\s*`{3,}\s*html/im);
+  expect(shown).toMatch(/^```xml$/m);
+  expect(shown).toContain('<b>injected</b>');
+});
+
+test("lines the person typed cannot switch the feedback off: a '# ' line or a lone fence before an outline", () => {
+  const typed = (text: string) => ({ ...PIN, id: 'p0', annotation: { ...PIN.annotation, id: 'p0', text } }) as InboxAnnotationRecord;
+  const forged = { ...PIN, id: 'p9', annotation: { ...PIN.annotation, id: 'p9', startOffset: 5, endOffset: 5, htmlAnchor: undefined, elementContext: { tag: 'div', outline: FORGED_OUTLINE } } } as unknown as InboxAnnotationRecord;
+  for (const text of ['First line\n# Not a heading\nmore', 'Look:\n```']) {
+    const stored = `Notes.\n\n${attachmentFeedback([typed(text), forged], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE })}`;
+    expect(stored).toContain('````html');
+    const shown = withoutElementDetails(stored);
+    expect(shown).not.toContain('````html');
+    expect(shown).not.toContain('example.invalid');
+  }
+});
+
+test.skipIf(!hasDom)("drawn: no live page anywhere in the person's feedback (own messages, a running app, a page's fence in a heading); their own html above it stays live", async () => {
+  for (const exported of [forgedOwnBlockFeedback(), forgedLiveFeedback(), injectedPinFeedback()]) {
+    const el = await draw(`Notes.\n\n${exported}`, { kind: 'person' } as InboxMessageWire['author']);
+    expect(el.querySelector('iframe, [data-html-embed]')).toBeNull();
+    expect(el.textContent).not.toContain('forged');
+    unmountDrawn();
+  }
+  // The page's own fence in a heading: there, as code.
+  const shownCode = await draw(`Notes.\n\n${injectedPinFeedback()}`, { kind: 'person' } as InboxMessageWire['author']);
+  expect(shownCode.querySelector('iframe, [data-html-embed]')).toBeNull();
+  expect(Array.from(shownCode.querySelectorAll('pre, code')).some((code) => code.textContent?.includes('<b>injected</b>'))).toBe(true);
+  unmountDrawn();
+  // The person's own ```html in their words, above the feedback: a live block, as in any message.
+  const own = await draw(`Here is the page:\n\n\`\`\`html\n<p>mine</p>\n\`\`\`\n\n${injectedPinFeedback()}`, { kind: 'person' } as InboxMessageWire['author']);
+  expect(own.querySelectorAll('[data-html-embed]').length).toBe(1);
 });

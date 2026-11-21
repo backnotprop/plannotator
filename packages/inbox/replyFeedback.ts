@@ -13,11 +13,43 @@
  * part of the reply and not as page headings. Display only: an agent's
  * message, and every other surface, draws its headings as before.
  */
-import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE, MESSAGE_FEEDBACK_HEADING, OWN_MESSAGE_FEEDBACK } from './attachments';
+import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE, LIVE_SITE_FEEDBACK_HEADING, MESSAGE_FEEDBACK_HEADING, OWN_MESSAGE_FEEDBACK } from './attachments';
 
-/** The headings the export opens each feedback section with. */
+/** The headings the export opens each feedback section with (the ones the reply's feedback block is split at). */
 const FEEDBACK_HEADINGS = new Set([MESSAGE_FEEDBACK_HEADING.title, OWN_MESSAGE_FEEDBACK.title, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE].map((title) => `# ${title}`));
+/** Every heading a Send's feedback can start with: those, and comments on a running app's pages. */
+const ANY_FEEDBACK_HEADING = new Set([...FEEDBACK_HEADINGS, `# ${LIVE_SITE_FEEDBACK_HEADING.title}`]);
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
+
+/** A fence that closes `opener`: a bare run of its character, at least as long (an info string means it opens one). */
+function closesFence(line: string, opener: string): boolean {
+  const run = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(line)?.[1];
+  return !!run && run[0] === opener[0] && run.length >= opener.length;
+}
+
+/**
+ * Where the first feedback section starts: a heading from `headings` on a line of its own, after a blank line
+ * (or first), outside code fences; -1 when there is none.
+ */
+function feedbackStart(lines: readonly string[], headings: ReadonlySet<string>): number {
+  let fence: string | null = null;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (fence !== null) {
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    const opener = FENCE.exec(line)?.[1];
+    if (opener) {
+      fence = opener;
+      continue;
+    }
+    if (!headings.has(line.trimEnd())) continue;
+    if (index > 0 && lines[index - 1]!.trim() !== '') continue;
+    return index;
+  }
+  return -1;
+}
 
 /**
  * The person's words and the feedback after them: split at the first
@@ -27,58 +59,47 @@ const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 export function splitReplyFeedback(text: string): { words: string; feedback: string } | null {
   if (!text.includes('# Feedback on ')) return null;
   const lines = text.split('\n');
-  let fence: string | null = null;
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
-    const opener = FENCE.exec(line)?.[1];
-    if (fence !== null) {
-      if (opener && opener[0] === fence[0] && opener.length >= fence.length) fence = null;
-      continue;
-    }
-    if (opener) {
-      fence = opener;
-      continue;
-    }
-    if (!FEEDBACK_HEADINGS.has(line.trimEnd())) continue;
-    if (index > 0 && lines[index - 1]!.trim() !== '') continue;
-    return { words: lines.slice(0, index).join('\n').trim(), feedback: lines.slice(index).join('\n').trim() };
-  }
-  return null;
+  const index = feedbackStart(lines, FEEDBACK_HEADINGS);
+  if (index < 0) return null;
+  return { words: lines.slice(0, index).join('\n').trim(), feedback: lines.slice(index).join('\n').trim() };
 }
 
 /** A line of a pinned element's details, as the export writes them after its comment (`elementContextExportBlock`). */
 const ELEMENT_DETAIL = /^- \*\*(?:selector|path|role|name|component|attrs|text|route|box|near)\*\* /;
-/** The sections whose comments can be on an element of a page: an attached page's, and a message's live html block's. */
-const ELEMENT_SECTIONS = [`# ${ATTACHMENT_FEEDBACK_HEADING.title}`, `# ${MESSAGE_FEEDBACK_HEADING.title}`];
-/** The fence that opens a pinned element's HTML outline there. */
+/** The fence that opens a pinned element's HTML outline (`elementContextExportBlock`), and the one that closes it. */
 const ELEMENT_OUTLINE = /^````html\s*$/;
+const ELEMENT_OUTLINE_CLOSE = /^\s{0,3}`{4,}\s*$/;
+/**
+ * A line the window's parser would take as a fence whose page is drawn live (`html`) or drawn (`svg`): any
+ * indentation, three or more backticks, that language first (`isHtmlEmbedLanguage`, `isSvgFenceLanguage`).
+ */
+const DRAWN_FENCE = /^(\s*`{3,}\s*)(html|svg)(?=\s|$)/i;
 
 /**
- * The person's own reply as the window draws it, without the page details a
- * pin on an HTML page carries for the agent (the owner's audit, 2026-11-19:
- * the sent reply showed the element's outline, drawn as a little page, then
- * its selector, path, box in pixels and the like). Under "# Feedback on the
- * attached files", and under "# Feedback on your messages" (a pin on an
- * element of a message's live html block, whose outline fence would draw as a
- * little live page), each pinned element's outline fence and the detail lines
- * after it are left out of the drawing, so the comment reads as its heading
- * (`Feedback on: "412 ms"`) and the person's words. The stored text, which is
- * what the agent reads, keeps them all. Display only; any other fence and any
- * other list stays as written.
- *
- * In those sections a ````html fence is the export's outline: the export
- * writes the person's words after `> ` and the quoted words' own fences carry
- * no language. So it is left out whether or not detail lines follow it (an
- * outline with no selector, path or box, which a page can post), and never
- * drawn as a live page in the person's own reply. (An attached page's comment
- * quotes only its first line: a ````html line a person typed on its own later
- * in it is hidden with it, in the drawing only.)
+ * The person's own reply as the window draws it (display only; the stored
+ * text, which is what the agent reads, keeps every line). From the first
+ * feedback heading to the end of the reply (everything a Send wrote after the
+ * person's words: comments on agents' messages, on the person's own, on
+ * attached files, on a guided review, on a running app's pages):
+ * - each pinned element's ````html outline and the detail lines after it
+ *   (`- **selector**`, `path`, `box` and the like), or two or more detail
+ *   lines after a blank line, are left out (the owner's audit, 2026-11-19: the
+ *   sent reply showed the outline drawn as a little page, then its selector,
+ *   path and box), so a comment reads as its heading and the person's words.
+ *   The outline goes whether or not detail lines follow it: a page can post
+ *   an outline alone;
+ * - no other fence there is ever drawn as a live page: an ```html or ```svg
+ *   fence (a page's own words in a quote's heading can open one) is drawn as
+ *   code (`xml`).
+ * The person's own words before the first feedback heading are drawn as
+ * written, their ```html fences live as in any message.
  */
 export function withoutElementDetails(markdown: string): string {
-  if (!ELEMENT_SECTIONS.some((heading) => markdown.includes(heading))) return markdown;
+  if (!markdown.includes('# Feedback on ')) return markdown;
   const lines = markdown.split('\n');
-  const kept: string[] = [];
-  let inSection = false;
+  const start = feedbackStart(lines, ANY_FEEDBACK_HEADING);
+  if (start < 0) return markdown;
+  const kept = lines.slice(0, start);
   let changed = false;
   /** How many detail lines start at `from`. */
   const detailsAt = (from: number) => {
@@ -86,40 +107,43 @@ export function withoutElementDetails(markdown: string): string {
     while (end < lines.length && ELEMENT_DETAIL.test(lines[end]!)) end++;
     return end - from;
   };
-  for (let index = 0; index < lines.length; index++) {
+  /** The line as drawn: a fence that would draw a page draws code. */
+  const defused = (line: string) => {
+    const drawn = line.replace(DRAWN_FENCE, '$1xml');
+    if (drawn !== line) changed = true;
+    return drawn;
+  };
+  let fence: string | null = null;
+  for (let index = start; index < lines.length; index++) {
     const line = lines[index]!;
-    if (ELEMENT_SECTIONS.includes(line)) inSection = true;
-    else if (inSection && /^# /.test(line)) inSection = false;
-    if (inSection && ELEMENT_OUTLINE.test(line)) {
-      // The outline's fence and the details right after it (none or more): one pinned element. A fence
-      // that is never closed would hold the rest: it is left out to the end.
+    if (ELEMENT_OUTLINE.test(line)) {
+      // The outline and the details right after it (none or more): one pinned element. An outline that is
+      // never closed would hold the rest: it is left out to the end.
       let close = index + 1;
-      while (close < lines.length && lines[close]!.trimEnd() !== '````') close++;
+      while (close < lines.length && !ELEMENT_OUTLINE_CLOSE.test(lines[close]!)) close++;
       index = close < lines.length ? close + detailsAt(close + 1) : lines.length;
       changed = true;
       continue;
     }
+    if (fence !== null) {
+      // Inside a fence (the person's, a file's): kept, but never a live page.
+      if (closesFence(line, fence)) fence = null;
+      kept.push(defused(line));
+      continue;
+    }
     const opener = FENCE.exec(line)?.[1];
     if (opener) {
-      // Any other fence is the person's or the file's: kept whole.
-      kept.push(line);
-      let close = index + 1;
-      while (close < lines.length) {
-        const end = FENCE.exec(lines[close]!)?.[1];
-        kept.push(lines[close]!);
-        if (end && end[0] === opener[0] && end.length >= opener.length) break;
-        close++;
-      }
-      index = close;
+      fence = opener;
+      kept.push(defused(line));
       continue;
     }
     // Details with no outline (a short export): two or more in a row, after a blank line.
-    if (inSection && ELEMENT_DETAIL.test(line) && (lines[index - 1] ?? '').trim() === '' && detailsAt(index) >= 2) {
+    if (ELEMENT_DETAIL.test(line) && (lines[index - 1] ?? '').trim() === '' && detailsAt(index) >= 2) {
       index += detailsAt(index) - 1;
       changed = true;
       continue;
     }
-    kept.push(line);
+    kept.push(defused(line));
   }
   return changed ? kept.join('\n') : markdown;
 }
