@@ -23,7 +23,7 @@ import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-too
 import { startInboxServer, type InboxServer } from "./inbox";
 import { cleanInboxSessionLabel, createInboxLiveSessions } from "./inbox-sessions";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
-import { createInboxSessionLabels } from "./inbox-session-labels";
+import { createInboxSessionLabels, INBOX_SESSION_LABELS_KEPT } from "./inbox-session-labels";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -401,7 +401,6 @@ describe("session labels across an Inbox restart (#3462)", () => {
 
     const second = await startInboxServer({ dataDir });
     servers.push(second);
-    // Nothing has polled yet: the session is not live, and its label is the persisted one.
     expect((await threads(second)).session_labels.ses_a).toBe("Fix login redirect");
   });
 
@@ -428,5 +427,15 @@ describe("session labels across an Inbox restart (#3462)", () => {
     servers.push(second);
     await poll(second, "ses_a", project, {});
     expect((await threads(second)).session_labels.ses_a).toBeUndefined();
+  });
+
+  test("only the newest sessions are kept on disk", async () => {
+    const { dataDir } = await restartable();
+    const labels = createInboxSessionLabels(inboxDir(dataDir));
+    for (let i = 0; i < INBOX_SESSION_LABELS_KEPT + 5; i++) labels.note(`ses_${i}`, `Name ${i}`, null);
+    const kept = Object.keys(createInboxSessionLabels(inboxDir(dataDir)).labels());
+    expect(kept.length).toBe(INBOX_SESSION_LABELS_KEPT);
+    expect(kept).not.toContain("ses_4");
+    expect(kept).toContain("ses_5");
   });
 });

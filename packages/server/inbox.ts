@@ -1363,7 +1363,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const withIcons = { ...wire, icons: agentIconFiles.list() };
     for (const listener of agentFaceListeners) listener(withIcons);
   });
-  // Each session's last known label and host title (inbox/session-labels.json): what an ended session shows after a restart.
   const sessionLabelStore = createInboxSessionLabels(inboxDir(dataDir));
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
@@ -6078,8 +6077,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const snoozedMode = snoozedModeOf(url);
         // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
-        // A session the Inbox is not hearing now (ended, or not heard since a restart) shows its last known label and
-        // title; a live session's own always wins, and a live one with none shows none.
         const liveNow = new Set(live.allLive().map((s) => s.session));
         const remembered = (all: Record<string, string>) => {
           const out: Record<string, string> = {};
