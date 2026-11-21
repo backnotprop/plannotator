@@ -92,6 +92,7 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
+import { inboxPairedCommandUnavailable } from "./inbox-call-command";
 import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
@@ -831,6 +832,13 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     const unknown = rest.find((arg) => arg !== "--tailscale");
     if (unknown) usageError(`Unknown inbox restart option: ${unknown} (restart takes only --tailscale)`);
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
+  }
+
+  // A paired cloud agent's machine (PLANNOTATOR_PAIRING) has no Inbox of its own: these reach the person's Inbox only
+  // through routes on their computer, which no door action carries. Said plainly, never "Inbox is off".
+  if ((args[0] === "projects" || args[0] === "rows" || args[0] === "icon") && process.env.PLANNOTATOR_PAIRING && !isInboxTurnedOn(dataDir)) {
+    process.stderr.write(`${inboxPairedCommandUnavailable(`plannotator inbox ${args[0]}`)}\n`);
+    process.exit(1);
   }
 
   if (args[0] === "projects") {

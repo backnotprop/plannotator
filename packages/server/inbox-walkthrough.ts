@@ -3,8 +3,18 @@
  * from the project when it is sent. They become a patch of context lines only, stored with the review like any other,
  * so the same viewers draw the code as it was then, with nothing marked as changed.
  */
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
+import { MAX_REVIEW_FILE_CONTENT_BYTES } from "@plannotator/shared/review-core";
+
+/** The most one file a walkthrough names may be: the review's own read cap for a file (5 MB). */
+export const INBOX_WALKTHROUGH_FILE_MAX_BYTES = MAX_REVIEW_FILE_CONTENT_BYTES;
+/** The most all the files one walkthrough names may come to: what one agent-door call takes as data (16 MB). */
+export const INBOX_WALKTHROUGH_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
+
+const MB = 1024 * 1024;
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 export type InboxWalkthroughRead = { ok: true; guide: Record<string, unknown>; patch: string } | { ok: false; error: string };
 
@@ -66,18 +76,57 @@ export function walkthroughFilePatch(path: string, text: string, ranges: [number
 
 const outside = (path: string) => !path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path);
 
-/** A file named relative to `folder`, once it is certain to be a file inside it (a link out of the folder isn't). */
-function fileInFolder(folder: string, file: string): { full: string; path: string } | null {
+/**
+ * A file named relative to `folder`, once it is certain to be a file inside it (a link out of the folder isn't), with
+ * the realpath it is read at. A hidden folder inside the project (`.github/`) is read, as before.
+ */
+function fileInFolder(folder: string, file: string): { full: string; real: string; path: string } | null {
   const full = resolve(folder, file);
   const path = relative(folder, full);
   if (outside(path)) return null;
+  let real: string;
   try {
-    if (!statSync(full).isFile() || outside(relative(realpathSync(folder), realpathSync(full)))) return null;
+    real = realpathSync(full);
+    if (!statSync(real).isFile() || outside(relative(realpathSync(folder), real))) return null;
   } catch {
     return null;
   }
-  return { full: join(folder, path), path: path.split(sep).join("/") };
+  return { full: join(folder, path), real, path: path.split(sep).join("/") };
 }
+
+/**
+ * The bytes of one named file: its realpath opened once without following a link, a regular file of at most
+ * `max` bytes (by its size and by what is read), else why not.
+ */
+function readNamedFile(real: string, path: string, max: number): Buffer | { error: string } {
+  let fd: number;
+  try {
+    fd = openSync(real, OPEN_FLAGS);
+  } catch {
+    return { error: `${path} could not be read.` };
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return { error: `${path} could not be read.` };
+    if (stat.size > max) return { error: tooLarge(path, max) };
+    const bytes = Buffer.alloc(Math.min(stat.size, max) + 1);
+    let read = 0;
+    while (read < bytes.length) {
+      const n = readSync(fd, bytes, read, bytes.length - read, read);
+      if (n === 0) break;
+      read += n;
+    }
+    if (read > max) return { error: tooLarge(path, max) };
+    return bytes.subarray(0, read);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const tooLarge = (path: string, max: number) =>
+  max < INBOX_WALKTHROUGH_FILE_MAX_BYTES
+    ? `${path}: the files this walkthrough names come to more than ${INBOX_WALKTHROUGH_TOTAL_MAX_BYTES / MB} MB, the most one reads. Name fewer or smaller files, or send guide with patch instead.`
+    : `${path} is larger than ${INBOX_WALKTHROUGH_FILE_MAX_BYTES / MB} MB, the most a walkthrough reads of one file. Name a smaller file, or send guide with patch instead.`;
 
 /**
  * The guide and patch to check and store, from a guide whose `diffs` name `file` and maybe `lines`. A `patch` the agent
@@ -98,7 +147,7 @@ export function readInboxWalkthrough(guide: unknown, folders: readonly string[])
   const { unplacedFiles: _unplaced, ...rest } = raw as Record<string, unknown>;
   if (!Array.isArray(rest.sections)) return { ok: false, error: "`guide.sections` must be a list of chapters." };
   const problems: string[] = [];
-  const named = new Map<string, { path: string; full: string; ranges: [number, number][] | null }>();
+  const named = new Map<string, { path: string; full: string; real: string; ranges: [number, number][] | null }>();
   const sections = rest.sections.map((section: unknown) => {
     if (!section || typeof section !== "object" || !Array.isArray((section as { diffs?: unknown }).diffs)) return section;
     const diffs = (section as { diffs: unknown[] }).diffs.map((ref: unknown) => {
@@ -107,6 +156,12 @@ export function readInboxWalkthrough(guide: unknown, folders: readonly string[])
       const found = folders.map((folder) => fileInFolder(folder, kept.file)).find(Boolean);
       if (!found) {
         problems.push(`${kept.file} isn't a file in the project.`);
+        return kept;
+      }
+      // A secret's name, as named and where it leads (the rule attachments use): never read, for any agent.
+      const secret = inboxAttachmentNameRefusal(found.full) ?? inboxAttachmentNameRefusal(found.real);
+      if (secret) {
+        problems.push(`${kept.file}: .env files are never read into a walkthrough (they hold secrets).`);
         return kept;
       }
       const ranges = lines === undefined || lines === null ? null : walkthroughRangesOf(lines);
@@ -120,8 +175,17 @@ export function readInboxWalkthrough(guide: unknown, folders: readonly string[])
   if (problems.length > 0) return { ok: false, error: problems.join("\n") };
   if (named.size === 0) return { ok: false, error: "Name at least one file: a chapter's `diffs` take `file` and `lines`." };
   let patch = "";
-  for (const { path, full, ranges } of named.values()) {
-    const bytes = readFileSync(full);
+  // At most INBOX_WALKTHROUGH_FILE_MAX_BYTES of a file and INBOX_WALKTHROUGH_TOTAL_MAX_BYTES in all, judged before
+  // each read: what would pass a cap is refused, never read whole.
+  let left = INBOX_WALKTHROUGH_TOTAL_MAX_BYTES;
+  for (const { path, real, ranges } of named.values()) {
+    const bytes = readNamedFile(real, path, Math.min(INBOX_WALKTHROUGH_FILE_MAX_BYTES, left));
+    if (!Buffer.isBuffer(bytes)) {
+      problems.push(bytes.error);
+      if (left < INBOX_WALKTHROUGH_FILE_MAX_BYTES) break;
+      continue;
+    }
+    left -= bytes.length;
     if (bytes.includes(0)) {
       problems.push(`${path} isn't text.`);
       continue;

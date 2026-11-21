@@ -168,6 +168,37 @@ export function blankInlineCode(text: string): string {
 }
 
 /**
+ * The body with each image source outside code that `rename` names (by the
+ * source as `inboxMessageImageRefsInOrder` gives it) written as its new value:
+ * a markdown target percent-encoded, an `<img src>` quoted. Everything else is
+ * left exactly as it was.
+ */
+export function renameInboxMessageImageSources(body: string, rename: ReadonlyMap<string, string>): string {
+  if (rename.size === 0) return body;
+  const text = blankCode(body);
+  const edits: { start: number; end: number; value: string }[] = [];
+  for (const match of text.matchAll(new RegExp(MARKDOWN_IMAGE_RE.source, "dg"))) {
+    const [start, end] = match.indices![1]!;
+    const next = rename.get(body.slice(start, end));
+    if (next !== undefined) edits.push({ start, end, value: encodeURIComponent(next).replace(/[()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`) });
+  }
+  for (const match of text.matchAll(new RegExp(HTML_IMG_SRC_RE.source, "dgi"))) {
+    const group = [1, 2, 3].find((n) => match.indices![n]);
+    if (group === undefined) continue;
+    const [start, end] = match.indices![group]!;
+    const next = rename.get(decodeAttribute(body.slice(start, end)));
+    if (next === undefined) continue;
+    const quoted = `"${next.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
+    // A quoted value keeps its quotes: the edit covers them too.
+    edits.push(group === 3 ? { start, end, value: quoted } : { start: start - 1, end: end + 1, value: quoted });
+  }
+  edits.sort((a, b) => b.start - a.start);
+  let out = body;
+  for (const edit of edits) out = out.slice(0, edit.start) + edit.value + out.slice(edit.end);
+  return out;
+}
+
+/**
  * The images the body shows, each once, in the order the text shows them:
  * the sources `inboxMessageImageRefs` finds, minus any inside a code block or
  * an inline code span (drawn as code, never as an image). What the store

@@ -1,16 +1,20 @@
+import { statSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { inboxCloudHostOf } from "@plannotator/core/inbox-cloud";
 import type { InboxProject } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxDevice } from "@plannotator/shared/inbox/devices";
-import { bodyShowsLocalImages } from "@plannotator/shared/inbox/inline-images";
+import type { AgentAttachedFile } from "@plannotator/shared/inbox/agent-pictures";
+import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { inboxUploadAttachments, readInboxUpload, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { bytesOfBase64, createInboxAgentPieces, inboxAgentPieceAction } from "./inbox-agent-pieces";
-import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
+import { hasCloudWake, INBOX_CLOUD_PLACES_DIR, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
 import { prototypePlace } from "./inbox-live";
 import { isWebPrototype } from "./inbox-web-prototypes";
+import type { InboxCloudSendFile } from "./inbox-cloud-pictures";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { fail, okComplete, type ToolResult } from "./inbox-mcp-result";
 
@@ -24,7 +28,6 @@ const EVERY_PROJECT = "\u0000every-project";
 
 const PATH_FIELDS: Record<string, string> = {
   project_path: `project_path: a folder on the person's computer, which a cloud agent does not name. Pass "project" with a project's name instead (whoami lists them).`,
-  walkthrough: "walkthrough: it reads files from the project's folder on the person's computer, which a cloud agent cannot ask for. Send guide with patch instead.",
 };
 
 export interface InboxAgentDoorDevices {
@@ -58,6 +61,24 @@ class DoorRefusal extends Error {
 
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+/** Fields that hold a place on the person's computer (a file's path, a project's folder): never handed to a cloud agent. */
+const LOCAL_PATH_FIELDS = new Set(["path", "named_path", "base_path", "root", "project_path", "working_folder", "cwd"]);
+
+/** A tool's structured result with every LOCAL_PATH_FIELDS field left out, at any depth; names, ids and the rest stay. */
+export function withoutLocalPaths(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutLocalPaths);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !LOCAL_PATH_FIELDS.has(key)).map(([key, inner]) => [key, withoutLocalPaths(inner)]));
+}
+
+const isFolder = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   const { store, agents } = context;
   const pieces = createInboxAgentPieces(store.dir);
@@ -72,8 +93,13 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     return false;
   };
 
-  const contextFor = (agent: InboxCloudAgent, uploads: readonly string[]): InboxMcpContext => ({
+  /**
+   * The context of one call. `files`: what it attached in this send, always set (empty when nothing), so every picture
+   * in what it writes comes from those bytes and nothing is ever looked for on this computer (inbox-cloud-pictures.ts).
+   */
+  const contextFor = (agent: InboxCloudAgent, files: readonly InboxCloudSendFile[]): InboxMcpContext => ({
     ...context.mcp,
+    inlineImageFiles: files,
     resolveProject: async (path) => {
       const found = store.projectByRoot(path) ?? (path === agents.homeRoot(agent) ? agents.home(agent) : null);
       if (!found) throw new InboxError("project_not_found", "No such project.");
@@ -81,9 +107,11 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     },
     projectRootOf: undefined,
     findProjects: async (path) => (path === EVERY_PROJECT ? { projects: [], unresolved: false, every: true } : { projects: [store.projectByRoot(path)].filter((p): p is InboxProject => p !== null), unresolved: false }),
+    // This send's own uploads only (the ones its body does not show as pictures), each once.
     recordAttachments: async (ids) => {
-      if (ids.length !== uploads.length || ids.some((id, i) => id !== uploads[i])) throw new InboxError("attachment_path_refused", "attachments: uploaded bytes only.");
-      return inboxUploadAttachments(store.dir, [...uploads], new Date(context.mcp.now?.() ?? Date.now()).toISOString());
+      const uploads = new Set(files.map((file) => file.id));
+      if (new Set(ids).size !== ids.length || ids.some((id) => typeof id !== "string" || !uploads.has(id))) throw new InboxError("attachment_path_refused", "attachments: uploaded bytes only.");
+      return inboxUploadAttachments(store.dir, [...ids] as string[], new Date(context.mcp.now?.() ?? Date.now()).toISOString());
     },
     checkPrototypeApps: async (apps, probing) => {
       const app = apps.find((candidate) => !isWebPrototype(candidate.target));
@@ -94,11 +122,8 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
         { field: "body" },
       );
     },
-    walkthroughThread: () => false,
     // Branch reviews: a cloud agent's report is a branch that lives wherever it pushed it (inbox-mcp-branch.ts).
     cloudAgent: { homeRoot: agents.homeRoot(agent) },
-    // A routine runs an agent on the person's computer: kept to the agents on it.
-    scheduledOn: () => false,
     sessionWakes: async (_host, session) => session === agent.session && hasCloudWake(agent),
   });
 
@@ -126,12 +151,16 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     const named = store.listProjects().filter((project) => sameName(project.name, value));
     if (named.length === 1) return named[0]!;
     if (named.length > 1) throw new DoorRefusal("project_ambiguous", `${JSON.stringify(value.trim())} names ${named.length} projects: ${named.map((p) => `${p.id}`).join(", ")}. Pass one of these ids as project.`);
+    // A repository by its git address (https://github.com/acme/api, git@github.com:acme/api.git): the one project
+    // whose origin it is, as a branch report finds it. One no project here has is not found: nothing is made for it.
+    const byRemote = context.mcp.branches?.projectOfRemote?.(value.trim()) ?? null;
+    if (byRemote) return byRemote;
     if (sameName(agents.homeName(agent), value)) return agents.home(agent);
     throw new DoorRefusal("project_not_found", `No project is named ${JSON.stringify(value.trim())}. Projects: ${projectNames().join(", ") || "none yet"}.`);
   };
 
   const projectNames = () => store.listProjects().map((project) => project.name);
-  const receive = async (agent: InboxCloudAgent, value: unknown): Promise<string[]> => {
+  const receive = async (agent: InboxCloudAgent, value: unknown): Promise<AgentAttachedFile[]> => {
     if (value === undefined) return [];
     if (!Array.isArray(value)) throw new DoorRefusal("validation_error", "attachments: a list of { name, data } (data: the file's bytes as base64), or { upload } for a file sent in pieces.");
     const files = value.map((item, i): { piece: ReturnType<typeof pieces.take> } | { name: string; bytes: Buffer } => {
@@ -150,10 +179,12 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     }
     const at = new Date(context.mcp.now?.() ?? Date.now()).toISOString();
     const ids: string[] = [];
+    const received: AgentAttachedFile[] = [];
     try {
       for (const file of files) {
         if ("piece" in file) {
           ids.push((await receiveInboxUpload(store.dir, file.piece.name, Bun.file(file.piece.path).stream(), { at })).upload_id);
+          received.push({ id: ids[ids.length - 1]!, name: file.piece.name });
           continue;
         }
         const bytes = file.bytes;
@@ -164,14 +195,22 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
           },
         });
         ids.push((await receiveInboxUpload(store.dir, file.name, stream, { at })).upload_id);
+        received.push({ id: ids[ids.length - 1]!, name: file.name });
       }
     } catch (error) {
       removeInboxUploads(store.dir, ids);
       throw error;
     }
     for (const file of files) if ("piece" in file) file.piece.drop();
-    return ids;
+    return received;
   };
+
+  /** The files a send attached, with the Inbox's own copy of each (the only place a picture of it is read from). */
+  const sendFilesOf = (received: readonly AgentAttachedFile[]): InboxCloudSendFile[] =>
+    received.flatMap((file) => {
+      const upload = readInboxUpload(store.dir, file.id);
+      return upload ? [{ id: file.id, name: upload.name, path: inboxBlobPath(store.dir, upload.sha256) }] : [];
+    });
 
   const whoami = (agent: InboxCloudAgent): ToolResult => {
     const home = agents.homeName(agent);
@@ -180,6 +219,44 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       `You are ${agent.name}, a cloud agent paired with this Inbox. You can read, search and write in every thread of every project here. A new thread goes in ${home} unless you pass "project" with another project's name.${projects.length > 0 ? ` Projects: ${projects.join(", ")}.` : ""} The Inbox answered, so your setup works.`,
       { name: agent.name, project: home, projects },
     );
+  };
+  /**
+   * A card call's project when the agent names none, as reply_to takes its thread's: the card's own for a card_id,
+   * the thread's for a create with thread_id, every project for list (as read_thread's list and search), else its home.
+   */
+  const cardProjectRoot = (agent: InboxCloudAgent, call: Record<string, unknown>): string => {
+    const rootOf = (projectId: string | undefined) => (projectId ? store.project(projectId)?.root : undefined);
+    if (typeof call.card_id === "string") return rootOf(store.card(call.card_id.trim())?.project_id) ?? agents.homeRoot(agent);
+    if (call.op === "list") return EVERY_PROJECT;
+    if (typeof call.thread_id === "string") return rootOf(store.message(call.thread_id.trim())?.project_id) ?? agents.homeRoot(agent);
+    return agents.homeRoot(agent);
+  };
+  /**
+   * A walkthrough reads the files it names from the project's folder on the person's computer (inbox-walkthrough.ts),
+   * as it does for a local agent, whatever commit that checkout is at. A project with no folder there (the agent's own
+   * place, or one whose folder is gone) has nothing to read: said plainly, before anything is sent.
+   */
+  const refuseWalkthroughWithoutCheckout = (agent: InboxCloudAgent, args: Record<string, unknown>) => {
+    const replied = typeof args.reply_to === "string" ? store.message(args.reply_to.trim()) : null;
+    const replyThread = replied?.thread_id ?? null;
+    const asked = args.walkthrough === true || (!!replyThread && !!context.mcp.walkthroughThread?.(replyThread));
+    if (!asked || args.snapshot !== undefined || args.guide === undefined || !context.mcp.codeReviewOn?.()) return;
+    const named = args[PROJECT_FIELD] === undefined ? null : projectNamed(agent, args[PROJECT_FIELD]);
+    const project = named ?? (replied ? store.project(replied.project_id) : null);
+    const root = project?.root ?? agents.homeRoot(agent);
+    // A cloud agent's own place (a folder under the Inbox's data, made for its threads) holds no checkout.
+    const inPlaces = relative(join(store.dir, INBOX_CLOUD_PLACES_DIR), root);
+    const ownPlace = !inPlaces.startsWith("..") && !isAbsolute(inPlaces);
+    if (!ownPlace && isFolder(root)) return;
+    throw new DoorRefusal(
+      "no_checkout",
+      `walkthrough: it reads the files it names from the project's checkout on the person's computer, and ${project?.name ?? agents.homeName(agent)} has none there. Pass project with a project that is checked out on their computer (whoami lists them; its git address works too), or send guide with patch instead.`,
+    );
+  };
+  /** A routine with no folder: the project the agent names, as a local agent's runs in its own project; else a new scratch folder (a cloud agent has no folder here). */
+  const routineFolder = (call: Record<string, unknown>, named: InboxProject | null) => {
+    if (named) call.project_path = named.root;
+    else if (call.op === "create" && call.folder === undefined) call.folder = { scratch: true };
   };
   const argumentsFor = (agent: InboxCloudAgent, tool: string, fields: readonly string[], args: Record<string, unknown>, uploads: readonly string[], commandId: string | null) => {
     const { [PROJECT_FIELD]: projectName, ...call } = args;
@@ -194,6 +271,10 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
         else call.all_projects ??= true;
       } else if (tool === "read_thread") {
         if (typeof call.thread_id !== "string" && typeof call.message_id !== "string") call.project_path = named?.root ?? EVERY_PROJECT;
+      } else if (tool === "card") {
+        call.project_path = named?.root ?? cardProjectRoot(agent, call);
+      } else if (tool === "routine") {
+        routineFolder(call, named);
       } else if (named || typeof call.reply_to !== "string") {
         call.project_path = named?.root ?? agents.homeRoot(agent);
       }
@@ -216,10 +297,6 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       if (extra) throw new DoorRefusal("validation_error", `${extra}: whoami takes no fields.`);
       return whoami(agent);
     }
-    // The person can still ask for one in a cloud agent's thread (/create-routine): say why not, true whether Routines are on or off.
-    if (tool === "routine") {
-      throw new DoorRefusal("tool_not_allowed", "routine: a routine runs an agent on the person's computer, and you run elsewhere, so nothing was written. Tell the person to make it in Routines in the Inbox, or to ask an agent on their computer.");
-    }
     const pieceResult = inboxAgentPieceAction(pieces, agent.session, tool, args);
     if (pieceResult) return pieceResult;
 
@@ -230,17 +307,22 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     const unknown = Object.keys(args).find((field) => !open.includes(field));
     if (unknown) throw new DoorRefusal("validation_error", `${unknown}: not taken through the agent door. ${tool} takes: ${open.join(", ") || "no fields"}.`);
 
-    if (typeof args.body === "string" && bodyShowsLocalImages(args.body)) {
-      throw new DoorRefusal("image_path_refused", "body: a picture shown by path (![alt](path)) is not taken from a cloud agent: the Inbox opens no path for it. Put the picture in attachments instead (plannotator inbox call reads a path there from your own disk and sends its bytes); it shows below the message.");
+    // A routine's files are paths on the person's computer that each run gets (the tool takes no bytes): not named by
+    // a cloud agent, whose paths are on its own machine. The rest of a routine is as a local agent's (the owner, 2026-11-21).
+    if (tool === "routine" && args.attachments !== undefined) {
+      throw new DoorRefusal("attachment_path_refused", "attachments: a routine's files are paths on the person's computer, which a cloud agent does not name. Make the routine without them; the person can add files to it in Routines in the Inbox.");
     }
-    const uploads = fields.includes("attachments") ? await receive(agent, args.attachments) : [];
+    if (tool === "submit_guide") refuseWalkthroughWithoutCheckout(agent, args);
+    const received = tool !== "routine" && fields.includes("attachments") ? await receive(agent, args.attachments) : [];
     try {
-      const sent = argumentsFor(agent, tool, fields, args, uploads, commandId);
-      const answer = await mcpRequest(contextFor(agent, uploads), "tools/call", { name: tool, arguments: sent });
+      // Every file goes to the tool; the send keeps below the message the ones its body does not show (inbox-cloud-pictures.ts).
+      const sent = argumentsFor(agent, tool, fields, args, received.map((file) => file.id), commandId);
+      const answer = await mcpRequest(contextFor(agent, sendFilesOf(received)), "tools/call", { name: tool, arguments: sent });
       if (!answer || answer.error) return fail("internal_error", answer?.error?.message ?? "The Inbox gave no answer.");
-      return answer.result as ToolResult;
+      const result = answer.result as ToolResult;
+      return result.structuredContent === undefined ? result : { ...result, structuredContent: withoutLocalPaths(result.structuredContent) as ToolResult["structuredContent"] };
     } finally {
-      removeInboxUploads(store.dir, uploads);
+      removeInboxUploads(store.dir, received.map((file) => file.id));
     }
   };
   const handle = async (req: Request): Promise<Response> => {

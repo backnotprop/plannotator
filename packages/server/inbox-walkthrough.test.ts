@@ -1,12 +1,14 @@
 /**
- * A walkthrough's read: what an agent names becomes a patch of context lines, or a refusal that says which file.
+ * A walkthrough's read: what an agent names becomes a patch of context lines, or a refusal that says which file. The
+ * read is the same for an agent here and a paired cloud agent: a .env file is never read (as named or through a link),
+ * nothing outside the folder is, and no file past its cap, nor more than the guide's cap in all, is read whole.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
-import { readInboxWalkthrough, walkthroughFilePatch, walkthroughRangesOf } from "./inbox-walkthrough";
+import { INBOX_WALKTHROUGH_FILE_MAX_BYTES, INBOX_WALKTHROUGH_TOTAL_MAX_BYTES, readInboxWalkthrough, walkthroughFilePatch, walkthroughRangesOf } from "./inbox-walkthrough";
 import { registerInboxGuideTools } from "./inbox-guides";
 import type { InboxMcpContext } from "./inbox-mcp";
 
@@ -100,6 +102,35 @@ describe("reading a guide", () => {
       const read = readInboxWalkthrough(guideOf([{ file }]), [project]);
       expect(refused(read)).toBe(`${file} isn't a file in the project.`);
     }
+  });
+
+  test("a .env file is never read, by its name or through a link to one; a hidden folder inside the project still is", () => {
+    const { project } = folder();
+    writeFileSync(join(project, ".env"), "TOKEN=secret\n");
+    writeFileSync(join(project, ".env.local"), "TOKEN=secret\n");
+    symlinkSync(join(project, ".env"), join(project, "settings.txt"));
+    for (const file of [".env", ".env.local", "settings.txt"]) {
+      const read = readInboxWalkthrough(guideOf([{ file }]), [project]);
+      expect(refused(read)).toBe(`${file}: .env files are never read into a walkthrough (they hold secrets).`);
+    }
+    mkdirSync(join(project, ".github"), { recursive: true });
+    writeFileSync(join(project, ".github", "ci.yml"), "on: push\n");
+    const read = readInboxWalkthrough(guideOf([{ file: ".github/ci.yml" }]), [project]);
+    expect(read.ok && read.patch).toContain(" on: push");
+  });
+
+  test("a file past the per-file cap, or files past the guide's cap in all, are refused by name, never read whole", () => {
+    const { project } = folder();
+    expect([INBOX_WALKTHROUGH_FILE_MAX_BYTES, INBOX_WALKTHROUGH_TOTAL_MAX_BYTES]).toEqual([5 * 1024 * 1024, 16 * 1024 * 1024]);
+    writeFileSync(join(project, "huge.ts"), Buffer.alloc(INBOX_WALKTHROUGH_FILE_MAX_BYTES + 1, "a"));
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "huge.ts", lines: "1" }]), [project]))).toBe("huge.ts is larger than 5 MB, the most a walkthrough reads of one file. Name a smaller file, or send guide with patch instead.");
+    // Four files of 4.5 MB: each under its cap, the fourth past the guide's 16 MB.
+    const part = Buffer.alloc(4.5 * 1024 * 1024, "b");
+    for (const name of ["a.ts", "b.ts", "c.ts", "d.ts"]) writeFileSync(join(project, name), part);
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "a.ts", lines: "1" }, { file: "b.ts", lines: "1" }, { file: "c.ts", lines: "1" }, { file: "d.ts", lines: "1" }]), [project]))).toBe(
+      "d.ts: the files this walkthrough names come to more than 16 MB, the most one reads. Name fewer or smaller files, or send guide with patch instead.",
+    );
+    expect(readInboxWalkthrough(guideOf([{ file: "a.ts", lines: "1" }, { file: "b.ts", lines: "1" }, { file: "c.ts", lines: "1" }]), [project]).ok).toBe(true);
   });
 
   test("every problem at once, each by name: a missing file, bad lines, a binary", () => {
