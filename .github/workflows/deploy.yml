@@ -24,7 +24,7 @@ name: Deploy
 #
 # Both paths reach one deploy-marketing job: one definition, one concurrency
 # group. Before it syncs, scripts/site-deploy.ts reads the commit live now (a
-# record in the bucket, _site-deploy/<commit>, written after each publish; a
+# record in the bucket, _site-deploy/<commit>, added before each sync; a
 # person reads https://plannotator.ai/_site-deploy/live.txt or the Deploy run's
 # notice) and never publishes a commit older than it (in its history), nor the
 # same commit or one with no change to what the site is built from again. A
@@ -154,7 +154,9 @@ jobs:
           fi
           echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
           echo "Changes ${BEFORE_SHA}..${CURRENT_SHA}"
-          CHANGED="$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA")"
+          # --no-renames: a moved file lists its old path too, so a page moved out
+          # of a site still deploys that site.
+          CHANGED="$(git diff --no-renames --name-only "$BEFORE_SHA" "$CURRENT_SHA")"
 
           changed() { grep -Eq "$1" <<< "$CHANGED" && echo true || echo false; }
           # The marketing site's pattern is SITE_INPUTS in scripts/site-deploy.ts
@@ -305,6 +307,14 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: bun run scripts/site-deploy.ts guard
 
+      # Before the sync, so from the moment the bucket may hold this tree the
+      # record names it: a publish cut short (a failed step below, a cancelled
+      # run) leaves both commits named, and the guard refuses anything older
+      # than either. The older record goes once the tree is up (below).
+      - name: Add this commit to the live record
+        if: steps.guard.outputs.publish == 'true'
+        run: bun run scripts/site-deploy.ts mark
+
       # The site's videos are not in the repository: they are uploaded by hand
       # to assets/ in this bucket. The excludes keep --delete from removing
       # them (an excluded key is neither uploaded nor deleted). assets/hosted/
@@ -332,8 +342,8 @@ jobs:
             --exclude "*" --include "*.txt" \
             --content-type "text/plain; charset=utf-8"
 
-      # The bucket holds this commit's tree now: record it before the
-      # invalidation, so the next guard compares with it even if that fails.
+      # The bucket holds this commit's tree now: live.txt names it and the
+      # older records go, before the invalidation.
       - name: Record the live commit
         if: steps.guard.outputs.publish == 'true'
         run: bun run scripts/site-deploy.ts record

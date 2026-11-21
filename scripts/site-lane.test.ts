@@ -12,15 +12,19 @@
  *    concurrency group, with other permissions, or without the guard first;
  *  - the guard lets an older commit, the live one again, or one with no site
  *    change publish, or publishes on a record or an answer it cannot read;
- *  - the site imports a file outside apps/marketing that SITE_INPUTS misses.
+ *  - the site imports a file outside apps/marketing that SITE_INPUTS misses;
+ *  - a publish cut short after its sync lets an older tree publish next, or a
+ *    moved site file reads as no site change;
+ *  - the lane's command line fails (or says publish) on an error instead of
+ *    answering "not site-only".
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { PASSED_MAIN_RUNS, buildGraph, plan, repoRoot, testFiles, type Change, type Plan, type RepoApi } from './ci-affected';
-import { LIVE_FILE, LIVE_PREFIX, SITE_INPUTS, guard, liveCommits, siteInput, staleKeys } from './site-deploy';
-import { decideRange, laneRange, laneTests, offLane } from './site-lane';
+import { LIVE_FILE, LIVE_PREFIX, SITE_INPUTS, guard, isManual, liveCommits, runGuard, siteChangedSince, siteInput, staleKeys } from './site-deploy';
+import { ciTests, cli, decideRange, laneRange, laneTests, offLane } from './site-lane';
 
 type Step = { name?: string; id?: string; if?: string; run?: string; uses?: string; env?: Record<string, string>; with?: Record<string, string> };
 type Job = {
@@ -92,8 +96,15 @@ describe('what the lane takes', () => {
     expect(laneRange([]).eligible).toBe(false);
   });
 
+  test('a file the site is built from stays off the lane even if PUSH_LIGHT is widened to it', () => {
+    const everything = () => true;
+    for (const p of ['apps/skills/core/plannotator/SKILL.md', 'packages/ui/shortcuts/index.ts', 'bun.lock']) expect(offLane(p, everything), p).toContain('SITE_INPUTS');
+    expect(offLane('apps/marketing/src/x.css', () => false)).toBe('a site file that is not light');
+    expect(offLane('apps/marketing/src/lib/inbox-muse.md', everything)).toContain('PUSH_RUNTIME_SITE');
+  });
+
   test('a path the lane takes outside apps/marketing is never one the site is built from', () => {
-    for (const p of ['docs/a.md', 'adr/0001.md', 'README.md', 'AGENTS.md', 'LICENSE-MIT', '.github/assets/x.png', 'apps/mobile/ios/App.swift']) {
+    for (const p of ['docs/a.md', 'adr/0001.md', 'README.md', 'AGENTS.md', 'LICENSE-MIT', '.github/assets/x.png']) {
       expect(offLane(p), p).toBeNull();
       expect(siteInput(p), p).toBe(false);
     }
@@ -280,16 +291,20 @@ describe('one publish, reached two ways', () => {
     const g = at((s) => s.run === 'bun run scripts/site-deploy.ts guard');
     const sync = at((s) => !!s.run?.startsWith('aws s3 sync'));
     const types = at((s) => !!s.run?.includes('--content-type "text/markdown'));
+    const mark = at((s) => s.run === 'bun run scripts/site-deploy.ts mark');
     const record = at((s) => s.run === 'bun run scripts/site-deploy.ts record');
     const inval = at((s) => !!s.run?.includes('create-invalidation'));
-    expect(build < creds && creds < g && g < sync && sync < types && types < record && record < inval).toBe(true);
+    // The commit joins the record before the bucket can hold its tree; the older record goes after.
+    expect(build < creds && creds < g && g < mark && mark < sync && sync < types && types < record && record < inval).toBe(true);
+    expect(publish.steps![g]!.env?.EVENT_NAME).toBe('${{ github.event_name }}');
     expect(publish.steps![g]!.id).toBe('guard');
     for (const s of publish.steps!.slice(g + 1)) expect(s.if, s.name).toBe("steps.guard.outputs.publish == 'true'");
     expect(publish.steps![sync]!.run).toContain(`--exclude "${LIVE_PREFIX}*"`);
   });
 
-  test("detect-changes greps the site's inputs with SITE_INPUTS", () => {
+  test("detect-changes greps the site's inputs with SITE_INPUTS, over a diff that lists both paths of a rename", () => {
     expect(text).toContain(`echo "marketing=$(changed '${SITE_INPUTS}')"`);
+    expect(text).toContain('CHANGED="$(git diff --no-renames --name-only "$BEFORE_SHA" "$CURRENT_SHA")"');
   });
 });
 
@@ -355,5 +370,119 @@ describe('the guard', () => {
     expect(await deploy(sha('4'), false), 'a newer commit with no site change').toBe(false);
     expect(await deploy(sha('4')), 'a newer commit with a site change').toBe(true);
     expect(live).toEqual([sha('4')]);
+  });
+  test('a publish cut short after its sync (no final record step) never lets an older tree publish next', async () => {
+    // The bucket's record as mark (before the sync) and record (after it) leave it.
+    let records = [sha('1')];
+    const run = async (c: string, finish = true) => {
+      const v = await decide(c, records);
+      if (!v.publish) return false;
+      records = [...new Set([...records, c])].sort(); // mark
+      if (finish) records = records.filter((k) => !staleKeys(records, c).includes(`${LIVE_PREFIX}${k}`)); // record
+      return true;
+    };
+    expect(await run(sha('3'), false), 'synced 3, then the run failed or was cancelled').toBe(true);
+    expect(records).toEqual([sha('1'), sha('3')]);
+    expect(await run(sha('2')), 'a late deploy of 2 (newer than 1, older than the tree in the bucket)').toBe(false);
+    expect(await run(sha('3')), 'a rerun of 3 repairs the record').toBe(true);
+    expect(records).toEqual([sha('3')]);
+  });
+
+  test('the step: no record is a loud warning; only a manual run (EVENT_NAME workflow_dispatch) publishes an older commit', async () => {
+    const io = (live: string[]) => ({ listLive: () => live, order: async (l: string, c: string) => order(l, c), siteChanged: () => true });
+    const none = await runGuard({ CANDIDATE: sha('2') }, io([]));
+    expect(none.verdict.publish).toBe(true);
+    expect(none.lines.some((l) => l.startsWith('::warning title=Marketing site: no live record::'))).toBe(true);
+    expect((await runGuard({ CANDIDATE: sha('2') }, io([sha('1')]))).lines.some((l) => l.startsWith('::warning'))).toBe(false);
+    for (const [event, publishes] of [['workflow_dispatch', true], ['push', false], ['workflow_run', false], [undefined, false]] as const) {
+      expect(isManual({ EVENT_NAME: event }), String(event)).toBe(publishes);
+      expect((await runGuard({ CANDIDATE: sha('2'), EVENT_NAME: event }, io([sha('3')]))).verdict.publish, String(event)).toBe(publishes);
+    }
+  });
+
+  test('reads a site change from real git history, a site file moved out of the site included', () => {
+    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'ci', GIT_AUTHOR_EMAIL: 'ci@example.invalid', GIT_COMMITTER_NAME: 'ci', GIT_COMMITTER_EMAIL: 'ci@example.invalid' };
+    const root = mkdtempSync(join(tmpdir(), 'site-deploy-'));
+    try {
+      const origin = join(root, 'origin');
+      mkdirSync(origin);
+      const git = (cwd: string, ...args: string[]) => {
+        const r = Bun.spawnSync(['git', ...args], { cwd, env: gitEnv });
+        if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+        return r.stdout.toString().trim();
+      };
+      const write = (f: string, body: string) => { mkdirSync(dirname(join(origin, f)), { recursive: true }); writeFileSync(join(origin, f), body); };
+      git(origin, 'init', '-q', '-b', 'main');
+      write('apps/marketing/public/page.txt', 'a page\n'.repeat(20));
+      write('docs/a.md', 'a\n');
+      git(origin, 'add', '-A'); git(origin, 'commit', '-q', '-m', 'base');
+      const live = git(origin, 'rev-parse', 'HEAD');
+      write('docs/a.md', 'b\n');
+      git(origin, 'commit', '-q', '-am', 'docs');
+      const docs = git(origin, 'rev-parse', 'HEAD');
+      git(origin, 'mv', 'apps/marketing/public/page.txt', 'docs/page.txt');
+      git(origin, 'commit', '-q', '-m', 'move a page out of the site');
+      const moved = git(origin, 'rev-parse', 'HEAD');
+      // As the deploy job has it: a depth-1 checkout of the candidate, the live commit fetched by id.
+      const work = join(root, 'work');
+      for (const [cand, want] of [[docs, false], [moved, true]] as const) {
+        Bun.spawnSync(['rm', '-rf', work]);
+        git(root, 'clone', '-q', '--depth=1', `file://${origin}`, work);
+        git(work, 'fetch', '-q', '--depth=1', 'origin', cand);
+        git(work, 'checkout', '-q', '--detach', cand);
+        expect(siteChangedSince(live, cand, work), cand === moved ? 'a page moved out of apps/marketing' : 'docs only').toBe(want);
+      }
+      expect(Bun.spawnSync(['git', 'diff', '--name-only', live, moved], { cwd: work, env: gitEnv }).stdout.toString().trim(), 'what rename detection would have shown: no site path').toBe('docs/a.md\ndocs/page.txt');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the lane's command line answers \"not site-only\" on any error", () => {
+  const withOutput = async (body: () => Promise<number>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'site-lane-cli-'));
+    const saved = { out: process.env.GITHUB_OUTPUT, sum: process.env.GITHUB_STEP_SUMMARY };
+    process.env.GITHUB_OUTPUT = join(dir, 'out');
+    process.env.GITHUB_STEP_SUMMARY = join(dir, 'summary');
+    writeFileSync(process.env.GITHUB_OUTPUT, '');
+    writeFileSync(process.env.GITHUB_STEP_SUMMARY, '');
+    try {
+      const code = await body();
+      return { code, out: readFileSync(process.env.GITHUB_OUTPUT, 'utf8'), summary: readFileSync(process.env.GITHUB_STEP_SUMMARY, 'utf8') };
+    } finally {
+      if (saved.out === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = saved.out;
+      if (saved.sum === undefined) delete process.env.GITHUB_STEP_SUMMARY; else process.env.GITHUB_STEP_SUMMARY = saved.sum;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test('range: an error is eligible=false, exit 0, and the reason in the summary', async () => {
+    const r = await withOutput(() => cli('range', { range: async () => { throw new Error('boom'); } }));
+    expect(r).toMatchObject({ code: 0, out: 'eligible=false\n' });
+    expect(r.summary).toContain('the lane could not decide: boom');
+  });
+
+  test('tests: a BASE that is not a commit id is eligible=false, never a plan', async () => {
+    expect(() => ciTests({ BASE: 'main' })).toThrow('BASE is not a commit id');
+    expect(() => ciTests({})).toThrow('BASE is not a commit id');
+    const r = await withOutput(() => cli('tests', { tests: () => ciTests({ BASE: '$(true)' }) }));
+    expect(r).toMatchObject({ code: 0, out: 'eligible=false\n' });
+    expect(r.summary).toContain('BASE is not a commit id');
+  });
+
+  test('an unknown command fails; the real range step on another event says not site-only', async () => {
+    expect(await cli('publish')).toBe(2);
+    const dir = mkdtempSync(join(tmpdir(), 'site-lane-cli-'));
+    try {
+      const out = join(dir, 'out');
+      writeFileSync(out, '');
+      const env: Record<string, string> = { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: out, GITHUB_EVENT_NAME: 'pull_request', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+      const r = Bun.spawnSync([process.execPath, 'run', join(repoRoot, 'scripts/site-lane.ts'), 'range'], { cwd: repoRoot, env });
+      expect(r.exitCode).toBe(0);
+      expect(readFileSync(out, 'utf8')).toBe('eligible=false\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

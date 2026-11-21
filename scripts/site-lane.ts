@@ -41,12 +41,17 @@ import { siteInput } from './site-deploy';
 
 export const SITE = 'apps/marketing/';
 
-/** Why this path keeps a range off the site lane, or null when the lane may take it. */
-export function offLane(path: string): string | null {
+/**
+ * Why this path keeps a range off the site lane, or null when the lane may take
+ * it. `light` is PUSH_LIGHT's verdict; the site-file and SITE_INPUTS checks do not
+ * rest on it, so widening PUSH_LIGHT (say, to the skills, which are Markdown) can
+ * never let a file the site is built from onto the lane.
+ */
+export function offLane(path: string, light: (path: string) => boolean = pushLight): string | null {
   if (PUSH_RUNTIME_SITE.some((r) => r.test(path))) return 'a site file the product fetches at runtime (PUSH_RUNTIME_SITE)';
-  if (path.startsWith(SITE)) return pushLight(path) ? null : 'a site file that is not light';
+  if (path.startsWith(SITE)) return light(path) ? null : 'a site file that is not light';
   if (siteInput(path)) return 'outside apps/marketing, among what the site is built from (SITE_INPUTS)';
-  if (!pushLight(path)) return 'neither the site nor the docs';
+  if (!light(path)) return 'neither the site nor the docs';
   return null;
 }
 
@@ -101,8 +106,8 @@ export async function decideRange(env: NodeJS.ProcessEnv = process.env, api?: Re
   return r.eligible ? { eligible: true, ...range, changes } : { eligible: false, why: r.why, changes };
 }
 
-async function ciRange() {
-  const r = await decideRange();
+async function ciRange(env: NodeJS.ProcessEnv = process.env) {
+  const r = await decideRange(env);
   if (r.changes) {
     console.log('Every path changed since the last main commit whose Test run passed:');
     for (const c of r.changes) console.log(`  ${c.status}\t${c.path}${offLane(c.path) ? `   <- ${offLane(c.path)}` : ''}`);
@@ -115,8 +120,8 @@ async function ciRange() {
   output({ eligible: 'true', base: r.base, sha: r.head });
 }
 
-function ciTests() {
-  const base = (process.env.BASE ?? '').trim();
+export function ciTests(env: NodeJS.ProcessEnv = process.env) {
+  const base = (env.BASE ?? '').trim();
   if (!SHA.test(base)) throw new Error(`BASE is not a commit id: ${JSON.stringify(base)}`);
   const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repoRoot }).stdout.toString().trim();
   const g = buildGraph();
@@ -132,21 +137,28 @@ function ciTests() {
   output({ eligible: 'true', unit_tests: JSON.stringify(r.unit), dom_tests: JSON.stringify(r.dom) });
 }
 
-if (import.meta.main) {
-  const cmd = process.argv[2];
+/**
+ * The command line. Never fails on a doubt: any error is the answer "not
+ * site-only" (eligible=false), and the site deploys after Test. Returns the exit code.
+ */
+export async function cli(cmd: string | undefined, steps: { range?: () => Promise<void>; tests?: () => void } = {}): Promise<number> {
+  const { range = () => ciRange(), tests = () => ciTests() } = steps;
   if (cmd === 'range') {
-    // Never fails on a doubt: the answer is "not site-only", and the site deploys after Test.
-    try { await ciRange(); } catch (e) {
+    try { await range(); } catch (e) {
       verdict(false, `the lane could not decide: ${(e as Error).message.split('\n')[0]}`);
       output({ eligible: 'false' });
     }
-  } else if (cmd === 'tests') {
-    try { ciTests(); } catch (e) {
+    return 0;
+  }
+  if (cmd === 'tests') {
+    try { tests(); } catch (e) {
       verdict(false, `the lane could not plan the site's tests: ${(e as Error).message.split('\n')[0]}`);
       output({ eligible: 'false' });
     }
-  } else {
-    console.error('usage: bun run scripts/site-lane.ts range|tests');
-    process.exit(2);
+    return 0;
   }
+  console.error('usage: bun run scripts/site-lane.ts range|tests');
+  return 2;
 }
+
+if (import.meta.main) process.exit(await cli(process.argv[2]));

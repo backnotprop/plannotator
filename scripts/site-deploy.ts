@@ -3,19 +3,23 @@
  * the one publish job both deploy paths reach (.github/workflows/deploy.yml,
  * `deploy-marketing`: after Test passes, and the site lane of a site-only push).
  *
- *   bun run scripts/site-deploy.ts guard    # after the build, before the S3 sync
- *   bun run scripts/site-deploy.ts record   # after the sync, before the invalidation
+ *   bun run scripts/site-deploy.ts guard    # after the build: publish this commit or not
+ *   bun run scripts/site-deploy.ts mark     # the guard said publish: add it to the record, before the sync
+ *   bun run scripts/site-deploy.ts record   # after the sync: live.txt names it, older records go
  *
- * The record is an empty-ish object per publish in the site's own bucket,
+ * The record is a small object per published commit in the site's own bucket,
  * `_site-deploy/<commit>` (and `_site-deploy/live.txt`, the same commit for a
- * person: https://plannotator.ai/_site-deploy/live.txt). The guard reads it by
+ * person: https://plannotator.ai/_site-deploy/live.txt). A commit is added
+ * before its sync and the older ones are removed after it, so a publish cut
+ * short leaves both named, never only the older one. The guard reads it by
  * listing the prefix, which the deploy role can already do (the sync lists the
  * bucket), so it needs no new permission. The sync excludes the prefix, so its
  * --delete never removes the record.
  *
  * The guard (an automatic run; a manual run publishes what it was asked to,
  * with a warning when that is older):
- *  - no record yet: publish;
+ *  - no record: publish, with a warning annotation (expected once, on the
+ *    first publish with a record; any other time something removed it);
  *  - the commit is in the history of a live one (GitHub's compare says
  *    "behind"): never publish, an older tree would replace a newer one;
  *  - the same commit is live, or nothing the site is built from (SITE_INPUTS)
@@ -111,8 +115,8 @@ export const staleKeys = (live: string[], candidate: string) => live.filter((l) 
 // ---------------------------------------------------------------------------
 // In the deploy job
 
-function run(cmd: string[], what: string): string {
-  const r = Bun.spawnSync(cmd, { stdout: 'pipe', stderr: 'pipe' });
+function run(cmd: string[], what: string, cwd?: string): string {
+  const r = Bun.spawnSync(cmd, { stdout: 'pipe', stderr: 'pipe', cwd });
   if (r.exitCode !== 0) throw new Error(`${what} failed: ${r.stderr.toString().trim().split('\n').pop() ?? ''}`);
   return r.stdout.toString();
 }
@@ -131,9 +135,37 @@ async function compareStatus(base: string, head: string, env = process.env): Pro
   return String(((await res.json()) as { status?: unknown }).status);
 }
 
-function siteChangedSince(live: string, candidate: string): boolean {
-  run(['git', 'fetch', '--no-tags', '--depth=1', 'origin', live], `fetching ${short(live)}`);
-  return run(['git', 'diff', '--name-only', live, candidate], 'the diff from the live commit').split('\n').some((p) => p && siteInput(p));
+/**
+ * Whether a path the site is built from differs between the live commit and the
+ * candidate (checked out in `repo`). --no-renames: a rename prints both paths, so
+ * a site page moved out of apps/marketing still counts as a site change.
+ */
+export function siteChangedSince(live: string, candidate: string, repo?: string, fetchLive = true): boolean {
+  if (fetchLive) run(['git', 'fetch', '--no-tags', '--depth=1', 'origin', live], `fetching ${short(live)}`, repo);
+  return run(['git', 'diff', '--no-renames', '--name-only', live, candidate], 'the diff from the live commit', repo).split('\n').some((p) => p && siteInput(p));
+}
+
+/** A manual run (deploy.yml hands the guard `EVENT_NAME: ${{ github.event_name }}`). */
+export const isManual = (env: NodeJS.ProcessEnv) => env.EVENT_NAME === 'workflow_dispatch';
+
+export type GuardIo = { listLive: () => string[]; order: (live: string, candidate: string) => Promise<string>; siteChanged: (live: string, candidate: string) => boolean };
+
+/** The guard step: its verdict, and the lines it prints (a warning annotation when no record is found). */
+export async function runGuard(env: NodeJS.ProcessEnv, io: GuardIo): Promise<{ verdict: Verdict; lines: string[] }> {
+  const candidate = (env.CANDIDATE ?? '').trim();
+  const live = io.listLive();
+  const lines = [`Live now: ${live.length ? live.join(', ') : 'none recorded'}`];
+  // Needed once, for the first publish with a record. Any other time something
+  // removed the record (a sync from a deploy.yml older than the record): this
+  // run publishes without the never-older check, and records again.
+  if (!live.length) lines.push(`::warning title=Marketing site: no live record::No ${LIVE_PREFIX}<commit> record in the bucket, so the never-older check cannot run for this publish. Expected only on the first publish after the record was added; otherwise something removed it (a sync from an older deploy.yml?).`);
+  const verdict = await guard({
+    candidate, live, manual: isManual(env),
+    order: (l) => io.order(l, candidate),
+    siteChanged: async (l) => io.siteChanged(l, candidate),
+  });
+  lines.push(verdict.why, `::notice title=Marketing site: ${verdict.publish ? 'publishing' : 'not publishing'} ${short(candidate)}::${verdict.why}`);
+  return { verdict, lines };
 }
 
 function output(lines: Record<string, string>) {
@@ -146,30 +178,39 @@ function summary(text: string) {
 }
 
 async function ciGuard() {
-  const candidate = (process.env.CANDIDATE ?? '').trim();
-  const live = listLive();
-  console.log(`Live now: ${live.length ? live.join(', ') : 'none recorded'}`);
-  const v = await guard({
-    candidate, live,
-    manual: process.env.EVENT_NAME === 'workflow_dispatch',
-    order: (l) => compareStatus(l, candidate),
-    siteChanged: async (l) => siteChangedSince(l, candidate),
-  });
-  console.log(v.why);
-  console.log(`::notice title=Marketing site: ${v.publish ? 'publishing' : 'not publishing'} ${short(candidate)}::${v.why}`);
-  summary(`**Marketing site:** ${v.why}`);
-  output({ publish: String(v.publish) });
+  const { verdict, lines } = await runGuard(process.env, { listLive, order: (l, c) => compareStatus(l, c), siteChanged: (l, c) => siteChangedSince(l, c) });
+  for (const l of lines) console.log(l);
+  summary(`**Marketing site:** ${verdict.why}`);
+  output({ publish: String(verdict.publish) });
 }
 
-function ciRecord() {
-  const candidate = (process.env.CANDIDATE ?? '').trim();
-  if (!SHA.test(candidate)) throw new Error(`the published commit is not a commit id: ${JSON.stringify(candidate)}`);
+function candidateOf(env = process.env): string {
+  const candidate = (env.CANDIDATE ?? '').trim();
+  if (!SHA.test(candidate)) throw new Error(`the commit to publish is not a commit id: ${JSON.stringify(candidate)}`);
+  return candidate;
+}
+
+function put(key: string, candidate: string) {
   const file = join(mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'site-deploy-')), 'live.txt');
   writeFileSync(file, `${candidate}\n`);
-  // The new record first, then the old one: an interrupted record names two commits, never none.
-  for (const key of [`${LIVE_PREFIX}${candidate}`, LIVE_FILE]) {
-    run(['aws', 's3', 'cp', file, `s3://${BUCKET}/${key}`, '--content-type', 'text/plain; charset=utf-8', '--cache-control', 'no-cache'], `recording ${key}`);
-  }
+  run(['aws', 's3', 'cp', file, `s3://${BUCKET}/${key}`, '--content-type', 'text/plain; charset=utf-8', '--cache-control', 'no-cache'], `recording ${key}`);
+}
+
+/**
+ * Before the sync: add this commit to the record. From here on the bucket may
+ * hold its tree, so a publish cut short (a failed step, a cancelled run) leaves
+ * a record naming both commits, and the guard refuses anything older than
+ * either: at worst a missed publish, never an older tree.
+ */
+function ciMark() {
+  const candidate = candidateOf();
+  put(`${LIVE_PREFIX}${candidate}`, candidate);
+}
+
+/** After the sync and the content types: the commit is live; live.txt names it and the older records go. */
+function ciRecord() {
+  const candidate = candidateOf();
+  put(LIVE_FILE, candidate);
   for (const key of staleKeys(listLive(), candidate)) run(['aws', 's3', 'rm', `s3://${BUCKET}/${key}`], `removing ${key}`);
   console.log(`::notice title=Marketing site live::plannotator.ai serves ${candidate}`);
   summary(`**Marketing site live:** ${candidate} (https://plannotator.ai/${LIVE_FILE})`);
@@ -179,9 +220,10 @@ if (import.meta.main) {
   const cmd = process.argv[2];
   try {
     if (cmd === 'guard') await ciGuard();
+    else if (cmd === 'mark') ciMark();
     else if (cmd === 'record') ciRecord();
     else {
-      console.error('usage: bun run scripts/site-deploy.ts guard|record');
+      console.error('usage: bun run scripts/site-deploy.ts guard|mark|record');
       process.exit(2);
     }
   } catch (e) {
