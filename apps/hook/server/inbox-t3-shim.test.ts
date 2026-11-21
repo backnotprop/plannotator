@@ -19,14 +19,15 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { InboxThread } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
-import { INBOX_REPLY_ARRIVES_TEXT } from "@plannotator/server/inbox-mcp";
+import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "@plannotator/server/inbox-mcp";
 import { readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { T3Credentials } from "@plannotator/t3-code/auth";
+import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { type FakeT3, startFakeT3, T3_THREAD_ID_FORMS } from "../../../tests/helpers/fake-t3";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
-import { fillInboxToolArguments, inboxClaudeCallSession, inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { fillInboxToolArguments, inboxCallHostSession, inboxClaudeCallSession, inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const THREAD = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
@@ -79,8 +80,8 @@ function shimEnv(dataDir: string, agent: Record<string, string>): Record<string,
   };
 }
 
-async function shim(dataDir: string, cwd: string, args: string[], agent: Record<string, string>): Promise<Client> {
-  const client = new Client({ name: "claude-code", version: "2.1.317" });
+async function shim(dataDir: string, cwd: string, args: string[], agent: Record<string, string>, clientInfo = { name: "claude-code", version: "2.1.317" }): Promise<Client> {
+  const client = new Client(clientInfo);
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ["run", entry, "inbox", "mcp", ...args], cwd, env: shimEnv(dataDir, agent), stderr: "pipe" }));
   clients.push(client);
   return client;
@@ -125,20 +126,106 @@ describe("the T3 thread as the shim's session", () => {
     expect(call({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: CLAUDE_SESSION })).toMatchObject({ host: "claude-code", session: CLAUDE_SESSION });
   });
 
-  test("the agent naming no host, t3 or claude-code is the thread; naming any other host is not", () => {
-    const fill = (args: Record<string, unknown>, host: { host: string; session: string; name: string }) =>
-      fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: args } }, "/work", "ses_OWN", host).params!.arguments;
+  test("the agent naming no host, t3, or a T3 provider (claude-code, codex, pi, acp) is the thread; naming any other host is not", () => {
+    const fill = (args: Record<string, unknown>, host: { host: string; session: string; name: string }, meta?: Record<string, unknown>, clientName?: string | null) =>
+      fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: args, ...(meta ? { _meta: meta } : {}) } }, "/work", "ses_OWN", host, clientName).params!.arguments;
     const t3 = { host: "t3", session: THREAD, name: "T3 Code" };
     const asThread = { body: "hi", project_path: "/work", agent_session: THREAD, agent_host: "t3", agent_name: "T3 Code" };
     expect(fill({ body: "hi" }, t3)).toEqual(asThread);
     expect(fill({ body: "hi", agent_host: "t3" }, t3)).toEqual(asThread);
     expect(fill({ body: "hi", agent_host: "claude-code" }, t3)).toEqual(asThread);
-    // Another host is not this thread: a reply to it must not wake the thread.
-    expect(fill({ body: "hi", agent_host: "codex" }, t3)).toEqual({ body: "hi", project_path: "/work", agent_session: "ses_OWN", agent_host: "codex" });
-    expect(fill({ body: "hi", agent_host: "gemini" }, t3)).toMatchObject({ agent_session: "ses_OWN" });
+    expect(fill({ body: "hi", agent_host: "codex" }, t3)).toEqual(asThread);
+    expect(fill({ body: "hi", agent_host: "pi" }, t3)).toEqual(asThread);
+    expect(fill({ body: "hi", agent_host: "acp" }, t3)).toEqual(asThread);
+    // Codex's per-call _meta.threadId never overrides a T3 thread when T3CODE_THREAD_ID is set.
+    expect(fill({ body: "hi" }, t3, { threadId: CODEX_THREAD, "x-codex-turn-metadata": { turn_trigger: "user" } }, "codex-mcp-client")).toEqual(asThread);
+    // Qwen-over-ACP never overrides a T3 thread either.
+    const qwenCtx = { home: "/tmp/qwen", parentPid: 999999, envSession: "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b" };
+    expect(inboxCallHostSession(t3, qwenCtx, { "qwen-code/invocation": { sessionId: "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b" } }, "qwen-code")).toEqual(t3);
+    // Another unrelated host is not this thread: a reply to it must not wake the thread.
+    expect(fill({ body: "hi", agent_host: "gemini" }, t3)).toEqual({ body: "hi", project_path: "/work", agent_session: "ses_OWN", agent_host: "gemini" });
     // Only a T3 thread takes another host's name: a Claude Code session that names t3 is not adopted.
     const claude = { host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" };
     expect(fill({ body: "hi", agent_host: "t3" }, claude)).toMatchObject({ agent_session: "ses_OWN", agent_host: "t3" });
+  });
+
+  test.each([
+    {
+      label: "Codex",
+      clientInfo: { name: "codex-mcp-client", version: "0.160.0" },
+      env: { T3CODE_THREAD_ID: THREAD, CODEX_THREAD_ID: CODEX_THREAD },
+      args: { body: "Ship the Codex change?", agent_host: "codex", idempotency_key: "t3-codex-1" },
+      meta: { threadId: CODEX_THREAD, "x-codex-turn-metadata": { turn_trigger: "user", turn_started_at_unix_ms: 1 } },
+    },
+    {
+      label: "Pi",
+      clientInfo: { name: "pi-mcp", version: "1.0.0" },
+      env: { T3CODE_THREAD_ID: THREAD, PI_SESSION_ID: "pi-session-1" },
+      args: { body: "Ship the Pi change?", agent_host: "pi", idempotency_key: "t3-pi-1" },
+    },
+    {
+      label: "ACP",
+      clientInfo: { name: "qwen-code", version: "0.24.0" },
+      env: { T3CODE_THREAD_ID: THREAD, QWEN_CODE_SESSION_ID: CODEX_THREAD },
+      args: { body: "Ship the ACP change?", agent_host: "acp", idempotency_key: "t3-acp-1" },
+    },
+  ])("a T3 $label thread (--t3) sends as its T3 thread and wakes on Inbox reply with the same grant checks as Claude", async ({ clientInfo, env, args, meta }) => {
+    const box = scratch();
+    const t3 = startFakeT3({ threads: [THREAD] });
+    fakes.push(t3);
+    new T3Credentials(box.dataDir, t3.endpoint).save({ endpoint: t3.endpoint.href, epoch: "e1", tokens: { access_token: t3.state.token, token_type: "Bearer" } });
+    const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null });
+    servers.push(server);
+
+    const client = await shim(box.dataDir, box.project, ["--t3"], env, clientInfo);
+    const result = await client.callTool({ name: "send_message", arguments: args, ...(meta ? { _meta: meta } : {}) });
+    expect((result.content as { text: string }[])[0]!.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    const sent = result.structuredContent as { message_id: string; thread_id: string };
+    const base = `http://127.0.0.1:${server.port}`;
+    const thread = async () => ((await (await fetch(`${base}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: InboxThread }).thread;
+    expect((await thread()).messages[0]).toMatchObject({ author: { kind: "agent", host: "t3", session: THREAD, name: "T3 Code" }, wakes: true });
+
+    const response = await fetch(`${base}/api/inbox/messages/${sent.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "person-provider-1", words: "Approved." }),
+    });
+    const replyId = ((await response.json()) as { reply: { id: string } }).reply.id;
+    await server.t3Wake.sweep();
+    await server.t3Wake.sweep();
+    expect(t3.turns).toEqual([{ threadId: THREAD, message: expect.stringContaining("Approved."), clientRequestId: `plannotator-inbox-${replyId}`, mode: "queue" }]);
+    expect((await thread()).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
+  }, 60_000);
+
+  test("a T3 Codex thread under a read-only grant is not promised a wake and tells the agent the reply will wait", async () => {
+    const box = scratch();
+    const t3 = startFakeT3({ threads: [THREAD], access: "read-only" });
+    fakes.push(t3);
+    new T3Credentials(box.dataDir, t3.endpoint).save({
+      endpoint: t3.endpoint.href,
+      epoch: "e1",
+      tokens: { access_token: t3.state.token, token_type: "Bearer", scope: "orchestration:read" },
+    });
+    const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null });
+    servers.push(server);
+
+    const client = await shim(box.dataDir, box.project, ["--t3"], { T3CODE_THREAD_ID: THREAD, CODEX_THREAD_ID: CODEX_THREAD }, { name: "codex-mcp-client", version: "0.160.0" });
+    const result = await client.callTool({
+      name: "send_message",
+      arguments: { body: "Check read-only grant?", idempotency_key: "t3-ro-1" },
+      _meta: { threadId: CODEX_THREAD, "x-codex-turn-metadata": { turn_trigger: "user", turn_started_at_unix_ms: 1 } },
+    });
+    expect((result.content as { text: string }[])[0]!.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    const sent = result.structuredContent as { thread_id: string };
+    const thread = ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: InboxThread }).thread;
+    expect(thread.messages[0]).toMatchObject({ author: { kind: "agent", host: "t3", session: THREAD, name: "T3 Code" } });
+    expect(thread.messages[0]!.wakes).not.toBe(true);
+  }, 60_000);
+
+  test("T3 CLI help documents Claude, Codex, Pi and ACP setup instead of limiting wake to Claude", () => {
+    expect(T3_CLI_USAGE).not.toContain("Only Claude threads in T3 wake");
+    expect(T3_CLI_USAGE).toContain("[mcp_servers.plannotator-inbox]");
+    expect(T3_CLI_USAGE).toContain("Pi and ACP");
   });
 
   test.each(Object.entries(T3_THREAD_ID_FORMS))("a T3 Claude's shim (--t3) in a thread of the %s form sends as its thread, and the person's reply reaches T3 once under the item's request id", async (_form, THREAD) => {
