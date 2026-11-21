@@ -190,8 +190,13 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
 test('a home machine whose clock is ahead answers that nothing is snoozed: the toast says the time has passed, not Snoozed', async () => {
   const { page, threads } = world;
   await page.route('**/threads/*/snooze', (route) => route.fulfill({ json: { snoozed: null } }));
-  await row(page, threads.refund).click({ button: 'right' });
   const menu = page.locator(`[data-row-menu="${threads.refund}"]`);
+  // Bounded tries (as inbox-open-stays-put.spec.ts): the row has just slid back from the Undo above, and on a busy
+  // runner one right-click's menu can close as the button comes up. An action waits with no time limit.
+  await expect(async () => {
+    await row(page, threads.refund).click({ button: 'right', timeout: 2_000 });
+    await expect(menu.locator('[data-row-action="snooze"]')).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   await menu.locator('[data-row-action="snooze"]').click();
   await menu.locator('[data-snooze-choice="tomorrow"]').click();
   await expect(toast(page)).toContainText('That time has passed.');

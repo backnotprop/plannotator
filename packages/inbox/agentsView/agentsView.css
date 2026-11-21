@@ -1,0 +1,88 @@
+/* ---------- The list's Agents view (agentsView/; design A "Agents that open") ----------
+   Each agent is a group of its own: its row (the face at 44 on the left, the name and the time, then one muted line
+   with its project, machine and state), and open, its threads one line each, indented under the name. Then the
+   "Ended" and "No agent" bands (today's group band). Theme tokens only. */
+.pn-inbox .ib-lbody > .ib-ag + .ib-ag { margin-top: 0; }
+.pn-inbox .ib-ag { padding: 2px 0 6px; border-bottom: 1px solid var(--ib-hair); }
+.pn-inbox .ib-ag:last-child, .pn-inbox .ib-ag[data-agent-ended] { border-bottom: 0; }
+.pn-inbox .ib-ag[data-agent-ended] { padding: 0; }
+.pn-inbox .ib-lbody > .ib-agband { margin-top: 10px; }
+
+/* The agent's row: the face is its own button (its picker), over the row's left; the rest of the row folds it. */
+.pn-inbox .ib-agh { position: relative; }
+.pn-inbox .ib-agh > .am-btn { position: absolute; left: 8px; top: 10px; z-index: 1; width: var(--ib-mark-44); height: var(--ib-mark-44); padding: 0; border: 0; border-radius: var(--ib-mark-44-r); background: none; display: grid; place-items: center; cursor: pointer; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+.pn-inbox .ib-agh > .am-btn[data-picks="none"] { pointer-events: none; }
+.pn-inbox .ib-agh-b { display: flex; flex-direction: column; justify-content: center; gap: 1px; width: 100%; min-height: 64px; padding: 10px 8px 6px 64px; border-radius: 10px; text-align: left; color: var(--foreground); }
+.pn-inbox .ib-agh-1, .pn-inbox .ib-agh-2 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pn-inbox .ib-agh-n { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14-5, 14.5px); font-weight: 600; line-height: 1.35; }
+.pn-inbox .ib-agh .ib-t { flex: none; margin-left: auto; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-agh-m { flex: 1 1 auto; display: flex; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 1.4; }
+/* The project is cut first, then the machine; the state words never. */
+.pn-inbox .ib-agh-p { flex: 0 1000 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; }
+.pn-inbox .ib-agh-k { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.pn-inbox .ib-agh-s { flex: none; white-space: pre; }
+.pn-inbox .ib-agh-marks { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.pn-inbox .ib-agh-marks .ib-badge { height: 20px; }
+.pn-inbox .ib-agh-c { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; }
+/* An ended agent: its face grey and its name muted, as an ended session reads elsewhere. */
+.pn-inbox .ib-ag[data-agent-ended] .ib-agh .am { filter: grayscale(1) opacity(0.55); }
+.pn-inbox .ib-ag[data-agent-ended] .ib-agh-n { color: var(--muted-foreground); font-weight: 550; }
+/* Ended agents sit closer, as in the picture. */
+.pn-inbox .ib-ag[data-agent-ended] .ib-agh-b { min-height: 60px; padding-top: 8px; padding-bottom: 4px; }
+.pn-inbox .ib-ag[data-agent-ended] .ib-agh > .am-btn { top: 8px; }
+
+/* A thread under its agent: one line, under the name. The wrapper keeps the row's hover action and its swipe. */
+.pn-inbox .ib-ag > .ib-rw, .pn-inbox .ib-agband > .ib-rw { margin-left: 56px; }
+.pn-inbox .ib-agband > .ib-rw { margin-left: 0; }
+/* A row off screen is skipped (inbox.css): its estimate is a line's. */
+.pn-inbox .ib-lbody > .ib-group > .ib-rw:has(> .ib-lrow) { contain-intrinsic-size: auto none auto 34px; }
+.pn-inbox .ib-lrow { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 34px; padding: 0 8px; border-radius: 8px; text-align: left; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
+.pn-inbox .ib-lrow-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.pn-inbox .ib-lrow .ib-key { flex: 1 1 auto; min-width: 0; }
+.pn-inbox .ib-lrow.ib-u:not(.ib-sent) .ib-lrow-t { font-weight: 600; color: var(--foreground); }
+.pn-inbox .ib-lrow.ib-sel { background: var(--ib-sel); }
+/* A title keeps a few words before the thread's other agents' icons shrink it (they give way first). */
+.pn-inbox .ib-lrow:has(> .ib-atiles) > .ib-lrow-t { min-width: min(8em, 38%); }
+/* Picking (picks.css): the box over the room left at the row's left; a picked row filled, the open one only when picked. */
+.pn-inbox .ib-rw:has(> .ib-lrow) > .ib-pick-box { left: 8px; top: 9px; }
+.pn-inbox .ib-listcol[data-picking] .ib-rw > .ib-lrow:not(:has(> .ib-pick-mark)) { padding-left: 32px; }
+.pn-inbox .ib-listcol[data-picking] .ib-lrow { user-select: none; }
+.pn-inbox .ib-listcol[data-picking] .ib-lrow.ib-sel:not(.ib-picked) { background: none; }
+.pn-inbox .ib-listcol[data-picking] .ib-lrow.ib-picked { background: var(--ib-sel); }
+.pn-inbox .ib-rw[data-menu] > .ib-lrow:not(.ib-sel) { background: var(--ib-hover); }
+.pn-inbox .ib-lrow[data-away] > * { opacity: 0.55; }
+/* The thread's other agents give way before the title is cut to a few letters. */
+/* With no room, a tile goes whole, never cut: the tiles wrap onto a second line that is never shown (the empty first
+   item lets the first tile wrap too). */
+.pn-inbox .ib-lrow > .ib-atiles { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; overflow: hidden; }
+.pn-inbox .ib-lrow > .ib-atiles::before { content: ''; width: 0; height: 20px; }
+.pn-inbox .ib-lrow .ib-lend { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.pn-inbox .ib-lrow .ib-lend:empty { display: none; }
+.pn-inbox .ib-lrow .ib-badge { height: 20px; }
+.pn-inbox .ib-lrow .ib-t { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-agmore { display: block; width: calc(100% - 56px); height: 30px; margin-left: 56px; padding: 0 8px; border-radius: 8px; text-align: left; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+/* The hover action covers the row's counts and time, as on a one-line row of the groups. */
+.ib-rw:has(:focus-visible):has(.ib-ract) .ib-lrow :is(.ib-t, .ib-lend) { visibility: hidden; }
+.pn-inbox .ib-rw > .ib-lrow ~ .ib-ract { height: 26px; right: 8px; }
+@media (hover: hover) {
+  .pn-inbox .ib-agh-b:hover, .pn-inbox .ib-lrow:not(.ib-sel):hover, .pn-inbox .ib-agmore:hover { background: var(--ib-hover); }
+  .pn-inbox .ib-agh:has(> .am-btn:hover, > .am-btn[data-fan-open]) > .ib-agh-b { background: var(--ib-hover); }
+  .ib-rw:hover:has(.ib-ract) .ib-lrow :is(.ib-t, .ib-lend) { visibility: hidden; }
+}
+
+/* Phone: the phone's padding, rows a finger tall, the face still 44. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-agh > .am-btn { left: 16px; top: 12px; }
+  .pn-inbox .ib-agh-b { min-height: 66px; padding: 12px 16px 4px 72px; border-radius: 0; }
+  .pn-inbox .ib-ag[data-agent-ended] .ib-agh-b { min-height: 62px; padding-top: 10px; padding-bottom: 4px; }
+  .pn-inbox .ib-ag[data-agent-ended] .ib-agh > .am-btn { top: 9px; }
+  .pn-inbox .ib-agh-b:active { background: color-mix(in oklch, var(--muted) 50%, transparent); }
+  .pn-inbox .ib-ag > .ib-rw { margin-left: 72px; margin-right: 8px; }
+  .pn-inbox .ib-agband > .ib-rw { margin: 0 8px; }
+  .pn-inbox .ib-lrow { height: 44px; }
+  .pn-inbox .ib-lbody > .ib-group > .ib-rw:has(> .ib-lrow) { contain-intrinsic-size: auto none auto 44px; }
+  .pn-inbox .ib-lrow:active { background: color-mix(in oklch, var(--muted) 50%, transparent); }
+  .pn-inbox .ib-lrow.ib-u .ib-t { color: var(--primary); font-weight: 550; }
+  .pn-inbox .ib-agmore { width: calc(100% - 80px); height: 44px; margin-left: 72px; }
+  .pn-inbox .ib-lbody > .ib-agband { margin-top: 0; }
+}
