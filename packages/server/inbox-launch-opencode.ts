@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { inboxLaunchTokenOk, openCodeSessionModel, parseOpenCodeAgents, parseOpenCodeDefaultModel, parseOpenCodeModels, type InboxLaunchChoices, type InboxLaunchChoicesUnread } from "@plannotator/core/inbox-launch-choice";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
+import { stripJsonComments } from "./agent-files";
 import { agentVersionRun, createAgentEnvironmentFor, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
@@ -119,8 +120,6 @@ const LIST_FAILED_AGAIN_MS = 15_000;
 const LIST_FAILED_AGAIN_MAX_MS = 5 * 60_000;
 /** Between a list key's parts: never in a path. */
 const LIST_KEY_CUT = "\u0000";
-/** How many (list key, folder) defaults the host keeps. */
-const DEFAULTS_KEPT = 32;
 /** A list read that found no login env runs the login shell again at most this often. */
 const LIST_LOGIN_AGAIN_MS = 5 * 60_000;
 /** The login shell's names this host keeps (`shellNames`): where OpenCode's files are, and an explicit config. */
@@ -152,6 +151,135 @@ export function openCodeListStamp(e: AgentEnvironment): string {
       }
     })
     .join(",");
+}
+
+/** A project config file bigger than this is not read (its folder's default is then not named). */
+export const OPENCODE_PROJECT_CONFIG_CAP = 256 * 1024;
+/** A project's own OpenCode config files, in each folder from the one picked up to its git root (OpenCode's names). */
+const OPENCODE_PROJECT_CONFIG_NAMES = ["opencode.jsonc", "opencode.json"] as const;
+
+/** `path` is `root` or inside it (both real paths). */
+const insideOf = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+/** `lstat`, never following a link; null when nothing is there (or it can't be looked at). */
+const there = (path: string) => {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+};
+
+export type OpenCodeProjectModel = { kind: "model"; model: string } | { kind: "none" } | { kind: "unsure" };
+
+/**
+ * The model a project's own OpenCode config sets (`model`, provider/id), read as DATA: nothing of the project runs,
+ * no plugin and no `.opencode` folder is loaded. Picking a folder in To must never run its code (OpenCode run there
+ * would load its config and plugins), so OpenCode is never asked there.
+ *
+ * Reads `opencode.jsonc` and `opencode.json` in `folder` and each folder above it up to its git root (a `.git` there),
+ * never above `home`; the nearest sets it. `none`: no project file sets `model` (OpenCode's own default, read in the
+ * home folder, names it). `unsure` whenever the name could be wrong: a config file present but unreadable, invalid,
+ * over 256 KiB, not a plain file or a link out of that tree; a `model` that is not a plain provider/id token; files
+ * that set different models where which wins is not certain; a project file that also sets an agent's model or
+ * changes the providers; a `.opencode/opencode.json(c)` (seen, never read); `OPENCODE_CONFIG_CONTENT` set with a
+ * project `model`. A folder outside home (or not there) is not read: `unsure`.
+ */
+export function openCodeProjectModel(folder: string, home: string, options: { configContent?: boolean } = {}): OpenCodeProjectModel {
+  const unsure = { kind: "unsure" } as const;
+  let top: string;
+  let start: string;
+  try {
+    top = realpathSync(home);
+    start = realpathSync(folder);
+  } catch {
+    return unsure;
+  }
+  if (!insideOf(start, top)) return unsure;
+  // The folders OpenCode would look in: the one picked, then up to its git root, never above home.
+  const dirs: string[] = [];
+  for (let dir = start; ; ) {
+    dirs.push(dir);
+    if (dir === top || there(join(dir, ".git"))) break;
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  const root = dirs[dirs.length - 1]!;
+  const found: { at: number; name: string; model: string }[] = [];
+  let changesProviders = false;
+  for (const [at, dir] of dirs.entries()) {
+    // Seen, never read: an `.opencode` folder's own config (a link there is not followed, so it may hold one).
+    const dotFolder = there(join(dir, ".opencode"));
+    if (dotFolder?.isSymbolicLink()) return unsure;
+    if (dotFolder?.isDirectory() && OPENCODE_PROJECT_CONFIG_NAMES.some((name) => there(join(dir, ".opencode", name)))) return unsure;
+    for (const name of OPENCODE_PROJECT_CONFIG_NAMES) {
+      const read = readProjectConfig(join(dir, name), root);
+      if (read === null) continue;
+      if (read === false) return unsure;
+      if (read.agentModel) return unsure;
+      if (read.changesProviders) changesProviders = true;
+      if (read.model === false) return unsure;
+      if (read.model !== null) found.push({ at, name, model: read.model });
+    }
+  }
+  if (found.length === 0) return changesProviders ? unsure : { kind: "none" };
+  if (options.configContent) return unsure;
+  const nearest = found[0]!;
+  // Nearest wins between files of one name; files of the two names that disagree: which wins is not certain.
+  if (found.some((f) => f.model !== nearest.model && (f.at === nearest.at || f.name !== nearest.name))) return unsure;
+  return { kind: "model", model: nearest.model };
+}
+
+/**
+ * One project config file as data. null: not there. false: there, but not read (unreadable, too big, not a plain file,
+ * a link out of `root`, not a JSON object). `model`: its top-level `model` (null: none; false: not a provider/id token).
+ */
+function readProjectConfig(path: string, root: string): { model: string | null | false; agentModel: boolean; changesProviders: boolean } | null | false {
+  let at = path;
+  try {
+    const link = lstatSync(path);
+    if (link.isSymbolicLink()) {
+      at = realpathSync(path);
+      if (!insideOf(at, root)) return false;
+    } else if (!link.isFile()) return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR" ? null : false;
+  }
+  let text: string;
+  let fd: number | null = null;
+  try {
+    fd = openSync(at, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > OPENCODE_PROJECT_CONFIG_CAP) return false;
+    const buffer = Buffer.alloc(OPENCODE_PROJECT_CONFIG_CAP + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const n = readSync(fd, buffer, size, buffer.length - size, size);
+      if (n <= 0) break;
+      size += n;
+    }
+    if (size > OPENCODE_PROJECT_CONFIG_CAP) return false;
+    text = buffer.subarray(0, size).toString("utf8").replace(/^\uFEFF/, "");
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonComments(text));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const config = parsed as Record<string, unknown>;
+  const agents = config.agent;
+  const agentModel = !!agents && typeof agents === "object" && Object.values(agents).some((agent) => !!agent && typeof agent === "object" && "model" in agent);
+  const changesProviders = "provider" in config || "enabled_providers" in config || "disabled_providers" in config;
+  if (!("model" in config)) return { model: null, agentModel, changesProviders };
+  const model = config.model;
+  const ok = typeof model === "string" && inboxLaunchTokenOk(model) && /^[^/]+\/.+$/.test(model);
+  return { model: ok ? model : false, agentModel, changesProviders };
 }
 
 /** OpenCode's lists when they could not be read: empty, with why, as a code (the window has the words). */
@@ -526,32 +654,34 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS, failedAgainMaxMs: LIST_FAILED_AGAIN_MAX_MS, binaryOf: (key) => key.slice(0, key.indexOf(LIST_KEY_CUT)) });
 
   /**
-   * The model OpenCode starts on, read in the folder the session would start in (a project's own `opencode.json` may
-   * set `model`), per list key and folder: a new list key (a config or sign-in change) reads it again. A read that
-   * fails or is still running names nothing (`undefined` while it runs, null once it failed), so the button never
-   * shows a name that may be wrong; it is never waited on. A few entries, never a growing map.
+   * OpenCode's own default (`GET /api/model/default`), read in the HOME folder only, exactly as the lists are (same env,
+   * same 5 s, same binary): never in a project, whose config and plugins OpenCode would load (a project's own `model`
+   * is read as data, `openCodeProjectModel`). One per list key: a new key (a config or sign-in change) reads it again.
+   * Never waited on: undefined while it reads, null after a read that failed, which is tried again after the list's
+   * backoff (15 s, doubled up to 5 minutes; a new key starts over).
    */
-  const defaults = new Map<string, { model: string | null; done: boolean }>();
-  const defaultOf = (listKey: string, folder: string | null): string | null | undefined => {
-    const key = `${listKey}${LIST_KEY_CUT}${folder ?? ""}`;
-    const kept = defaults.get(key);
-    if (kept) return kept.done ? kept.model : undefined;
-    const entry = { model: null as string | null, done: false };
-    defaults.delete(key);
-    defaults.set(key, entry);
-    while (defaults.size > DEFAULTS_KEPT) defaults.delete(defaults.keys().next().value!);
+  let homeDefault: { key: string; model: string | null; reading: boolean; at: number; times: number } | null = null;
+  const homeDefaultOf = (listKey: string): string | null | undefined => {
+    const kept = homeDefault?.key === listKey ? homeDefault : null;
+    if (kept?.reading) return undefined;
+    if (kept?.model) return kept.model;
+    if (kept && Date.now() - kept.at < Math.min(LIST_FAILED_AGAIN_MAX_MS, LIST_FAILED_AGAIN_MS * 2 ** (kept.times - 1))) return null;
+    const entry = { key: listKey, model: null as string | null, reading: true, at: 0, times: kept?.times ?? 0 };
+    homeDefault = entry;
     void (async () => {
       try {
         const e = await ctx.environment();
         const path = binOf(e);
         if (!path) return;
         const env = openCodeListEnv(listFrom ?? (await listSource()).env);
-        const ran = await e.run([path, "--standalone", "api", "GET", "/api/model/default"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: folder ?? ctx.homeDir, env, cleanEnv: true });
+        const ran = await e.run([path, "--standalone", "api", "GET", "/api/model/default"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true });
         if (ran.exitCode === 0 && !ran.timedOut) entry.model = parseOpenCodeDefaultModel(JSON.parse(ran.stdout));
       } catch {
         entry.model = null;
       } finally {
-        entry.done = true;
+        entry.reading = false;
+        entry.at = Date.now();
+        entry.times = entry.model ? 0 : entry.times + 1;
       }
     })();
     return undefined;
@@ -583,18 +713,20 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     // The key: the binary (path@version), which env the read starts from, and OpenCode's config and sign-in files'
     // stamps, found with that same env. A provider added or signed in to shows on the next read, with no Inbox restart.
     // `defaultIn`: the folder To names (null: the home folder, as for a scratch folder not made yet); absent, no
-    // default is read. Its read starts beside the list's and is never waited on: a slow one names it on a later read.
+    // default is named. A project's own `model` is read from its config files as data (nothing of it runs); else, or
+    // for the home folder, OpenCode's default read in the home folder, beside the list's and never waited on.
     async choices(options: { defaultIn?: string | null } = {}) {
       if (choiceKey === null) return choiceLists(null);
       const key = choiceKey;
       const source = await listSource();
       listFrom = source.env;
       const listKey = [key, source.from, openCodeListStamp(createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: source.env }))].join(LIST_KEY_CUT);
-      const wantsDefault = options.defaultIn !== undefined;
-      if (wantsDefault) defaultOf(listKey, options.defaultIn!);
+      const own = typeof options.defaultIn === "string" ? openCodeProjectModel(options.defaultIn, ctx.homeDir, { configContent: !!source.env.OPENCODE_CONFIG_CONTENT?.trim() }) : null;
+      const fromHome = options.defaultIn === null || own?.kind === "none";
+      if (fromHome) homeDefaultOf(listKey);
       const lists = await choiceLists(listKey);
-      if (!lists || lists.unread || !wantsDefault) return lists;
-      const model = defaultOf(listKey, options.defaultIn!);
+      if (!lists || lists.unread || options.defaultIn === undefined) return lists;
+      const model = own?.kind === "model" ? own.model : fromHome ? homeDefaultOf(listKey) : null;
       return model ? { ...lists, default_model: model } : lists;
     },
 

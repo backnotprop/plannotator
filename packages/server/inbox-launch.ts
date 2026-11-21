@@ -1946,6 +1946,8 @@ ${result.text}`);
    */
   const networkSeen = new Map<string, { at: number; exists: boolean; slow: boolean; reading: boolean }>();
   const NETWORK_LOOK_MS = 10_000;
+  /** `root` is on a network drive (one that may not answer: never read in process). */
+  const onNetworkDrive = (root: string, mounted: readonly { path: string; network?: true }[]) => mounted.some((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
   const projectThere = (root: string, mounted: readonly { path: string; network?: true }[]): { exists: boolean; slow?: true } => {
     const drive = mounted.find((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
     if (!drive) return { exists: isFolder(root) };
@@ -2251,13 +2253,10 @@ ${result.text}`);
     /**
      * `GET /api/inbox/sessions`'s `launch` block: the agents To offers, the projects the folder menu lists.
      * `owner`: the owner's window asks, so each agent says which folders it would Trust and start. That read is
-     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read.
+     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read (Trust and
+     * start's facts, and OpenCode's project config for its default's name). Null (another site, the device door): none.
      */
-    async composeBlock(
-      owner: { pick: { agent: string; project: string } | null } | null = null,
-      /** The folder To names, from any window: where OpenCode's default model is read (`default_for`). */
-      named: { agent: string; project: string } | null = null,
-    ): Promise<InboxComposeLaunch | undefined> {
+    async composeBlock(owner: { pick: { agent: string; project: string } | null } | null = null): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
       // New message is open: the first time, the login shell read ahead of a Send.
       warmLogin();
@@ -2304,11 +2303,15 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          // Its default model is read in the folder To names: a project here (local, not on a drive that isn't
-          // answering) or the scratch pick (the home folder: the scratch folder is not made yet). Any other folder, or
-          // none named: no default, so no name that may be wrong.
-          const namedHere = named?.agent === host.agent ? named.project : null;
-          const namedProject = namedHere && namedHere !== INBOX_SCRATCH_PICK ? projects.find((p) => p.id === namedHere && p.exists && !p.slow && !outsideHome(options.homeDir, p.root)) : null;
+          // Its default model is named for the folder picked in To, for the owner's own window only (`owner.pick`, as
+          // Trust and start's facts): a project here (in home, there, not on a network drive, whose config files are
+          // read as data) or the scratch pick (the home folder: the scratch folder is not made yet). Any other folder,
+          // another site's page, the device door, or none picked: no default, so no name that may be wrong.
+          const namedHere = owner?.pick?.agent === host.agent ? owner.pick.project : null;
+          const namedProject =
+            namedHere && namedHere !== INBOX_SCRATCH_PICK
+              ? projects.find((p) => p.id === namedHere && p.exists && !p.slow && !onNetworkDrive(p.root, mounted) && !outsideHome(options.homeDir, p.root))
+              : null;
           const defaultIn = namedHere === INBOX_SCRATCH_PICK ? null : namedProject ? namedProject.root : undefined;
           // A list still being read past the wait, or one that could not be read: compose has Default and says so
           // (OpenCode), with no last pick (Default stays picked).

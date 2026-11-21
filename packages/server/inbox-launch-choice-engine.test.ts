@@ -2,11 +2,12 @@
  * The model menu's lists through the launch engine (a real engine over a temp data dir, the test fake as the agent):
  * while a host's lists are being read or could not be read, compose gets them with no saved pick (Default stays
  * picked), a Send is accepted (Default, or a model by the API) and a Default Send keeps the saved pick; OpenCode's
- * default is asked for in the folder To names and said to be for it; a host's login-read hook that throws never fails
+ * default is asked for the folder the owner's window picked in To and said to be for it, never for a folder outside
+ * home, gone, or on a network drive; a host's login-read hook that throws never fails
  * the login read. No Inbox is started.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
@@ -37,21 +38,27 @@ const unread: Lists = { models: [], efforts: [], effort_word: "Variant", unread:
 
 /** `lists`: what the fake's `choices` answers (a function of what it was asked; a never-settling promise for "slow"). */
 function setup(lists: (options: { defaultIn?: string | null }) => Promise<Lists | null>, extra: { loginReadThrows?: boolean } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "plannotator-launch-choice-engine-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-choice-engine-")));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
   const home = join(root, "home");
   const folder = join(home, "harbor-api");
-  for (const dir of [dataDir, folder]) mkdirSync(dir, { recursive: true });
+  // A project outside home, and one on a network drive mounted in home that doesn't answer.
+  const outside = join(root, "elsewhere", "billing-svc");
+  const nas = join(home, "nas");
+  const onNas = join(nas, "footage-tools");
+  for (const dir of [dataDir, folder, outside, onNas]) mkdirSync(dir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
+  setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
+  setEnv("PLANNOTATOR_TEST_DRIVES", JSON.stringify({ drives: [{ path: nas, network: true }], slow: [nas] }));
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const store = InboxStore.open(dataDir);
   const project = store.ensureProject({ name: "harbor-api", root: folder });
   const fake = fakeLaunchHost();
   const asked: { defaultIn?: string | null }[] = [];
   fake.host.choices = (options = {}) => (asked.push(options), lists(options));
-  fake.host.choicesWhileReading = reading;
+  Object.assign(fake.host, { choicesWhileReading: reading });
   if (extra.loginReadThrows) {
     fake.host.loginRead = () => {
       throw new Error("a host's hook broke");
@@ -75,13 +82,19 @@ function setup(lists: (options: { defaultIn?: string | null }) => Promise<Lists 
     hosts: () => [fake.host],
   });
   restore.push(() => launch.stop());
-  const agentOf = async (named: { agent: string; project: string } | null = null) => (await launch.composeBlock(null, named))!.agents.find((a) => a.agent === FAKE)!;
+  /** `pick`: the folder the owner's window picked in To (null: the owner's window with none picked); `owner: false`: another site or the device door. */
+  const agentOf = async (pick: { agent: string; project: string } | null = null, owner = true) => (await launch.composeBlock(owner ? { pick } : null))!.agents.find((a) => a.agent === FAKE)!;
   const saved = () => JSON.parse(readFileSync(join(dataDir, "inbox", "launch", "last-choice.json"), "utf8"))[FAKE];
   const send = async (launchTo: Record<string, unknown>) => {
     const target = launch.target({ launch: { agent: FAKE, project_id: project.id, ...launchTo } })!;
     return launch.prepare(target, { name: "Tidy the readme", body: "Tidy the readme.", resolveProject: async () => project });
   };
-  return { dataDir, home, folder, project, fake, launch, asked, agentOf, saved, send };
+  const projects = {
+    outside: store.ensureProject({ name: "billing-svc", root: outside }),
+    gone: store.ensureProject({ name: "old-api", root: join(home, "old-api") }),
+    onNas: store.ensureProject({ name: "footage-tools", root: onNas }),
+  };
+  return { dataDir, home, folder, project, projects, fake, launch, asked, agentOf, saved, send };
 }
 
 describe("compose's lists while they are being read or could not be read", () => {
@@ -137,6 +150,15 @@ describe("the default model is asked for in the folder To names", () => {
     const unknown = await t.agentOf({ agent: FAKE, project: "prj_not_here" });
     expect(t.asked.at(-1)).toEqual({});
     expect(unknown.choices!.default_for).toBeUndefined();
+  });
+
+  test("a project outside home, one whose folder is gone, and one on a network drive that doesn't answer: no folder is read", async () => {
+    const t = setup(async (options) => (options.defaultIn !== undefined ? { ...listed, default_model: "opencode/big-pickle" } : listed));
+    for (const project of [t.projects.outside, t.projects.gone, t.projects.onNas]) {
+      const block = await t.agentOf({ agent: FAKE, project: project.id });
+      expect({ project: project.name, asked: t.asked.at(-1) }).toEqual({ project: project.name, asked: {} });
+      expect(block.choices!.default_for).toBeUndefined();
+    }
   });
 });
 

@@ -20,8 +20,9 @@ export interface InboxLaunchChoices {
   /** OpenCode's own agents a session may start as (`GET /api/agent`: primary, not hidden). Absent: no Agent column. */
   primary_agents?: string[];
   /**
-   * The model the agent's CLI starts on when none is picked (OpenCode's `GET /api/model/default`, read in the folder
-   * To names), provider/model. Absent: unknown, or not read yet for that folder.
+   * The model the agent's CLI most likely starts on when none is picked, provider/model, for the folder picked in To:
+   * the project config's own `model` (read as data), else OpenCode's `GET /api/model/default` read in the home folder.
+   * Absent: unknown, uncertain, or not read yet for that folder.
    */
   default_model?: string;
   /** The folder `default_model` was read for: the project id To named, or the scratch pick. The window names it only for that one. */
