@@ -127,7 +127,7 @@ export function blankCode(body: string): string {
  * backtick in one paragraph is literal even when another has one too.
  */
 export function blankInlineCode(text: string): string {
-  const parts = text.split(/(\n[ \t]*\n)/);
+  const parts = text.split(/(\r?\n[ \t\r]*\n)/);
   return parts.length === 1 ? blankInlineCodeInBlock(text) : parts.map((part, i) => (i % 2 === 0 ? blankInlineCodeInBlock(part) : part)).join("");
 }
 
