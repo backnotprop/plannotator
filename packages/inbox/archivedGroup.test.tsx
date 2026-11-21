@@ -507,6 +507,7 @@ test.skipIf(!hasDom)('picking: an archived row is picked with a live one, Combin
   const archivedEl = group()!.querySelector<HTMLElement>('[data-thread-id]')!;
   const id = archivedEl.getAttribute('data-thread-id')!;
   expect(archivedEl.closest('.ib-rw')!.querySelector('[data-pick-box]')).not.toBeNull();
+  expect(archivedEl.closest('.ib-rw')!.hasAttribute('data-archived')).toBe(false);
   click(archivedEl, { metaKey: true });
   expect(count()).toBe('2 selected');
   expect(archivedEl.getAttribute('aria-pressed')).toBe('true');
