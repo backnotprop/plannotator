@@ -973,6 +973,9 @@ test('the header says the message has files: its count opens the same tiles unde
   expect(page.url()).toContain(`file=${world.attachments.plan}`);
   // The thread beside the file is 440 px: the head row goes to two lines, and the count is drawn whole (inbox-polish, item 5).
   expect(Math.round((await page.locator('section.ib-pane').first().boundingBox())!.width)).toBe(440);
+  // The thread keeps the opened tile where it was (threadPlace.ts), so the taller head row can sit above the view's top
+  // with no heading above it: scrolled back into view, it is drawn whole.
+  await count.scrollIntoViewIfNeeded();
   expect(await cutInHeadRow(count)).toBeNull();
   expect(await cutInHeadRow(count.locator('.ib-hflag'))).toBeNull();
   await pane.getByRole('button', { name: 'Close retry-plan.md' }).click();
