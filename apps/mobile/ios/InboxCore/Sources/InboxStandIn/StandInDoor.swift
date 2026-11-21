@@ -24,6 +24,9 @@ public actor StandInDoor {
     public var racesPicks = 0
     /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
     public var proxyRefusesReplies: Int?
+    /// Threads whose archive something between the phone and the computer refuses with a web page (a 403): one
+    /// row of an act on several rows that is not taken.
+    public var proxyRefusesArchive: Set<String> = []
     /// True: the Authorization header never reaches the door, as when something in between strips it.
     public var stripsToken = false
     public init() {}
@@ -209,6 +212,8 @@ public actor StandInDoor {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]), fields)
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), fields)
     case ("messages", 4, _) where parts[2] == "actions": answer = markAction(MessageID(parts[1]), parts[3], fields)
+    case ("messages", 3, "resolve") where options.proxyRefusesArchive.contains(parts[1]):
+      return DoorAnswerBytes(status: 403, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8))
     case ("messages", 3, "reply"):
       if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
       answer = reply(MessageID(parts[1]), fields)
@@ -340,7 +345,7 @@ public actor StandInDoor {
     }
   }
 
-  /// `markAction`: Done (with an optional note), Can't do it (with a reason), or null to take it back.
+  /// `markAction`: Done (with an optional note), Can't do it (with a reason), Skip (no note: one sent is dropped), or null to take it back.
   private func markAction(_ message: MessageID, _ key: String, _ fields: [String: JSONValue]) -> DoorAnswerBytes {
     do {
       let at = try target(message)
@@ -353,13 +358,15 @@ public actor StandInDoor {
       case .null?: outcome = nil
       case .string("done")?: outcome = .done
       case .string("cant")?: outcome = .cant
-      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", or null to undo.", field: "outcome")
+      case .string("skip")?: outcome = .skip
+      default: return refuse(422, "validation_error", "outcome: \"done\", \"cant\", \"skip\", or null to undo.", field: "outcome")
       }
       var note = ""
       if let raw = fields["note"], raw != .null {
         guard case .string(let text) = raw else { return refuse(422, "validation_error", "note: text.", field: "note") }
         note = text.trimmingCharacters(in: .whitespacesAndNewlines)
       }
+      if outcome == .skip { note = "" }
       if outcome == .cant, note.isEmpty { return refuse(422, "validation_error", "note: say why you can't do it; the agent gets it word for word.", field: "note") }
       let state = questions[q].state
       if state == .sent { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }

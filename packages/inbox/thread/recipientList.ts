@@ -9,7 +9,7 @@ import type { ReplyStart } from './replyStart';
 
 /**
  * The thread's agents, the session a hand-off or takeover gave the thread, and, when the agent asked has ended, the
- * live sessions in its place and, last, the start row (`start`). `gone`: sessions a Send was refused for as not
+ * live sessions in its place and, last, the start row (`start`). A renamed session is its given name (`givenNameOf`). `gone`: sessions a Send was refused for as not
  * live any more, ended in the list from then on. `rcptDefault`: the session the words go to unless aimed.
  */
 export function replyRecipientList(input: {
@@ -22,6 +22,8 @@ export function replyRecipientList(input: {
   gone: ReadonlyMap<string, string | null>;
   rcptDefault: string | null;
   start: ReplyStart | null;
+  /** The name the person gave a session (Rename… on its sidebar row), or null. */
+  givenNameOf?: (session: string) => string | null;
 }): RecipientRow[] {
   const { thread, askerEnded, asking, live, taggable, gone, rcptDefault } = input;
   const people: RecipientPerson[] = [...input.participants];
@@ -40,6 +42,7 @@ export function replyRecipientList(input: {
     // A live session of the project's list that the `@` list has not read: the thread's folder (the list is its project's).
     (session) => sessionFolder(session, thread, taggable) ?? (gone.has(session) || live?.sessions.some((s) => s.session === session) ? thread.project.name : null),
     (session) => recipientState(session, taggable, ended),
+    input.givenNameOf,
   ).map((row) => ({ ...row, alone: canTakeAlone(row.state, row.session === rcptDefault || latestBy(thread, row.session) !== undefined) }));
   return askerEnded && input.start ? [...rows, input.start.row] : rows;
 }

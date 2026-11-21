@@ -432,6 +432,10 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
+              // In the document a plain wheel scrolls the page past the
+              // diagram; Ctrl/Cmd+wheel and a pinch zoom it. The popout
+              // (below) zooms on a plain wheel.
+              wheelZoom="modifier"
               onAskAI={handleAskAI}
               onResolutionChange={setResolution}
               onRenderState={setRenderState}

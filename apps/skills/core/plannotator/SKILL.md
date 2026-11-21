@@ -33,6 +33,7 @@ Use the CLI only when you have no such tool, or for what the tool does not do: `
 | Browse past plan decisions | `plannotator archive` |
 | Export or share a Guided Review | `plannotator guide export` / `plannotator guide share` |
 | Reopen or list live sessions | `plannotator sessions` |
+| Make Plannotator use their own colour theme file | `plannotator theme --help` |
 | Ask the person something they can answer later, without blocking | The `plannotator_inbox` tool when you have it, else the Inbox's MCP server (`plannotator inbox mcp`) |
 | Have work run on its own on a schedule, reporting in the Inbox (a routine) | `plannotator routine --help` |
 
@@ -220,6 +221,7 @@ plannotator data-dir
 plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'PLANNOTATOR_FEEDBACK_END'
 <the message, exactly as the person approved it>
 PLANNOTATOR_FEEDBACK_END
+plannotator theme add <file> | use <id> [--light | --dark] | list [--json] | remove <id>
 plannotator update [--check]
 plannotator uninstall [--purge] [--yes] [--dry-run]
 plannotator improve-context
@@ -228,6 +230,7 @@ plannotator improve-context
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
 - `data-dir` prints the absolute path of Plannotator's data directory (plans, history, drafts, `config.json`, `hooks/`) and creates nothing. Run it whenever you need a file in that folder, and use the path it prints. Never write a path such as `~/.plannotator/...` from memory: an install can keep its data under `$XDG_DATA_HOME/plannotator`, and a new `~/.plannotator` can hide that data from Plannotator. If it prints nothing or fails (an older Plannotator, before 0.28.41), use `$PLANNOTATOR_DATA_DIR` when it is set; otherwise the home folder's `.plannotator` if it exists, else `$XDG_DATA_HOME/plannotator` when `XDG_DATA_HOME` is set, else the home folder's `.plannotator`.
 - `feedback` sends the person's feedback about Plannotator to its maintainers and prints `Sent` (the message, the category and contact if given, the version, the OS name and that it came from the CLI; nothing else). Only when the person asks you to send feedback: show them the exact text first and run it only after they say yes. Pass the message on stdin with a quoted heredoc (`<<'PLANNOTATOR_FEEDBACK_END'`, quotes included; pick another end word if a line of the message is exactly that), never inside double quotes in any shell, where `$VAR`, backticks and `$(...)` are expanded and change the approved text. Fill in or leave out the bracketed options (`--category idea`), and put a contact in single quotes. In PowerShell, set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` and pipe a single-quoted here-string (`@'` … `'@ | plannotator feedback --stdin`). Exit 0 sent, 1 not sent, 2 usage.
+- `plannotator theme` gives Plannotator the person's own colour theme (a VS Code theme, a base16 scheme, or Plannotator's own format): run `plannotator theme --help` for the commands and the format.
 - `update` installs the newest release now (the install script, with the choices from the last install); `--check` only reports whether one exists. Run it only when the person asks you to update Plannotator: it replaces the binary. Exit 0 up to date or updated, 1 failed, 2 usage, 130 interrupted.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
 - `improve-context` and `install-runtime` are internal integration commands (hook plumbing and managed runtime install). Never run `improve-context` directly; `plannotator install-runtime agent-terminal` exists for reinstalling the optional annotate-terminal runtime and is normally run by the installer.

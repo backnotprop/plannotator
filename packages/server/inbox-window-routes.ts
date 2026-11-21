@@ -69,6 +69,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-priority.ts',
   'packages/server/inbox-project-tags.ts',
   'packages/server/inbox-reply-drafts.ts',
+  'packages/server/inbox-run-routes.ts',
   'packages/server/inbox-scheduled-routes.ts',
   'packages/server/inbox-search.ts',
   'packages/server/inbox-sessions.ts',
@@ -94,7 +95,7 @@ export const ROUTE_FILES = [
 ] as const;
 
 /** A path is a route of the Inbox when it starts with one of these. */
-const ROUTE_START = /^\/(api\/|mcp$|favicon\.(png|ico)$|manifest\.webmanifest$|apple-touch-icon\.png$|app-icon\/|assets\/|$)/;
+const ROUTE_START = /^\/(api\/|mcp$|favicon\.(png|ico)$|manifest\.webmanifest$|apple-touch-icon\.png$|plannotator-themes\.js$|app-icon\/|assets\/|$)/;
 
 const PARAM = ':id';
 

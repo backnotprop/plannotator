@@ -21,8 +21,11 @@ export function listMoveIndex(count: number, index: number, move: ListMove): num
   }
 }
 
-/** The list's stops on screen, in order: rows (one element per row) and the groups' headers. */
-export const LIST_STOPS = '[data-thread-id], button.ib-band';
+/**
+ * The list's stops on screen, in order: rows (one element per row) and the groups' headers; in the Agents view
+ * (agentsView/) each agent's row and its "N more" too, so ↓ ↑ reach a folded agent and open it with Enter.
+ */
+export const LIST_STOPS = '[data-thread-id], button.ib-band, button[data-agent-head], button[data-agent-more]';
 /** A row of the list (one element per row), without the groups' headers. */
 export const LIST_ROWS = '[data-thread-id]';
 
