@@ -508,6 +508,12 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
     writeFileSync(join(docDir, "media", "demo.webm"), "WEBM_BYTES");
     writeFileSync(join(parent, "private.webm"), "PRIVATE_BYTES");
     symlinkSync(join(parent, "private.webm"), join(docDir, "media", "escape.webm"));
+    // A video name that links to a file of another kind inside the folder, and a hidden folder.
+    writeFileSync(join(docDir, "notes.txt"), "PRIVATE_NOTES");
+    symlinkSync(join(docDir, "notes.txt"), join(docDir, "media", "notes.mp4"));
+    mkdirSync(join(docDir, ".git"));
+    writeFileSync(join(docDir, ".git", "clip.webm"), "HIDDEN_VIDEO");
+    symlinkSync(join(docDir, ".git", "clip.webm"), join(docDir, "media", "hidden.webm"));
     const linkedDir = join(parent, "linked");
     mkdirSync(linkedDir);
     const linkedDocument = join(linkedDir, "linked.md");
@@ -526,6 +532,11 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
       expect((await get("media/large.mp4")).status).toBe(413);
       for (const path of ["../private.webm", "media/escape.webm", "/private.webm", "media/demo.txt"]) {
         expect((await get(path)).status).not.toBe(200);
+      }
+      for (const path of ["media/notes.mp4", ".git/clip.webm", "media/hidden.webm"]) {
+        const refused = await get(path);
+        expect(refused.status).toBe(403);
+        expect(await refused.text()).not.toContain("PRIVATE_NOTES");
       }
       expect((await get("private.webm", parent)).status).not.toBe(200);
       expect((await get("clip.webm", linkedDir)).status).toBe(403);

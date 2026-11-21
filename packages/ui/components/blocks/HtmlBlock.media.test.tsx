@@ -58,6 +58,18 @@ describe.if(hasDom)('annotated Markdown video paths', () => {
     expect(video?.getAttribute('poster')).toBe('/api/image?path=media%2Fposter.png&base=%2Fdocs%2Fproof');
   });
 
+  test('a re-render with new callbacks keeps the playing video element', async () => {
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root?.render(<HtmlBlock block={VIDEO_BLOCK} imageBaseDir="/docs/proof" onOpenLinkedDoc={() => {}} onNavigateAnchor={() => {}} />));
+    const video = host.querySelector('video');
+    expect(video).not.toBeNull();
+    await act(async () => root?.render(<HtmlBlock block={VIDEO_BLOCK} imageBaseDir="/docs/proof" onOpenLinkedDoc={() => {}} onNavigateAnchor={() => {}} />));
+    expect(host.querySelector('video')).toBe(video);
+    expect(video?.isConnected).toBe(true);
+  });
+
   test('a host with its own image resolver keeps its video URLs as written', async () => {
     setImageSrcResolver((path) => `https://assets.example/${path}`);
     host = document.createElement('div');

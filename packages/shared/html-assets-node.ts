@@ -21,11 +21,7 @@ export function annotateMediaFile(
   if (!path || !base || !isAbsolute(base) || isAbsolute(path) || /^[a-z][a-z\d+.-]*:/i.test(path) || path.includes('\\')) {
     return { status: 403 };
   }
-  const extension = pathPosix.extname(path).toLowerCase();
-  const contentType = extension === '.mp4' ? 'video/mp4'
-    : extension === '.webm' ? 'video/webm'
-      : extension === '.ogg' ? 'video/ogg' : null;
-  if (!contentType) return { status: 403 };
+  if (!annotateMediaContentType(path)) return { status: 403 };
   const directory = resolvePath(base);
   // The caller's base is untrusted. It must be the folder of a document this
   // session opened, including a linked document outside the original roots.
@@ -33,19 +29,38 @@ export function annotateMediaFile(
     const docDir = dirname(resolvePath(document));
     return isWithinDirectory(directory, docDir) && isWithinDirectory(docDir, directory);
   })) return { status: 403 };
-  const resolved = resolvePath(directory, path);
-  if (!isWithinDirectory(resolved, directory)) return { status: 403 };
-  const state = htmlAssetFileState(resolved, MAX_HTML_ASSET_BYTES);
-  if (state === 'too-large') return { status: 413 };
-  if (state !== 'ok') return { status: 404 };
-  // Serve the target the containment check resolved, not the link's name.
+  // Resolve once; every check below is on the file that is then served.
+  let root: string;
   let target: string;
   try {
-    target = realpathSync(resolved);
+    root = realpathSync(directory);
+    target = realpathSync(resolvePath(directory, path));
   } catch {
     return { status: 404 };
   }
-  return { status: 200, path: target, contentType, size: statSync(target).size };
+  const inside = relative(root, target);
+  if (!inside || inside.startsWith("..") || isAbsolute(inside)) return { status: 403 };
+  // Hidden files and folders (`.git/`, `.cache/`), as the HTML assets refuse them.
+  if (refusesHiddenHtmlAssetPath(inside)) return { status: 403 };
+  // A `clip.mp4` link to `notes.txt` is not a video.
+  const contentType = annotateMediaContentType(target);
+  if (!contentType) return { status: 403 };
+  let stat;
+  try {
+    stat = statSync(target);
+  } catch {
+    return { status: 404 };
+  }
+  if (!stat.isFile()) return { status: 404 };
+  if (stat.size > MAX_HTML_ASSET_BYTES) return { status: 413 };
+  return { status: 200, path: target, contentType, size: stat.size };
+}
+
+function annotateMediaContentType(path: string): string | null {
+  const extension = pathPosix.extname(path.replace(/\\/g, "/")).toLowerCase();
+  return extension === ".mp4" ? "video/mp4"
+    : extension === ".webm" ? "video/webm"
+      : extension === ".ogg" ? "video/ogg" : null;
 }
 
 /**
