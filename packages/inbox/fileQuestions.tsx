@@ -37,6 +37,14 @@ export interface FileQuestions {
 
 /** The status tag a pick not sent shows, as on the body's cards. */
 const DRAFT_STATUS = { label: 'Draft', tone: 'open' } as const;
+/**
+ * A question the archive closed (state `closed` with no Mark read): the card's own tag reads its answer, and it has
+ * none, so it would say "Open". The words and muted tone an archived action item's badge already has
+ * (ActionChecklist). The body's cards use it too (useQuestionCards).
+ */
+export const ARCHIVE_CLOSED_STATUS = { label: 'Closed', tone: 'skip' } as const;
+/** The archive closed it: `closed` with no Mark read's `set_aside_at` (a Mark read's has its skip answer's tag). */
+export const closedByArchive = (q: Pick<InboxQuestion, 'state' | 'set_aside_at'> | undefined): boolean => q?.state === 'closed' && !q.set_aside_at;
 
 /** The records of `message` asked inside the attachment `attachmentId`, then the questions of its body. */
 export function fileQuestionRecords(message: Pick<InboxMessageWire, 'questions'> | undefined, attachmentId: string): InboxQuestion[] {
@@ -101,8 +109,10 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
       },
       questionReadOnly: (indexed: IndexedQuestion) => fileQuestionLocked(cardRecord(byFileKey, indexed), locked),
       questionStatusLabel: (indexed: IndexedQuestion, status: QuestionStatus) => {
-        if (status !== 'answered' && status !== 'skipped') return undefined;
         const record = cardRecord(byFileKey, indexed);
+        // Closed by the archive: "Closed", as the body's cards (useQuestionCards), never "Open".
+        if (closedByArchive(record)) return ARCHIVE_CLOSED_STATUS;
+        if (status !== 'answered' && status !== 'skipped') return undefined;
         return record && (record.state === 'open' || record.state === 'picked') ? DRAFT_STATUS : undefined;
       },
       renderQuestionFooter: (indexed: IndexedQuestion) => {

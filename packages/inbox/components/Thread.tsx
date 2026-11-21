@@ -2655,6 +2655,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       return at ? `Sent ${whenTime(at)}` : 'Sent';
     }
     if (q.state === 'closed' && q.set_aside_at) return `Closed unanswered when you marked it read · ${whenTime(q.set_aside_at)}`;
+    // The archive closed it (an archived action item's own words, ActionChecklist).
+    if (q.state === 'closed') return 'Closed when the thread was archived.';
     if (q.state === 'picked' && q.picked_at) return `Picked ${whenTime(q.picked_at)} · in your draft`;
     // Re-ask: the person asked the agent for it again; it stays open until the agent replaces it.
     const reaskedBy = reaskedIn(thread.messages, message.id, q);

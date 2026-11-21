@@ -161,6 +161,7 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/movedTo.test.tsx
+packages/inbox/archivedQuestionCard.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/replyQuote.test.tsx
 packages/inbox/phoneComposer.test.tsx

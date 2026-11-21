@@ -92,6 +92,8 @@ describe("resolve_message with moved_to", () => {
     expect(store.questionsOf(old.id).map((q) => q.state)).toEqual(["closed"]);
     const row = store.listRow(old.id)!;
     expect(inboxRowArchived(row)).toBe(true);
+    // The row counts no question waiting (the list and Settings' Archived block read this).
+    expect(row.questions).toMatchObject({ open: 0, picked: 0 });
     expect(row.unseen).toBe(unseenBefore);
     expect(store.pendingReplies(SUB.session!)).toEqual([]);
     expect(store.pendingReplies(ORCH.session!)).toEqual([]);
