@@ -399,17 +399,34 @@ describe("the title a thread the person started reaches an agent with (agentTitl
     }
   });
 
-  test("once the agent names a thread over the suggestion, plain replies take its name and a first sight the subject, as in any agent-named thread", () => {
+  test("once the agent names it, over a suggestion or no name, everything takes the agent's name, a first sight too", () => {
     const { store, project } = world();
     const other = { host: "claude-code", session: "ses_other" };
-    const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k", thread_name: "Inbox list", thread_name_auto: true });
-    const named = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Sketch.", reply_to: root.id, thread: "Retry budget" });
-    expect(named.naming).toEqual({ status: "named", name: "Retry budget" });
-    expect(store.canNameThread(root.id, "ses_live")).toBe(false);
-    const plain = store.sendReply(named.message.id, { words: "Thanks.", idempotency_key: "plain" }).reply;
-    expect(store.agentTitle(plain, "ses_live")).toBe("Retry budget");
-    const fresh = store.sendNewMessage(root.id, { body: "Pick this up too.", to: other, idempotency_key: "new" }).message;
-    expect(store.agentTitle(fresh, "ses_other")).toBe(root.subject);
+    for (const [label, named] of [["suggested", { thread_name: "Inbox list", thread_name_auto: true }], ["none", {}]] as const) {
+      const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: `k-${label}`, ...named });
+      const renamed = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Sketch.", reply_to: root.id, thread: `Retry budget ${label}` });
+      expect(renamed.naming).toEqual({ status: "named", name: `Retry budget ${label}` });
+      expect(store.message(root.id)!.named_by).toMatchObject({ kind: "agent" });
+      expect(store.canNameThread(root.id, "ses_live")).toBe(false);
+      const plain = store.sendReply(renamed.message.id, { words: "Thanks.", idempotency_key: `plain-${label}` }).reply;
+      expect(store.agentTitle(plain, "ses_live")).toBe(`Retry budget ${label}`);
+      const fresh = store.sendNewMessage(root.id, { body: "Pick this up too.", to: other, idempotency_key: `new-${label}` }).message;
+      expect(store.agentTitle(fresh, "ses_other")).toBe(`Retry budget ${label}`);
+      const sentOn = store.sendReply(renamed.message.id, { words: "Take this over.", to: other, idempotency_key: `on-${label}` }).reply;
+      expect(store.redirectedFrom(sentOn)).not.toBeNull();
+      expect(store.agentTitle(sentOn, "ses_other")).toBe(`Retry budget ${label}`);
+      // The root, delivered again (a first sight): the name as it stands now.
+      expect(store.agentTitle(store.message(root.id)!, "ses_live")).toBe(`Retry budget ${label}`);
+    }
+  });
+
+  test("a thread an agent started keeps its subject on a first sight, named or not", () => {
+    const { store, project } = world();
+    const other = { host: "claude-code", session: "ses_other" };
+    const own = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "status", subject: "Nightly status", thread: "Nightly" }).message;
+    expect(store.listRow(own.thread_id)!.thread_name).toBe("Nightly");
+    const fresh = store.sendNewMessage(own.thread_id, { body: "Pick this up.", to: other, idempotency_key: "new" }).message;
+    expect(store.agentTitle(fresh, "ses_other")).toBe("Nightly status");
   });
 
   test("a routine's thread keeps the routine's subject, even under a numbered name", () => {

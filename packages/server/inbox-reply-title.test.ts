@@ -425,25 +425,29 @@ for (const { by, named } of NAMED_BY) describe(`a thread the person started and 
   });
 });
 
-describe("a suggested name the agent replaced", () => {
-  test("plain replies take the agent's name; a session's first sight keeps the subject, as in any agent-named thread", async () => {
-    const { server, client, project } = await setup();
-    await poll(server, OWNER, project);
-    const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key(), thread_name: "Inbox list", thread_name_auto: true });
-    await delivered(server, OWNER, started.message.id);
-    const renamed = await agentSends(client, project, OWNER, "On it.", { reply_to: started.message.id, thread: "Webhook retry budget" });
-    const plain = await personReplies(server, renamed.message_id, "Thanks.");
-    const [reply] = await poll(server, OWNER, project);
-    expect(reply).toMatchObject({ id: plain, subject: "Webhook retry budget" });
-    expect(reply!.name_thread).toBeUndefined();
-    await delivered(server, OWNER, plain);
-    await poll(server, OTHER, project);
-    await personReplies(server, renamed.message_id, "@Claude Code (other) a look?", { tags: [OTHER_TAG] });
-    expect((await poll(server, OTHER, project))[0]).toMatchObject({ tagged: { owner: "Claude Code" }, subject: "Idea: retry the webhook on a 409" });
-  });
+describe("a thread the person started that the agent named, over a suggestion or no name", () => {
+  for (const [label, named] of [["over a suggestion", { thread_name: "Inbox list", thread_name_auto: true }], ["with no name", {}]] as const) {
+    test(`${label}: plain replies and a session's first sight both take the agent's name`, async () => {
+      const { server, client, project } = await setup();
+      await poll(server, OWNER, project);
+      const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Idea: retry the webhook on a 409.", idempotency_key: key(), ...named });
+      await delivered(server, OWNER, started.message.id);
+      const renamed = await agentSends(client, project, OWNER, "On it.", { reply_to: started.message.id, thread: "Webhook retry budget" });
+      const plain = await personReplies(server, renamed.message_id, "Thanks.");
+      const [reply] = await poll(server, OWNER, project);
+      expect(reply).toMatchObject({ id: plain, subject: "Webhook retry budget" });
+      expect(reply!.name_thread).toBeUndefined();
+      await delivered(server, OWNER, plain);
+      await poll(server, OTHER, project);
+      await personReplies(server, renamed.message_id, "@Claude Code (other) a look?", { tags: [OTHER_TAG] });
+      const [tagged] = await poll(server, OTHER, project);
+      expect(tagged).toMatchObject({ tagged: { owner: "Claude Code" }, subject: "Webhook retry budget" });
+      expect(firstLine(tagged!)).toBe(`Plannotator Inbox: Webhook retry budget (${tagged!.id})`);
+    });
+  }
 });
 
-describe("what is not a plain reply keeps the subject, in a thread an agent named too", () => {
+describe("what is not a plain reply keeps the subject, in a thread an agent started and named too", () => {
   test("a New message, which answers nothing and may reach a session new to the thread", async () => {
     const { server, client, project } = await setup();
     const sent = await asked(client, project);

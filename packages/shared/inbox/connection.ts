@@ -1313,10 +1313,11 @@ export interface InboxReplyCommand {
    * The title a wake shows, as the Inbox decided it (`InboxStore.agentTitle`):
    * on a plain reply the thread's short name, or null when it has none, which
    * every connection words `a reply`; on everything in a thread the person
-   * started and named, or left with compose's suggested name (not a
-   * routine's), that name; on everything else the thread's subject. An
-   * older Inbox always sends the subject here, and a less old one the
-   * subject on a suggested name's first message and first sights.
+   * started that has a name (theirs, compose's suggestion, or the one an
+   * agent gave it; not a routine's), that name as it stands now; on
+   * everything else the thread's subject. An older Inbox always sends the
+   * subject here, and a less old one the subject on the first message and
+   * first sights of a thread whose name is a suggestion or an agent's.
    */
   subject: string | null
   /** The reply or message, markdown, verbatim. */
