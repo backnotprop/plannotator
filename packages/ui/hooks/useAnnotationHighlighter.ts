@@ -1618,6 +1618,10 @@ export function useAnnotationHighlighter({
       // verdict, so it is neither attempted nor unanchored here (the same
       // rule the raw-HTML pinpoints follow on their surface).
       if (ann.diagramAnchor) return;
+      // A comment on an element of a live html block is restored inside that
+      // block's own page, by the block (html-embed), which reports its own
+      // verdict: neither attempted nor unanchored here.
+      if (ann.htmlBlockAnchor != null) return;
       // A comment on part of an image has no text either: the image viewer
       // draws its box, and the Viewer reports it unanchored when its image is
       // gone from the document.

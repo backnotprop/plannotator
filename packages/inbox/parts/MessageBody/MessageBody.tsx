@@ -3,7 +3,7 @@
  * it, and its pictures. Drawn inside parts/MessageView.tsx, which draws it again only when what it draws from changed.
  * Its pieces are hooks beside it, called in the order its effects always ran.
  */
-import { useCallback, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
@@ -90,7 +90,9 @@ export function MessageBody({
   const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
   const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, renderRunBlock, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
-  const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion } = useBodyComments({ comments, message, blocks, onPick });
+  const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion, embedAnnotate } = useBodyComments({ comments, message, blocks, onPick, pictures });
+  // The message's live html blocks take comments on their elements where its text takes them (the pen under a block).
+  const annotatableEmbeds = useMemo(() => (embedAnnotate ? { ...htmlEmbeds, annotate: embedAnnotate } : htmlEmbeds), [htmlEmbeds, embedAnnotate]);
 
   /** The sent reply's parts after the words (the rest, the feedback): read-only text. */
   const readOnlyViewer = (parts: Block[], markdown: string) => (
@@ -174,7 +176,7 @@ export function MessageBody({
         resolveLocalLink={resolveLocalLink}
         refRepo={refRepo}
         answerOnly
-        htmlEmbeds={htmlEmbeds}
+        htmlEmbeds={annotatableEmbeds}
         // `readOnly` is about the question cards (answerLocked locks them); with comments on, the text still takes them.
         readOnly={readOnly && !comments}
         questionAnswers={answers}

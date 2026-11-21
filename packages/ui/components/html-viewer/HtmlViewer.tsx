@@ -547,6 +547,34 @@ export interface HtmlViewerProps {
    * the host's policy. Ignored in live (`src`) mode. Absent → srcdoc, unchanged.
    */
   frameUrl?: (document: string) => Promise<string | null>;
+  /**
+   * Opt-in: the page sits in the host's own text, as tall as the host says,
+   * with none of the viewer's own chrome around it (the Plannotator Inbox: a
+   * live `html` block of a message, commented in place). With it:
+   * - no card (background, rounded corners, shadow), no bar above the frame
+   *   (the global Comment button, attachments, the diff toggle) and no ring
+   *   while Annotate is armed: the host shows the mode itself;
+   * - the frame is `height` pixels tall. The host measures the page (its own
+   *   script in the document reports it) and the bridge's own measure is
+   *   not used, so the frame is exactly as tall as the host's other frame of
+   *   the same page;
+   * - the frame's `color-scheme` is `colorScheme`, and its background is
+   *   transparent: a page with a transparent background shows the host's
+   *   text behind it only when the two schemes match.
+   * - a pin's comment box opens beside its element (`CommentPopover`
+   *   `placement: 'side'`: right, else left, else under or over it as
+   *   always), so it does not cover what the host draws under the frame.
+   * Ignored with `fullViewport` and in live (`src`) mode. Absent → unchanged.
+   */
+  inline?: HtmlViewerInline;
+}
+
+/** How a host draws the viewer in its own text (`HtmlViewer` `inline`). */
+export interface HtmlViewerInline {
+  /** The frame's height, in pixels. */
+  height: number;
+  /** The frame's `color-scheme`. Absent: `auto`, as without `inline`. */
+  colorScheme?: "light" | "dark";
 }
 
 /** What a host's served frame document says when it is no longer kept (`frameUrl`). */
@@ -669,6 +697,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       frameUrl,
       pageNavigation = false,
       frameStart,
+      inline,
     },
     ref,
   ) => {
@@ -1636,7 +1665,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       if (readOnly) setGlobalCommentPopover(null);
     }, [readOnly]);
 
-    const hasActionButtons = !readOnly || Boolean(diffAvailable && onToggleDiff);
+    // In the host's text (`inline`): no chrome of the viewer's own.
+    const inlineFrame = !fullViewport && !liveMode && inline ? inline : null;
+    const hasActionButtons = !inlineFrame && (!readOnly || Boolean(diffAvailable && onToggleDiff));
 
     // Document-level controls (attachments + global comment). Shared between the
     // normal layout (bar above the card) and full-viewport (floating overlay), so
@@ -1703,14 +1734,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
           <article
             data-print-region="article"
-            className={fullViewport ? "relative overflow-hidden w-full flex-1" : "relative bg-card rounded-xl shadow-xl overflow-hidden w-full"}
+            className={fullViewport ? "relative overflow-hidden w-full flex-1" : inlineFrame ? "relative overflow-hidden w-full" : "relative bg-card rounded-xl shadow-xl overflow-hidden w-full"}
           >
             {/* Armed affordance: a subtle accent ring floats over the iframe
                 while Annotate is armed (hosts that wire the toggle only).
                 Overlaid + pointer-transparent, so it never shifts layout and
                 never eats a click; an inset shadow on the article itself
                 would paint UNDER the covering iframe. */}
-            {!readOnly && annotateModeActive && (onAnnotateModeExit || onAnnotateModeToggle) && (
+            {!readOnly && !inlineFrame && annotateModeActive && (onAnnotateModeExit || onAnnotateModeToggle) && (
               <div
                 aria-hidden
                 data-print-hide
@@ -1778,11 +1809,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",
-                height: fullViewport ? "100%" : `${iframeHeight}px`,
-                ...(!liveMode ? { "--pn-html-print-height": `${iframeHeight}px` } : {}),
+                height: fullViewport ? "100%" : `${inlineFrame ? inlineFrame.height : iframeHeight}px`,
+                ...(!liveMode ? { "--pn-html-print-height": `${inlineFrame ? inlineFrame.height : iframeHeight}px` } : {}),
                 border: "none",
                 display: "block",
-                colorScheme: "auto",
+                colorScheme: inlineFrame?.colorScheme ?? "auto",
+                ...(inlineFrame ? { background: "transparent" } : {}),
                 outline: !readOnly && vimModeEnabled ? "none" : undefined,
               }}
               title={title}
@@ -1868,6 +1900,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
               allowImages={allowCommentImages}
+              // In the host's text the box opens beside the element (right, else left), not under it over the
+              // lines the host draws below the frame.
+              placement={inlineFrame ? "side" : undefined}
               mentionSource={mentionSource}
               // A pinpoint click opens this composer directly (never the
               // selection toolbar), so it carries the surface's one-click 👍.

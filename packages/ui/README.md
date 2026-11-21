@@ -138,6 +138,27 @@ Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^
 
 **`sandbox`** (published in ui 0.55.0): the srcdoc frame's whole `sandbox` attribute. The default is `"allow-scripts allow-modals"`, so a page's `alert`, `confirm` and `prompt` open. A host that shows documents other people wrote passes `sandbox="allow-scripts"`, so no dialog draws over its origin. `hostNavigates` still adds `allow-popups`. A non-string such as `null` gets the default. `""` is the strictest frame: no scripts, so nothing on the page can be annotated. A changed value applies when the frame next loads a document. Do not add `allow-same-origin`. See HANDOFF.md § "`HtmlViewer` `sandbox`".
 
+**`inline`** (unreleased): `inline?: { height: number; colorScheme?: "light" | "dark" }` draws the page in the host's own text with none of the viewer's chrome: no card (background, corners, shadow), no bar above the frame (the global Comment button, attachments, the diff toggle), no ring while Annotate is armed. The frame is `height` pixels tall (the host measures the page; the bridge's own `resize` is not used), and it carries `colorScheme` on a transparent background, so a page with a transparent background shows the host's text behind it. Ignored with `fullViewport` and in live (`src`) mode. Absent → the viewer exactly as before. The Plannotator Inbox uses it for a message's live `html` block while the person comments on its elements (below).
+
+**Comments on a live `html` fence (`HtmlEmbedHost.annotate`; unreleased).** `Viewer`'s `htmlEmbeds` host may also pass `annotate: HtmlEmbedAnnotate`:
+
+```ts
+htmlEmbeds={{
+  frameUrl,                 // as before: the fence's page, served under EMBED_RESPONSE_CSP
+  annotate: {
+    frameUrl,               // (document) => URL of the annotatable document, served under the SAME policy
+    indexOf,                // (block) => its place among the document's live html blocks, from 1 (0: no pen)
+    annotations,            // the document's comments that carry `htmlBlockAnchor`
+    onAdd,                  // (annotation) => kept? (`blockId` and `htmlBlockAnchor` are set)
+    selectedId, onSelect,   // the comment the host points at; a marker pressed
+    onRestoreReport,        // { attempted, unanchored }: what a block could not draw
+    allowImages,            // false: no image button in the comment box
+  },
+}}
+```
+
+Absent → no pen, and the block is the frame it always was. With it, a pen at the end of the block's caption turns on the viewer's pinpoint over the page: the block frames the page again through `HtmlViewer` (`inline`, `frameUrl`, `sandbox={EMBED_SANDBOX}`), from `buildEmbedDocument(html, { closeHead: true })` (core; `closeHead` ends our `<head>` before the page so the bridge lands in it; absent → the document as before). That second document, and the viewer's chunk, load only once the pen is first turned on or the block has a comment to show. The host must serve it under `EMBED_RESPONSE_CSP` and nothing wider: never `'self'`, never `allow-same-origin`. A comment carries `Annotation.htmlBlockAnchor` (`@plannotator/core/html-block-anchor`: `{ v: 1, index, id, sourceLine }`) beside `htmlAnchor` / `elementContext`; a block draws only the comments made on its place and its source, and reports the rest unanchored. The text highlighter skips rows with `htmlBlockAnchor`. `utils/parser` exports `additionalTargetsExportBlock` beside `elementContextExportBlock` for a host that writes its own feedback entry.
+
 #### HTML annotation parity seams (0.32.0)
 
 Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotation experience, all additive and all defaulting to today's behavior. Requires `@plannotator/core` 0.25.0 (the `html-anchor` subpath), so install and publish core before ui:
