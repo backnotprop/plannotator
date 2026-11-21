@@ -806,7 +806,8 @@ public final class InboxSession {
       }
       // A drawing this way cannot carry (the relay takes no uploads): it waits, with its comment's save, for another
       // way, and is not tried again on this one. Everything else in the thread goes on; a Send that carried its
-      // comment goes without it (the comment stays, "Will send", for a later Send).
+      // comment goes without it (the comment is back in the list, "Needs your computer's network", and goes by
+      // itself once the drawing is there).
       if write.kind == .markup, case .refused(_, let error) = failure, error.code == WireErrorCode.relayUploadUnavailable.rawValue {
         parkedDrawings[write.id] = pathIndex ?? -1
         lookForAnotherWay()
@@ -927,9 +928,14 @@ public final class InboxSession {
     guard !pumping.contains(thread) else { return }
     pumping.insert(thread)
     defer { pumping.remove(thread) }
+    // A Send never waits on a drawing: a comment whose drawing cannot reach the computer now leaves it, for the list.
+    releaseHeldBackSends(thread)
     if client == nil { _ = await connect() }
     quietly(quiet) { book.checked = false }
-    while !removed, client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread && !heldBack($0) }) {
+    while !removed, client != nil, standing == .ok {
+      // A comment the person sent while its drawing could not go, once the drawing is there: its own Send.
+      sendOwed(ThreadID(thread))
+      guard let next = held.first(where: { $0.thread == thread && !heldBack($0) }) else { break }
       // A Send whose comments' texts are being read waits for them, briefly (`feedbackTextWait`).
       if resolving.contains(next.id) { break }
       // A Send that carries a comment held back with its drawing goes without it.
@@ -1130,17 +1136,28 @@ public final class InboxSession {
     guard let model = thread(id), !sending.contains(id), !SendPlan.needsComputer(model.thread), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
     let targets = SendPlan.targets(in: model.thread)
-    guard !targets.isEmpty, !text.isEmpty || !commentsToSend(id).isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
+    // Comments whose drawing cannot reach the computer now (away from its network): no Send carries them, and none
+    // waits for them. They stay in the list, marked, and each goes by itself once its drawing is there.
+    let owing = commentsToOwe(id)
+    guard !targets.isEmpty, !text.isEmpty || !commentsToSend(id).isEmpty || !owing.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     sending.insert(id)
     defer { sending.remove(id) }
     // The comments on files that wait: they ride the last reply, with the words (the window's `routeSendAnnotations`).
     // The words are in the outbox before anything is awaited: the texts the comments' lines are read from come after.
     let riding = commentsToSend(id)
     let needsTexts = needsFeedbackTexts(id, for: riding)
-    guard !text.isEmpty || !riding.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
+    guard !text.isEmpty || !riding.isEmpty || !owing.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     notices[id] = nil
     returned[id] = nil
     keepGivenBack()
+    if !owing.isEmpty || commentBook.owed.contains(where: { owed in riding.contains { $0.id == owed } }) {
+      commentBook.owed.formUnion(owing.map(\.id))
+      // One that would have gone by itself rides this Send instead.
+      commentBook.owed.subtract(riding.map(\.id))
+      keepComments()
+    }
+    // Only such comments: nothing is sent now, and nothing waits in the outbox.
+    if text.isEmpty, riding.isEmpty, !targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) { return true }
     // A reply with neither an answer nor words is never made: the Inbox refuses one ("write a reply or send at
     // least one answer"). So with no words, the agent that wrote last and asked nothing gets no reply.
     var carrier: String?
@@ -1179,7 +1196,7 @@ public final class InboxSession {
   /// Whether Send has anything to carry for this thread.
   public func canSend(thread id: ThreadID, words: String) -> Bool {
     guard standing == .ok, let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil, !SendPlan.needsComputer(model.thread) else { return false }
-    return (SendPlan.hasSomethingToSend(thread: model.thread, words: words) || !commentsToSend(id).isEmpty) && !SendPlan.targets(in: model.thread).isEmpty
+    return (SendPlan.hasSomethingToSend(thread: model.thread, words: words) || !commentsToSend(id).isEmpty || !commentsToOwe(id).isEmpty) && !SendPlan.targets(in: model.thread).isEmpty
   }
 
   public func canAnswer() -> Bool { standing == .ok && (skew == nil || offers(DoorRoutes.postMessagePicks)) }

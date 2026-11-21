@@ -476,7 +476,7 @@ struct CommentRow: View {
     switch standing {
     case .goes: return nil
     case .unanchored: return (PhoneWords.unanchored, "location.slash", Token.mutedForeground)
-    case .drawingWaits: return (PhoneWords.willSend, "clock", Token.mutedForeground)
+    case .drawingWaits: return (PhoneWords.needsNetwork, "wifi", Token.mutedForeground)
     case .notSaved: return (PhoneWords.commentNotSaved, "exclamationmark.circle", Token.destructive)
     case .window: return (PhoneWords.replyOnComputer, "desktopcomputer", Token.mutedForeground)
     }

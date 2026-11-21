@@ -248,57 +248,23 @@ final class FileCommentRecoveryTests: XCTestCase {
     XCTAssertEqual(replies.count, 1, "the Send went")
     XCTAssertEqual(replies.first?["words"]?.text, "Ship it.")
     XCTAssertNil(replies.first?["annotation_ids"]?.items.first, "without the comment")
-    XCTAssertEqual(session.comments(retry).map(\.id), [made.id], "which stays for a later Send")
+    XCTAssertEqual(session.comments(retry).map(\.id), [made.id], "which stays in the list")
     // The relay is not asked again for the drawing while it is the way.
     await session.refresh()
     await settled(session, retry)
     XCTAssertEqual(ways.drawingsOnRelay, 1, "not tried again on the same way")
 
-    // A direct way: the drawing goes, then its comment, which rides the next Send.
+    // A direct way: the drawing goes, then its comment, by itself (the Send was pressed while it waited).
     ways.direct = true
     await session.refresh()
     await settled(session, retry)
     XCTAssertFalse(session.drawingWaits(made))
-    XCTAssertEqual(session.commentsToSend(retry).map(\.id), [made.id])
     let markups = await door.posts("markups")
     XCTAssertEqual(markups.count, 1, "carried by the direct way")
-    _ = await session.send(thread: retry, words: "And the drawing.")
-    await settled(session, retry)
     let last = await door.posts("/reply").map(body).last
     XCTAssertEqual(last?["annotation_ids"]?.items.first?.text, made.id)
     XCTAssertFalse((last?["feedback"]?.text ?? "").contains(PendingDrawing.scheme))
-  }
-
-  func testASendOfOnlyCommentsWaitsWholeForItsDrawingAndGoesWhenAWayCarriesIt() async throws {
-    let ways = Ways()
-    let (door, session, picture) = try await relayed(ways)
-    let retry = StandInData.retry
-    // Made, and sent with no words, with the computer away.
-    await door.setOffline(true)
-    await session.refresh()
-    let made = try XCTUnwrap(session.addComment(thread: retry, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Crop the top.", markup: nil), drawing: png(9)))
-    let queued = await session.send(thread: retry, words: "")
-    XCTAssertTrue(queued)
-    // Back through the relay only: the drawing cannot go. The Send stays, whole, as the person made it.
-    await door.setOffline(false)
-    await session.refresh()
-    await settled(session, retry)
-    XCTAssertEqual(ways.drawingsOnRelay, 1)
-    let none = await door.posts("/reply")
-    XCTAssertTrue(none.isEmpty)
-    XCTAssertEqual(session.heldReplies(retry).count, 1, "still shown as the message that waits")
-    XCTAssertEqual(session.heldComments(try XCTUnwrap(session.heldReplies(retry).first)), 1)
-    // Nothing is asked again on this way: the retry that was running for the computer being away ends.
-    for _ in 0..<60 where session.retry != nil { try? await Task.sleep(for: .milliseconds(10)) }
-    XCTAssertNil(session.retry, "nothing is asked again on this way")
-    // A way that carries it: the drawing, the comment, then the Send, whole.
-    ways.direct = true
-    await session.refresh()
-    await settled(session, retry)
-    let replies = await door.posts("/reply").map(body)
-    XCTAssertEqual(replies.count, 1)
-    XCTAssertEqual(replies.first?["annotation_ids"]?.items.first?.text, made.id)
-    XCTAssertTrue(session.heldReplies(retry).isEmpty)
+    XCTAssertTrue(session.comments(retry).isEmpty)
   }
 
   func testASendOfOnlyCommentsADrawingRefusedForGoodEmptiesIsToldAboutAndItsCommentStays() async throws {

@@ -8337,7 +8337,7 @@
         "file-13"
       ],
       "mobile": "v1",
-      "why": "native drawing screen, undo banner",
+      "why": "native drawing screen, undo banner; a drawing goes on the computer's own network only (the relay carries no upload): away from it the comment stays in the list, \"Needs your computer's network\", queues no Send, and goes by itself once the drawing has gone (owner, 2026-11-21)",
       "source": "SCOPE H. Comments and annotations; F L71-L72",
       "ios": {
         "state": "building"

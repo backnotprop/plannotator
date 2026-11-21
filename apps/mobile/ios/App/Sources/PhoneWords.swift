@@ -411,6 +411,11 @@ enum PhoneWords {
   static let commentNotSaved = "The comment was not saved."
   /// packages/inbox/components/AnnotationsChip.tsx: a comment whose place in the file is lost (it goes with its quote).
   static let unanchored = "Unanchored"
+  /// A comment whose drawing can reach the computer only on its own network (the relay carries no drawing). The
+  /// owner's words; the window runs on the computer and has no such state.
+  static let needsNetwork = "Needs your computer's network"
+  /// The thread's line for the comments sent while their drawing could not go: each goes by itself once it can.
+  static func commentsNeedNetwork(_ n: Int) -> String { "\(CountWords.comments(n)) \(n == 1 ? "needs" : "need") your computer's network" }
   /// packages/ui/components/Viewer.tsx: a comment on the whole document.
   static let globalComment = "Global comment"
   /// packages/inbox/components/Markup.tsx `markupToast`: a drawing added to the reply.

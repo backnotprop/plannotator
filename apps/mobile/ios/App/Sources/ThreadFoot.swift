@@ -76,6 +76,15 @@ struct Composer: View {
         // In line with the page's words and icons above it (the page's margin is 20, the foot's 12).
         .padding(.horizontal, Space.close)
     }
+    // Comments the person sent while their drawing could not reach the computer: they go by themselves once it can.
+    let needNetwork = session.commentsNeedingNetwork(id).count
+    if needNetwork > 0 {
+      Label(PhoneWords.commentsNeedNetwork(needNetwork), systemImage: "wifi")
+        .font(TextRole.meta)
+        .foregroundStyle(Token.mutedForeground)
+        .padding(.horizontal, Space.close)
+        .accessibilityIdentifier("thread-needs-network")
+    }
     // Under the guard only the guard speaks: the refusal behind it names keys.
     if let notice = session.notices[id], !guarded {
       let said = PhoneWords.notice(notice, computer: session.computer.name, agent: thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) })

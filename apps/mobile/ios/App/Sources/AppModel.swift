@@ -388,6 +388,20 @@ struct LaunchOptions {
             session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing(0.6), marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
             await session.deliverHeld(thread: StandInData.files)
           }
+        case "drawingonly":
+          // One drawing on the flame graph, made away from the computer's network: the relay cannot carry it, so it
+          // waits for the direct way, and nothing else waits for a Send.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          if let picture = session.attachments(StandInData.files).first(where: { $0.name == "reconnect-flamegraph.png" }) {
+            let drawing = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 6)).pngData { context in
+              UIColor(white: 0.6, alpha: 1).setFill()
+              context.fill(CGRect(x: 0, y: 0, width: 24, height: 6))
+            }
+            await door.setOptions { $0.refusesMarkups = "relay_upload_unavailable" }
+            session.addComment(thread: StandInData.files, item: picture, version: .current, annotation: FileComments.picture(name: picture.name, comment: "Is this gap the handshake?", markup: nil), drawing: drawing, marks: [PictureMark(kind: .pin, points: [1500, 300], size: 40)])
+            await session.deliverHeld(thread: StandInData.files)
+          }
         case "filechangesnext":
           // The agent edits the plan after the phone last asked how the thread's files stand.
           if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {

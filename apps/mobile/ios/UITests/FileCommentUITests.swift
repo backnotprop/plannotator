@@ -341,6 +341,47 @@ final class FileCommentUITests: XCTestCase {
     shot("22-away-reply-waits")
   }
 
+  // MARK: A drawing away from the computer's network
+
+  @MainActor
+  func testASendOfOnlyADrawingAwayFromTheNetworkQueuesNothingAndWordsMakeSendWorkAgain() {
+    let app = launch(stage: "files,drawingonly")
+    let strip = app.buttons["thread-comments"]
+    XCTAssertTrue(strip.waitForExistence(timeout: 20))
+    let send = app.buttons["Send"]
+    XCTAssertTrue(send.isEnabled, "Send can be pressed for the drawing")
+    XCTAssertFalse(app.staticTexts["thread-needs-network"].exists, "the thread says nothing before Send")
+    send.tap()
+    // Nothing is queued: no waiting message, and the thread says why the drawing stays.
+    let line = app.staticTexts["thread-needs-network"]
+    XCTAssertTrue(line.waitForExistence(timeout: 10))
+    XCTAssertEqual(line.label, "1 comment needs your computer's network")
+    XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Will send when'")).firstMatch.exists, "nothing waits in the outbox")
+    XCTAssertFalse(send.isEnabled, "Send has nothing more to do")
+    shot("r5-02-thread-line")
+
+    // The comment is still in the list, marked, and still the person's to change.
+    strip.tap()
+    let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch
+    XCTAssertTrue(row.waitForExistence(timeout: 5))
+    XCTAssertTrue(row.label.contains("Needs your computer's network"), row.label)
+    XCTAssertFalse(row.label.contains("Will send"), row.label)
+    shot("r5-01-list-marked")
+    app.navigationBars["1 comment"].buttons["Done"].tap()
+
+    // Words make Send work again; they go now, and the drawing stays behind, marked.
+    let field = app.textViews["Reply"].exists ? app.textViews["Reply"] : app.textFields["Reply"]
+    XCTAssertTrue(field.waitForExistence(timeout: 5))
+    field.tap()
+    field.typeText("Ship it, the gap is the handshake.")
+    XCTAssertTrue(send.isEnabled, "words make Send work again")
+    shot("r5-03-words-send-ready")
+    send.tap()
+    XCTAssertTrue(app.staticTexts["Ship it, the gap is the handshake."].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["thread-needs-network"].waitForExistence(timeout: 5), "the drawing stays behind")
+    shot("r5-04-words-sent-drawing-stays")
+  }
+
   // MARK: What a Send carries, and taking a change back
 
   /// The toast's Undo (the picture's own Undo is another button).
@@ -366,7 +407,8 @@ final class FileCommentUITests: XCTestCase {
     let refused = app.buttons.matching(NSPredicate(format: "label CONTAINS 'The flat top is the cap.'")).firstMatch
     XCTAssertTrue(refused.label.contains("The comment was not saved."), refused.label)
     let waits = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Is this gap the handshake?'")).firstMatch
-    XCTAssertTrue(waits.label.contains("Will send"), waits.label)
+    XCTAssertTrue(waits.label.contains("Needs your computer's network"), waits.label)
+    XCTAssertFalse(waits.label.contains("Will send"), waits.label)
     let foot = app.staticTexts["comments-ride"]
     if !foot.exists { app.swipeUp() }
     XCTAssertTrue(foot.waitForExistence(timeout: 5))
