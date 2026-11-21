@@ -7,7 +7,8 @@
  * state where the folder goes.
  *
  * Two rows titled alike, or a title that reads as another row's name ("Pi"), carry the fallback name after it, as the
- * `@` list does ("Review (Claude Code 2)"): two sessions of one agent stay told apart.
+ * `@` list does ("Review (Claude Code 2)"): two sessions of one agent stay told apart. The fallback is the row's
+ * `fallback` (named as if no session were renamed), so two sessions renamed alike never read "Reviewer (Reviewer)".
  */
 import type { RecipientRow } from '../replyRecipients';
 import { labelOf, type SessionLabels } from '../sessionLabels';
@@ -38,7 +39,8 @@ export function recipientNames(rows: readonly RecipientRow[], labels: SessionLab
     const agent = title === null ? null : agentName(row.host);
     const quiet = RECIPIENT_QUIET[row.state];
     out.set(row.session, {
-      name: title === null ? row.label : shared ? `${title} (${row.label})` : title,
+      // Two alike: each says its fallback name (as if none were renamed), never its own label, which may be the title itself.
+      name: title === null ? row.label : shared ? `${title} (${row.fallback ?? row.label})` : title,
       title,
       agent,
       quiet,

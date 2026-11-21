@@ -52,8 +52,7 @@ struct PermissionCard: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-      .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.border.opacity(0.7)))
+      .cardSurface()
       .onAppear {
         shown = Date()
         if let kept = drafts?.reasons[reasonKey] {
@@ -81,27 +80,27 @@ struct PermissionCard: View {
     let terminalOnly = toTerminal && !labels.contains(PermissionPrompt.allowOnce)
     let can = self.session.canAnswer() && !busy
     return VStack(alignment: .leading, spacing: 0) {
-      HStack(spacing: 8) {
+      HStack(spacing: Space.close) {
         AgentMark(author: message.author, size: 22)
-        Text(agent).font(.subheadline.weight(.semibold)).foregroundStyle(Token.foreground).lineLimit(1).layoutPriority(1)
+        Text(agent).font(TextRole.name).foregroundStyle(Token.foreground).lineLimit(1).layoutPriority(1)
         TimelineView(.everyMinute) { now in
           let minutes = TimeWords.date(message.createdAt).map { Int(now.date.timeIntervalSince($0) / 60) } ?? 0
-          Text(PhoneWords.permWaiting + (minutes >= 1 ? PhoneWords.permMinutes(minutes) : "")).font(.subheadline).foregroundStyle(Token.mutedForeground).lineLimit(1)
+          Text(PhoneWords.permWaiting + (minutes >= 1 ? PhoneWords.permMinutes(minutes) : "")).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).lineLimit(1)
         }
         Spacer(minLength: 0)
       }
-      .padding(.horizontal, 16)
-      .frame(minHeight: 44)
+      .padding(.horizontal, Space.card)
+      .frame(minHeight: Space.touch)
       .accessibilityElement(children: .combine)
       .lineEdge("head")
-      Divider().overlay(Token.border)
-      VStack(alignment: .leading, spacing: 10) {
-        Text(Self.ticks(title)).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader).lineEdge("title")
+      Hairline()
+      VStack(alignment: .leading, spacing: Space.near) {
+        Text(Self.ticks(title)).font(TextRole.prompt).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader).lineEdge("title")
         PermissionRequest(read: read, kind: PermissionPrompt.kind(question.prompt))
       }
-      .padding(16)
-      Divider().overlay(Token.border)
-      VStack(alignment: .leading, spacing: 8) {
+      .padding(Space.card)
+      Hairline()
+      VStack(alignment: .leading, spacing: Space.close) {
         switch mode {
         case .reason: denyReason(question)
         case .confirmFull: confirmFull(question)
@@ -118,12 +117,13 @@ struct PermissionCard: View {
           }
           if terminalOnly {
             AnswerButton(words: PermissionPrompt.terminal, style: .plain) { answer(question, PermissionPrompt.terminal) }
-            if let note = read.note { Text(note).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true) }
+            if let note = read.note { Text(note).font(TextRole.meta).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true) }
           } else {
             if labels.contains(PermissionPrompt.auto) {
-              VStack(alignment: .leading, spacing: 0) {
-                Text(PhoneWords.orAllowAndSwitch).font(.footnote).foregroundStyle(Token.mutedForeground).padding(.top, 6)
-                HStack(spacing: 18) {
+              // On the buttons' own centre line, as every answer above it is.
+              VStack(alignment: .center, spacing: 0) {
+                Text(PhoneWords.orAllowAndSwitch).font(TextRole.meta).foregroundStyle(Token.mutedForeground).padding(.top, Space.trim)
+                HStack(spacing: Space.card) {
                   LinkButton(words: PhoneWords.autoMode) { answer(question, PermissionPrompt.auto) }
                   // Only a session that may switch to it offers Full permissions (its choices say so).
                   if labels.contains(PermissionPrompt.full) {
@@ -135,15 +135,16 @@ struct PermissionCard: View {
                   }
                 }
               }
+              .frame(maxWidth: .infinity)
             }
-            if toTerminal { LinkButton(words: PermissionPrompt.terminal, quiet: true) { answer(question, PermissionPrompt.terminal) } }
+            if toTerminal { LinkButton(words: PermissionPrompt.terminal, quiet: true) { answer(question, PermissionPrompt.terminal) }.frame(maxWidth: .infinity) }
           }
         }
         if self.session.refusal(message: message.id, key: question.key) != nil, mode != .confirmFull {
-          Label(PhoneWords.answerNotSent, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(Token.destructive)
+          Trouble(words: PhoneWords.answerNotSent)
         }
       }
-      .padding(16)
+      .padding(Space.card)
       .disabled(!can)
     }
     .accessibilityElement(children: .contain)
@@ -153,18 +154,18 @@ struct PermissionCard: View {
   private var armed: Bool { Date().timeIntervalSince(shown) >= Self.arm }
 
   private func denyReason(_ question: InboxQuestion) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: Space.close) {
       TextField(PhoneWords.tellWhatInstead(shortAgent), text: $reason, axis: .vertical)
         .lineLimit(2...6)
-        .font(.body)
+        .font(TextRole.body)
         .focused($typing)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(minHeight: 64, alignment: .top)
-        .fieldGround(radius: 14)
+        .padding(.horizontal, Space.step)
+        .padding(.vertical, Space.near)
+        .frame(minHeight: Size.reasonField, alignment: .top)
+        .fieldGround(focused: typing)
         .accessibilityLabel(PhoneWords.whyYouDeny(shortAgent))
         .lineEdge("reason")
-      HStack(spacing: 8) {
+      HStack(spacing: Space.close) {
         let empty = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         AnswerButton(words: PhoneWords.cancel, style: .ghost, hugs: true) {
           mode = .answers
@@ -181,11 +182,11 @@ struct PermissionCard: View {
   }
 
   private func confirmFull(_ question: InboxQuestion) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: Space.near) {
       run(Text(PhoneWords.switchToFull).fontWeight(.semibold).foregroundStyle(Token.foreground), Text(" " + PhoneWords.switchToFullDetail(agent)).foregroundStyle(Token.mutedForeground))
-        .font(.subheadline)
+        .font(TextRole.secondary)
         .fixedSize(horizontal: false, vertical: true)
-      HStack(spacing: 8) {
+      HStack(spacing: Space.close) {
         AnswerButton(words: PhoneWords.cancel, style: .ghost, hugs: true) { mode = .answers }
         AnswerButton(words: PhoneWords.allowAndSwitch, style: .plain) { answer(question, PermissionPrompt.full, confirmFull: true) }
       }
@@ -243,57 +244,57 @@ struct PermissionCard: View {
       Button {
         opened.toggle()
       } label: {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.close) {
           AgentMark(author: message.author, size: 22).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
           Image(systemName: allowed ? "checkmark" : outcome == .deny ? "xmark" : "minus")
-            .font(.footnote.weight(.bold))
+            .font(TextRole.meta.weight(.bold))
             .foregroundStyle(allowed ? Token.success : Token.mutedForeground)
             .accessibilityHidden(true)
           // Everything the record says shares one left edge: the verdict, the request, the person's reason.
-          VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+          VStack(alignment: .leading, spacing: Space.tight) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.close) {
               verbText(verb).fixedSize(horizontal: false, vertical: true)
               Spacer(minLength: 4)
-              Text(time).font(.footnote).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(1)
+              Text(time).font(TextRole.meta).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(1)
             }
             // The request whole when it fits in two lines; a longer one is cut in its middle, so its end (the
             // part that says what and where) always shows.
             whatText(what)
             if outcome == .deny, let reason = PermissionPrompt.reason(question) {
-              Text(PhoneWords.youSaid(reason)).font(.footnote).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+              Text(PhoneWords.youSaid(reason)).font(TextRole.meta).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             if outcome == .terminal, let handoff = read.handoff {
-              Text(handoff).font(.footnote).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+              Text(handoff).font(TextRole.meta).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             if held {
-              Label(PhoneWords.willSendWhenBack(session.computer.name), systemImage: "clock").font(.footnote).foregroundStyle(Token.mutedForeground)
+              Label(PhoneWords.willSendWhenBack(session.computer.name), systemImage: "clock").font(TextRole.meta).foregroundStyle(Token.mutedForeground)
             }
           }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(minHeight: 44)
+        .padding(.horizontal, Space.snug)
+        .padding(.vertical, Space.near)
+        .frame(minHeight: Space.touch)
         .contentShape(Rectangle())
       }
-      .buttonStyle(ChoiceStyle())
+      .buttonStyle(PressStyle())
       .accessibilityElement(children: .combine)
       if opened {
         Divider().overlay(Token.border)
-        VStack(alignment: .leading, spacing: 10) {
-          Text(Self.ticks(title)).font(.body.weight(.semibold)).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: Space.near) {
+          Text(Self.ticks(title)).font(TextRole.action).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true)
           PermissionRequest(read: read, kind: PermissionPrompt.kind(question.prompt))
         }
-        .padding(16)
+        .padding(Space.card)
       }
     }
   }
 
   private func verbText(_ verb: String) -> some View {
-    Text(Self.ticks(verb)).font(.subheadline.weight(.medium)).foregroundStyle(Token.foreground).multilineTextAlignment(.leading)
+    Text(Self.ticks(verb)).font(TextRole.link).foregroundStyle(Token.foreground).multilineTextAlignment(.leading)
   }
 
   private func whatText(_ what: String) -> some View {
-    Text(what).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).lineLimit(2).truncationMode(.middle)
+    Text(what).font(TextRole.code(.footnote)).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).lineLimit(2).truncationMode(.middle)
   }
 
   /// A label with its inline code as code.
@@ -302,7 +303,7 @@ struct PermissionCard: View {
     for span in PermissionPrompt.spans(text) {
       var part = AttributedString(span.text)
       if span.code {
-        part.font = .system(.callout, design: .monospaced)
+        part.font = TextRole.code()
         part.backgroundColor = (onPrimary ? Token.primaryForeground : Token.foreground).opacity(onPrimary ? 0.18 : 0.12)
       }
       out += part
@@ -323,23 +324,15 @@ private struct AnswerButton: View {
 
   var body: some View {
     Button(action: action) {
+      // Words alone that can be touched are the accent colour everywhere in the app; a plain answer stands off its
+      // card by a tint of its words' own colour, in the dark as in the light.
       Text(PermissionCard.ticks(words, onPrimary: style == .filled))
-        .font(.body.weight(style == .ghost ? .medium : .semibold))
-        // Words alone that can be touched are the accent colour everywhere in the app.
-        .foregroundStyle(style == .filled ? Token.primaryForeground : style == .off ? Token.mutedForeground : style == .ghost ? Token.primary : Token.foreground)
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: hugs ? nil : .infinity, minHeight: 48)
-        .frame(minWidth: hugs ? 72 : nil)
-        // A tint of the words' own colour, so the button stands off its card in the dark as in the light.
-        .background(style == .filled ? Token.primary : style == .ghost ? Color.clear : Token.foreground.opacity(style == .off ? 0.05 : 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        // A hairline too, so a plain answer stands off its card in the dark.
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Token.foreground.opacity(style == .plain ? 0.22 : 0)))
-        .contentShape(Rectangle())
+        .frame(minWidth: hugs ? Space.touch - Space.tight : nil)
+        .actionGround(style == .filled ? .filled : style == .plain ? .neutral : style == .ghost ? .bare : .off, wide: !hugs)
     }
-    .buttonStyle(ChoiceStyle())
+    .buttonStyle(PressStyle())
   }
 }
 
@@ -352,12 +345,12 @@ private struct LinkButton: View {
   var body: some View {
     Button(action: action) {
       Text(words)
-        .font(.subheadline.weight(.medium))
+        .font(TextRole.link)
         .foregroundStyle(quiet ? Token.mutedForeground : Token.primary)
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(minWidth: Space.touch, minHeight: Space.touch)
         .contentShape(Rectangle())
     }
-    .buttonStyle(ChoiceStyle())
+    .buttonStyle(PressStyle())
   }
 }
 
@@ -371,7 +364,7 @@ struct PermissionRequest: View {
   private static let cap = 8
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: Space.close) {
       if let preview = read.preview, let detail = read.detail, detail.onLine {
         file(preview, path: PermissionPrompt.relative(detail.text, to: read.folder))
         rest
@@ -379,23 +372,23 @@ struct PermissionRequest: View {
         if kind == .fetch, detail.onLine {
           link(detail.text)
           if let purpose = read.purpose {
-            run(Text(PhoneWords.lookingFor + " ").foregroundStyle(Token.mutedForeground), Text(purpose).foregroundStyle(Token.foreground).fontWeight(.medium)).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            run(Text(PhoneWords.lookingFor + " ").foregroundStyle(Token.mutedForeground), Text(purpose).foregroundStyle(Token.foreground).fontWeight(.medium)).font(TextRole.secondary).fixedSize(horizontal: false, vertical: true)
           }
         } else {
           if read.unsandboxed {
-            Label(PhoneWords.outsideSandbox, systemImage: "exclamationmark.triangle").font(.subheadline.weight(.semibold)).foregroundStyle(Token.destructive)
+            Label(PhoneWords.outsideSandbox, systemImage: "exclamationmark.triangle").font(TextRole.name).foregroundStyle(Token.destructive)
           }
           CodeBlock(code: detail.onLine && kind == .file ? PermissionPrompt.relative(detail.text, to: read.folder) : detail.text, copies: false).lineEdge("code")
           linksTo
           if kind == .bash {
             if let purpose = read.purpose {
-              Text((purpose.hasSuffix(".") ? String(purpose.dropLast()) : purpose) + ".").font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("purpose")
+              Text((purpose.hasSuffix(".") ? String(purpose.dropLast()) : purpose) + ".").font(TextRole.secondary).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).lineEdge("purpose")
             }
             if let folder = read.folder {
               // On its own line, so the path is never split after "~/"; a path longer than the line cuts in its middle.
-              HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(PhoneWords.runsIn).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize()
-                Text(folder).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.middle)
+              HStack(alignment: .firstTextBaseline, spacing: Space.tight) {
+                Text(PhoneWords.runsIn).font(TextRole.secondary).foregroundStyle(Token.mutedForeground).fixedSize()
+                Text(folder).font(TextRole.code(.footnote)).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.middle)
               }
               .lineEdge("folder")
             }
@@ -410,13 +403,13 @@ struct PermissionRequest: View {
 
   @ViewBuilder private var linksTo: some View {
     if let target = read.linksTo {
-      run(Text(PhoneWords.linksTo + " "), Text(target).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.foreground)).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+      run(Text(PhoneWords.linksTo + " "), Text(target).font(TextRole.code(.footnote)).foregroundStyle(Token.foreground)).font(TextRole.meta).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
     }
   }
 
   @ViewBuilder private var rest: some View {
     if let leftover = read.leftover {
-      Text(PhoneWords.alsoInRequest).font(.subheadline).foregroundStyle(Token.mutedForeground)
+      Text(PhoneWords.alsoInRequest).font(TextRole.secondary).foregroundStyle(Token.mutedForeground)
       CodeBlock(code: leftover, copies: false)
     }
   }
@@ -432,15 +425,15 @@ struct PermissionRequest: View {
         Text(text).foregroundStyle(Token.foreground)
       }
     }
-    .font(.system(.callout, design: .monospaced))
+    .font(TextRole.code())
     .textSelection(.enabled)
     .fixedSize(horizontal: false, vertical: true)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 14)
-    .padding(.vertical, 12)
-    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+    .padding(.horizontal, Space.snug)
+    .padding(.vertical, Space.step)
+    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
     if parts.origin == nil, let host = parts.host {
-      run(Text(PhoneWords.host + " ").foregroundStyle(Token.mutedForeground), Text(host).font(.system(.footnote, design: .monospaced)).fontWeight(.medium).foregroundStyle(Token.foreground)).font(.subheadline)
+      run(Text(PhoneWords.host + " ").foregroundStyle(Token.mutedForeground), Text(host).font(TextRole.code(.footnote)).fontWeight(.medium).foregroundStyle(Token.foreground)).font(TextRole.secondary)
     }
   }
 
@@ -456,48 +449,48 @@ struct PermissionRequest: View {
       return (index, number, preview.isDiff ? line.first : nil, preview.isDiff ? String(line.dropFirst()) : line)
     }
     return VStack(alignment: .leading, spacing: 0) {
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: Space.hair) {
         run(Text(String(path[..<cut])).foregroundStyle(Token.mutedForeground), Text(String(path[cut...])).foregroundStyle(Token.foreground).fontWeight(.medium))
-          .font(.system(.footnote, design: .monospaced))
+          .font(TextRole.code(.footnote))
           .fixedSize(horizontal: false, vertical: true)
-        Text(PhoneWords.fileFacts(kind: preview.kind, lines: lines)).font(.footnote).monospacedDigit().foregroundStyle(Token.mutedForeground)
+        Text(PhoneWords.fileFacts(kind: preview.kind, lines: lines)).font(TextRole.meta).monospacedDigit().foregroundStyle(Token.mutedForeground)
       }
-      .padding(.horizontal, 14)
-      .padding(.vertical, 9)
+      .padding(.horizontal, Space.snug)
+      .padding(.vertical, Space.close)
       if read.linksTo != nil {
         Divider().overlay(Token.border)
-        linksTo.padding(.horizontal, 14).padding(.vertical, 7)
+        linksTo.padding(.horizontal, Space.snug).padding(.vertical, Space.trim)
       }
       Divider().overlay(Token.border)
       VStack(alignment: .leading, spacing: 0) {
         ForEach(rows, id: \.id) { row in
           if let n = row.number {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-              Text("\(n)").monospacedDigit().foregroundStyle(Token.mutedForeground.opacity(0.7)).frame(width: 26, alignment: .trailing).accessibilityHidden(true)
+            HStack(alignment: .firstTextBaseline, spacing: Space.near) {
+              Text("\(n)").monospacedDigit().foregroundStyle(Token.mutedForeground.opacity(0.7)).frame(width: Size.gutter, alignment: .trailing).accessibilityHidden(true)
               Text(row.text.isEmpty ? " " : row.text).foregroundStyle(Token.foreground).fixedSize(horizontal: false, vertical: true)
               Spacer(minLength: 0)
             }
-            .padding(.trailing, 14)
-            .padding(.vertical, 1)
+            .padding(.trailing, Space.snug)
+            .padding(.vertical, Space.hair)
             .background(row.sign == "+" ? Token.success.opacity(0.12) : row.sign == "-" ? Token.destructive.opacity(0.1) : Color.clear)
           } else {
-            Text(row.text).font(.caption).foregroundStyle(Token.mutedForeground).padding(.horizontal, 14).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading).background(Token.foreground.opacity(0.04))
+            Text(row.text).font(TextRole.caption).foregroundStyle(Token.mutedForeground).padding(.horizontal, Space.snug).padding(.vertical, Space.tight).frame(maxWidth: .infinity, alignment: .leading).background(Token.foreground.opacity(0.04))
           }
         }
       }
-      .font(.system(.footnote, design: .monospaced))
-      .padding(.vertical, 8)
+      .font(TextRole.code(.footnote))
+      .padding(.vertical, Space.close)
       if lines.count > Self.cap {
         Divider().overlay(Token.border)
         Button(all ? PhoneWords.showLess : PhoneWords.showMoreLines(lines.count - Self.cap)) { all.toggle() }
-          .font(.footnote)
+          .font(TextRole.meta)
           .foregroundStyle(Token.mutedForeground)
-          .padding(.horizontal, 14)
-          .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+          .padding(.horizontal, Space.snug)
+          .frame(maxWidth: .infinity, minHeight: Space.touch, alignment: .leading)
           .contentShape(Rectangle())
-          .buttonStyle(ChoiceStyle())
+          .buttonStyle(PressStyle())
       }
     }
-    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
   }
 }

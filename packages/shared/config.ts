@@ -644,6 +644,18 @@ export interface PlannotatorConfig {
   /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
   inboxSpacesView?: "cards" | "list";
   /**
+   * Share this space (packages/shared/spaces/): the Share button on a plan's page in the Inbox, which puts a copy of
+   * the plan in a hosted space. Off unless set to `true` here (config only: no Settings row, no command); it also
+   * needs `inboxPlans`, and `PLANNOTATOR_SHARE=disabled` (or `share: "disabled"`) turns it off with every other
+   * share. Off: no share route, no button, no call to any host.
+   */
+  inboxSpaceShare?: boolean;
+  /**
+   * The Spaces origin a plan is shared to (`resolveSpacesUrl` in packages/shared/spaces/url.ts). Overridden by the
+   * PLANNOTATOR_SPACES_URL env var. `https`, or `http` on this computer only.
+   */
+  spacesUrl?: string;
+  /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.
@@ -697,7 +709,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string; routines?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; view_choice?: string; personal_agents?: string; priority?: string; routines?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
@@ -718,7 +730,10 @@ export interface PlannotatorConfig {
     grill_me_tip?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
+    /** List view's two-choice dialog, retired (its entry left the line): kept as written, read by nothing. */
     list_view?: { shownAt?: string; key?: string };
+    /** "Which view do you prefer?" (reveals.ts `view_choice`): claimed once, as the Board's; a pick sets the browser's view. */
+    view_choice?: { shownAt?: string; key?: string };
     /**
      * The tab icon dialog (an update-day dialog): `dueAt` for someone who used an earlier Inbox, `freshAt` for a fresh
      * install (never due), both written at the first release start of the version that ships it; then claimed once.
@@ -730,6 +745,8 @@ export interface PlannotatorConfig {
     launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
+    /** The Group tip (packages/shared/inbox/band-tip.ts): stamped once when shown, or when a band's menu was opened first. */
+    band_tip?: { shownAt?: string; key?: string; usedAt?: string };
   };
   /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {

@@ -11,7 +11,7 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { ThreadTagLine } from './ThreadTagLine';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchInRex, inboxLaunchRexUnstoppable, inboxLaunchStops, inboxPersonAnsweredSince, inboxSessionlessSend, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
@@ -126,8 +126,7 @@ import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
 import { ReplySummary } from './ReplySummary';
 import { ReplyRow } from './ReplyRow';
 import { sendFailure } from '../sendFailure';
-import { ReplyRecipient } from './ReplyRecipient';
-import { PhoneReplyRecipient } from './PhoneReplyRecipient';
+import { ReplyRecipientControl } from '../parts/ReplyRecipientControl';
 import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
 import { replyRecipientList } from '../thread/recipientList';
 import { isStartRow, replyStartOf } from '../thread/replyStart';
@@ -1119,8 +1118,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
   /** Another session can take an ended session's reply: a live one, or a new one (the start row). */
   const anotherTakes = anyOtherLive || replyStart !== null;
-  // Who gets the reply (approval "inbox-reply-recipient", option E): a pill under the box, right, in a thread with
-  // more than one agent, or one whose only agent ended while another can take it (it does the old route choice's job).
+  // Who gets the reply (approval "inbox-reply-recipient"): in a thread with more than one agent, or one whose only
+  // agent ended while another can take it (it does the old route choice's job).
   const pillActive = !resolved && (multiAgent || (askerEnded && anotherTakes));
   /** Whom the words go to unless the person aims them: the session of the message they answer (wordsMessage). */
   const rcptDefault = (() => {
@@ -1136,8 +1135,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const rcptAgents = useMemo(
-    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart }) : []),
-    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart],
+    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart, givenNameOf: (session) => givenName(agentNames, session) }) : []),
+    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart, agentNames],
   );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
@@ -1484,9 +1483,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         stopHold();
         const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
         const id = CSS.escape(record.id);
-        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"]`);
-        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view.
-        const onDiagram = annotationOf(record).diagramAnchor != null;
+        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"], ${inMessage} [data-html-embed-comments~="${id}"]`);
+        // A comment on a diagram part (or an element of a live html block): the diagram (block) is rung, and its own selection brings the part into view.
+        const onDiagram = annotationOf(record).diagramAnchor != null || annotationOf(record).htmlBlockAnchor != null;
         const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;
         target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
@@ -2696,7 +2695,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setStale([]);
     setGuard(false);
   };
-  // The action items whose Done or Can't do it waits in the draft (approval "inbox-action-items-in-reply"):
+  // The action items whose Done, Can't do it or Skip waits in the draft (approval "inbox-action-items-in-reply"):
   // listed in the reply box, counted beside Send ("Draft · 1 done"), carried by the Send.
   const draftActions: ActionRow[] = thread.messages.flatMap((m) =>
     m.author.kind !== 'agent'
@@ -2707,7 +2706,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return [{ id: `${m.id}/${a.key}`, messageId: m.id, number: a.position + 1, prompt: a.prompt, outcome: mine.outcome, note: mine.note, seen: a.action_result?.by === 'agent' }];
         }),
   );
-  const draftCant = draftActions.filter((a) => a.outcome === 'cant' && !a.seen).length;
+  const [draftCant, draftSkipped] = (['cant', 'skip'] as const).map((o) => draftActions.filter((a) => a.outcome === o && !a.seen).length);
   /** Picks, annotations or action items wait for a Send. */
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
@@ -2718,7 +2717,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
-  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }, false);
+  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }, false);
 
   // The answers this reply carries, as the cards show them now: a saved pick, or one being
   // saved. The box lists them live (ReplyAnswers); they never go into the words, where a
@@ -3628,7 +3627,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
+            askerEnded: wordsEnded && wordsAsking && !(repliedTo && inboxSessionlessSend(repliedTo)) ? { name: wordsAsking.name } : null, // never for a reply to a script's post
             stuck,
             handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
@@ -4194,11 +4193,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     aimReply(next);
     announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
   };
-  // The one place the reply's recipient control splits: a phone's is in the box's row with its sheet (approval
-  // "inbox-phone-composer-picker"), a computer's is the pill. Both show by the same rule (`pillActive`): a thread with
-  // one agent has no control at all.
-  const rcptPill = !pillActive ? null : phone ? (
-    <PhoneReplyRecipient
+  // The reply's recipient control: a phone's in the box's row, a computer's the field's lead (parts/ReplyRecipientControl).
+  const rcptPill = !pillActive ? null : (
+    <ReplyRecipientControl
+      phone={phone}
       rows={rcptAgents}
       chosen={rcptChosen}
       open={rcptOpen}
@@ -4210,8 +4208,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       labels={sessionLabels}
       folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
-  ) : (
-    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} labels={sessionLabels} folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name} />
   );
   const routeChoice = asking ? (
     <RouteChoice
@@ -5610,6 +5606,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   ariaLabel={`Reply to ${replyToNames}`}
                   ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                   placeholder="Write a reply. Type / for a skill"
+                  lead={phone ? undefined : rcptPill}
                   destination="your reply"
                   skillFilter={skillFilter}
                   commands={replyCommands}
@@ -5715,7 +5712,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={rcptPill}
+                pill={phone ? rcptPill : null}
                 hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
@@ -5876,7 +5873,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}
-                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant - draftSkipped, cant: draftCant, skipped: draftSkipped }}
                   onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
                   commentsOpen={commentsList !== null && !commentsList.card}
                 />

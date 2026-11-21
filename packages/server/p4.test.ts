@@ -20,7 +20,7 @@ afterEach(() => {
 describe("P4 provider non-regression", () => {
   const testIfUnix = process.platform === "win32" ? test.skip : test;
 
-  testIfUnix("still detects, diffs, expands, and disables staging after GitButler registration", async () => {
+  testIfUnix("opens an available changelist, expands its diff, and disables staging", async () => {
     const workspace = makeTempDir("plannotator-p4-workspace-");
     const binDir = makeTempDir("plannotator-p4-bin-");
     const localFile = join(workspace, "file.txt");
@@ -37,9 +37,14 @@ describe("P4 provider non-regression", () => {
       '    echo "Server address: perforce:1666"',
       "    ;;",
       "  opened)",
-      '    echo "//depot/file.txt#1 - edit default change (text) by test-user@test-client"',
+      '    case "${PLANNOTATOR_TEST_P4_OPENED:-mixed}:$3" in',
+      "      empty:*|numbered:default) ;;",
+      '      *) echo "//depot/file.txt#1 - edit $3 change (text) by test-user@test-client" ;;',
+      "    esac",
       "    ;;",
       "  changes)",
+      '    echo "Change 987 on 2026/11/18 by test-user@test-client *pending* \'Review this change\'"',
+      '    echo "Change 421 on 2026/11/17 by test-user@test-client *pending* \'Older change\'"',
       "    ;;",
       "  diff)",
       '    printf "%s\\n" "--- //depot/file.txt#1"',
@@ -64,7 +69,12 @@ describe("P4 provider non-regression", () => {
       "const prepared = await prepareLocalReviewDiff({ cwd, configuredDiffType: 'since-base' });",
       "const canStage = await canStageFiles('p4-default', cwd);",
       "const contents = await getVcsFileContentsForDiff('p4-default', '', 'file.txt', undefined, cwd);",
-      "console.log(JSON.stringify({ prepared, canStage, contents }));",
+      "const selected = await prepareLocalReviewDiff({ cwd, configuredDiffType: 'since-base', requestedDiffType: 'p4-changelist:421' });",
+      "process.env.PLANNOTATOR_TEST_P4_OPENED = 'numbered';",
+      "const numbered = await prepareLocalReviewDiff({ cwd, configuredDiffType: 'since-base' });",
+      "process.env.PLANNOTATOR_TEST_P4_OPENED = 'empty';",
+      "const empty = await prepareLocalReviewDiff({ cwd, configuredDiffType: 'since-base' });",
+      "console.log(JSON.stringify({ prepared, canStage, contents, selected, numbered, empty }));",
     ].join("\n");
     const child = Bun.spawn([process.execPath, "-e", script], {
       cwd: import.meta.dir,
@@ -80,19 +90,33 @@ describe("P4 provider non-regression", () => {
     ]);
     expect(exitCode, stderr).toBe(0);
     const payload: unknown = JSON.parse(stdout);
+    const fileDiff = expect.stringContaining("diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new");
+    const numberedOptions = [
+      { id: "p4-changelist:987", label: "CL 987: Review this change" },
+      { id: "p4-changelist:421", label: "CL 421: Older change" },
+    ];
     expect(payload).toMatchObject({
       prepared: {
         diffType: "p4-default",
+        rawPatch: fileDiff,
         gitContext: {
           vcsType: "p4",
           currentBranch: "test-client",
-          diffOptions: [{ id: "p4-default", label: "Default changelist" }],
+          diffOptions: [
+            { id: "p4-default", label: "Default changelist" },
+            ...numberedOptions,
+          ],
         },
       },
       canStage: false,
       contents: { oldContent: "old\n", newContent: "new\n" },
+      selected: { diffType: "p4-changelist:421", rawPatch: fileDiff },
+      numbered: {
+        diffType: "p4-changelist:987",
+        rawPatch: fileDiff,
+        gitContext: { vcsType: "p4", diffOptions: numberedOptions },
+      },
+      empty: { diffType: "p4-default", rawPatch: "", gitContext: { diffOptions: [] } },
     });
-    expect(stdout).toContain("diff --git a/file.txt b/file.txt");
-    expect(stdout).toContain("-old\\n+new");
   });
 });

@@ -4,7 +4,7 @@ import { readThemePairCookies, writeThemePairCookies } from '../config/settings'
 import { useConfigValue } from '../config/useConfig';
 import { storage } from '../utils/storage';
 import {
-  BUILT_IN_THEMES,
+  getAllThemes,
   getUnsupportedMode,
   resolvePairTheme,
   resolveThemeMode,
@@ -46,7 +46,8 @@ type ThemeProviderState = {
   manageFavicon: boolean;
 };
 
-const ThemeProviderContext = createContext<ThemeProviderState>({
+/** The context's value outside any ThemeProvider (see `useHasThemeProvider`). */
+const NO_PROVIDER_STATE: ThemeProviderState = {
   theme: 'dark',
   setTheme: () => null,
   mode: 'dark',
@@ -58,9 +59,11 @@ const ThemeProviderContext = createContext<ThemeProviderState>({
   lightTheme: 'plannotator',
   darkTheme: 'plannotator',
   setHalfTheme: () => null,
-  availableThemes: BUILT_IN_THEMES,
+  availableThemes: getAllThemes(),
   manageFavicon: false,
-});
+};
+
+const ThemeProviderContext = createContext<ThemeProviderState>(NO_PROVIDER_STATE);
 
 /**
  * Held on <html> while a theme change lands. theme.css sets every transition's
@@ -390,7 +393,8 @@ export function ThemeProvider({
     lightTheme: pair.light,
     darkTheme: pair.dark,
     setHalfTheme,
-    availableThemes: BUILT_IN_THEMES,
+    // The person's own themes (themeRegistry's custom themes) first, then the built-ins.
+    availableThemes: getAllThemes(),
     manageFavicon,
   }), [mode, preferredMode, resolvedMode, colorTheme, pair.light, pair.dark, setMode, setColorTheme, setHalfTheme, manageFavicon]);
 
@@ -399,6 +403,16 @@ export function ThemeProvider({
       {children}
     </ThemeProviderContext.Provider>
   );
+}
+
+/**
+ * Whether a ThemeProvider is mounted above. Outside one, `useTheme()` answers
+ * the Plannotator palette in dark mode whatever the page shows, so a part
+ * that must match the page (the code fences' colours, `useFenceTheme`) reads
+ * the page itself instead.
+ */
+export function useHasThemeProvider(): boolean {
+  return useContext(ThemeProviderContext) !== NO_PROVIDER_STATE;
 }
 
 export const useTheme = () => {

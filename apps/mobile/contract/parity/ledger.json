@@ -473,12 +473,15 @@
       "id": "window-036",
       "title": "A file opened beside a thread folds the sidebar away temporarily",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "rethink",
       "why": "A file opens full screen over the thread",
       "source": "SCOPE C. Sidebar; L61",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -2530,12 +2533,14 @@
       "id": "window-190",
       "title": "A file covers the thread full screen: toolbar bottom right with 44 px targets (‹ Back to the thread, pen, comment count, ⋯, Hide tools); count opens the annotation panel as a bottom sheet; Hide tucks the toolbar into a 44 × 52 px handle",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "v1",
       "why": "Full-screen cover with a toolbar",
       "source": "SCOPE O. Phone layout (under 768 px) as described in this guide; L324",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -2886,7 +2891,7 @@
     },
     {
       "id": "window-218",
-      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply and the recipient pill, and a bin \"Discard draft\"",
+      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply, and a bin \"Discard draft\"; with several agents, the recipient chip at the start of the words (a phone: the mark-only control in the row)",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -4876,7 +4881,7 @@
     },
     {
       "id": "messages-100",
-      "title": "See who gets the words: pill \"to [mark] <agent>\" (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
+      "title": "See who gets the words: a chip \"to [mark] <agent>\" at the start of the reply's first line on a computer, the words after it; on a phone the agent's mark and a chevron in the box's row (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -6045,7 +6050,7 @@
     },
     {
       "id": "messages-182",
-      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, ⋯ (Mark read, Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
+      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, Mark read (its own button where there is room; beside an open thread in the ⋯), ⋯ (Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -6156,6 +6161,19 @@
       "mobile": "v1",
       "why": "",
       "source": "SCOPE 16. The project menu; M:L68, M:L95, M:L104, M:L181",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "messages-262",
+      "title": "Mark all as read and Archive all on the list: \"Mark all as read\" in the list ⋮ (after \"Select threads\") takes every row the list shows that takes Mark read; a group band's menu (right-click, Shift+F10, or a finger held on the band; a bottom sheet on a phone) offers \"Mark all as read\" and \"Archive all\" for that band's rows, each only where it applies, none on a band with nothing to take (the browser's own menu there) or while picking; neither toggles the band; never a snoozed row; a thread with news not yet shown is left out; the set-aside warning, one toast and one Undo; a one-time tooltip on the band (\"Right-click for group actions\", a phone's \"Hold a group for actions\") until shown once or the band's menu was opened",
+      "surface": [],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "source": "SCOPE 16. The project menu; inbox-window.md, Mark all as read on the list",
+      "since": "2026-11-20",
       "ios": {
         "state": "not-started"
       }
@@ -7205,12 +7223,14 @@
         "field:InboxUpload.size",
         "field:InboxUpload.width"
       ],
-      "flows": [],
+      "flows": [
+        "file-01"
+      ],
       "mobile": "v1",
       "why": "native attachment tiles",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L3-L9",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7229,48 +7249,58 @@
       "id": "files-003",
       "title": "Markdown file (kind `markdown`)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
-      "why": "native Markdown document",
+      "why": "native Markdown document; building: raw HTML blocks, display math and link reference definitions are not ported yet, so a `<details>` block is drawn as its own text and the block ids after one are not the window's",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L51, L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-004",
       "title": "Plain text file (kind `text`; `.txt` keeps the text view)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native text view",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-005",
       "title": "Data and log files (`.log`, yaml, json, toml, ini, csv, tsv, xml, `.env.example`...) drawn as code though stored as `text`",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native code view",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-006",
       "title": "Code file (kind `code`: any other UTF-8 text)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native code view, tap a line",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7279,12 +7309,14 @@
       "surface": [
         "window:/api/inbox/pages"
       ],
-      "flows": [],
+      "flows": [
+        "file-06"
+      ],
       "mobile": "v1",
-      "why": "sandboxed web view block",
+      "why": "sandboxed web view block; building: the page's relative pictures and frames are not fetched yet (they come with the page routes)",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L20-L22, L27, L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7305,12 +7337,14 @@
       "surface": [
         "field:InboxQuestionChoice.image"
       ],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "native gallery and zoom viewer",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L25",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7322,36 +7356,45 @@
         "field:InboxInlineImage.media_type",
         "field:InboxUpload.media_type"
       ],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "native player (AVPlayer)",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L73",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "99284f332e96496c"
       }
     },
     {
       "id": "files-011",
       "title": "Audio recording (MP3, AAC, M4A, WAV, Ogg, FLAC, WebM audio)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "native audio player",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L74",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-012",
       "title": "PDF",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "rethink",
       "why": "opens in the system PDF preview (Quick Look), plus share sheet",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L25, L51, L95",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7360,36 +7403,45 @@
       "surface": [
         "field:InboxReviewAnchor.file"
       ],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "save to Files, share sheet",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9-L10, L25",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "91b8e04f80dfad25"
       }
     },
     {
       "id": "files-014",
       "title": "A text or code file over 16 MB is a download, not a viewer",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "download card, share sheet",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L9, L13",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-015",
       "title": "A file that changed since it was sent says so, and the sent version still opens",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-08"
+      ],
       "mobile": "v1",
       "why": "changed line and sent version",
       "source": "SCOPE A. What an agent can attach, and what kind it becomes; F L11, L25, L54, L78",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7411,12 +7463,14 @@
         "door:GET threads/:id/attachments",
         "window:/api/inbox/threads/:id/attachments"
       ],
-      "flows": [],
+      "flows": [
+        "file-01"
+      ],
       "mobile": "v1",
       "why": "native tile grid",
       "source": "SCOPE B. Tiles, gallery and the attachments count; F L11, L15, L25, L95",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7497,24 +7551,28 @@
       "id": "files-024",
       "title": "Full screen: file fills the window, floating toolbar (Back, pen, comment count, N/M, ⋯, Side by side, ×, Hide tools)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "rethink",
       "why": "full-screen push with a native navigation bar and bottom toolbar",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-025",
       "title": "Hide tools: everything floating flies into one corner control; one press brings it back",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "rethink",
       "why": "tap the file to hide and show the bars",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7533,12 +7591,15 @@
       "id": "files-027",
       "title": "Changed chip: \"Changed since sent · View sent version\" / \"Showing the sent version · View current file\" / \"The file is gone; showing the sent copy\"",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-08"
+      ],
       "mobile": "v1",
       "why": "changed chip, top left",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L54",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7569,24 +7630,30 @@
       "id": "files-030",
       "title": "Coming back from a file keeps your place in the thread",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "v1",
       "why": "native navigation keeps scroll",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L50",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-031",
       "title": "Where full screen goes back to: exactly the view before it; browser Back matches",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02"
+      ],
       "mobile": "rethink",
       "why": "native navigation stack returns to the view before",
       "source": "SCOPE C. Opening a file: the pane, side by side, full screen; F L57",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7629,12 +7696,15 @@
       "id": "files-035",
       "title": "Stepper bar \"‹ 3 of 9 · name ⌄ ›\" under the file; order is per message: images in the text, then attached files",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-02",
+        "file-03"
+      ],
       "mobile": "rethink",
-      "why": "position pill in the toolbar plus swipe; no bar under the file",
+      "why": "position pill in the toolbar plus swipe; no bar under the file; building: the cover leaves the pictures in a message's words out and steps through a message's attached files first, not the window's order",
       "source": "SCOPE D. Stepping between files, and picture choices; F L51",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7653,12 +7723,15 @@
       "id": "files-037",
       "title": "Swipe sideways with one finger to step; file follows the finger; \"Next · name\" card at the edge",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-03"
+      ],
       "mobile": "v1",
       "why": "native paging swipe",
       "source": "SCOPE D. Stepping between files, and picture choices; F L51",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7719,31 +7792,37 @@
       "why": "native zoom and paging",
       "source": "SCOPE D. Stepping between files, and picture choices; F L52",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-043",
       "title": "Swipe down to close an image at Fit (past 15% of height or a flick)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "swipe down to dismiss",
       "source": "SCOPE D. Stepping between files, and picture choices; F L52",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
       "id": "files-044",
       "title": "Picture stays clear of the option card / toolbar at Fit",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "safe area inset",
       "source": "SCOPE D. Stepping between files, and picture choices; F L53",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7752,24 +7831,29 @@
       "surface": [
         "window:/api/inbox/attachments/:id"
       ],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native document, comments sheet",
       "source": "SCOPE E. Viewers, one per kind; F L13, L69, L77",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
       "id": "files-046",
       "title": "Copy file (raw text of the version on screen)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-10"
+      ],
       "mobile": "v1",
       "why": "Copy and share sheet",
       "source": "SCOPE E. Viewers, one per kind; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7827,12 +7911,14 @@
       "id": "files-051",
       "title": "Code view: line numbers, line and range comments, plain text above 100,000 characters, wrapped when a line is over 1,000",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-05"
+      ],
       "mobile": "v1",
       "why": "native code view with line comments",
       "source": "SCOPE E. Viewers, one per kind; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -7904,12 +7990,15 @@
       "id": "files-057",
       "title": "Image viewer: pinch / Ctrl+wheel zoom about the pointer, pan, double tap toggles Fit and 2x, Fit to 800%, size bar with scale and Fit / Actual size",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-04"
+      ],
       "mobile": "v1",
       "why": "native pinch and double tap",
       "source": "SCOPE E. Viewers, one per kind; F L69",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7982,12 +8071,15 @@
       "id": "files-063",
       "title": "PDF / other / too-large file: Download card in the pane (reachable by stepping)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "download card; Quick Look for a PDF",
       "source": "SCOPE E. Viewers, one per kind; F L51, L95",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -7997,12 +8089,15 @@
         "door:GET attachments/:id/download",
         "window:/api/inbox/attachments/:id/download"
       ],
-      "flows": [],
+      "flows": [
+        "file-10"
+      ],
       "mobile": "v1",
       "why": "save to Files, share sheet",
       "source": "SCOPE F. Download, Open in, reveal, copy; F L17, L19, L29",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "dbccbcc322fdb79e"
       }
     },
     {
@@ -8055,12 +8150,15 @@
       "id": "files-068",
       "title": "Copy image (HTML `<img>` plus PNG on the clipboard)",
       "surface": [],
-      "flows": [],
+      "flows": [
+        "file-10"
+      ],
       "mobile": "v1",
       "why": "Copy in the long-press menu",
       "source": "SCOPE F. Download, Open in, reveal, copy; F L29",
       "ios": {
-        "state": "not-started"
+        "state": "done",
+        "fingerprint": "e3b0c44298fc1c14"
       }
     },
     {
@@ -8137,7 +8235,7 @@
       "why": "plain notes",
       "source": "SCOPE G. Links to files, and files a message only names; F L60, L62",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -8422,6 +8520,21 @@
       "mobile": "v1",
       "why": "native image, cached",
       "source": "SCOPE I. Pictures and live pages inside a message; F L115-L119",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "files-096-media",
+      "title": "Sound and video written in a message body play in place (native player, by byte range)",
+      "surface": [
+        "door:GET messages/:id/image",
+        "window:/api/inbox/messages/:id/image"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
       "ios": {
         "state": "not-started"
       }
@@ -13960,12 +14073,14 @@
         "field:InboxMessageWire.attachments",
         "field:InboxQuestionChoice.image"
       ],
-      "flows": [],
+      "flows": [
+        "file-09"
+      ],
       "mobile": "v1",
       "why": "native viewers, share sheet",
       "source": "SCOPE 1. Inventory; P:18, P:14",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -14052,7 +14167,7 @@
       "why": "native viewers; a web view only for HTML pages",
       "source": "SCOPE 1. Inventory; P:24-30",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -15821,12 +15936,14 @@
       "surface": [
         "door:GET attachments/:id/audio"
       ],
-      "flows": [],
+      "flows": [
+        "file-07"
+      ],
       "mobile": "v1",
       "why": "native audio player with moment comments",
       "source": "SCOPE 4. Voice; `packages/inbox/components/AudioPlayer.tsx`; the mobile ADR (inbox-mobile), section 12",
       "ios": {
-        "state": "not-started"
+        "state": "building"
       }
     },
     {
@@ -16795,6 +16912,40 @@
       "source": "seed: flows",
       "ios": {
         "state": "not-started"
+      }
+    },
+    {
+      "id": "flow-attachment",
+      "title": "The attachment flow (flows/07-attachment.md)",
+      "surface": [
+        "check:file-01",
+        "check:file-02",
+        "check:file-03",
+        "check:file-04",
+        "check:file-05",
+        "check:file-06",
+        "check:file-07",
+        "check:file-08",
+        "check:file-09",
+        "check:file-10"
+      ],
+      "flows": [
+        "file-01",
+        "file-02",
+        "file-03",
+        "file-04",
+        "file-05",
+        "file-06",
+        "file-07",
+        "file-08",
+        "file-09",
+        "file-10"
+      ],
+      "mobile": "v1",
+      "why": "The phone's own flow spec; each check is proved by a UI test.",
+      "source": "seed: flows",
+      "ios": {
+        "state": "building"
       }
     },
     {
@@ -21126,6 +21277,161 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-plannotator-themes-js",
+      "title": "window:/plannotator-themes.js",
+      "surface": [
+        "window:/plannotator-themes.js"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxactionresult-outcome-skip",
+      "title": "enum:InboxActionResult.outcome.skip",
+      "surface": [
+        "enum:InboxActionResult.outcome.skip"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxactionresult-person-outcome-skip",
+      "title": "enum:InboxActionResult.person.outcome.skip",
+      "surface": [
+        "enum:InboxActionResult.person.outcome.skip"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxrowunsent-skipped",
+      "title": "field:InboxRowUnsent.skipped",
+      "surface": [
+        "field:InboxRowUnsent.skipped"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-get-messages-id-run",
+      "title": "door:GET messages/:id/run",
+      "surface": [
+        "door:GET messages/:id/run"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-messages-id-run",
+      "title": "door:POST messages/:id/run",
+      "surface": [
+        "door:POST messages/:id/run"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-door-post-messages-id-secret",
+      "title": "door:POST messages/:id/secret",
+      "surface": [
+        "door:POST messages/:id/secret"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-run",
+      "title": "window:/api/inbox/messages/:id/run",
+      "surface": [
+        "window:/api/inbox/messages/:id/run"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-window-api-inbox-messages-id-secret",
+      "title": "window:/api/inbox/messages/:id/secret",
+      "surface": [
+        "window:/api/inbox/messages/:id/secret"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-frame-runs",
+      "title": "frame:runs",
+      "surface": [
+        "frame:runs"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-20",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "files-101-annotate",
+      "title": "Pen under an `html` block: comment on an element of the live page in place (the element boxed, the comment box beside it, a numbered marker, \"HTML · <element>\" in the list of comments)",
+      "surface": [
+        "window:/api/inbox/embed-pages",
+        "window:/api/inbox/embed-pages/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
       "ios": {
         "state": "not-started"
       }
