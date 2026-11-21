@@ -10,7 +10,8 @@
  *   Cyrillic accents dropped (NFD, U+0300 to U+036F), so `resume` finds
  *   `résumé`. Matching only: every offset this module hands out points into
  *   the ORIGINAL text.
- * - Tokens: maximal runs of letters, digits and combining marks, cut further
+ * - Tokens: maximal runs of letters, digits and combining marks (a soft
+ *   hyphen between two of them does not end the run), cut further
  *   where `Intl.Segmenter` (word granularity) puts a word boundary, so
  *   Japanese and Chinese split into words without spaces. A run of plain
  *   ASCII takes a fast path that gives the same tokens. A token under 2
@@ -37,7 +38,7 @@ const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hang
 /** Scripts written without spaces between words: only these need the segmenter. */
 const NO_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 const NON_ASCII = /[^\x00-\x7f]/;
-const WORD_RUN = /[\p{L}\p{N}\p{M}]+/gu;
+const WORD_RUN = /[\p{L}\p{N}\p{M}]+(?:\u00ad+[\p{L}\p{N}\p{M}]+)*/gu;
 
 let wordSegmenter: Intl.Segmenter | null | undefined;
 function segmenter(): Intl.Segmenter | null {
