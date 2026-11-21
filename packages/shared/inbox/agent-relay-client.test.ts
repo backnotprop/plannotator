@@ -40,6 +40,9 @@ describe("a call while the person's computer is asleep", () => {
     expect(isInboxAgentWrite("thread_pulls", { thread_id: "thr_1", remove: ["all"] })).toBe(true);
     expect(isInboxAgentWrite("send_message", { body: "Hi" })).toBe(true);
     expect(isInboxAgentWrite("read_thread", {})).toBe(false);
+    // A command's window route (inbox rows, projects, icon, export-decisions): a GET reads, a POST changes something.
+    expect(isInboxAgentWrite("route", { method: "GET", path: "/api/inbox/projects" })).toBe(false);
+    expect(isInboxAgentWrite("route", { method: "POST", path: "/api/inbox/settings", body: { rows: [] } })).toBe(true);
     expect(isInboxAgentWrite("search", { query: "x" })).toBe(false);
   });
 

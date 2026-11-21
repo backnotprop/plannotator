@@ -44,7 +44,7 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { planAgentBodyPictures } from "@plannotator/shared/inbox/agent-pictures";
-import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
+import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS, INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, type InboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
@@ -225,15 +225,6 @@ export interface CallCommandDeps {
   pairedTransport?: (tool: string, body: Record<string, unknown>, waitMs?: number) => Promise<InboxAgentRelayOutcome>;
 }
 
-/**
- * What a command with no agent-door action says to a paired cloud agent (`PLANNOTATOR_PAIRING`) instead of looking for
- * an Inbox on its own machine: it changes the person's Inbox on their computer through a route only that computer
- * reaches, so it is not available over a pairing. Never "Inbox is off", which is about a machine the agent is not on.
- */
-export function inboxPairedCommandUnavailable(command: string): string {
-  return `not_over_pairing: ${command} works only on the person's computer, and you reach their Inbox through a pairing, so nothing was done. Ask the person to do it in the Inbox, or to ask an agent on their computer.`;
-}
-
 /** Run `plannotator inbox call …`; resolves to the exit code. */
 export async function runInboxCallCommand(argv: readonly string[], deps: CallCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
@@ -303,29 +294,24 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
 
 type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 
-/** A paired cloud agent's call: the agent door, with the pairing's token. Only on this computer until the relay carries it. */
-async function runPairedCall(
-  parsed: Extract<ParsedCallCommand, { ok: true }>,
-  deps: CallCommandDeps,
-  out: (text: string) => void | Promise<void>,
-  err: (text: string) => void,
-  refused: (code: string, message: string, exit?: number) => number,
-): Promise<number> {
+type PairedDeps = Pick<CallCommandDeps, "env" | "timeoutMs" | "pairedTransport">;
+type PairedLink = {
+  ok: true;
+  relayed: (InboxAgentPairing & { relay: NonNullable<InboxAgentPairing["relay"]> }) | null;
+  transport: (tool: string, body: Record<string, unknown>, waitMs?: number) => Promise<InboxAgentRelayOutcome>;
+  resultOf: (outcome: Extract<InboxAgentRelayOutcome, { kind: "answer" }>) => { result: CallResult } | { code: string; message: string };
+  /** One call whose result is read here (a piece of a file, a command's route): its structured result, or the refusal as a code and words. */
+  call: PairedCall;
+};
+
+/** The way to the person's Inbox that PLANNOTATOR_PAIRING names: the agent door with its token, through the relay (or PLANNOTATOR_PAIRING_DOOR). */
+function pairedLink(deps: PairedDeps): PairedLink | { ok: false; code: string; message: string; exit: number } {
   const pairing = decodeInboxAgentPairing(deps.env.PLANNOTATOR_PAIRING);
-  if (!pairing) return refused("invalid_pairing", "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox: it is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole (it starts with plannotator-pairing-).", 2);
+  if (!pairing) return { ok: false, exit: 2, code: "invalid_pairing", message: "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox: it is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole (it starts with plannotator-pairing-)." };
   const door = deps.env.PLANNOTATOR_PAIRING_DOOR ? loopbackDoor(deps.env.PLANNOTATOR_PAIRING_DOOR) : null;
-  if (deps.env.PLANNOTATOR_PAIRING_DOOR && !door) return refused("pairing_door_needed", "PLANNOTATOR_PAIRING_DOOR must be the Inbox's address on this computer (http://127.0.0.1:<port>). Unset it to go through the relay.", 2);
+  if (deps.env.PLANNOTATOR_PAIRING_DOOR && !door) return { ok: false, exit: 2, code: "pairing_door_needed", message: "PLANNOTATOR_PAIRING_DOOR must be the Inbox's address on this computer (http://127.0.0.1:<port>). Unset it to go through the relay." };
   if (!door && !pairing.relay) {
-    return refused("pairing_without_relay", "This pairing string was made before the person's Inbox could reach its relay, so it works only on their computer. Ask the person to remove this agent and pair it again.", 1);
-  }
-  if (parsed.session !== null) return refused("invalid_session", "--session is not taken with PLANNOTATOR_PAIRING: the pairing names the agent.", 2);
-  let args: Record<string, unknown>;
-  try {
-    const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
-    args = value as Record<string, unknown>;
-  } catch (error) {
-    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+    return { ok: false, exit: 1, code: "pairing_without_relay", message: "This pairing string was made before the person's Inbox could reach its relay, so it works only on their computer. Ask the person to remove this agent and pair it again." };
   }
   const relayed = !door && pairing.relay ? { ...pairing, relay: pairing.relay } : null;
   const transport = async (tool: string, body: Record<string, unknown>, waitMs?: number): Promise<InboxAgentRelayOutcome> => {
@@ -354,12 +340,11 @@ async function runPairedCall(
     if (outcome.status < 200 || outcome.status >= 300 || !answer?.result) return { code: answer?.code ?? "inbox_error", message: answer?.error ?? `The Inbox answered ${outcome.status}.` };
     return { result: answer.result };
   };
-
-  // One piece of a file, either way: its result, or the Inbox's refusal as a code and words.
-  const pieceCall: PairedCall = async (tool, body) => {
+  const call: PairedCall = async (tool, body) => {
     const outcome = await transport(tool, body, PIECE_WAIT_MS);
     if (outcome.kind === "refused") return { ok: false, code: outcome.code, message: outcome.message };
-    if (outcome.kind === "queued") return { ok: false, code: "no_answer", message: "The person's computer did not take the file in time. Nothing was sent. Try again later." };
+    // Only a write is queued (a command's change, isInboxAgentWrite): applied once when the computer answers.
+    if (outcome.kind === "queued") return { ok: false, code: "queued", message: `${outcome.reason === "offline" ? "The person's computer is asleep or offline" : "The person's computer did not answer in time"}. This change waits at the relay and is applied once when it is back. Do not run it again.` };
     const got = resultOf(outcome);
     if ("code" in got) return { ok: false, ...got };
     if (got.result.isError) {
@@ -369,6 +354,48 @@ async function runPairedCall(
     }
     return { ok: true, structured: got.result.structuredContent };
   };
+  return { ok: true, relayed, transport, resultOf, call };
+}
+
+/**
+ * For a command that is a thin client over the window's routes on the person's computer (`inbox rows`, `projects`,
+ * `icon`, `export-decisions`), run by a paired cloud agent: its request to `path` goes through the agent door's `route`
+ * (packages/server/inbox-agent-routes.ts), and the Inbox's answer comes back as the Response the command reads, so it
+ * prints exactly what it prints on that computer. A request that does not reach the Inbox answers 502 with its
+ * reason, in the routes' own `{ code, error }`.
+ */
+export function inboxPairedRouteFetch(deps: PairedDeps): ((path: string, init?: { method?: string; body?: string }) => Promise<Response>) | { code: string; message: string } {
+  const link = pairedLink(deps);
+  if (!link.ok) return { code: link.code, message: link.message };
+  return async (path, init = {}) => {
+    const method = init.method ?? "GET";
+    const got = await link.call(INBOX_AGENT_ROUTE, { method, path, ...(init.body !== undefined ? { body: JSON.parse(init.body) } : {}) });
+    if (!got.ok) return new Response(JSON.stringify({ code: got.code, error: got.message }), { status: 502, headers: { "Content-Type": "application/json" } });
+    const answer = got.structured as { status?: number; content_type?: string; body?: string } | undefined;
+    return new Response(answer?.body ?? "", { status: answer?.status ?? 502, headers: answer?.content_type ? { "Content-Type": answer.content_type } : {} });
+  };
+}
+
+/** A paired cloud agent's call: the agent door, with the pairing's token, through the relay. */
+async function runPairedCall(
+  parsed: Extract<ParsedCallCommand, { ok: true }>,
+  deps: CallCommandDeps,
+  out: (text: string) => void | Promise<void>,
+  err: (text: string) => void,
+  refused: (code: string, message: string, exit?: number) => number,
+): Promise<number> {
+  const link = pairedLink(deps);
+  if (!link.ok) return refused(link.code, link.message, link.exit);
+  if (parsed.session !== null) return refused("invalid_session", "--session is not taken with PLANNOTATOR_PAIRING: the pairing names the agent.", 2);
+  let args: Record<string, unknown>;
+  try {
+    const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
+    args = value as Record<string, unknown>;
+  } catch (error) {
+    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+  }
+  const { relayed, transport, resultOf, call: pieceCall } = link;
   if (parsed.action === INBOX_AGENT_FETCH_FILE) {
     const fetched = await fetchPairedFile(args, deps.cwd, pieceCall);
     if (!fetched.ok) return refused(fetched.code, fetched.message);
@@ -376,9 +403,11 @@ async function runPairedCall(
     return 0;
   }
   // The pictures the body shows from this machine's disk, as a local agent writes them: sent with the message, each
-  // named by its file's name, which is what the door shows it by (packages/shared/inbox/agent-pictures.ts).
+  // named by its file's name, which is what the door shows it by (packages/shared/inbox/agent-pictures.ts). A path
+  // that is no file here is left as it is, for the Inbox to read on the person's computer. A routine's files are paths
+  // each run reads there, so they go as they are.
   const pictures =
-    typeof args.body === "string"
+    typeof args.body === "string" && parsed.action !== "routine"
       ? planAgentBodyPictures(args.body, Array.isArray(args.attachments) ? args.attachments : [], deps.cwd, (path) => {
           try {
             return statSync(path).isFile();
@@ -389,7 +418,7 @@ async function runPairedCall(
       : null;
   if (pictures) args.body = pictures.body;
   if (pictures && pictures.files.length > 0) args.attachments = [...(Array.isArray(args.attachments) ? args.attachments : [])];
-  if (Array.isArray(args.attachments)) {
+  if (Array.isArray(args.attachments) && parsed.action !== "routine") {
     const sent = await pairedAttachments(args.attachments, deps.cwd, pieceCall, pictures?.files ?? []);
     if (!sent.ok) return refused(sent.code, sent.message);
     args.attachments = sent.items;

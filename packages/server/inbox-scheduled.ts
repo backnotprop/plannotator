@@ -31,7 +31,6 @@ import {
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { inboxLaunchedSession } from "@plannotator/core/inbox-run-line";
-import { isInboxCloudAuthor } from "@plannotator/core/inbox-cloud";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxAttachment } from "@plannotator/core/inbox-types";
@@ -42,27 +41,6 @@ export const INBOX_SCHEDULED_OFF_TEXT =
 
 /** Who asked: the person in the window, or an agent session (and the thread it asked from). */
 export type InboxScheduledBy = { kind: "person" } | { kind: "agent"; host: string; session: string; name: string; thread_id: string | null };
-
-/**
- * The owner's decision, pending (2026-11-21): when a paired cloud agent changes what an approved routine does (its
- * prompt, schedule, model or effort), the routine turns off until the person turns it on again, as a folder or agent
- * change does for any agent, and the change line goes to the routine's own thread, never one the agent names. False:
- * kept on, and the line goes where the agent says, as for an agent on this computer. Agents here are unchanged either way.
- */
-export const CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL = true;
-
-/** The fields whose change by a cloud agent hands the switch back to the person (`cloudRoutineChange`). */
-const CLOUD_APPROVED_FIELDS: readonly string[] = ["prompt", "schedule", "model", "effort"];
-
-/**
- * What a change to a routine by `by` does beyond what it does for every agent (a folder or agent change turns it off):
- * `turnsOff`, the routine goes off until the person turns it on; `ownThread`, its line goes to the routine's own
- * thread. Both only for a cloud agent, and only while `needsApproval` (`CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL`) is on.
- */
-export function cloudRoutineChange(by: InboxScheduledBy, changed: readonly string[], needsApproval = CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL): { turnsOff: boolean; ownThread: boolean } {
-  const cloud = needsApproval && by.kind === "agent" && isInboxCloudAuthor({ kind: "agent", host: by.host, session: by.session });
-  return { turnsOff: cloud && changed.some((field) => CLOUD_APPROVED_FIELDS.includes(field)), ownThread: cloud };
-}
 
 /**
  * A routine's name (or a folder's words) as text in a change line: never a picture, a link, a mention or HTML,
@@ -103,8 +81,6 @@ export function createInboxScheduled(deps: {
   displayFolder: (path: string) => string;
   now?: () => number;
   log?: (line: string) => void;
-  /** Tests only: `CLOUD_PROMPT_CHANGE_NEEDS_APPROVAL` otherwise. */
-  cloudPromptChangeNeedsApproval?: boolean;
 }) {
   const { store, launch } = deps;
   const now = deps.now ?? Date.now;
@@ -288,13 +264,12 @@ export function createInboxScheduled(deps: {
   /**
    * Every change an agent makes says so, as that agent: in the thread it named, else in the routine's own thread (made
    * for the line when the routine has none yet, where its first run would go). The line is no one's words: it takes
-   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`). `ownThread`: in the routine's
-   * own thread whatever the agent named (a cloud agent's update, `cloudRoutineChange`).
+   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`).
    */
-  const tell = async (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">, ownThread = false): Promise<string | null> => {
+  const tell = async (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">): Promise<string | null> => {
     if (by.kind !== "agent") return null;
     const own = threadOf(record);
-    const thread = (by.thread_id && !ownThread ? store.message(by.thread_id) : null) ?? (own ? store.message(own) : null);
+    const thread = (by.thread_id ? store.message(by.thread_id) : null) ?? (own ? store.message(own) : null);
     const line = { author: { kind: "agent" as const, host: by.host, session: by.session, name: by.name }, body, scheduled_change: { scheduled_id: record.id, name: record.name, ...change } };
     if (thread) return store.sendMessage({ ...line, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.id;
     const project = projectOf(record) ?? (await firstProject(record));
@@ -574,10 +549,8 @@ export function createInboxScheduled(deps: {
       if (input.schedule !== undefined) fields.schedule = scheduleOf(input.schedule, before.schedule);
       const changed = (Object.keys(fields) as (keyof InboxScheduledThread)[]).filter((key) => JSON.stringify(fields[key] ?? null) !== JSON.stringify(before[key] ?? null));
       if (changed.length === 0) return { record: before, told: null };
-      // An agent that changes where it works or which agent runs it hands the switch back to the person; so does a
-      // cloud agent that changes what it does (`cloudRoutineChange`).
-      const cloud = cloudRoutineChange(by, changed, deps.cloudPromptChangeNeedsApproval);
-      const moved = by.kind === "agent" && (changed.includes("folder") || changed.includes("agent") || cloud.turnsOff);
+      // An agent that changes where it works or which agent runs it hands the switch back to the person.
+      const moved = by.kind === "agent" && (changed.includes("folder") || changed.includes("agent"));
       const patch: Partial<InboxScheduledThread> = { ...fields, ...(moved ? { enabled: false, approved_at: null } : {}) };
       // A new schedule counts from now: nothing it would have run before is caught up.
       if (changed.includes("schedule") && before.enabled) patch.handled_through = iso();
@@ -588,7 +561,7 @@ export function createInboxScheduled(deps: {
         op: "update",
         fields: changed as InboxScheduledChange["fields"],
         ...(turnedOff ? { turned_off: true as const } : {}),
-      }, cloud.ownThread);
+      });
       return { record, told };
     },
 

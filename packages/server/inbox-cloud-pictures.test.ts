@@ -1,22 +1,21 @@
 /**
- * Nothing a paired cloud agent writes makes the Inbox read a picture from the person's disk, wherever it names one
- * (inbox-cloud-pictures.ts), while an agent on this computer still shows a picture by its path. On a store, with no
- * Inbox running. The failures these guard: the background capture copying a picture a cloud agent's message names
- * (a routine change line, any message), so its bytes become a file of the thread; the window's image route reading it
- * live; a cloud agent's attached Markdown file or HTML page showing a picture from the person's disk.
+ * A cloud agent's message shows pictures as a local agent's does (inbox-cloud-pictures.ts): read from the person's disk
+ * by the path it writes, and a picture it sent as bytes from the Inbox's own copy. On a store, with no Inbox running.
+ * The failures these guard: the background capture or the window's image route treating a cloud agent's message by a
+ * rule of its own; a picture captured from bytes sent with the message read from a file of that name on disk instead;
+ * a file that is not a picture taken as one.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isInboxCloudAuthor } from "@plannotator/core/inbox-cloud";
-import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxUploadAttachments, receiveInboxUpload } from "@plannotator/shared/inbox/uploads";
-import { createInboxAttachmentRoutes, createInboxHtmlAssets } from "./inbox-attachments";
-import { createInboxImageCapture, inboxMessageImageRoute } from "./inbox-message-images";
+import { inboxSendUploadPictures } from "./inbox-cloud-pictures";
+import { createInboxImageCapture, inboxMessageImageRoute, inboxPictureFromUpload } from "./inbox-message-images";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+const GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 const CLOUD = { kind: "agent" as const, host: "cloud-grok", session: "cloud.0123456789ab", name: "Nightly fixer" };
 const LOCAL = { kind: "agent" as const, host: "codex", session: "ses-codex", name: "Codex" };
 
@@ -36,7 +35,6 @@ function world() {
   mkdirSync(desk, { recursive: true });
   const scan = join(desk, "scan.png");
   writeFileSync(scan, PNG);
-  writeFileSync(join(desk, "clip.mp4"), Buffer.alloc(64));
   const project = store.ensureProject({ name: "ledger", root: projectRoot });
   const send = (author: typeof CLOUD | typeof LOCAL, body: string, extra: Record<string, unknown> = {}) =>
     store.sendMessage({ project_id: project.id, author, body, subject: `From ${author.name}`, ...extra }).message;
@@ -47,80 +45,47 @@ function world() {
   return { root, store, project, desk, scan, send, image };
 }
 
-describe("who counts as a cloud agent", () => {
-  test("by its host or its session, either alone; a person or an agent here does not", () => {
-    for (const author of [CLOUD, { ...CLOUD, session: null }, { ...CLOUD, host: null }, { kind: "agent", host: "cloud", session: null }, { kind: "agent", host: "cloud-new-preset", session: "x" }]) {
-      expect([author, isInboxCloudAuthor(author)]).toEqual([author, true]);
-    }
-    for (const author of [LOCAL, { kind: "person" }, { kind: "agent", host: "cloudflare", session: "ses-1" }, null]) expect([author, isInboxCloudAuthor(author)]).toEqual([author, false]);
-  });
-});
-
-describe("the background capture", () => {
-  test("never reads a picture a cloud agent's message names; an agent here still has its picture copied by its path", async () => {
+describe("a picture by its path, whoever wrote the message", () => {
+  test("the background capture copies it and the window's image route shows it, for a cloud agent as for an agent here", async () => {
     const w = world();
-    const body = (scan: string) => `Look: ![s](${scan}) and <img src="${scan}">`;
-    const cloud = w.send(CLOUD, body(w.scan));
-    const local = w.send(LOCAL, body(w.scan));
+    const body = `Look: ![s](${w.scan})`;
+    const cloud = w.send(CLOUD, body);
+    const local = w.send(LOCAL, body);
+    for (const id of [cloud.id, local.id]) {
+      const shown = await w.image(id, w.scan);
+      expect([id, shown.status, Buffer.from(await shown.arrayBuffer())]).toEqual([id, 200, PNG]);
+    }
     const capture = createInboxImageCapture(w.store, { pauseMs: 0 });
     capture.schedule(cloud.thread_id);
     capture.schedule(local.thread_id);
     await capture.idle();
     capture.stop();
-    expect(w.store.message(cloud.id)!.inline_images ?? []).toEqual([]);
-    expect(w.store.message(local.id)!.inline_images!.map((image) => [image.ref, image.path, image.size])).toEqual([[w.scan, w.scan, PNG.length]]);
+    for (const id of [cloud.id, local.id]) expect(w.store.message(id)!.inline_images!.map((image) => [image.ref, image.path])).toEqual([[w.scan, w.scan]]);
   });
 });
 
-describe("the window's image route", () => {
-  test("a cloud agent's picture not captured at send is not found, its sound or video too; nothing is read from disk. An agent here's shows", async () => {
-    const w = world();
-    const clip = join(w.desk, "clip.mp4");
-    const cloud = w.send(CLOUD, `![s](${w.scan}) ![v](${clip})`);
-    for (const src of [w.scan, clip]) expect([src, (await w.image(cloud.id, src)).status]).toEqual([src, 404]);
-    expect(await (await w.image(cloud.id, w.scan)).json()).toMatchObject({ code: "image_not_attached" });
-    const local = w.send(LOCAL, `![s](${w.scan})`);
-    const shown = await w.image(local.id, w.scan);
-    expect([shown.status, Buffer.from(await shown.arrayBuffer())]).toEqual([200, PNG]);
-  });
-});
-
-describe("a cloud agent's attached files", () => {
-  const routes = (store: InboxStore) => createInboxAttachmentRoutes({ store, serverSession: "srv", readBody: async (req) => (await req.json()) as Record<string, unknown> });
-
-  test("its Markdown file shows no picture from the person's disk; an agent here's does", async () => {
-    const w = world();
-    const notes = join(w.project.root, "notes.md");
-    writeFileSync(notes, `# Notes\n\n![s](${w.scan})\n`);
-    const handle = routes(w.store);
-    for (const [author, status] of [[CLOUD, 404], [LOCAL, 200]] as const) {
-      const attachments = await recordInboxAttachments(w.store.dir, [notes], { base: w.project.root, at: new Date().toISOString() });
-      const message = w.send(author, "The notes.", { attachments });
-      const url = new URL(`http://127.0.0.1/api/inbox/attachments/${message.attachments![0]!.id}/markdown-image?path=${encodeURIComponent(w.scan)}`);
-      expect([author.name, (await handle(new Request(url), url))!.status]).toEqual([author.name, status]);
-    }
+describe("a picture sent as bytes", () => {
+  test("only a picture file is matched to a src; the rest stay below the message", () => {
+    const uploads = [
+      { id: "upl_1", name: "chart.png", kind: "image", path: "/blobs/1" },
+      { id: "upl_2", name: "notes.md", kind: "markdown", path: "/blobs/2" },
+    ];
+    const { pictures, attachments } = inboxSendUploadPictures("![c](chart.png) ![n](notes.md) ![d](/Users/p/desk.png)", uploads, ["upl_1", "upl_2", "/Users/p/report.pdf"]);
+    expect([...pictures].map(([src, file]) => [src, file.id])).toEqual([["chart.png", "upl_1"]]);
+    expect(attachments).toEqual(["upl_2", "/Users/p/report.pdf"]);
   });
 
-  test("its HTML page (uploaded bytes) gets no address for a picture outside its folder; a page an agent here attached does", async () => {
+  test("the window shows one captured from bytes from the Inbox's copy, before a file of the same name in the project", async () => {
     const w = world();
-    const html = `<!doctype html><img id="p" src="${w.scan}">`;
-    const at = new Date().toISOString();
-    const pageOf = async (author: typeof CLOUD | typeof LOCAL) => {
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode(html));
-          controller.close();
-        },
-      });
-      const { upload_id } = await receiveInboxUpload(w.store.dir, "page.html", stream, { at });
-      const attachments = await inboxUploadAttachments(w.store.dir, [upload_id], at);
-      return w.send(author, "The page.", { attachments }).attachments![0]!.path;
-    };
-    const assets = createInboxHtmlAssets(w.store);
-    const cloudPage = assets.rewriteHtml(html, await pageOf(CLOUD));
-    const localPage = assets.rewriteHtml(html, await pageOf(LOCAL));
-    expect(cloudPage).toContain(`src="${w.scan}"`);
-    expect(cloudPage).not.toMatch(/src="\/api\/html-assets\//);
-    expect(localPage).toMatch(/src="\/api\/html-assets\/[0-9a-f]+\/scan\.png"/);
+    writeFileSync(join(w.project.root, "chart.png"), PNG);
+    const blob = inboxBlobPath(w.store.dir, "a".repeat(64));
+    mkdirSync(join(w.store.dir, "blobs"), { recursive: true });
+    writeFileSync(blob, GIF);
+    const record = { id: "att_UP", path: realpathSync(blob), named_path: null, name: "chart.png", kind: "image", sent_sha256: "a".repeat(64), size: GIF.length, sent_at: "2026-11-21T00:00:00.000Z", sent_mtime: "2026-11-21T00:00:00.000Z", ref: "chart.png" };
+    expect(inboxPictureFromUpload(w.store.dir, record as never)).toBe(true);
+    expect(inboxPictureFromUpload(w.store.dir, { ...record, path: join(w.project.root, "chart.png") } as never)).toBe(false);
+    const message = w.send(CLOUD, "![c](chart.png)", { inline_images: [record] });
+    const shown = await w.image(message.id, "chart.png");
+    expect([shown.status, Buffer.from(await shown.arrayBuffer())]).toEqual([200, GIF]);
   });
 });

@@ -40,16 +40,26 @@ async function sendInPieces(path: string, item: string, send: PairedSend, name =
   return done.ok ? { ok: true, upload: uploadId } : done;
 }
 
+/** Whether `path` is a regular file on this machine. */
+async function isFileHere(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The send's attachments as the door takes them: each path read from this machine (a big file in pieces), every other
- * item as it is. `named`: more files to send under a given name (the body's pictures, planAgentBodyPictures).
+ * The send's attachments as the door takes them: a path that is a file on this machine read and sent as bytes (a big
+ * file in pieces); any other path as it is, for the Inbox to open on the person's computer as a local agent's; every
+ * other item as it is. `named`: more files to send under a given name (the body's pictures, planAgentBodyPictures).
  */
 export async function pairedAttachments(items: readonly unknown[], cwd: string, send: PairedSend, named: readonly { path: string; name: string }[] = []): Promise<{ ok: true; items: unknown[] } | Refusal> {
   const sent: unknown[] = [];
   let inline = 0;
   type File = { path: string; name: string; label: string };
   const all: (File | { item: unknown })[] = [
-    ...items.map((item) => (typeof item === "string" ? { path: resolve(cwd, item), name: basename(resolve(cwd, item)), label: item } : { item })),
+    ...(await Promise.all(items.map(async (item) => (typeof item === "string" && (await isFileHere(resolve(cwd, item))) ? { path: resolve(cwd, item), name: basename(resolve(cwd, item)), label: item } : { item })))),
     ...named.map((file) => ({ ...file, label: file.path })),
   ];
   try {

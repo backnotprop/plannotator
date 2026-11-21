@@ -1,19 +1,20 @@
 /**
- * A paired cloud agent gets what a local agent gets (the owner, 2026-11-21: "They need to have the same access as a
- * local agent to the inbox"), through the agent door (inbox-agent-door.ts) on a store, with no Inbox running and no
- * server: the door's own handler, a stub device and pairing. The failures these guard: a picture in the body refused
- * (or read from the person's disk), a card call aimed at the agent's own place instead of the card's project, a
- * repository's git address not finding its project (or making a new one), a routine refused, a walkthrough refused
- * or read from nowhere; a picture named anywhere in what it writes (a guide's intent in place of a body) read from the
- * person's disk, or shown in the window from the project's file of the same name instead of the bytes it attached; a
- * place on the person's computer handed back in a result.
+ * A paired cloud agent can do what a local agent can, with the same tool call and the same checks (the owner,
+ * 2026-11-21: "Whatever I can do locally, I should be able to do from a cloud instance"), through the agent door
+ * (inbox-agent-door.ts) on a store, with no Inbox running and no server: the door's own handler, a stub device and
+ * pairing. The failures these guard: a cloud agent's project_path, attachment path, body picture path, localhost
+ * prototype, routine files or walkthrough refused, or handled by a rule a local agent does not get; a picture it sent
+ * as bytes shown from a file of the same name on the person's disk; a place on the person's computer left out of what
+ * it reads; a card call aimed at the agent's own place instead of the card's project; a repository's git address not
+ * finding its project (or making a new one); a command's window route not reached, or reached beyond its routes.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { INBOX_CARD_ACTION_ON, type InboxProject } from "@plannotator/core/inbox-types";
+import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentDoor } from "./inbox-agent-door";
 import { inboxMessageImageRoute } from "./inbox-message-images";
@@ -24,8 +25,6 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 const PATCH = "diff --git a/src/pay.ts b/src/pay.ts\n--- a/src/pay.ts\n+++ b/src/pay.ts\n@@ -1,2 +1,2 @@\n-export const pay = 0;\n+export const pay = 1;\n export const refund = 2;\n";
 const guideWith = (intent: string) => ({ title: "Pay", intent, sections: [{ title: "Pay", overview: "The constant.", diffs: [{ file: "src/pay.ts", summary: "Pay is one." }] }] });
-/** Every key at any depth of a result. */
-const keysOf = (value: unknown): string[] => (Array.isArray(value) ? value.flatMap(keysOf) : value && typeof value === "object" ? Object.entries(value).flatMap(([key, inner]) => [key, ...keysOf(inner)]) : []);
 const TOKEN = `tok_${"A".repeat(43)}`;
 type Result = { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, any> };
 
@@ -34,7 +33,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function world(mcp: Partial<InboxMcpContext> = {}) {
+function world(mcp: Partial<InboxMcpContext> = {}, route?: (req: Request) => Promise<Response>) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-door-parity-")));
   roots.push(root);
   const store = InboxStore.open(join(root, "data"));
@@ -62,10 +61,13 @@ function world(mcp: Partial<InboxMcpContext> = {}) {
     mcp: {
       store,
       baseUrl: () => "http://localhost:1/",
-      resolveProject: async () => ledger,
+      resolveProject: async (path: string) => store.projectByRoot(path) ?? ledger,
+      // The local agent's own rule, as the Inbox's context has it (inbox.ts).
+      recordAttachments: (paths: readonly string[], _project: unknown, base: string) => recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
       branches: { on: () => false, projectOfRemote: (url: string) => (inboxGitRemoteKey(url) === "github.com/acme/ledger" ? ledger : null) } as never,
       ...mcp,
     } as InboxMcpContext,
+    ...(route ? { route } : {}),
   });
   const call = async (tool: string, args: Record<string, unknown>): Promise<Result> => {
     const response = await door.handle(new Request("http://127.0.0.1/api/inbox/agent/call", { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ tool, arguments: args }) }));
@@ -75,7 +77,54 @@ function world(mcp: Partial<InboxMcpContext> = {}) {
   return { root, store, ledger, agent, place, call, error };
 }
 
-describe("pictures in a cloud agent's message", () => {
+describe("a folder and a file on the person's computer, named as a local agent names them", () => {
+  test("project_path picks the project for a send and a list; with project too it is one or the other", async () => {
+    const w = world();
+    const sent = await w.call("send_message", { project_path: w.ledger.root, subject: "Pay", body: "Pay is one now." });
+    expect(w.error(sent)).toBeNull();
+    expect(w.store.message(sent.structuredContent!.message_id as string)!.project_id).toBe(w.ledger.id);
+    const listed = await w.call("read_thread", { project_path: w.ledger.root, asked_by: "anyone" });
+    expect(listed.structuredContent!.project.id).toBe(w.ledger.id);
+    expect(w.error(await w.call("send_message", { project: "ledger", project_path: w.ledger.root, body: "Both." }))).toStartWith("validation_error:");
+  });
+
+  test("an attachment path is read on the person's computer by the local agent's rule, beside files sent as bytes, in the order given", async () => {
+    const w = world();
+    const sent = await w.call("send_message", { project: "ledger", body: "The code and the notes.", attachments: ["src/pay.ts", { name: "notes.md", data: Buffer.from("# n\n").toString("base64") }, join(w.ledger.root, "secret.png")] });
+    expect(w.error(sent)).toBeNull();
+    const message = w.store.message(sent.structuredContent!.message_id as string)!;
+    expect(message.attachments!.map((a) => a.name)).toEqual(["pay.ts", "notes.md", "secret.png"]);
+    expect(readFileSync(message.attachments![0]!.path, "utf8")).toBe("export const pay = 1;\nexport const refund = 2;\n");
+    // The refusals a local agent gets, and no other: a .env file, a folder, a file that is not there.
+    writeFileSync(join(w.ledger.root, ".env"), "TOKEN=1\n");
+    for (const path of [".env", "src", "gone.txt"]) expect([path, w.error(await w.call("send_message", { project: "ledger", body: "No.", attachments: [path] }))?.split(":")[0]]).toEqual([path, "validation_error"]);
+  });
+
+  test("a picture the body names by a path is read from the person's disk, a guide's intent too", async () => {
+    const w = world();
+    const sent = await w.call("send_message", { project: "ledger", body: `See ![scan](${join(w.ledger.root, "secret.png")}) and ![rel](secret.png)` });
+    expect(w.error(sent)).toBeNull();
+    expect(w.store.message(sent.structuredContent!.message_id as string)!.inline_images!.map((image) => [image.name, image.size])).toEqual([["secret.png", PNG.length], ["secret.png", PNG.length]]);
+    const guide = await w.call("submit_guide", { project: "ledger", guide: guideWith("How pay works. ![scan](secret.png)"), patch: PATCH });
+    expect(w.error(guide)).toBeNull();
+    expect(w.store.message(guide.structuredContent!.message_id as string)!.inline_images!.map((image) => image.name)).toEqual(["secret.png"]);
+  });
+
+  test("a running app on the person's computer as a question's prototype is checked there, as for a local agent", async () => {
+    const checked: string[] = [];
+    const w = world({
+      checkPrototypeApps: async (apps) => {
+        checked.push(...apps.map((app) => app.target));
+        return [];
+      },
+    });
+    const body = [":::question", "Which checkout?", "- [ ] A · Classic", "    Prototype: http://localhost:4000/checkout", "- [ ] B · Total first", ":::"].join("\n");
+    expect(w.error(await w.call("send_message", { project: "ledger", body }))).toBeNull();
+    expect(checked).toEqual(["http://localhost:4000/checkout"]);
+  });
+});
+
+describe("pictures a cloud agent sends as bytes", () => {
   test("![alt](name) shows the file attached in the same send, in the body and not again below it", async () => {
     const w = world();
     const sent = await w.call("send_message", { project: "ledger", body: "The chart: ![chart](./chart.png)", attachments: [{ name: "chart.png", data: PNG.toString("base64") }, { name: "notes.md", data: Buffer.from("# n\n").toString("base64") }] });
@@ -85,33 +134,14 @@ describe("pictures in a cloud agent's message", () => {
     expect(message.attachments!.map((attachment) => attachment.name)).toEqual(["notes.md"]);
   });
 
-  test("a picture that names no file attached in the send is refused, never read from the project's folder, and nothing is written", async () => {
+  test("a file that is not a picture, named as one, stays below the message and nothing is refused", async () => {
     const w = world();
-    const before = w.store.listProjects().length;
-    const refused = await w.call("send_message", { project: "ledger", body: "See ![it](secret.png)", attachments: [{ name: "other.png", data: PNG.toString("base64") }] });
-    expect(w.error(refused)).toStartWith("image_path_refused:");
-    const notPicture = await w.call("send_message", { project: "ledger", body: "See ![it](notes.md)", attachments: [{ name: "notes.md", data: Buffer.from("# n\n").toString("base64") }] });
-    expect(w.error(notPicture)).toStartWith("image_not_shown:");
-    expect(w.store.listProjects().length).toBe(before);
-    expect(w.store.listRows().length).toBe(0);
-  });
-});
-
-describe("a picture named anywhere in what a cloud agent writes", () => {
-  test("submit_guide with no body: a picture of the person's disk in the guide's intent (its body then) is refused and nothing is written", async () => {
-    const w = world();
-    const disk = join(w.ledger.root, "secret.png");
-    for (const intent of [`How pay works. ![scan](${disk})`, `How pay works. <img src="${disk}">`, "How pay works. ![scan](secret.png)"]) {
-      const refused = await w.call("submit_guide", { project: "ledger", guide: guideWith(intent), patch: PATCH });
-      expect(w.error(refused)).toStartWith("image_path_refused:");
-    }
-    expect(w.store.listRows().length).toBe(0);
-    const sent = await w.call("submit_guide", { project: "ledger", guide: guideWith("How pay works."), patch: PATCH });
+    const sent = await w.call("send_message", { project: "ledger", body: "See ![it](notes.md)", attachments: [{ name: "notes.md", data: Buffer.from("# n\n").toString("base64") }] });
     expect(w.error(sent)).toBeNull();
-    expect(w.store.message(sent.structuredContent!.message_id as string)!).toMatchObject({ body: "How pay works." });
+    expect(w.store.message(sent.structuredContent!.message_id as string)!.attachments!.map((a) => a.name)).toEqual(["notes.md"]);
   });
 
-  test("the window shows a cloud agent's picture from the bytes it attached, never the project's file of the same name", async () => {
+  test("the window shows the bytes it sent, never the project's file of the same name", async () => {
     const w = world();
     const sent = await w.call("send_message", { project: "ledger", body: "![it](secret.png)", attachments: [{ name: "secret.png", data: GIF.toString("base64") }] });
     expect(w.error(sent)).toBeNull();
@@ -123,21 +153,18 @@ describe("a picture named anywhere in what a cloud agent writes", () => {
   });
 });
 
-describe("what a cloud agent is handed back", () => {
-  test("no file path or project folder on this computer in a send's result or a full read; names and ids stay", async () => {
+describe("what a cloud agent reads", () => {
+  test("its results and reads carry the paths on the person's computer, as a local agent's do", async () => {
     const w = world();
-    const sent = await w.call("send_message", { project: "ledger", body: "Notes: ![c](chart.png)", attachments: [{ name: "chart.png", data: PNG.toString("base64") }, { name: "notes.md", data: Buffer.from("# n\n").toString("base64") }] });
+    const sent = await w.call("send_message", { project: "ledger", body: "Notes.", attachments: ["src/pay.ts"] });
     expect(w.error(sent)).toBeNull();
+    const path = w.store.message(sent.structuredContent!.message_id as string)!.attachments![0]!.path;
     const full = await w.call("read_thread", { thread_id: sent.structuredContent!.thread_id, format: "full" });
     const windowed = await w.call("read_thread", { thread_id: sent.structuredContent!.thread_id });
-    for (const result of [sent, full, windowed]) {
-      const keys = keysOf(result.structuredContent);
-      for (const local of ["path", "named_path", "base_path", "root"]) expect(keys).not.toContain(local);
-      expect(JSON.stringify(result.structuredContent)).not.toContain(w.root);
-    }
-    expect(windowed.content[0]!.text).not.toContain(w.ledger.root);
-    expect(full.structuredContent!.thread.messages[0].attachments.map((a: { name: string }) => a.name)).toEqual(["notes.md"]);
-    expect(full.structuredContent!.thread.messages[0].inline_images.map((a: { name: string }) => a.name)).toEqual(["chart.png"]);
+    expect(full.structuredContent!.thread.messages[0].attachments[0].path).toBe(path);
+    expect(full.structuredContent!.thread.project.root).toBe(w.ledger.root);
+    expect(windowed.content[0]!.text).toContain(`(${w.ledger.root})`);
+    expect(windowed.content[0]!.text).toContain(path);
   });
 });
 
@@ -177,7 +204,7 @@ describe.if(INBOX_CARD_ACTION_ON)("a cloud agent's cards", () => {
 });
 
 describe("routines and walkthroughs", () => {
-  test("a routine reaches the routine tool while the person has Routines on, a create with no folder in a new scratch folder; its files are refused", async () => {
+  test("a routine reaches the routine tool while the person has Routines on, a create with no folder in a new scratch folder; its files go to it as paths, as a local agent's", async () => {
     const created: Record<string, unknown>[] = [];
     const scheduled = {
       list: () => [],
@@ -194,24 +221,54 @@ describe("routines and walkthroughs", () => {
     expect(created.map((input) => input.folder)).toEqual([{ scratch: true }]);
     await w.call("routine", { op: "create", name: "Triage", prompt: "Triage.", agent: "claude-code", project: "ledger" });
     expect(created.at(-1)!.folder).toEqual({ path: w.ledger.root });
-    expect(w.error(await w.call("routine", { op: "create", name: "T", prompt: "T.", attachments: ["/etc/hosts"] }))).toStartWith("attachment_path_refused:");
+    await w.call("routine", { op: "create", name: "T", prompt: "T.", agent: "claude-code", project_path: w.ledger.root, attachments: [join(w.ledger.root, "src", "pay.ts")] });
+    expect([created.at(-1)!.folder, created.at(-1)!.attachments]).toEqual([{ path: w.ledger.root }, [join(w.ledger.root, "src", "pay.ts")]]);
   });
 
-  test("a walkthrough reads the named project's checkout on this computer; with no checkout it says so", async () => {
+  test("a walkthrough reads the named project's checkout on this computer, by project or project_path; elsewhere it fails as a local agent's does", async () => {
     let walkthroughThread = "";
     const w = world({ codeReviewOn: () => true, walkthroughThread: (id) => id === walkthroughThread });
     const guide = { title: "Pay", intent: "How pay works.", sections: [{ title: "Pay", overview: "The constants.", diffs: [{ file: "src/pay.ts", lines: "1-2", summary: "Both constants." }] }] };
-    expect(w.error(await w.call("submit_guide", { guide, walkthrough: true }))).toStartWith("no_checkout:");
-    const sent = await w.call("submit_guide", { guide, walkthrough: true, project: "ledger" });
-    expect(w.error(sent)).toBeNull();
-    expect(w.store.message(sent.structuredContent!.message_id as string)!.guide!.walkthrough).toBe(true);
+    // In its own place, which holds no checkout: the walkthrough's own refusal, the one a local agent gets for a folder without the file.
+    const elsewhere = w.error(await w.call("submit_guide", { guide, walkthrough: true }));
+    expect(elsewhere).toStartWith("invalid_guide:");
+    expect(elsewhere).toContain("src/pay.ts isn't a file in the project.");
+    for (const where of [{ project: "ledger" }, { project_path: w.ledger.root }]) {
+      const sent = await w.call("submit_guide", { guide, walkthrough: true, ...where });
+      expect(w.error(sent)).toBeNull();
+      expect(w.store.message(sent.structuredContent!.message_id as string)!.guide!.walkthrough).toBe(true);
+    }
     // A guide sent into a thread the New review box started as a walkthrough is one, as a local agent's is.
     const started = w.store.sendMessage({ project_id: w.ledger.id, author: { kind: "person" }, body: "Walk me through pay.", subject: "Walkthrough" }).message;
     walkthroughThread = started.thread_id;
     const reply = await w.call("submit_guide", { guide, reply_to: started.id });
     expect(w.error(reply)).toBeNull();
     expect(w.store.message(reply.structuredContent!.message_id as string)!.guide!.walkthrough).toBe(true);
-    // Nothing was read from the agent's own place.
-    expect(readdirSync(w.place)).toEqual([]);
+  });
+});
+
+describe("the window routes a paired agent's commands use", () => {
+  test("a command's request reaches the Inbox's own handler; a rows change is the pairing's agent's; no other route is carried", async () => {
+    const seen: { method: string; path: string; body: unknown }[] = [];
+    const w = world({}, async (req) => {
+      const url = new URL(req.url);
+      seen.push({ method: req.method, path: `${url.pathname}${url.search}`, body: req.method === "POST" ? await req.json() : null });
+      return Response.json({ ok: true });
+    });
+    const got = await w.call("route", { method: "GET", path: "/api/inbox/projects" });
+    expect(w.error(got)).toBeNull();
+    expect(got.structuredContent).toMatchObject({ status: 200, body: JSON.stringify({ ok: true }) });
+    expect(w.error(await w.call("route", { method: "POST", path: "/api/inbox/settings", body: { rows: ["subject"] } }))).toBeNull();
+    expect(seen.at(-1)).toEqual({ method: "POST", path: "/api/inbox/settings", body: { rows: ["subject"], rows_by: { host: "cloud", session: w.agent.session } } });
+    const before = seen.length;
+    for (const [method, path, body] of [
+      ["GET", "/api/inbox/threads", undefined],
+      ["POST", "/api/inbox/settings", { board: true }],
+      ["POST", "/api/inbox/settings", { rows: [], rows_by: { host: "pi", session: "ses-pi" } }],
+      ["DELETE", "/api/inbox/projects", undefined],
+    ] as const) {
+      expect([path, w.error(await w.call("route", { method, path, ...(body ? { body } : {}) }))?.split(":")[0]]).toEqual([path, "validation_error"]);
+    }
+    expect(seen.length).toBe(before);
   });
 });

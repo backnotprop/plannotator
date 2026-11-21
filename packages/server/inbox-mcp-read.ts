@@ -132,7 +132,7 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
-  /** In place of `attachments` for a cloud agent (`ThreadReadInput.filesOf`): each file with the command that fetches it. */
+  /** In place of `attachments` for a cloud agent (`ThreadReadInput.filesOf`): each file with its path and the command that fetches it. */
   files?: AgentFile[];
   /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
   ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
@@ -218,7 +218,7 @@ export interface ThreadReadInput {
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
   names?: SessionNameOf;
-  /** Through the agent door: a message's files as a cloud agent fetches them, in place of their paths on this computer. */
+  /** Through the agent door: a message's files with their paths here and the command that fetches each to the agent's machine. */
   filesOf?: (message: InboxMessageWire) => AgentFile[];
 }
 
@@ -775,7 +775,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   if (message.viewing) lines.push(message.viewing);
   if (message.review_comment) lines.push(message.review_comment);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
-  if (message.files?.length) lines.push(`Files: ${message.files.map((f) => `${f.name} (${f.kind}, ${sizeText(f.size)}): ${f.fetch}`).join("; ")}`);
+  if (message.files?.length) lines.push(`Files: ${message.files.map((f) => `${f.name} (${f.kind}, ${sizeText(f.size)}): ${f.path} (to your machine: ${f.fetch})`).join("; ")}`);
   if (message.attachments?.length) {
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
   }
@@ -804,7 +804,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   );
   const facts = [
     thread.thread_name ? `Name: ${thread.thread_name}` : null,
-    `Project: ${thread.project.name}${thread.project.root ? ` (${thread.project.root})` : ""}`,
+    `Project: ${thread.project.name} (${thread.project.root})`,
     `From: ${thread.participants.map((p) => `${p.you ? `${p.name} (you)` : p.name} ${p.messages}`).join(", ")}`,
     thread.resolved_at ? `Resolved ${shortTime(thread.resolved_at)}` : null,
     result.url,

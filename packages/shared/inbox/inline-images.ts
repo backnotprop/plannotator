@@ -60,9 +60,8 @@ export interface CaptureInlineImagesInput {
   /** Stage the blobs as temp files until `commit` (a send the store may still refuse). */
   stage?: boolean;
   /**
-   * A cloud agent's send (inbox-agent-door.ts): each picture is a file it attached in the same send, by the src as
-   * written, read from where the Inbox keeps those bytes. A src not here is a failure (`image_not_attached`): nothing
-   * is ever read from the project's folder or anywhere else on this computer.
+   * Pictures sent as bytes in the same send (a paired cloud agent's, inbox-agent-door.ts), by the src as written: read
+   * from where the Inbox keeps those bytes, before any file of that name on disk. Every other src is read as usual.
    */
   files?: ReadonlyMap<string, { path: string; name: string }>;
 }
@@ -121,10 +120,6 @@ export async function captureInboxInlineImages(inboxDirPath: string, input: Capt
   for (const [index, ref] of refs.entries()) {
     if (index > 0) await yieldToLoop();
     const file = input.files?.get(ref);
-    if (input.files && !file) {
-      failures.push({ ref, code: "image_not_attached" });
-      continue;
-    }
     // The Inbox's own copy of an attached file: no hidden-folder rule (it lives under the data folder), the same image checks.
     const read = await (file ? readInboxPictureAsync(file.path, () => false) : readInboxMessageImageAsync({ body: input.body, root: input.root, base: input.base ?? null, path: ref, anywhere: input.anywhere === true })).catch(() => null);
     if (!read || !read.ok) {

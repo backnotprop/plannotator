@@ -1,16 +1,15 @@
 /**
- * A cloud agent's pictures in a message's body (the owner, 2026-11-21: "They need to have the same access as a local
- * agent to the inbox"). A local agent writes `![alt](path)` and the Inbox copies the file from its disk. A cloud agent
- * runs elsewhere, so the Inbox opens no path for it: each picture its body shows names a file it attached in the same
- * send, by that file's name (`![shot](shot.png)` with `{ "name": "shot.png", … }`), as a question's prototype names an
- * attached HTML page. That file shows in the body where it is written, not again below the message.
+ * A paired cloud agent's pictures in a message's body (the owner, 2026-11-21: "They need to have the same access as a
+ * local agent to the inbox"). A local agent writes `![alt](path)` and the Inbox copies the file from the person's disk;
+ * a cloud agent's body does the same. A picture on the agent's own machine is sent as bytes with the message instead,
+ * and its src names that file (`![shot](shot.png)` with `{ "name": "shot.png", … }`), which then shows first.
  *
- * - A cloud agent's send matches them (`matchAgentBodyPictures`, from `sendAgentMessage` in packages/server/inbox-mcp.ts,
- *   on the body actually sent: its own, or a guide's intent in its place) by name only: nothing reads a path, and a src
- *   that names no attached file refuses the send.
- * - `plannotator inbox call` with a pairing (`planAgentBodyPictures`, apps/hook/server/inbox-call-command.ts) lets the
- *   agent write the same `![alt](path)` a local agent writes: each picture's file on the agent's own disk is sent with
- *   the message, and the src renamed to that file's name where the name alone would not find it.
+ * - The door's send matches them (`matchAgentBodyPictures`, from `sendAgentMessage` in packages/server/inbox-mcp.ts,
+ *   on the body actually sent: its own, or a guide's intent in its place) by name; a src that names no file sent is
+ *   read from the person's disk, as a local agent's.
+ * - `plannotator inbox call` with a pairing (`planAgentBodyPictures`, apps/hook/server/inbox-call-command.ts) sends
+ *   each picture whose path is a file on the agent's own machine with the message, the src renamed to that file's name
+ *   where the name alone would not find it; any other src is left as it is, for the person's disk.
  */
 
 import { basename, extname, resolve } from "node:path";
@@ -53,7 +52,7 @@ export function matchAgentBodyPictures<File extends AgentAttachedFile>(body: str
  * The pictures a paired agent's body shows from its own disk: `files` to send with the message (each path, under a
  * name no other file of the send has), and the body with a src renamed where its file name alone would not find its
  * file. A path the send already attaches (`attachments`, as the agent wrote them) is not sent twice: the picture names
- * that file. A src that is no file here is left as it is (the door then says it names no attached file).
+ * that file. A src that is no file here is left as it is: the Inbox reads it on the person's computer.
  */
 export function planAgentBodyPictures(
   body: string,

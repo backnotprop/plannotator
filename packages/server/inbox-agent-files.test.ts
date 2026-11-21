@@ -2,7 +2,8 @@
  * A paired cloud agent fetches the files of a thread (contract section 13, point 6), through the agent door's own
  * handler in-process (no server): the files a local agent attached, a file the person attached to a reply and the
  * person's drawing on an image come whole across pieces with the Inbox's hash, by `plannotator inbox call`'s own
- * loop; nothing that is not a file of a message the agent may read comes out; a local agent's read_thread is as before.
+ * loop; read_thread gives each file's path on the person's computer too, as a local agent's does; nothing that is not
+ * a file of a message the agent may read comes out; a local agent's read_thread is as before.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
@@ -109,41 +110,38 @@ async function world() {
 }
 
 describe("a paired cloud agent fetches the files of a thread", () => {
-  test("read_thread through the door lists every file with its command and no path on the person's disk", async () => {
+  test("read_thread through the door lists every file with its path on the person's computer and the command that fetches it", async () => {
     const w = await world();
     const read = await w.call("read_thread", { thread_id: w.threadId });
     expect(read.isError).toBeUndefined();
     const text = read.content[0]!.text;
-    const files = (id: string) => (read.structuredContent!.thread.messages as { id: string; files?: { file: string; name: string; fetch: string }[]; attachments?: unknown }[]).find((m) => m.id === id)!;
+    const files = (id: string) => (read.structuredContent!.thread.messages as { id: string; files?: { file: string; name: string; path: string; fetch: string }[]; attachments?: unknown }[]).find((m) => m.id === id)!;
     const first = files(w.root0.id);
     const answer = files(w.reply.id);
     expect(first.attachments).toBeUndefined();
-    expect(first.files!.map((f) => f.name)).toEqual(["notes.md", "demo.bin"]);
-    expect(answer.files!.map((f) => f.name)).toEqual(["shot.txt", w.drawing.name]);
+    expect(first.files!.map((f) => [f.name, f.path])).toEqual(w.root0.attachments!.map((a) => [a.name, a.path]));
+    expect(answer.files!.map((f) => [f.name, f.path])).toEqual([["shot.txt", w.store.message(w.reply.id)!.attachments![0]!.path], [w.drawing.name, w.drawing.path]]);
     for (const file of [...first.files!, ...answer.files!]) {
       const id = first.files!.includes(file) ? w.root0.id : w.reply.id;
       expect(file.fetch).toBe(`plannotator inbox call fetch_file '{"message_id":"${id}","file":"${file.file}"}'`);
-      expect(text).toContain(file.fetch);
+      expect(text).toContain(`${file.path} (to your machine: ${file.fetch})`);
     }
-    for (const attachment of [...w.root0.attachments!, ...w.store.message(w.reply.id)!.attachments!]) expect(text).not.toContain(attachment.path);
-    // Nothing of the person's computer in the text or the structured result: the drawing is named by its file name.
-    expect(JSON.stringify(read)).not.toContain(w.root);
-    expect(text).toContain(`- [demo-markup] \`${w.drawing.name}\``);
+    // The project's folder and the person's words about a drawing, as a local agent reads them.
+    expect(text).toContain(`(${w.store.project(w.root0.project_id)!.root})`);
+    expect(text).toContain(`- [demo-markup] \`${w.drawing.path}\``);
   });
 
-  test("format full, a send's result and a fetch's result carry no place on the person's computer either", async () => {
+  test("format full gives the records as a local agent gets them, paths included", async () => {
     const w = await world();
     const full = await w.call("read_thread", { thread_id: w.threadId, format: "full" });
+    const local = await w.tools.read_thread!.handler({ thread_id: w.threadId, format: "full", agent_session: "ses_other", agent_host: "claude-code" }, {});
     expect(full.isError).toBeUndefined();
-    expect(full.structuredContent!.thread.messages.length).toBe(2);
-    const sent = await w.call("send_message", { reply_to: w.reply.id, body: "Thanks: fetched both." });
-    expect(sent.isError).toBeUndefined();
-    const piece = await w.call(INBOX_AGENT_FETCH_FILE, { message_id: w.reply.id, file: w.drawing.name });
-    expect(piece.isError).toBeUndefined();
-    for (const result of [full, sent, piece]) expect(JSON.stringify(result)).not.toContain(w.root);
+    const records = (result: Result) => (result.structuredContent!.thread.messages as { attachments?: { path: string }[] }[]).map((m) => m.attachments?.map((a) => a.path) ?? []);
+    expect(records(full)).toEqual(records(local));
+    expect(records(full).flat()).toContain(w.root0.attachments![0]!.path);
   });
 
-  test("each file comes whole, across pieces, with the Inbox's hash; by its id or its name; an earlier copy is kept", async () => {
+  test("each file comes whole, across pieces, with the Inbox's hash; by its id, its path or its name; an earlier copy is kept", async () => {
     const w = await world();
     const demo = w.root0.attachments!.find((a) => a.name === "demo.bin")!;
     const one = await w.fetchFile({ message_id: w.root0.id, file: demo.id }, "got");
@@ -156,6 +154,8 @@ describe("a paired cloud agent fetches the files of a thread", () => {
 
     const again = await w.fetchFile({ message_id: w.root0.id, file: "demo.bin" }, "got");
     expect(again.ok && again.saved.path).toBe(join(w.root, "got", "demo-2.bin"));
+    const byPath = await w.fetchFile({ message_id: w.root0.id, file: demo.path }, "got");
+    expect(byPath.ok && sha(readFileSync(byPath.saved.path))).toBe(sha(w.big));
 
     const shot = await w.fetchFile({ message_id: w.reply.id, file: "shot.txt" });
     expect(shot.ok && readFileSync(shot.saved.path, "utf8")).toBe(w.shot.toString());
@@ -173,9 +173,9 @@ describe("a paired cloud agent fetches the files of a thread", () => {
     const notes = w.root0.attachments!.find((a) => a.name === "notes.md")!;
     // Another message's file, named under this message.
     expect(await w.refusal({ message_id: w.reply.id, file: notes.id })).toStartWith("file_not_found:");
-    // Paths and traversal, however written.
-    for (const file of [notes.path, "../../notes.md", "..\\notes.md", `markups/${w.drawing.name}`, "..", "/etc/passwd"]) {
-      expect(await w.refusal({ message_id: w.root0.id, file })).toStartWith("path_refused:");
+    // A path that is not one of the message's files, however written, names nothing.
+    for (const file of ["../../notes.md", "..\\notes.md", `markups/${w.drawing.name}`, "..", "/etc/passwd", join(w.root, "ledger", "other.bin")]) {
+      expect(await w.refusal({ message_id: w.root0.id, file })).toStartWith("file_not_found:");
     }
     // A drawing the message's words do not name, however real.
     const other = writeInboxMarkup(w.store.dir, Buffer.concat([PNG, Buffer.from([0])]));
@@ -252,10 +252,8 @@ describe("pictures a body shows, by who wrote the message", () => {
     expect(got.ok && sha(readFileSync(got.saved.path))).toBe(sha(PNG));
   });
 
-  test("on a cloud agent's message a picture taken from this computer's disk is never handed out; on a local agent's it is, as the window shows it", async () => {
+  test("a picture a body shows is handed out from the Inbox's copy, whoever wrote the message and wherever it was read from", async () => {
     const w = await world();
-    // What a capture from the disk records: the project file's realpath, its bytes copied to a blob. Never made for a
-    // cloud agent's message now; the fetch refuses one even if a record ever held it.
     const onDisk = join(w.root, "ledger", "desk.png");
     writeFileSync(onDisk, PNG);
     const blob = inboxBlobPath(w.store.dir, sha(PNG));
@@ -272,12 +270,9 @@ describe("pictures a body shows, by who wrote the message", () => {
       (result) => result!.structuredContent!.sha256 as string,
       (error: { code: string }) => error.code,
     );
-    const cloud = storeWith({ kind: "agent", host: "cloud", session: "cloud.0123456789ab", name: "Nightly fixer" });
-    expect(await fetchFrom(cloud, "att_UPLOAD")).toBe(sha(PNG));
-    expect(await fetchFrom(cloud, "att_DISK")).toBe("file_not_found");
-    expect(await fetchFrom(cloud, "att_OPEN")).toBe("file_not_found");
-    const local = storeWith({ kind: "agent", host: "claude-code", session: "ses_local", name: "Builder" });
-    for (const file of ["att_UPLOAD", "att_DISK", "att_OPEN"]) expect(await fetchFrom(local, file)).toBe(sha(PNG));
+    for (const author of [{ kind: "agent", host: "cloud", session: "cloud.0123456789ab", name: "Nightly fixer" }, { kind: "agent", host: "claude-code", session: "ses_local", name: "Builder" }]) {
+      for (const file of ["att_UPLOAD", "att_DISK", "att_OPEN"]) expect([author.host, file, await fetchFrom(storeWith(author), file)]).toEqual([author.host, file, sha(PNG)]);
+    }
   });
 
   test("a file in the dotenv family is never handed out, whatever the record says", async () => {

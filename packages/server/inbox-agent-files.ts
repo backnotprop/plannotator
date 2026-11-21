@@ -1,39 +1,33 @@
 /**
  * The files of a thread for a paired cloud agent (the agent door, contract
  * section 13 point 6). A local agent opens a file of a message by the path
- * read_thread gives; a cloud agent runs elsewhere and cannot, so through the
- * door read_thread lists each file with the command that fetches it, and
- * `fetch_file { message_id, file, offset }` answers its bytes one piece at a
- * time (`plannotator inbox call fetch_file` loops the pieces and saves it).
+ * read_thread gives; a cloud agent has that path too, and runs on another
+ * machine, so through the door read_thread lists each file with its path on
+ * the person's computer and the command that fetches its bytes, and
+ * `fetch_file { message_id, file, offset }` answers them one piece at a time
+ * (`plannotator inbox call fetch_file` loops the pieces and saves it).
  *
- * What it serves, and nothing else:
+ * What it serves:
  *  - the message must be one read_thread shows this agent: in the thread the
  *    store gives it (`InboxStore.agentThread`, the read windowedThread makes);
- *  - the file is named by that message's record, never by a path: an attached
- *    file or a picture its body shows (`attachments`, `inline_images`, by
- *    their `att_` id or their name when only one has it), or a drawing the
- *    person made on an image, named in their own message's words by its place
- *    in the Inbox's markups folder (`<sha256>.png`);
- *  - on a cloud agent's own message, a picture its body shows only when it was
- *    captured at send from a file it attached (the Inbox's blob of the upload,
- *    `inboxCloudSendPictures`): never one read from this computer's disk, even
- *    if the capture code ever recorded one;
+ *  - the file is one of that message's: an attached file or a picture its body
+ *    shows (`attachments`, `inline_images`, by their `att_` id, their path as
+ *    read_thread lists it, or their name when only one has it), or a drawing
+ *    the person made on an image, named in their own message's words by its
+ *    place in the Inbox's markups folder (`<sha256>.png`);
  *  - the bytes are the Inbox's own copy: the sent blob (`inbox/blobs/<sha256>`,
  *    opened as the browser's `?version=sent` download opens it, no symlink
- *    followed) or the drawing (`inbox/markups/<name>`, the same); the file's
- *    path on the person's disk is never opened;
- *  - a path-like name, a dotenv name, and a file past 100 MB (an upload's cap)
- *    are refused.
+ *    followed) or the drawing (`inbox/markups/<name>`, the same);
+ *  - a dotenv name, and a file past 100 MB (an upload's cap), are refused.
  */
 
-import { constants, lstatSync, realpathSync } from "node:fs";
+import { constants, lstatSync } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { isDotenvFileName } from "@plannotator/core/annotatable";
-import { isInboxCloudAuthor } from "@plannotator/core/inbox-cloud";
-import { INBOX_UPLOAD_MAX_BYTES, isInboxTextKind, type InboxAttachment, type InboxInlineImage, type InboxMessageWire } from "@plannotator/core/inbox-types";
+import { INBOX_UPLOAD_MAX_BYTES, isInboxTextKind, type InboxAttachment, type InboxMessageWire } from "@plannotator/core/inbox-types";
 import { INBOX_AGENT_FETCH_FILE } from "@plannotator/shared/inbox/agent-pairing";
-import { inboxBlobPath, inboxBlobsDir, openInboxAttachmentVersion } from "@plannotator/shared/inbox/attachments";
+import { openInboxAttachmentVersion } from "@plannotator/shared/inbox/attachments";
 import { inboxMarkupsDir, isInboxMarkupName } from "@plannotator/shared/inbox/markups";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -53,12 +47,13 @@ const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants
 const DRAWING_NAME = /^[0-9a-f]{64}\.(?:png|jpg|webp)/;
 const DRAWING_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
 
-/** A file of a message as a cloud agent reads it: what to pass as `file`, and the command that saves it. */
+/** A file of a message as a cloud agent reads it: what to pass as `file`, its path on the person's computer, and the command that saves it. */
 export interface AgentFile {
   file: string;
   name: string;
   kind: string;
   size: number;
+  path: string;
   fetch: string;
 }
 
@@ -78,53 +73,18 @@ export function inboxDrawingsNamed(inboxDirPath: string, message: Pick<InboxMess
   return names;
 }
 
-/**
- * Whether a picture on a cloud agent's message was captured at send from a file it attached: read from the Inbox's own
- * blob of the upload (its recorded realpath is that blob), not taken later on open.
- */
-export function inboxCloudPictureFromUpload(inboxDirPath: string, image: InboxInlineImage): boolean {
-  if (image.captured !== undefined || typeof image.path !== "string") return false;
-  let blobs: string;
-  try {
-    blobs = realpathSync(inboxBlobsDir(inboxDirPath));
-  } catch {
-    return false;
-  }
-  try {
-    return image.path === join(blobs, image.sent_sha256) || image.path === inboxBlobPath(inboxDirPath, image.sent_sha256);
-  } catch {
-    return false;
-  }
-}
-
 function sourcesOf(inboxDirPath: string, message: InboxMessageWire): (Omit<AgentFile, "fetch"> & { source: Source })[] {
-  // A cloud agent's message never hands out a picture read from this computer: only what it attached.
-  const shown = isInboxCloudAuthor(message.author) ? (message.inline_images ?? []).filter((image) => inboxCloudPictureFromUpload(inboxDirPath, image)) : (message.inline_images ?? []);
-  const records = [...(message.attachments ?? []), ...shown].map((record) => ({ file: record.id, name: record.name, kind: record.kind, size: record.size, source: { record } }));
+  const records = [...(message.attachments ?? []), ...(message.inline_images ?? [])].map((record) => ({ file: record.id, name: record.name, kind: record.kind, size: record.size, path: record.path, source: { record } }));
   const drawings = inboxDrawingsNamed(inboxDirPath, message).flatMap((name) => {
+    const path = join(inboxMarkupsDir(inboxDirPath), name);
     try {
-      const stat = lstatSync(join(inboxMarkupsDir(inboxDirPath), name));
-      return stat.isFile() ? [{ file: name, name, kind: "image", size: stat.size, source: { drawing: name } }] : [];
+      const stat = lstatSync(path);
+      return stat.isFile() ? [{ file: name, name, kind: "image", size: stat.size, path, source: { drawing: name } }] : [];
     } catch {
       return [];
     }
   });
   return [...records, ...drawings];
-}
-
-/**
- * A result as a cloud agent gets it: each drawing's place in the Inbox's data folder (in the person's own words, where
- * the window's feedback names it) is cut to its file name, which is what read_thread lists it by. Nothing else changes.
- */
-export function inboxAgentWithoutDrawingPaths<T>(inboxDirPath: string, value: T): T {
-  const prefix = `${inboxMarkupsDir(inboxDirPath)}${sep}`;
-  const cut = (inner: unknown): unknown => {
-    if (typeof inner === "string") return inner.includes(prefix) ? inner.split(prefix).join("") : inner;
-    if (Array.isArray(inner)) return inner.map(cut);
-    if (!inner || typeof inner !== "object") return inner;
-    return Object.fromEntries(Object.entries(inner).map(([key, item]) => [key, cut(item)]));
-  };
-  return cut(value) as T;
 }
 
 /** The command that saves one file of a message on the agent's machine. */
@@ -180,11 +140,8 @@ export async function inboxAgentFetchAction(store: InboxStore, session: string, 
   if (!wanted) throw refuse("validation_error", "file: one of the message's files, as read_thread lists it.");
   const files = sourcesOf(store.dir, message);
   const listed = files.map((f) => (f.file === f.name ? f.file : `${f.file} (${f.name})`)).join(", ") || "none";
-  if (/[\\/\0]/.test(wanted) || wanted === "." || wanted === "..") {
-    throw refuse("path_refused", `file: ${JSON.stringify(wanted)} is a path, and the Inbox opens no path for a cloud agent. ${messageId}'s files: ${listed}.`);
-  }
   const named = files.filter((f) => f.name === wanted);
-  const hit = files.find((f) => f.file === wanted) ?? (named.length === 1 ? named[0] : undefined);
+  const hit = files.find((f) => f.file === wanted || f.path === wanted) ?? (named.length === 1 ? named[0] : undefined);
   if (!hit) throw refuse("file_not_found", `${messageId} has no file ${JSON.stringify(wanted)}${named.length > 1 ? " by that name alone" : ""}. Its files: ${listed}.`);
   if (isDotenvFileName(hit.name)) throw refuse("attachment_refused", `${hit.name}: the Inbox does not hand out a .env file.`);
 

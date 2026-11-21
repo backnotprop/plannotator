@@ -1,8 +1,10 @@
 /**
  * A paired cloud agent's commands (`PLANNOTATOR_PAIRING`), with the paired call's one request stubbed
  * (`CallCommandDeps.pairedTransport`): no relay, no Inbox. The failures these guard: a command that looks for an
- * Inbox on the agent's own machine (and says the Inbox is off) instead of going through the pairing, a folder or an
- * identity sent through the door, and a picture in the body that never reaches the person.
+ * Inbox on the agent's own machine (and says the Inbox is off) instead of going through the pairing, an identity sent
+ * through the door, a picture in the body that never reaches the person, a path on the person's computer read (and
+ * refused) on the agent's machine instead of passed to the Inbox, and `inbox rows`, `projects`, `icon` or
+ * `export-decisions` saying they are not available over a pairing instead of reaching the person's Inbox.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -10,7 +12,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { runCardCommand } from "./card-command";
-import { runInboxCallCommand, type CallCommandDeps } from "./inbox-call-command";
+import { inboxPairedRouteFetch, runInboxCallCommand, type CallCommandDeps } from "./inbox-call-command";
+import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
+import { runInboxIconCommand } from "./inbox-icon-command";
+import { runInboxProjectsCommand } from "./inbox-projects-command";
+import { runInboxRowsCommand } from "./inbox-rows-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runRoutineCommand } from "./routine-command";
@@ -93,5 +99,67 @@ describe("a paired cloud agent's commands go through its pairing", () => {
     const m = cloudMachine();
     expect(await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "See ![it](nowhere.png) and ![web](https://example.com/a.png)." })], m.deps)).toBe(0);
     expect(m.calls.at(-1)!.body).toEqual({ reply_to: "msg_1", body: "See ![it](nowhere.png) and ![web](https://example.com/a.png)." });
+  });
+
+  test("an attachment path that is a file here is sent as bytes; one that is not is passed as written, for the person's computer; a routine's go as written", async () => {
+    const m = cloudMachine();
+    writeFileSync(join(m.cwd, "report.txt"), "all green");
+    const there = "/Users/person/code/api/notes.md";
+    expect(await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "Both.", attachments: ["report.txt", there, "src/elsewhere.ts"] })], m.deps)).toBe(0);
+    expect(m.calls.at(-1)!.body.attachments).toEqual([{ name: "report.txt", data: Buffer.from("all green").toString("base64") }, there, "src/elsewhere.ts"]);
+    expect(await runInboxCallCommand(["routine", JSON.stringify({ op: "create", name: "T", prompt: "T.", attachments: ["report.txt"] })], m.deps)).toBe(0);
+    expect(m.calls.at(-1)!).toEqual({ tool: "routine", body: { op: "create", name: "T", prompt: "T.", attachments: ["report.txt"] } });
+    expect(m.err).toEqual([]);
+  });
+});
+
+describe("inbox rows, projects, icon and export-decisions over a pairing", () => {
+  /** A cloud machine whose door answers each `route` as the person's Inbox would. */
+  function routed(answer: (method: string, path: string, body: unknown) => { status: number; body: unknown; type?: string }) {
+    const m = cloudMachine();
+    m.deps.pairedTransport = async (tool, body) => {
+      m.calls.push({ tool, body: structuredClone(body) });
+      const got = answer(String(body.method), String(body.path), body.body);
+      const text = typeof got.body === "string" ? got.body : JSON.stringify(got.body);
+      return { kind: "answer", status: 200, body: JSON.stringify({ result: { content: [{ type: "text", text: "ok" }], structuredContent: { status: got.status, content_type: got.type ?? "application/json", body: text } } }) };
+    };
+    const fetchRoute = inboxPairedRouteFetch(m.deps);
+    if ("code" in fetchRoute) throw new Error(fetchRoute.message);
+    const base = { json: true, ensureRunning: m.deps.ensureRunning, out: m.deps.out, err: m.deps.err, fetchRoute };
+    return { ...m, base };
+  }
+
+  test("each reaches its route on the person's Inbox through the door, and prints what it prints there", async () => {
+    const m = routed((method, path) => {
+      if (path === "/api/inbox/settings") return { status: 200, body: { rows: ["subject"] } };
+      if (path === "/api/inbox/projects") return { status: 200, body: { projects: [{ id: "prj_1", name: "api", root: "/Users/person/api", threads: 2 }] } };
+      if (path.startsWith("/api/inbox/tidy")) return { status: 200, body: { combine: [] } };
+      if (path === "/api/inbox/icon-animate") return { status: 200, body: { applied: true, icon: "x" } };
+      if (path.includes("/decisions")) return { status: 200, body: "# Decisions\n", type: "text/markdown" };
+      return { status: 404, body: { code: "not_found", error: `${method} ${path}` } };
+    });
+    writeFileSync(join(m.cwd, "icon.svg"), "<svg/>");
+    expect(await runInboxRowsCommand([], m.base)).toBe(0);
+    expect(await runInboxProjectsCommand([], m.base)).toBe(0);
+    expect(await runInboxIconCommand(["set", "icon.svg", "--request", "ia_1"], { ...m.base, cwd: m.cwd })).toBe(0);
+    expect(await runInboxExportDecisionsCommand(["--thread", "thr_1"], { ...m.base, cwd: m.cwd })).toBe(0);
+    expect(m.calls.map((call) => [call.tool, call.body.method, String(call.body.path).split("?")[0]])).toEqual([
+      ["route", "GET", "/api/inbox/settings"],
+      ["route", "GET", "/api/inbox/projects"],
+      ["route", "GET", "/api/inbox/tidy"],
+      ["route", "POST", "/api/inbox/icon-animate"],
+      ["route", "GET", "/api/inbox/threads/thr_1/decisions"],
+    ]);
+    expect(m.out.join("")).toContain('"name": "api"');
+    expect(m.out.at(-1)).toBe("# Decisions\n");
+    expect(m.err).toEqual([]);
+  });
+
+  test("a rows change sends only the rows (the door names the agent), and the Inbox's refusal is printed as its own", async () => {
+    const m = routed((method) => (method === "GET" ? { status: 200, body: { rows: ["smallNames"] } } : { status: 409, body: { code: "busy", error: "Try again." } }));
+    expect(await runInboxRowsCommand(["set", "spacing=roomy"], m.base)).toBe(1);
+    const post = m.calls.find((call) => call.body.method === "POST")!;
+    expect(Object.keys(post.body.body as object)).toEqual(["rows"]);
+    expect(m.err.join("")).toBe("busy: Try again.\n");
   });
 });

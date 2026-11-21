@@ -59,20 +59,6 @@ export function isInboxCloudSession(session: unknown): session is string {
   return typeof session === "string" && INBOX_CLOUD_SESSION_PATTERN.test(session);
 }
 
-/**
- * Whether words were written by a paired cloud agent: what it writes never makes the Inbox read a file on this
- * computer (its pictures come only from files it attached in the same send). The agent door fills the host and
- * session from the pairing and refuses either from the agent, so it cannot pass as an agent here. Either sign is
- * enough, by its shape (`cloud`/`cloud-…`, `cloud.…`), so a record with one missing, or a preset added later, still
- * counts: when unsure, nothing is read from disk. An agent here that names itself so only loses its disk pictures.
- */
-export function isInboxCloudAuthor(author: { kind: string; host?: unknown; session?: unknown } | null | undefined): boolean {
-  if (!author || author.kind !== "agent") return false;
-  const host = typeof author.host === "string" ? author.host.trim() : "";
-  const session = typeof author.session === "string" ? author.session.trim() : "";
-  return host === INBOX_CLOUD_HOST || host.startsWith(`${INBOX_CLOUD_HOST}-`) || session.startsWith(`${INBOX_CLOUD_HOST}.`);
-}
-
 export interface InboxCloudAgentView {
   session: string;
   name: string;

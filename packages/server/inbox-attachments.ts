@@ -36,7 +36,6 @@ import { basename, dirname, relative as relativeTo, resolve as resolvePath, sep 
 import { htmlAssetPathRefused, isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, htmlAssetHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
 import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
-import { isInboxCloudAuthor } from "@plannotator/core/inbox-cloud";
 import {
   checkCurrentAsync,
   inboxAttachmentState,
@@ -138,28 +137,15 @@ async function inboxPagePictureResponse(path: string, req: Request): Promise<Res
  * and secret names, nested documents with no network, and pictures from
  * anywhere on this computer (`pictures`).
  */
-export function createInboxHtmlAssets(store?: InboxStore) {
+export function createInboxHtmlAssets() {
   return createHtmlAssetRegistry({
     refuseAssetPath: inboxRefusesAssetPath,
     documentCsp: INBOX_HTML_DOCUMENT_CSP,
     pictures: {
       allows: (path) => INBOX_PAGE_PICTURE_RE.test(path) && !inboxRefusesAssetPath(path),
       serve: inboxPagePictureResponse,
-      ...(store ? { fromPage: (root: string) => !cloudAgentPageFolder(store, root) } : {}),
     },
   });
-}
-
-/**
- * Whether `root` is the folder of a page a cloud agent sent (its bytes, kept in `<data>/inbox/uploads/<attachment id>/`):
- * such a page shows no picture from outside its folder, so nothing it names is read from this computer
- * (inbox-cloud-pictures.ts).
- */
-function cloudAgentPageFolder(store: InboxStore, root: string): boolean {
-  const id = basename(root);
-  if (!id.startsWith("att_")) return false;
-  const hit = store.attachment(id);
-  return !!hit && dirname(hit.attachment.path) === root && isInboxCloudAuthor(hit.message.author);
 }
 
 /**
@@ -308,7 +294,7 @@ async function readVersion(store: InboxStore, attachment: InboxAttachment, versi
 
 export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContext) {
   const { store, serverSession } = context;
-  const htmlAssets = createInboxHtmlAssets(store);
+  const htmlAssets = createInboxHtmlAssets();
 
   const guardedBody = async (req: Request): Promise<Record<string, unknown> | Response> => {
     const body = await context.readBody(req);
@@ -355,8 +341,6 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const { attachment, message } = attachmentOf(markdownImage[1]!);
       if (attachment.kind !== "markdown") throw new InboxError("validation_error", "Only Markdown attachments show inline images.");
-      // A cloud agent's Markdown file: the pictures it names are never read from this computer (inbox-cloud-pictures.ts).
-      if (isInboxCloudAuthor(message.author)) return inboxImageResponse(req, { ok: false, status: 404, code: "image_not_attached", error: "A cloud agent's file shows no pictures from this computer." });
       const project = store.project(message.project_id);
       if (!project) throw new InboxError("project_not_found", "The attachment's project is gone.");
       const document = url.searchParams.get("document");
