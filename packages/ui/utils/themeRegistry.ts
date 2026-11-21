@@ -170,7 +170,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
       light: { primary: '#1a63b8', secondary: '#e7eaef', accent: '#946300', background: '#f8f9fb', foreground: '#22262e' },
     },
   },
-    {
+  {
     id: 'tritanopia',
     name: 'Tritanopia',
     builtIn: true,
