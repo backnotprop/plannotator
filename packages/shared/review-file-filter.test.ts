@@ -12,10 +12,17 @@ test('include globs are alternatives and exclusions win', () => {
   ].filter(matches)).toEqual(['src/one.ts', 'README.md', 'docs/help.mdx', 'docs/.draft.md']);
 });
 
-test('root globs stay at the root and bracket groups can contain commas', () => {
-  const matches = compileReviewFileFilter({ include: '*.md, data/file[0,1].txt', exclude: '' })!;
-  expect(['root.md', 'docs/guide.md', 'data/file0.txt', 'data/file,.txt', 'data/file2.txt'].filter(matches))
-    .toEqual(['root.md', 'data/file0.txt', 'data/file,.txt']);
+test('patterns read like VS Code search: any depth unless ./, folder names, .ext, any case, backslashes', () => {
+  const paths = ['root.md', 'docs/Guide.MD', 'src/a.ts', 'lib/src/b.ts', 'srcx/c.ts', 'data/file0.txt', 'data/file,.txt', 'data/file2.txt'];
+  const pick = (include: string) => paths.filter(compileReviewFileFilter({ include, exclude: '' })!);
+  expect(pick('*.md')).toEqual(['root.md', 'docs/Guide.MD']);
+  expect(pick('.md')).toEqual(['root.md', 'docs/Guide.MD']);
+  expect(pick('src')).toEqual(['src/a.ts', 'lib/src/b.ts']);
+  expect(pick('src/')).toEqual(['src/a.ts', 'lib/src/b.ts']);
+  expect(pick('./src')).toEqual(['src/a.ts']);
+  expect(pick('/src/**')).toEqual(['src/a.ts']);
+  expect(pick('lib\\src')).toEqual(['lib/src/b.ts']);
+  expect(pick('data/file[0,1].txt')).toEqual(['data/file0.txt', 'data/file,.txt']);
 });
 
 test('exclusions alone start with every file and clearing restores the unfiltered path', () => {

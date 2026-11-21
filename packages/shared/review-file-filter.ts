@@ -34,11 +34,21 @@ export function splitReviewGlobs(input: string): string[] {
   return globs;
 }
 
+export function expandReviewGlob(glob: string): string[] {
+  let pattern = glob.replace(/\\/g, '/');
+  const rooted = /^\.?\//.test(pattern);
+  pattern = pattern.replace(/^(\.?\/)+/, '').replace(/\/+$/, '');
+  if (!pattern) return rooted ? ['**'] : [];
+  if (!rooted && pattern.startsWith('.') && !pattern.startsWith('..')) pattern = `*${pattern}`;
+  const base = rooted ? pattern : `**/${pattern}`;
+  return [base, `${base}/**`].map((expanded) => expanded.replace(/\*\*\/\*\*/g, '**'));
+}
+
 export function compileReviewFileFilter({ include, exclude }: ReviewFileFilter): ((path: string) => boolean) | null {
-  const includes = splitReviewGlobs(include);
-  const excludes = splitReviewGlobs(exclude);
+  const includes = splitReviewGlobs(include).flatMap(expandReviewGlob);
+  const excludes = splitReviewGlobs(exclude).flatMap(expandReviewGlob);
   if (includes.length === 0 && excludes.length === 0) return null;
-  const options = { dot: true, nonegate: true, noextglob: true, regex: false, posix: true, windows: false };
+  const options = { dot: true, nocase: true, nonegate: true, noextglob: true, regex: false, posix: true, windows: false };
   const inScope = includes.length ? picomatch(includes, options) : null;
   const ignored = excludes.length ? picomatch(excludes, options) : null;
   return (path) => (!inScope || inScope(path)) && (!ignored || !ignored(path));
