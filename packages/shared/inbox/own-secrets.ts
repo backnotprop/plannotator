@@ -14,6 +14,8 @@
  *  - `inbox/tls/` (packages/server/inbox-lan.ts: the Wi-Fi door's key)
  *  - `inbox/secrets/` and `inbox/secrets.json` (packages/server/inbox-run-setup.ts: run setups' secrets)
  *  - `inbox/linear-key`, `inbox/voice-key` (inbox-linear-key.ts, inbox-voice.ts: saved API keys)
+ *  - `inbox/antigravity/links/` (apps/hook/server/inbox-antigravity-command.ts: each running Antigravity CLI
+ *    conversation's language server address and its CSRF token, which starts a turn in it)
  *  - `cloudflare-access/` (cf-tunnel.ts, cf-access-door.ts: the tunnel token and door sessions)
  *  - `secrets/` (packages/shared/spaces/credential.ts, sem-diff-opinion.ts)
  */
@@ -33,13 +35,14 @@ export const INBOX_OWN_SECRET_PATHS: readonly string[] = [
   "inbox/secrets.json",
   "inbox/linear-key",
   "inbox/voice-key",
+  "inbox/antigravity/links",
   "cloudflare-access",
   "secrets",
 ];
 
 const REFUSAL = "the Inbox's own keys are never attached or read (they would let anyone act as this Inbox or one of its devices).";
 
-/** A folder in each spelling it has: as given, and its realpath. */
+/** A path in each spelling it has: as given, and its realpath. */
 function spellings(folder: string): string[] {
   const out = [resolve(folder)];
   try {
@@ -60,12 +63,12 @@ export function inboxOwnSecretRefusal(path: string, dataDirs: readonly string[] 
   if (!isAbsolute(path)) return null;
   const fold = platform === "darwin" || platform === "win32" ? (text: string) => text.toLowerCase() : (text: string) => text;
   const named = fold(resolve(path).replace(/:[^\\/]*$/, "").replace(/[. ]+$/, ""));
-  for (const dir of new Set(dataDirs.flatMap(spellings))) {
-    for (const entry of INBOX_OWN_SECRET_PATHS) {
-      const guarded = fold(join(dir, ...entry.split("/")));
-      const rel = relative(guarded, named);
-      if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel) && rel.split(sep)[0] !== "..")) return REFUSAL;
-    }
+  // Each guarded entry where it really is too: a data folder's `inbox` (or an entry in it) may be a link elsewhere.
+  const guarded = new Set(dataDirs.flatMap(spellings).flatMap((dir) => INBOX_OWN_SECRET_PATHS.flatMap((entry) => spellings(join(dir, ...entry.split("/"))))));
+  for (const entry of guarded) {
+    const rel = relative(fold(entry), named);
+    // Inside: no step up (a child named `..foo` is inside), and not on another drive.
+    if (rel === "" || (!isAbsolute(rel) && rel.split(sep)[0] !== "..")) return REFUSAL;
   }
   return null;
 }

@@ -64,8 +64,36 @@ describe("the Inbox's own keys", () => {
     expect(inboxOwnSecretRefusal("/d/plannotator/inbox/relay.json", [data], "linux")).not.toBeNull();
     expect(inboxOwnSecretRefusal("/d/plannotator/Inbox/Relay.JSON", [data], "darwin")).not.toBeNull();
     expect(inboxOwnSecretRefusal("/d/plannotator/inbox/relay.json::$DATA", [data], "win32")).not.toBeNull();
-    for (const path of ["/d/plannotator/inbox/cloud-agents/cloud.1/notes.md", "/d/plannotator/inbox/blobs/abc", "/d/plannotator/plans/a.md", "/d/other/inbox/relay.json", "relay.json"]) {
+    for (const path of ["/d/plannotator/inbox/cloud-agents/cloud.1/notes.md", "/d/plannotator/inbox/blobs/abc", "/d/plannotator/plans/a.md", "/d/other/inbox/relay.json", "relay.json", "/d/plannotator/inbox/antigravity/notes.md"]) {
       expect([path, inboxOwnSecretRefusal(path, [data], "linux")]).toEqual([path, null]);
     }
+    // A child whose name starts with two dots is inside its folder, not a step out of it.
+    expect(inboxOwnSecretRefusal("/d/plannotator/inbox/device-secrets/..dev_1", [data], "linux")).not.toBeNull();
+    // A running Antigravity conversation's hand-over: its language server's address and token.
+    expect(inboxOwnSecretRefusal("/d/plannotator/inbox/antigravity/links/conv.json", [data], "linux")).not.toBeNull();
+  });
+
+  test("a key reached where it really is, when a folder of the data folder is a link elsewhere, is refused too", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-own-secrets-linked-")));
+    restore.push(() => rmSync(root, { recursive: true, force: true }));
+    const dataDir = join(root, "data");
+    const elsewhere = join(root, "elsewhere", "inbox");
+    mkdirSync(join(elsewhere, "device-secrets"), { recursive: true });
+    mkdirSync(dataDir);
+    writeFileSync(join(elsewhere, "relay.json"), "secret");
+    writeFileSync(join(elsewhere, "device-secrets", "dev_1"), "secret");
+    writeFileSync(join(elsewhere, "notes.md"), "not a key");
+    symlinkSync(elsewhere, join(dataDir, "inbox"));
+    for (const key of [join(elsewhere, "relay.json"), join(elsewhere, "device-secrets", "dev_1")]) {
+      expect([key, inboxOwnSecretRefusal(key, [dataDir])]).toEqual([key, "the Inbox's own keys are never attached or read (they would let anyone act as this Inbox or one of its devices)."]);
+    }
+    expect(inboxOwnSecretRefusal(join(elsewhere, "notes.md"), [dataDir])).toBeNull();
+    const before = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    restore.push(() => {
+      if (before === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = before;
+    });
+    await expect(recordInboxAttachments(join(root, "store"), [join(elsewhere, "relay.json")], { base: root, at: "2026-11-21T00:00:00.000Z" })).rejects.toThrow("the Inbox's own keys are never attached or read");
   });
 });

@@ -16,6 +16,8 @@ import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { INBOX_CARD_ACTION_ON, type InboxProject } from "@plannotator/core/inbox-types";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { encodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
+import { runInboxCallCommand } from "../../apps/hook/server/inbox-call-command";
 import { createInboxAgentDoor } from "./inbox-agent-door";
 import { inboxMessageImageRoute } from "./inbox-message-images";
 import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
@@ -74,7 +76,31 @@ function world(mcp: Partial<InboxMcpContext> = {}, route?: (req: Request) => Pro
     return ((await response.json()) as { result: Result }).result;
   };
   const error = (result: Result) => (result.isError ? result.content[0]!.text : null);
-  return { root, store, ledger, agent, place, call, error };
+  /**
+   * `plannotator inbox call` on the cloud agent's own machine (a folder of its own), its paired call answered by this
+   * door's own handler: what the command sends is what the door takes.
+   */
+  const cli = async (argv: string[]) => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-door-parity-cloud-")));
+    roots.push(cwd);
+    let stdout = "";
+    let stderr = "";
+    const pairing = encodeInboxAgentPairing({ device_id: "dev_01K7PAIRINGTEST00000000000", token: TOKEN, secret: "B".repeat(43), relay: { url: "https://relay.example", mailbox_id: `mbx_${"C".repeat(22)}` } });
+    const run = () =>
+      runInboxCallCommand(argv, {
+        cwd,
+        env: { PLANNOTATOR_PAIRING: pairing },
+        ensureRunning: () => Promise.reject(new Error("a paired call looks for no Inbox here")),
+        out: (text) => void (stdout += text),
+        err: (text) => void (stderr += text),
+        pairedTransport: async (tool, body) => {
+          const response = await door.handle(new Request("http://127.0.0.1/api/inbox/agent/call", { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ tool, arguments: body }) }));
+          return { kind: "answer", status: response.status, body: await response.text() };
+        },
+      });
+    return { cwd, run: async () => ({ code: await run(), stdout, stderr }) };
+  };
+  return { root, store, ledger, agent, place, call, error, cli };
 }
 
 describe("a folder and a file on the person's computer, named as a local agent names them", () => {
@@ -153,6 +179,32 @@ describe("pictures a cloud agent sends as bytes", () => {
     const answer = (await inboxMessageImageRoute(new Request(url), url, w.store))!;
     expect([answer.status, answer.headers.get("content-type")]).toEqual([200, "image/gif"]);
     expect(Buffer.from(await answer.arrayBuffer())).toEqual(GIF);
+  });
+});
+
+describe("pictures from the cloud agent's own disk, sent by plannotator inbox call", () => {
+  test("a guide whose intent shows a picture on the agent's machine arrives with that picture in it", async () => {
+    const w = world();
+    const machine = await w.cli(["submit_guide", JSON.stringify({ project: "ledger", guide: guideWith("How pay works. ![flow](out/flow.png)"), patch: PATCH })]);
+    mkdirSync(join(machine.cwd, "out"));
+    writeFileSync(join(machine.cwd, "out", "flow.png"), GIF);
+    const done = await machine.run();
+    expect([done.code, done.stderr]).toEqual([0, ""]);
+    const message = w.store.message(JSON.parse(done.stdout).message_id as string)!;
+    expect(message.inline_images!.map((image) => [image.ref, image.name, image.size])).toEqual([["out/flow.png", "flow.png", GIF.length]]);
+    expect(message.attachments ?? []).toEqual([]);
+    // A path is still no attachment of a guide's.
+    expect(w.error(await w.call("submit_guide", { project: "ledger", guide: guideWith("Pay."), patch: PATCH, attachments: ["src/pay.ts"] }))).toStartWith("validation_error: attachments[0]: ");
+  });
+
+  test("a refused path is named by its place in the agent's list when a picture before it was sent as bytes, and said to be looked for on the person's computer", async () => {
+    const w = world();
+    const machine = await w.cli(["send_message", JSON.stringify({ project: "ledger", body: "![](shot.png)", attachments: ["shot.png", { path: "missing.md" }] })]);
+    writeFileSync(join(machine.cwd, "shot.png"), PNG);
+    const done = await machine.run();
+    expect(done.code).toBe(1);
+    expect(done.stderr).toStartWith("validation_error: attachments[1]: ");
+    expect(done.stderr).toContain("(Looked for on the person's computer: it is no file on this machine, or was given as { \"path\": … }.)");
   });
 });
 

@@ -166,6 +166,15 @@ describe("which computer a path is read on", () => {
     o.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "tool_not_allowed: shell is not an Inbox action." }] } }) });
     await runInboxCallCommand(["send_message", JSON.stringify({ reply_to: "msg_1", body: "x" })], o.deps);
     expect(o.err.join("")).not.toContain("update");
+    // routine: an older Inbox's own refusal of it says to update; a current one with Routines off does not.
+    const old = cloudMachine();
+    old.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "tool_not_allowed: routine: a routine runs an agent on the person's computer, and you run elsewhere, so nothing was written." }] } }) });
+    expect(await runRoutineCommand(["list"], old.deps)).toBe(1);
+    expect(old.err.join("")).toContain("ask the person to update it.");
+    const off = cloudMachine();
+    off.deps.pairedTransport = async () => ({ kind: "answer", status: 200, body: JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "tool_not_allowed: routine is not an Inbox action. Actions: whoami, send_message." }] } }) });
+    expect(await runRoutineCommand(["list"], off.deps)).toBe(1);
+    expect(off.err.join("")).not.toContain("update");
   });
 });
 

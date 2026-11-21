@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
-import { INBOX_WALKTHROUGH_FILE_MAX_BYTES, INBOX_WALKTHROUGH_TOTAL_MAX_BYTES, readInboxWalkthrough, walkthroughFilePatch, walkthroughRangesOf } from "./inbox-walkthrough";
+import { INBOX_WALKTHROUGH_FILE_MAX_BYTES, INBOX_WALKTHROUGH_SCAN_MAX_BYTES, INBOX_WALKTHROUGH_TOTAL_MAX_BYTES, readInboxWalkthrough, walkthroughFilePatch, walkthroughRangesOf } from "./inbox-walkthrough";
 import { registerInboxGuideTools } from "./inbox-guides";
 import type { InboxMcpContext } from "./inbox-mcp";
 
@@ -141,6 +141,26 @@ describe("reading a guide", () => {
     );
     for (const name of ["a.ts", "b.ts", "c.ts", "d.ts"]) writeFileSync(join(project, name), `${"b".repeat(80)}\n`.repeat(60_000));
     expect(readInboxWalkthrough(guideOf([{ file: "a.ts", lines: "1" }, { file: "b.ts", lines: "1" }, { file: "c.ts", lines: "1" }, { file: "d.ts", lines: "1" }]), [project]).ok).toBe(true);
+  });
+
+  test("a file is read at most 256 MB in to reach the lines named: past that they are refused by name, before it, and a file ending there, read", () => {
+    const { project } = folder();
+    expect(INBOX_WALKTHROUGH_SCAN_MAX_BYTES).toBe(256 * 1024 * 1024);
+    // The cap made 64 KB here, so the file can be small: 10,000 lines of 10 bytes, line 9000 at 90 KB in.
+    const scan = 64 * 1024;
+    writeFileSync(join(project, "big.log.ts"), Array.from({ length: 10_000 }, (_, i) => `row ${String(i + 1).padStart(5, "0")}`).join("\n") + "\n");
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "big.log.ts", lines: "9000" }]), [project], scan))).toBe(
+      "big.log.ts: the lines named are more than 0.0625 MB into the file, the most a walkthrough reads of one file. Name lines nearer the start, or send guide with patch instead.",
+    );
+    // Lines past the end of a file longer than the cap are refused the same way, not read to its end.
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "big.log.ts", lines: "20000" }]), [project], scan))).toStartWith("big.log.ts: the lines named are more than 0.0625 MB into the file");
+    const early = readInboxWalkthrough(guideOf([{ file: "big.log.ts", lines: "1-5, 6553" }]), [project], scan);
+    expect(early.ok && early.patch).toContain("@@ -6553,1 +6553,1 @@\n row 06553\n");
+    // A file of exactly the cap is read to its end.
+    writeFileSync(join(project, "edge.ts"), `${"row 00000\n".repeat(6553)}last!\n`);
+    const edge = readInboxWalkthrough(guideOf([{ file: "edge.ts", lines: "6554" }]), [project], scan);
+    expect(edge.ok && edge.patch).toContain("@@ -6554,1 +6554,1 @@\n last!\n");
+    expect(refused(readInboxWalkthrough(guideOf([{ file: "edge.ts", lines: "6555" }]), [project], scan))).toBe("edge.ts has 6554 lines, so line 6555 isn't there.");
   });
 
   test("the Inbox's own keys are never read into one, even with its data folder as the project", () => {

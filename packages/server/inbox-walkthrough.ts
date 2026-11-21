@@ -16,6 +16,11 @@ import { MAX_REVIEW_FILE_CONTENT_BYTES } from "@plannotator/shared/review-core";
 export const INBOX_WALKTHROUGH_FILE_MAX_BYTES = MAX_REVIEW_FILE_CONTENT_BYTES;
 /** The most the excerpts of one walkthrough may come to: what one agent-door call takes as data (16 MB). */
 export const INBOX_WALKTHROUGH_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
+/**
+ * The most of one file a walkthrough reads through to reach the lines it names (256 MB), for every agent: the read is
+ * done inside the request, so naming lines near the end of a file of many gigabytes must not hold the Inbox up.
+ */
+export const INBOX_WALKTHROUGH_SCAN_MAX_BYTES = 256 * 1024 * 1024;
 
 const MB = 1024 * 1024;
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
@@ -63,7 +68,7 @@ const merged = (ranges: [number, number][]): [number, number][] => {
 /** One file's named lines as a diff of context lines, from its text. Ranges past the end stop at the end. */
 export function walkthroughFilePatch(path: string, text: string, ranges: [number, number][] | null): string | { error: string } {
   const bytes = Buffer.from(text, "utf8");
-  const part = excerptPatch(path, ranges, Number.MAX_SAFE_INTEGER, (into, at) => bytes.copy(into, 0, at, Math.min(bytes.length, at + into.length)));
+  const part = excerptPatch(path, ranges, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, (into, at) => bytes.copy(into, 0, at, Math.min(bytes.length, at + into.length)));
   return "error" in part ? { error: part.error } : part.patch;
 }
 
@@ -92,9 +97,10 @@ const CHUNK = 64 * 1024;
 /**
  * One named file's patch, read from its realpath opened once without following a link: only as far as its last
  * named line (to the end when it names none), in 64 KB reads, keeping only the named lines, so a big file costs what
- * its excerpt does. `max`: the most the kept lines may come to. A NUL in what is read means it isn't text.
+ * its excerpt does. `max`: the most the kept lines may come to; `scan`: the most of the file read to reach them. A NUL
+ * in what is read means it isn't text.
  */
-function readNamedExcerpt(real: string, path: string, ranges: [number, number][] | null, max: number): Excerpt {
+function readNamedExcerpt(real: string, path: string, ranges: [number, number][] | null, max: number, scan: number): Excerpt {
   let fd: number;
   try {
     fd = openSync(real, OPEN_FLAGS);
@@ -103,7 +109,7 @@ function readNamedExcerpt(real: string, path: string, ranges: [number, number][]
   }
   try {
     if (!fstatSync(fd).isFile()) return { error: `${path} could not be read.` };
-    return excerptPatch(path, ranges, max, (into, at) => readSync(fd, into, 0, into.length, at));
+    return excerptPatch(path, ranges, max, scan, (into, at) => readSync(fd, into, 0, into.length, at));
   } finally {
     closeSync(fd);
   }
@@ -111,8 +117,11 @@ function readNamedExcerpt(real: string, path: string, ranges: [number, number][]
 
 type Excerpt = { patch: string; bytes: number } | { error: string; total?: boolean };
 
-/** The patch of the named lines of what `read` gives (bytes from an offset, 0 at the end), read only as far as needed. */
-function excerptPatch(path: string, ranges: [number, number][] | null, max: number, read: (into: Buffer, at: number) => number): Excerpt {
+/**
+ * The patch of the named lines of what `read` gives (bytes from an offset, 0 at the end), read only as far as needed
+ * and never more than `scan` bytes: a named line not reached by then is refused.
+ */
+function excerptPatch(path: string, ranges: [number, number][] | null, max: number, scan: number, read: (into: Buffer, at: number) => number): Excerpt {
   const want = merged(ranges ?? [[1, Number.MAX_SAFE_INTEGER]]);
   const lastWanted = want[want.length - 1]![1];
   const kept = new Map<number, string>();
@@ -131,9 +140,12 @@ function excerptPatch(path: string, ranges: [number, number][] | null, max: numb
   let at = 0;
   let done = false;
   while (!done) {
-    const n = read(chunk, at);
-    if (n === 0) break;
-    at += n;
+    // One byte past `scan` is asked for, so a file that ends exactly there is read whole and one that goes on is not.
+    const got = read(chunk.subarray(0, Math.min(CHUNK, scan + 1 - at)), at);
+    if (got === 0) break;
+    const n = Math.min(got, scan - at);
+    const over = at + got > scan;
+    at += got;
     const bytes = chunk.subarray(0, n);
     if (bytes.includes(0)) return { error: `${path} isn't text.` };
     let from = 0;
@@ -160,6 +172,7 @@ function excerptPatch(path: string, ranges: [number, number][] | null, max: numb
       line += 1;
       inLine = named(line);
     }
+    if (over && !done) return { error: tooFar(path, scan) };
   }
   // The last line has no line break: it is a line all the same, and the patch says so.
   const noNewline = lineOpen;
@@ -182,6 +195,9 @@ function excerptPatch(path: string, ranges: [number, number][] | null, max: numb
   return { patch: `${out.join("\n")}\n`, bytes: keptBytes };
 }
 
+const tooFar = (path: string, scan: number) =>
+  `${path}: the lines named are more than ${scan / MB} MB into the file, the most a walkthrough reads of one file. Name lines nearer the start, or send guide with patch instead.`;
+
 const tooLarge = (path: string, max: number) =>
   max < INBOX_WALKTHROUGH_FILE_MAX_BYTES
     ? `${path}: the lines this walkthrough names come to more than ${INBOX_WALKTHROUGH_TOTAL_MAX_BYTES / MB} MB, the most one takes. Name fewer lines, or send guide with patch instead.`
@@ -191,9 +207,10 @@ const tooLarge = (path: string, max: number) =>
  * The guide and patch to check and store, from a guide whose `diffs` name `file` and maybe `lines`. A `patch` the agent
  * sent as well is never looked at, so its own diff (or an empty one) can't get in the way. The strict checks that
  * follow are the ones every guide gets, so a file placed twice is refused by name there. `folders`: where to look, the
- * agent's own first (it may be a worktree or a subfolder), the project's last.
+ * agent's own first (it may be a worktree or a subfolder), the project's last. `scan`: the most of one file read
+ * (INBOX_WALKTHROUGH_SCAN_MAX_BYTES; a test sets less).
  */
-export function readInboxWalkthrough(guide: unknown, folders: readonly string[]): InboxWalkthroughRead {
+export function readInboxWalkthrough(guide: unknown, folders: readonly string[], scan = INBOX_WALKTHROUGH_SCAN_MAX_BYTES): InboxWalkthroughRead {
   let raw = guide;
   if (typeof raw === "string") {
     try {
@@ -244,7 +261,7 @@ export function readInboxWalkthrough(guide: unknown, folders: readonly string[])
   // counted as they are read: an excerpt that would pass a cap is refused, never read whole.
   let left = INBOX_WALKTHROUGH_TOTAL_MAX_BYTES;
   for (const { path, real, ranges } of named.values()) {
-    const part = readNamedExcerpt(real, path, ranges, Math.min(INBOX_WALKTHROUGH_FILE_MAX_BYTES, left));
+    const part = readNamedExcerpt(real, path, ranges, Math.min(INBOX_WALKTHROUGH_FILE_MAX_BYTES, left), scan);
     if ("error" in part) {
       problems.push(part.error);
       if (part.total) break;

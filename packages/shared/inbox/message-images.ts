@@ -122,9 +122,16 @@ export function blankCode(body: string): string {
  * a run of N backticks opens a span that the next run of exactly N closes
  * (CommonMark); a run with no such closer stays literal. Each run length has
  * one cursor over the runs of that length, and cursors only move forward, so
- * a body of many unmatched backticks is still linear.
+ * a body of many unmatched backticks is still linear. A span never crosses a
+ * blank line: the window draws inline code paragraph by paragraph, so a stray
+ * backtick in one paragraph is literal even when another has one too.
  */
 export function blankInlineCode(text: string): string {
+  const parts = text.split(/(\n[ \t]*\n)/);
+  return parts.length === 1 ? blankInlineCodeInBlock(text) : parts.map((part, i) => (i % 2 === 0 ? blankInlineCodeInBlock(part) : part)).join("");
+}
+
+function blankInlineCodeInBlock(text: string): string {
   const runs: { start: number; end: number }[] = [];
   for (let i = 0; i < text.length; ) {
     if (text.charCodeAt(i) !== 96) {

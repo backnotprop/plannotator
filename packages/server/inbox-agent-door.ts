@@ -76,9 +76,10 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
    * computer, plus what only the pairing has. The agent's own place (a folder under the Inbox's data, its threads'
    * project when it names none) and "every project" (a list or search with none named) resolve here; every other
    * folder, a `project_path` it names included, goes through the local agent's own lookups. `uploads`: the files it
-   * sent as bytes in this send (inbox-cloud-pictures.ts).
+   * sent as bytes in this send (inbox-cloud-pictures.ts); `given`: the send's list as the agent gave it (receive()'s
+   * items), which a refusal names a path's place in.
    */
-  const contextFor = (agent: InboxCloudAgent, uploads: readonly InboxSendUpload[]): InboxMcpContext => {
+  const contextFor = (agent: InboxCloudAgent, uploads: readonly InboxSendUpload[], given: readonly string[] = []): InboxMcpContext => {
     const homeRoot = agents.homeRoot(agent);
     const local = context.mcp;
     const sent = new Set(uploads.map((upload) => upload.id));
@@ -100,8 +101,9 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
         const ids = items.filter((item): item is string => typeof item === "string" && sent.has(item));
         if (new Set(ids).size !== ids.length) throw new InboxError("validation_error", "attachments: each file once.");
         if (paths.length > 0 && !local.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
-        // A refusal names the path by its place in the agent's own list, not among the paths alone.
-        const at = items.flatMap((item, i) => (typeof item === "string" && sent.has(item) ? [] : [i]));
+        // A refusal names the path by its place in the agent's own list, not among the paths alone. The list given
+        // here may have lost the uploads the body shows as pictures, never a path: the k-th path is the k-th given.
+        const at = (given.length > 0 ? given : items).flatMap((item, i) => (typeof item === "string" && sent.has(item) ? [] : [i]));
         const fromDisk =
           paths.length > 0
             ? await local.recordAttachments!(paths, project, base).catch((error: unknown) => {
@@ -287,14 +289,20 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     const fields = tools.get(tool);
     if (!fields) throw new DoorRefusal("tool_not_allowed", `${tool} is not an Inbox action. Actions: ${[WHOAMI, ...tools.keys()].join(", ")}.`);
     const open = [...fields.filter((field) => !IDENTITY_FIELDS.includes(field)), ...(fields.includes("project_path") ? [PROJECT_FIELD] : [])];
-    const unknown = Object.keys(args).find((field) => !open.includes(field));
+    // A guide takes no attachments, but the pictures its body (or its guide's intent) shows from the agent's own disk
+    // come as bytes, as a send's do (plannotator inbox call sends them): kept for the send, not given to the tool.
+    const guidePictures = tool === "submit_guide" && !fields.includes("attachments") && args.attachments !== undefined;
+    const unknown = Object.keys(args).find((field) => !open.includes(field) && !(guidePictures && field === "attachments"));
     if (unknown) throw new DoorRefusal("validation_error", `${unknown}: not taken through the agent door. ${tool} takes: ${open.join(", ") || "no fields"}.`);
+    const pathAt = guidePictures && Array.isArray(args.attachments) ? args.attachments.findIndex((item) => typeof item === "string") : -1;
+    if (pathAt >= 0) throw new DoorRefusal("validation_error", `attachments[${pathAt}]: ${tool} takes only the pictures its body or its guide's intent shows, each as bytes ({ name, data } or { upload }), named as the picture names its file.`);
 
     // A routine's files are paths each run reads on the person's computer: given to the tool as they are.
-    const { items, received } = tool !== "routine" && fields.includes("attachments") ? await receive(agent, args.attachments) : { items: null, received: [] };
+    const { items, received } = (tool !== "routine" && fields.includes("attachments")) || guidePictures ? await receive(agent, args.attachments) : { items: null, received: [] };
     try {
-      const sent = argumentsFor(agent, tool, fields, args, items, commandId);
-      const answer = await mcpRequest(contextFor(agent, uploadsOf(received)), "tools/call", { name: tool, arguments: sent });
+      const sent = argumentsFor(agent, tool, fields, args, guidePictures ? null : items, commandId);
+      if (guidePictures) delete sent.attachments;
+      const answer = await mcpRequest(contextFor(agent, uploadsOf(received), items ?? []), "tools/call", { name: tool, arguments: sent });
       if (!answer || answer.error) return fail("internal_error", answer?.error?.message ?? "The Inbox gave no answer.");
       return answer.result as ToolResult;
     } finally {

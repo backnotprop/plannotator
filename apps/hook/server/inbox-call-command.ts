@@ -307,12 +307,15 @@ type PairedLink = {
 /**
  * The door actions and refusals only an older Inbox gives a call this command knows is real: `tool_not_allowed` for
  * an action added since, or a path refusal it no longer makes. The person's Plannotator is older than this one.
+ * `routine` is refused by an older Inbox in words of its own; "routine is not an Inbox action" is a current Inbox with
+ * Routines off (Settings → Capabilities), which updating would not change.
  */
-const NEWER_ACTIONS: readonly string[] = [INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_PIECE, INBOX_AGENT_UPLOAD_FINISH];
+const NEWER_ACTIONS: readonly string[] = [INBOX_AGENT_FETCH_FILE, INBOX_AGENT_ROUTE, INBOX_AGENT_UPLOAD_PIECE, INBOX_AGENT_UPLOAD_FINISH, "routine"];
 const OLD_REFUSALS: readonly string[] = ["path_refused", "attachment_path_refused", "image_path_refused", "no_checkout"];
 const UPDATE_THERE = " Plannotator on the person's computer is older than this one: ask the person to update it.";
-export function inboxPairedSkewNote(tool: string, code: string): string {
-  return (code === "tool_not_allowed" && NEWER_ACTIONS.includes(tool)) || OLD_REFUSALS.includes(code) ? UPDATE_THERE : "";
+export function inboxPairedSkewNote(tool: string, code: string, words = ""): string {
+  const switchedOff = tool === "routine" && /\broutine is not an Inbox action\b/.test(words);
+  return (code === "tool_not_allowed" && NEWER_ACTIONS.includes(tool) && !switchedOff) || OLD_REFUSALS.includes(code) ? UPDATE_THERE : "";
 }
 
 /** The way to the person's Inbox that PLANNOTATOR_PAIRING names: the agent door with its token, through the relay (or PLANNOTATOR_PAIRING_DOOR). */
@@ -364,7 +367,7 @@ function pairedLink(deps: PairedDeps): PairedLink | { ok: false; code: string; m
       const text = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
       const match = /^([a-z][a-z0-9_]*): ([\s\S]*)$/.exec(text);
       const code = match?.[1] ?? "inbox_error";
-      return { ok: false, code, message: `${match?.[2] ?? text}${inboxPairedSkewNote(tool, code)}` };
+      return { ok: false, code, message: `${match?.[2] ?? text}${inboxPairedSkewNote(tool, code, text)}` };
     }
     return { ok: true, structured: got.result.structuredContent };
   };
@@ -468,7 +471,7 @@ async function runPairedCall(
   if (got.result.isError) {
     const words = (got.result.content ?? []).map((part) => part.text ?? "").join("\n");
     const code = /^([a-z][a-z0-9_]*): /.exec(words)?.[1] ?? "";
-    got.result.content = [{ text: `${sideOf(words)}${inboxPairedSkewNote(parsed.action, code)}` }];
+    got.result.content = [{ text: `${sideOf(words)}${inboxPairedSkewNote(parsed.action, code, words)}` }];
   }
   if (relayed && parsed.action === "whoami" && !got.result.isError) {
     got.result.structuredContent = { ...got.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
