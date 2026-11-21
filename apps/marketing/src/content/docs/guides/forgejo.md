@@ -54,6 +54,8 @@ For several instances, put them in `~/.plannotator/config.json`, one token per o
 }
 ```
 
+In the Inbox, **Settings → Accounts → Forgejo and Gitea** adds a host and a token, replaces or removes them, and checks that the host accepts the token. It writes the same two keys here (`forgejoHosts` and `forgejoTokens`), so the command line and the pages use them too. A host or token set in the environment shows there, read-only. The window never shows a token again after you save it.
+
 That file stores the tokens in plain text, so prefer the environment variables for one instance. The environment variables take precedence. Plannotator never logs a token and never sends one to the browser.
 
 If the token is missing, rejected, or lacks a scope, `plannotator review` stops with a message that says which. A `404` can also mean the account may not see the repository: it is private, or the account is a *restricted* one that has not been added to it.

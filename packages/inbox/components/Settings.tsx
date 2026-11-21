@@ -11,6 +11,7 @@ import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { AccountsRefresh, AccountsSection } from './Accounts';
 import { LinearKeySettings } from './LinearKeySettings';
+import { ForgejoHostsSettings } from './ForgejoHostsSettings';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { AgentStatusRow } from '../agents/AgentStatusSwitch';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
@@ -1216,6 +1217,7 @@ export function SettingsPage(props: SettingsPageProps) {
           <>
             <AccountsSection machine={machines.find((machine) => machine.self)?.name} />
             {settings.linear_key && <LinearKeySettings initial={settings.linear_key} where={voiceWhere(settings.voice ?? null)} />}
+            {settings.forgejo_hosts && <ForgejoHostsSettings initial={settings.forgejo_hosts} where={voiceWhere(settings.voice ?? null)} />}
           </>
         );
         break;

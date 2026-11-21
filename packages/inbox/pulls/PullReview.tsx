@@ -714,7 +714,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
         ? buildGuideSnapshot({
             guide: { title: layer.title, intent: '', sections: [] },
             reviewed: [],
-            review: { rawPatch: patch, gitRef: `${diff.base}...${diff.head}`, source: { kind: 'pr', repo: stack?.repo, branch: layer.head, pr: { url: layer.url, number: layer.number, title: layer.title, platform: layer.platform } } },
+            review: { rawPatch: patch, gitRef: `${diff.base}...${diff.head}`, source: { kind: 'pr', repo: stack?.repo, branch: layer.head, pr: { url: layer.url, number: layer.number, title: layer.title, ...(layer.platform === 'forgejo' ? {} : { platform: layer.platform }) } } },
             exportedAt: new Date(0).toISOString(),
           })
         : null,

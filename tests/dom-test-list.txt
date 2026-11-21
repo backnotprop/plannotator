@@ -641,6 +641,7 @@ packages/inbox/voiceKeptWords.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/inbox/voiceMiss.test.ts
 packages/inbox/linearKeySettings.test.tsx
+packages/inbox/forgejoHostsSettings.test.tsx
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
