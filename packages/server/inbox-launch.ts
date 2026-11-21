@@ -337,7 +337,9 @@ export function createInboxLaunch(options: {
    * composer's "Start Claude Code" while the switch was never set (what it follows), and by each start for
    * its own env, after the Send answered. One read at a time: callers meanwhile share it. Of a read only its
    * PATH (for the plain env) and the names the hosts keep (`shellNames`: Claude Code's skip-permissions
-   * export and CLAUDE_CONFIG_DIR) are kept; the env itself is never held for a launch.
+   * export and CLAUDE_CONFIG_DIR) are kept here. A start never uses a held env: each start reads its own. The
+   * whole env goes to the hosts' `loginRead`; only OpenCode's keeps it, in memory, for its model-list reads (a key
+   * exported in the shell rc decides which providers OpenCode lists), never for a start.
    */
   let shell: { kept: LaunchEnv; at: number } | null = null;
   /** Settings → Agents reads the shell again only when its last read is older than this. */
@@ -357,6 +359,7 @@ export function createInboxLaunch(options: {
         // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
         for (const name of hostList.flatMap((host) => host.shellFlags ?? [])) if (login[name]) kept[name] = "1";
         shell = { kept, at: now() };
+        for (const host of hostList) host.loginRead?.(login);
         return login;
       } finally {
         reading = null;
@@ -908,7 +911,8 @@ export function createInboxLaunch(options: {
     memo.seenLive = false;
     starting.add(launch.id);
     try {
-      // The person's login env, read for this start only (after the Send answered; never kept).
+      // The person's login env, read for this start (after the Send answered). This start never uses an older one; the
+      // read also reaches the hosts' `loginRead` (OpenCode keeps it in memory for its model lists only).
       const login = await readLogin();
       await trustMadeFolder(launch, host);
       // A reply's launch takes its thread's name.

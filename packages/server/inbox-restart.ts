@@ -506,7 +506,7 @@ export function openCodePluginSpec(text: string): string | null {
 }
 
 /** The config files to read, in order: `OPENCODE_CONFIG` (an explicit file) when set, then the global folder's. */
-function openCodeConfigFiles(environment: AgentEnvironment): string[] {
+export function openCodeConfigFiles(environment: AgentEnvironment): string[] {
   const explicit = environment.env.OPENCODE_CONFIG?.trim();
   const expanded = explicit?.startsWith("~/") ? join(environment.homeDir, explicit.slice(2)) : explicit;
   const dir = openCodeConfigDir(environment);

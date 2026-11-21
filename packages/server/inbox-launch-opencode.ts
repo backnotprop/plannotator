@@ -1,17 +1,18 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { inboxLaunchTokenOk, openCodeSessionModel, parseOpenCodeAgents, parseOpenCodeModels } from "@plannotator/core/inbox-launch-choice";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
-import { agentVersionRun, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
+import { agentVersionRun, createAgentEnvironmentFor, openCodeGeneration, openCodePluginInstalled, type AgentEnvironment } from "./inbox-agents";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
-import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { LOGIN_ENV_FALLBACKS, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext, type LaunchStartFailure } from "./inbox-launch-host";
 import { createOpenCodePermissions, OPENCODE, OPENCODE_NAME, type OpenCodePermissionAsked } from "./inbox-launch-opencode-permission";
+import { openCodeConfigFiles } from "./inbox-restart";
 
 export { OPENCODE, OPENCODE_NAME };
 export const OPENCODE_LAUNCH_MIN_VERSION = "2.0.19";
@@ -87,6 +88,68 @@ export function openCodeAttachCommand(bin: string, folder: string, session: stri
 
 export function openCodeHandoffCommand(bin: string, folder: string, session: string, pid: number, dataDir: string | null = null): string {
   return `/bin/sh -c ${shellQuote(`cd ${shellQuote(folder)} || exit 1; while kill -0 ${pid} 2>/dev/null; do sleep 0.2; done; ${openCodeTerminalRun(bin, session, dataDir)}`)}`;
+}
+
+/**
+ * The words of a failed turn's error: a string as it is; OpenCode's nested error (`{ name, data: { message } }`) by
+ * `data.message`, then `message`, then `name`. Never "[object Object]": empty when none of them is words.
+ */
+export function openCodeErrorText(error: unknown): string {
+  if (typeof error === "string") return error;
+  if ((typeof error === "number" && Number.isFinite(error)) || typeof error === "boolean") return String(error);
+  if (!error || typeof error !== "object") return "";
+  const e = error as { name?: unknown; message?: unknown; data?: unknown };
+  const nested = e.data && typeof e.data === "object" ? (e.data as { message?: unknown }).message : undefined;
+  for (const text of [nested, e.message, e.name]) if (typeof text === "string" && text.trim()) return text;
+  return "";
+}
+
+/** A failed turn's words from OpenCode's `session.execution.failed` data: its `error`, else its `message`. */
+export function openCodeFailedTurnText(data: { error?: unknown; message?: unknown }): string {
+  return openCodeErrorText(data.error) || openCodeErrorText(data.message);
+}
+
+/**
+ * What each list read keeps of OpenCode's output, in UTF-16 code units (JavaScript string length, not bytes): about
+ * 16 million characters. A gateway provider (Vercel's, OpenRouter) lists hundreds of models, past the 64 Ki default.
+ */
+export const OPENCODE_LIST_OUTPUT_CAP = 16 * 1024 * 1024;
+/** A list read that failed (a slow first run, a config mid-edit) is tried again this soon, doubling up to 5 minutes. */
+const LIST_FAILED_AGAIN_MS = 15_000;
+const LIST_FAILED_AGAIN_MAX_MS = 5 * 60_000;
+/** Between a list key's parts: never in a path. */
+const LIST_KEY_CUT = "\u0000";
+/** A list read that found no login env runs the login shell again at most this often. */
+const LIST_LOGIN_AGAIN_MS = 5 * 60_000;
+/** The login shell's names this host keeps (`shellNames`): where OpenCode's files are, and an explicit config. */
+const OPENCODE_SHELL_NAMES = ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"] as const;
+
+/**
+ * The env OpenCode's lists are read with: the login env through the launch filter (`launchSpawnEnv`), so a key or an
+ * `OPENCODE_CONFIG` the person's shell sets counts as it does in the session. No `OPENCODE`, no `OPENCODE_SERVER_*`
+ * and no `PLANNOTATOR_*` name: OpenCode may load Plannotator's plugin for the read, and it must not act as a session.
+ */
+export function openCodeListEnv(login: Readonly<LaunchEnv>): LaunchEnv {
+  return Object.fromEntries(Object.entries(launchSpawnEnv(login)).filter(([name]) => name !== "OPENCODE" && !name.startsWith("OPENCODE_SERVER_") && !name.startsWith("PLANNOTATOR_")));
+}
+
+/**
+ * What OpenCode's lists depend on besides its binary: its config files (`OPENCODE_CONFIG`, then the global folder's)
+ * and its sign-in file. Only their change time and size, from `stat`: the sign-in file is never read.
+ */
+export function openCodeListStamp(e: AgentEnvironment): string {
+  const data = e.env.XDG_DATA_HOME?.trim();
+  const dataHome = data && isAbsolute(data) ? data : join(e.homeDir, ".local", "share");
+  return [...openCodeConfigFiles(e), join(dataHome, "opencode", "auth.json")]
+    .map((file) => {
+      try {
+        const stat = statSync(file);
+        return `${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        return "-";
+      }
+    })
+    .join(",");
 }
 
 export function openCodeTurnErrorNote(error: string): string {
@@ -182,7 +245,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
         return;
       case "session.execution.failed": {
         s.busySince = null;
-        const text = String(data.error?.message ?? data.error ?? data.message ?? "");
+        const text = openCodeFailedTurnText(data);
         if (existsSync(ctx.launchDir(s.launchId))) ctx.startLog(s.launchId, `opencode ${s.session}: the turn ended with an error: ${text.slice(0, 2000)}`);
         note(s.launchId, s.session, openCodeTurnErrorNote(text), `opencode-error-${s.launchId}-${Date.now()}-${++notes}`);
         threads?.onChange();
@@ -361,16 +424,62 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
 
   let binName = "opencode2";
   let choiceKey: string | null = null;
+  /**
+   * The env of the last login read this host had (any login read the Inbox made, `loginRead`; a start's; a resume's; or
+   * its own): list reads reuse it, so they don't run the person's login shell (their rc files) for each read. Memory
+   * only, never written. A stand-in from a shell that did not answer (`LOGIN_ENV_FALLBACKS`) is never held as it.
+   */
+  let heldLogin: LaunchEnv | null = null;
+  let listLoginTriedAt: number | null = null;
+  let listLoginTry: Promise<void> | null = null;
+  const holdLogin = (login: Readonly<LaunchEnv>) => {
+    if (login.PATH && !LOGIN_ENV_FALLBACKS.has(login)) heldLogin = { ...login };
+  };
+  /** One login read for the lists, shared with any under way, at most every 5 minutes; null when none may start. */
+  const listLogin = (): Promise<void> | null => {
+    if (listLoginTry) return listLoginTry;
+    if (listLoginTriedAt !== null && Date.now() - listLoginTriedAt < LIST_LOGIN_AGAIN_MS) return null;
+    listLoginTriedAt = Date.now();
+    listLoginTry = ctx
+      .loginEnv()
+      .then(holdLogin, () => {})
+      .finally(() => {
+        listLoginTry = null;
+      });
+    return listLoginTry;
+  };
+  type ListSource = { env: LaunchEnv; from: "held" | "names" | "plain" };
+  /**
+   * The env a list read starts from, and which it is (part of the cache key, so getting the full login env reads the
+   * lists once again). A login env this host holds. Else, once a login read finished (it held nothing: the shell did
+   * not answer), the Inbox's env with the login PATH and the names this host keeps, while one login read runs in the
+   * background (never waited on here). Else, before any login read finished, one login read (shared with compose's
+   * read ahead, which a Send waits on anyway), then the Inbox's env if it gave nothing to hold.
+   */
+  const listSource = async (): Promise<ListSource> => {
+    if (heldLogin) return { env: heldLogin, from: "held" };
+    const plain = (await ctx.environment()).env as LaunchEnv;
+    const shell = ctx.shell();
+    if (shell) {
+      void listLogin();
+      return { env: { ...plain, ...Object.fromEntries(OPENCODE_SHELL_NAMES.flatMap((name) => (shell[name] === undefined ? [] : [[name, shell[name]!]]))) }, from: "names" };
+    }
+    await listLogin();
+    return heldLogin ? { env: heldLogin, from: "held" } : { env: plain, from: "plain" };
+  };
+  /** The source `choices` keyed its read on, so the read runs with the env its key came from. */
+  let listFrom: LaunchEnv | null = null;
   const choiceLists = launchChoiceCache(async () => {
     const e = await ctx.environment();
     const path = binOf(e);
     if (!path) return null;
+    // Read with the login env, filtered (`openCodeListEnv`): the keys and OPENCODE_CONFIG it sets decide which
+    // providers OpenCode lists.
+    const env = openCodeListEnv(listFrom ?? (await listSource()).env);
+    const read = (route: string) => e.run([path, "--standalone", "api", "GET", route], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir, env, cleanEnv: true, outputCap: OPENCODE_LIST_OUTPUT_CAP });
     // The models, and OpenCode's own agents (build, plan, …) a session can start as: an agent list that can't be
     // read leaves no Agent column, never the models.
-    const [listed, agents] = await Promise.all([
-      e.run([path, "--standalone", "api", "GET", "/api/model"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir }),
-      e.run([path, "--standalone", "api", "GET", "/api/agent"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir }).catch(() => null),
-    ]);
+    const [listed, agents] = await Promise.all([read("/api/model"), read("/api/agent").catch(() => null)]);
     if (listed.exitCode !== 0 || listed.timedOut) return null;
     let models: ReturnType<typeof parseOpenCodeModels>;
     try {
@@ -386,12 +495,12 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       primary = null;
     }
     return primary && primary.length > 0 ? { ...models, primary_agents: primary } : models;
-  });
+  }, Date.now, { failedAgainMs: LIST_FAILED_AGAIN_MS, failedAgainMaxMs: LIST_FAILED_AGAIN_MAX_MS, binaryOf: (key) => key.slice(0, key.indexOf(LIST_KEY_CUT)) });
 
   return {
     agent: OPENCODE,
     name: OPENCODE_NAME,
-    shellNames: ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR"],
+    shellNames: OPENCODE_SHELL_NAMES,
 
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
@@ -407,12 +516,24 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return { ok: true, version };
     },
 
-    choices: () => choiceLists(choiceKey),
+    /** Every login read the Inbox makes: held for the list reads (not a shell that did not answer). */
+    loginRead: holdLogin,
+
+    // The key: the binary (path@version), which env the read starts from, and OpenCode's config and sign-in files'
+    // stamps, found with that same env. A provider added or signed in to shows on the next read, with no Inbox restart.
+    async choices() {
+      if (choiceKey === null) return choiceLists(null);
+      const key = choiceKey;
+      const source = await listSource();
+      listFrom = source.env;
+      return choiceLists([key, source.from, openCodeListStamp(createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: source.env }))].join(LIST_KEY_CUT));
+    },
 
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
     trusts: () => true,
 
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
+      holdLogin(input.login);
       const made = await makeSession(launch, input);
       if (!made.ok) return made;
       procs.set(made.session, made.server);
@@ -426,6 +547,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
      * (`fresh` changes nothing: the session exists from `makeSession` whether or not it took a turn).
      */
     async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean; fresh?: boolean }) {
+      holdLogin(input.login);
       let session = input.resume ? (launch.session_ref ?? "") : "";
       if (!session) {
         const made = await makeSession(launch, input);
@@ -467,6 +589,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       try {
         if (old) await end(old, "restart");
         const login = await ctx.loginEnv().catch((): LaunchEnv => ({}));
+        holdLogin(login);
         if (mark.cancel) return nothing("cancelled during the restart: nothing started");
         const result = await spawnServer(launch, session, login, () => mark.cancel !== null);
         if (mark.cancel) {
