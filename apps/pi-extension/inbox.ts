@@ -39,7 +39,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
@@ -50,7 +50,7 @@ import {
 } from "./generated/inbox/agent-link.ts";
 import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
 import { isInboxTurnedOn } from "./generated/inbox/turned-on.ts";
-import { readPiSessionClaims, releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
+import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import { detectPiHost } from "./pi-host.ts";
@@ -290,48 +290,77 @@ export function exportPiSessionProject(env: Record<string, string | undefined>, 
 	}
 }
 
-/** How far a handoff chain is followed for ancestor wakes: a few levels, nearest first (#3539). */
-const PI_INBOX_ANCESTOR_DEPTH = 3;
+/** How far a handoff line is followed back: as many as the poll's `continues` takes (INBOX_CONTINUES_MAX). */
+const PI_HANDOFF_LINE_MAX = 8;
+/** A session header longer than this is not read (Pi's header is a few hundred bytes). */
+const PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
 
-/** The header (line 1) of a Pi session's .jsonl, or null when it cannot be read. Exported for the tests. */
+/**
+ * The header (line 1) of a Pi session's .jsonl, or null when it cannot be read. Only the first line is read:
+ * the rest of a session file can be many megabytes. Exported for the tests.
+ */
 export function readPiSessionHeader(file: string): { id?: unknown; parentSession?: unknown } | null {
+	let fd: number | null = null;
 	try {
-		const first = readFileSync(file, "utf8").split("\n", 1)[0] ?? "";
+		fd = openSync(file, "r");
+		const chunk = Buffer.alloc(4096);
+		const parts: Buffer[] = [];
+		let size = 0;
+		for (;;) {
+			const read = readSync(fd, chunk, 0, chunk.length, null);
+			if (read <= 0) break;
+			const end = chunk.subarray(0, read).indexOf(0x0a);
+			parts.push(Buffer.from(chunk.subarray(0, end >= 0 ? end : read)));
+			size += end >= 0 ? end : read;
+			if (end >= 0) break;
+			if (size > PI_SESSION_HEADER_MAX_BYTES) return null;
+		}
+		const first = Buffer.concat(parts).toString("utf8").trim();
 		if (!first) return null;
 		const value: unknown = JSON.parse(first);
-		return typeof value === "object" && value !== null ? (value as { id?: unknown; parentSession?: unknown }) : null;
+		return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as { id?: unknown; parentSession?: unknown }) : null;
 	} catch {
 		return null;
+	} finally {
+		if (fd !== null) {
+			try {
+				closeSync(fd);
+			} catch {}
+		}
 	}
 }
 
 /**
- * The handed-off ancestors of a session, nearest first (#3539): walk the parentSession chain from the
- * session's .jsonl header, stopping at the first session a live Pi still claims (that Pi keeps its own
- * replies), at a session already seen, or at the depth cap. A claim from this process is ignored: it is
- * the session this process is leaving, about to be released. Exported for the tests.
+ * The sessions a handed-off Pi session continues, nearest first (#3539): Pi's handoff starts the new
+ * session with `parentSession: <old session file>` in its header, and that file's header has the old id
+ * (and its own `parentSession` when the line goes further back). Sent as the poll's `continues`, so the
+ * Inbox hands this session what waits for an old id while that id does not poll; an old session that is
+ * running again keeps its own (packages/server/inbox-continuations.ts). Stops at an unreadable file, a
+ * header without an id, a session already seen, or PI_HANDOFF_LINE_MAX. Exported for the tests.
  */
-export function handedOffAncestorSessionIds(sessionFile: string | undefined, currentSessionId: string, dataDir: string): string[] {
-	if (!sessionFile) return [];
-	const live = new Set(
-		readPiSessionClaims(dataDir)
-			.filter((claim) => claim.pid !== process.pid)
-			.map((claim) => claim.session),
-	);
-	const ancestors: string[] = [];
+export function piHandoffLine(sessionFile: string | null | undefined, currentSessionId: string): string[] {
+	const line: string[] = [];
 	const seen = new Set<string>([currentSessionId]);
-	let file: string | undefined = sessionFile;
-	for (let depth = 0; depth < PI_INBOX_ANCESTOR_DEPTH && file; depth++) {
-		const parent: unknown = readPiSessionHeader(file)?.parentSession;
+	let file = sessionFile;
+	while (file && line.length < PI_HANDOFF_LINE_MAX) {
+		const parent = readPiSessionHeader(file)?.parentSession;
 		if (typeof parent !== "string" || !parent) break;
-		const id: unknown = readPiSessionHeader(parent)?.id;
+		const id = readPiSessionHeader(parent)?.id;
 		if (typeof id !== "string" || !id || seen.has(id)) break;
-		if (live.has(id)) break;
 		seen.add(id);
-		ancestors.push(id);
+		line.push(id);
 		file = parent;
 	}
-	return ancestors;
+	return line;
+}
+
+/** The handoff line of the session `ctx` runs; none when Pi cannot say its file (an in-memory session). */
+function piHandoffLineOf(ctx: ExtensionContext, sessionId: string): string[] {
+	try {
+		return piHandoffLine(ctx.sessionManager.getSessionFile(), sessionId);
+	} catch {
+		return [];
+	}
 }
 
 /** Exported for the tests. */
@@ -357,8 +386,8 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 
 	let ctx: ExtensionContext | null = null;
 	let wake: InboxWake | null = null;
-	/** Wakes for the handed-off ancestors of this session (#3539): their replies land here too. */
-	let ancestorWakes: InboxWake[] = [];
+	/** The sessions this one continues (piHandoffLine), read as the session starts: the poll's `continues`. */
+	let continues: string[] = [];
 	/** The on-disk version the session was last told about (#2085's message, once per version). */
 	let notifiedOnDisk: string | null = null;
 	let activationSettled = false;
@@ -372,8 +401,6 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 	const prompts = new PiTerminalPrompts();
 	/** The wake waiting to show up as a user message in the session. */
 	let waiting: { id: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
-	/** Sends queued behind it: the main wake and the ancestor wakes share the one `waiting` slot (#3539). */
-	let sendQueue: Array<{ text: string; command: InboxReplyCommand; deliverAs: "followUp" | "steer"; resolve: () => void; reject: (error: Error) => void }> = [];
 
 	const endWaiting = (error?: Error) => {
 		const entry = waiting;
@@ -382,7 +409,6 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 		clearTimeout(entry.timer);
 		if (error) entry.reject(error);
 		else entry.resolve();
-		pumpSendQueue();
 	};
 
 	const idleNow = (current: ExtensionContext): boolean => {
@@ -393,41 +419,29 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 		}
 	};
 
-	/** Start one queued send in the `waiting` slot. */
-	const startSend = (entry: { text: string; command: InboxReplyCommand; deliverAs: "followUp" | "steer"; resolve: () => void; reject: (error: Error) => void }) => {
-		const current = ctx;
-		const watchdog = () => {
-			if (waiting?.id !== entry.command.id) return;
-			// Still busy (Pi preparing the run, or the person's run first): look again later.
-			if (current && isCtxAlive(current) && !idleNow(current)) {
-				waiting.timer = setTimeout(watchdog, DELIVERY_WATCHDOG_MS);
-				return;
-			}
-			// A steer that never started: the person pressed Esc during the run, and Pi moved its
-			// queued messages into the editor. Take ours back out, so the reply, which now waits for
-			// idle and arrives as a follow-up, is not also sent a second time from the editor.
-			if (entry.deliverAs === "steer" && current && isCtxAlive(current)) takeOutOfEditor(current, entry.text);
-			endWaiting(new Error("the message did not reach the session"));
-		};
-		waiting = { id: entry.command.id, resolve: entry.resolve, reject: entry.reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) };
-		try {
-			pi.sendUserMessage(entry.text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs: entry.deliverAs }));
-		} catch (error) {
-			endWaiting(error instanceof Error ? error : new Error(String(error)));
-		}
-	};
-
-	/** Start the next queued send, if the slot is free. */
-	function pumpSendQueue(): void {
-		if (waiting || sendQueue.length === 0) return;
-		startSend(sendQueue.shift()!);
-	}
-
 	/** Put the wake text into the session and wait until Pi starts it as a user message. */
 	const send = (text: string, command: InboxReplyCommand, deliverAs: "followUp" | "steer") =>
 		new Promise<void>((resolve, reject) => {
-			sendQueue.push({ text, command, deliverAs, resolve, reject });
-			pumpSendQueue();
+			const current = ctx;
+			const watchdog = () => {
+				if (waiting?.id !== command.id) return;
+				// Still busy (Pi preparing the run, or the person's run first): look again later.
+				if (current && isCtxAlive(current) && !idleNow(current)) {
+					waiting.timer = setTimeout(watchdog, DELIVERY_WATCHDOG_MS);
+					return;
+				}
+				// A steer that never started: the person pressed Esc during the run, and Pi moved its
+				// queued messages into the editor. Take ours back out, so the reply, which now waits for
+				// idle and arrives as a follow-up, is not also sent a second time from the editor.
+				if (deliverAs === "steer" && current && isCtxAlive(current)) takeOutOfEditor(current, text);
+				endWaiting(new Error("the message did not reach the session"));
+			};
+			waiting = { id: command.id, resolve, reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) };
+			try {
+				pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs }));
+			} catch (error) {
+				endWaiting(error instanceof Error ? error : new Error(String(error)));
+			}
 		});
 
 	const target = {
@@ -470,6 +484,8 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 			}
 			return { version, on_disk: onDisk, host: ohMyPi ? ("oh-my-pi" as const) : ("pi" as const) };
 		},
+		// A handed-off session (#3539): the sessions it continues, so their replies come here while they are gone.
+		continues: () => continues,
 		// The session's working folder, so the Inbox lists it under its project from its first poll.
 		projectPath: () => {
 			const current = ctx;
@@ -491,27 +507,6 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 				return null;
 			}
 		},
-	};
-
-	/** The ancestor wakes for a handed-off session (#3539): match them to the parentSession chain. */
-	const reconcileAncestorWakes = (startCtx: ExtensionContext, sessionId: string) => {
-		if (!startCtx.hasUI) {
-			for (const ancestor of ancestorWakes) ancestor.dispose();
-			ancestorWakes = [];
-			return;
-		}
-		// getSessionFile is missing on older Pi (and on test fakes): no file, no ancestors, the main wake still runs.
-		const sessionFile = startCtx.sessionManager.getSessionFile?.() ?? undefined;
-		const wanted = handedOffAncestorSessionIds(sessionFile, sessionId, connection.dataDir);
-		const wantedSet = new Set(wanted);
-		for (const ancestor of ancestorWakes) if (!wantedSet.has(ancestor.sessionId)) ancestor.dispose();
-		ancestorWakes = ancestorWakes.filter((ancestor) => wantedSet.has(ancestor.sessionId));
-		for (const id of wanted) {
-			if (ancestorWakes.some((ancestor) => ancestor.sessionId === id)) continue;
-			const ancestor = new InboxWake(connection, id, target);
-			ancestor.start();
-			ancestorWakes.push(ancestor);
-		}
 	};
 
 	// Before each bash call: the session's project for the commands it runs (exportPiSessionProject).
@@ -538,11 +533,11 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 			prompts.clear();
 			endWaiting(new Error("the session changed"));
 		}
+		continues = startCtx.hasUI ? piHandoffLineOf(startCtx, sessionId) : [];
 		if (!wake && startCtx.hasUI) {
 			wake = new InboxWake(connection, sessionId, target);
 			wake.start();
 		}
-		reconcileAncestorWakes(startCtx, sessionId);
 	});
 
 	// The reminder (INBOX_REMINDER_TEXT): one hidden custom message on the
@@ -582,24 +577,17 @@ export function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, o
 	}
 
 	pi.on("session_shutdown", () => {
-		for (const ancestor of ancestorWakes) ancestor.dispose();
-		ancestorWakes = [];
 		wake?.dispose();
 		wake = null;
 		ctx = null;
 		prompts.clear();
-		for (const entry of sendQueue.splice(0)) entry.reject(new Error("the session ended"));
 		endWaiting(new Error("the session ended"));
 	});
 
 	// The person submitted something: their turn goes first, and replies follow them to this process.
 	pi.on("input", (event) => {
 		wake?.onForeignPrompt();
-		for (const ancestor of ancestorWakes) ancestor.onForeignPrompt();
-		if (event?.source !== "extension") {
-			wake?.touch();
-			for (const ancestor of ancestorWakes) ancestor.touch();
-		}
+		if (event?.source !== "extension") wake?.touch();
 	});
 	pi.on("agent_start", () => {
 		runOpen = true;
