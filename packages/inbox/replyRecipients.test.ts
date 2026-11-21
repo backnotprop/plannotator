@@ -8,6 +8,7 @@ import { expect, test } from 'bun:test';
 import { raceWhat } from './components/ReplyRoute';
 import { aimable, canAddRecipient, canTakeAlone, knownRecipients, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
 import type { TaggableModel } from './api';
+import { recipientNames } from './thread/recipientNames';
 
 const rowsOf = (people: { host: string; session: string }[], folders: Record<string, string | null>, states: Record<string, RecipientState> = {}) =>
   recipientRows(people, (s) => folders[s] ?? null, (s) => states[s] ?? 'live').map((r) => [r.session, r.label, r.short, r.state]);
@@ -46,6 +47,33 @@ test('a renamed session in another folder takes no folder, and leaves the others
     ['Docs pass', 'Docs pass'],
     ['Claude Code', 'Claude Code'],
     ['Claude Code 2', 'Claude Code 2'],
+  ]);
+});
+
+/** Each row's name in the list, with the given names as the window has them (sessionLabels.ts puts them over the labels). */
+const listNames = (people: { host: string; session: string }[], given: Record<string, string>) => {
+  const rows = recipientRows(people, () => 'superfans', () => 'live', (s) => given[s] ?? null);
+  const names = recipientNames(rows, Object.assign(Object.create(null), given), () => 'superfans');
+  return rows.map((r) => [r.session, names.get(r.session)!.name]);
+};
+
+test('two sessions renamed alike are told apart by the names they had before, never "Reviewer (Reviewer)"', () => {
+  const people = [{ host: 'claude-code', session: 'a' }, { host: 'claude-code', session: 'b' }];
+  expect(listNames(people, { a: 'Reviewer', b: 'Reviewer' })).toEqual([
+    ['a', 'Reviewer (Claude Code)'],
+    ['b', 'Reviewer (Claude Code 2)'],
+  ]);
+});
+
+test('a session renamed to another one\'s default name: that one is numbered past it, so no two rows read alike, in either order', () => {
+  const people = [{ host: 'claude-code', session: 'a' }, { host: 'claude-code', session: 'b' }];
+  expect(listNames(people, { b: 'Claude Code' })).toEqual([
+    ['a', 'Claude Code 2'],
+    ['b', 'Claude Code'],
+  ]);
+  expect(listNames(people, { a: 'Claude Code' })).toEqual([
+    ['a', 'Claude Code'],
+    ['b', 'Claude Code 2'],
   ]);
 });
 

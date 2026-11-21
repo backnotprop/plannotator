@@ -910,3 +910,20 @@ test.skipIf(!hasDom)('three Pi sessions in one folder, one renamed in the sideba
     act(() => setAgentNames(new Map()));
   }
 });
+
+test.skipIf(!hasDom)('two sessions renamed alike: the chip and the rows add the names they had before, so the two read and are heard apart', async () => {
+  taggable.push(tagged('ses_claude2', 'claude-code'));
+  const thread = threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 45));
+  try {
+    act(() => setAgentNames(new Map([['ses_claude', 'Reviewer'], ['ses_claude2', 'Reviewer']])));
+    const el = await render(thread);
+    await write(el, 'Use the old totals.');
+    expect(pill(el)!.getAttribute('aria-label')).toBe('To Reviewer (Claude Code 2). Change who gets this reply');
+    await openList(el);
+    expect(named(el).map((r) => r[0])).toEqual(['Reviewer (Claude Code)', 'Reviewer (Claude Code 2)']);
+    await only(el, 'ses_claude');
+    expect(pill(el)!.getAttribute('aria-label')).toBe('To Reviewer (Claude Code). Change who gets this reply');
+  } finally {
+    act(() => setAgentNames(new Map()));
+  }
+});
