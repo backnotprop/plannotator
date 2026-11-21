@@ -321,13 +321,11 @@ export function usePierreTheme(options?: {
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
           }
-          /* Keep wrapped diff columns (split, semantic split, unified) bounded to
-             1fr without expanding to unbreakable min-content widths such as
-             long code suggestions (issue #3772). */
-          [data-diff][data-overflow='wrap'],
-          [data-file][data-overflow='wrap'] {
-            --diffs-code-grid: var(--diffs-grid-number-column-width) minmax(0, 1fr);
-          }
+          /* In wrap mode the code column is 1fr, whose minimum is its items'
+             min-content: an inline comment with an unbreakable line (a long
+             code suggestion) widened its column and crushed the other split
+             pane (issue #3772). Only the annotation row opts out; the
+             suggestion scrolls inside its card instead. */
           [data-overflow='wrap'] [data-line-annotation] {
             min-width: 0;
           }
