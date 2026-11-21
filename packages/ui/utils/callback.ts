@@ -3,8 +3,10 @@
  *
  * When the bot posts a plan URL with ?cb=<encoded_url>&ct=<token>,
  * these utilities parse the config and POST the user's decision back.
- * A 2xx answer may carry `{ "return_url": "<http(s) url>" }`: the page then
- * goes there after the done screen (back to the issue the link came from).
+ * A 2xx answer may carry `{ "return_url": "<https url>" }`: the done screen
+ * then shows one link back there ("Back to github.com"), which the person
+ * clicks. The page never moves by itself: anyone can build a share link with
+ * their own bot address, so the person must see where a link goes first.
  */
 
 /** Actions the user can trigger via the in-Plannotator callback buttons. */
@@ -23,18 +25,24 @@ export interface ToastSuccess {
   readonly type: 'success';
   readonly message: string;
   /**
-   * Where the bot wants the person to go after the decision landed (the
-   * issue or work item the link came from). Read from `return_url` in the
-   * callback's 2xx JSON answer; only http: and https: are kept. Absent when
-   * the answer names none.
+   * A link back to where the bot wants the person to go after the decision
+   * landed (the issue or work item the link came from), for the done screen.
+   * Read from `return_url` in the callback's 2xx JSON answer and checked by
+   * `parseReturnLink`. Absent when the answer names none or a bad one.
    */
-  readonly returnUrl?: string;
+  readonly returnLink?: ReturnLink;
 }
 export interface ToastError   { readonly type: 'error';   readonly message: string }
 export type ToastPayload = ToastSuccess | ToastError | null;
 
-/** How long the done screen shows before the page goes to `returnUrl`. */
-export const CALLBACK_RETURN_DELAY_MS = 1500;
+/** A link the done screen shows: `href` is what the browser opens, `label` names its host. */
+export interface ReturnLink {
+  readonly href: string;
+  readonly label: string;
+}
+
+/** The longest `return_url` the done screen links to. */
+export const RETURN_URL_MAX_LENGTH = 2048;
 
 /**
  * Parse callback configuration from URL search params.
@@ -76,11 +84,34 @@ export function getCallbackConfig(
 }
 
 /**
- * Read an optional `return_url` from a callback's 2xx answer. Any other
- * answer (empty, not JSON, no string field, a scheme other than http: or
- * https:) gives undefined, so the decision still counts as sent.
+ * Check a bot's `return_url` and build the done screen's link from it.
+ *
+ * Kept: a string of at most `RETURN_URL_MAX_LENGTH` characters that parses as
+ * an https: URL with no user name or password. Anything else gives undefined.
+ * The link goes to the parsed `href` and its label names the parsed
+ * `hostname`, so the label is the host the browser will open (an
+ * internationalized name shows in its xn-- form, so a look-alike shows).
  */
-async function readReturnUrl(res: Response): Promise<string | undefined> {
+export function parseReturnLink(raw: unknown): ReturnLink | undefined {
+  if (typeof raw !== "string" || raw === "" || raw.length > RETURN_URL_MAX_LENGTH) return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.hostname === "") {
+    return undefined;
+  }
+  return { href: url.href, label: `Back to ${url.hostname}` };
+}
+
+/**
+ * Read an optional `return_url` from a callback's 2xx answer. Any other
+ * answer (empty, not JSON, no field, a value `parseReturnLink` refuses)
+ * gives undefined, so the decision still counts as sent.
+ */
+async function readReturnLink(res: Response): Promise<ReturnLink | undefined> {
   let body: unknown;
   try {
     body = await res.json();
@@ -88,14 +119,7 @@ async function readReturnUrl(res: Response): Promise<string | undefined> {
     return undefined;
   }
   if (!body || typeof body !== "object") return undefined;
-  const raw = (body as { return_url?: unknown }).return_url;
-  if (typeof raw !== "string" || raw === "") return undefined;
-  try {
-    const { protocol } = new URL(raw);
-    return protocol === "https:" || protocol === "http:" ? raw : undefined;
-  } catch {
-    return undefined;
-  }
+  return parseReturnLink((body as { return_url?: unknown }).return_url);
 }
 
 /**
@@ -130,9 +154,9 @@ export async function executeCallback(
           : "Callback failed.",
       };
     }
-    const returnUrl = await readReturnUrl(res);
-    return returnUrl
-      ? { type: "success", message: successMsg, returnUrl }
+    const returnLink = await readReturnLink(res);
+    return returnLink
+      ? { type: "success", message: successMsg, returnLink }
       : { type: "success", message: successMsg };
   } catch {
     return { type: "error", message: "Callback failed." };

@@ -378,7 +378,7 @@ type ShareableAnnotation =
 
 Known limitation: share links intentionally do not carry HTML element anchors or additional multi-select targets. Restore on the raw-HTML surface is text-search based; this is the contract asserted by `sharing.multiTarget.test.ts`.
 
-**Bot callbacks** (`packages/ui/utils/callback.ts`). A share link with `cb=<url>&ct=<token>` (query or hash) shows Approve and Send Feedback; a click POSTs `{ action, token, annotated_url }` to `cb`. A 2xx answer may carry `{ "return_url": "<http(s) url>" }`: the done screen shows for `CALLBACK_RETURN_DELAY_MS` (1.5 s), then the tab goes there (the issue the link came from). Another scheme, a body that is not JSON or no field leaves the page on the done screen, as before. Tests: `callback.test.ts`.
+**Bot callbacks** (`packages/ui/utils/callback.ts`). A share link with `cb=<url>&ct=<token>` (query or hash) shows Approve and Send Feedback; a click POSTs `{ action, token, annotated_url }` to `cb`. A 2xx answer may carry `{ "return_url": "<https url>" }`: the done screen ("Plan Approved" / "Feedback Sent") shows it as one link the person clicks, "Back to <hostname>", in the same tab (`CompletionOverlay` `links` with `sameTab`). The page never moves by itself: anyone can build a share link with their own bot address. `parseReturnLink` keeps only https:, no user name or password, at most `RETURN_URL_MAX_LENGTH` (2048) characters; the label is the parsed `hostname` (an internationalized name in its xn-- form) and the link the parsed `href`. Any other value, a body that is not JSON, no field or a failed send leaves the done screen as before. Tests: `callback.test.ts`, `App.callbackReturnLink.test.tsx`.
 
 ## Settings Persistence
 
