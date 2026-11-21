@@ -1052,7 +1052,7 @@ export interface SearchRequest {
   offset?: number;
   limit?: number;
   tags?: readonly string[] | null;
-  /** The project open in the list: a tie boost, never a filter. */
+  machines?: boolean;
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
   sort?: InboxSearchSort | null;
@@ -1207,7 +1207,7 @@ export function uploadFile(
 
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
-  const query = new URLSearchParams({ q: request.q, ...(selfMachineId() ? { machines: '1' } : {}) });
+  const query = new URLSearchParams({ q: request.q, ...(request.machines && selfMachineId() ? { machines: '1' } : {}) });
   for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
   for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);

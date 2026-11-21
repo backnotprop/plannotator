@@ -39,7 +39,7 @@ const row = (id: string, machine?: string) => ({
 test("in the merged view search asks the linked machines, and their rows (groups and Recent) route there", async () => {
   setSelfMachine(SELF);
   const asked = stub({ q: '', terms: [], took_ms: 0, indexing: false, threads: 3, totals: null, groups: { threads: [row(MAC_FOUND, MAC)] }, recent: [row(LOCAL), row(MAC_RECENT, MAC)], recent_searches: [], serverSession: 's' });
-  await searchInbox({ q: '' });
+  await searchInbox({ q: '', machines: true });
   expect(new URL(asked[0]!, 'http://x').searchParams.get('machines')).toBe('1');
   expect(machineOf(MAC_RECENT)).toBe(MAC);
   expect(machineOf(MAC_FOUND)).toBe(MAC);
@@ -51,6 +51,6 @@ test("in the merged view search asks the linked machines, and their rows (groups
 
 test('before the merged list named this Inbox, search is its own', async () => {
   const asked = stub({ q: 'x', terms: [], took_ms: 0, indexing: false, threads: 0, totals: null, groups: null, recent: null, serverSession: 's' });
-  await searchInbox({ q: 'x' });
+  await searchInbox({ q: 'x', machines: true });
   expect(asked[0]).not.toContain('machines=1');
 });

@@ -63,6 +63,7 @@ import {
   type RowThreadChip,
 } from './model';
 import { readSearchSort, SEARCH_SORT_OPTIONS, setSearchSort, useSearchSort } from './searchSort';
+import { keepingRow, optionKey, searchPasses, unansweredWords } from './searchMachines';
 
 /** How long typing settles before a query goes out. */
 export const SEARCH_DEBOUNCE_MS = 120;
@@ -539,6 +540,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Enter pressed while a newer query was on its way: open its first row once it lands. */
   const openWhenSettled = useRef(false);
+  const merged = useRef<{ key: string; model: SearchModel } | null>(null);
+  const carry = useRef<{ key: string; top: number | null } | null>(null);
+  const touched = useRef(false);
+  const pressing = useRef(false);
+  const heldMerge = useRef<(() => void) | null>(null);
+  const optionsRef = useRef<SearchOption[]>([]);
+  const hlRef = useRef<number | null>(null);
 
   const clearTimers = () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -558,11 +566,33 @@ export default function SearchPalette(props: SearchPaletteProps) {
       const key = JSON.stringify([query.trim(), nextFilters, nextType, nextSort]);
       // A picked type asks for its group alone, the first page ("Show all"'s request); with no words, the request is today's.
       const one = nextType && query.trim() ? { group: nextType, limit: SEARCH_PAGE } : {};
+      const passes = searchPasses(nextFilters);
+      const request = { q: query, ...nextFilters, current: currentProject, sort: nextSort, ...one };
+      merged.current = null;
       setPending(true);
       setError(false);
-      searchInbox({ q: query, ...nextFilters, current: currentProject, sort: nextSort, ...one }, controller.signal)
-        .then((model) => {
+      if (passes === 'both') {
+        searchInbox({ ...request, machines: true }, controller.signal)
+          .then((model) => {
+            if (seq !== requestSeq.current || model.indexing) return;
+            merged.current = { key, model };
+            const apply = () => {
+              if (seq !== requestSeq.current) return;
+              const at = hlRef.current;
+              const option = at === null ? undefined : optionsRef.current[at];
+              const shown = at === null ? null : document.getElementById(optionId(at));
+              carry.current = option ? { key: optionKey(option), top: shown ? shown.getBoundingClientRect().top : null } : null;
+              setAnswered((current) => (current && current.key === key ? { ...current, model: keepingRow(model, option) } : current));
+            };
+            if (pressing.current) heldMerge.current = apply;
+            else apply();
+          })
+          .catch(() => {});
+      }
+      searchInbox({ ...request, machines: passes === 'merged' }, controller.signal)
+        .then((local) => {
           if (seq !== requestSeq.current) return;
+          const model = !local.indexing && merged.current?.key === key ? merged.current.model : local;
           if (model.indexing) {
             // Skeletons and the indexing line until the index is built; ask again.
             setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
@@ -575,7 +605,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
           // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
           const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType, tagWords(nextFilters.tags, tagListRef.current)).join(', ') : '';
-          setLive(only ? `${said}. Searched only ${only}` : said);
+          setLive(model.unanswered?.length && passes === 'merged' ? unansweredWords(model.unanswered) : only ? `${said}. Searched only ${only}` : said);
         })
         .catch((cause) => {
           if (seq !== requestSeq.current || (cause instanceof DOMException && cause.name === 'AbortError')) return;
@@ -647,12 +677,46 @@ export default function SearchPalette(props: SearchPaletteProps) {
   }, [answered, expanded, actions, shapes]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
+  optionsRef.current = options;
+  hlRef.current = hl;
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
   useLayoutEffect(() => {
+    touched.current = false;
+    carry.current = null;
     setHl(options.length > 0 ? 0 : null);
     // Only a new answer resets it; expanding a group keeps the row.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionsKey]);
+  useLayoutEffect(() => {
+    const held = carry.current;
+    carry.current = null;
+    if (!held) return;
+    const at = options.findIndex((option) => optionKey(option) === held.key);
+    if (at < 0) return;
+    const row = document.getElementById(optionId(at));
+    const list = listRef.current;
+    if (touched.current && held.top !== null && row && list) list.scrollTop += row.getBoundingClientRect().top - held.top;
+    setHl(at);
+    // optionId is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options]);
+  useEffect(() => {
+    const release = () => {
+      if (!pressing.current) return;
+      pressing.current = false;
+      setTimeout(() => {
+        const apply = heldMerge.current;
+        heldMerge.current = null;
+        apply?.();
+      }, 0);
+    };
+    document.addEventListener('pointerup', release, true);
+    document.addEventListener('pointercancel', release, true);
+    return () => {
+      document.removeEventListener('pointerup', release, true);
+      document.removeEventListener('pointercancel', release, true);
+    };
+  }, []);
   useEffect(() => {
     if (!openWhenSettled.current || pending || !answered || answered.model.indexing) return;
     openWhenSettled.current = false;
@@ -690,7 +754,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
-      const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE });
+      const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE, machines: searchPasses(filters) !== 'local' });
       // A message that came in since the last page moves the next one down: a row already shown is not shown twice.
       const shown = new Set((already ?? []).map((row) => `${row.type}-${row.id}`));
       const more = (model.groups?.[option.group] ?? []).filter((row) => !shown.has(`${row.type}-${row.id}`));
@@ -765,6 +829,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       event.preventDefault();
       if (options.length === 0) return;
       const down = event.key === 'ArrowDown';
+      touched.current = true;
       setHl((current) => (current === null ? (down ? 0 : options.length - 1) : (current + (down ? 1 : -1) + options.length) % options.length));
       return;
     }
@@ -966,6 +1031,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // ── body ──
   const filtered = filtersSet(filters);
   const indexing = answered?.model.indexing === true;
+  const unanswered = answered && !indexing && !error ? (answered.model.unanswered ?? []) : [];
+  const unansweredEmpty = unanswered.length > 0 && options.length === 0 && Boolean(answered?.filters.project);
   let index = -1;
   const body = (() => {
     if (error) {
@@ -1006,9 +1073,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
       if (!answered.q && !filtered) return <div className="ib-sp-empty ib-sp-quiet">Type to search threads, messages and files.</div>;
       const scope = scopeWords(answered.filters, projectName, answered.type, tagWords(answered.filters.tags, tagList));
       return (
-        <div className="ib-sp-empty" data-search-none="">
+        <div className="ib-sp-empty" data-search-none="" data-search-unanswered={unansweredEmpty ? '' : undefined}>
           <span>
-            {answered.q ? (
+            {unansweredEmpty ? (
+              unansweredWords(unanswered)
+            ) : answered.q ? (
               <>
                 No matches for &ldquo;<bdi>{answered.q}</bdi>&rdquo;
               </>
@@ -1048,7 +1117,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
               role: 'option' as const,
               'aria-selected': selected,
               'data-option': i,
-              onPointerMove: () => hl !== i && setHl(i),
+              onPointerMove: () => {
+                touched.current = true;
+                if (hl !== i) setHl(i);
+              },
               onMouseDown: keepInputFocus,
               onClick: (event: ReactMouseEvent) => activate(i, event.metaKey || event.ctrlKey),
             };
@@ -1229,6 +1301,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
           aria-label="Search results"
           data-dim={pending && answered && !indexing ? '' : undefined}
           onScroll={measure}
+          onPointerDown={() => {
+            pressing.current = true;
+          }}
         >
           {body}
         </div>
@@ -1237,6 +1312,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
       {resultScope.length > 0 && (
         <div className="ib-sp-scope" data-search-scope="" onMouseDown={keepInputFocus}>
           <SearchedOnly scope={resultScope} onEverywhere={clearFilters} />
+        </div>
+      )}
+      {unanswered.length > 0 && !unansweredEmpty && (
+        <div className="ib-sp-scope" data-search-unanswered="" onMouseDown={keepInputFocus}>
+          {unansweredWords(unanswered)}
         </div>
       )}
       {!phone && <KeyFooter />}
