@@ -591,6 +591,24 @@ describe('a push to main', () => {
     }
   });
 
+  test('a site file the product fetches at runtime is never light, so a picker miss cannot reach people through a light push', () => {
+    for (const f of [
+      'apps/marketing/public/assets/icon-sets/v1/index.json', 'apps/marketing/public/assets/decisions/v1/banner-dark.png',
+      'apps/marketing/public/assets/hosted/personal-agents-b-light.webp', 'apps/marketing/public/assets/inbox-film-poster.jpg',
+      'apps/marketing/public/assets/ask-this-session-poster.jpg', 'apps/marketing/public/assets/tui-herdr-lite-poster.jpg',
+      'apps/marketing/src/lib/inbox-cloud-agent.md', 'apps/marketing/src/lib/inbox-muse.md', 'apps/marketing/src/pages/[inbox]/muse.md.ts',
+    ]) expect(pushLight(f), f).toBe(false);
+    // Every plannotator.ai asset or agent page the shipped code names maps to a path that is not light
+    // (a new one fails here until PUSH_RUNTIME_SITE covers it). `${MEDIA_BASE_URL}/x` is the announcement dialogs' form.
+    const lines = Bun.spawnSync(['git', 'grep', '-h', '-E', 'https://plannotator\\.ai/(assets|inbox/[A-Za-z0-9-]+\\.md)|MEDIA_BASE_URL\\}/', '--', 'packages', 'apps', ':!apps/marketing', ':!*.test.*', ':!**/test/**', ':!**/tests/**'], { cwd: repoRoot }).stdout.toString();
+    const paths = new Set<string>();
+    for (const m of lines.matchAll(/https:\/\/plannotator\.ai\/assets\/([^"'`\s$]+)/g)) paths.add(`apps/marketing/public/assets/${m[1]}`);
+    for (const m of lines.matchAll(/MEDIA_BASE_URL\}\/([^"'`\s]+)/g)) paths.add(`apps/marketing/public/assets/${m[1]}`);
+    for (const m of lines.matchAll(/https:\/\/plannotator\.ai\/inbox\/([A-Za-z0-9-]+)\.md/g)) paths.add(`apps/marketing/src/lib/inbox-${m[1]}.md`).add(`apps/marketing/src/pages/[inbox]/${m[1]}.md.ts`);
+    expect(paths.size).toBeGreaterThan(5);
+    expect([...paths].filter((p) => pushLight(p))).toEqual([]);
+  });
+
   // A throwaway main with history: base (code, site, docs), then the pushes.
   const dir = mkdtempSync(join(tmpdir(), 'ci-affected-push-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));

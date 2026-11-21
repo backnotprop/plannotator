@@ -79,7 +79,7 @@ jobs:
   # What this change runs (scripts/ci-affected.ts). Never fails on a doubt: the
   # picker answers "all" instead. It stays on ubuntu-24.04 like guides-show.
   plan:
-    name: Plan (what this PR runs)
+    name: Plan (what this change runs)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # actions: read lists main's passed Test runs, the base of a push's plan

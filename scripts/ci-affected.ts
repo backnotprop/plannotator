@@ -1031,7 +1031,24 @@ export const PASSED_MAIN_RUNS = 'actions/workflows/test.yml/runs?branch=main&eve
  */
 export const PUSH_LIGHT = ['apps/marketing/**', 'docs/**', 'adr/**', '.github/assets/**', '*.md', 'LICENSE-*'];
 
-export const pushLight = (path: string) => nativeAppFile(path) || PUSH_LIGHT.some((g) => match(g, path));
+/**
+ * Site files the product reads from plannotator.ai at runtime, so a change
+ * there reaches people the moment the site deploys, whatever the picker
+ * missed: never light. The Inbox's icon sets (INBOX_ICON_SETS_POINTER_DEFAULT),
+ * the decision post's banner (DECISION_POST_BANNER), the hand-uploaded hosted
+ * files (PERSONAL_AGENTS_BANNER_BASE), the announcement dialogs' footage and
+ * posters (MEDIA_BASE_URL), and the pages a cloud agent is told to follow
+ * (INBOX_CLOUD_SETUP_PAGE, INBOX_CLOUD_MUSE_PAGE) with their sources.
+ */
+export const PUSH_RUNTIME_SITE: RegExp[] = [
+  /^apps\/marketing\/public\/assets\/(icon-sets|decisions|hosted)\//,
+  /^apps\/marketing\/public\/assets\/(ask-this-session|inbox-film|tui-herdr)[^/]*$/,
+  /^apps\/marketing\/src\/lib\/inbox-(cloud-agent|muse)\.md$/,
+  /^apps\/marketing\/src\/pages\/\[inbox\]\//,
+];
+
+export const pushLight = (path: string) =>
+  nativeAppFile(path) || (PUSH_LIGHT.some((g) => match(g, path)) && !PUSH_RUNTIME_SITE.some((r) => r.test(path)));
 
 const SHA = /^[0-9a-f]{40}$/;
 
