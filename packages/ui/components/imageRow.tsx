@@ -14,7 +14,17 @@
  * the images included), so a comment's stored position is unchanged; only its
  * layout classes and `data-image-row="<count>"` are added. A host can style on
  * that attribute.
+ *
+ * A host that sizes the pictures in a document itself turns this off with
+ * `<ImageRowsContext.Provider value={false}>` around its renderer: no row, no
+ * cap, no attribute; its images draw exactly as before. The Plannotator Inbox
+ * does this for message bodies, whose pictures it fits itself
+ * (`.ib-body img[data-ib-fit]`).
  */
+import { createContext } from 'react';
+
+/** False: images alone in a paragraph draw as they always did (the host sizes them). Default true. */
+export const ImageRowsContext = createContext(true);
 
 const IMAGE = /!\[[^\]]*\]\([^)]+\)/;
 const LINKED_IMAGE = new RegExp(`\\[${IMAGE.source}\\]\\([^)]+\\)`);
@@ -43,9 +53,9 @@ const ROW_CLASS =
 /** One image: its own width, capped in height. */
 const SINGLE_CLASS = '[&_img]:max-h-[min(30rem,70vh)] [&_img]:w-auto [&_img]:object-contain';
 
-/** Classes and attributes for the element holding `text`; empty when it is not images only. */
-export function imageRowProps(text: string): { className: string; 'data-image-row'?: number } {
-  const count = imageOnlyCount(text);
+/** Classes and attributes for the element holding `text`; empty when it is not images only, or rows are off (ImageRowsContext). */
+export function imageRowProps(text: string, enabled = true): { className: string; 'data-image-row'?: number } {
+  const count = enabled ? imageOnlyCount(text) : 0;
   if (count === 0) return { className: '' };
   return { className: count > 1 ? ROW_CLASS : SINGLE_CLASS, 'data-image-row': count };
 }

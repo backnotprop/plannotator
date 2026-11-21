@@ -389,3 +389,16 @@ test.skipIf(!hasDom)('two copies of one raw clip both stay the same players acro
   expect([...host!.querySelectorAll('video[data-inline-media]')]).toEqual(videos);
   expect(videos[0]!.getAttribute('aria-label')).toBe('Renamed');
 });
+
+test.skipIf(!hasDom)("ui's image rows stay out of a message body: its pictures keep the Inbox's own fit, one alone and several on a line", async () => {
+  const body = ['![window](shots/window.png)', '', '![a](shots/window.png) ![b](shots/icon.png) ![c](shots/page.png)', '', '- ![d](shots/window.png) ![e](shots/icon.png)'].join('\n');
+  await render(body, [WINDOW_SHOT, ICON_SHOT, PAGE_SHOT], []);
+  const bodyEl = host!.querySelector('.ib-body')!;
+  // ui would mark each of these paragraphs as a row (data-image-row) and cap or size its images with classes
+  // that fight `.ib-body img[data-ib-fit]`: the 70vh cap would become 30rem, a row would squeeze each picture to 12rem.
+  expect(bodyEl.querySelectorAll('[data-image-row]')).toHaveLength(0);
+  const imageClasses = Array.from(bodyEl.querySelectorAll('*')).flatMap((el) => [...el.classList].filter((cls) => cls.startsWith('[&_img]')));
+  expect(imageClasses).toEqual([]);
+  // The Inbox's own fit is on every picture with a record.
+  for (const alt of ['window', 'a', 'b', 'c', 'd', 'e']) expect(host!.querySelector(`img[alt="${alt}"]`)!.hasAttribute('data-ib-fit')).toBe(true);
+});

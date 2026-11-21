@@ -2,7 +2,8 @@ import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml, sanitizedHtmlDrawsNothing } from "../../utils/sanitizeHtml";
-import { DROPPED_HTML_BLOCK_TAGS, HTML_BLOCK_OPEN_RE } from "@plannotator/core/markdown-structure";
+import { DROPPED_HTML_BLOCK_TAGS, HTML_BLOCK_OPEN_RE, isHtmlTagSpelling } from "@plannotator/core/markdown-structure";
+import { holdsDroppedHtmlTag } from "../../utils/inlineHtmlTags";
 import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
@@ -267,14 +268,20 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     () => sanitizeBlockHtml(block.content),
     [block.content],
   );
-  const drawsNothing = React.useMemo(() => sanitizedHtmlDrawsNothing(sanitized), [sanitized]);
+  // Hidden only when the sanitizer emptied it by dropping such a tag (`<iframe>`, `<div><script>…</div>`); a
+  // spacer (`<p>&nbsp;</p>`, `<br>`) or an empty `<div></div>` draws as it always did.
+  const drawsNothing = React.useMemo(
+    () => holdsDroppedHtmlTag(block.content) && sanitizedHtmlDrawsNothing(sanitized),
+    [block.content, sanitized],
+  );
   // Opened by a tag the sanitizer drops (`<iframe>`, `<script>`): before these
   // were HTML blocks the line printed as a paragraph of text, so the page has
   // one `<p>` fewer than when such a comment was saved (see
-  // useAnnotationHighlighter's restore, which checks for this mark).
+  // useAnnotationHighlighter's restore, which checks for this mark). Only
+  // these are marked: a block that was HTML before (`<div>…</div>`) moved nothing.
   const opensDropped = React.useMemo(() => {
     const tag = HTML_BLOCK_OPEN_RE.exec(block.content.trim())?.[1];
-    return tag !== undefined && DROPPED_HTML_BLOCK_TAGS.has(tag.toLowerCase());
+    return tag !== undefined && DROPPED_HTML_BLOCK_TAGS.has(tag.toLowerCase()) && isHtmlTagSpelling(tag);
   }, [block.content]);
   useEffect(() => {
     if (!ref.current || drawsNothing) return;
@@ -303,7 +310,7 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     // Nothing the sanitizer kept is drawn (an embed, a script, a form with no
     // words): no gap in the page. The block keeps its id, so the document's
     // block order is the same.
-    return <div hidden data-block-id={block.id} data-block-type="html" data-html-dropped="" {...sourceLineAttrs(block)} />;
+    return <div hidden data-block-id={block.id} data-block-type="html" data-html-dropped={opensDropped ? "" : undefined} {...sourceLineAttrs(block)} />;
   }
   return (
     <div className="relative my-4" {...sourceLineAttrs(block)}>

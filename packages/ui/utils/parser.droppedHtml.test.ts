@@ -126,6 +126,22 @@ describe('raw HTML inside a line', () => {
     expect(matchInlineHtml('<KBD>K</KBD>')).toMatchObject({ kind: 'element', tag: 'kbd' });
   });
 
+  test('a close tag shown in a code span closes nothing; same-name tags nest', () => {
+    // The `</script>` is in backticks: the opener is a bare mention, the words after it stay.
+    expect(matchInlineHtml('<script> block: a `</script>` in it ends the script.')).toBeNull();
+    expect(matchInlineHtml('<kbd> for keys, e.g. `<kbd>Ctrl</kbd>`')).toBeNull();
+    expect(matchInlineHtml('<kbd><kbd>Ctrl</kbd>+<kbd>C</kbd></kbd> to copy')).toEqual({
+      kind: 'element',
+      tag: 'kbd',
+      inner: '<kbd>Ctrl</kbd>+<kbd>C</kbd>',
+      length: 39,
+    });
+    // A close in a later sentence, past a code span: not looked for there; the tag stays text.
+    expect(matchInlineHtml('<sub>see the note. Run `make` first, then the rest.</sub> after')).toBeNull();
+    // Backticks that open no code span (no closing run) are text, and do not stop the search.
+    expect(matchInlineHtml('<kbd>`</kbd> is the backtick key')).toMatchObject({ kind: 'element', tag: 'kbd', inner: '`' });
+  });
+
   test('a bare mention, a look-alike word, a close tag alone and an autolink stay text', () => {
     expect(matchInlineHtml('<iframe> with a <video> element')).toBeNull();
     expect(matchInlineHtml('<scriptless> word')).toBeNull();

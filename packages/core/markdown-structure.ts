@@ -83,7 +83,8 @@ export const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
  * nothing, where it used to print its own tag as text. `pre` is drawn, so it is
  * an ordinary block tag (HTML_BLOCK_TAGS).
  *
- * Its extent never crosses a blank line (CommonMark type 7), so an opener that
+ * It opens a block only on the first line or after a blank line, never in the
+ * middle of a paragraph. Its extent never crosses a blank line (CommonMark type 7), so an opener that
  * is never closed cannot hide the rest of a document: the block runs to the
  * line holding its close tag when that comes before the next blank line, else
  * it is only the opening tag's own lines, and only when nothing but the tag is
@@ -355,8 +356,11 @@ export function htmlBlockEndAt(lines: string[], i: number, closeCache: Map<strin
   // An opener the sanitizer drops (`<iframe …>`, `<script>`): bounded by the next blank line.
   // Spelled as HTML spells it (`iframe` or `IFRAME`): a capitalised `<Button>` or
   // `<Form>` is a component in MDX or JSX, and stays what it was.
+  // It opens a block only where a paragraph cannot be running (the first line, or after a blank line): a line
+  // inside a paragraph stays in it, as it always did, so the paragraph keeps its block id and its `<p>`; the
+  // tag is dropped there inline.
   if (!trimmed.startsWith('</') && DROPPED_HTML_BLOCK_TAGS.has(tagName) && isHtmlTagSpelling(htmlTagMatch[1])) {
-    return droppedHtmlBlockEnd(lines, i, tagName);
+    return i === 0 || lines[i - 1].trim() === '' ? droppedHtmlBlockEnd(lines, i, tagName) : -1;
   }
   if (!HTML_BLOCK_TAGS.has(tagName)) return -1;
   let end = i;

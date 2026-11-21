@@ -20,7 +20,8 @@
  *   capitalised component name (`<Button>`, `<Form>`) as MDX and JSX write it.
  *
  * The close tag is looked for within MAX_ELEMENT_CHARS, so a long run of
- * unclosed tags stays linear.
+ * unclosed tags stays bounded; same-name tags nest, and the search stops at a
+ * code span, so a close tag shown in backticks never closes anything.
  */
 import { DROPPED_HTML_BLOCK_TAGS, isHtmlTagSpelling } from '@plannotator/core/markdown-structure';
 
@@ -49,9 +50,51 @@ export type InlineHtmlMatch =
   /** Draw nothing for these characters. */
   | { kind: 'drop'; length: number };
 
+/** Where a code span starting at `at` (a run of backticks) ends, or -1 when the run has no closing run (it is text). */
+function codeSpanEnd(text: string, at: number, limit: number): number {
+  let n = 0;
+  while (text[at + n] === '`') n++;
+  for (let i = at + n; i < limit; ) {
+    if (text[i] !== '`') {
+      i++;
+      continue;
+    }
+    let m = 0;
+    while (text[i + m] === '`') m++;
+    if (m === n) return i + m;
+    i += m;
+  }
+  return -1;
+}
+
+/**
+ * The close tag that ends the `name` element opened just before `from`: same-name tags nest (each opener
+ * needs its own close), and the search never enters or passes a code span (`</script>` written in backticks
+ * is shown, not markup). Null when there is none within MAX_ELEMENT_CHARS.
+ */
 function closeAfter(text: string, from: number, name: string): { at: number; length: number } | null {
-  const close = new RegExp(`</${name}\\s*>`, 'i').exec(text.slice(from, from + MAX_ELEMENT_CHARS));
-  return close ? { at: from + close.index, length: close[0].length } : null;
+  const limit = Math.min(text.length, from + MAX_ELEMENT_CHARS);
+  const tagRe = new RegExp(`^<(/?)${name}(?=[\\s/>])(?:\\s(?:[^>"']|"[^"]*"|'[^']*')*)?(/?)>`, 'i');
+  let depth = 1;
+  for (let i = from; i < limit; i++) {
+    const ch = text[i];
+    if (ch === '`') {
+      if (codeSpanEnd(text, i, limit) !== -1) return null;
+      while (text[i + 1] === '`') i++;
+      continue;
+    }
+    if (ch !== '<') continue;
+    const tag = tagRe.exec(text.slice(i, Math.min(limit, i + 512)));
+    if (!tag) continue;
+    if (tag[1]) {
+      depth--;
+      if (depth === 0) return { at: i, length: tag[0].length };
+    } else if (!tag[2]) {
+      depth++;
+    }
+    i += tag[0].length - 1;
+  }
+  return null;
 }
 
 /** What the raw HTML at the start of `text` draws as, or null when it is text. */
@@ -78,4 +121,37 @@ export function matchInlineHtml(text: string): InlineHtmlMatch | null {
   }
   // No close: markup only when it is written as markup (attributes, or `/>`).
   return attributes!.trim() || selfClosing ? { kind: 'drop', length: whole!.length } : null;
+}
+
+const TAG_OPEN_RE = /<([a-zA-Z][a-zA-Z0-9]*)(?=[\s/>])/g;
+
+/** Whether `source` holds a tag the sanitizer drops (`<iframe`, `<SCRIPT`), spelled as HTML spells it. */
+export function holdsDroppedHtmlTag(source: string): boolean {
+  for (const match of source.matchAll(TAG_OPEN_RE)) {
+    if (DROPPED_HTML_BLOCK_TAGS.has(match[1]!.toLowerCase()) && isHtmlTagSpelling(match[1]!)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a paragraph's text is nothing but raw HTML the sanitizer drops (and white space): such a
+ * paragraph is drawn hidden, so it leaves no gap, and it stays a `<p>` so the page's paragraphs keep
+ * their numbers (a comment saved when it printed as text still finds its place).
+ */
+export function inlineHtmlDrawsNothing(text: string): boolean {
+  let i = 0;
+  let dropped = false;
+  while (i < text.length) {
+    if (/\s/.test(text[i]!)) {
+      i++;
+      continue;
+    }
+    const match = text[i] === '<' ? matchInlineHtml(text.slice(i)) : null;
+    if (!match) return false;
+    if (match.kind === 'element') return false;
+    if (match.kind === 'unwrap' && !inlineHtmlDrawsNothing(match.inner) && match.inner.trim() !== '') return false;
+    dropped = true;
+    i += match.length;
+  }
+  return dropped;
 }

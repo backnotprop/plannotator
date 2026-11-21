@@ -38,7 +38,9 @@ function mount(element: React.ReactElement): void {
 }
 
 const html = () => document.documentElement;
-const saved = hasDom ? { className: html().className, style: html().getAttribute('style'), body: document.body.getAttribute('style') } : null;
+const saved = hasDom
+  ? { className: html().className, style: html().getAttribute('style'), body: document.body.getAttribute('style'), theme: html().getAttribute('data-theme'), colorMode: html().getAttribute('data-color-mode') }
+  : null;
 
 afterEach(() => {
   if (root) {
@@ -53,6 +55,10 @@ afterEach(() => {
   else html().setAttribute('style', saved.style);
   if (saved.body === null) document.body.removeAttribute('style');
   else document.body.setAttribute('style', saved.body);
+  for (const [name, value] of [['data-theme', saved.theme], ['data-color-mode', saved.colorMode]] as const) {
+    if (value === null) html().removeAttribute(name);
+    else html().setAttribute(name, value);
+  }
 });
 
 const last = () => seen[seen.length - 1];
@@ -85,6 +91,22 @@ describe.if(hasDom)('fences outside a ThemeProvider follow the page', () => {
       html().classList.add('dark');
     });
     expect(last()).toBe(FENCE_SYNTAX_THEME.dark);
+  });
+
+  test('a host that switches its theme with data-theme or data-color-mode on <html> is followed live', async () => {
+    html().setAttribute('data-theme', 'dark');
+    mount(<Probe />);
+    expect(last()).toBe(FENCE_SYNTAX_THEME.dark);
+    await page(() => html().setAttribute('data-theme', 'light'));
+    expect(last()).toBe(FENCE_SYNTAX_THEME.light);
+    await page(() => {
+      html().removeAttribute('data-theme');
+      html().setAttribute('data-color-mode', 'dark');
+    });
+    expect(last()).toBe(FENCE_SYNTAX_THEME.dark);
+    // A value that names no mode (GitHub's `auto`) says nothing: the white page is light.
+    await page(() => html().setAttribute('data-color-mode', 'auto'));
+    expect(last()).toBe(FENCE_SYNTAX_THEME.light);
   });
 
   test('color-scheme on <html> and the page\'s own background decide when there is no class', async () => {

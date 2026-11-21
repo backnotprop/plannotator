@@ -1,6 +1,6 @@
 import React from 'react';
 import { ListMarker } from './ListMarker';
-import { imageRowProps } from './imageRow';
+import { imageRowProps, ImageRowsContext } from './imageRow';
 
 /**
  * Shared list-item body: the marker plus the item's text content. Used by the
@@ -37,6 +37,7 @@ export const ListItemBody: React.FC<ListItemBodyProps> = ({
   renderInline,
 }) => {
   const paragraphs = content.split(/\n\n+/);
+  const imageRows = React.useContext(ImageRowsContext);
   return (
     <>
       <ListMarker
@@ -48,12 +49,12 @@ export const ListItemBody: React.FC<ListItemBodyProps> = ({
         onToggle={onToggle}
       />
       {paragraphs.length === 1 ? (
-        <ImageAwareSpan className={textClassName} text={content}>{renderInline(content)}</ImageAwareSpan>
+        <ImageAwareSpan className={textClassName} text={content} enabled={imageRows}>{renderInline(content)}</ImageAwareSpan>
       ) : (
         <div className={textClassName}>
           {paragraphs.map((para, i) => {
             // Images only: one row of equal height (imageRow.tsx).
-            const imageRow = imageRowProps(para);
+            const imageRow = imageRowProps(para, imageRows);
             return (
               <p key={i} className={`${i > 0 ? 'mt-3' : ''} ${imageRow.className}`.trim()} data-image-row={imageRow['data-image-row']}>
                 {renderInline(para)}
@@ -67,8 +68,8 @@ export const ListItemBody: React.FC<ListItemBodyProps> = ({
 };
 
 /** The item's one paragraph; images only draw as one row of equal height (imageRow.tsx). */
-function ImageAwareSpan({ className, text, children }: { className: string; text: string; children: React.ReactNode }) {
-  const imageRow = imageRowProps(text);
+function ImageAwareSpan({ className, text, enabled, children }: { className: string; text: string; enabled: boolean; children: React.ReactNode }) {
+  const imageRow = imageRowProps(text, enabled);
   return (
     <span className={imageRow.className ? `${className} ${imageRow.className}` : className} data-image-row={imageRow['data-image-row']}>
       {children}

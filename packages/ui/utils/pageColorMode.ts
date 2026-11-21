@@ -6,7 +6,9 @@
  *
  * What it reads, first answer wins:
  * 1. `<html class="light">` (what ThemeProvider and theme.css use), or a
- *    `dark` class; a `theme-*` class without `light` is theme.css's dark half.
+ *    `dark` class; then `data-theme` or `data-color-mode` on `<html>` when it
+ *    is `light` or `dark`; then a `theme-*` class without `light`, which is
+ *    theme.css's dark half.
  * 2. `color-scheme` on `<html>` when it names one scheme (`light`, `dark`).
  * 3. The page's own background (`<body>`, then `<html>`), when it paints one:
  *    light when its relative luminance is over 0.4.
@@ -14,7 +16,8 @@
  * 5. Light: a page that says nothing is a white page.
  *
  * The answer is kept and read again when `<html>` or `<body>` change their
- * class or style, or the system scheme changes.
+ * class, style, `data-theme` or `data-color-mode`, or the system scheme
+ * changes.
  */
 
 export type PageColorMode = 'light' | 'dark';
@@ -50,12 +53,20 @@ function schemeOf(value: string | undefined | null): PageColorMode | 'both' | nu
   return words[0] as PageColorMode;
 }
 
+/** Attributes a host may switch its theme with (`<html data-theme="dark">`, GitHub's `data-color-mode`). */
+const MODE_ATTRIBUTES = ['data-theme', 'data-color-mode'] as const;
+const WATCHED = ['class', 'style', ...MODE_ATTRIBUTES];
+
 /** The page's mode right now (see the module doc for the order). */
 export function readPageColorMode(doc: Document | undefined = typeof document === 'undefined' ? undefined : document): PageColorMode {
   if (!doc) return 'light';
   const html = doc.documentElement;
   if (html.classList.contains('light')) return 'light';
   if (html.classList.contains('dark')) return 'dark';
+  for (const attribute of MODE_ATTRIBUTES) {
+    const value = html.getAttribute(attribute)?.trim().toLowerCase();
+    if (value === 'light' || value === 'dark') return value;
+  }
   if (Array.from(html.classList).some((cls) => cls.startsWith('theme-'))) return 'dark';
   const view = doc.defaultView;
   const computed = (el: Element) => (view && typeof view.getComputedStyle === 'function' ? view.getComputedStyle(el) : null);
@@ -87,8 +98,8 @@ function start(): void {
   if (typeof document === 'undefined') return;
   const observer = typeof MutationObserver === 'function' ? new MutationObserver(refresh) : null;
   const watch = () => {
-    observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
-    if (document.body) observer?.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+    observer?.observe(document.documentElement, { attributes: true, attributeFilter: WATCHED });
+    if (document.body) observer?.observe(document.body, { attributes: true, attributeFilter: WATCHED });
   };
   watch();
   const media = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;

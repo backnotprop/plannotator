@@ -195,6 +195,38 @@ describe.if(hasDom)('raw HTML the sanitizer drops draws nothing, never its sourc
     });
   }
 
+  test('an iframe line inside a paragraph is dropped there: the paragraph stays one block, as it always was', async () => {
+    const markdown = `Intro.\n<iframe src="${URL_BASE}/e" width="100%" height="320"></iframe>\nCaption.\n\nNext.`;
+    // One paragraph, then another: the same blocks (and ids) as when the line printed as text.
+    expect(parseMarkdownToBlocks(markdown).map((b) => `${b.id}:${b.type}`)).toEqual(['block-0:paragraph', 'block-1:paragraph']);
+    const { article } = await mountViewer(markdown);
+    expect(droppedIn(article)).toEqual([]);
+    expect(visibleText(article)).toBe('Intro. Caption. Next.');
+    expect(article.querySelectorAll('p[data-block-id]')).toHaveLength(2);
+  });
+
+  test('a paragraph of nothing but dropped HTML (a script right under a heading) is a hidden paragraph: no gap, the same count of paragraphs', async () => {
+    const { article } = await mountViewer('## Setup\n<script>track()</script>\n\nRun it.');
+    const paragraphs = Array.from(article.querySelectorAll<HTMLElement>('p[data-block-id]'));
+    expect(paragraphs.map((p) => p.hidden)).toEqual([true, false]);
+    expect(visibleText(article)).toBe('Setup Run it.');
+  });
+
+  test('spacers and empty blocks with no dropped tag draw as they always did; only blocks that printed text before are marked', async () => {
+    const { article } = await mountViewer(['<p>&nbsp;</p>', '', '<p><br></p>', '', '<div><br/></div>', '', '<div></div>', '', `<div><iframe src="${URL_BASE}/x"></iframe></div>`, '', `<iframe src="${URL_BASE}/y"></iframe>`].join('\n'));
+    const html = Array.from(article.querySelectorAll<HTMLElement>('[data-block-type="html"]'));
+    expect(html.map((el) => [el.hidden, el.hasAttribute('data-html-dropped')])).toEqual([
+      [false, false],
+      [false, false],
+      [false, false],
+      [false, false],
+      // Emptied by dropping its iframe: hidden, but it was an HTML block before too (no paragraph moved).
+      [true, false],
+      // A line that used to print as a paragraph of text.
+      [true, true],
+    ]);
+  });
+
   test('mid-sentence: the tag goes, the sentence stays; a prose mention stays as written', async () => {
     const { article } = await mountViewer(
       [
@@ -259,6 +291,29 @@ describe.if(hasDom)('raw HTML the sanitizer drops draws nothing, never its sourc
     expect(article.querySelector('mark')).toBeNull();
     expect(article.querySelector('[data-html-mark] strong')?.textContent).toBe('marked');
     expect(visibleText(article)).toBe('H2O, x2, Ctrl, marked');
+  });
+
+  test('a close tag in a code span closes nothing, nested tags nest, a close past a code span is not looked for', async () => {
+    const { article } = await mountViewer(
+      [
+        'Never put user data in a <script> block: a `</script>` in it ends the script.',
+        '',
+        'Use <kbd> for keys, e.g. `<kbd>Ctrl</kbd>`',
+        '',
+        'Copy with <kbd><kbd>Ctrl</kbd>+<kbd>C</kbd></kbd> now.',
+        '',
+        'Water is H<sub>2 see the note. Run `make` first, then the rest.</sub> after.',
+      ].join('\n'),
+    );
+    const text = visibleText(article);
+    expect(text).toContain('Never put user data in a <script> block: a </script> in it ends the script.');
+    expect(text).toContain('Use <kbd> for keys, e.g. <kbd>Ctrl</kbd>');
+    expect(Array.from(article.querySelectorAll('p code'), (code) => code.textContent)).toEqual(['</script>', '<kbd>Ctrl</kbd>', 'make']);
+    // Only the nested shortcut is drawn as keys: an outer box around two inner ones.
+    const outer = Array.from(article.querySelectorAll('kbd')).filter((kbd) => !kbd.parentElement?.closest('kbd'));
+    expect(outer.map((kbd) => [kbd.textContent, kbd.querySelectorAll('kbd').length])).toEqual([['Ctrl+C', 2]]);
+    expect(article.querySelector('sub')).toBeNull();
+    expect(text).toContain('Water is H<sub>2 see the note. Run make first, then the rest.</sub> after.');
   });
 
   test('<details> keeps working, a tag in a code span or a fence stays as written', async () => {
