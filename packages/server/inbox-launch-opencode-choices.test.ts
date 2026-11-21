@@ -4,12 +4,13 @@
  * OpenCode's default instead. Against a small fake `opencode2` (no real OpenCode, no network, no Inbox started).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { launchSpawnEnv } from "./inbox-launch-env";
 import type { LaunchHostContext } from "./inbox-launch-host";
-import { createOpenCodeLaunchHost, openCodeErrorText, openCodeTurnErrorNote } from "./inbox-launch-opencode";
+import { createOpenCodeLaunchHost, openCodeErrorText, openCodeFailedTurnText, openCodeTurnErrorNote } from "./inbox-launch-opencode";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -27,6 +28,8 @@ const path = require("path");
 const args = process.argv.slice(2);
 if (args[0] === "--version") { process.stdout.write("opencode v2.2.7\n"); process.exit(0); }
 if (args[0] === "--standalone" && args[1] === "api" && args[2] === "GET" && args[3] === "/api/model") {
+  fs.appendFileSync(path.join(__dirname, "reads.log"), "model\n");
+  fs.writeFileSync(path.join(__dirname, "env-names.json"), JSON.stringify(Object.keys(process.env)));
   const listed = JSON.parse(fs.readFileSync(path.join(__dirname, "state.json"), "utf8")).models.slice();
   const extra = process.env.OPENCODE_CONFIG;
   if (extra && fs.existsSync(extra)) {
@@ -46,7 +49,7 @@ if (args[0] === "--standalone" && args[1] === "api" && args[2] === "GET" && args
 process.exit(1);
 `;
 
-function setup(models: { providerID: string; id: string }[], options: { loginEnv?: Record<string, string> } = {}) {
+function setup(models: { providerID: string; id: string }[], options: { loginEnv?: Record<string, string>; ownEnv?: Record<string, string>; noShellRead?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-opencode-choices-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -62,17 +65,22 @@ function setup(models: { providerID: string; id: string }[], options: { loginEnv
   writeFileSync(join(bin, "opencode2"), `#!/bin/sh\nexec "${process.execPath}" "${join(bin, "fake-opencode.cjs")}" "$@"\n`);
   chmodSync(join(bin, "opencode2"), 0o755);
   // The Inbox's own env (a desktop or service start: no shell rc), and the person's login shell's.
-  const own = { HOME: home, PATH: `${bin}:/usr/bin:/bin` };
+  const own = { HOME: home, PATH: `${bin}:/usr/bin:/bin`, ...(options.ownEnv ?? {}) };
   const login = { ...own, ...(options.loginEnv ?? {}) };
+  // `noShellRead`: no login read finished yet (ctx.shell() is null), so the list read asks for one.
+  let loginReads = 0;
   const ctx = {
     dataDir,
     homeDir: home,
     platform: process.platform,
     selfCommand: ["plannotator"],
     ownEnv: () => own,
-    environment: async () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: own }),
-    shell: () => login,
-    loginEnv: async () => login,
+    environment: async () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: launchSpawnEnv(own) }),
+    shell: () => (options.noShellRead ? null : login),
+    loginEnv: async () => {
+      loginReads++;
+      return login;
+    },
     launchDir: (id: string) => join(dataDir, "launch", id),
     startLog: () => {},
     displayFolder: (p: string) => p,
@@ -81,7 +89,18 @@ function setup(models: { providerID: string; id: string }[], options: { loginEnv
   } as unknown as LaunchHostContext;
   const host = createOpenCodeLaunchHost(ctx);
   cleanup.push(() => host.close());
-  return { host, root, globalConfig, state };
+  const reads = () => (existsSync(join(bin, "reads.log")) ? readFileSync(join(bin, "reads.log"), "utf8").trim().split("\n").length : 0);
+  const envNames = () => JSON.parse(readFileSync(join(bin, "env-names.json"), "utf8")) as string[];
+  return { host, root, home, globalConfig, state, reads, envNames, loginReads: () => loginReads };
+}
+
+/** Polls until `check` holds (a list read again runs in the background), or fails after `ms`. */
+async function until(check: () => Promise<boolean>, ms = 10_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error("timed out");
+    await Bun.sleep(20);
+  }
 }
 
 const zen = [
@@ -112,7 +131,28 @@ describe("OpenCode's model list reaches the picker", () => {
     utimesSync(t.globalConfig, later, later);
     t.state([...zen, local]);
     expect((await t.host.available()).ok).toBe(true);
-    expect((await t.host.choices())!.models).toContain("ollama/qwen2.5-coder:32b");
+    // The old list is answered at once while the new one is read, then the new one.
+    expect((await t.host.choices())!.models).toEqual(["opencode/big-pickle", "opencode/flint-40b-free"]);
+    await until(async () => (await t.host.choices())!.models.includes("ollama/qwen2.5-coder:32b"));
+    expect(t.reads()).toBe(2);
+    // Nothing changed since: no read again.
+    await t.host.choices();
+    expect(t.reads()).toBe(2);
+  });
+
+  test("signing in to a provider (OpenCode's auth.json changes) shows on the next read; the file is only stat'ed, never read", async () => {
+    const t = setup(zen);
+    expect((await t.host.available()).ok).toBe(true);
+    expect((await t.host.choices())!.models).toHaveLength(2);
+    const auth = join(t.home, ".local", "share", "opencode", "auth.json");
+    mkdirSync(join(t.home, ".local", "share", "opencode"), { recursive: true });
+    writeFileSync(auth, JSON.stringify({ ollama: { type: "api", key: "sk-not-real" } }));
+    // Not readable: a read of it would fail; a stat still sees it.
+    chmodSync(auth, 0o000);
+    cleanup.push(() => chmodSync(auth, 0o600));
+    t.state([...zen, local]);
+    await until(async () => (await t.host.choices())!.models.includes("ollama/qwen2.5-coder:32b"));
+    expect(t.reads()).toBe(2);
   });
 
   test("a config the person's login shell points OpenCode at (OPENCODE_CONFIG) counts, as it does for the session itself", async () => {
@@ -123,6 +163,39 @@ describe("OpenCode's model list reaches the picker", () => {
     const t = setup(zen, { loginEnv: { OPENCODE_CONFIG: file } });
     expect((await t.host.available()).ok).toBe(true);
     expect((await t.host.choices())!.models).toContain("lmstudio/qwen/qwen3-coder-30b");
+    // A login read already finished: its kept names are used, the login shell is not run again for the list.
+    expect(t.loginReads()).toBe(0);
+  });
+
+  test("with no login read yet, the list read asks for one once, reads with it, and later reads reuse it", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-opencode-config-")));
+    cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+    const file = join(root, "local-models.json");
+    writeFileSync(file, JSON.stringify({ provider: { lmstudio: { models: { "qwen/qwen3-coder-30b": {} } } } }));
+    const t = setup(zen, { loginEnv: { OPENCODE_CONFIG: file }, noShellRead: true });
+    expect((await t.host.available()).ok).toBe(true);
+    expect((await t.host.choices())!.models).toContain("lmstudio/qwen/qwen3-coder-30b");
+    writeFileSync(t.globalConfig, JSON.stringify({ plugins: ["@plannotator/opencode"], small_model: "opencode/big-pickle" }));
+    const later = new Date(Date.now() + 5_000);
+    utimesSync(t.globalConfig, later, later);
+    t.state([...zen, local]);
+    await until(async () => (await t.host.choices())!.models.includes("ollama/qwen2.5-coder:32b"));
+    expect(t.reads()).toBe(2);
+    expect(t.loginReads()).toBe(1);
+  });
+
+  test("the list read's env has no Plannotator name and no OpenCode server sign-in, from the login env or the Inbox's", async () => {
+    const t = setup(zen, {
+      ownEnv: { PLANNOTATOR_PORT: "19432", PLANNOTATOR_INBOX_TOOL: "1" },
+      loginEnv: { PLANNOTATOR_DATA_DIR: "/somewhere", PLANNOTATOR_INBOX_TOOL: "1", OPENCODE: "1", OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: "x", MY_GATEWAY_KEY: "k" },
+      noShellRead: true,
+    });
+    expect((await t.host.available()).ok).toBe(true);
+    expect(await t.host.choices()).not.toBeNull();
+    const names = t.envNames();
+    expect(names.filter((name) => name.startsWith("PLANNOTATOR_") || name.startsWith("OPENCODE_SERVER_") || name === "OPENCODE")).toEqual([]);
+    // The login env's own names reach OpenCode, as they do the session.
+    expect(names).toContain("MY_GATEWAY_KEY");
   });
 });
 
@@ -132,9 +205,29 @@ describe("a failed turn's note says what OpenCode said", () => {
     expect(openCodeErrorText({ name: "APIError", message: "Rate limited" })).toBe("Rate limited");
     expect(openCodeErrorText({ name: "UnknownError", data: {} })).toBe("UnknownError");
     expect(openCodeErrorText("connection refused")).toBe("connection refused");
-    for (const error of [{ data: { message: { deep: true } } }, {}, null, 42]) expect(openCodeErrorText(error)).toBe("");
+    expect(openCodeErrorText(500)).toBe("500");
+    expect(openCodeErrorText(false)).toBe("false");
+    for (const error of [{ data: { message: { deep: true } } }, {}, null, undefined, Number.NaN]) expect(openCodeErrorText(error)).toBe("");
     const note = openCodeTurnErrorNote(openCodeErrorText({ name: "ProviderModelNotFoundError", data: { providerID: "ollama", modelID: "qwen" } }));
     expect(note).toContain("ProviderModelNotFoundError");
     expect(note).not.toContain("[object Object]");
+  });
+
+  test("the event's error comes first, then its message", () => {
+    expect(openCodeFailedTurnText({ error: { name: "APIError", data: { message: "Bad gateway" } }, message: "turn failed" })).toBe("Bad gateway");
+    expect(openCodeFailedTurnText({ error: {}, message: "turn failed" })).toBe("turn failed");
+    expect(openCodeFailedTurnText({ message: "turn failed" })).toBe("turn failed");
+    expect(openCodeFailedTurnText({})).toBe("");
+  });
+});
+
+describe("a run's output", () => {
+  test("a character split between two chunks of output is kept whole, never U+FFFD", async () => {
+    const e = createAgentEnvironmentFor({ platform: process.platform, homeDir: tmpdir(), env: { PATH: "/usr/bin:/bin" } });
+    // "€" is E2 82 AC: the first two bytes, a pause so they arrive as their own chunk, then the last.
+    const script = "process.stdout.write(Buffer.from([0x61, 0xe2, 0x82])); setTimeout(() => process.stdout.write(Buffer.from([0xac, 0x62])), 150);";
+    const ran = await e.run([process.execPath, "-e", script], { timeoutMs: 5_000 });
+    expect(ran.exitCode).toBe(0);
+    expect(ran.stdout).toBe("a€b");
   });
 });

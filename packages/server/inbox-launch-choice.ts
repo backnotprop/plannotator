@@ -55,31 +55,46 @@ export function withinLaunchWait<T>(answer: Promise<T | null>, ms = LAUNCH_CHOIC
 }
 
 /**
- * `key` is the CLI's path and version (OpenCode adds its config and sign-in files' change times): a help read costs a
- * process, and compose asks every few seconds. `failedAgainMs`: how long a key whose read failed is not read again.
+ * `key` is the CLI's path and version (OpenCode adds its config and sign-in files' modification times): a help read
+ * costs a process, and compose asks every few seconds.
+ *
+ * Stale while read again: once a key's read succeeded, its lists are answered at once while a new key reads (in the
+ * background) and after a new key's read failed, so a key change never hides the menu or drops a pick. A new key's
+ * lists replace them only when its read succeeds. A key whose read failed is not read again for `failedAgainMs`,
+ * doubled after each failure in a row up to `failedAgainMaxMs` (default: no doubling); a success or another key starts
+ * over.
  */
-export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now, options: { failedAgainMs?: number } = {}) {
+export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>, now: () => number = Date.now, options: { failedAgainMs?: number; failedAgainMaxMs?: number } = {}) {
   const failedAgainMs = options.failedAgainMs ?? FAILED_AGAIN_MS;
+  const failedAgainMaxMs = Math.max(failedAgainMs, options.failedAgainMaxMs ?? failedAgainMs);
   let kept: { key: string; value: LaunchChoiceLists } | null = null;
-  let failed: { key: string; at: number } | null = null;
+  let failed: { key: string; at: number; times: number } | null = null;
   let reading: { key: string; answer: Promise<LaunchChoiceLists | null> } | null = null;
+  /** The key asked for last: a slower read for an older key never replaces its lists. */
+  let latest: string | null = null;
   const read = (key: string | null): Promise<LaunchChoiceLists | null> => {
     if (key === null) return Promise.resolve(null);
+    latest = key;
     if (kept?.key === key) return Promise.resolve(kept.value);
-    if (failed?.key === key && now() - failed.at < failedAgainMs) return Promise.resolve(null);
-    if (reading?.key === key) return reading.answer;
+    const stale = kept ? Promise.resolve(kept.value) : null;
+    if (failed?.key === key && now() - failed.at < Math.min(failedAgainMaxMs, failedAgainMs * 2 ** (failed.times - 1))) return stale ?? Promise.resolve(null);
+    if (reading?.key === key) return stale ?? reading.answer;
     const answer = load()
       .catch(() => null)
       .then((value) => {
-        if (value) kept = { key, value };
-        else failed = { key, at: now() };
+        if (value) {
+          if (latest === key || !kept) kept = { key, value };
+          if (failed?.key === key) failed = null;
+        } else {
+          failed = { key, at: now(), times: failed?.key === key ? failed.times + 1 : 1 };
+        }
         return value;
       })
       .finally(() => {
         if (reading?.answer === answer) reading = null;
       });
     reading = { key, answer };
-    return answer;
+    return stale ?? answer;
   };
   return read;
 }
