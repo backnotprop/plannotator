@@ -11,6 +11,7 @@ import { TryPrototypeTab } from '../../components/PrototypeWindow';
 import { prototypePageCount } from '../../prototypes';
 import type { MessageBodyProps } from './types';
 import { useAcceptedUndo } from '../../useAcceptedUndo';
+import { ARCHIVE_CLOSED_STATUS, closedByArchive } from '../../fileQuestions';
 
 /** An unsent pick's tag on its card (statusLabel). */
 // A pick saved and not sent is part of the person's draft (approval "inbox-reply-drafts": "Draft" replaces "Not sent").
@@ -138,11 +139,13 @@ export function useQuestionCards({
   );
 
   // A pick not sent yet tags its card "Draft", not "Answered" (the footer says when it was picked);
-  // a sent answer, and a question a Mark read closed, keep the card's own tag.
+  // a sent answer, and a question a Mark read closed, keep the card's own tag. One the archive closed reads "Closed",
+  // never the "Open" its missing answer would give it (a pick saved before the archive does not make it "Draft").
   const statusLabel = useCallback(
     (question: IndexedQuestion, status: QuestionStatus) => {
-      if (status !== 'answered' && status !== 'skipped') return undefined;
       const wire = message.questions?.find((q) => q.key === question.question.key);
+      if (closedByArchive(wire)) return ARCHIVE_CLOSED_STATUS;
+      if (status !== 'answered' && status !== 'skipped') return undefined;
       return wire && (wire.state === 'open' || wire.state === 'picked') ? NOT_SENT_STATUS : undefined;
     },
     [message.questions],

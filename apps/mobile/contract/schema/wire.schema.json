@@ -3489,6 +3489,16 @@
             }
           ]
         },
+        "moved_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxMovedTo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "idempotency_key": {
           "anyOf": [
             {
@@ -3554,6 +3564,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "moved_note": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxMovedNote"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reopened": {
           "type": "array",
@@ -4104,6 +4124,64 @@
         "created_at",
         "resolved_at",
         "idempotency_key"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxMovedNote": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "thread_id",
+        "questions"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxMovedTo": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open": {
+          "type": "boolean",
+          "const": true
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "thread_id",
+        "subject"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"

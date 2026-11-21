@@ -648,15 +648,22 @@ export function createInboxLaunch(options: {
   const respawnUntrustedOf = (memo: Memo): boolean => memo.respawn?.untrusted === true && respawnFailedOf(memo) !== null;
 
   /**
+   * What waits for `session` from the person, oldest first: never the note that its questions moved (resolve_message's
+   * `moved_to`). That note goes to a session that comes on its own; it never starts or respawns one.
+   */
+  const personPending = (session: string): InboxMessage[] => store.pendingReplies(session, { tags: true }).filter((m) => !m.moved_note);
+
+  /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
    * was taken since the latest start but the session has neither polled busy
    * nor answered.
    */
   const turnWaitingOf = (root: InboxMessage, memo: Memo): boolean => {
     if (!root.delivery) return true;
-    if (root.to && store.pendingReplies(root.to.session, { tags: true }).length > 0) return true;
+    if (root.to && personPending(root.to.session).length > 0) return true;
     if (memo.busySeen) return false;
-    const lastId = store.threadMessageIds(root.thread_id).at(-1);
+    // The note that the session's questions moved is not the person's: the latest is the message before it.
+    const lastId = [...store.threadMessageIds(root.thread_id)].reverse().find((id) => !store.message(id)?.moved_note);
     const last = lastId ? store.message(lastId) : null;
     // The person's latest, unless it went to another session (re-addressed), or is a routine's skip line or a run that didn't start.
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
@@ -1290,8 +1297,7 @@ ${result.text}`);
       // A reply the person wrote after the clone ended: never the thread's own first message (it waits for the agent
       // too), nor one the clone already had (E7: Cancel stays cancelled, a failure stays failed, a restart included).
       const ended = launch.clone.ended_at ?? null;
-      const newest = store
-        .pendingReplies(root.to.session, { tags: true })
+      const newest = personPending(root.to.session)
         .filter((reply) => reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
@@ -1323,7 +1329,7 @@ ${result.text}`);
     };
     const live = liveOf(host, root, memo);
     // The person's reply starts it again: from this computer or over the tailnet.
-    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const newest = personPending(root.to.session).at(-1);
     const early = now() - memo.startedAt < INBOX_RUN_START_GRACE_MS;
     if (live || (early && !memo.paneClosed)) {
       // In Rex, its own pane closed (by the person, or Rex's API): the program went with it, while its last polls
@@ -1433,7 +1439,7 @@ ${result.text}`);
     if (inRex && !pane) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_NO_TAB);
     const memo = memoOf(launch);
     // What waits now was written before the Stop: it stays for the person's next reply.
-    memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
+    memo.heldReply = root.to ? (personPending(root.to.session).at(-1)?.id ?? null) : null;
     stopping.add(launch.id);
     let result: LaunchHostResult;
     try {
@@ -1904,11 +1910,12 @@ ${result.text}`);
    */
   const sendAgain = (root: InboxMessage, memo: Memo): void => {
     const session = inboxLaunchedSession(root)!;
-    if (store.pendingReplies(session, { tags: true }).length === 0) {
+    if (personPending(session).length === 0) {
       const last = store
         .threadMessageIds(root.thread_id)
         .map((id) => store.message(id))
-        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && m.delivery?.session === session)
+        // The person's own words: never the note that the session's questions moved.
+        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && !m.moved_note && m.delivery?.session === session)
         .at(-1);
       if (!last) throw new InboxError("validation_error", "That launch did not fail.");
       store.sendAgain(last.id, session);

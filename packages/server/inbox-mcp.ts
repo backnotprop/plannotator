@@ -25,7 +25,7 @@ import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from
 import { INBOX_RUN_TOOL_TEXT } from "@plannotator/core/inbox-run-guide";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_CHANGE_RULE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_MOVED_TO_FIELD_DESCRIPTION, INBOX_MOVED_TO_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
@@ -120,7 +120,7 @@ export const SEND_MESSAGE_DESCRIPTION = [
  * whole; send_message's own description is cut at 2,048 characters).
  */
 export const SUPERSEDES_DESCRIPTION =
-  "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message, as a list of strings, e.g. [\"msg_…/q-…\"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
+  `Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. "<message id>/<key>" for one question (read_thread gives each question's key) or "<message id>" for every open question of that message, as a list of strings, e.g. ["msg_…/q-…"]. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put \`Replaces: <message id>/<key>\` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions. ${INBOX_MOVED_TO_RULE}`;
 
 /**
  * read_thread, as a raw MCP client reads it (the agent tool words its lead
@@ -241,6 +241,9 @@ export const SEND_BODY_DESCRIPTION = [
 
 const AGENT_SESSION_DESCRIPTION =
   "Your session id. The `plannotator inbox mcp` shim fills it. read_thread's asked_by \"me\" matches on it.";
+/** resolve_message's `agent_session`: it is there for `moved_to` only (the thread it names must hold a question your session asked). */
+const RESOLVE_AGENT_SESSION_DESCRIPTION =
+  "Your session id. The `plannotator inbox mcp` shim fills it. moved_to needs it: the thread it names must hold a question your session asked.";
 
 /**
  * The fields every sending tool takes beside its content (send_message and
@@ -1533,19 +1536,24 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     {
       title: "Resolve a thread",
       description:
-        "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
+        "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer, or when you moved its questions to another thread (moved_to). resolved: false reopens it. Its questions read as closed; the person sees the thread as Archived.",
       inputSchema: z
         .object({
           message_id: z.string().describe("Any message id in the thread, or the thread id."),
           resolved: z.boolean().optional().describe("Default true."),
+          moved_to: z.string().optional().describe(INBOX_MOVED_TO_FIELD_DESCRIPTION),
+          agent_session: z.string().optional().describe(RESOLVE_AGENT_SESSION_DESCRIPTION),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) =>
       guarded(() => {
-        const summary = store.resolveThread(ownMessageId(store, input.message_id), input.resolved ?? true);
-        return ok(`Thread ${summary.thread_id} is ${summary.resolved_at ? "resolved" : "open"}.`, { thread: summary });
+        const movedTo = input.moved_to === undefined ? undefined : { to: input.moved_to, session: input.agent_session ?? null };
+        const summary = store.resolveThread(ownMessageId(store, input.message_id), input.resolved ?? true, "agent", movedTo);
+        const moved = summary.resolved_at ? store.message(summary.thread_id)?.moved_to : null;
+        const where = moved ? `; its questions point to thread ${moved.thread_id}${moved.subject ? ` (${JSON.stringify(moved.subject)})` : ""}` : "";
+        return ok(`Thread ${summary.thread_id} is ${summary.resolved_at ? "resolved" : "open"}${where}.`, { thread: summary });
       }),
   );
 

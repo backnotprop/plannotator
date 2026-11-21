@@ -4488,8 +4488,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const command = replyCommandOf(reply, sendNow, session);
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
-    // Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
-    if (command.tidy || command.ack_of || command.handed_away) return command;
+    // Never on a Tidy, a 👍, a hand-off notice or the note that questions moved: those are not about the thread's work.
+    if (command.tidy || command.ack_of || command.handed_away || command.moved) return command;
     const receiver = session ?? store.recipientOf(reply)?.session ?? null;
     // The details line (approval "inbox-wake-context"). A brand new thread has nothing to say yet: its only message is this one.
     const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
@@ -4591,10 +4591,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
       ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
-      ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
+      ...(!reply.ack_of && !reply.moved_note && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
       // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
       ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
+      // The Inbox's note that this session's questions moved to another thread: the wake is a notice with no reply
+      // instruction (INBOX_MOVED_WAKE_INSTRUCTION). An older connection words it as a reply.
+      ...(reply.moved_note ? { moved: true as const } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.

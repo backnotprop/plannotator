@@ -182,7 +182,8 @@ export function createInboxCloudWake(options: {
       if (!agent || !hasCloudWake(agent)) continue;
       if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending") setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
       for (const item of all) if (POSTED.has(item.cloud_wake?.state ?? "")) store.handover.hand(item, session, "cloud");
-      const open = all.filter((item) => !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
+      // The note that a session's questions moved never starts a run: it is for a session that comes on its own.
+      const open = all.filter((item) => !item.moved_note && !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
       const byThread = new Map<string, InboxMessage[]>();
       for (const item of open) (byThread.get(item.thread_id) ?? byThread.set(item.thread_id, []).get(item.thread_id)!).push(item);
       for (const [threadId, items] of byThread) {
