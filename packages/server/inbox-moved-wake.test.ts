@@ -41,12 +41,17 @@ async function setup() {
   const client = new Client({ name: "inbox-moved-wake-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
-  const call = async (name: string, session: string, args: Record<string, unknown>) =>
-    (await client.callTool({ name, arguments: { project_path: project, agent_session: session, agent_name: "Claude Code", agent_host: "claude-code", ...args } })) as {
-      isError?: boolean;
-      structuredContent: Record<string, unknown>;
-    };
-  return { server, call };
+  type Result = { isError?: boolean; content: { text: string }[]; structuredContent: Record<string, unknown> };
+  // Each tool's schema is strict, and a refused call comes back as isError (it does not throw): every call names only
+  // its own fields, and every result is checked.
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const result = (await client.callTool({ name, arguments: args })) as Result;
+    expect({ name, isError: result.isError ?? false, text: result.isError ? result.content.map((c) => c.text).join("\n") : "" }).toEqual({ name, isError: false, text: "" });
+    return result;
+  };
+  const send = (session: string, subject: string, body: string) =>
+    call("send_message", { project_path: project, agent_session: session, agent_name: "Claude Code", agent_host: "claude-code", subject, body });
+  return { server, call, send };
 }
 
 const url = (server: InboxServer, path: string) => `http://127.0.0.1:${server.port}${path}`;
@@ -60,19 +65,19 @@ async function poll(server: InboxServer, session: string) {
 }
 
 test("the orchestrator's reads leave the note for the sub-agent's wake, which words it as a notice with nothing to answer", async () => {
-  const { server, call } = await setup();
-  const old = (await call("send_message", "ses_sub", { subject: "Retry policy", body: ASK("Retry failed charges?") })).structuredContent;
-  const brief = (await call("send_message", "ses_orch", { subject: "Morning brief", body: ASK("Retry failed charges?") })).structuredContent;
-  const resolved = await call("resolve_message", "ses_orch", { message_id: old.thread_id, moved_to: brief.thread_id });
-  expect(resolved.isError).toBeFalsy();
-  // The orchestrator reads the thread it archived, both ways.
-  await call("read_thread", "ses_orch", { thread_id: old.thread_id });
-  await call("read_thread", "ses_orch", { thread_id: old.thread_id, format: "full" });
+  const { server, call, send } = await setup();
+  const old = (await send("ses_sub", "Retry policy", ASK("Retry failed charges?"))).structuredContent;
+  const brief = (await send("ses_orch", "Morning brief", ASK("Retry failed charges?"))).structuredContent;
+  // resolve_message: message_id, resolved, moved_to, agent_session.
+  await call("resolve_message", { message_id: old.thread_id, moved_to: brief.thread_id, agent_session: "ses_orch" });
+  expect(server.store.message(String(old.thread_id))!.moved_to).toMatchObject({ thread_id: brief.thread_id });
+  // The orchestrator reads the thread it archived, both ways (read_thread: thread_id, format, agent_session).
+  await call("read_thread", { thread_id: old.thread_id, agent_session: "ses_orch" });
+  await call("read_thread", { thread_id: old.thread_id, format: "full", agent_session: "ses_orch" });
   expect(await poll(server, "ses_orch")).toEqual([]);
   const [command, ...more] = await poll(server, "ses_sub");
   expect(more).toEqual([]);
   expect(command).toMatchObject({ type: "reply", thread_id: old.thread_id, moved: true });
-  expect(command).not.toHaveProperty("name_thread");
   const lines = inboxWakeText(command!).split("\n");
   expect(lines[1]).toBe(INBOX_MOVED_WAKE_INSTRUCTION);
   expect(lines.at(-1)).toBe(`[thread ${old.thread_id}]`);

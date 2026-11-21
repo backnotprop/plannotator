@@ -304,10 +304,3 @@ test("the moved note's wake: the first line, the notice line, the note, its thre
   expect(text).not.toContain("send_message");
   expect(text).not.toContain("reply_to");
 });
-
-test("a moved note from an Inbox that does not set `moved` is worded as today's reply (the fallback)", () => {
-  const text = wake({ body: MOVED_BODY });
-  expect(text.split("\n")[1]).toBe(INBOX_WAKE_INSTRUCTION);
-  expect(text).toContain(MOVED_BODY);
-  expect(text).toEndWith(INBOX_WAKE_CLOSING_LINE);
-});

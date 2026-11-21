@@ -384,6 +384,40 @@ describe("the Inbox tells the agents whose questions moved, quietly", () => {
     });
   }
 
+  test("a note not delivered yet goes stale and is not handed once the person unarchives the thread", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    expect(store.pendingReplies(SUB.session!)).toHaveLength(1);
+    // The sub-agent was busy; the person unarchives the old thread and answers there.
+    store.resolveThread(old.id, false, "person");
+    const [record] = store.questionsOf(old.id);
+    store.sendReply(old.id, { idempotency_key: "k-here", questions: [{ key: record!.key, revision: record!.revision, answer: ANSWER(record!) }] });
+    const waiting = store.pendingReplies(SUB.session!);
+    expect(waiting.some((m) => m.moved_note)).toBe(false);
+    expect(waiting).toHaveLength(1);
+  });
+
+  test("a note not delivered yet goes stale once an agent writes in the old thread again (moved_to is dropped)", () => {
+    const { store } = open();
+    const { old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    store.sendMessage({ project_id: old.project_id, author: agent("ses_helper"), body: "Picking this back up here.", reply_to: old.id });
+    expect(store.message(old.id)!.moved_to ?? null).toBeNull();
+    expect(store.pendingReplies(SUB.session!)).toEqual([]);
+  });
+
+  test("the note is never pushed into a busy turn: auto Send now passes it by, as it does the set-aside note", () => {
+    const { store } = open();
+    const { project, old, brief } = world(store);
+    store.resolveThread(old.id, true, "agent", { to: brief.id, session: ORCH.session });
+    // A plain reply to the same session in another thread is pushed in, so the clock below is due.
+    const other = store.sendMessage({ project_id: project.id, author: SUB, subject: "Logs", body: "Logs are in." }).message;
+    const reply = store.sendReply(other.id, { idempotency_key: "k-logs", words: "Thanks." }).reply;
+    const marked = store.autoSendDue(SUB.session!, { afterMs: 0, clockOf: () => ({ autoSince: 0, since: 0 }) });
+    expect(marked.map((m) => m.id)).toEqual([reply.id]);
+  });
+
   test("a plain archive by another session (no moved_to) tells nobody, as before", () => {
     const { store } = open();
     const { old } = world(store);

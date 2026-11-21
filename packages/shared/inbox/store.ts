@@ -3979,9 +3979,7 @@ export class InboxStore {
    * same on every read, so a reader new to the thread is another agent.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
-    // A 👍's note is any agent's to see. A moved note is not: it is owed to its own session like any reply, and only
-    // its wake settles it (`pendingFor`).
-    if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
+    if (message.to || hasTags(message) || message.delivery || isUnlistedNote(message) || message.taken_back_at) return false;
     if (message.tidy && !message.tidy.wake) return false;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
@@ -6868,6 +6866,12 @@ export class InboxStore {
     if (message.tidy && !message.tidy.wake) return false;
     // A 👍 taken back before it went is never delivered.
     if (isAckNote(message) && !this.ackNoteLive(message)) return false;
+    // A moved note only while its thread stays archived pointing where the questions went: once the person unarchives
+    // it, or an agent writes there again (both drop `moved_to`), "don't wait on them here" is no longer true.
+    if (isMovedNote(message)) {
+      const root = this.messages.get(message.thread_id);
+      if (!root || root.resolved_at === null || !root.moved_to) return false;
+    }
     const seq = this.messageSeq.get(message.id) ?? 0;
     // A New message, or a reply the person sent to another session, is
     // settled only by its delivery to the session it names, never by another
@@ -7205,7 +7209,8 @@ export class InboxStore {
     const now = this.now().getTime();
     const marked: InboxMessage[] = [];
     for (const item of this.pendingReplies(session, { tags: options.tags })) {
-      if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0) continue;
+      // The Inbox's own notes wait for the turn to end, the moved-questions note too: never pushed into a busy turn.
+      if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0 || item.moved_note) continue;
       if (!INBOX_AUTO_SEND_ACK_NOTES && item.ack_of) continue;
       // Tidy goes to a busy session when its turn ends, never into it.
       if (item.tidy) continue;
