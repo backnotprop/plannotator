@@ -1,9 +1,10 @@
 /**
- * Who gets the reply (approval "inbox-reply-recipient", option E "Under the
- * box, right"): in a thread with more than one agent, a pill in the box's own
- * row, at the right of what goes with the reply, "to [tile] Claude Code
- * (plannotator) ⌄" (approval "inbox-reply-box", T6). A computer only: a phone's
- * is PhoneReplyRecipient.tsx, in the row with a bottom sheet.
+ * Who gets the reply, in a thread with more than one agent (approval "inbox-reply-recipient"; placed by
+ * "inbox-reply-target-chip", option B "A chip at the start of your words", 2026-11-20, which superseded option E's
+ * pill under the box, right, and a phone's mark-only control): a filled chip at the start of the words' first line,
+ * "to [tile] Claude Code (plannotator) ⌄", the words flowing after it (`chip`; drawn by the field, FieldLead.tsx). A
+ * phone draws the same chip (`RecipientChip`) with its bottom sheet, PhoneReplyRecipient.tsx. Without `chip` it is the
+ * pill in the box's own row, which a PR's new thread keeps (`PullThreadStart`).
  *
  * Tap it for the thread's agents (live first, ended last), the chosen ones
  * ticked. Tap a name: only that agent. Tap a circle: that agent too ("2
@@ -28,10 +29,10 @@ import { skillMenuHost } from './ComposerField';
 import { skillListRoom } from '../caretMenu';
 import { recipientNames } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
-import { Tip } from './Tip';
+import { isTextCut, Tip } from './Tip';
 import { markRecipientList } from '../pageMarks';
 
-/** The longest title the pill shows; a longer one leaves the pill its fallback name, and the title goes to its hover. */
+/** The longest title the pill (and the chip) shows; a longer one leaves it its fallback name, and the title goes to its hover. */
 const PILL_TITLE_MAX = 26;
 const NO_LABELS: SessionLabels = {};
 const NO_FOLDER = () => '';
@@ -82,7 +83,7 @@ const RPICK_LEAST = 56;
  * clips) and in a short window not every agent shows (#3427). Above the pill by default; below it when the
  * pill sits too close to the thread's header for one whole row above it.
  */
-function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean, wide: boolean): CSSProperties | undefined {
+function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean, wide: boolean, start = false): CSSProperties | undefined {
   const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
   const measure = useCallback(() => {
     const pill = pillRef.current;
@@ -94,7 +95,8 @@ function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean
     const rect = pill.getBoundingClientRect();
     // inbox.css's widths: 300, or 360 with a "start a new session" row (`.ib-rpick:has([data-recipient-start])`).
     const width = Math.min(wide ? 360 : 300, view.innerWidth - 24);
-    const left = Math.max(12, Math.min(rect.right - width, view.innerWidth - width - 12));
+    // The pill's list ends at its right end; the chip's starts at its left end, over the words.
+    const left = Math.max(12, Math.min(start ? rect.left : rect.right - width, view.innerWidth - width - 12));
     // The room under the thread's header; `--ib-tg-room` caps the list to it, under inbox.css's own cap.
     const room = skillListRoom(pill);
     const above = rect.top - RPICK_GAP - room.top - 8;
@@ -109,7 +111,7 @@ function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean
         : { top: rect.bottom + RPICK_GAP, bottom: 'auto', '--ib-tg-room': `${Math.round(Math.max(RPICK_LEAST, room.bottom - rect.bottom - RPICK_GAP - 8))}px` }),
     } as CSSProperties;
     setStyle((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
-  }, [open, pillRef, wide]);
+  }, [open, pillRef, wide, start]);
   // Every commit (the box grows as the person types); the equality guard converges.
   useLayoutEffect(() => {
     measure();
@@ -134,6 +136,84 @@ function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean
   return style;
 }
 
+/** What the pill and the chip show and say for the chosen recipients, named as the list names them. */
+function recipientFace(rows: readonly RecipientRow[], chosen: readonly RecipientRow[], labels: SessionLabels, folderOf: (session: string) => string) {
+  const one = chosen.length === 1 ? chosen[0]! : null;
+  const named = recipientNames(rows, labels, folderOf);
+  const nameOf = (row: RecipientRow) => named.get(row.session)?.name ?? row.label;
+  /** The wide name: the row's name while it is short enough to fit, else the fallback name. */
+  const pillOf = (row: RecipientRow) => {
+    const name = nameOf(row);
+    return graphemesOf(name).length <= PILL_TITLE_MAX ? name : row.label;
+  };
+  const names = namesList(chosen.map(nameOf));
+  const ended = one?.state === 'ended';
+  const tile = one?.start ? (
+    <StartTile host={one.host} />
+  ) : one ? (
+    <span className="ib-atile">
+      <HostMark host={one.host} agent={one.session} />
+    </span>
+  ) : (
+    <TagStack participants={chosen} />
+  );
+  const words = one ? pillOf(one) : `${chosen.length} agents`;
+  /** The face leaves something out (several names, a title too long, the fallback name): the hover says it whole. */
+  const partial = chosen.length > 1 || (one !== null && words !== nameOf(one));
+  return { one, named, nameOf, pillOf, names, ended, tile, words, partial };
+}
+
+/**
+ * The chip at the start of the words' first line (approval "inbox-reply-target-chip", option B): a filled token, "to
+ * [tile] Pi ⌄", the same words and names as the pill. A long name gives way with "…" (inbox.css caps the chip), and
+ * then, as when it shows a fallback name or "2 agents", the hover says who in full. Its name is the pill's own.
+ */
+export function RecipientChip({
+  rows,
+  chosen,
+  open,
+  onClick,
+  labels = NO_LABELS,
+  folderOf = NO_FOLDER,
+  noun = 'reply',
+  buttonRef,
+  attrs,
+}: {
+  rows: readonly RecipientRow[];
+  chosen: readonly RecipientRow[];
+  open: boolean;
+  onClick: () => void;
+  labels?: SessionLabels;
+  folderOf?: (session: string) => string;
+  noun?: 'reply' | 'message';
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+  /** `aria-*` and `data-*` attributes of the host (the list it controls, a sheet's popup kind). */
+  attrs?: Record<string, string | undefined>;
+}) {
+  const { one, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
+  return (
+    <Tip content={names} when={(trigger) => !open && (partial || isTextCut(trigger.querySelector('.ib-rto-n')))}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="ib-rto-chip"
+        data-recipient=""
+        data-recipient-chip=""
+        data-recipient-chosen={chosen.map((r) => r.session).join(' ')}
+        data-ended={ended ? '' : undefined}
+        aria-label={`To ${names}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
+        aria-expanded={open}
+        // The press must not take focus from the words (a phone's sheet gives it back to them).
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onClick}
+        {...attrs}
+      >
+        <Face tile={tile} full={words} short={one ? one.short : words} ended={ended} />
+      </button>
+    </Tip>
+  );
+}
+
 export function ReplyRecipient({
   rows,
   chosen,
@@ -145,6 +225,7 @@ export function ReplyRecipient({
   labels = NO_LABELS,
   folderOf = NO_FOLDER,
   noun = 'reply',
+  chip = false,
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -163,22 +244,15 @@ export function ReplyRecipient({
   folderOf?: (session: string) => string;
   /** What is sent: a reply, or a PR's new thread's first message (`PullThreadStart`), as the names read it. */
   noun?: 'reply' | 'message';
+  /** The chip at the start of the words (a thread's reply box, drawn as the field's lead), not the pill in the row. */
+  chip?: boolean;
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const pillRef = useRef<HTMLButtonElement | null>(null);
-  const spot = useListSpot(pillRef, open, rows.some((row) => row.start));
+  const spot = useListSpot(pillRef, open, rows.some((row) => row.start), chip);
   const host = pillRef.current ? skillMenuHost(pillRef.current) : null;
   const chosenIds = chosen.map((r) => r.session);
-  const one = chosen.length === 1 ? chosen[0]! : null;
-  const named = recipientNames(rows, labels, folderOf);
-  const nameOf = (row: RecipientRow) => named.get(row.session)?.name ?? row.label;
-  /** The pill's wide name: the row's name while it is short enough to fit, else the fallback name. */
-  const pillOf = (row: RecipientRow) => {
-    const name = nameOf(row);
-    return graphemesOf(name).length <= PILL_TITLE_MAX ? name : row.label;
-  };
-  const names = namesList(chosen.map(nameOf));
-  const ended = one?.state === 'ended';
+  const { one, named, nameOf, pillOf, names, ended, tile, words, partial } = recipientFace(rows, chosen, labels, folderOf);
 
   // A press outside the pill and its list closes the list; so does Escape, before anything else hears it.
   useEffect(() => {
@@ -201,16 +275,6 @@ export function ReplyRecipient({
     };
   }, [open, onOpen]);
 
-  const tile = one?.start ? (
-    <StartTile host={one.host} />
-  ) : one ? (
-    <span className="ib-atile">
-      <HostMark host={one.host} agent={one.session} />
-    </span>
-  ) : (
-    <TagStack participants={chosen} />
-  );
-  const words = one ? pillOf(one) : `${chosen.length} agents`;
   const button = (
     <button
       ref={pillRef}
@@ -315,11 +379,17 @@ export function ReplyRecipient({
     </div>
   ) : null;
 
-  const pill = (
-    <span className="ib-rto-wrap">
-      {!open && (chosen.length > 1 || (one && words !== nameOf(one))) ? <Tip content={names}>{button}</Tip> : button}
-    </span>
-  );
+  // The list portals out of the reply box's own boxes (see useListSpot): nothing renders in place.
+  const portal = list && host && spot ? createPortal(list, host) : null;
+  if (chip) {
+    return (
+      <>
+        <RecipientChip rows={rows} chosen={chosen} open={open} onClick={() => onOpen(!open)} labels={labels} folderOf={folderOf} noun={noun} buttonRef={pillRef} attrs={{ 'aria-controls': open ? listId : undefined }} />
+        {portal}
+      </>
+    );
+  }
+  const pill = <span className="ib-rto-wrap">{!open && partial ? <Tip content={names}>{button}</Tip> : button}</span>;
   // A wide window: every name stacked under the pill, so the Draft words beside it never move when it changes.
   return (
     <span className="ib-rto-slot">
@@ -329,8 +399,7 @@ export function ReplyRecipient({
         </span>
       ))}
       {pill}
-      {/* The list portals out of the reply box's own boxes (see useListSpot): nothing renders in place. */}
-      {list && host && spot ? createPortal(list, host) : null}
+      {portal}
     </span>
   );
 }

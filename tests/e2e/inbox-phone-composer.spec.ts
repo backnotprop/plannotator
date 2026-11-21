@@ -1,7 +1,8 @@
 /**
  * The phone composer and its picker sheet (approval "inbox-phone-composer-picker"): the reply box and New message are
- * one rounded card 8 px from the edges and from the keyboard, with one row (paperclip, Skills, who gets the words, the
- * mic, a round Send), and who gets the words opens a bottom sheet.
+ * one rounded card 8 px from the edges and from the keyboard, with one row (paperclip, Skills, the mic, a round Send);
+ * who gets the reply is the chip at the start of the words (approval "inbox-reply-target-chip", 2026-11-20), and it
+ * opens a bottom sheet.
  *
  * Proved against the compiled binary under a temp PLANNOTATOR_DATA_DIR, at 390 px in WebKit as an iPhone and Chromium
  * as a Pixel, with three live sessions held by the bridge's real long-poll (two with a long label):
@@ -10,8 +11,9 @@
  *   the card ends 8 px over it, Send in reach, and a long reply scrolls inside 40% of what is left.
  * - The sheet (a thread with two agents): a dialog that takes focus from the field and gives it back, a long label
  *   cut on one line, closed by Escape, the scrim and a drag down on its head; with reduced motion it does not slide.
- * - Reply, two agents: the pill is the recipient's mark and a chevron, named for a screen reader; a row picks one, a
- *   circle adds one, and Send reaches both. Two sessions of one agent: the same look, and the pill's name says which.
+ * - Reply, two agents: the chip at the start of the words, with the recipient's mark and name, the words after it;
+ *   a row picks one, a circle adds one ("2 agents"), and Send reaches both. Two sessions of one agent: the chip's
+ *   name says which.
  * - New message: To in the foot's row, its sheet with the filter unfocused, the card 8 px over the keyboard with the
  *   title kept, the dialog's own ground under the keyboard. Chromium at 1440 x 900: none of it applies.
  *
@@ -202,7 +204,7 @@ async function shot(page: Page, name: string, keyboard = false): Promise<void> {
 
 const pane = (page: Page) => page.locator('section.ib-pane');
 const replyField = (page: Page) => pane(page).locator('.ib-rbox textarea').first();
-const recipient = (page: Page) => pane(page).locator('.ib-rbox [data-reply-row][data-phone] [data-recipient]');
+const recipient = (page: Page) => pane(page).locator('.ib-rbox [data-field-lead] [data-recipient]');
 const replySheet = (page: Page) => page.locator('[data-sheet][data-recipient-list]');
 
 /** The thread with its reply box open and empty, the field holding focus. */
@@ -404,25 +406,34 @@ for (const engine of ENGINES) {
       await page.context().close();
     });
 
-    test('reply, two agents: the pill is a mark named for a screen reader, a row picks one, a circle adds one, Send reaches both; two sessions of one agent: the pill says which', async () => {
+    test('reply, two agents: the chip at the start of the words names the recipient, the words start after it, a row picks one, a circle adds one, Send reaches both; two sessions of one agent: the chip says which', async () => {
       const page = await phone();
       await openBox(page, world.twoThread);
       const box = pane(page).locator('.ib-rbox');
       const sheet = replySheet(page);
-      await expect(recipient(page), 'a two-agent thread shows the recipient as a pill').toHaveAttribute('data-agent-pill', '');
-      await expect(recipient(page).locator('.ib-apill-n'), 'agents of two kinds: the pill shows words beside the mark').toHaveCount(0);
+      await expect(recipient(page), 'a two-agent thread shows no chip at the start of the words').toBeVisible();
+      await expect(box.locator('[data-reply-row] [data-recipient], [data-agent-pill], [data-agent-mark]'), 'the row still holds a recipient control').toHaveCount(0);
       // What a screen reader hears: the agent, and its session's title where it has one.
       const named = async (session: string) => {
         const heard = (await recipient(page).getAttribute('aria-label')) ?? '';
-        for (const part of session === TWO_A ? ['Claude Code', LABEL_TWO.slice(0, 40)] : ['Pi']) expect(heard, `the pill's name leaves out "${part}"`).toContain(part);
-        expect(heard, 'the pill\'s name does not say what it is for').toMatch(/^Reply goes to .*\. Change$/);
+        for (const part of session === TWO_A ? [LABEL_TWO.slice(0, 40)] : ['Pi']) expect(heard, `the chip's name leaves out "${part}"`).toContain(part);
+        expect(heard, 'the chip\'s name does not say what it is for').toMatch(/^To .*\. Change who gets this reply$/);
       };
       await named((await recipient(page).getAttribute('data-recipient-chosen'))!);
-      const pill = await spot(recipient(page));
-      expect(pill.height, 'the pill is taller than one line').toBeLessThanOrEqual(37);
-      expect(pill.width, 'a mark and a chevron take 70 px or more').toBeLessThan(70);
-      expect(pill.left, 'the pill runs under Skills').toBeGreaterThanOrEqual((await spot(box.locator('[data-reply-skills]'))).right);
-      expect(pill.right, 'the pill runs under the mic').toBeLessThanOrEqual((await spot(box.locator('[data-voice-mic]'))).left);
+      await expect(recipient(page).locator('.ib-rto-n'), 'the chip shows no name on a phone').toBeVisible();
+      // On the first line, the words indented by its width, never past about 40% of the line; the field's name is its own.
+      const lead = await recipient(page).evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const text = el.closest('.ib-cfield')!.querySelector('textarea')!;
+        const t = text.getBoundingClientRect();
+        const cs = getComputedStyle(text);
+        const inner = t.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        return { indent: parseFloat(cs.textIndent) - (Math.ceil(r.width) + 8), top: r.top - t.top, line: parseFloat(cs.paddingTop) + parseFloat(cs.lineHeight), share: r.width / inner, label: text.getAttribute('aria-label') ?? '' };
+      });
+      expect(Math.abs(lead.indent), 'the first line is not indented by the chip and the gap').toBeLessThanOrEqual(1);
+      expect(lead.top, 'the chip is not on the first line').toBeLessThan(lead.line);
+      expect(lead.share, 'the chip takes more than 40% of the line').toBeLessThanOrEqual(0.41);
+      expect(lead.label, 'the chip is part of the field\'s name').not.toMatch(/Change who gets/);
       await shot(page, `${engine.name}-reply-two`);
       await recipient(page).tap();
       await sheetOpen(sheet);
@@ -432,7 +443,7 @@ for (const engine of ENGINES) {
       const other = (await sheet.locator('[data-recipient-row][aria-selected="false"]').getAttribute('data-recipient-row'))!;
       await sheet.locator(`[data-recipient-row="${other}"] .ib-sheet-t`).tap();
       await expect(sheet, 'a tap on a row did not close the sheet').toHaveCount(0);
-      await expect(recipient(page), 'the pill is not the agent tapped').toHaveAttribute('data-recipient-chosen', other);
+      await expect(recipient(page), 'the chip is not the agent tapped').toHaveAttribute('data-recipient-chosen', other);
       await named(other);
       await expect(replyField(page), 'after a pick focus is not in the reply (a real keyboard would stay down)').toBeFocused();
       await recipient(page).tap();
@@ -442,22 +453,17 @@ for (const engine of ENGINES) {
       await expect(sheet, 'the circle closed the sheet').toHaveAttribute('data-shown', '');
       await page.keyboard.press('Escape');
       await expect(sheet).toHaveCount(0);
-      await expect(recipient(page), 'two recipients are not shown as a mark').toHaveAttribute('data-agent-mark', '');
-      await expect(recipient(page).locator('[data-agent-count]'), 'the mark does not count two recipients').toHaveText('2');
+      await expect(recipient(page).locator('.ib-rto-short'), 'the chip does not count two recipients').toHaveText('2 agents');
       const words = `Both of you: keep the promo field closed by default (${engine.name}).`;
       await replyField(page).fill(words);
       await box.getByRole('button', { name: 'Send', exact: true }).tap();
       await expect(pane(page).locator('article.ib-message[data-author="person"]', { hasText: words }), 'the thread does not show the reply').toBeVisible();
       for (const session of [TWO_A, TWO_B]) await expect.poll(() => world.polls[session]!.got(words, world.twoThread), { message: `${session} was not handed the reply`, timeout: 30_000 }).toBe(true);
-      // Two Claude Code sessions: the same look, the mark and the chevron alone. Its name says which, and the sheet lists both.
+      // Two Claude Code sessions: the chip's name says which, and the sheet lists both.
       await openBox(page, world.sameThread);
-      await expect(recipient(page), 'two sessions of one agent: no control in the row').toHaveAttribute('data-agent-pill', '');
-      await expect(recipient(page).locator('.ib-apill-n'), 'two sessions of one agent: the pill shows a name').toHaveCount(0);
-      await expect(recipient(page), 'the pill\'s name does not say who gets the reply').toHaveAttribute('aria-label', /^Reply goes to .*Claude Code.*\. Change$/);
-      expect((await spot(recipient(page))).right - (await spot(recipient(page))).left, 'the pill is wider than a mark and a chevron').toBeLessThan(70);
-      const both = await spot(recipient(page));
-      expect(both.left, 'the pill runs under Skills').toBeGreaterThanOrEqual((await spot(box.locator('[data-reply-skills]'))).right);
-      expect(both.right, 'the pill runs under the mic').toBeLessThanOrEqual((await spot(box.locator('[data-voice-mic]'))).left);
+      await expect(recipient(page), 'two sessions of one agent: no chip').toBeVisible();
+      await expect(recipient(page), 'the chip\'s name does not say who gets the reply').toHaveAttribute('aria-label', /^To .+\. Change who gets this reply$/);
+      expect((await spot(recipient(page))).right - (await spot(box.locator('.ib-cfield'))).left, 'the chip runs past 40% of the box').toBeLessThanOrEqual((await spot(box.locator('.ib-cfield'))).width * 0.45);
       await shot(page, `${engine.name}-reply-same-agent`);
       await page.context().close();
     });
@@ -518,16 +524,47 @@ for (const engine of ENGINES) {
 }
 
 test.describe('Chromium at 1440 x 900 (the desktop)', () => {
-  test('none of it applies: the recipient pill, Send with its word, the To line', async ({ page }) => {
+  test('none of the phone applies: the recipient chip with its full name, Send with its word, the To line', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const box = pane(page).locator('.ib-rbox');
     for (const thread of [world.oneThread, world.twoThread]) {
       await page.goto(`${world.url}#thread=${thread}`);
       await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       await expect(box.locator('[data-reply-send]')).toBeVisible();
-      if (thread === world.oneThread) await expect(box.locator('[data-recipient]'), 'a one-agent thread has a recipient pill on the desktop').toHaveCount(0);
+      if (thread === world.oneThread) {
+        await expect(box.locator('[data-recipient], [data-field-lead]'), 'a one-agent thread has a recipient control on the desktop').toHaveCount(0);
+        expect(await replyField(page).evaluate((el) => getComputedStyle(el).textIndent), 'a one-agent thread\'s words are indented').toBe('0px');
+      }
     }
-    await expect(box.locator('[data-recipient]'), 'the desktop lost its recipient pill').toHaveClass(/(^|\s)ib-rto(\s|$)/);
+    // Several agents: the chip at the start of the words (approval "inbox-reply-target-chip"), not the pill in the row.
+    await expect(box.locator('[data-field-lead] [data-recipient]'), 'the desktop lost its recipient chip').toHaveClass(/(^|\s)ib-rto-chip(\s|$)/);
+    await expect(box.locator('[data-reply-row] [data-recipient], .ib-rto'), 'the pill is still in the row').toHaveCount(0);
+    await replyField(page).fill('Keep the promo field closed.');
+    const first = await box.evaluate((el) => {
+      const chip = el.querySelector('[data-field-lead] [data-recipient]')!.getBoundingClientRect();
+      const text = el.querySelector('textarea')!;
+      const mirror = el.querySelector('.ib-rmirror')!;
+      const walk = document.createTreeWalker(mirror, NodeFilter.SHOW_TEXT);
+      const node = walk.nextNode()!;
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, 1);
+      const glyph = range.getBoundingClientRect();
+      return { after: glyph.left - chip.right, sameLine: Math.abs((glyph.top + glyph.bottom) / 2 - (chip.top + chip.bottom) / 2), indent: parseFloat(getComputedStyle(text).textIndent) - (Math.ceil(chip.width) + 8) };
+    });
+    expect(first.after, 'the first word does not start after the chip').toBeGreaterThanOrEqual(6);
+    expect(first.sameLine, 'the first word is not on the chip\'s line').toBeLessThanOrEqual(3);
+    expect(Math.abs(first.indent), 'the first line is not indented by the chip and the gap').toBeLessThanOrEqual(1);
+    // Backspace at the start of the words takes nothing, and opens nothing.
+    await replyField(page).evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+    await page.keyboard.press('Backspace');
+    await expect(replyField(page)).toHaveValue('Keep the promo field closed.');
+    await expect(box.locator('[data-field-lead] [data-recipient]')).toHaveAttribute('aria-expanded', 'false');
+    // The chip opens the list the pill opened.
+    await box.locator('[data-field-lead] [data-recipient]').click();
+    await expect(page.locator('.ib-rpick[data-recipient-list]'), 'the chip does not open the list').toBeVisible();
+    await page.keyboard.press('Escape');
+    await replyField(page).fill('');
     await expect(pane(page).locator('.ib-rbox [data-agent-mark], .ib-rbox [data-agent-pill], .ib-sheet'), 'a phone part is drawn on the desktop').toHaveCount(0);
     expect((await box.locator('[data-reply-send] .ib-rsend-w').boundingBox())!.width, 'Send lost its word on the desktop').toBeGreaterThanOrEqual(20);
     await page.locator('[data-open-compose]').first().click();

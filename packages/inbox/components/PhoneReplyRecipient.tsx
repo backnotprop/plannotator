@@ -1,12 +1,13 @@
 /**
- * Who gets the reply, on a phone (approval "inbox-phone-composer-picker"): the agent control in the reply box's row,
- * after the paperclip and Skills, and the sheet it opens. A computer keeps ReplyRecipient.tsx. Like that pill it shows
- * only in a thread with several agents (ThreadPane's `pillActive`): a one-agent thread has no control in its row.
+ * Who gets the reply, on a phone (approval "inbox-phone-composer-picker"): the control and the sheet it opens. A
+ * computer keeps ReplyRecipient.tsx. Like that one it shows only in a thread with several agents (ThreadPane's
+ * `pillActive`): a one-agent thread has no control at all.
  *
- * - One recipient: its mark and a small chevron, never a name (`AgentPill`; the owner: "It should only ever be one"),
- *   also when two of the thread's agents are of one kind. The accessible name says who, with the session's title, and
- *   the sheet lists every agent by name with the current one marked. Several recipients: the first mark with how many
- *   (`AgentMark`).
+ * - A thread's reply box (`chip`; approval "inbox-reply-target-chip", option B, 2026-11-20, which superseded the
+ *   mark-only control in the row): the computer's chip at the start of the words' first line, "to [mark] Pi ⌄", with
+ *   the name (the short one, as a narrow box shows it), drawn by the field (FieldLead.tsx). Its name is the computer's.
+ * - Without `chip` (a PR's new thread): the control in the box's row, after the paperclip and Skills. One recipient: its
+ *   mark and a small chevron, never a name (`AgentPill`). Several: the first mark with how many (`AgentMark`).
  * - The sheet: each agent by its session's title (issue #2450) with "<agent> · <folder>" under it. A tap on a row sends
  *   to that agent only and closes; the circle at a row's end adds it and the sheet stays; the last row types a real `@`.
  *   A start row (thread/replyStart.ts), "+ [mark] New Claude Code session" with "in ledger" under it, takes it alone.
@@ -21,6 +22,7 @@ import { recipientNames } from '../thread/recipientNames';
 import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
+import { RecipientChip } from './ReplyRecipient';
 
 
 const AtSign = () => (
@@ -41,6 +43,7 @@ export function PhoneReplyRecipient({
   labels,
   folderOf,
   noun = 'reply',
+  chip = false,
 }: {
   /** Every agent the sheet offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -61,6 +64,8 @@ export function PhoneReplyRecipient({
   folderOf: (session: string) => string;
   /** What is sent: a reply, or a PR's new thread's first message (`PullThreadStart`), as the sheet and names say it. */
   noun?: 'reply' | 'message';
+  /** The chip at the start of the words (a thread's reply box, drawn as the field's lead), not the control in the row. */
+  chip?: boolean;
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
   const names = recipientNames(rows, labels, folderOf);
@@ -78,7 +83,9 @@ export function PhoneReplyRecipient({
   };
   return (
     <>
-      {!first ? (
+      {chip ? (
+        <RecipientChip rows={rows} chosen={chosen} open={open} onClick={() => onOpen(!open)} labels={labels} folderOf={folderOf} noun={noun} attrs={{ 'aria-haspopup': 'dialog' }} />
+      ) : !first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (
         <AgentPill {...control} host={first.host} agent={first.start ? null : first.session} start={!!first.start} label={null} detail={ended ? 'ended' : null} />

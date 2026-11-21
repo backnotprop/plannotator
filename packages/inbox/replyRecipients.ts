@@ -1,12 +1,13 @@
 /**
  * Who gets the reply (approval "inbox-reply-recipient", option E): the rules
- * behind the pill under the reply box in a thread with more than one agent.
- * Pure, for the tests; the pill and its list are ReplyRecipient.tsx.
+ * behind the chip at the start of the reply's words (approval
+ * "inbox-reply-target-chip") in a thread with more than one agent.
+ * Pure, for the tests; the chip and its list are ReplyRecipient.tsx.
  *
  * Names: two sessions of one agent in different folders read "Claude Code
  * (plannotator)", "Claude Code (billing-api)"; a second one in the same
- * folder "Claude Code 2", numbered by who came first. A phone shows the folder
- * alone beside the tile ("plannotator"). Live agents come first, ended last.
+ * folder "Claude Code 2", numbered by who came first. A narrow box (a phone)
+ * shows the folder alone beside the tile ("plannotator"). Live agents come first, ended last.
  */
 import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableModel } from './api';

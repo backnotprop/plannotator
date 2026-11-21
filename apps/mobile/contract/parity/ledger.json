@@ -2891,7 +2891,7 @@
     },
     {
       "id": "window-218",
-      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply and the recipient pill, and a bin \"Discard draft\"",
+      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply, and a bin \"Discard draft\"; with several agents, the recipient chip at the start of the words",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -4881,7 +4881,7 @@
     },
     {
       "id": "messages-100",
-      "title": "See who gets the words: pill \"to [mark] <agent>\" (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
+      "title": "See who gets the words: a chip \"to [mark] <agent>\" at the start of the reply's first line, the words after it (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
       "surface": [],
       "flows": [],
       "mobile": "v1",

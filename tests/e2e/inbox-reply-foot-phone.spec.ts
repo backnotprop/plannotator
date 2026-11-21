@@ -7,7 +7,8 @@
  *    and Send (a round arrow) at the right edge; no bin (the owner: "maybe we don't need delete icon. I like
  *    attachment on left"); every control drawn 36 px and 44 px to press (approval "inbox-phone-composer-picker");
  *    nothing runs past the box; one agent wrote there, so nothing says who gets the reply;
- *  - two agents: who gets the reply is a pill in that row, after Skills, never on the line over it;
+ *  - two agents: who gets the reply is the chip at the start of the words (approval "inbox-reply-target-chip"), with
+ *    its name and 44 px to press; never in the row or on the line over it;
  *  - a tap on the summary sheet's scrim closes it and presses nothing under it; Skip them, Review comments; a long
  *    agent name in the list stays on one line;
  *  - recording (decision D5): the status takes the paperclip's and Skills' place; the mic, Send and the box never move;
@@ -213,36 +214,37 @@ for (const width of [390, 320] as const) {
 }
 
 for (const width of [390, 320] as const) {
-  test(`a phone at ${width} wide, two agents: who gets the reply is a pill (its mark and a chevron) in the row after Skills, 36 px drawn and 44 px to press, never on the line over it`, async ({ browser }) => {
+  test(`a phone at ${width} wide, two agents: who gets the reply is the chip at the start of the words, with the name, 44 px to press; the row keeps the paperclip, Skills, the mic and Send`, async ({ browser }) => {
     const page = await phone(browser, width);
     await page.goto(`${world.url}#thread=${twoAgents}`);
     await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
-    const pill = pane(page).locator('.ib-rbox [data-reply-row] [data-recipient]');
-    await expect(pill).toBeVisible();
-    await expect(pill).toHaveAttribute('data-agent-pill', '');
-    await expect(pill).toHaveAccessibleName(/^Reply goes to .+\. Change$/);
+    // The chip (approval "inbox-reply-target-chip", 2026-11-20): not in the row, not on the line over it.
+    const chip = pane(page).locator('.ib-rbox [data-field-lead] [data-recipient]');
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAccessibleName(/^To .+\. Change who gets this reply$/);
+    await expect(pane(page).locator('.ib-rbox [data-reply-row] [data-recipient]')).toHaveCount(0);
     await expect(pane(page).locator('.ib-rbox [data-reply-line] [data-recipient]')).toHaveCount(0);
-    await expect(pane(page).locator('.ib-rbox .ib-rto')).toHaveCount(0);
+    await expect(pane(page).locator('.ib-rbox .ib-rto, .ib-rbox [data-agent-pill], .ib-rbox [data-agent-mark]')).toHaveCount(0);
     await expect(pane(page).locator('.ib-rbox [data-reply-row] [data-voice-mic]')).toBeVisible();
-    const drawn = await pill.evaluate((el) => {
+    const drawn = await chip.evaluate((el) => {
       const r = el.getBoundingClientRect();
-      const box = el.closest('.ib-rbox')!.getBoundingClientRect();
-      const skills = el.closest('[data-reply-row]')!.querySelector('[data-reply-skills]')!.getBoundingClientRect();
-      const mic = el.closest('[data-reply-row]')!.querySelector('[data-voice-mic]')!.getBoundingClientRect();
+      const text = el.closest('.ib-cfield')!.querySelector('textarea')!;
+      const t = text.getBoundingClientRect();
+      const name = el.querySelector('.ib-rto-n')!;
       return {
-        height: r.height,
         press: parseFloat(getComputedStyle(el, '::after').height),
-        // The two agents wear different marks (Claude Code, Codex): the mark and the chevron, no name.
-        name: el.querySelector('.ib-apill-n') !== null,
-        mark: (el.querySelector('.ib-apill-m .ib-mk')?.getClientRects().length ?? 0) > 0 && el.querySelector('.ib-apill-c') !== null,
-        afterSkills: r.left >= skills.right - 0.5 && Math.abs((r.top + r.bottom) / 2 - (skills.top + skills.bottom) / 2) <= 2,
-        beforeMic: r.right <= mic.left + 0.5,
-        inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
+        name: (name.textContent ?? '').length > 0 && name.getBoundingClientRect().width > 4,
+        // On the first line, at the field's start, and the words indented by its width and the gap.
+        firstLine: r.top >= t.top - 0.5 && r.top < t.top + parseFloat(getComputedStyle(text).paddingTop) + parseFloat(getComputedStyle(text).lineHeight),
+        start: Math.abs(r.left - (t.left + parseFloat(getComputedStyle(text).paddingLeft))) <= 1.5,
+        indent: Math.abs(parseFloat(getComputedStyle(text).textIndent) - (Math.ceil(r.width) + 8)) <= 1,
+        // Never more than about 40% of the line.
+        share: r.width / (t.width - parseFloat(getComputedStyle(text).paddingLeft) - parseFloat(getComputedStyle(text).paddingRight)),
       };
     });
-    expect(drawn.height, 'the pill is drawn 36 px tall').toBe(36);
-    expect(drawn.press, 'the pill is 44 px to press').toBeGreaterThanOrEqual(44);
-    expect({ name: drawn.name, mark: drawn.mark, afterSkills: drawn.afterSkills, beforeMic: drawn.beforeMic, inside: drawn.inside }).toEqual({ name: false, mark: true, afterSkills: true, beforeMic: true, inside: true });
+    expect(drawn.press, 'the chip is 44 px to press').toBeGreaterThanOrEqual(44);
+    expect({ name: drawn.name, firstLine: drawn.firstLine, start: drawn.start, indent: drawn.indent }).toEqual({ name: true, firstLine: true, start: true, indent: true });
+    expect(drawn.share, 'the chip takes more than 40% of the first line').toBeLessThanOrEqual(0.41);
     oneRow(await readRow(page));
     await page.context().close();
   });

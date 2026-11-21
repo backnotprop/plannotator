@@ -1,14 +1,13 @@
 /**
- * Who gets the reply (approval "inbox-reply-recipient", option E): in a thread
- * with more than one agent, a pill under the reply box names the recipient;
- * its list switches it, adds a second one ("2 agents"), and the Reply arrow on
- * an older message aims it. The failure this catches: a reply that goes to
- * another agent than the one the pill names, a pill that moves when an agent
- * writes, or a one-agent thread that grows new UI.
+ * Who gets the reply (approval "inbox-reply-recipient"; placed by "inbox-reply-target-chip", option B, 2026-11-20): in
+ * a thread with more than one agent, a chip at the start of the words' first line names the recipient; its list
+ * switches it, adds a second one ("2 agents"), and the Reply arrow on an older message aims it. The failure this
+ * catches: a reply that goes to another agent than the one the chip names, a chip that moves when an agent writes,
+ * one that becomes part of the words (Backspace, the field's name, the tab order), or a one-agent thread that grows
+ * new UI.
  *
- * A phone (approval "inbox-phone-composer-picker"): under the same rule as a
- * computer's pill (a one-agent thread has none), the control is in the box's
- * row after Skills, and its list is a bottom sheet; the last cases here.
+ * A phone (approval "inbox-phone-composer-picker"): under the same rule (a one-agent thread has none), the same chip
+ * with the name, and its list is a bottom sheet; the last cases here.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -19,6 +18,7 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
 import { setSessionLabels } from './sessionLabels';
+import { firstLineRtl } from './components/FieldLead';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -218,6 +218,9 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   const text = await write(el, 'Ship it.');
   await settle(1100);
   expect(pill(el)).toBeNull();
+  // No chip and no indent: the field is the field as ever.
+  expect(el.querySelector('[data-field-lead]')).toBeNull();
+  expect((el.querySelector('.ib-cfield') as HTMLElement).style.getPropertyValue('--ib-lead')).toBe('');
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
   const leaves = [...el.querySelectorAll('.ib-pfoot *')].filter((n) => n.children.length === 0).map((n) => n.textContent ?? '');
   expect(leaves.some((t) => t.startsWith('Reply to'))).toBe(false);
@@ -226,6 +229,99 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
+});
+
+/** The reply box's controls a Tab reaches, in order. */
+const tabStops = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.ib-rbox button, .ib-rbox textarea')].filter((n) => n.tabIndex >= 0 && !(n as HTMLButtonElement).disabled);
+
+test.skipIf(!hasDom)('several agents, a computer: the chip is at the start of the words, in the field before the textarea, not in the row; it is no part of the field\'s name, and a Tab reaches it before the words', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const text = await write(el, '');
+  const chip = pill(el)!;
+  const field = el.querySelector('.ib-cfield') as HTMLElement;
+  expect(chip.hasAttribute('data-recipient-chip')).toBe(true);
+  expect(chip.closest('[data-field-lead]')?.parentElement).toBe(field);
+  expect(chip.closest('[data-reply-row]')).toBeNull();
+  // The pill in the row is gone: the chip replaces it.
+  expect(el.querySelector('.ib-rto, .ib-rto-slot, [data-reply-row] [data-recipient]')).toBeNull();
+  expect(chip.querySelector('.ib-rto-l')?.textContent).toBe('to');
+  expect(pillName(el)).toBe('Pi');
+  expect(chip.getAttribute('aria-label')).toBe('To Pi. Change who gets this reply');
+  // The words start after it: the first line is indented by its width (FieldLead sets it on the field), the
+  // placeholder is the field's own.
+  expect(field.style.getPropertyValue('--ib-lead')).toMatch(/^\d+px$/);
+  expect(text.placeholder).toBe('Write a reply. Type / for a skill');
+  // Not part of the field: the field's name is its own, and the chip comes first in the tab order.
+  expect(text.getAttribute('aria-label')).toBe('Reply to Pi');
+  expect(text.hasAttribute('aria-labelledby')).toBe(false);
+  expect(chip.closest('label')).toBeNull();
+  const stops = tabStops(el);
+  expect(stops.indexOf(chip)).toBeGreaterThanOrEqual(0);
+  expect(stops.indexOf(chip)).toBeLessThan(stops.indexOf(text));
+  expect(stops.indexOf(text) - stops.indexOf(chip)).toBe(1);
+});
+
+test.skipIf(!hasDom)('Backspace at the start of the words leaves the chip where it is, and opens nothing', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  for (const words of ['Use the old totals.', '']) {
+    const text = await write(el, words);
+    act(() => {
+      text.focus();
+      text.setSelectionRange(0, 0);
+    });
+    await key(text, 'Backspace');
+    await key(text, 'Backspace');
+    expect(text.value).toBe(words);
+    expect(pill(el)).not.toBeNull();
+    expect(pillName(el)).toBe('Pi');
+    expect(pill(el)!.getAttribute('aria-expanded')).toBe('false');
+    expect(el.querySelector('[data-recipient-list]')).toBeNull();
+    expect(document.activeElement).toBe(text);
+  }
+});
+
+test.skipIf(!hasDom)('the chip opens the list the pill opened, over the words, and a press on it leaves the caret in the words', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const text = await write(el, 'Use the old totals.');
+  act(() => text.focus());
+  const chip = pill(el)!;
+  // The press keeps focus in the words.
+  const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+  act(() => {
+    chip.dispatchEvent(press);
+  });
+  expect(press.defaultPrevented).toBe(true);
+  await openList(el);
+  const list = el.querySelector('[data-recipient-list]') as HTMLElement;
+  expect(list.classList.contains('ib-rpick')).toBe(true);
+  expect(chip.getAttribute('aria-expanded')).toBe('true');
+  expect(chip.getAttribute('aria-controls')).toBe(list.id);
+  expect(rows(el)).toEqual([
+    ['Claude Code', null],
+    ['Pi', null],
+  ]);
+  await only(el, 'ses_claude');
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  expect(pillName(el)).toBe('Claude Code');
+  expect(document.activeElement).toBe(text);
+});
+
+test.skipIf(!hasDom)('words that start right to left move the chip to the right end of the first line, where the browser indents them', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  await write(el, 'مرحبا، هل انتهيت؟');
+  expect(el.querySelector('[data-field-lead]')?.getAttribute('data-field-lead')).toBe('rtl');
+  await write(el, 'Done? مرحبا');
+  expect(el.querySelector('[data-field-lead]')?.getAttribute('data-field-lead')).toBe('ltr');
+});
+
+test('firstLineRtl: the first strong letter of the first paragraph decides; numbers and marks do not, and a later paragraph never does', () => {
+  expect(firstLineRtl('')).toBe(false);
+  expect(firstLineRtl('Ship it')).toBe(false);
+  expect(firstLineRtl('שלום')).toBe(true);
+  expect(firstLineRtl('12, "مرحبا"')).toBe(true);
+  expect(firstLineRtl('12 Ship مرحبا')).toBe(false);
+  expect(firstLineRtl('\nمرحبا')).toBe(false);
+  expect(firstLineRtl('42\nמה')).toBe(false);
 });
 
 test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside the box\'s row', async () => {
@@ -680,25 +776,24 @@ const sheetRow = (el: HTMLElement, session: string) => el.querySelector(`[data-r
 /** The sheet is open: after a close it stays in the DOM for its way out, so the control says it. */
 const sheetOpen = (el: HTMLElement) => pill(el)?.getAttribute('aria-expanded') === 'true';
 
-test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in the row after Skills; its sheet is a dialog that takes focus, a circle adds a second agent (an ended one\'s is off), a row picks that agent alone, closes the sheet and gives the reply its focus back', async () => {
+test.skipIf(!hasDom)('a phone, several agents: who gets the reply is the chip at the start of the words, with its name; its sheet is a dialog that takes focus, a circle adds a second agent (an ended one\'s is off), a row picks that agent alone, closes the sheet and gives the reply its focus back', async () => {
   const el = await render(threadOf(agentMessage(M1, GONE, 39), agentMessage(M2, CLAUDE, 41), agentMessage(M3, PI, 45)), true);
   const text = await write(el, 'Use the old totals.');
   act(() => text.focus());
   const control = pill(el)!;
-  // In the row, after Skills; never on the line over the row, and none of a computer's pill.
-  expect(control.closest('[data-reply-row]') !== null).toBe(true);
-  expect(el.querySelector('[data-reply-line] [data-recipient]')).toBeNull();
-  expect(el.querySelector('.ib-rto')).toBeNull();
-  expect(el.querySelector('[data-reply-skills]')!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(el.querySelector('[data-voice-mic], [data-reply-send]')!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-  // It names the last writer.
-  expect(control.hasAttribute('data-agent-pill')).toBe(true);
+  // In the field, before the words; not in the row, and not the mark-only control the row had.
+  expect(control.closest('[data-field-lead]') !== null).toBe(true);
+  expect(control.closest('[data-reply-row]')).toBeNull();
+  expect(el.querySelector('[data-reply-row] [data-recipient]')).toBeNull();
+  expect(el.querySelector('[data-agent-mark], [data-agent-pill]')).toBeNull();
+  expect(control.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // It names the last writer, with the name (the phone shows it too now).
+  expect(control.hasAttribute('data-recipient-chip')).toBe(true);
   expect(control.getAttribute('data-recipient-chosen')).toBe('ses_pi');
-  expect(control.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
+  expect(control.querySelector('.ib-rto-full')?.textContent).toBe('Pi');
+  expect(control.querySelector('.ib-rto-short')?.textContent).toBe('Pi');
+  expect(control.getAttribute('aria-label')).toBe('To Pi. Change who gets this reply');
   expect(control.getAttribute('aria-haspopup')).toBe('dialog');
-  // No other agent here wears Pi's mark: the mark and the chevron say it, with no name (the label has it).
-  expect(control.querySelector('.ib-apill-n')).toBeNull();
-  expect(control.querySelector('.ib-apill-m') !== null && control.querySelector('.ib-apill-c') !== null).toBe(true);
   await openList(el);
   const sheet = el.querySelector('[data-recipient-list]') as HTMLElement;
   expect(sheet.getAttribute('role')).toBe('dialog');
@@ -720,8 +815,8 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in t
   expect(sheetOpen(el)).toBe(true);
   expect(tick(el, 'ses_claude').getAttribute('aria-checked')).toBe('true');
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_pi ses_claude');
-  expect(pill(el)!.querySelector('[data-agent-count]')?.textContent).toBe('2');
-  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Pi and Claude Code. Change');
+  expect(pill(el)!.querySelector('.ib-rto-short')?.textContent).toBe('2 agents');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('To Pi and Claude Code. Change who gets this reply');
   // A row: that agent only. The sheet closes and the reply has focus again.
   await act(async () => sheetRow(el, 'ses_claude').click());
   await settle();
@@ -739,19 +834,18 @@ test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in t
   expect(replies()[0]!.body.tags).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('a phone, two agents with the same mark (two Claude Code sessions): still the mark alone, and its accessible name says which gets the reply', async () => {
+test.skipIf(!hasDom)('a phone, two agents of one kind (two Claude Code sessions): the chip names each by its folder, as a narrow box names it, and its accessible name says which', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M4, FARCLAUDE, 45, { from_project: { name: FAR.name, root: FAR.root } })), true);
   await write(el, 'Which folder?');
-  expect(pill(el)!.hasAttribute('data-agent-pill')).toBe(true);
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_far');
-  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (plannotator). Change');
-  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill(el)!.getAttribute('aria-label')).toBe('To Claude Code (plannotator). Change who gets this reply');
+  expect(pill(el)!.querySelector('.ib-rto-short')?.textContent).toBe('plannotator');
   await openList(el);
   await act(async () => sheetRow(el, 'ses_claude').click());
   await settle();
   expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
-  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
-  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (superfans). Change');
+  expect(pill(el)!.querySelector('.ib-rto-short')?.textContent).toBe('superfans');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('To Claude Code (superfans). Change who gets this reply');
 });
 
 test.skipIf(!hasDom)('a phone, a tagged agent that ended and never wrote here: its row can\'t be picked alone, and the reply stays with the agent that wrote', async () => {
@@ -773,7 +867,7 @@ test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no cont
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
   const text = await write(el, 'Ship it.');
   expect(pill(el)).toBeNull();
-  expect(el.querySelector('[data-agent-mark], [data-agent-pill]')).toBeNull();
+  expect(el.querySelector('[data-agent-mark], [data-agent-pill], [data-field-lead]')).toBeNull();
   expect(el.querySelector('[data-recipient-list], [data-sheet]')).toBeNull();
   // The row is the paperclip, Skills and Send.
   expect(el.querySelector('[data-reply-row][data-phone] [data-reply-skills]')).not.toBeNull();

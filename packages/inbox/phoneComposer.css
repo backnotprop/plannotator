@@ -2,8 +2,8 @@
  * The phone composer and its picker sheet (approval "inbox-phone-composer-picker").
  *
  * On a phone the reply box and New message are one rounded card that floats 8 px above the keyboard and 8 px from the
- * edges, with one bottom row: the paperclip, Skills, who gets the words, a spacer, the mic, Send (a round arrow).
- * Who gets the words opens a bottom sheet (components/BottomSheet.tsx).
+ * edges, with one bottom row: the paperclip, Skills, a spacer, the mic, Send (a round arrow). Who gets the words (New
+ * message's To in its row; a reply's chip at the start of its words) opens a bottom sheet (components/BottomSheet.tsx).
  *
  * A computer is untouched: the components here are drawn only on a phone (phone.ts `usePhone`), and every rule that
  * restyles something a computer also draws sits inside the phone query, the same one phone.ts and inbox.css spell out.
@@ -167,6 +167,10 @@
   .pn-inbox .ib-pfoot .ib-rquote { padding: 14px 52px 0 18px; }
   .pn-inbox .ib-pfoot .ib-rbox:has(> .ib-rquote) .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding-top: 8px; }
   .pn-inbox .ib-pfoot .ib-rline { padding: 0 10px 0 8px; }
+  /* Who gets the reply in a thread with several agents: the chip at the start of the words (inbox.css), at the 16 px
+     words' size, with a 44 px tap area that moves nothing. */
+  .pn-inbox .ib-pfoot .ib-rto-chip { height: 25px; font-size: var(--ib-fs-13-5, 13.5px); }
+  .pn-inbox .ib-pfoot .ib-rto-chip::after { content: ''; position: absolute; inset: -10px -4px; }
   /* The row: every control 36 px and round, 44 px to the touch. */
   .pn-inbox .ib-rrow[data-phone] { gap: 8px; padding: 8px 10px 10px; }
   .pn-inbox .ib-rrow[data-phone] .ib-rmid { height: 36px; }

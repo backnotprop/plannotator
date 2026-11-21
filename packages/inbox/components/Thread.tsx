@@ -1119,8 +1119,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
   /** Another session can take an ended session's reply: a live one, or a new one (the start row). */
   const anotherTakes = anyOtherLive || replyStart !== null;
-  // Who gets the reply (approval "inbox-reply-recipient", option E): a pill under the box, right, in a thread with
-  // more than one agent, or one whose only agent ended while another can take it (it does the old route choice's job).
+  // Who gets the reply (approval "inbox-reply-recipient"): in a thread with more than one agent, or one whose only agent ended while another can take it.
   const pillActive = !resolved && (multiAgent || (askerEnded && anotherTakes));
   /** Whom the words go to unless the person aims them: the session of the message they answer (wordsMessage). */
   const rcptDefault = (() => {
@@ -4194,11 +4193,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     aimReply(next);
     announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
   };
-  // The one place the reply's recipient control splits: a phone's is in the box's row with its sheet (approval
-  // "inbox-phone-composer-picker"), a computer's is the pill. Both show by the same rule (`pillActive`): a thread with
-  // one agent has no control at all.
+  // The reply's recipient: a chip at the start of the words, the field's lead ("inbox-reply-target-chip", 2026-11-20). It
+  // opens a phone's sheet ("inbox-phone-composer-picker") or a computer's list. A one-agent thread has none (`pillActive`).
   const rcptPill = !pillActive ? null : phone ? (
     <PhoneReplyRecipient
+      chip
       rows={rcptAgents}
       chosen={rcptChosen}
       open={rcptOpen}
@@ -4211,7 +4210,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
   ) : (
-    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} labels={sessionLabels} folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name} />
+    <ReplyRecipient chip rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} labels={sessionLabels} folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name} />
   );
   const routeChoice = asking ? (
     <RouteChoice
@@ -5610,6 +5609,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   ariaLabel={`Reply to ${replyToNames}`}
                   ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                   placeholder="Write a reply. Type / for a skill"
+                  lead={rcptPill}
                   destination="your reply"
                   skillFilter={skillFilter}
                   commands={replyCommands}
@@ -5715,7 +5715,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
-                pill={rcptPill}
+                pill={null}
                 hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
