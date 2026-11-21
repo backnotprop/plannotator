@@ -117,7 +117,6 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     for (const id of out) {
       const root = store.message(id);
       if (!root || root.thread_id !== id) throw new InboxError("thread_not_found", `No thread ${id} on this machine.`, { field: "thread_ids" });
-      // The list's own rule: a thread that came back from the archive is open there, so it is combinable.
       const row = store.listRow(id);
       if (row && inboxRowArchived(row)) throw new InboxError("thread_archived", `${store.threadSubject(id) ?? id} is archived.`, { field: "thread_ids" });
     }
@@ -222,8 +221,6 @@ export function createInboxCombine(deps: InboxCombineDeps) {
   const archive = (record: Stored, resolved: boolean) => {
     for (const thread of record.threads) {
       try {
-        // A came-back thread is still resolved: Unarchive, then Archive, so a new archive line follows the messages
-        // that brought it back (the thread-state model's "archived again").
         if (resolved && store.message(thread.id)?.resolved_at != null) store.resolveThread(thread.id, false, "person");
         store.resolveThread(thread.id, resolved, "person");
       } catch {
