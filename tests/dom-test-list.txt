@@ -37,6 +37,7 @@ packages/ui/components/ai/AIProviderBar.dom.test.tsx
 packages/ui/components/ai/SessionAskNotice.dom.test.tsx
 packages/ui/hooks/useAIChat.sessionAsk.test.tsx
 packages/ui/hooks/useAIChat.newChat.test.tsx
+packages/ui/hooks/useAIChat.persistence.test.tsx
 packages/ui/components/ai/NewChatButton.dom.test.tsx
 packages/ui/components/chat/ChatFrame.dom.test.tsx
 packages/ui/components/chat/ChatComposer.dom.test.tsx
@@ -63,6 +64,7 @@ packages/ui/components/Tooltip.dom.test.tsx
 packages/ui/components/MermaidBlock.theme.test.tsx
 packages/ui/components/DiagramBlock.anchor.test.tsx
 packages/ui/components/DiagramBlock.askAI.test.tsx
+packages/ui/components/DiagramBlock.copySource.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
 packages/ui/components/Viewer.textComments.test.tsx
@@ -256,6 +258,7 @@ packages/inbox/ask/askReadsOnce.test.tsx
 packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
+packages/inbox/ask/sideCorner.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/rowSwipeList.test.tsx
 packages/inbox/threadReadRetry.test.tsx
@@ -555,6 +558,7 @@ packages/ui/components/html-viewer/bridgeAssetLinkKey.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
+packages/ui/components/MarkdownContentsRail.marks.test.tsx
 packages/ui/components/DeferredMarkdownContentsRail.test.ts
 packages/ui/components/CommentPopover.overlayGutter.test.tsx
 packages/ui/components/ComposerTokenTextarea.perKey.test.tsx
@@ -871,3 +875,11 @@ packages/inbox/projectTagMenu.test.tsx
 packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
 packages/inbox/runCardLive.test.tsx
+packages/ui/components/Viewer.footnotesAutolinks.test.tsx
+packages/inbox/markAllReadList.test.tsx
+packages/ui/hooks/useFenceTheme.page.test.tsx
+packages/ui/components/Viewer.rawHtmlImages.test.tsx
+packages/inbox/launchChoiceStates.test.tsx
+packages/ui/components/html-embed/HtmlEmbedBlock.annotate.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.inline.test.tsx
+packages/ui/components/html-viewer/bridgeStructuralAnchor.test.ts

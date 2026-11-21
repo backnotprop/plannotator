@@ -84,7 +84,7 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { LaunchChoiceError, launchChoicesReadable, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
 import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
@@ -337,7 +337,9 @@ export function createInboxLaunch(options: {
    * composer's "Start Claude Code" while the switch was never set (what it follows), and by each start for
    * its own env, after the Send answered. One read at a time: callers meanwhile share it. Of a read only its
    * PATH (for the plain env) and the names the hosts keep (`shellNames`: Claude Code's skip-permissions
-   * export and CLAUDE_CONFIG_DIR) are kept; the env itself is never held for a launch.
+   * export and CLAUDE_CONFIG_DIR) are kept here. A start never uses a held env: each start reads its own. The
+   * whole env goes to the hosts' `loginRead`; only OpenCode's keeps it, in memory, for its model-list reads (a key
+   * exported in the shell rc decides which providers OpenCode lists), never for a start.
    */
   let shell: { kept: LaunchEnv; at: number } | null = null;
   /** Settings → Agents reads the shell again only when its last read is older than this. */
@@ -357,6 +359,12 @@ export function createInboxLaunch(options: {
         // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
         for (const name of hostList.flatMap((host) => host.shellFlags ?? [])) if (login[name]) kept[name] = "1";
         shell = { kept, at: now() };
+        for (const host of hostList) {
+          // A host's own hook: one that throws never fails the login read (or the start waiting on it).
+          try {
+            host.loginRead?.(login);
+          } catch {}
+        }
         return login;
       } finally {
         reading = null;
@@ -639,6 +647,30 @@ export function createInboxLaunch(options: {
   /** The reply's restart was refused because the agent does not trust the folder. */
   const respawnUntrustedOf = (memo: Memo): boolean => memo.respawn?.untrusted === true && respawnFailedOf(memo) !== null;
 
+  type Pending = (session: string) => InboxMessage[];
+  const pendingEach: Pending = (session) => store.pendingReplies(session, { tags: true });
+  const pendingOnePass = (): Pending => {
+    let found: { sessions: Set<string>; bySession: Map<string, InboxMessage[]> } | null = null;
+    return (session) => {
+      if (!found) {
+        const sessions = new Set(roots().flatMap((root) => (root.to ? [root.to.session] : [])));
+        found = { sessions, bySession: store.pendingRepliesFor(sessions, { tags: true }) };
+      }
+      return found.sessions.has(session) ? (found.bySession.get(session) ?? []) : pendingEach(session);
+    };
+  };
+  let pass: Pending | null = null;
+  const pendingOf: Pending = (session) => (pass ?? pendingEach)(session);
+  const inOnePass = <T>(read: () => T, pending: Pending = pendingOnePass()): T => {
+    if (pass) return read();
+    pass = pending;
+    try {
+      return read();
+    } finally {
+      pass = null;
+    }
+  };
+
   /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
    * was taken since the latest start but the session has neither polled busy
@@ -646,7 +678,7 @@ export function createInboxLaunch(options: {
    */
   const turnWaitingOf = (root: InboxMessage, memo: Memo): boolean => {
     if (!root.delivery) return true;
-    if (root.to && store.pendingReplies(root.to.session, { tags: true }).length > 0) return true;
+    if (root.to && pendingOf(root.to.session).length > 0) return true;
     if (memo.busySeen) return false;
     const lastId = store.threadMessageIds(root.thread_id).at(-1);
     const last = lastId ? store.message(lastId) : null;
@@ -800,7 +832,9 @@ export function createInboxLaunch(options: {
     // The switch off governs new starts only: an agent already started keeps its line, its questions and its respawn.
     const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
-    for (const root of all) maybeRespawn(root);
+    inOnePass(() => {
+      for (const root of all) maybeRespawn(root);
+    });
     for (const root of all) watchTurnError(root);
     for (const host of hostList) stateOf(host).permissions.sweep();
     if (!watched) return;
@@ -908,7 +942,8 @@ export function createInboxLaunch(options: {
     memo.seenLive = false;
     starting.add(launch.id);
     try {
-      // The person's login env, read for this start only (after the Send answered; never kept).
+      // The person's login env, read for this start (after the Send answered). This start never uses an older one; the
+      // read also reaches the hosts' `loginRead` (OpenCode keeps it in memory for its model lists only).
       const login = await readLogin();
       await trustMadeFolder(launch, host);
       // A reply's launch takes its thread's name.
@@ -1281,8 +1316,7 @@ ${result.text}`);
       // A reply the person wrote after the clone ended: never the thread's own first message (it waits for the agent
       // too), nor one the clone already had (E7: Cancel stays cancelled, a failure stays failed, a restart included).
       const ended = launch.clone.ended_at ?? null;
-      const newest = store
-        .pendingReplies(root.to.session, { tags: true })
+      const newest = pendingOf(root.to.session)
         .filter((reply) => reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
@@ -1314,7 +1348,7 @@ ${result.text}`);
     };
     const live = liveOf(host, root, memo);
     // The person's reply starts it again: from this computer or over the tailnet.
-    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const newest = pendingOf(root.to.session).at(-1);
     const early = now() - memo.startedAt < INBOX_RUN_START_GRACE_MS;
     if (live || (early && !memo.paneClosed)) {
       // In Rex, its own pane closed (by the person, or Rex's API): the program went with it, while its last polls
@@ -1937,6 +1971,8 @@ ${result.text}`);
    */
   const networkSeen = new Map<string, { at: number; exists: boolean; slow: boolean; reading: boolean }>();
   const NETWORK_LOOK_MS = 10_000;
+  /** `root` is on a network drive (one that may not answer: never read in process). */
+  const onNetworkDrive = (root: string, mounted: readonly { path: string; network?: true }[]) => mounted.some((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
   const projectThere = (root: string, mounted: readonly { path: string; network?: true }[]): { exists: boolean; slow?: true } => {
     const drive = mounted.find((d) => d.network && (root === d.path || root.startsWith(`${d.path}/`)));
     if (!drive) return { exists: isFolder(root) };
@@ -2103,7 +2139,7 @@ ${result.text}`);
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
       // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
-      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      const lists = host.choices ? launchChoicesReadable(await withinLaunchWait(host.choices())) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
@@ -2189,7 +2225,9 @@ ${result.text}`);
         // always runs in the background: no new tab per run.
         ...(config().startIn === "rex" && host.rexCommand && input.background !== true ? { rex: {} } : {}),
       };
-      if (host.choices && input.keepLastChoice !== true) {
+      // Default sent while the lists were being read or could not be read (no menu to pick from): the saved pick stays.
+      const picked = !!(target.choice?.model || target.choice?.effort || target.choice?.primary_agent);
+      if (host.choices && input.keepLastChoice !== true && (lists || picked)) {
         try {
           writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
         } catch {
@@ -2240,7 +2278,8 @@ ${result.text}`);
     /**
      * `GET /api/inbox/sessions`'s `launch` block: the agents To offers, the projects the folder menu lists.
      * `owner`: the owner's window asks, so each agent says which folders it would Trust and start. That read is
-     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read.
+     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read (Trust and
+     * start's facts, and OpenCode's project config for its default's name). Null (another site, the device door): none.
      */
     async composeBlock(owner: { pick: { agent: string; project: string } | null } | null = null): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
@@ -2289,9 +2328,23 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
-          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
-          const choices = lists ? { ...lists, ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) } : null;
+          // Its default model is named for the folder picked in To, for the owner's own window only (`owner.pick`, as
+          // Trust and start's facts): a project here (in home, there, not on a network drive, whose config files are
+          // read as data) or the scratch pick (the home folder: the scratch folder is not made yet). Any other folder,
+          // another site's page, the device door, or none picked: no default, so no name that may be wrong.
+          const namedHere = owner?.pick?.agent === host.agent ? owner.pick.project : null;
+          const namedProject =
+            namedHere && namedHere !== INBOX_SCRATCH_PICK
+              ? projects.find((p) => p.id === namedHere && p.exists && !p.slow && !onNetworkDrive(p.root, mounted) && !outsideHome(options.homeDir, p.root))
+              : null;
+          const defaultIn = namedHere === INBOX_SCRATCH_PICK ? null : namedProject ? namedProject.root : undefined;
+          // A list still being read past the wait, or one that could not be read: compose has Default and says so
+          // (OpenCode), with no last pick (Default stays picked).
+          const lists = host.choices ? await withinLaunchWait(host.choices(defaultIn === undefined ? {} : { defaultIn }), undefined, host.choicesWhileReading ?? null) : null;
+          const last = launchChoicesReadable(lists) ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const choices = lists
+            ? { ...lists, ...(lists.default_model && namedHere ? { default_for: namedHere } : {}), ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) }
+            : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );
@@ -2430,7 +2483,12 @@ ${result.text}`);
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
       // One pass over the launches per list read, not one per row.
       const latest = new Map(roots().map((m) => [m.thread_id, m]));
-      return (row) => decorate(row, latest.get(row.thread_id) ?? null);
+      const pending = pendingOnePass();
+      return (row) => inOnePass(() => decorate(row, latest.get(row.thread_id) ?? null), pending);
+    },
+
+    onePass<T>(read: () => T): T {
+      return inOnePass(read);
     },
 
     /**
@@ -2481,12 +2539,14 @@ ${result.text}`);
      * no host here (a downgrade) is left out, as it has no line.
      */
     agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean; rex: boolean }[] {
-      return roots().flatMap((root) => {
-        const launch = root.launch!;
-        const session = inboxLaunchedSession(root);
-        if (launch.deleted_at || !session || !hostOf(launch)) return [];
-        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
-      });
+      return inOnePass(() =>
+        roots().flatMap((root) => {
+          const launch = root.launch!;
+          const session = inboxLaunchedSession(root);
+          if (launch.deleted_at || !session || !hostOf(launch)) return [];
+          return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, rex: inboxLaunchRexUnstoppable(launch) }];
+        }),
+      );
     },
 
     /** "Start new agents in" is Rex: every agent of this computer's in a Rex pane gets its place line, marks and Show. */
@@ -2549,12 +2609,14 @@ ${result.text}`);
 
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
-      return roots()
-        .map((root) => {
-          const line = runOfRoot(root);
-          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
-        })
-        .join(",");
+      return inOnePass(() =>
+        roots()
+          .map((root) => {
+            const line = runOfRoot(root);
+            return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
+          })
+          .join(","),
+      );
     },
   };
 }

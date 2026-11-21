@@ -320,17 +320,19 @@ import {
   revealAgainAt,
   revealStamp,
   revealStampNotNow,
+  revealWaitStarts,
   type RevealId,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
+import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
-import { createInboxEmbeds } from "./inbox-embeds";
+import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -3602,7 +3604,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
-   * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
+   * on" writes the switch. A registered offer (Bro mode, the view choice) adds its own here, and its id to `INBOX_REVEALS`.
    */
   /**
    * The "Star the repo" ask (approval "star-ask"; packages/shared/star-ask.ts): open while no surface showed or answered
@@ -3633,9 +3635,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // read in `revealState`, only while it is unshown and could go today.
     grill_me_tip: () => true,
     star: starUndecided,
-    // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
-    // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
-    list_view: () => true,
+    // "Which view do you prefer?" (reveals.ts `view_choice`): the view is each browser's own (packages/inbox/listView.ts),
+    // so the Inbox never sees it decided; the page holds it back on Agents (reveal.ts `viewChoiceWanted`). Only its own
+    // stamp closes it: List view's retired `list_view` stamp is not read, so whoever saw that dialog is offered this one.
+    view_choice: () => true,
     // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
     // pick in Settings (here, plan review or code review) before its moment drops it.
     tab_icon: tabIconUndecided,
@@ -3754,19 +3757,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The line's own rules hold for this page load (`setup`: the agent note, which keeps no spacing). A dev build: free. */
   const lineFree = (kind: "setup" | "spaced", load: string | null): boolean => revealLineFree(kind, revealState(new Date(), load), new Date());
   /**
-   * The dialog this page may arm, or null. The first time an entry is next is kept, for the patience and the
-   * retirement.
+   * The dialog this page may arm, or null. The first time an entry is next, or an `ahead` offer is armed beside it, is
+   * kept, for the patience and the retirement (reveals.ts `revealWaitStarts`).
    */
   const revealNow = (load: string | null = null, read?: { now: Date; state: RevealState }): RevealId | null => {
     if (!snoozeIntroRelease) return null;
     const now = read?.now ?? new Date();
     const state = read?.state ?? revealState(now, load);
-    const next = revealNext(state, now);
-    if (next && !state.waitingSince?.[next]) {
+    const starts = revealWaitStarts(state, now);
+    if (starts.length > 0) {
       const reveals = loadConfig().inboxReveals;
-      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, [next]: now.toISOString() } } });
+      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } } });
     }
-    return next;
+    return revealNext(state, now);
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
@@ -3894,10 +3897,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
   };
   /**
+   * The Group tip (packages/shared/inbox/band-tip.ts): a band's one-time tooltip, a day or more after first use, until
+   * it was shown once or a band's menu was opened. A tooltip the person's pointer calls up: reported due only outside
+   * the gap (`lineReport`), but its claim neither waits for nor starts one, so opening a band's menu always retires it.
+   */
+  const bandTipState = (): BandTipState => ({
+    firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+    tenure: snoozeIntroRelease,
+    saved: loadConfig().inboxReveals?.band_tip,
+  });
+  const claimBandTip = (key: string | null, used: boolean): boolean => {
+    const at = new Date().toISOString();
+    // A band's menu opened: stamped whatever the tenure or the gap, and never shown.
+    if (used) {
+      const save = bandTipUsed(bandTipState(), at);
+      if (save) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: save } });
+      return false;
+    }
+    const claim = bandTipClaim(bandTipState(), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.band_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
   const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
+  /** `state` with the waits `revealNow` starts at `now` (reveals.ts `revealWaitStarts`) kept. */
+  const waitingFrom = (state: RevealState, now: Date): RevealState => {
+    const starts = revealWaitStarts(state, now);
+    return starts.length === 0 ? state : { ...state, waitingSince: { ...state.waitingSince, ...Object.fromEntries(starts.map((id) => [id, now.toISOString()])) } };
+  };
   const lineReport = (load: string | null) => {
     const now = new Date();
     const state = revealState(now, load);
@@ -3912,15 +3944,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
-      // With `next` waiting from this read on (`revealNow` has just kept it), so the end of its patience is named too.
-      again_in:
-        snoozeIntroRelease
-          ? againIn(revealAgainAt(next && !state.waitingSince?.[next] ? { ...state, waitingSince: { ...state.waitingSince, [next]: now.toISOString() } } : state, now), now)
-          : null,
+      // With `next` and the `ahead` offers waiting from this read on (`revealNow` has just kept them), so the end of
+      // their patience and their 14 days is named too.
+      again_in: snoozeIntroRelease ? againIn(revealAgainAt(waitingFrom(state, now), now), now) : null,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
+      band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
@@ -4795,6 +4827,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           cliVersion: version,
           pluginsDir: claudePluginInstall.pluginsDir(),
           changedAt: claudePluginInstall.changedAt,
+          realPath: claudePluginInstall.realPath,
         });
       }
       if (host === "pi") return piSessionOutdated(plugin, version, { pinned: piPinned() });
@@ -4999,6 +5032,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
     launchResumes: (threadId, session) => launch.resumes(threadId, session),
+    onePass: (read) => launch.onePass(read),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId),
@@ -5441,6 +5475,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
+  // The same block while the person comments on it: the window's own build of its page, under the same policy.
+  const embedPages = createInboxEmbedPages({ readBody: (req) => readBody(req), json });
   // Attached HTML pages ("Pages only"): the documents the window frames for an attached page, under their own policy (inbox-pages.ts).
   const attachedPages = createInboxPages({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
@@ -7187,8 +7223,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7196,6 +7232,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
         const key = body.key;
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
+        // `used`: the Group tip only, a band's menu opened (it retires the tip, never shows it).
+        if (body.used !== undefined && (body.used !== true || id !== "band_tip")) throw new InboxError("validation_error", "used: true, with id band_tip only.", { field: "used" });
         const load = revealLoadId(req.headers.get("x-plannotator-load"));
         // Not now on an offer already shown: the line waits three days. Nothing is claimed.
         if (body.answer === "not_now") {
@@ -7209,6 +7247,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Sidebar tip: outside the line too (packages/shared/inbox/sidebar-tip.ts).
         if (id === "sidebar_tip") {
           return json({ show: claimSidebarTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
+        if (id === "band_tip") {
+          return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
@@ -7323,6 +7365,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
       const embedded = await embeds.route(req, url, framers);
       if (embedded) return embedded;
+      const embeddedPage = await embedPages.route(req, url, framers);
+      if (embeddedPage) return embeddedPage;
       // Attached HTML pages: keep a page's frame document, and serve it under its own policy (web pictures, never in the window).
       const paged = await attachedPages.route(req, url, framers);
       if (paged) return paged;

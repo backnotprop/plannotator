@@ -15,6 +15,7 @@
  */
 
 import { customSyntaxThemeFor } from './customSyntaxThemes';
+import { FENCE_SYNTAX_THEME } from './fenceSyntaxThemes';
 
 /** Plannotator theme id -> Shiki theme name, per mode. `null` = this palette
  *  has no counterpart in that mode and falls back to the Pierre default. */
@@ -114,6 +115,10 @@ export function resetFenceThemeResolver(): void {
  * fences, `CodeBlock`, the code-file hover preview, the plan diff view, code
  * review's suggestion snippets), so a host override applies to all of them.
  * The diff pane's dark/light pair (`resolveSyntaxTheme`) is not affected.
+ *
+ * Where that pair would be Pierre's default (`pierre-light` / `pierre-dark`),
+ * a fence gets `FENCE_SYNTAX_THEME`: the same colours with every one under
+ * 4.5:1 on a code block fixed (fenceSyntaxThemes.ts).
  */
 export function resolveFenceTheme(colorTheme: string, mode: 'dark' | 'light'): string {
   if (fenceThemeResolver) {
@@ -125,5 +130,8 @@ export function resolveFenceTheme(colorTheme: string, mode: 'dark' | 'light'): s
     }
     if (typeof override === 'string' && override) return override;
   }
-  return resolveSyntaxTheme(colorTheme, mode)?.[mode] ?? DEFAULT_SYNTAX_THEME[mode];
+  const resolved = resolveSyntaxTheme(colorTheme, mode)?.[mode] ?? DEFAULT_SYNTAX_THEME[mode];
+  // Where the diff pane would draw Pierre's default, a fence draws the same
+  // colours with the low-contrast ones fixed (fenceSyntaxThemes.ts).
+  return resolved === DEFAULT_SYNTAX_THEME[mode] ? FENCE_SYNTAX_THEME[mode] : resolved;
 }

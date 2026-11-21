@@ -75,6 +75,76 @@ export const VOID_HTML_TAGS: ReadonlySet<string> = new Set([
 
 export const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
 
+/**
+ * Raw HTML the renderer's sanitizer drops (it is not on its allow-list), as a
+ * line's opener: CommonMark's type 1 openers that are not drawn (`script`,
+ * `style`, `textarea`) and the embeds, forms and foreign content. A line that
+ * opens one of these is an HTML block, so the sanitizer drops it and it draws
+ * nothing, where it used to print its own tag as text. `pre` is drawn, so it is
+ * an ordinary block tag (HTML_BLOCK_TAGS).
+ *
+ * It opens a block only on the first line or after a blank line, never in the
+ * middle of a paragraph. Its extent never crosses a blank line (CommonMark type 7), so an opener that
+ * is never closed cannot hide the rest of a document: the block runs to the
+ * line holding its close tag when that comes before the next blank line, else
+ * it is only the opening tag's own lines, and only when nothing but the tag is
+ * on them. A line that starts with the tag and goes on in prose ("<script>
+ * tags are blocked here") is not a block; it stays a paragraph.
+ */
+export const DROPPED_HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
+  'script', 'style', 'textarea', 'noscript', 'template',
+  'iframe', 'frame', 'frameset', 'object', 'embed', 'applet',
+  'form', 'input', 'button', 'select',
+  'svg', 'math', 'canvas',
+]);
+
+/**
+ * A tag name written the way HTML is (`iframe`, `IFRAME`), not a capitalised
+ * component name (`Button`, `Form`, `iFrame`) as MDX and JSX write them.
+ */
+export function isHtmlTagSpelling(name: string): boolean {
+  return name === name.toLowerCase() || name === name.toUpperCase();
+}
+
+/** Per-document arrays for the dropped-tag extents, keyed by the lines array (one array per parse). */
+const droppedExtentCache = new WeakMap<string[], Map<string, Int32Array>>();
+
+/**
+ * For each line, the index of the next line at or after it for which `test`
+ * holds, or `lines.length`. One O(N) pass per document and key.
+ */
+function nextLineWhere(lines: string[], key: string, test: (line: string) => boolean): Int32Array {
+  let perDoc = droppedExtentCache.get(lines);
+  if (!perDoc) {
+    perDoc = new Map();
+    droppedExtentCache.set(lines, perDoc);
+  }
+  let next = perDoc.get(key);
+  if (!next) {
+    next = new Int32Array(lines.length + 1);
+    next[lines.length] = lines.length;
+    for (let k = lines.length - 1; k >= 0; k--) next[k] = test(lines[k]) ? k : next[k + 1];
+    perDoc.set(key, next);
+  }
+  return next;
+}
+
+/** The last line of the dropped-tag block line `i` opens (DROPPED_HTML_BLOCK_TAGS), or -1. */
+function droppedHtmlBlockEnd(lines: string[], i: number, tagName: string): number {
+  const blank = nextLineWhere(lines, '\0blank', (line) => line.trim() === '')[i + 1] ?? lines.length;
+  const closeRe = new RegExp(`</${tagName}\\s*>`, 'i');
+  const close = nextLineWhere(lines, `</${tagName}`, (line) => closeRe.test(line))[i];
+  // Closed before a blank line: a block only when it ends as markup does
+  // ("<script>…</script>"), not in prose after the close tag.
+  if (close < blank) return lines[close].trimEnd().endsWith('>') ? close : -1;
+  // Never closed before a blank line: the opening tag's own lines, when they
+  // hold nothing but the tag (attributes may run over several lines).
+  const tagEnd = nextLineWhere(lines, '\0gt', (line) => line.includes('>'))[i];
+  if (tagEnd >= blank) return -1;
+  const opening = lines.slice(i, tagEnd + 1).join('\n').trim();
+  return /^<[a-zA-Z][a-zA-Z0-9]*(?:\s(?:[^>"']|"[^"]*"|'[^']*')*)?\/?>$/.test(opening) ? tagEnd : -1;
+}
+
 // CommonMark bounds a link label to 999 characters. Reusing that bound here
 // also caps the worst-case backtracking cost of the bracket-matching groups
 // below to a constant per starting position, turning a document with a very
@@ -281,8 +351,18 @@ export const markProtectedLines = (lines: string[]): boolean[] => {
 export function htmlBlockEndAt(lines: string[], i: number, closeCache: Map<string, TagCloseIndex>): number {
   const trimmed = lines[i].trim();
   const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
-  if (!htmlTagMatch || !HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) return -1;
+  if (!htmlTagMatch) return -1;
   const tagName = htmlTagMatch[1].toLowerCase();
+  // An opener the sanitizer drops (`<iframe …>`, `<script>`): bounded by the next blank line.
+  // Spelled as HTML spells it (`iframe` or `IFRAME`): a capitalised `<Button>` or
+  // `<Form>` is a component in MDX or JSX, and stays what it was.
+  // It opens a block only where a paragraph cannot be running (the first line, or after a blank line): a line
+  // inside a paragraph stays in it, as it always did, so the paragraph keeps its block id and its `<p>`; the
+  // tag is dropped there inline.
+  if (!trimmed.startsWith('</') && DROPPED_HTML_BLOCK_TAGS.has(tagName) && isHtmlTagSpelling(htmlTagMatch[1])) {
+    return i === 0 || lines[i - 1].trim() === '' ? droppedHtmlBlockEnd(lines, i, tagName) : -1;
+  }
+  if (!HTML_BLOCK_TAGS.has(tagName)) return -1;
   let end = i;
   if (trimmed.startsWith('</')) {
     while (end + 1 < lines.length && lines[end + 1].trim() !== '') end++;

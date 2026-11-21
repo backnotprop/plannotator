@@ -46,7 +46,8 @@ type ThemeProviderState = {
   manageFavicon: boolean;
 };
 
-const ThemeProviderContext = createContext<ThemeProviderState>({
+/** The context's value outside any ThemeProvider (see `useHasThemeProvider`). */
+const NO_PROVIDER_STATE: ThemeProviderState = {
   theme: 'dark',
   setTheme: () => null,
   mode: 'dark',
@@ -60,7 +61,9 @@ const ThemeProviderContext = createContext<ThemeProviderState>({
   setHalfTheme: () => null,
   availableThemes: getAllThemes(),
   manageFavicon: false,
-});
+};
+
+const ThemeProviderContext = createContext<ThemeProviderState>(NO_PROVIDER_STATE);
 
 /**
  * Held on <html> while a theme change lands. theme.css sets every transition's
@@ -400,6 +403,16 @@ export function ThemeProvider({
       {children}
     </ThemeProviderContext.Provider>
   );
+}
+
+/**
+ * Whether a ThemeProvider is mounted above. Outside one, `useTheme()` answers
+ * the Plannotator palette in dark mode whatever the page shows, so a part
+ * that must match the page (the code fences' colours, `useFenceTheme`) reads
+ * the page itself instead.
+ */
+export function useHasThemeProvider(): boolean {
+  return useContext(ThemeProviderContext) !== NO_PROVIDER_STATE;
 }
 
 export const useTheme = () => {

@@ -1085,6 +1085,12 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-group + .ib-group { margin-top: 12px; }
 .ib-band .ib-n { font-weight: 500; color: var(--muted-foreground); }
 .ib-band .ib-ic { margin-left: auto; color: var(--muted-foreground); }
+/* The Group tip's anchor (GroupBand.tsx): no size, the band's full height, so the tip is centred on the band. After
+   the name and count it takes back the flex gap it adds; at the right end it is out of the flow. */
+.ib-band-tipat { align-self: stretch; width: 0; margin-inline-start: -8px; flex: none; }
+.ib-band-tipat[data-end] { position: absolute; inset-block: 0; inset-inline-end: 12px; margin: 0; }
+/* The tip sits on the band: the pointer goes through it to the band (a right-click there is the band's menu). */
+:is([data-pn-tooltip], :has(> [data-pn-tooltip])):has([data-band-tip]) { pointer-events: none; }
 /* The one-line row (approval "inbox-row-byline", 2026-10-29; its cells by approval "list-rows-mail-icons",
    2026-10-30): the agents' marks with the project after them, the title cell (the thread's name, then the grey
    subject), then right-aligned the count in words, the badge, the open counts and the time, each in a column of its
@@ -1343,7 +1349,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-band .ib-n, .ib-band .ib-ic { color: var(--ib-band-mfg-s, var(--muted-foreground)); }
 .ib-band .ib-n { font-weight: var(--ib-band-nw-s, 500); }
 button.ib-band { transition: var(--ib-fade-s, var(--ib-ui-fade)); }
-button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
+/* `data-menu`: its right-click (or long-press) menu is open (RowMenu.tsx `bands`), as a row keeps its look then. */
+button.ib-band:is(:hover, [data-menu]) { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* A closed group's header looks as an open one does (approval "inbox-list-groups-close", correction 2026-11-06):
    only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
@@ -1380,8 +1387,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-mrow[data-menu] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 50%, transparent)); }
 /* A finger held on a row opens its menu (RowMenu.tsx, `longPress`): no iOS callout and no text selection under it.
    Touch only: a touch screen, or iOS and iPadOS WebKit (a trackpad iPad's primary pointer is fine). */
-@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
-@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw, button.ib-band) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw, button.ib-band) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 /* Rows that wait on nobody (Sent, Quiet): the title steps back. Off, a wide row's title takes its row's colour and
    a three-line row's is quiet text. */
 .ib-row[data-section="quiet"] .ib-title { color: var(--ib-quiet-dim, currentcolor); }
@@ -4952,6 +4959,18 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-lchopt .ib-cp-lchname { display: flex; align-items: baseline; gap: 0.5em; }
 .ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+/* OpenCode's default named on the button, "Default (big-pickle) · build": only the name gives way, the brackets and the rest stay whole. */
+.ib-cp-lchbtn > .ib-cp-lchw { display: inline-flex; min-width: 0; overflow: hidden; }
+.ib-cp-lchw > span { flex: none; white-space: nowrap; }
+.ib-cp-lchw > .ib-cp-lchdn { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; }
+/* The menu's Default row with OpenCode's default and its provider: drops to a second line in a narrow column, never cut. */
+.ib-cp-lchopt .ib-cp-lchname.ib-cp-lchdef { flex-wrap: wrap; row-gap: 1px; line-height: 1.3; }
+.ib-cp-lchname.ib-cp-lchdef > span:first-child { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt:has(.ib-cp-lchdef) { padding-top: 8px; padding-bottom: 8px; }
+/* OpenCode's list being read or not readable: under Default, the menu's notice row (a spinner while it is read). */
+.ib-cp-picker.ib-cp-lch .ib-cp-opt.ib-cp-fnotice { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
+.ib-cp-picker.ib-cp-lch .ib-cp-fnotice > svg.ib-ic { margin-top: 2px; }
+.ib-cp-picker.ib-cp-lch .ib-cp-fnotice > .ib-spin { flex: none; margin: 3px 2px 0 1px; }
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
 /* OpenCode's Agent column (build, plan) beside the model and the variant: the same room as a filterable list. */
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-compose-choice-menu="primary_agent"]) { width: min(480px, calc(100% - 28px)); }
@@ -7820,10 +7839,11 @@ dialog.ib-dlg.ib-bro.ib-gm h2 code { font-family: var(--font-mono); font-size: 0
   .ib-bro.ib-gm .ib-bi-text { padding: 20px 22px 0; }
 }
 /* GRILL-ME-TIP-END */
-/* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
-   small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
-   name and tags, one line, and its button (Smart groups' the primary one). */
-dialog.ib-dlg.ib-lvc { width: min(620px, calc(100vw - 32px)); }
+/* "Which view do you prefer?" (ListViewIntro.tsx, layout C): Agents, Smart groups and Simple list in three columns on
+   the well, Agents first and wider, each a small picture of the person's own list in that view (light for everyone,
+   scaled down), its name and tags, one line, and its button (the view in use the filled one). Each column is a subgrid
+   of the same four rows, so the names, lines and buttons line up whatever wraps. */
+dialog.ib-dlg.ib-lvc { width: min(980px, calc(100vw - 32px)); }
 .ib-lvc .ib-dlg-in { padding: 0; }
 .ib-lvc { --lvc-well: color-mix(in oklch, var(--background) 70%, var(--card)); }
 :root.light .ib-lvc { --lvc-well: color-mix(in oklch, var(--muted) 48%, var(--card)); }
@@ -7831,32 +7851,41 @@ dialog.ib-dlg.ib-lvc { width: min(620px, calc(100vw - 32px)); }
 .ib-lvc-head h2 { margin: 0; font-size: var(--ib-fs-16, 16px); font-weight: 650; }
 .ib-lvc-head h2:focus { outline: none; }
 .ib-lvc-head p { margin: 4px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.5; }
-.ib-lvc-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; padding: 18px 22px 20px; background: var(--lvc-well); }
-.ib-lvc-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.ib-lvc-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-lvc-choices { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0 18px; margin-top: 16px; padding: 18px 22px 20px; background: var(--lvc-well); }
+.ib-lvc-col { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 4px; min-width: 0; }
+.ib-lvc-name { display: flex; align-self: start; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
 /* The tags: text 4.5:1 or more and a 1 px edge 3:1 or more against the well, in light and dark. */
 .ib-lvc-tag { padding: 0 7px; border: 1px solid color-mix(in oklch, var(--primary) 80%, var(--foreground)); border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, var(--card)); color: color-mix(in oklch, var(--primary) 72%, var(--foreground)); font-size: var(--ib-fs-11, 11px); font-weight: 600; line-height: 1.5; }
+.ib-lvc .ib-lvc-tag { white-space: nowrap; }
 /* The view in use now: the same small tag, plain (the window's text on the card, a grey edge), beside Recommended. */
 .ib-lvc-inuse { border-color: color-mix(in oklch, var(--foreground) 56%, var(--card)); background: var(--card); color: var(--foreground); }
 .ib-lvc-line { margin-bottom: 12px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; }
-.pn-inbox .ib-lvc-pick, dialog .ib-lvc-pick { margin-top: auto; justify-content: center; min-height: 36px; }
-/* The picture: the real list column drawn 400 px wide in a light scope, scaled to the thumbnail (--th-s). */
-.ib-lvc-thumb { --th-s: 0.64; position: relative; display: block; height: 150px; margin-bottom: 8px; overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.pn-inbox .ib-lvc-pick, dialog .ib-lvc-pick { align-self: end; justify-content: center; min-height: 36px; }
+/* The picture: the real list column drawn 400 px wide in a light scope, scaled to the thumbnail (--th-s). Agents' is
+   zoomed out further, so four agents show whole. */
+.ib-lvc-thumb { --th-s: 0.64; position: relative; display: block; height: 250px; margin-bottom: 8px; overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-lvc-lead .ib-lvc-thumb { --th-s: 0.52; }
 .ib-lvc-frame { position: absolute; left: 0; top: 0; display: flex; width: calc(100% / var(--th-s)); height: calc(100% / var(--th-s)); transform: scale(var(--th-s)); transform-origin: 0 0; background: var(--card); text-align: left; pointer-events: none; }
-/* The rows fade out at the picture's foot, into its own light card, so none is cut mid-line. */
+/* The rows fade out at the picture's foot, into its own light card, so none is cut mid-line (Agents' only a little). */
 .ib-lvc-frame::after { content: ""; position: absolute; inset: auto 0 0; height: 30%; background: linear-gradient(to bottom, color-mix(in oklch, var(--card) 0%, transparent), var(--card)); }
+.ib-lvc-lead .ib-lvc-frame::after { height: 9%; }
 dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: auto; visibility: visible; flex: 1; width: auto; height: 100%; border-right: 0; }
 .ib-lvc-frame .ib-lbody { overflow: hidden; padding-top: 6px; }
-.ib-lvc-frame .ib-lbody > .ib-group > .ib-rw, .ib-lvc-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
+.ib-lvc-frame .ib-lbody > .ib-group > .ib-rw, .ib-lvc-frame .ib-lbody > .ib-group > .ib-mrow, .ib-lvc-frame .ib-lbody > .ib-ag { content-visibility: visible; }
 .ib-lvc-frame :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .ib-lvc-frame .ib-band .ib-ic { margin-left: auto; }
+.ib-lvc-frame .ib-ract { display: none; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* A phone: a bottom sheet, the two columns kept side by side with smaller pictures; 44 px buttons. */
+  /* A phone: a bottom sheet, Agents across the top, Smart groups and Simple list side by side under it; 44 px buttons. */
   dialog.ib-dlg.ib-lvc.ib-lvc-phone { margin: auto 8px calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); max-width: none; }
   .ib-lvc-phone .ib-lvc-head { padding: 18px 18px 0; }
-  .ib-lvc-phone .ib-lvc-choices { gap: 10px; padding: 14px 14px 16px; }
-  .ib-lvc-phone .ib-lvc-thumb { --th-s: 0.4; height: 110px; }
+  .ib-lvc-phone .ib-lvc-choices { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 12px; padding: 16px 16px 18px; }
+  .ib-lvc-phone .ib-lvc-lead { grid-column: 1 / -1; }
+  .ib-lvc-phone .ib-lvc-col { row-gap: 4px; }
+  .ib-lvc-phone .ib-lvc-thumb { --th-s: 0.4; height: 92px; }
+  .ib-lvc-phone .ib-lvc-lead .ib-lvc-thumb { --th-s: 0.46; height: 250px; }
   .ib-lvc-phone .ib-lvc-name { font-size: var(--ib-fs-15, 15px); }
+  .ib-lvc-phone .ib-lvc-line { margin-bottom: 10px; }
   .pn-inbox .ib-lvc-phone .ib-lvc-pick, dialog.ib-lvc-phone .ib-lvc-pick { min-height: 44px; }
 }
 
@@ -9444,6 +9473,49 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
    follows the phone's keyboard (--ib-vvh, phone.ts). The layer lets the page take the clicks around the window. */
 .ib-ask-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 41; pointer-events: none; isolation: isolate; }
 .ib-ask-layer [data-chat-window] { pointer-events: auto; border-color: var(--ib-float-line-s, var(--border)); }
+/* The minimized side chat (ask/SideChatCorner.tsx; the owner, 2026-11-20, the 28 px circle): a circle in the window's
+   bottom-right corner on the ground, the pane beside it cut inward around it (scoop.ts). The pocket's radius is the
+   circle's and a 5 px ring (19 px), tangent to the window's edges. The button is a 44 px box at the corner whose hit
+   area is clipped (inline clip-path) to the pocket and the ground strips along the window's edges: never the pane. */
+.ib-sc { --ib-sc-d: 28px; --ib-sc-r: 19px; position: absolute; right: 0; bottom: 0; width: 0; height: 0; }
+.pn-inbox .ib-sc-btn { position: absolute; right: 0; bottom: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
+/* The circle: the panes' own material (the card, their hairline and a soft shadow), centred on the pocket. */
+.ib-sc-dot {
+  position: absolute; width: var(--ib-sc-d); height: var(--ib-sc-d);
+  right: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2); bottom: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2);
+  border-radius: 50%; display: grid; place-items: center; background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px color-mix(in oklch, var(--ib-shadow-ink) 8%, transparent), 0 4px 10px -4px color-mix(in oklch, var(--ib-shadow-ink) 18%, transparent);
+  transition: background-color 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
+}
+:root:not(.light) .ib-sc-dot { background: color-mix(in oklch, var(--card) 92%, var(--foreground)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent), inset 0 1px 0 color-mix(in oklch, var(--foreground) 6%, transparent), 0 4px 12px -4px color-mix(in oklch, var(--ib-shadow-ink) 70%, transparent); }
+/* Hover: a step lighter or deeper, never a move. */
+.ib-sc-btn:hover .ib-sc-dot { background: color-mix(in oklch, var(--muted) 45%, var(--card)); }
+:root:not(.light) .ib-sc-btn:hover .ib-sc-dot { background: color-mix(in oklch, var(--card) 84%, var(--foreground)); }
+.ib-sc-btn:active .ib-sc-dot { transform: scale(0.96); }
+/* Focus: the Inbox's 2 px ring, 2 px off the circle, inside the pocket. */
+.ib-sc-btn:focus-visible .ib-sc-dot { box-shadow: 0 0 0 2px var(--ib-ground, var(--background)), 0 0 0 4px var(--ring); }
+/* A new answer: the accent dot on the circle's shoulder, cut out of the circle by its own colour. */
+.ib-sc-new {
+  position: absolute; width: calc(var(--ib-sc-d) * 0.28); height: calc(var(--ib-sc-d) * 0.28);
+  right: calc(var(--ib-sc-r) - var(--ib-sc-d) * 0.395); bottom: calc(var(--ib-sc-r) + var(--ib-sc-d) * 0.115);
+  border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--card); pointer-events: none;
+}
+:root:not(.light) .ib-sc-new { box-shadow: 0 0 0 2px color-mix(in oklch, var(--card) 92%, var(--foreground)); }
+/* Still answering: a short arc runs round the circle's rim. Reduced motion: it holds still. */
+.ib-sc-work {
+  position: absolute; width: calc(var(--ib-sc-d) + 6px); height: calc(var(--ib-sc-d) + 6px);
+  right: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2 - 3px); bottom: calc(var(--ib-sc-r) - var(--ib-sc-d) / 2 - 3px);
+  rotate: -90deg; animation: ib-sc-turn 1.4s linear infinite; pointer-events: none;
+}
+.ib-sc-work circle { fill: none; stroke: color-mix(in oklch, var(--primary) 70%, transparent); stroke-width: 1.75; stroke-linecap: round; }
+@keyframes ib-sc-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-sc-work { animation: none; } }
+/* The window on its way into the circle: a copy of it, under the circle. */
+.ib-sc-fly { position: fixed; inset: 0; pointer-events: none; z-index: -1; }
+/* Behind the cut pane (z-index -1 in the shell's stacking context): its hairline and shadows along the cut. */
+.ib-sc-edge { position: fixed; pointer-events: none; z-index: -1; }
+.ib-sc-edge > .ib-sc-shade, .ib-sc-edge > .ib-sc-rim { position: absolute; inset: 0; }
+.ib-sc-edge > .ib-sc-shade > i { position: absolute; background: #000; }
 .pn-inbox .ib-ask-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 6px; border: none; border-radius: 8px; background: var(--muted); color: var(--foreground); cursor: pointer; }
 .pn-inbox .ib-ask-chip:hover, .pn-inbox .ib-ask-chip[data-popup-open] { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .pn-inbox .ib-ask-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -9614,6 +9686,31 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .ib-rto-slot { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: end; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 260px; margin-left: 6px; margin-right: -6px; }
 .ib-rto-slot > * { grid-area: 1 / 1; }
 .pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
+/* The chip at the start of the words (approval "inbox-reply-target-chip", option B, 2026-11-20): who gets the reply in a
+   thread with several agents, on a computer (the pill above stays for a PR's new thread; a phone keeps its control in
+   the box's row, phoneComposer.css). A filled
+   token laid over the first line's indent: FieldLead.tsx places it and sets `--ib-lead`, which indents the field and
+   its painted mirror alike, so the words, the caret and the placeholder start after it and later lines wrap under it.
+   Capped at 40% of the first line (`--ib-lead-max`, FieldLead.tsx, from the textarea's content box) so the first line
+   always keeps room for the caret; a longer name gives way with "…". In the narrowest panes (a split view's 400 px) it drops "to" when
+   that lets the whole name fit, or when beside it too little of the name would show (`data-tight`, RecipientChip):
+   the mark and the chevron still say what it is, and its accessible name still starts "To". */
+.ib-cfield:has(> .ib-flead) :is(.ib-rtext, .ib-rmirror) { text-indent: var(--ib-lead, 0px); }
+.ib-flead { position: absolute; top: 0; left: 0; z-index: 1; display: flex; min-width: 0; max-width: var(--ib-lead-max, min(240px, 40%)); }
+.pn-inbox .ib-rto-chip { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 23px; min-width: 0; max-width: 100%; padding: 0 6px 0 7px; border: 0; border-radius: 7px; background: var(--ib-fill, color-mix(in oklch, var(--foreground) 7%, transparent)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1; white-space: nowrap; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-rto-chip:hover, .pn-inbox .ib-rto-chip[aria-expanded="true"] { background: color-mix(in oklch, var(--foreground) 11%, transparent); color: var(--foreground); }
+.pn-inbox .ib-rto-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-rto-chip .ib-atile { width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); background: transparent; }
+.ib-rto-chip .ib-tg-stack .ib-mk { width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); box-shadow: 0 0 0 1.5px var(--card); }
+.ib-rto-chip .ib-tg-stack .ib-mk > svg, .ib-rto-chip .ib-tg-stack .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
+.pn-inbox .ib-rto-chip[data-ended] .ib-atile { opacity: 0.55; }
+.pn-inbox .ib-rto-chip[data-ended] .ib-rto-n { color: var(--muted-foreground); }
+/* A narrow field (480 px or less, measured by RecipientChip so its accessible name can say what shows) names the
+   agent as a narrow row did: the short name, the folder alone. */
+.ib-rto-chip[data-narrow] .ib-rto-full { display: none; }
+.ib-rto-chip[data-narrow] .ib-rto-short { display: block; }
+.ib-rto-chip[data-tight] .ib-rto-l { display: none; }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-rto-chip { transition: none; } }
 /* The list: the `@` list's box and tiles, over the pill's right end. */
 .ib-tg-menu.ib-rpick { left: auto; right: 0; bottom: calc(100% + 6px); margin: 0; width: 300px; max-width: calc(100vw - 24px); padding: 6px; }
 /* Room for the start row's "+", mark, "New Claude Code session" and "in ledger" on one line. */
