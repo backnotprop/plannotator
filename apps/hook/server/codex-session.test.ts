@@ -1050,6 +1050,24 @@ describe("getLatestCodexPlan", () => {
     expect(result).toBeNull();
   });
 
+  test("a later turn’s Stop feedback does not hide the named turn’s revision", () => {
+    const turnId = "turn-revised";
+    const path = writeTempRollout(buildRollout(
+      turnStarted(turnId),
+      completedPlanItem("Original plan", turnId),
+      hookPrompt("Please revise."),
+      completedPlanItem("Revised plan", turnId),
+      turnCompleted(turnId),
+      turnStarted("turn-later"),
+      completedPlanItem("Unrelated plan", "turn-later"),
+      hookPrompt("Please revise this separate plan."),
+    ));
+    expect(getLatestCodexPlan(path, { turnId, stopHookActive: true })).toEqual({
+      text: "Revised plan",
+      source: "plan-item",
+    });
+  });
+
   test("returns the revised plan after a denied Stop review", () => {
     const turnId = "turn-stop-revised";
     const path = writeTempRollout(
