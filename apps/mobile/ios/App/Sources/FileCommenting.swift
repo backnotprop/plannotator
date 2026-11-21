@@ -121,7 +121,17 @@ final class CommentDesk {
   func keep(session: InboxSession, thread: ThreadID, item: AttachmentItem, version: AttachmentVersion, picture: Bool, readKey: String? = nil) {
     guard ready(on: item, picture: picture), !keeping else { return }
     if let editing {
-      session.editComment(editing.id, thread: thread, words: trimmed)
+      switch session.editComment(editing.id, thread: thread, words: trimmed) {
+      case .changed: break
+      case .unchanged:
+        // Nothing changed: the editor closes, with no word of success.
+        cancel()
+        return
+      case .alreadyWent:
+        // The comment went before the change could: nothing is kept, and the words stay in the editor.
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+        return
+      }
     } else {
       let target = draft?.file == item.id ? draft?.target : picture ? .picture : nil
       let on = draft?.file == item.id ? draft?.version ?? version : version

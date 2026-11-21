@@ -34,6 +34,18 @@ struct CommentBook {
   /// Comments the person pressed Send for while their drawing could not reach the computer: each goes by itself,
   /// once, in a Send of its own, when its drawing is there. Kept across closing the app.
   var owed: Set<String> = []
+  /// The message each of those answers: the one the person's words went to (or would have gone to) when they pressed
+  /// Send. Its agent gets the comment, whoever writes after. None for one marked by an older build: the end of the
+  /// thread then.
+  var owedTo: [String: MessageID] = [:]
+
+  /// Mark these comments to go by themselves, to the agent of `message`.
+  mutating func owe(_ ids: some Sequence<String>, to message: MessageID?) {
+    for id in ids {
+      owed.insert(id)
+      owedTo[id] = message
+    }
+  }
 }
 
 private struct KeptComments: Codable {
@@ -44,11 +56,15 @@ private struct KeptComments: Codable {
   var refused: [String: InboxSession.Notice]?
   /// Absent in a copy from before a drawing's comment could go by itself.
   var owed: [String]?
+  /// The message each owed comment answers. Absent in a copy from before it was kept: such a comment goes to the end
+  /// of the thread.
+  var owedTo: [String: String]?
 }
 
 extension LocalCopy {
   func saveComments(_ book: CommentBook) {
-    let kept = KeptComments(kept: Dictionary(uniqueKeysWithValues: book.kept.map { ($0.key.rawValue, $0.value) }), removed: book.removed.sorted(), readKeys: book.readKeys, refused: book.refused, owed: book.owed.sorted())
+    let kept = KeptComments(kept: Dictionary(uniqueKeysWithValues: book.kept.map { ($0.key.rawValue, $0.value) }), removed: book.removed.sorted(), readKeys: book.readKeys, refused: book.refused, owed: book.owed.sorted(),
+      owedTo: Dictionary(uniqueKeysWithValues: book.owedTo.filter { book.owed.contains($0.key) }.map { ($0.key, $0.value.rawValue) }))
     if let data = try? JSONEncoder().encode(kept) { write(data, to: "comments.json") }
   }
 
@@ -56,6 +72,7 @@ extension LocalCopy {
     guard let data = read("comments.json"), let kept = try? JSONDecoder().decode(KeptComments.self, from: data) else { return CommentBook() }
     var book = CommentBook(kept: Dictionary(uniqueKeysWithValues: kept.kept.map { (ThreadID($0.key), $0.value) }), removed: Set(kept.removed), refused: kept.refused ?? [:], readKeys: kept.readKeys)
     book.owed = Set(kept.owed ?? [])
+    book.owedTo = Dictionary(uniqueKeysWithValues: (kept.owedTo ?? [:]).filter { book.owed.contains($0.key) }.map { ($0.key, MessageID($0.value)) })
     return book
   }
 
@@ -155,7 +172,9 @@ extension InboxSession {
     (try? JSONEncoder().encode(DoorAnnotationBody(idempotencyKey: key, attachmentId: comment.attachment, version: comment.version, annotation: comment.annotation))) ?? Data("{}".utf8)
   }
 
-  private func holdSave(_ comment: FileComment) {
+  /// Returns the save's key.
+  @discardableResult
+  private func holdSave(_ comment: FileComment) -> String {
     // A save of the same comment that has not left yet is replaced by this one: the computer gets the last words.
     // One that may have reached the computer passes that on, so a removal made later still goes after it.
     let replaced = held.filter { $0.kind == .annotation && $0.subject == comment.id && !book.inFlight.contains($0.id) }
@@ -167,6 +186,7 @@ extension InboxSession {
       held[index].mayHaveArrived = true
       saveOutbox()
     }
+    return key
   }
 
   /// A drawing on its way to the computer, unless one is already (the same drawing is kept once, by its hash).
@@ -205,19 +225,40 @@ extension InboxSession {
     return comment
   }
 
+  /// What became of a change to a comment's words.
+  public enum CommentEdit: Sendable, Equatable {
+    /// The new words are kept (or the comment, left with no words, is removed).
+    case changed
+    /// The words are the same: nothing to keep.
+    case unchanged
+    /// The comment already went, in a Send on its way or delivered: the new words cannot go with it.
+    case alreadyWent
+  }
+
   /// Change a waiting comment's words. Empty words remove it, unless it is a drawing (which then says so itself).
   /// A comment the computer did not keep is tried again, the same words or not; a drawing it never got goes first.
-  public func editComment(_ id: String, thread: ThreadID, words: String) {
-    guard let index = commentBook.kept[thread]?.firstIndex(where: { $0.id == id }), !riding(thread).contains(id) else { return }
+  /// A comment a Send that waits carries (one that went by itself while its editor was open) is changed in that Send
+  /// too, its new save ahead of it; one whose Send has left is not changed.
+  @discardableResult
+  public func editComment(_ id: String, thread: ThreadID, words: String) -> CommentEdit {
+    guard let index = commentBook.kept[thread]?.firstIndex(where: { $0.id == id }) else { return .alreadyWent }
+    let carrier = held.first { $0.kind == .reply && $0.thread == thread.rawValue && ((try? JSONDecoder().decode(DoorReplyBody.self, from: $0.body))?.annotationIds ?? []).contains(id) }
+    // On its way, or sent with no answer (the computer may have it): the words it carries are the ones that go.
+    if let carrier, book.inFlight.contains(carrier.id) || book.inDoubt.contains(carrier.id) || carrier.mayHaveArrived == true { return .alreadyWent }
     let comment = commentBook.kept[thread]![index]
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
     if text.isEmpty, comment.images.isEmpty {
+      // Taken out of the Send that carries it first; a Send that carried nothing else is not made.
+      if let carrier, strip(carrier.id, of: [id]) == .wouldEmpty {
+        held.removeAll { $0.id == carrier.id }
+        saveOutbox()
+      }
       removeComment(id, thread: thread)
-      return
+      return .changed
     }
     let changed = comment.with(words: text.isEmpty ? Words.markupOnly : text)
     let retry = commentBook.refused[id] != nil || (!comment.saved && !held.contains { $0.kind == .annotation && $0.subject == id })
-    guard changed != comment || retry else { return }
+    guard changed != comment || retry else { return .unchanged }
     // A drawing the computer never kept goes again before the comment that names it; one whose bytes are gone
     // cannot, and the comment stays refused rather than name a picture that is not there.
     for image in changed.images {
@@ -225,15 +266,33 @@ extension InboxSession {
       guard drawing(hash) != nil else {
         commentBook.kept[thread]![index] = changed
         keepComments()
-        return
+        return .changed
       }
       holdDrawing(hash, thread: thread)
     }
     commentBook.kept[thread]![index] = changed
     commentBook.refused[id] = nil
-    holdSave(changed)
+    let save = holdSave(changed)
+    if let carrier {
+      // The new words reach the computer before the Send that names the comment, and the Send carries them.
+      if let at = held.firstIndex(where: { $0.id == save }), let before = held.firstIndex(where: { $0.id == carrier.id }), at > before {
+        held.insert(held.remove(at: at), at: before)
+        saveOutbox()
+      }
+      rewriteFeedback(carrier.id, thread: thread)
+    }
     keepComments()
     Task { await pump(thread.rawValue, readsList: false) }
+    return .changed
+  }
+
+  /// The person opened a comment's editor (or closed it, with nil). A comment that goes by itself never leaves while
+  /// its words are being changed: it goes once the editor closes, saved or not.
+  public func setEditing(_ id: String?, thread: ThreadID) {
+    guard editingComment != id else { return }
+    let closed = editingComment != nil && id == nil
+    editingComment = id
+    if closed { Task { await pump(thread.rawValue, readsList: false) } }
   }
 
   /// A comment just removed, with what its Undo brings back: its place in the list, the text it was read on and
@@ -243,8 +302,9 @@ extension InboxSession {
     let index: Int
     let readKey: String?
     let drawings: [String: Data]
-    /// It was to go by itself once its drawing reached the computer; brought back, it still does.
+    /// It was to go by itself once its drawing reached the computer; brought back, it still does, to the same agent.
     var owed = false
+    var owedTo: MessageID?
   }
 
   /// Remove a waiting comment: here at once, and on the computer if it ever got there (or may have).
@@ -254,7 +314,7 @@ extension InboxSession {
     let comment = commentBook.kept[thread]![index]
     var drawings: [String: Data] = [:]
     for image in comment.images { if let hash = PendingDrawing.hash(image.path), let bytes = drawing(hash) { drawings[hash] = bytes } }
-    let removed = RemovedComment(comment: comment, index: index, readKey: commentBook.readKeys[id], drawings: drawings, owed: commentBook.owed.contains(id))
+    let removed = RemovedComment(comment: comment, index: index, readKey: commentBook.readKeys[id], drawings: drawings, owed: commentBook.owed.contains(id), owedTo: commentBook.owedTo[id])
     commentBook.kept[thread]?.removeAll { $0.id == id }
     commentBook.refused[id] = nil
     // Removed before it went by itself: it never goes.
@@ -310,7 +370,7 @@ extension InboxSession {
     list.insert(comment, at: min(removed.index, list.count))
     commentBook.kept[old.thread] = list
     commentBook.readKeys[comment.id] = removed.readKey
-    if removed.owed { commentBook.owed.insert(comment.id) }
+    if removed.owed { commentBook.owe([comment.id], to: removed.owedTo) }
     holdSave(comment)
     keepComments()
     Task { await pump(old.thread.rawValue, readsList: false) }
@@ -363,15 +423,20 @@ extension InboxSession {
     let kept = commentBook.kept[ThreadID(reply.thread)] ?? []
     let blocked = Set(ids.filter { id in kept.first(where: { $0.id == id }).map(drawingWaits) ?? false })
     guard !blocked.isEmpty else { return false }
+    // The mark is kept before the Send changes, to the agent this Send answers: an app that ends in between finds the
+    // Send still carrying them and lets go of them again. Kept after, an end in between would lose the mark.
+    commentBook.owe(blocked, to: reply.message.map { MessageID($0) })
+    keepComments()
     switch strip(reply.id, of: blocked) {
-    case .unchanged: return false
+    case .unchanged:
+      commentBook.owed.subtract(blocked)
+      keepComments()
+      return false
     case .stripped: break
     case .wouldEmpty:
       held.removeAll { $0.id == reply.id }
       saveOutbox()
     }
-    commentBook.owed.formUnion(blocked)
-    keepComments()
     return true
   }
 
@@ -424,9 +489,23 @@ extension InboxSession {
     return comments(thread).filter { !commentBook.owed.contains($0.id) && commentStanding($0, items: items) == .drawingWaits }
   }
 
-  /// The comments that go by themselves and can now: their drawing is on the computer. They go in one Send of their
-  /// own, with no words, to the agent the person's words would answer, and leave `owed` in the same step (the Send
-  /// is in the outbox first, so a relaunch in between never sends them twice: a comment a Send carries is not here).
+  /// Whether a comment that goes by itself still waits on a drawing: its own, or one of another comment that goes by
+  /// itself to the same agent (they go together, in one Send).
+  func owedDrawingPending(_ comment: FileComment) -> Bool {
+    if Self.drawingPending(comment) { return true }
+    let to = commentBook.owedTo[comment.id]
+    return (commentBook.kept[comment.thread] ?? []).contains { other in
+      other.id != comment.id && commentBook.owed.contains(other.id) && commentBook.owedTo[other.id] == to && Self.drawingPending(other)
+    }
+  }
+
+  /// The comments that go by themselves and can now: every drawing of theirs is on the computer. Those for one agent
+  /// go together, in one Send of their own with no words, to the agent the person's words went to when they pressed
+  /// Send (that agent's latest message now, as a Send to it would answer), whoever wrote after. They leave `owed` in the
+  /// same step (the Send is in the outbox first, so a relaunch in between never sends them twice: a comment a Send
+  /// carries is not here). One whose words are being changed waits for its editor to close. Once their drawings are
+  /// there, comments that cannot go by themselves now (the thread is handed on or archived, this Inbox takes no reply)
+  /// are no longer owed: they are plain comments, for the person's next Send, never sent later by themselves.
   func sendOwed(_ thread: ThreadID) {
     guard !commentBook.owed.isEmpty else { return }
     // One that left (sent, removed) or rides a Send already is no longer owed.
@@ -437,18 +516,43 @@ extension InboxSession {
       commentBook.owed.subtract(gone)
       keepComments()
     }
-    guard standing == .ok, offers(DoorRoutes.postMessageReply) || skew == nil, let model = self.thread(thread), !SendPlan.needsComputer(model.thread),
-      let target = SendPlan.targets(in: model.thread).last
-    else { return }
+    guard standing == .ok, let model = self.thread(thread) else { return }
+    let owedHere = comments(thread).filter { commentBook.owed.contains($0.id) }
+    guard !owedHere.isEmpty else { return }
+    // By the message each was marked for: those wait for one another.
+    var marked: [MessageID?: [FileComment]] = [:]
+    var order: [MessageID?] = []
+    for comment in owedHere {
+      let to = commentBook.owedTo[comment.id]
+      if marked[to] == nil { order.append(to) }
+      marked[to, default: []].append(comment)
+    }
+    let last = SendPlan.targets(in: model.thread).last?.message
+    let canSend = (offers(DoorRoutes.postMessageReply) || skew == nil) && !SendPlan.needsComputer(model.thread) && model.thread.resolvedAt == nil
     let items = attachments(thread)
-    let ready = comments(thread).filter { commentBook.owed.contains($0.id) && !Self.drawingPending($0) && commentStanding($0, items: items).rides }
-    guard !ready.isEmpty else { return }
-    let key = UUID().uuidString
-    var body = DoorReplyBody(idempotencyKey: key, words: "", questions: [], withThread: true)
-    body.feedback = feedback(ready, thread: thread)
-    body.annotationIds = ready.map(\.id)
-    enqueue(kind: .reply, thread: thread, message: target.message, request: Door.postMessageReply(message: target.message), body: (try? JSONEncoder().encode(body)) ?? Data("{}".utf8), key: key)
-    commentBook.owed.subtract(ready.map(\.id))
+    var settled: [String] = []
+    // The reply each group goes in: one per agent message it answers now.
+    var sends: [MessageID: [FileComment]] = [:]
+    var sendOrder: [MessageID] = []
+    for to in order {
+      let group = marked[to] ?? []
+      guard !group.contains(where: Self.drawingPending), !group.contains(where: { $0.id == editingComment }) else { continue }
+      settled.append(contentsOf: group.map(\.id))
+      let ready = group.filter { commentStanding($0, items: items).rides }
+      guard canSend, let target = to.flatMap({ SendPlan.latest(sessionOf: $0, in: model.thread) }) ?? last, !ready.isEmpty else { continue }
+      if sends[target] == nil { sendOrder.append(target) }
+      sends[target, default: []].append(contentsOf: ready)
+    }
+    guard !settled.isEmpty else { return }
+    for target in sendOrder {
+      let ready = sends[target] ?? []
+      let key = UUID().uuidString
+      var body = DoorReplyBody(idempotencyKey: key, words: "", questions: [], withThread: true)
+      body.feedback = feedback(ready, thread: thread)
+      body.annotationIds = ready.map(\.id)
+      enqueue(kind: .reply, thread: thread, message: target, request: Door.postMessageReply(message: target), body: (try? JSONEncoder().encode(body)) ?? Data("{}".utf8), key: key)
+    }
+    commentBook.owed.subtract(settled)
     keepComments()
   }
 
@@ -608,8 +712,9 @@ extension InboxSession {
   /// Whether a comment waits for its drawing, which the way to the computer cannot carry now: it rides no Send until
   /// the drawing has arrived.
   /// One that goes by itself waits until its drawing is there, whatever the way: it rides no Send the person makes.
+  /// One that goes with others to the same agent waits for their drawings too.
   public func drawingWaits(_ comment: FileComment) -> Bool {
-    commentHeldBack(comment) || (commentBook.owed.contains(comment.id) && Self.drawingPending(comment))
+    commentHeldBack(comment) || (commentBook.owed.contains(comment.id) && owedDrawingPending(comment))
   }
 
   /// The computer will never keep this comment (or this drawing): it stays on the phone with the reason, and no

@@ -143,6 +143,8 @@ public final class InboxSession {
   var files = FileBook()
   /// Comments on files that wait for a Send (FileCommentsSession.swift).
   var commentBook = CommentBook()
+  /// The comment whose words the person is changing in its editor (`setEditing`): one that goes by itself waits for it.
+  @ObservationIgnored var editingComment: String?
   /// Whether the phone splits a file's text into the window's blocks, by the bytes' cache key: read once, and never
   /// a reason to draw again.
   @ObservationIgnored var commentSplits: [String: Bool] = [:]
@@ -1160,7 +1162,8 @@ public final class InboxSession {
     returned[id] = nil
     keepGivenBack()
     if !owing.isEmpty || commentBook.owed.contains(where: { owed in riding.contains { $0.id == owed } }) {
-      commentBook.owed.formUnion(owing.map(\.id))
+      // Each goes by itself to the agent these words answer (or would, with no words), whoever writes after.
+      commentBook.owe(owing.map(\.id), to: targets.last?.message)
       // One that would have gone by itself rides this Send instead.
       commentBook.owed.subtract(riding.map(\.id))
       keepComments()

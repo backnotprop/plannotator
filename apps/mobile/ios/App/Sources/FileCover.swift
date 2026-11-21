@@ -273,6 +273,8 @@ struct FileCover: View {
       desk.marking = false
     }
     .commentToast(desk.toasts, lift: desk.foot)
+    // A comment that goes by itself waits while its words are being changed here.
+    .onChange(of: desk.editing?.id, initial: true) { _, id in session.setEditing(id, thread: thread) }
     .sheet(isPresented: $desk.listOpen) {
       CommentsSheet(session: session, thread: thread, current: at, toasts: desk.toasts) { comment in
         // After the sheet is down, so the viewer is on screen to move.
@@ -302,7 +304,10 @@ struct FileCover: View {
     }
     // How each file stands now (changed since sent, gone), asked once the cover is up.
     .task { await session.readAttachments(thread) }
-    .onDisappear { shelf.closeAll(session) }
+    .onDisappear {
+      shelf.closeAll(session)
+      session.setEditing(nil, thread: thread)
+    }
   }
 
   /// The More menu's way to comment on the whole file, in the window's words: a document's or a code file's
