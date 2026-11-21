@@ -177,14 +177,10 @@ describe("a launched session's turn that ended in an error", () => {
     // The transcript still ends in that error until the message goes in: it stands for nothing now.
     w.launch().sweep(false);
     expect((await w.launch().runOf(root.id))?.turn_error).toBeUndefined();
-    // It goes in once, as a turn (busy, then idle again), and a new error is a new note.
+    // It goes in once, and a new error is a new note.
     w.store.recordDelivery(reply.id, { host: FAKE, session });
     expect(w.store.pendingReplies(session)).toEqual([]);
-    w.clock.now += 1_000;
-    w.fake.poll(session, true, w.clock.now);
     w.errors.set(session, { key: "e-2", text: "Overloaded again.", at: w.clock.now });
-    w.clock.now += 1_000;
-    w.fake.poll(session, false, w.clock.now);
     w.launch().sweep(false);
     expect(w.notes(root).map((m) => m.body).filter((b) => b.includes("turn ended"))).toHaveLength(2);
     expect((await w.launch().runOf(root.id))?.turn_error).toBe(true);
@@ -213,6 +209,102 @@ describe("the sweep reads an idle session's turn error only when there is a reas
     expect(at.length).toBeLessThanOrEqual(10);
     expect(Math.max(...at.map((t, i) => t - (at[i - 1] ?? 0)))).toBeLessThanOrEqual(10_000);
     expect(new Set(w.asked)).toEqual(new Set([session]));
+  });
+
+  // The Claude Code mod looks at its own state once a second and says only a change: a turn shorter than that (a
+  // credit or sign-in error returns at once) is never said busy, and its idle spell never moves.
+  test("a turn too short to be said busy: noted by the next sweep after the session takes the message, as before", async () => {
+    const w = world();
+    const { root, session } = await w.started();
+    // A while idle first: the reads are 10 s apart by now.
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    // A reply goes in and fails at once, between two sweeps.
+    const reply = w.store.sendReply(root.id, { words: "Go on.", idempotency_key: "r-1" }).reply;
+    w.store.recordDelivery(reply.id, { host: FAKE, session });
+    w.errors.set(session, { key: "e-1", text: "Credit balance too low.", at: w.clock.now });
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    expect(w.notes(root)).toHaveLength(1);
+
+    // A tag in another thread goes in (nothing in this thread moves) and fails just after the sweep that saw it.
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    w.fake.took(session);
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    w.errors.set(session, { key: "e-2", text: "Overloaded.", at: w.clock.now + 500 });
+    let waited = 0;
+    while (w.notes(root).length < 2 && waited < 30) {
+      w.clock.now += 1_000;
+      waited += 1;
+      w.launch().sweep(false);
+    }
+    expect(waited).toBeLessThanOrEqual(1);
+  });
+
+  test("a turn too short to be said busy that ends well clears the line by the next sweep", async () => {
+    const w = world();
+    const { root, session } = await w.started();
+    w.errors.set(session, { key: "e-1", text: "Rate limited.", at: w.clock.now });
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBe(true);
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    // The person replies; it goes in, answers and ends well at once, never said busy.
+    const reply = w.store.sendReply(w.notes(root)[0]!.id, { words: "Try now.", idempotency_key: "r-1" }).reply;
+    w.store.recordDelivery(reply.id, { host: FAKE, session });
+    w.fake.took(session);
+    w.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: FAKE, session, name: "Fake Agent" }, body: "Done.", reply_to: reply.id, idempotency_key: "done" });
+    w.errors.set(session, null);
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBeUndefined();
+  });
+
+  test("Try again, read long after the error, fails again at once: noted by the next sweep", async () => {
+    const w = world();
+    const { root, session, launchId } = await w.started();
+    w.errors.set(session, { key: "e-1", text: "Credit balance too low.", at: w.clock.now });
+    w.launch().sweep(false);
+    for (let i = 0; i < 30; i++) {
+      w.clock.now += 1_000;
+      w.launch().sweep(false);
+    }
+    expect((await w.post(launchId, "retry"))!.status).toBe(200);
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBeUndefined();
+    // It goes in (the mod's `delivered`) and fails again at once.
+    const again = w.store.pendingReplies(session).map((m) => m.id);
+    expect(again).toHaveLength(1);
+    w.store.recordDelivery(again[0]!, { host: FAKE, session });
+    w.fake.took(session);
+    w.errors.set(session, { key: "e-2", text: "Credit balance too low.", at: w.clock.now });
+    w.clock.now += 1_000;
+    w.launch().sweep(false);
+    expect((await w.launch().runOf(root.id))?.turn_error).toBe(true);
+  });
+
+  test("Try again on a turn said busy, then idle: the new error is a new note", async () => {
+    const w = world();
+    const { root, session, launchId } = await w.started();
+    w.errors.set(session, { key: "e-1", text: "Overloaded.", at: w.clock.now });
+    w.launch().sweep(false);
+    await w.post(launchId, "retry");
+    w.launch().sweep(false);
+    w.clock.now += 1_000;
+    w.fake.poll(session, true, w.clock.now);
+    w.errors.set(session, { key: "e-2", text: "Overloaded again.", at: w.clock.now });
+    w.clock.now += 1_000;
+    w.fake.poll(session, false, w.clock.now);
+    w.launch().sweep(false);
+    expect(w.notes(root).map((m) => m.body).filter((b) => b.includes("turn ended"))).toHaveLength(2);
   });
 
   test("a turn that ends is read on that sweep; an error written with no turn seen, within 10 s", async () => {

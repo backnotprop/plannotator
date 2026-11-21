@@ -223,10 +223,11 @@ interface Memo {
 
 /**
  * An idle launched session's turn error (`LaunchHost.turnError`, Claude Code's transcript, a few file calls in the
- * person's folder and Claude's) is read when the session turns idle, on that same sweep, then again after 1 s, 2 s,
- * 4 s, 8 s and every 10 s while it stays idle. A turn the Inbox saw end is read at once, as before; a transcript
- * written a moment after the session said idle is seen within as long again; a turn the Inbox never saw (a
- * connection that does not say busy) within 10 s. Before, every second, for every idle launch (#2788).
+ * person's folder and Claude's) is read on the sweep that sees something happen (a turn ended, the session took an
+ * item, a line in its thread: `readTurnError`), then again after 1 s, 2 s, 4 s, 8 s and every 10 s while nothing
+ * more happens. A turn the Inbox saw end is read at once, and one too short to be said busy (an error that returns
+ * at once) by the next second, as before; only a turn nothing in the Inbox started or saw (the agent going on by
+ * itself, too briefly to be said busy) waits up to 10 s. Before, every second, for every idle launch (#2788).
  */
 const TURN_ERROR_READ_MS = 1_000;
 const TURN_ERROR_READ_MAX_MS = 10_000;
@@ -784,11 +785,15 @@ export function createInboxLaunch(options: {
   };
 
   /**
-   * The host's turn error for an idle session: read again only when the idle spell is new (a turn ended since, or the
-   * session came back) or its wait passed (TURN_ERROR_READ_MS); otherwise the last read stands, with no file call.
+   * The host's turn error for an idle session: read again only when something happened (`spell`) or its wait passed
+   * (TURN_ERROR_READ_MS); otherwise the last read stands, with no file call. Something happened: a turn ended (a new
+   * idle spell), the session took an item as a turn (`taken`: a reply, a tag, Send now, a routine's message, even a
+   * turn too short to be said busy), a line in the launch's thread (a reply, its delivery, Try again, the agent's
+   * answer), or the session came back (the read is dropped while it is busy or away).
    */
-  const readTurnError = (host: LaunchHost, launch: InboxLaunchRecord, session: string, live: LaunchLive, memo: Memo): LaunchTurnError | null => {
-    const spell = `${session}:${live.busy}:${live.idleSince ?? ""}`;
+  const readTurnError = (host: LaunchHost, root: InboxMessage, session: string, live: LaunchLive, memo: Memo): LaunchTurnError | null => {
+    const launch = root.launch!;
+    const spell = `${session}:${live.busy}:${live.idleSince ?? ""}:${live.taken ?? 0}:${store.threadVersion(root.thread_id)}`;
     const last = memo.turnErrorRead;
     const at = now();
     // A clock set back reads at once.
@@ -813,7 +818,7 @@ export function createInboxLaunch(options: {
     const live = liveOf(host, root, memo);
     const was = memo.turnError ?? null;
     // Not connected (stopped, or not yet back): the stopped line says what it is. A turn runs: its end decides.
-    let found = !live || live.busy === true ? null : readTurnError(host, launch, session, live, memo);
+    let found = !live || live.busy === true ? null : readTurnError(host, root, session, live, memo);
     if (!live || live.busy === true) memo.turnErrorRead = null;
     if (found && found.key === memo.turnErrorTried) found = null;
     memo.turnError = found ? { key: found.key, at: found.at } : null;
@@ -1947,6 +1952,8 @@ ${result.text}`);
     }
     memo.turnErrorTried = memo.turnError?.key ?? null;
     memo.turnError = null;
+    // The message goes in again: its turn's end is read from the next sweep on, as at any turn's start.
+    memo.turnErrorRead = null;
     // "Starting <agent> again…" until its turn begins.
     memo.busySeen = false;
     memo.startedAt = now();

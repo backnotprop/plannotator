@@ -167,6 +167,8 @@ interface SeenSession {
   busySince?: number | null;
   /** How many polls it started (launch: a stopped or respawned session counts as live again only once it polls anew). */
   polls?: number;
+  /** How many items it took as a turn (the connection's `delivered`): each began a turn, however short. */
+  taken?: number;
   /** The last time it was seen idle (busy false); null when never. Decides whether an automatic mark went into a turn. */
   idleAt?: number | null;
   /**
@@ -660,6 +662,14 @@ export function createInboxLiveSessions(options: {
   const steering = new Map<string, number>();
   const steerHanded = (session: string) => void steering.set(session, now());
   const steerDone = (session: string) => void steering.delete(session);
+  /**
+   * The session took an item as a turn (`delivered`). A turn shorter than its connection's look at its own state
+   * (the mod's 1 s tick) is never said busy; this count still moves, so a launch reads that turn's end (`taken`).
+   */
+  const tookItem = (session: string) => {
+    const entry = sessions.get(session);
+    if (entry) entry.taken = (entry.taken ?? 0) + 1;
+  };
 
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
@@ -1289,10 +1299,10 @@ export function createInboxLiveSessions(options: {
   };
 
   /** A live session's turn state (a launched thread's run line); null when it is not live. */
-  const runStateOf = (session: string): { busy: boolean | null; busySince: number | null; polls: number; idleSince: number | null } | null => {
+  const runStateOf = (session: string): { busy: boolean | null; busySince: number | null; polls: number; idleSince: number | null; taken: number } | null => {
     const entry = sessions.get(session);
     return entry && isLive(entry)
-      ? { busy: entry.busy, busySince: entry.busy === true ? (entry.busySince ?? null) : null, polls: entry.polls ?? 0, idleSince: entry.busy === false ? entry.idleSince : null }
+      ? { busy: entry.busy, busySince: entry.busy === true ? (entry.busySince ?? null) : null, polls: entry.polls ?? 0, idleSince: entry.busy === false ? entry.idleSince : null, taken: entry.taken ?? 0 }
       : null;
   };
 
@@ -1493,6 +1503,7 @@ export function createInboxLiveSessions(options: {
     clock: now,
     isSessionLive,
     runStateOf,
+    tookItem,
     pollsNow,
     holdsPollNow,
     composeTarget,
