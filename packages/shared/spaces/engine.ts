@@ -22,8 +22,8 @@
  *   A space is never made again by itself.
  * - The space is the person's own only when the space says so: `kept` is read from the create's answer, and a
  *   signed-in create that comes back with no owner (its first answer was lost before the sign-in) is claimed.
- * - The approval goes last, and only into a space that is the person's own. A space that does not take it is not
- *   asked again, and the run ends as done without it.
+ * - No approval is sent by a run: a tool's own approval call is always refused. The person's approval goes up only
+ *   with Keep, on the space's sign-in page (share-job.ts).
  */
 import { gitBlobSha, planPictureTypeOf } from "@plannotator/core/plans";
 import {
@@ -370,23 +370,6 @@ export async function runSpaceShare(run: SpaceShareRun): Promise<SpaceShareResul
             return;
           }
           throw error;
-        }
-        return;
-      }
-      case "approval": {
-        const page = record.pages[step.doc];
-        const version = page?.pushed.find((p) => p.local === step.version)?.remote;
-        if (!page?.remote_id || !version) {
-          record.approval_refused = true;
-          return;
-        }
-        try {
-          await client.approve(spaceId, page.remote_id, version);
-          record.approval = { document_id: step.doc, version_number: step.version };
-        } catch (error) {
-          // The space does not take an approval from here (yet): the share is whole without it.
-          if (!(error instanceof SpacesError) || error.status < 400 || error.status >= 500 || error.status === 429) throw error;
-          record.approval_refused = true;
         }
         return;
       }

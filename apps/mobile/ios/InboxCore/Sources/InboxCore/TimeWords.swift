@@ -12,11 +12,17 @@ public struct TimeWords: Sendable {
   }
 
   public static func date(_ iso: String) -> Date? {
-    let withFraction = ISO8601DateFormatter()
-    withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     if let date = withFraction.date(from: iso) { return date }
-    return ISO8601DateFormatter().date(from: iso)
+    return plain.date(from: iso)
   }
+
+  /// Made once (a formatter is costly to make, and a long list parses a time per row); safe from any thread.
+  nonisolated(unsafe) private static let withFraction: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+  nonisolated(unsafe) private static let plain = ISO8601DateFormatter()
 
   private var calendar: Calendar {
     var calendar = Calendar(identifier: .gregorian)

@@ -47,9 +47,15 @@ final class AppModel {
   func boot() async {
     defer { booted = true }
     let launch = LaunchOptions()
+    // A test starts with every group of the list at its default.
+    if launch.resetFolds { defaults.removeObject(forKey: "listFolds") }
     computers = (try? credentials.all()) ?? []
     // A removal that was cut short leaves no copy behind.
-    if let known = try? credentials.all() { LocalCopy.sweep(root: copyRoot, keeping: known.map(\.id)) }
+    if let known = try? credentials.all() {
+      LocalCopy.sweep(root: copyRoot, keeping: known.map(\.id))
+      // The files of computers this phone no longer has go with them.
+      AttachmentCache.sweep(caches: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0], keeping: known.map(\.id))
+    }
     if launch.standIn || (defaults.bool(forKey: Self.demoKey) && computers.isEmpty) {
       await startDemo(launch)
       if let link = launch.pairLink { offer(link: link) }
@@ -64,7 +70,9 @@ final class AppModel {
   func use(_ computer: PairedComputer) {
     session?.stop()
     let copy = LocalCopy(folder: LocalCopy.folder(root: copyRoot, computer: computer.id))
-    let session = InboxSession(computer: computer, app: app, copy: copy) { computer in computer.addresses.compactMap { HTTPTransport(address: $0) } }
+    let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    let bytes = AttachmentCache(folder: AttachmentCache.folder(caches: caches, computer: computer.id))
+    let session = InboxSession(computer: computer, app: app, copy: copy, bytes: bytes) { computer in computer.addresses.compactMap { HTTPTransport(address: $0) } }
     self.session = session
     isDemo = false
     standIn = nil
@@ -194,7 +202,9 @@ final class AppModel {
     let issued = await door.issueToken()
     let computer = PairedComputer(id: issued.device.rawValue, name: options.computerName, token: launch.standInRemoved ? "tok_removed" : issued.token, secret: options.secret, addresses: [])
     session?.stop()
-    let session = InboxSession(computer: computer, app: app) { _ in [StandInTransport(door: door)] }
+    // The stand-in's files are kept for this run only, apart from any real computer's.
+    let bytes = AttachmentCache(folder: FileManager.default.temporaryDirectory.appendingPathComponent("stand-in-files-\(UUID().uuidString)", isDirectory: true))
+    let session = InboxSession(computer: computer, app: app, bytes: bytes) { _ in [StandInTransport(door: door)] }
     self.session = session
     isDemo = true
     if !launch.standIn { defaults.set(true, forKey: Self.demoKey) }
@@ -232,6 +242,7 @@ struct LaunchOptions {
   var standInFloor: Int? { debug && defaults.object(forKey: "standInFloor") != nil ? defaults.integer(forKey: "standInFloor") : nil }
   var standInRemoved: Bool { debug && defaults.bool(forKey: "standInRemoved") }
   var open: ThreadID? { debug ? defaults.string(forKey: "open").map { ThreadID($0) } : nil }
+  var resetFolds: Bool { debug && defaults.bool(forKey: "resetFolds") }
   var stageName: String? { debug ? defaults.string(forKey: "stage") : nil }
 
   private var debug: Bool {
@@ -333,6 +344,58 @@ struct LaunchOptions {
               thread.messages[at].questions?[0].supersededBy = InboxSupersededBy(messageId: written, key: "q_rollout2")
             }
           }
+        case "files":
+          // A thread whose messages carry files of every kind.
+          await StandInMedia.seat(on: door)
+          await session.refresh()
+        case "fileskept":
+          // The person read the thread and opened the plan earlier: both are on the phone.
+          await session.open(StandInData.files)
+          await session.readAttachments(StandInData.files)
+          if let plan = session.attachments(StandInData.files).first, (try? await session.openAttachment(plan)) != nil { session.attachmentClosed(plan) }
+        case "filechangesnext":
+          // The agent edits the plan after the phone last asked how the thread's files stand.
+          if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
+            await door.changeFileAfterNextRead(plan.id, to: Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
+          }
+        case "filespage":
+          // A page that tries to leave: to the network, to a site, to the phone's dialer.
+          _ = await door.addFile(thread: StandInData.files, message: StandInData.filesSecond, name: StandInData.leavingPageName, kind: .html, bytes: Data(StandInData.leavingPage.utf8))
+          await session.refresh()
+        case "filechanged", "filegone":
+          // The plan changes on the computer after it was sent, or is deleted there.
+          if let plan = await door.thread(StandInData.files)?.messages.first?.attachments?.first {
+            await door.changeFile(plan.id, to: step == "filegone" ? nil : Data(StandInData.plan.replacingOccurrences(of: "capped at 60 seconds", with: "capped at 30 seconds").utf8))
+          }
+        case "worst":
+          // Rows that try to break the list (the break pass).
+          for thread in StandInData.worstThreads(now: Date()) { await door.add(thread) }
+          await session.refresh()
+        case "thousand":
+          for thread in StandInData.manyThreads(now: Date()) { await door.add(thread) }
+          await session.refresh()
+        case "starred":
+          for thread in [StandInData.retry, StandInData.checkout, StandInData.docs] { await session.act(.star, on: thread, undo: false) }
+        case "snoozedrow":
+          if let tomorrow = SnoozeRules().choices().first(where: { $0.id == .tomorrow }) {
+            await session.act(.snooze(until: tomorrow.untilISO, at: nil), on: StandInData.billing, undo: false)
+            await session.act(.snooze(until: tomorrow.untilISO, at: nil), on: StandInData.upload, undo: false)
+          }
+        case "priorityrow":
+          await session.act(.priority(true), on: StandInData.checkout, undo: false)
+        case "archivedrow":
+          for thread in [StandInData.bumps, StandInData.docs] { await session.act(.archive, on: thread, undo: false) }
+        case "archivedmany":
+          // Twenty-five archived threads: more than one page of the Archived list.
+          let many = StandInData.manyThreads(now: Date(), count: 25)
+          for thread in many { await door.add(thread) }
+          await session.refresh()
+          await session.actMany(.archive, on: many.map(\.threadId))
+        case "archiverefused":
+          // Something between the phone and the computer refuses one thread's archive: one row of several not taken.
+          await door.setOptions { $0.proxyRefusesArchive = [StandInData.checkout.rawValue] }
+        case "readrow":
+          await session.act(.read, on: StandInData.upload, undo: false)
         case "outdated":
           // The computer was updated past this app after the phone last read it: the copy stays readable.
           await door.setOptions { $0.minAppContract = 99; $0.contract = 99 }

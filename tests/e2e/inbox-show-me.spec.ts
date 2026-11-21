@@ -639,7 +639,7 @@ test('a part lands on its line and the board shrinks to the corner card; it grow
   await expect(transcript).toContainText('Show me on retry-worker.ts lines 16–18: What happens after the third failure?');
   await expect(page.locator('[data-chat-window]')).not.toContainText('plannotator shape');
   await askBox.fill('');
-  await page.locator('[data-chat-window]').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator('[data-chat-window]').getByRole('button', { name: 'Minimize', exact: true }).click();
   await expect(page.locator('[data-chat-window]')).toHaveCount(0);
 });
 
