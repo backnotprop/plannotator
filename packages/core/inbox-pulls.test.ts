@@ -17,6 +17,8 @@ import {
   inboxPullParent,
   inboxPullMove,
   inboxPullStacks,
+  inboxPullUrlOf,
+  inboxPullUrlOfKey,
   inboxPullUrlsIn,
   type InboxPull,
   inboxPullRefOfKey,
@@ -272,6 +274,22 @@ describe("a PR's address", () => {
   test("a forge's own addresses read back to the list's key", () => {
     expect(inboxPullRefOfUrl("https://github.com/northwind/web-app/pull/869")?.key).toBe("github.com/northwind/web-app#869");
     expect(inboxPullRefOfUrl("https://gitlab.com/infra/terraform/modules/-/merge_requests/61/diffs")).toMatchObject({ key: "gitlab.com/infra/terraform/modules#61:pull", platform: "gitlab" });
+  });
+
+  test("a Forgejo's `/pulls/N` is its own platform on a host the person named, and a GitHub's on any other", () => {
+    // codeberg.org is a Forgejo from the start; a host is one only when the person named it.
+    expect(inboxPullRefOfUrl("https://codeberg.org/acme/w/pulls/7")).toMatchObject({ key: "codeberg.org/acme/w#7", platform: "forgejo", host: "codeberg.org", repo: "acme/w", number: 7 });
+    expect(inboxPullRefOfUrl("https://github.com/acme/w/pulls/7")).toMatchObject({ platform: "github" });
+    // A key has no `:pull` for either, so the host alone says which.
+    expect(inboxPullRefOfKey("codeberg.org/acme/w#7")).toMatchObject({ platform: "forgejo" });
+    expect(inboxPullRefOfKey("github.com/acme/w#7")).toMatchObject({ platform: "github" });
+    expect(inboxPullRefOfKey("gitlab.com/acme/w#7:pull")).toMatchObject({ platform: "gitlab" });
+  });
+
+  test("each forge's PR address is its own page", () => {
+    expect(inboxPullUrlOfKey("codeberg.org/acme/w#7")).toBe("https://codeberg.org/acme/w/pulls/7");
+    expect(inboxPullUrlOfKey("github.com/acme/w#7")).toBe("https://github.com/acme/w/pull/7");
+    expect(inboxPullUrlOf({ platform: "gitlab", host: "gitlab.com", repo: "g/p", number: 3 })).toBe("https://gitlab.com/g/p/-/merge_requests/3");
   });
 
   test("an agent-written address cannot walk out of repos/… or smuggle a query into the API call", () => {

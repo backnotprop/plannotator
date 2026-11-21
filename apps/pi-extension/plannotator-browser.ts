@@ -538,7 +538,8 @@ async function createCodeReviewBrowserSession(
 				"Supported formats:\n" +
 				"  GitHub: https://github.com/owner/repo/pull/123\n" +
 				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42\n" +
-				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7",
+				"  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7\n" +
+				"  Forgejo / Gitea: https://forgejo.example.com/owner/repo/pulls/7",
 			);
 		}
 
@@ -556,7 +557,7 @@ async function createCodeReviewBrowserSession(
 			ghAccountEnv = access.childEnv;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			// REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+			// REST-only platforms (Bitbucket, Forgejo) have no CLI to be missing; their auth
 			// error already names the env vars and token scopes to set.
 			if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
 				throw new Error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);

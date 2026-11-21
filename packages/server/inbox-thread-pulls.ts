@@ -61,6 +61,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, CARD_MARKS_BATCH, CARD_MARKS_MAX_CONCURRENT } from "./inbox-card-marks";
 import { sessionLastSawThread } from "./inbox-session-reads";
 import type { ProblemDiag } from "@plannotator/core/problem";
+import { forgejoProblem } from "@plannotator/core/problem-words";
 import { createToolStatus, type ToolStatus } from "@plannotator/shared/tool-state";
 import { githubPullFailure, gitlabPullFailure, type ThreadPullFailure } from "./inbox-thread-pull-problem";
 import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, refCliRunner, refErrorOf, type CliHosts, type RefCards, type RefCli, type RefRunner } from "./ref-cards";
@@ -277,6 +278,8 @@ export function createThreadPullStates(options: {
     const result = options.refCards ? await options.refCards.get(url, retry ? { retry } : undefined).catch(() => null) : null;
     const read = result?.ok ? cardDataThreadPullRead(result.data) : null;
     if (read || result?.ok) return land(key, read);
+    // A Forgejo is read with its token, not a CLI: its own words for why (no token, refused, rate limited…).
+    if (ref.platform === "forgejo") return land(key, null, { problem: forgejoProblem(result?.ok === false ? result.error : "unsupported", { url }, new Date(now())), diag: null });
     // Bitbucket is read with an API token, not a CLI: no tool state to name.
     if (ref.platform !== "gitlab") return land(key, null);
     const unread = !result || (!result.ok && result.error === "unsupported");
@@ -323,7 +326,7 @@ export function createThreadPullStates(options: {
           continue;
         }
         const ref = parseForgeRefUrl(pull.url);
-        if (retry && ref && ref.platform !== "bitbucket") tools.forget(ref.platform === "github" ? "gh" : "glab", ref.host);
+        if (retry && ref && (ref.platform === "github" || ref.platform === "gitlab")) tools.forget(ref.platform === "github" ? "gh" : "glab", ref.host);
         const projectHost = options.projectHostOf?.(pull.project_id) ?? null;
         if (!ref || ref.kind !== "pull" || forgeRefKey(ref) !== pull.pull) {
           land(pull.pull, null);

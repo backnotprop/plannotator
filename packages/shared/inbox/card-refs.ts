@@ -51,10 +51,11 @@ const forgeParser: InboxCardRefParser = {
     if (hint === "pr" && kind !== "pr") return null;
     const repo = `${ref.owner}/${ref.repo}`;
     const where = ref.host === "github.com" || ref.host === "gitlab.com" ? repo : `${ref.host}/${repo}`;
+    // Each forge's own word for a pull request: GitHub `pull`, Forgejo `pulls`, GitLab `-/merge_requests`.
     const path =
       ref.platform === "gitlab"
         ? `${repo}/-/${kind === "pr" ? "merge_requests" : "issues"}/${ref.number}`
-        : `${repo}/${kind === "pr" ? "pull" : "issues"}/${ref.number}`;
+        : `${repo}/${kind === "pr" ? (ref.platform === "forgejo" ? "pulls" : "pull") : "issues"}/${ref.number}`;
     return { kind, source: ref.platform, ref: `${where}${forgeRefLabel(ref)}`, url: `https://${ref.host}/${path}` };
   },
 };
@@ -65,7 +66,7 @@ const prUrlParser: InboxCardRefParser = {
   parse(text) {
     const pr = parseInboxCardPr(text);
     if (!pr) return null;
-    const source = pr.url.startsWith("https://bitbucket.org/") ? "bitbucket" : pr.url.includes("/-/merge_requests/") ? "gitlab" : "github";
+    const source = pr.url.startsWith("https://bitbucket.org/") ? "bitbucket" : pr.url.includes("/-/merge_requests/") ? "gitlab" : /\/pulls\/\d+$/.test(pr.url) ? "forgejo" : "github";
     return { kind: "pr", source, ref: pr.ref, url: pr.url };
   },
 };

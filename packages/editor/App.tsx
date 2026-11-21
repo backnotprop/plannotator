@@ -57,7 +57,7 @@ import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
-import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { refCardRouteTransport, setRefCardForgejo, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
@@ -2811,7 +2811,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isApiMode || isSharedSession) return;
     setRefCardTransport(refCardRouteTransport('/api/ref'));
-    return () => setRefCardTransport(null);
+    // A Forgejo / Gitea link too: the server reads it with the person's token, on a host they named.
+    setRefCardForgejo(true);
+    return () => {
+      setRefCardTransport(null);
+      setRefCardForgejo(false);
+    };
   }, [isApiMode, isSharedSession]);
 
   // The user's current direct-edit text: the open editor buffer, else the

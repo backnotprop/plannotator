@@ -23,7 +23,8 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
-import type { RefCli, RefCommandResult, RefRunner } from "@plannotator/shared/ref-cards";
+import type { ForgeRefCardData } from "@plannotator/core/forge-ref-card";
+import type { ForgejoRefReader, RefCli, RefCommandResult, RefRunner } from "@plannotator/shared/ref-cards";
 
 export interface RefCardRouteServer {
   url: string;
@@ -34,7 +35,7 @@ export type RefCardRouteKind = "plan" | "review" | "annotate";
 
 export type StartRefCardRouteServer = (
   kind: RefCardRouteKind,
-  options: { root: string; docPath: string; htmlContent: string; refRunner: RefRunner; tailnetPublished?: boolean },
+  options: { root: string; docPath: string; htmlContent: string; refRunner: RefRunner; forgejoRefReader: ForgejoRefReader; tailnetPublished?: boolean },
 ) => Promise<RefCardRouteServer>;
 
 const HTML = "<!doctype html><html><body>ref-card-route-app</body></html>";
@@ -156,6 +157,16 @@ export function defineRefCardRouteScenarios(
   let server: RefCardRouteServer | null = null;
   let host = "";
   let calls: Array<{ cli: RefCli; args: string[] }> = [];
+  /** Every Forgejo the server asked for: a Forgejo is read with a token over its API, never through gh or glab. */
+  let forgejoAsked: string[] = [];
+  const forgejoRefReader: ForgejoRefReader = async (ref) => {
+    forgejoAsked.push(`${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`);
+    return {
+      platform: "forgejo", kind: "pull", repo: `${ref.owner}/${ref.repo}`, number: ref.number, url: `https://${ref.host}/${ref.owner}/${ref.repo}/pulls/${ref.number}`,
+      title: "Ship the Forgejo widget", state: "merged", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+      comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+    } as unknown as ForgeRefCardData;
+  };
 
   afterEach(() => {
     server?.stop();
@@ -175,6 +186,7 @@ export function defineRefCardRouteScenarios(
   async function setUp(kind: RefCardRouteKind, mode: { remote?: boolean; tailnetPublished?: boolean } = {}): Promise<string> {
     environment.reset();
     calls = [];
+    forgejoAsked = [];
     const dir = environment.makeTempDir();
     process.env.PLANNOTATOR_DATA_DIR = join(dir, "data");
     process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
@@ -187,7 +199,7 @@ export function defineRefCardRouteScenarios(
     const root = environment.makeTempDir();
     const docPath = join(root, "notes.md");
     writeFileSync(docPath, "# Notes\n\nSee https://github.com/acme/widgets/pull/12\n");
-    server = await start(kind, { root, docPath, htmlContent: HTML, refRunner: run, tailnetPublished: mode.tailnetPublished });
+    server = await start(kind, { root, docPath, htmlContent: HTML, refRunner: run, forgejoRefReader, tailnetPublished: mode.tailnetPublished });
     // Remote mode binds every interface: talk to it over loopback.
     const base = new URL(server.url);
     host = `127.0.0.1:${base.port}`;
@@ -214,6 +226,26 @@ export function defineRefCardRouteScenarios(
         // A second hover is the server's cache: nothing runs again.
         expect((await get(refPath(PR_URL))).status).toBe(200);
         expect(queries()).toHaveLength(1);
+      });
+
+      // The Forgejo / Gitea link in a document (plan, annotate, review). What regresses: no card for a Forgejo link at all
+      // (the reader was never wired into these servers), a card read through gh or glab, a host the person has not named
+      // being asked, or an answer that is not cached.
+      test(`${kind}: a Forgejo link answers its card through the Forgejo reader and no CLI; a host not named is not asked`, async () => {
+        const serverSession = await setUp(kind);
+        const same = { origin: `http://${host}`, "sec-fetch-site": "same-origin" };
+        const card = await get(refPath("https://codeberg.org/acme/widgets/pulls/5"), same);
+        expect(card.status).toBe(200);
+        expect(card.body).toMatchObject({ ok: true, serverSession, data: { title: "Ship the Forgejo widget", number: 5, repo: "acme/widgets" } });
+        expect(forgejoAsked).toEqual(["codeberg.org/acme/widgets#5"]);
+        // A second hover is the server's cache.
+        expect((await get(refPath("https://codeberg.org/acme/widgets/pulls/5"), same)).status).toBe(200);
+        expect(forgejoAsked).toHaveLength(1);
+        // codeberg.org is the one Forgejo known with nothing configured: any other host's /pulls/<n> link is recognised but not read.
+        const unnamed = await get(refPath("https://git.unnamed.test/acme/widgets/pulls/5"), same);
+        expect(unnamed.body).toMatchObject({ ok: false, error: "unsupported" });
+        expect(forgejoAsked).toHaveLength(1);
+        expect(calls).toHaveLength(0);
       });
 
       test(`${kind}: another site, a foreign Host, a url that is no ref, and a POST run nothing`, async () => {

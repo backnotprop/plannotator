@@ -9,7 +9,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import { problemOf } from "./problem";
-import { cardProblem, commandHostTrusted, TOOL_STATES, toolProblem, type ToolCli } from "./problem-words";
+import { cardProblem, commandHostTrusted, forgejoProblem, TOOL_STATES, toolProblem, type ToolCli } from "./problem-words";
+import type { ForgeRefCardError } from "./forge-ref-card";
 
 describe("each state maps to its code and its one next step", () => {
   const next = (cli: ToolCli, host: string, trusted?: boolean) =>
@@ -90,5 +91,43 @@ describe("older and newer answers", () => {
     expect(problemOf({ code: "tool.future", kind: "tool", title: "t", detail: "d", action: { kind: "teleport" } })?.code).toBe("tool.future");
     // A command is only ever a sign-in to a plain host.
     expect(problemOf({ code: "tool.signed_out", kind: "tool", title: "t", detail: "d", action: { kind: "copy_command", value: "gh auth login --hostname x.dev; curl evil" } })?.action).toBeUndefined();
+  });
+});
+
+describe("a Forgejo is read with its token, never a CLI", () => {
+  const ERRORS: ForgeRefCardError[] = ["unsupported", "cli_missing", "signed_out", "not_found", "rate_limited", "unavailable"];
+
+  test("a failed Forgejo card is never turned into a gh problem (it told the person gh was not installed)", () => {
+    for (const error of ERRORS) {
+      expect(cardProblem({ ok: false, error, fetchedAt: 0 }, { platform: "forgejo", host: "git.example.test", kind: "pull" })).toBeNull();
+    }
+    // GitHub's own still reads as gh.
+    expect(cardProblem({ ok: false, error: "cli_missing", fetchedAt: 0 }, { platform: "github", host: "github.com", kind: "pull" })?.title).toBe("gh isn't installed");
+  });
+
+  test("each failure says what to do about the token, names no CLI and no host, and passes the wire check", () => {
+    for (const error of ERRORS) {
+      const p = forgejoProblem(error, { url: "https://git.example.test/o/r/pulls/1" });
+      expect(`${p.title} ${p.detail}`).not.toMatch(/\b(gh|glab|CLI)\b|GitHub|GitLab|git\.example\.test/);
+      expect(p.code).toMatch(/^forgejo\./);
+      expect(problemOf(p)).toEqual(p);
+    }
+    expect(forgejoProblem("signed_out").detail).toContain("forgejoTokens");
+    expect(forgejoProblem("unsupported").detail).toContain("forgejoHosts");
+  });
+
+  test("the next step: Try again where asking again can help, the PR's page when it cannot be seen, nothing for a rate limit", () => {
+    const step = (error: ForgeRefCardError, url?: string) => {
+      const p = forgejoProblem(error, { url });
+      return [p.code, p.action ? (p.action.kind === "retry" ? "retry" : `${p.action.kind} ${p.action.value}`) : "none", p.retry ? "retry" : "-"];
+    };
+    expect(step("signed_out")).toEqual(["forgejo.signed_out", "none", "retry"]);
+    expect(step("unavailable")).toEqual(["forgejo.unavailable", "none", "retry"]);
+    expect(step("cli_missing")).toEqual(["forgejo.unavailable", "none", "retry"]);
+    expect(step("rate_limited")).toEqual(["forgejo.rate_limited", "none", "-"]);
+    expect(step("unsupported")).toEqual(["forgejo.unsupported", "none", "-"]);
+    expect(step("not_found", "https://git.example.test/o/r/pulls/1")).toEqual(["forgejo.not_found", "open_url https://git.example.test/o/r/pulls/1", "-"]);
+    // A page that is not https is never offered.
+    expect(step("not_found", "http://127.0.0.1:3000/o/r/pulls/1")[1]).toBe("none");
   });
 });

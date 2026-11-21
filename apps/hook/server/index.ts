@@ -1535,6 +1535,7 @@ if (args[0] === "sessions") {
       console.error("  GitHub: https://github.com/owner/repo/pull/123");
       console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
       console.error("  Bitbucket Cloud: https://bitbucket.org/workspace/repo/pull-requests/7");
+      console.error("  Forgejo / Gitea: https://forgejo.example.com/owner/repo/pulls/7");
       process.exit(1);
     }
 
@@ -1547,7 +1548,7 @@ if (args[0] === "sessions") {
       ghAccountEnv = noteGhAccountForThisRun(await checkPRAuth(prRef));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // REST-only platforms (Bitbucket) have no CLI to be missing; their auth
+      // REST-only platforms (Bitbucket, Forgejo) have no CLI to be missing; their auth
       // error already names the env vars and token scopes to set.
       if (cliName && (msg.includes("not found") || msg.includes("ENOENT"))) {
         console.error(`${getPlatformLabel(prRef)} CLI (${cliName}) is not installed.`);
@@ -1589,7 +1590,7 @@ if (args[0] === "sessions") {
         sessionDir = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
         const prNumber = getPRNumber(prMetadata);
         localPath = path.join(sessionDir, "pool", `pr-${prNumber}`);
-        // GitHub/GitLab: the PR head ref on origin. Bitbucket: the source
+        // GitHub/GitLab: the PR head ref on origin. Forgejo: refs/pull/N/head on origin. Bitbucket: the source
         // branch, from the fork's URL when the PR comes from one.
         const headFetch = getPRHeadFetchSpec(prMetadata);
         const fetchRefStr = headFetch.ref;

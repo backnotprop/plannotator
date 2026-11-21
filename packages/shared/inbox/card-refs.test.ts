@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_CARD_LINK_LABEL_MAX, inboxCardLinkLabel, inboxCardMarkRef, type InboxAuthor } from "@plannotator/core/inbox-types";
+import { learnForgejoHosts } from "@plannotator/core/forge-refs";
 import { parseInboxCardRef } from "./card-refs";
 import { InboxStore } from "./store";
 
@@ -184,6 +185,25 @@ describe("parseInboxCardRef: any other web link (user feedback #10)", () => {
     expect(sourceOf("https://acme.youtrack.cloud/issue/PROJ-1")).toBe("youtrack");
     // A web link is never a PR.
     expect(parseInboxCardRef("https://www.notion.so/acme/Roadmap", "pr")).toBeNull();
+  });
+
+  test("Forgejo: a pull request keeps its own /pulls/ link, the host is part of its name, and an unnamed host's issue is a plain link", () => {
+    try {
+      expect(sourceOf("https://codeberg.org/acme/widgets/pulls/12")).toBe("forgejo");
+      // GitHub writes /pull/N: a Forgejo link rebuilt that way would be a 404.
+      expect(parseInboxCardRef("https://codeberg.org/acme/widgets/pulls/12/files")).toMatchObject({ kind: "pr", source: "forgejo", ref: "codeberg.org/acme/widgets#12", url: "https://codeberg.org/acme/widgets/pulls/12" });
+      expect(parseInboxCardRef("https://codeberg.org/acme/widgets/issues/4")).toMatchObject({ kind: "issue", source: "forgejo", ref: "codeberg.org/acme/widgets#4", url: "https://codeberg.org/acme/widgets/issues/4" });
+      // A pull request's path names its forge on any host; an issue's does not, until the host is named.
+      expect(parseInboxCardRef("https://git.acme.com/acme/widgets/pulls/3")).toMatchObject({ kind: "pr", source: "forgejo", url: "https://git.acme.com/acme/widgets/pulls/3" });
+      expect(sourceOf("https://git.acme.com/acme/widgets/issues/3")).toBe("web");
+      learnForgejoHosts(["git.acme.com"]);
+      expect(sourceOf("https://git.acme.com/acme/widgets/issues/3")).toBe("forgejo");
+      // GitHub's own links are not taken for a Forgejo's.
+      expect(sourceOf("https://github.com/acme/widgets/pull/12")).toBe("github");
+      expect(parseInboxCardRef("https://github.com/acme/widgets/pull/12")?.url).toBe("https://github.com/acme/widgets/pull/12");
+    } finally {
+      learnForgejoHosts([]);
+    }
   });
 
   test("other schemes, credentials, whitespace and no scheme are refused", () => {

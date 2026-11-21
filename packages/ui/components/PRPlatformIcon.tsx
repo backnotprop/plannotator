@@ -14,9 +14,29 @@ export const BitbucketIcon: React.FC<{ className?: string }> = ({ className }) =
   </svg>
 );
 
+/** Forgejo / Gitea: a generic branch mark (not the project's logo). Uses currentColor. */
+export const ForgejoIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <circle cx="6" cy="5.5" r="2.5" />
+    <circle cx="6" cy="18.5" r="2.5" />
+    <circle cx="18" cy="9" r="2.5" />
+    <path d="M6 8v8" />
+    <path d="M18 11.5c0 3-4 3.5-8 4.5" />
+  </svg>
+);
+
 /** The mark of the platform a PR/MR lives on. Unknown platforms get GitHub's. */
 export const PRPlatformIcon: React.FC<{ platform: string; className?: string }> = ({ platform, className }) => {
   if (platform === "gitlab") return <GitLabIcon className={className} />;
   if (platform === "bitbucket") return <BitbucketIcon className={className} />;
+  if (platform === "forgejo") return <ForgejoIcon className={className} />;
   return <GitHubIcon className={className} />;
 };

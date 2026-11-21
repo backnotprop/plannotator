@@ -7,6 +7,7 @@
  * it, so the two never differ. Never throws.
  */
 
+import { classifyForgeHost } from "./forge-refs";
 import { findQuestionBlocks, parseQuestionBlock } from "./question-block";
 
 /**
@@ -508,7 +509,9 @@ function replaceLinks(text: string): string {
       }
     });
     const lower = host.toLowerCase();
-    if (/(?:^|\.)(?:github\.com|gitlab\.com|bitbucket\.org)$/.test(lower) && parts.length >= 2) {
+    // A Forgejo / Gitea names its pull request /<owner>/<repo>/pulls/<n> (no other forge does), so on any host it is a PR.
+    if (parts.length >= 4 && parts[2] === "pulls" && /^\d+$/.test(parts[3] ?? "")) return ` PR${LINK_JOIN}${parts[3]} `;
+    if ((/(?:^|\.)(?:github\.com|gitlab\.com|bitbucket\.org)$/.test(lower) || classifyForgeHost(lower) === "forgejo") && parts.length >= 2) {
       const kind = parts.indexOf("pull") >= 0 ? "pull" : parts.indexOf("pull-requests") >= 0 ? "pull-requests" : parts.indexOf("merge_requests") >= 0 ? "merge_requests" : parts.indexOf("issues") >= 0 ? "issues" : null;
       const number = kind ? parts[parts.indexOf(kind) + 1] : undefined;
       if (kind && number && /^\d+$/.test(number)) return ` ${kind === "issues" ? "Issue" : "PR"}${LINK_JOIN}${number} `;

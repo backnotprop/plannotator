@@ -10,7 +10,7 @@
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
 import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
-import { BitbucketIcon } from '@plannotator/ui/components/PRPlatformIcon';
+import { BitbucketIcon, ForgejoIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { loadRefCard, refCardTarget } from '@plannotator/ui/utils/refCard';
 import type { ForgePlatform } from '@plannotator/core/forge-refs';
@@ -38,6 +38,7 @@ function Glyph({ name }: { name: keyof typeof GLYPHS }) {
 
 function ForgeMark({ platform }: { platform: ForgePlatform }) {
   if (platform === 'bitbucket') return <BitbucketIcon className="ib-tl-ic" />;
+  if (platform === 'forgejo') return <ForgejoIcon className="ib-tl-ic" />;
   return platform === 'github' ? <GitHubIcon className="ib-tl-ic" /> : <GitLabIcon className="ib-tl-ic" />;
 }
 

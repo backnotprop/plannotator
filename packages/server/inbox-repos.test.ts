@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
+import { learnForgejoHosts } from "@plannotator/core/forge-refs";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxRepoCache, readInboxProjectRepo } from "./inbox-repos";
 
@@ -185,6 +186,27 @@ test("the projects list carries a project's origin host once resolved; a folder 
   const { projects } = (await response.json()) as { projects: { name: string; repo_host?: string | null }[] };
   expect(projects.find((p) => p.name === "widgets")?.repo_host).toBe("gitlab.example.com");
   expect(projects.find((p) => p.name === "notes")).not.toHaveProperty("repo_host");
+});
+
+test("the projects list tags a project whose origin is a Forgejo (codeberg.org, or a host the person named), and no other", async () => {
+  learnForgejoHosts(["git.acme.com"]);
+  try {
+    const root = tempRoot();
+    const codeberg = gitProject(root, "on-codeberg", "https://codeberg.org/acme/on-codeberg.git");
+    const named = gitProject(root, "on-named", "git@git.acme.com:team/on-named.git");
+    const opaque = gitProject(root, "on-opaque", "git@source.acme.io:team/on-opaque.git");
+    const github = gitProject(root, "on-github", "https://github.com/acme/on-github.git");
+    const server = await startInboxServer({ dataDir: join(root, "data") });
+    servers.push(server);
+    const threads = await Promise.all([codeberg, named, opaque, github].map((project) => send(server, project, "See #7.")));
+    for (const threadId of threads) await settledRepo(server, threadId);
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`);
+    const { projects } = (await response.json()) as { projects: { name: string; repo_forge?: string }[] };
+    const forge = (name: string) => projects.find((p) => p.name === name)?.repo_forge;
+    expect([forge("on-codeberg"), forge("on-named"), forge("on-opaque"), forge("on-github")]).toEqual(["forgejo", "forgejo", undefined, undefined]);
+  } finally {
+    learnForgejoHosts([]);
+  }
 });
 
 test("peek answers what the cache holds, however old, and never reads", async () => {

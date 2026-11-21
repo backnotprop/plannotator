@@ -13,10 +13,10 @@ const PATCH = "diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\
 
 defineRefCardRouteScenarios(
   "bun",
-  async (kind, { root, docPath, htmlContent, refRunner, tailnetPublished }) => {
-    if (kind === "review") return startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent, agentCwd: root, refRunner, tailnetPublished });
-    if (kind === "plan") return startPlannotatorServer({ plan: "# Plan\n\nSee https://github.com/acme/widgets/pull/12", origin: "claude-code", htmlContent, refRunner });
-    return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate", refRunner, tailnetPublished });
+  async (kind, { root, docPath, htmlContent, refRunner, forgejoRefReader, tailnetPublished }) => {
+    if (kind === "review") return startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent, agentCwd: root, refRunner, forgejoRefReader, tailnetPublished });
+    if (kind === "plan") return startPlannotatorServer({ plan: "# Plan\n\nSee https://github.com/acme/widgets/pull/12", origin: "claude-code", htmlContent, refRunner, forgejoRefReader });
+    return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate", refRunner, forgejoRefReader, tailnetPublished });
   },
   {
     // `--tailscale` exists for review and annotate only (plan review has no such flag).

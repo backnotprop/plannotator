@@ -10,8 +10,8 @@ import { startReviewServer } from "./serverReview.ts";
 
 const PATCH = "diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-a\n+# Notes\n";
 
-defineRefCardRouteScenarios("pi", async (kind, { root, docPath, htmlContent, refRunner }) => {
-	if (kind === "review") return startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent, agentCwd: root, refRunner });
-	if (kind === "plan") return startPlanReviewServer({ plan: "# Plan\n\nSee https://github.com/acme/widgets/pull/12", htmlContent, origin: "pi", refRunner });
-	return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate", refRunner });
+defineRefCardRouteScenarios("pi", async (kind, { root, docPath, htmlContent, refRunner, forgejoRefReader }) => {
+	if (kind === "review") return startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent, agentCwd: root, refRunner, forgejoRefReader });
+	if (kind === "plan") return startPlanReviewServer({ plan: "# Plan\n\nSee https://github.com/acme/widgets/pull/12", htmlContent, origin: "pi", refRunner, forgejoRefReader });
+	return startAnnotateServer({ markdown: "# Notes\n", filePath: docPath, htmlContent, mode: "annotate", refRunner, forgejoRefReader });
 });
