@@ -138,6 +138,31 @@ Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^
 
 **`sandbox`** (published in ui 0.55.0): the srcdoc frame's whole `sandbox` attribute. The default is `"allow-scripts allow-modals"`, so a page's `alert`, `confirm` and `prompt` open. A host that shows documents other people wrote passes `sandbox="allow-scripts"`, so no dialog draws over its origin. `hostNavigates` still adds `allow-popups`. A non-string such as `null` gets the default. `""` is the strictest frame: no scripts, so nothing on the page can be annotated. A changed value applies when the frame next loads a document. Do not add `allow-same-origin`. See HANDOFF.md § "`HtmlViewer` `sandbox`".
 
+**`inline`** (unreleased): `inline?: { height: number; colorScheme?: "light" | "dark" }` draws the page in the host's own text with none of the viewer's chrome: no card (background, corners, shadow), no bar above the frame (the global Comment button, attachments, the diff toggle), no ring while Annotate is armed. The frame is `height` pixels tall (the host measures the page; the bridge's own `resize` is not used), and it carries `colorScheme` on a transparent background, so a page with a transparent background shows the host's text behind it. A pin's comment box opens beside its element and ends above the frame's foot (`CommentPopover` `placement: 'side'` with `keepAbove`, below), its header names the element by tag and label ("rect · Pro, W3") and the row of target chips shows only from the second element on; the pinned element's box is a ring a little off its edge, and a comment's marker sits above its element, on its top edge at the clicked x (the clicked point where that edge does not show), so neither hides a small element such as a chart's bar; with Annotate on and focus outside the page, Escape runs `onAnnotateModeExit` in the capture phase and is used (`preventDefault`, `stopPropagation`), so the host's own Escape does not also run; while the host has a dialog, a sheet, a menu, a list of choices or a popover open anywhere in the window, Escape is left to the host (a window marked `data-chat-window` that stays open beside the text, such as an Ask AI window, counts only while focus is in it). Ignored with `fullViewport` and in live (`src`) mode. Absent → the viewer exactly as before. The Plannotator Inbox uses it for a message's live `html` block while the person comments on its elements (below).
+
+**`structuralAnchors`** (unreleased): `structuralAnchors?: boolean`, a promise the host makes: the document shown is, byte for byte, the one every annotation in `annotations` was made on. Then an element with no text and no stable id (an SVG chart's bar) is anchored by its place and its signature: `HtmlElementAnchor.structure` (`HtmlAnchorStructure` in `@plannotator/core/html-anchor`: `{ path, ns, attrs }`, the child-index path from the root element, the namespace, and the element's own attributes). Restore follows the path and takes the element only on an exact signature match, never one nearby; otherwise the comment is unanchored. `parseHtmlElementAnchor` (core and ui) validates and caps it (`parseHtmlAnchorStructure`) and refuses an anchor whose `structure` is not valid. Absent → such an element gets no anchor, as before, and a `structure` a page posts is dropped. Ignored in live (`src`) mode. `HtmlEmbedHost.annotate` turns it on for a block, which shows only the comments made on its own source.
+
+**`CommentPopover` `keepAbove`** (unreleased): `keepAbove?: HTMLElement | null`, for the comment card with `placement: 'side'`: the card ends above that element's foot (as much of it as shows; `visibleFootOf`) and stays inside the card's pane, beside the anchor (right, else left; from the anchor's top down, or from the foot up when the anchor is low), else over it, else under it, else on it. A phone docks the card as always. Absent → as before. `computeCommentCardGeometry` takes it as `floor`.
+
+**Comments on a live `html` fence (`HtmlEmbedHost.annotate`; unreleased).** `Viewer`'s `htmlEmbeds` host may also pass `annotate: HtmlEmbedAnnotate`:
+
+```ts
+htmlEmbeds={{
+  frameUrl,                 // as before: the fence's page, served under EMBED_RESPONSE_CSP
+  annotate: {
+    frameUrl,               // (document) => URL of the annotatable document, served under the SAME policy
+    indexOf,                // (block) => its place among the document's live html blocks, from 1 (0: no pen)
+    annotations,            // the document's comments that carry `htmlBlockAnchor`
+    onAdd,                  // (annotation) => kept? (`blockId` and `htmlBlockAnchor` are set)
+    selectedId, onSelect,   // the comment the host points at; a marker pressed
+    onRestoreReport,        // { attempted, unanchored }: what a block could not draw
+    allowImages,            // false: no image button in the comment box
+  },
+}}
+```
+
+Absent → no pen, and the block is the frame it always was. With it, a pen at the end of the block's caption turns on the viewer's pinpoint over the page: the block frames the page again through `HtmlViewer` (`inline`, `frameUrl`, `sandbox={EMBED_SANDBOX}`), from `buildEmbedDocument(html, { closeHead: true })` (core; `closeHead` ends our `<head>` before the page so the bridge lands in it; absent → the document as before). That second document, and the viewer's chunk, load only once the pen is first turned on or the block has a comment to show. The host must serve it under `EMBED_RESPONSE_CSP` and nothing wider: never `'self'`, never `allow-same-origin`. A comment carries `Annotation.htmlBlockAnchor` (`@plannotator/core/html-block-anchor`: `{ v: 1, index, id, sourceLine }`) beside `htmlAnchor` / `elementContext`; a block draws only the comments made on its place and its source, and reports the rest unanchored. The text highlighter skips rows with `htmlBlockAnchor`. `utils/parser` exports `additionalTargetsExportBlock` beside `elementContextExportBlock` for a host that writes its own feedback entry.
+
 #### HTML annotation parity seams (0.32.0)
 
 Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotation experience, all additive and all defaulting to today's behavior. Requires `@plannotator/core` 0.25.0 (the `html-anchor` subpath), so install and publish core before ui:
