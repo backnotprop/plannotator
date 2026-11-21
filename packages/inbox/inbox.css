@@ -4952,6 +4952,18 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-lchopt .ib-cp-lchname { display: flex; align-items: baseline; gap: 0.5em; }
 .ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+/* OpenCode's default named on the button, "Default (big-pickle) · build": only the name gives way, the brackets and the rest stay whole. */
+.ib-cp-lchbtn > .ib-cp-lchw { display: inline-flex; min-width: 0; overflow: hidden; }
+.ib-cp-lchw > span { flex: none; white-space: nowrap; }
+.ib-cp-lchw > .ib-cp-lchdn { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; }
+/* The menu's Default row with OpenCode's default and its provider: drops to a second line in a narrow column, never cut. */
+.ib-cp-lchopt .ib-cp-lchname.ib-cp-lchdef { flex-wrap: wrap; row-gap: 1px; line-height: 1.3; }
+.ib-cp-lchname.ib-cp-lchdef > span:first-child { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.pn-inbox .ib-cp-opt.ib-cp-lchopt:has(.ib-cp-lchdef) { padding-top: 8px; padding-bottom: 8px; }
+/* OpenCode's list being read or not readable: under Default, the menu's notice row (a spinner while it is read). */
+.ib-cp-picker.ib-cp-lch .ib-cp-opt.ib-cp-fnotice { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
+.ib-cp-picker.ib-cp-lch .ib-cp-fnotice > svg.ib-ic { margin-top: 2px; }
+.ib-cp-picker.ib-cp-lch .ib-cp-fnotice > .ib-spin { flex: none; margin: 3px 2px 0 1px; }
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
 /* OpenCode's Agent column (build, plan) beside the model and the variant: the same room as a filterable list. */
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-compose-choice-menu="primary_agent"]) { width: min(480px, calc(100% - 28px)); }

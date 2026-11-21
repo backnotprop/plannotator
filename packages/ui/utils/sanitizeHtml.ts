@@ -102,3 +102,28 @@ export function sanitizeBlockHtml(html: string): string {
 export function sanitizeInlineHtml(html: string): string {
   return sanitize(html);
 }
+
+/**
+ * Whether sanitized markup draws nothing: no text but white space, and no
+ * image, video, picture, rule or table. A raw HTML block the sanitizer
+ * emptied (`<iframe …></iframe>`, `<div><script>…</script></div>`) is then
+ * not drawn at all, so it leaves no empty gap in the document. Without a DOM
+ * (server render) it answers false.
+ */
+export function sanitizedHtmlDrawsNothing(sanitized: string): boolean {
+  if (typeof document === 'undefined') return false;
+  if (!sanitized.trim()) return true;
+  const known = drawsNothingCache.get(sanitized);
+  if (known !== undefined) return known;
+  const template = document.createElement('template');
+  template.innerHTML = sanitized;
+  const content = template.content;
+  const answer = !(content.textContent ?? '').trim() && !content.querySelector('img, video, picture, hr, table');
+  // One parse per distinct block, not per mount or per keystroke elsewhere in the document.
+  if (drawsNothingCache.size >= DRAWS_NOTHING_CACHE_MAX) drawsNothingCache.delete(drawsNothingCache.keys().next().value!);
+  drawsNothingCache.set(sanitized, answer);
+  return answer;
+}
+
+const DRAWS_NOTHING_CACHE_MAX = 500;
+const drawsNothingCache = new Map<string, boolean>();

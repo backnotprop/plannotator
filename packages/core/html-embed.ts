@@ -202,15 +202,35 @@ const LEADING_DOCTYPE = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i;
  * into ours (the HTML parser folds a second `<html>` and `<head>` in), so the
  * bootstrap always runs before any of the page's own code.
  */
-export function buildEmbedDocument(html: string): string {
+export function buildEmbedDocument(html: string, options: EmbedDocumentOptions = {}): string {
   const page = html.replace(LEADING_DOCTYPE, "");
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     `<style>${BASE_CSS}</style><script>${EMBED_BOOTSTRAP}</script>` +
+    (options.closeHead ? "</head>" : "") +
     page
   );
 }
+
+export interface EmbedDocumentOptions {
+  /**
+   * End our `<head>` before the agent's HTML, for a host that adds its own
+   * script to the document afterwards (ui's HtmlViewer puts its annotation
+   * bridge before the first `</head>`): ours is then the first, whatever the
+   * page writes, and the document keeps its doctype. The page parses to the
+   * same tree: its own `<head>` content still lands in the head, a fragment
+   * in the body. Absent: the document as it always was.
+   */
+  closeHead?: boolean;
+}
+
+/**
+ * The most an annotatable embed's document may weigh: the fence
+ * (`EMBED_MAX_BYTES`) and what the viewer adds to it (its annotation bridge,
+ * about 300 KB, and the theme).
+ */
+export const EMBED_ANNOTATABLE_MAX_BYTES = EMBED_MAX_BYTES + 1536 * 1024;
 
 /** The fragment that hands the embed its theme and mode before it paints (`#pn=…`). */
 export function embedFragment(theme: EmbedTheme, mode: EmbedMode = "inline"): string {
@@ -246,6 +266,13 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
 
 /** The id the Inbox gives an embed: the first 32 hex digits of the SHA-256 of its HTML. */
 export const EMBED_ID = /^[a-f0-9]{32}$/;
+
+/** The embed's id, read from the URL of its document (`…/embeds/<id>`); null when the URL does not end in one. */
+export function embedIdFromUrl(url: string): string | null {
+  const path = url.split(/[?#]/, 1)[0] ?? "";
+  const id = path.slice(path.lastIndexOf("/") + 1);
+  return EMBED_ID.test(id) ? id : null;
+}
 
 /**
  * What a frame document a host serves says to the window that framed it when

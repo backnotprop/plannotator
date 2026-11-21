@@ -441,7 +441,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
-  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone);
+  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone, { defaultFor: trustPick?.projectId ?? null, say });
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;

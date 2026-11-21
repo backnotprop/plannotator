@@ -21407,6 +21407,21 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "files-101-annotate",
+      "title": "Pen under an `html` block: comment on an element of the live page in place (the element boxed, the comment box beside it, a numbered marker, \"HTML · <element>\" in the list of comments)",
+      "surface": [
+        "window:/api/inbox/embed-pages",
+        "window:/api/inbox/embed-pages/:id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

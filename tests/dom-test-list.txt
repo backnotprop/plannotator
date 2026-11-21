@@ -555,6 +555,7 @@ packages/ui/components/html-viewer/bridgeAssetLinkKey.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
+packages/ui/components/MarkdownContentsRail.marks.test.tsx
 packages/ui/components/DeferredMarkdownContentsRail.test.ts
 packages/ui/components/CommentPopover.overlayGutter.test.tsx
 packages/ui/components/ComposerTokenTextarea.perKey.test.tsx
@@ -872,3 +873,9 @@ packages/inbox/projectTagsFilter.test.tsx
 packages/inbox/tagWritesPending.test.tsx
 packages/inbox/runCardLive.test.tsx
 packages/ui/components/Viewer.footnotesAutolinks.test.tsx
+packages/ui/hooks/useFenceTheme.page.test.tsx
+packages/ui/components/Viewer.rawHtmlImages.test.tsx
+packages/inbox/launchChoiceStates.test.tsx
+packages/ui/components/html-embed/HtmlEmbedBlock.annotate.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.inline.test.tsx
+packages/ui/components/html-viewer/bridgeStructuralAnchor.test.ts

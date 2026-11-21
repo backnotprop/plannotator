@@ -34,6 +34,7 @@
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { basename, isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { cutText } from "@plannotator/core/inbox-questions";
 import { killWindowsProcessTree, planAgentJobSpawn } from "@plannotator/ai/providers/command-path";
@@ -119,7 +120,7 @@ export interface AgentEnvironment {
    */
   /**
    * `cleanEnv`: the child gets `env` alone (PATH folded in), none of this process's. `stdin`: written to the child's
-   * stdin, which is then closed (without it, stdin is ignored). `outputCap`: what is kept of each stream (default 64 KiB).
+   * stdin, which is then closed (without it, stdin is ignored). `outputCap`: what is kept of each stream, in UTF-16 code units (default 64 Ki, about 64 KiB for ASCII).
    */
   run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>>; cleanEnv?: boolean; stdin?: string; outputCap?: number; killGroup?: boolean }): Promise<AgentRunResult>;
 }
@@ -270,9 +271,15 @@ function spawnRun(
     let stderr = "";
     let settled = false;
     let exited = false;
+    // `outputCap` counts UTF-16 code units (string length), not bytes. Each stream is decoded across chunks, so a
+    // character split between two chunks (likely in a long output) is kept whole, never U+FFFD.
     const cap = (text: string) => (text.length > outputCap ? text.slice(0, outputCap) : text);
-    child.stdout?.on("data", (chunk: Buffer) => (stdout = cap(stdout + chunk.toString("utf8"))));
-    child.stderr?.on("data", (chunk: Buffer) => (stderr = cap(stderr + chunk.toString("utf8"))));
+    const outText = new StringDecoder("utf8");
+    const errText = new StringDecoder("utf8");
+    child.stdout?.on("data", (chunk: Buffer) => (stdout = cap(stdout + outText.write(chunk))));
+    child.stderr?.on("data", (chunk: Buffer) => (stderr = cap(stderr + errText.write(chunk))));
+    child.stdout?.on("end", () => (stdout = cap(stdout + outText.end())));
+    child.stderr?.on("end", () => (stderr = cap(stderr + errText.end())));
     const kill = () => {
       liveRuns.delete(kill);
       // Once it exited, its pid (and group id) may name another process.
