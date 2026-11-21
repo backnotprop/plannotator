@@ -24,7 +24,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_GROUP_TIP_SEEN, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -98,7 +98,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   markTourDecided(dataDir);
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configFile, JSON.stringify({ ...config, inboxCodeReview: true, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
+  writeFileSync(configFile, JSON.stringify({ ...config, inboxCodeReview: true, inboxReveals: { ...E2E_GROUP_TIP_SEEN, code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
   for (const dir of ['claude', 'codex', 'xdg', 'fakes']) mkdirSync(join(root, dir), { recursive: true });
   const fakes = join(root, 'fakes');
   // Signed out: no forge is ever asked, and Reviews lists no PRs.

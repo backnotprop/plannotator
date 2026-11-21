@@ -1085,6 +1085,12 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-group + .ib-group { margin-top: 12px; }
 .ib-band .ib-n { font-weight: 500; color: var(--muted-foreground); }
 .ib-band .ib-ic { margin-left: auto; color: var(--muted-foreground); }
+/* The Group tip's anchor (GroupBand.tsx): no size, the band's full height, so the tip is centred on the band. After
+   the name and count it takes back the flex gap it adds; at the right end it is out of the flow. */
+.ib-band-tipat { align-self: stretch; width: 0; margin-inline-start: -8px; flex: none; }
+.ib-band-tipat[data-end] { position: absolute; inset-block: 0; inset-inline-end: 12px; margin: 0; }
+/* The tip sits on the band: the pointer goes through it to the band (a right-click there is the band's menu). */
+:is([data-pn-tooltip], :has(> [data-pn-tooltip])):has([data-band-tip]) { pointer-events: none; }
 /* The one-line row (approval "inbox-row-byline", 2026-10-29; its cells by approval "list-rows-mail-icons",
    2026-10-30): the agents' marks with the project after them, the title cell (the thread's name, then the grey
    subject), then right-aligned the count in words, the badge, the open counts and the time, each in a column of its
@@ -1343,7 +1349,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-band .ib-n, .ib-band .ib-ic { color: var(--ib-band-mfg-s, var(--muted-foreground)); }
 .ib-band .ib-n { font-weight: var(--ib-band-nw-s, 500); }
 button.ib-band { transition: var(--ib-fade-s, var(--ib-ui-fade)); }
-button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
+/* `data-menu`: its right-click (or long-press) menu is open (RowMenu.tsx `bands`), as a row keeps its look then. */
+button.ib-band:is(:hover, [data-menu]) { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* A closed group's header looks as an open one does (approval "inbox-list-groups-close", correction 2026-11-06):
    only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
@@ -1380,8 +1387,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-mrow[data-menu] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 50%, transparent)); }
 /* A finger held on a row opens its menu (RowMenu.tsx, `longPress`): no iOS callout and no text selection under it.
    Touch only: a touch screen, or iOS and iPadOS WebKit (a trackpad iPad's primary pointer is fine). */
-@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
-@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw, button.ib-band) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw, button.ib-band) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 /* Rows that wait on nobody (Sent, Quiet): the title steps back. Off, a wide row's title takes its row's colour and
    a three-line row's is quiet text. */
 .ib-row[data-section="quiet"] .ib-title { color: var(--ib-quiet-dim, currentcolor); }
