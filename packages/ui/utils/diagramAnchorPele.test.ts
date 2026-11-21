@@ -215,6 +215,54 @@ describe.if(hasDom)('Pele finders make the anchors Mermaid makes', () => {
     expect([...clickable(svgs.mermaid, MERMAID_FINDER, RENDER_ID).values()]).toContainEqual({ family: 'sequence', kind: 'cluster', id: 'frame-3', label: 'loop' });
   });
 
+  // Pele ends a message to a `create`d actor at that actor's box (its
+  // lifeline starts below it), and a message from deep in nested activations
+  // at the edge of the innermost bar, ~25 px off the lifeline: neither end
+  // is near a lifeline, so before these were read the message lost the ends
+  // Mermaid gives it.
+  test('sequence: a message to a created participant or actor, and one from six activations deep, keep their ends', async () => {
+    const svgs = await drawn('28-sequence-create-activation');
+    const targets = expectParity(svgs);
+    const ends = (id: string) => {
+      const t = targets.find((target) => target.id === id);
+      return `${t?.from} -> ${t?.to}`;
+    };
+    expect(ends('msg-7')).toBe('B -> E');
+    expect(ends('msg-8')).toBe('E -> B');
+    expect(ends('msg-9')).toBe('B -> C');
+    expect(ends('msg-10')).toBe('C -> D');
+    expect(ends('msg-11')).toBe('B -> A');
+    expect(targets.every((t) => t.kind !== 'edge' || (t.from !== undefined && t.to !== undefined))).toBe(true);
+  });
+
+  // A wrong end restores a comment onto another message of the same label,
+  // so a point two actors could claim names neither, as it did before.
+  test('sequence: a message end two actors could claim names neither', () => {
+    const A_BAR = '<rect class="pele-activation" data-id="A" x="20" y="60" width="30" height="200"/>';
+    const B_BAR = '<rect class="pele-activation" data-id="B" x="40" y="60" width="10" height="200"/>';
+    const ends = (bars: string, end: number) => {
+      const drawn = parseInertSvg(
+        [
+          '<svg xmlns="http://www.w3.org/2000/svg" class="pele pele-sequence" aria-roledescription="sequence"><g>',
+          '<path class="pele-lifeline" data-id="A" d="M0,44V300"/><path class="pele-lifeline" data-id="B" d="M60,44V300"/><path class="pele-lifeline" data-id="C" d="M200,44V300"/>',
+          bars,
+          `<g class="pele-edge pele-message" data-id="i0"><path d="M${end},100H193"/></g>`,
+          ...['A', 'B', 'C'].map((name, i) => `<g class="pele-node pele-actor" data-id="${name}"><rect x="${[0, 60, 200][i]! - 30}" y="0" width="60" height="44"/></g>`),
+          '</g></svg>',
+        ].join(''),
+      )!;
+      const t = PELE_FINDER.targetFromElement(drawn, drawn.querySelector('g.pele-message')!, PELE_ID);
+      return `${t?.from} -> ${t?.to}`;
+    };
+    // On A's bar (deep activations reach right to x=50) and 15 px off B's lifeline: the two readings disagree.
+    expect(ends(A_BAR, 45)).toBe('undefined -> undefined');
+    // On bars of both A and B, and between their lifelines.
+    expect(ends(A_BAR + B_BAR, 32)).toBe('undefined -> undefined');
+    // On A's bar only, clear of B's lifeline: A; on no bar, near B's lifeline: B.
+    expect(ends(A_BAR, 30)).toBe('A -> C');
+    expect(ends(A_BAR, 66)).toBe('B -> C');
+  });
+
   test('state: two states named alike in two composites, composites, a self-transition, a note; no pseudo-state', async () => {
     const svgs = await drawn('21-state-parts');
     const targets = expectParity(svgs);

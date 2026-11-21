@@ -12,7 +12,7 @@ What Pele keeps and loses, per type and per feature, is data in `PELE_CAPABILITI
 
 Part comments: for the same source, a click on a part makes the same anchor (kind, id or ends, label, source line) under either engine, so a comment made under one restores on the same part under the other. Checked per type against Mermaid svgs captured in Chromium (`test-setup/fixtures/diagrams/2x-*.svg`, each with its `.mmd` source) in `utils/diagramAnchorPele.test.ts`, and through the real `DiagramBlock` in `components/DiagramBlock.engine.test.tsx`. Per type:
 
-- sequence: an actor by name (a stick-figure `actor` too), a message `msg-<n>` with its ends read from where its line starts and stops, a note `note-<n>`, a frame `frame-<n>`, numbered as both engines draw them (a frame nested in another first).
+- sequence: an actor by name (a stick-figure `actor` too), a message `msg-<n>` with its ends read from where its line starts and stops (at a lifeline, the edge of an activation bar however deep, or the box of an actor the message creates; a point two actors could claim names neither), a note `note-<n>`, a frame `frame-<n>`, numbered as both engines draw them (a frame nested in another first).
 - state: a state or composite state by id (as a node, as Mermaid does), a transition `edge<n>`, a note; no start or end pseudo-state.
 - class: a class by name (its label is the name, not an `«interface»` annotation), a relation by its ends; a note is not a part.
 - ER: an entity by name, a relationship by its ends.

@@ -11,7 +11,8 @@ import { diagramFamilyOf, MERMAID_FINDER, splitEdgeStem, type DiagramFinder } fr
  *
  * - flowchart: node / subgraph / edge by Mermaid id and ends;
  * - sequence: actor by name, message `msg-<n>` (its ends read from where its
- *   line starts and stops), note `note-<n>`, frame `frame-<n>`, numbered as
+ *   line starts and stops: a lifeline, an activation bar's edge, a created
+ *   actor's box), note `note-<n>`, frame `frame-<n>`, numbered as
  *   Mermaid numbers them;
  * - state: state and composite as `node`, transition `edge<n>`, note;
  * - class: class by name, relation by its ends;
@@ -116,57 +117,137 @@ function sequenceActorLabel(svg: Element, name: string): string {
   return actor === null ? name : nameOf(actor);
 }
 
-/** The x of each lifeline (`M{x},{y}V…`), by actor name. */
-function lifelines(svg: Element): ReadonlyArray<{ readonly name: string; readonly x: number }> {
+interface Lifeline {
+  readonly name: string;
+  readonly x: number;
+  /** Where the lifeline starts: below its actor's box, which for a `create`d actor is level with the message that creates it. */
+  readonly top: number;
+}
+
+interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Each lifeline (`M{x},{y}V…`), by actor name. */
+function lifelines(svg: Element): readonly Lifeline[] {
   return Array.from(svg.querySelectorAll('path.pele-lifeline[data-id]')).flatMap((line) => {
-    const x = /^\s*M\s*(-?[\d.]+)/u.exec(line.getAttribute('d') ?? '')?.[1];
+    const m = /^\s*M\s*(-?[\d.]+)[\s,]+(-?[\d.]+)/u.exec(line.getAttribute('d') ?? '');
     const name = line.getAttribute('data-id');
-    return x === undefined || name === null ? [] : [{ name, x: Number(x) }];
+    return m === null || name === null ? [] : [{ name, x: Number(m[1]), top: Number(m[2]) }];
   });
 }
 
-/** Where an absolute svg path starts and stops along x (Pele writes absolute commands only); null for anything else. */
-function pathEndsX(d: string): { start: number; end: number } | null {
+/** Every point an absolute svg path visits, in order (Pele writes absolute commands only); null for anything else. */
+function pathPoints(d: string): Point[] | null {
   const tokens = d.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e-?\d+)?/gu) ?? [];
-  // Arguments per segment, and which one is the segment's end x.
-  const shape: Readonly<Record<string, readonly [number, number]>> = { M: [2, 0], L: [2, 0], T: [2, 0], H: [1, 0], C: [6, 4], S: [4, 2], Q: [4, 2], A: [7, 5] };
-  let x: number | null = null;
-  let start: number | null = null;
+  // Arguments per segment, and which of them are the segment's end x and y (-1: unchanged).
+  const shape: Readonly<Record<string, readonly [number, number, number]>> = {
+    M: [2, 0, 1],
+    L: [2, 0, 1],
+    T: [2, 0, 1],
+    H: [1, 0, -1],
+    V: [1, -1, 0],
+    C: [6, 4, 5],
+    S: [4, 2, 3],
+    Q: [4, 2, 3],
+    A: [7, 5, 6],
+  };
+  const points: Point[] = [];
+  let x = 0;
+  let y = 0;
   let command = '';
   for (let i = 0; i < tokens.length; ) {
     const token = tokens[i] ?? '';
     if (/^[A-Za-z]$/u.test(token)) {
       command = token;
       i += 1;
-      if (command === 'Z') x = start;
-      continue;
-    }
-    if (command === 'V') {
-      i += 1;
+      if (command === 'Z' && points[0] !== undefined) points.push(points[0]);
       continue;
     }
     const spec = shape[command];
     if (spec === undefined) return null;
     const args = tokens.slice(i, i + spec[0]).map(Number);
     if (args.length < spec[0] || args.some((n) => Number.isNaN(n))) return null;
-    x = args[spec[1]] ?? null;
-    if (start === null) start = x;
+    if (spec[1] >= 0) x = args[spec[1]] ?? x;
+    if (spec[2] >= 0) y = args[spec[2]] ?? y;
+    points.push({ x, y });
     i += spec[0];
   }
-  return start === null || x === null ? null : { start, end: x };
+  return points;
 }
 
-/** The actor whose lifeline is nearest to `x`, when one is clearly nearest. */
-function actorAt(lines: ReadonlyArray<{ readonly name: string; readonly x: number }>, x: number): string | null {
+/** The actor whose lifeline is nearest to `x`, when one is clearly nearest (by 8 px) and within `limit`. */
+function nearestLifeline(lines: readonly Lifeline[], x: number, limit: number): string | null {
   const sorted = [...lines].sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x));
   const nearest = sorted[0];
   if (nearest === undefined) return null;
   const distance = Math.abs(nearest.x - x);
   const runnerUp = sorted[1];
-  // An arrowhead or an activation bar moves a line's end a few pixels off
-  // its lifeline; a point between two lifelines names neither.
-  if (distance > 24 || (runnerUp !== undefined && Math.abs(runnerUp.x - x) - distance < 8)) return null;
+  if (distance > limit || (runnerUp !== undefined && Math.abs(runnerUp.x - x) - distance < 8)) return null;
   return nearest.name;
+}
+
+/** An arrowhead's length past the edge a line points at, and some rounding. */
+const EDGE_REACH = 10;
+
+const numberAttr = (el: Element, name: string): number => Number(el.getAttribute(name) ?? Number.NaN);
+
+/** The actor whose activation bar a point sits on the edge of: a line from or
+ * to a nested activation starts or stops at its innermost bar, ~5 px further
+ * off the lifeline per level. Null when no bar, or bars of two actors, are there. */
+function activationAt(svg: Element, p: Point): string | null {
+  const names = new Set<string>();
+  for (const bar of Array.from(svg.querySelectorAll('rect.pele-activation[data-id]'))) {
+    const [x, y, width, height] = ['x', 'y', 'width', 'height'].map((name) => numberAttr(bar, name)) as [number, number, number, number];
+    if ([x, y, width, height].some((n) => Number.isNaN(n))) continue;
+    if (p.y < y || p.y > y + height || p.x < x - EDGE_REACH || p.x > x + width + EDGE_REACH) continue;
+    names.add(bar.getAttribute('data-id') ?? '');
+  }
+  const [name] = [...names];
+  return names.size === 1 && name !== undefined && name !== '' ? name : null;
+}
+
+/** How far down an actor's box (or stick figure and its name) reaches. */
+function verticalSpan(actor: Element): { top: number; bottom: number } | null {
+  const ys: number[] = [];
+  for (const el of Array.from(actor.querySelectorAll('rect, circle, path, text'))) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'rect') ys.push(numberAttr(el, 'y'), numberAttr(el, 'y') + numberAttr(el, 'height'));
+    else if (tag === 'circle') ys.push(numberAttr(el, 'cy') - numberAttr(el, 'r'), numberAttr(el, 'cy') + numberAttr(el, 'r'));
+    else if (tag === 'text') ys.push(numberAttr(el, 'y') - 16, numberAttr(el, 'y') + 4);
+    else for (const point of pathPoints(el.getAttribute('d') ?? '') ?? []) ys.push(point.y);
+  }
+  const known = ys.filter((n) => !Number.isNaN(n));
+  return known.length === 0 ? null : { top: Math.min(...known), bottom: Math.max(...known) };
+}
+
+/** The `create`d actor a point is level with: its box is drawn where the
+ * message that creates it is, above its lifeline, and the line stops at the
+ * box. The one such actor, when the point is also nearer its lifeline than
+ * any other's. */
+function createdActorAt(svg: Element, lines: readonly Lifeline[], p: Point): string | null {
+  const level = Array.from(svg.querySelectorAll('g.pele-actor[data-id]:not(.pele-actor-footer)')).filter((actor) => {
+    const line = lines.find((candidate) => candidate.name === actor.getAttribute('data-id'));
+    if (line === undefined || line.top <= p.y) return false;
+    const span = verticalSpan(actor);
+    return span !== null && p.y >= span.top && p.y <= span.bottom;
+  });
+  const name = level.length === 1 ? level[0]?.getAttribute('data-id') : null;
+  if (name === null || name === undefined) return null;
+  return nearestLifeline(lines, p.x, Number.POSITIVE_INFINITY) === name ? name : null;
+}
+
+/** The actor a message line starts or stops at: its lifeline (an arrowhead
+ * moves the end a few px off it), the edge of its activation bar, or the box
+ * of an actor the message creates. Two readings that disagree, or a point
+ * none of them names, name no actor: the message then has no ends, as
+ * before, rather than wrong ones. */
+function actorAtEnd(svg: Element, lines: readonly Lifeline[], p: Point): string | null {
+  const byLifeline = nearestLifeline(lines, p.x, 24);
+  const byBar = activationAt(svg, p);
+  if (byLifeline !== null && byBar !== null) return byLifeline === byBar ? byLifeline : null;
+  return byLifeline ?? byBar ?? createdActorAt(svg, lines, p);
 }
 
 function sequenceMessageTarget(svg: Element, index: number): DiagramTarget | null {
@@ -174,10 +255,12 @@ function sequenceMessageTarget(svg: Element, index: number): DiagramTarget | nul
   if (message === undefined) return null;
   const id = message.getAttribute('data-id') ?? '';
   const line = message.querySelector('path:not(.pele-marker)');
-  const ends = line === null ? null : pathEndsX(line.getAttribute('d') ?? '');
+  const points = line === null ? null : pathPoints(line.getAttribute('d') ?? '');
+  const first = points?.[0];
+  const last = points?.[points.length - 1];
   const lines = lifelines(svg);
-  const from = ends === null ? null : actorAt(lines, ends.start);
-  const to = ends === null ? null : actorAt(lines, ends.end);
+  const from = first === undefined ? null : actorAtEnd(svg, lines, first);
+  const to = last === undefined ? null : actorAtEnd(svg, lines, last);
   return {
     family: 'sequence',
     kind: 'edge',
