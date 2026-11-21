@@ -199,6 +199,8 @@
       "/api/inbox/drafts",
       "/api/inbox/drafts/:id",
       "/api/inbox/drafts/:id/delete",
+      "/api/inbox/embed-pages",
+      "/api/inbox/embed-pages/:id",
       "/api/inbox/embeds",
       "/api/inbox/embeds/:id",
       "/api/inbox/events",

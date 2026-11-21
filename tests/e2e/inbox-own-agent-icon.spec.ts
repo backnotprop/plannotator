@@ -297,14 +297,14 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
   await shot(page, 'list-dark');
   await page.emulateMedia({ colorScheme: 'light' });
 
-  // The thread: the author, the participants and the "to" pill.
+  // The thread: the author, the participants and the "to" chip.
   await page.locator(`[data-thread-id="${world.threads.wide}"]`).first().click();
   const hash = (await sidebarMark(page, byKey.wide!).locator('[data-agent-mark]').getAttribute('data-face'))!.slice(4);
-  // The author, then the reply box's "to" pill.
+  // The author, then the reply box's "to" chip.
   // The list row's, its two messages' authors and the participants (the sidebar's plays the picture itself).
   await expect.poll(() => page.locator(`.ib-own img[src="/api/inbox/agent-icons/${hash}?still=1"]`).count()).toBeGreaterThanOrEqual(3);
   await page.keyboard.press('r');
-  await expect(page.locator(`.ib-rto .ib-own img[src="/api/inbox/agent-icons/${hash}?still=1"]`)).toBeVisible();
+  await expect(page.locator(`.ib-rto-chip .ib-own img[src="/api/inbox/agent-icons/${hash}?still=1"]`)).toBeVisible();
   await shot(page, 'thread-light');
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot(page, 'thread-dark');
@@ -495,8 +495,8 @@ test('every size a picture is drawn at, for each test picture (shots only)', asy
     // A message's author: the big mark in the message's head (the participants' stack is small).
     await shot(page, `size-${a.key}-author`, page.locator(`.ib-own.ib-big img[src*="${(await sidebarMark(page, id).locator('[data-agent-mark]').getAttribute('data-face'))!.slice(4)}"]`).first().locator('..'));
     await page.keyboard.press('r');
-    // The "to" pill shows in a thread with two agents (the wide one's).
-    const pill = page.locator('.ib-rto:visible');
+    // The "to" chip shows in a thread with two agents (the wide one's).
+    const pill = page.locator('.ib-rto-chip:visible');
     if (await pill.count()) await shot(page, `size-${a.key}-to-pill`, pill.first());
     await page.keyboard.press('Escape');
   }

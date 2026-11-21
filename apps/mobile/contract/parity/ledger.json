@@ -2891,7 +2891,7 @@
     },
     {
       "id": "window-218",
-      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply and the recipient pill, and a bin \"Discard draft\"",
+      "title": "Reply box: one card, words first; chevron at top right closes it and keeps the draft (as Esc); row with Send, paperclip, Skills (inserts `/`, opens the skill list), mic, a middle cell with what goes with the reply, and a bin \"Discard draft\"; with several agents, the recipient chip at the start of the words (a phone: the mark-only control in the row)",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -4881,7 +4881,7 @@
     },
     {
       "id": "messages-100",
-      "title": "See who gets the words: pill \"to [mark] <agent>\" (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
+      "title": "See who gets the words: a chip \"to [mark] <agent>\" at the start of the reply's first line on a computer, the words after it; on a phone the agent's mark and a chevron in the box's row (only in a thread with several agents, a hand-off, or an ended only-agent with another session live)",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -6050,7 +6050,7 @@
     },
     {
       "id": "messages-182",
-      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, ⋯ (Mark read, Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
+      "title": "Pick bar: Select all box, \"N selected\" (or \"Tap threads to select them\"), Archive, Snooze, Mark read (its own button where there is room; beside an open thread in the ⋯), ⋯ (Mark unread, Star, Unstar, Add to Priority, Remove from Priority, Hide pull requests, Add tag), Done",
       "surface": [],
       "flows": [],
       "mobile": "v1",
@@ -6161,6 +6161,19 @@
       "mobile": "v1",
       "why": "",
       "source": "SCOPE 16. The project menu; M:L68, M:L95, M:L104, M:L181",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "messages-262",
+      "title": "Mark all as read and Archive all on the list: \"Mark all as read\" in the list ⋮ (after \"Select threads\") takes every row the list shows that takes Mark read; a group band's menu (right-click, Shift+F10, or a finger held on the band; a bottom sheet on a phone) offers \"Mark all as read\" and \"Archive all\" for that band's rows, each only where it applies, none on a band with nothing to take (the browser's own menu there) or while picking; neither toggles the band; never a snoozed row; a thread with news not yet shown is left out; the set-aside warning, one toast and one Undo; a one-time tooltip on the band (\"Right-click for group actions\", a phone's \"Hold a group for actions\") until shown once or the band's menu was opened",
+      "surface": [],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "source": "SCOPE 16. The project menu; inbox-window.md, Mark all as read on the list",
+      "since": "2026-11-20",
       "ios": {
         "state": "not-started"
       }
@@ -21511,6 +21524,21 @@
       "title": "field:InboxMovedNote.thread_id",
       "surface": [
         "field:InboxMovedNote.thread_id"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-21",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "files-101-annotate",
+      "title": "Pen under an `html` block: comment on an element of the live page in place (the element boxed, the comment box beside it, a numbered marker, \"HTML · <element>\" in the list of comments)",
+      "surface": [
+        "window:/api/inbox/embed-pages",
+        "window:/api/inbox/embed-pages/:id"
       ],
       "flows": [],
       "mobile": "undecided",

@@ -326,12 +326,13 @@ import {
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
+import { bandTipClaim, bandTipDue, bandTipUsed, type BandTipState } from "@plannotator/shared/inbox/band-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
 import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
-import { createInboxEmbeds } from "./inbox-embeds";
+import { createInboxEmbedPages, createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -3896,6 +3897,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
   };
   /**
+   * The Group tip (packages/shared/inbox/band-tip.ts): a band's one-time tooltip, a day or more after first use, until
+   * it was shown once or a band's menu was opened. A tooltip the person's pointer calls up: reported due only outside
+   * the gap (`lineReport`), but its claim neither waits for nor starts one, so opening a band's menu always retires it.
+   */
+  const bandTipState = (): BandTipState => ({
+    firstUseAt: snoozeIntroSaved()?.firstUseAt ?? null,
+    tenure: snoozeIntroRelease,
+    saved: loadConfig().inboxReveals?.band_tip,
+  });
+  const claimBandTip = (key: string | null, used: boolean): boolean => {
+    const at = new Date().toISOString();
+    // A band's menu opened: stamped whatever the tenure or the gap, and never shown.
+    if (used) {
+      const save = bandTipUsed(bandTipState(), at);
+      if (save) saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: save } });
+      return false;
+    }
+    const claim = bandTipClaim(bandTipState(), key, at);
+    if (!claim.save) return claim.show;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, band_tip: claim.save } });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    return loadConfig().inboxReveals?.band_tip?.shownAt === at;
+  };
+  /**
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
@@ -3926,6 +3951,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       launch_tip: launchTipDue(launchTipState()) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
       sidebar_tip: sidebarTipDue(sidebarTipState(), now.toISOString()) && revealLineFree("setup", state, now),
+      // The Group tip (outside the line): the page may claim it at the first hover of a band with a menu.
+      band_tip: bandTipDue(bandTipState(), now.toISOString()) && revealLineFree("setup", state, now),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build. */
@@ -5449,6 +5476,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
+  // The same block while the person comments on it: the window's own build of its page, under the same policy.
+  const embedPages = createInboxEmbedPages({ readBody: (req) => readBody(req), json });
   // Attached HTML pages ("Pages only"): the documents the window frames for an attached page, under their own policy (inbox-pages.ts).
   const attachedPages = createInboxPages({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
@@ -7195,8 +7224,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
-        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || (typeof id === "string" && id in lineOffers))) {
-          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || id === "launch_tip" || id === "sidebar_tip" || id === "band_tip" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note, launch_tip, sidebar_tip, band_tip or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
         }
         // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
         const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
@@ -7204,6 +7233,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
         const key = body.key;
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
+        // `used`: the Group tip only, a band's menu opened (it retires the tip, never shows it).
+        if (body.used !== undefined && (body.used !== true || id !== "band_tip")) throw new InboxError("validation_error", "used: true, with id band_tip only.", { field: "used" });
         const load = revealLoadId(req.headers.get("x-plannotator-load"));
         // Not now on an offer already shown: the line waits three days. Nothing is claimed.
         if (body.answer === "not_now") {
@@ -7217,6 +7248,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Sidebar tip: outside the line too (packages/shared/inbox/sidebar-tip.ts).
         if (id === "sidebar_tip") {
           return json({ show: claimSidebarTip(key ?? null), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        // The Group tip: outside the line, its own stamp only (packages/shared/inbox/band-tip.ts).
+        if (id === "band_tip") {
+          return json({ show: claimBandTip(key ?? null, body.used === true), reveal: { next: revealNow(load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
         // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
         if (id === "star") {
@@ -7331,6 +7366,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
       const embedded = await embeds.route(req, url, framers);
       if (embedded) return embedded;
+      const embeddedPage = await embedPages.route(req, url, framers);
+      if (embeddedPage) return embeddedPage;
       // Attached HTML pages: keep a page's frame document, and serve it under its own policy (web pictures, never in the window).
       const paged = await attachedPages.route(req, url, framers);
       if (paged) return paged;

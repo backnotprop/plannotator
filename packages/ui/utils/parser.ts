@@ -1076,7 +1076,7 @@ export const elementContextExportBlock = (ann: any, opts: ElementContextExportOp
  *  labeled with the semantic hover label plus a short excerpt so the agent
  *  reading the feedback sees every referenced element. Emits nothing for
  *  single-target annotations, keeping their output byte-identical. */
-const additionalTargetsExportBlock = (ann: any): string => {
+export const additionalTargetsExportBlock = (ann: any): string => {
   const targets = ann?.htmlAdditionalTargets;
   if (!Array.isArray(targets) || targets.length === 0) return '';
   // Leading blank line: the preceding comment line is a `> blockquote`, and
