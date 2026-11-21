@@ -340,7 +340,13 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
     },
     [block, embedId, index],
   );
-  const selectComment = useCallback((id: string | null) => hostRef.current.annotate?.onSelect?.(id), []);
+  // A marker's click names a comment by id, and the page can post any id: only this block's own are opened.
+  const ownIdsRef = useRef<ReadonlySet<string>>(new Set());
+  ownIdsRef.current = useMemo(() => new Set(mine.own.map((annotation) => annotation.id)), [mine]);
+  const selectComment = useCallback((id: string | null) => {
+    if (id !== null && !ownIdsRef.current.has(id)) return;
+    hostRef.current.annotate?.onSelect?.(id);
+  }, []);
   const disarm = useCallback(() => setArmed(false), []);
 
   // Near the screen: take a live slot (or wait for one), a load permit, then the page's URL.
@@ -426,6 +432,29 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
     if (!live) setArmed(false);
   }, [live]);
 
+  // The annotatable document has to speak too, as the light frame does: one that never does (the host lost
+  // it, the browser refused it) is never a blank box. The block goes back to its light frame, pen off, which
+  // has its own wait before its code is shown.
+  const annotatableShown = live && annotatable && annotate !== undefined;
+  const [annotatableSpoke, setAnnotatableSpoke] = useState(false);
+  useEffect(() => {
+    setAnnotatableSpoke(false);
+  }, [annotatableShown, url]);
+  const annotatableReady = useCallback(() => {
+    setAnnotatableSpoke(true);
+    ready();
+  }, [ready]);
+  useEffect(() => {
+    if (!annotatableShown || annotatableSpoke) return;
+    const timer = setTimeout(() => {
+      setRefused(true);
+      setAnnotatable(false);
+      setArmed(false);
+      setPhase((now) => (now === 'ready' ? 'loading' : now));
+    }, readyTimeoutMs);
+    return () => clearTimeout(timer);
+  }, [annotatableShown, annotatableSpoke, url]);
+
   const body = useMemo(() => {
     if (showCode || phase === 'failed') return <CodeBlock block={block} isHovered={false} />;
     if (phase === 'waiting') {
@@ -469,7 +498,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
                   height={height}
                   onHeight={setHeight}
                   onEscape={escapeInline}
-                  onReady={ready}
+                  onReady={annotatableReady}
                   armed={penOn}
                   onDisarm={disarm}
                   annotations={mine.own}

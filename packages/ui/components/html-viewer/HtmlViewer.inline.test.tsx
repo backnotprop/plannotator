@@ -132,6 +132,47 @@ describe.if(hasDom)('HtmlViewer inline', () => {
     expect(exits).toBe(2);
   });
 
+  test("Escape in the host's text steps aside while the host has something open anywhere (focus on the page's body): the host's own Escape gets it", async () => {
+    let exits = 0;
+    let hostSaw = 0;
+    const hostListener = () => void (hostSaw += 1);
+    window.addEventListener('keydown', hostListener);
+    try {
+      await mount({ height: 240 }, false, { onAnnotateModeExit: () => (exits += 1) });
+      const press = async () => {
+        const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+        await act(async () => {
+          document.body.dispatchEvent(event);
+        });
+        return event;
+      };
+      const overlays = [
+        '<div role="dialog">Sheet</div>',
+        '<div role="menu"></div>',
+        '<div role="listbox"></div>',
+        '<div aria-modal="true"></div>',
+        '<dialog open>Open</dialog>',
+        '<button aria-haspopup="menu" aria-expanded="true">More</button>',
+      ];
+      for (const markup of overlays) {
+        const holder = document.createElement('div');
+        holder.innerHTML = markup;
+        document.body.appendChild(holder);
+        const event = await press();
+        expect(event.defaultPrevented).toBe(false);
+        holder.remove();
+      }
+      expect(exits).toBe(0);
+      expect(hostSaw).toBe(overlays.length);
+      // Nothing open: the pen goes off and the host's Escape does not also run.
+      expect((await press()).defaultPrevented).toBe(true);
+      expect(exits).toBe(1);
+      expect(hostSaw).toBe(overlays.length);
+    } finally {
+      window.removeEventListener('keydown', hostListener);
+    }
+  });
+
   test('structural anchors are opt-in: without the prop a posted one is dropped and restore is not flagged', async () => {
     const structure = { path: [1, 0], ns: 'http://www.w3.org/1999/xhtml', attrs: [['class', 'bar']] };
     const saved = { id: 'a1', blockId: '', startOffset: 0, endOffset: 0, type: 'COMMENT', text: 'w', originalText: '[element: bar]', createdA: 1, htmlAnchor: { selector: 'div', tagName: 'div', structure } };

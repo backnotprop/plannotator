@@ -433,3 +433,64 @@ test('an element of an html block is commented in place: same boundary, the pers
     await world.close();
   }
 });
+
+/** An agent's chart as agents draw it: SVG bars with no id, no data-* and no text of their own. */
+const BARS = [
+  '<svg viewBox="0 0 300 120" style="display:block;width:300px;height:120px">',
+  ...[60, 80, 40, 70].map((height, i) => `<rect x="${20 + i * 70}" y="${110 - height}" width="30" height="${height}" rx="3" fill="var(--chart-2)"/>`),
+  '</svg>',
+].join('');
+
+test('a bar with no id is commented in place and its marker is on that bar after a reload (its place and signature in the same block)', async ({ browser }) => {
+  const world = await startWorld('plannotator-inbox-inline-html-structural-e2e-');
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  try {
+    const sent = await world.agent.send({
+      project_path: world.project,
+      subject: 'Signups by week',
+      body: ['Signups by week:', '', fence(BARS), '', 'Week 3 dipped.'].join('\n'),
+    });
+    const page = await context.newPage();
+    await page.goto(`${world.url}#thread=${sent.thread_id}`);
+    const message = page.locator(`[data-message-id="${sent.message_id as string}"]`);
+    const embed = message.locator('[data-html-embed]');
+    await expect(embed).toHaveAttribute('data-html-embed-phase', 'ready');
+    const pen = embed.locator('[data-html-embed-annotate]');
+    await pen.click();
+    await expect(pen).toHaveAttribute('aria-pressed', 'true');
+    const iframe = embed.locator('[data-html-embed-annotatable] iframe');
+    const frame = (await (await iframe.elementHandle())!.contentFrame())!;
+    // The bridge is armed (its pinpoint cursor on the page's body) before the click.
+    await expect(frame.locator('body')).toHaveAttribute('data-plannotator-pinpoint-cursor', '');
+    const third = frame.locator('rect').nth(2);
+    expect(await third.evaluate((bar) => bar.getAttributeNames().sort())).toEqual(['fill', 'height', 'rx', 'width', 'x', 'y']);
+    await third.click();
+    const composer = page.locator('[data-comment-popover] textarea');
+    await expect(composer).toBeVisible();
+    await composer.fill('Why did week 3 dip?');
+    await composer.press('ControlOrMeta+Enter');
+    await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
+    await expect(frame.locator('[data-plannotator-marker]')).toHaveCount(1);
+
+    // A real reload: a new document, the comment read back from the store, found by its place and signature.
+    await page.reload();
+    const again = (await (await embed.locator('[data-html-embed-annotatable] iframe').elementHandle())!.contentFrame())!;
+    await expect(again.locator('[data-plannotator-marker]')).toHaveCount(1);
+    const marker = (await again.locator('[data-plannotator-marker]').boundingBox())!;
+    const bars = await again.locator('rect').evaluateAll((rects) => rects.map((rect) => {
+      const box = rect.getBoundingClientRect();
+      return { x: box.x, right: box.right, top: box.top };
+    }));
+    const frameBox = (await embed.locator('[data-html-embed-annotatable] iframe').boundingBox())!;
+    const centerX = marker.x + marker.width / 2 - frameBox.x;
+    // Over the third bar (its top edge), and over no other.
+    const under = bars.map((bar, index) => (centerX >= bar.x - 4 && centerX <= bar.right + 4 ? index : -1)).filter((index) => index >= 0);
+    expect(under).toEqual([2]);
+    await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
+    await page.locator('[data-annotations-chip]').click();
+    await expect(page.locator('.ib-annpop [data-annotation-row] [data-unanchored]')).toHaveCount(0);
+  } finally {
+    await context.close().catch(() => {});
+    await world.close();
+  }
+});

@@ -65,9 +65,17 @@ const ELEMENT_OUTLINE = /^````html\s*$/;
  * (`Feedback on: "412 ms"`) and the person's words. The stored text, which is
  * what the agent reads, keeps them all. Display only; any other fence and any
  * other list stays as written.
+ *
+ * In those sections a ````html fence is the export's outline: the export
+ * writes the person's words after `> ` and the quoted words' own fences carry
+ * no language. So it is left out whether or not detail lines follow it (an
+ * outline with no selector, path or box, which a page can post), and never
+ * drawn as a live page in the person's own reply. (An attached page's comment
+ * quotes only its first line: a ````html line a person typed on its own later
+ * in it is hidden with it, in the drawing only.)
  */
 export function withoutElementDetails(markdown: string): string {
-  if (!ELEMENT_SECTIONS.some((heading) => markdown.includes(heading)) || !markdown.includes('- **')) return markdown;
+  if (!ELEMENT_SECTIONS.some((heading) => markdown.includes(heading))) return markdown;
   const lines = markdown.split('\n');
   const kept: string[] = [];
   let inSection = false;
@@ -83,14 +91,13 @@ export function withoutElementDetails(markdown: string): string {
     if (ELEMENT_SECTIONS.includes(line)) inSection = true;
     else if (inSection && /^# /.test(line)) inSection = false;
     if (inSection && ELEMENT_OUTLINE.test(line)) {
-      // The outline's fence and the details right after it: one pinned element.
+      // The outline's fence and the details right after it (none or more): one pinned element. A fence
+      // that is never closed would hold the rest: it is left out to the end.
       let close = index + 1;
       while (close < lines.length && lines[close]!.trimEnd() !== '````') close++;
-      if (close < lines.length && detailsAt(close + 1) > 0) {
-        index = close + detailsAt(close + 1);
-        changed = true;
-        continue;
-      }
+      index = close < lines.length ? close + detailsAt(close + 1) : lines.length;
+      changed = true;
+      continue;
     }
     const opener = FENCE.exec(line)?.[1];
     if (opener) {

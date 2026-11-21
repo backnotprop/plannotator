@@ -33,6 +33,7 @@ const viewerModule = hasDom ? await import('../Viewer') : null;
 const parserModule = hasDom ? await import('../../utils/parser') : null;
 const gateModule = hasDom ? await import('./loadGate') : null;
 const bridgeModule = hasDom ? await import('../html-viewer/bridge-script') : null;
+const blockModule = hasDom ? await import('./HtmlEmbedBlock') : null;
 
 const ID = '0123456789abcdef0123456789abcdef';
 const OTHER_ID = 'fedcba9876543210fedcba9876543210';
@@ -208,6 +209,54 @@ describe.skipIf(!hasDom)('the pen on', () => {
     expect(page).toBeGreaterThan(bridge);
   });
 
+  test('an annotatable document that never speaks is never a blank box: back to the light frame, pen off, the code reachable', async () => {
+    blockModule!.setEmbedReadyTimeoutForTests(300);
+    try {
+      const w = world();
+      const el = await mount(w.embeds);
+      await say(lightFrame(el)!.contentWindow, { pnEmbed: 1, kind: 'height', height: 300 });
+      expect(el.querySelector('[data-html-embed]')!.getAttribute('data-html-embed-phase')).toBe('ready');
+      await turnPenOn(el);
+      expect(annotatableFrame(el)).not.toBeNull();
+      // The second load never speaks.
+      await settle(450);
+      expect(annotatableFrame(el)).toBeNull();
+      expect(lightFrame(el)).not.toBeNull();
+      expect(pen(el)!.getAttribute('aria-pressed')).toBe('false');
+      expect(el.querySelector<HTMLButtonElement>('[data-html-embed-code]')!.disabled).toBe(false);
+      // The light frame has its own wait: it speaks, the block is ready; it would not, its code shows.
+      await say(lightFrame(el)!.contentWindow, { pnEmbed: 1, kind: 'height', height: 300 });
+      expect(el.querySelector('[data-html-embed]')!.getAttribute('data-html-embed-phase')).toBe('ready');
+      // The pen again: the annotatable document is asked for again, and one that speaks stays.
+      await turnPenOn(el);
+      const frame = annotatableFrame(el)!;
+      expect(frame).not.toBeNull();
+      await say(frame.contentWindow, { pnEmbed: 1, kind: 'height', height: 300 });
+      await settle(450);
+      expect(annotatableFrame(el)).not.toBeNull();
+      expect(pen(el)!.getAttribute('aria-pressed')).toBe('true');
+    } finally {
+      blockModule!.setEmbedReadyTimeoutForTests(10_000);
+    }
+  });
+
+  test('when neither load speaks, the code shows', async () => {
+    blockModule!.setEmbedReadyTimeoutForTests(300);
+    try {
+      const w = world();
+      const el = await mount(w.embeds);
+      await say(lightFrame(el)!.contentWindow, { pnEmbed: 1, kind: 'height', height: 300 });
+      await turnPenOn(el);
+      await settle(450);
+      expect(lightFrame(el)).not.toBeNull();
+      await settle(450);
+      expect(el.querySelector('[data-html-embed]')!.getAttribute('data-html-embed-phase')).toBe('failed');
+      expect(el.querySelector('pre, code')).not.toBeNull();
+    } finally {
+      blockModule!.setEmbedReadyTimeoutForTests(10_000);
+    }
+  });
+
   test("the comment's words are the person's, typed in the window: nothing a message from the page carries becomes them", async () => {
     const w = world();
     const el = await mount(w.embeds);
@@ -350,6 +399,24 @@ describe.skipIf(!hasDom)('saved comments', () => {
     await settle(60);
     expect(el.querySelector('[data-html-embed]')!.hasAttribute('data-html-embed-comments')).toBe(false);
     expect(w.reports).toContainEqual({ attempted: ['c-changed'], unanchored: ['c-changed'] });
+  });
+
+  test("a marker's click opens only this block's own comment: an id the page makes up, or another block's, opens nothing", async () => {
+    const own = saved('c-own', { v: 1, index: 1, id: ID, sourceLine: [3, 5] });
+    const changed = saved('c-changed', { v: 1, index: 1, id: OTHER_ID, sourceLine: [3, 5] });
+    const elsewhere = saved('c-elsewhere', { v: 1, index: 2, id: ID, sourceLine: [9, 12] });
+    const opened: Array<string | null> = [];
+    const w = world([own, changed, elsewhere], { onSelect: (id) => void opened.push(id) });
+    const el = await mount(w.embeds);
+    await settle(60);
+    const frame = annotatableFrame(el)!;
+    expect(frame).not.toBeNull();
+    for (const id of ['c-elsewhere', 'c-changed', 'msg_01K7SOMEONE', 'x'.repeat(200)]) {
+      await say(frame.contentWindow, { type: 'plannotator-bridge-mark-click', id });
+    }
+    expect(opened).toEqual([]);
+    await say(frame.contentWindow, { type: 'plannotator-bridge-mark-click', id: 'c-own' });
+    expect(opened).toEqual(['c-own']);
   });
 
   test("another block's comment is not this block's: nothing is drawn or reported, and the light frame stays", async () => {

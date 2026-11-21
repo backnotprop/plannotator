@@ -572,7 +572,9 @@ export interface HtmlViewerProps {
    *   neither hides a small element such as a chart's bar;
    * - with Annotate on and focus outside the page, Escape runs
    *   `onAnnotateModeExit` first (capture phase) and is used, so the host's
-   *   own Escape (closing what the page sits in) does not also run.
+   *   own Escape (closing what the page sits in) does not also run; while the
+   *   host has a dialog, sheet, menu, list of choices or popover open
+   *   anywhere in the window, Escape is left to the host.
    * Ignored with `fullViewport` and in live (`src`) mode. Absent → unchanged.
    */
   inline?: HtmlViewerInline;
@@ -595,6 +597,28 @@ export interface HtmlViewerProps {
 
 /** `inline`: the pinned element's box, drawn as a ring 2 px off the element instead of a border on its edge. */
 const INLINE_PIN_BOX_CSS = `<style>html [data-plannotator-pinpoint-box][data-pinned]{border-color:transparent;background:transparent;outline:2px solid var(--pn-accent,#d97757);outline-offset:2px}</style>`;
+
+/** What a host may have open over its text (`inline`'s Escape steps aside for it): a dialog, modal or not, a sheet, a
+ *  menu, a list of choices, an open popover. */
+const HOST_OVERLAYS = [
+  'dialog[open]',
+  '[aria-modal="true"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '[aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"]',
+  '[data-popover-layer]',
+].join(', ');
+
+function hostOverlayOpen(): boolean {
+  if (document.querySelector(HOST_OVERLAYS)) return true;
+  try {
+    return document.querySelector(':popover-open') !== null;
+  } catch {
+    return false;
+  }
+}
 
 /** How a host draws the viewer in its own text (`HtmlViewer` `inline`). */
 export interface HtmlViewerInline {
@@ -1604,8 +1628,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
         if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return;
         if (inlineMode) {
-          // In the host's text: something of the host's that is open (a menu, a list, a dialog) closes first.
-          if (e.isComposing || target?.closest?.('[role="menu"], [role="listbox"], [role="dialog"], [aria-modal="true"]')) return;
+          // In the host's text: something of the host's that is open anywhere in the window (a menu, a list, a
+          // dialog, a sheet, a popover) closes first, wherever the focus is.
+          if (e.isComposing || hostOverlayOpen()) return;
           // This Escape is used: the host's own ladder (the thread under the page) does not also run.
           e.preventDefault();
           e.stopPropagation();

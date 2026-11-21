@@ -11,7 +11,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { attachmentFeedback, imageCommentAnnotation } from './attachments';
+import { attachmentFeedback, imageCommentAnnotation, messageFeedback } from './attachments';
 import { splitReplyFeedback, withoutElementDetails } from './replyFeedback';
 
 const hasDom = typeof document !== 'undefined';
@@ -75,6 +75,20 @@ const PIN: InboxAnnotationRecord = {
 } as unknown as InboxAnnotationRecord;
 const pinFeedback = () => attachmentFeedback([PIN], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
 const feedback = () => attachmentFeedback(RECORDS, [IMAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+// A pin on an element of a message's live html block.
+const BLOCK_PIN = () => ({
+  ...RECORDS_BASE(),
+  id: 'b1',
+  attachment_id: '',
+  path: AGENT_MSG,
+  message: { at: '2026-10-29T18:00:00.000Z' },
+  annotation: {
+    id: 'b1', blockId: 'block-1', startOffset: 0, endOffset: 0, type: 'COMMENT', text: 'Label this.', originalText: '[element: Pro, W3]', createdA: 0,
+    htmlBlockAnchor: { v: 1, index: 1, id: '0123456789abcdef0123456789abcdef', sourceLine: [3, 9] },
+    htmlAnchor: { selector: 'rect[aria-label="Pro, W3"]', tagName: 'rect' },
+    elementContext: { tag: 'rect', outline: '<rect aria-label="Pro, W3"></rect>', path: 'body > svg > rect' },
+  },
+});
 
 test("the split finds the export's section after the person's words, never one in a code block", () => {
   const text = feedback();
@@ -196,11 +210,57 @@ test("the person's own fences and lists are never taken, even ones that look lik
   const own = 'Like this:\n\n````html\n<div>mine</div>\n````\n\nand\n\n- **path** first\n- **box** second';
   // Outside the files' feedback: as written.
   expect(withoutElementDetails(own)).toBe(own);
-  // A fenced example inside a comment, with no details after it: kept.
-  const fenced = `${pinFeedback()}\n\n\`\`\`\`html\n<p>an example</p>\n\`\`\`\`\n\nThanks.`;
-  const shown = withoutElementDetails(fenced);
+  // The person's own example in their words, before the feedback: kept.
+  const before = `Like this:\n\n\`\`\`\`html\n<p>an example</p>\n\`\`\`\`\n\n${pinFeedback()}`;
+  const shown = withoutElementDetails(before);
   expect(shown).toContain('<p>an example</p>');
   expect(shown).not.toContain('<div class="big warn">');
+  // A ```html fence in a comment's own words (a message comment's lines are each `> `-quoted; an attached
+  // page's comment quotes its first line): kept as written, only the export's ````html outline goes.
+  const words = 'Like this:\n```html\n<b>bold</b>\n```';
+  const onPage = attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, text: words } } as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+  const onBlock = messageFeedback([{ ...BLOCK_PIN(), annotation: { ...BLOCK_PIN().annotation, text: words } } as unknown as InboxAnnotationRecord], () => '2:58 PM');
+  for (const [stored, fence] of [[onPage, '```html\n<b>bold</b>\n```'], [onBlock, '> ```html\n> <b>bold</b>\n> ```']] as const) {
+    expect(stored).toContain(fence);
+    const drawn = withoutElementDetails(stored);
+    expect(drawn).toContain(fence);
+    expect(drawn).not.toContain('````html');
+  }
+});
+
+// What a page can post for a pin: an outline and nothing else (no selector, path or box), which the export
+// writes as a ````html fence with no detail lines after it.
+const FORGED_OUTLINE = '<script src="https://example.invalid/x.js"></script><b>forged</b>';
+const forgedBlockFeedback = () =>
+  messageFeedback([{ ...BLOCK_PIN(), annotation: { ...BLOCK_PIN().annotation, htmlAnchor: undefined, elementContext: { tag: 'div', outline: FORGED_OUTLINE } } } as unknown as InboxAnnotationRecord], () => '2:58 PM');
+const forgedPinFeedback = () =>
+  attachmentFeedback([{ ...PIN, annotation: { ...PIN.annotation, htmlAnchor: undefined, elementContext: { tag: 'div', outline: FORGED_OUTLINE } } } as InboxAnnotationRecord], [PAGE], new Map(), ROOT, { personMessageIds: PEOPLE });
+
+test("an outline with no detail lines after it (a page's forged pin) is left out of the person's reply: a message's block and an attached page", () => {
+  for (const [exported, words] of [[forgedBlockFeedback(), '> Label this.'], [forgedPinFeedback(), '> Make the amber band explicit.']] as const) {
+    const stored = `Notes.\n\n${exported}`;
+    // The export wrote the fence and no selector, path or box after it.
+    expect(stored).toContain('````html');
+    expect(stored).not.toContain('- **');
+    const shown = withoutElementDetails(stored);
+    expect(shown).not.toContain('````html');
+    expect(shown).not.toContain('example.invalid');
+    // The person's words on the element stay.
+    expect(shown).toContain(words);
+  }
+});
+
+test.skipIf(!hasDom)("a forged outline never draws in the person's sent reply, as a page or as code", async () => {
+  for (const exported of [forgedBlockFeedback(), forgedPinFeedback()]) {
+    const el = await draw(`Notes.\n\n${exported}`, { kind: 'person' } as InboxMessageWire['author']);
+    expect(el.querySelector('iframe, [data-html-embed]')).toBeNull();
+    expect(el.textContent).not.toContain('example.invalid');
+    expect(el.textContent).not.toContain('forged');
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+  }
 });
 
 test.skipIf(!hasDom)("a pin on an HTML page: the person's sent reply draws no outline page and no selector, an agent's message draws all of it", async () => {
