@@ -934,7 +934,13 @@ ${SANDBOX_SHIM_SCRIPT}
       renderAnnotationOverlay();
     }
 
+    else if (type === PREFIX + 'set-structural-anchors') {
+      structuralAnchors = e.data.active === true;
+    }
+
     else if (type === PREFIX + 'find-and-mark') {
+      // The host's word that this document is the one the comment was made on (structural anchors).
+      if (e.data.structural === true) structuralAnchors = true;
       var found = restoreAnnotation(
         e.data.id,
         e.data.annotationType || 'comment',
@@ -3259,6 +3265,101 @@ ${SANDBOX_SHIM_SCRIPT}
     return null;
   }
 
+  // --- Structural anchors (opt-in: the parent's set-structural-anchors, or
+  // the flag on its find-and-mark). The host has checked that this document
+  // is, byte for byte, the one the comments were made on (the Inbox: a live
+  // html block's source hash). Only then may an element with no text and no
+  // stable identity be anchored by where it sits: the child index at each
+  // level from the root element down, saved with a signature of the element
+  // (tag, namespace, its own attributes). Restore follows the path and takes
+  // the element ONLY when the signature is exactly the same. It never takes
+  // an element nearby, and a page that builds its DOM differently on each
+  // load fails the check: unanchored. Off (every other host), the rule above
+  // stands: no anchor.
+  var structuralAnchors = false;
+  var STRUCTURE_MAX_DEPTH = 64;
+  var STRUCTURE_MAX_ATTRS = 24;
+  var STRUCTURE_MAX_NAME = 64;
+  var STRUCTURE_MAX_VALUE = 160;
+
+  // The viewer's own overlays are not the page's: they are not counted.
+  function structureChildren(parent) {
+    var out = [];
+    var kids = parent.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (!overlayNodes.has(kids[i])) out.push(kids[i]);
+    }
+    return out;
+  }
+
+  function structurePath(el) {
+    var path = [];
+    var current = el;
+    while (current && current !== document.documentElement) {
+      var parent = current.parentElement;
+      if (!parent || path.length >= STRUCTURE_MAX_DEPTH) return null;
+      var index = structureChildren(parent).indexOf(current);
+      if (index < 0) return null;
+      path.unshift(index);
+      current = parent;
+    }
+    return current === document.documentElement && path.length ? path : null;
+  }
+
+  // A long value (a path's d) is kept as a digest and its length.
+  function structureDigest(value) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < value.length; i++) {
+      h ^= value.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16);
+  }
+
+  // Null: an element whose attributes are past the caps gets no anchor
+  // (nothing is cut to fit: a shortened signature could match another).
+  function structureSignature(el) {
+    var list = el.attributes;
+    if (!list) return null;
+    var attrs = [];
+    for (var i = 0; i < list.length; i++) {
+      var name = list[i].name;
+      // The viewer's own marks on the page (the armed cursor on body).
+      if (name.indexOf('data-plannotator-') === 0) continue;
+      if (!name || name.length > STRUCTURE_MAX_NAME || attrs.length >= STRUCTURE_MAX_ATTRS) return null;
+      var value = String(list[i].value);
+      attrs.push(value.length <= STRUCTURE_MAX_VALUE ? [name, value] : [name, structureDigest(value), value.length]);
+    }
+    attrs.sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+    return { ns: el.namespaceURI || '', attrs: attrs };
+  }
+
+  function buildAnchorStructure(el) {
+    if (!structuralAnchors || isViewerOverlayNode(el)) return null;
+    var path = structurePath(el);
+    var signature = path && structureSignature(el);
+    if (!signature) return null;
+    return { path: path, ns: signature.ns, attrs: signature.attrs };
+  }
+
+  function resolveAnchorStructure(anchor) {
+    var structure = anchor.structure;
+    if (!structuralAnchors || !structure || typeof structure !== 'object') return null;
+    var path = structure.path;
+    if (!Array.isArray(path) || !path.length || path.length > STRUCTURE_MAX_DEPTH || !Array.isArray(structure.attrs)) return null;
+    var current = document.documentElement;
+    for (var i = 0; i < path.length; i++) {
+      if (typeof path[i] !== 'number') return null;
+      current = structureChildren(current)[path[i]];
+      if (!current) return null;
+    }
+    if (current.tagName.toLowerCase() !== anchor.tagName.toLowerCase()) return null;
+    var signature = structureSignature(current);
+    if (!signature || signature.ns !== structure.ns) return null;
+    if (JSON.stringify(signature.attrs) !== JSON.stringify(structure.attrs)) return null;
+    return current;
+  }
+
   function buildElementAnchor(el) {
     if (!el || el.nodeType !== 1) return null;
     var selector = buildAnchorSelector(el);
@@ -3272,7 +3373,12 @@ ${SANDBOX_SHIM_SCRIPT}
     // derived signature would validate the WRONG element after a sibling is
     // inserted or removed. A wrong-binding anchor is worse than no anchor:
     // ship none and fail closed (the pin simply doesn't restore).
-    if (!snapshot && !anchorHasStableIdentity(selector, el)) return null;
+    if (!snapshot && !anchorHasStableIdentity(selector, el)) {
+      // ...unless the host vouches for the document (structural anchors):
+      // then its place and its exact signature, never the selector.
+      var structure = buildAnchorStructure(el);
+      return structure ? { selector: selector, tagName: el.tagName.toLowerCase(), structure: structure } : null;
+    }
     return {
       selector: selector,
       tagName: el.tagName.toLowerCase(),
@@ -3304,6 +3410,8 @@ ${SANDBOX_SHIM_SCRIPT}
 
   function resolveAnchorElement(anchor) {
     if (!anchor || typeof anchor.selector !== 'string' || !anchor.selector || typeof anchor.tagName !== 'string') return null;
+    // A structural anchor resolves by its path and signature or not at all.
+    if (anchor.structure) return resolveAnchorStructure(anchor);
     return resolveAnchorSelector(anchor) || relocateBySource(anchor);
   }
 

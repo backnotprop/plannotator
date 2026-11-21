@@ -9,6 +9,10 @@
  * frame is as tall as the host says whatever the bridge reports, and it
  * carries the host's color-scheme on a transparent background (a page with a
  * transparent background would otherwise sit on an opaque backdrop).
+ *
+ * Also: Escape with Annotate on is used only in the host's text (an attached
+ * page's Escape is as before), and a viewer that did not ask for structural
+ * anchors drops one a page posts and asks for none on restore.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
@@ -18,6 +22,7 @@ import type { HtmlViewerInline } from './HtmlViewer';
 
 const hasDom = typeof document !== 'undefined';
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
+const bridgeModule = hasDom ? await import('./bridge-script') : null;
 
 const mountedRoots: Array<{ unmount: () => void }> = [];
 
@@ -31,7 +36,7 @@ afterEach(async () => {
 
 const PAGE = '<html><head><title>t</title></head><body><p id="target">Target</p></body></html>';
 
-async function mount(inline?: HtmlViewerInline, fullViewport = false): Promise<HTMLElement> {
+async function mount(inline?: HtmlViewerInline, fullViewport = false, more: Partial<React.ComponentProps<NonNullable<typeof htmlViewerModule>['HtmlViewer']>> = {}): Promise<HTMLElement> {
   const HtmlViewer = htmlViewerModule!.HtmlViewer;
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -51,6 +56,7 @@ async function mount(inline?: HtmlViewerInline, fullViewport = false): Promise<H
         onAnnotateModeExit={() => {}}
         inline={inline}
         fullViewport={fullViewport}
+        {...more}
       />,
     );
   });
@@ -104,5 +110,60 @@ describe.if(hasDom)('HtmlViewer inline', () => {
     expect(frame.style.height).toBe('100%');
     expect(frame.style.colorScheme).toBe('auto');
     expect(full.querySelector('article')!.className).toBe('relative overflow-hidden w-full flex-1');
+  });
+
+  test('Escape with Annotate on: used (and first) in the host\'s text; in an attached page it exits Annotate and is left as it was', async () => {
+    const press = async () => {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      await act(async () => {
+        document.body.dispatchEvent(event);
+      });
+      return event;
+    };
+    let exits = 0;
+    await mount({ height: 240 }, false, { onAnnotateModeExit: () => (exits += 1) });
+    expect((await press()).defaultPrevented).toBe(true);
+    expect(exits).toBe(1);
+    await act(async () => {
+      for (const root of mountedRoots.splice(0)) root.unmount();
+    });
+    await mount(undefined, false, { onAnnotateModeExit: () => (exits += 1) });
+    expect((await press()).defaultPrevented).toBe(false);
+    expect(exits).toBe(2);
+  });
+
+  test('structural anchors are opt-in: without the prop a posted one is dropped and restore is not flagged', async () => {
+    const structure = { path: [1, 0], ns: 'http://www.w3.org/1999/xhtml', attrs: [['class', 'bar']] };
+    const saved = { id: 'a1', blockId: '', startOffset: 0, endOffset: 0, type: 'COMMENT', text: 'w', originalText: '[element: bar]', createdA: 1, htmlAnchor: { selector: 'div', tagName: 'div', structure } };
+    for (const asked of [false, true]) {
+      const added: Array<{ htmlAnchor?: unknown }> = [];
+      const host = await mount({ height: 240 }, false, { structuralAnchors: asked, annotations: [saved as never], onAddAnnotation: (annotation) => void added.push(annotation) });
+      const frame = host.querySelector('iframe')!;
+      const posted: Record<string, unknown>[] = [];
+      frame.contentWindow!.postMessage = ((message: Record<string, unknown>) => void posted.push(message)) as never;
+      const say = (data: unknown) => act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data }));
+      });
+      await say({ type: 'plannotator-bridge-ready', protocolVersion: bridgeModule!.BRIDGE_PROTOCOL_VERSION });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+      const mark = posted.find((message) => message.type === 'plannotator-bridge-find-and-mark')!;
+      expect(mark.structural).toBe(asked ? true : undefined);
+      expect(posted.some((message) => message.type === 'plannotator-bridge-set-structural-anchors')).toBe(asked);
+      await say({ type: 'plannotator-bridge-selection', text: '[element: bar]', rect: { top: 10, left: 10, width: 20, height: 20 }, pinpoint: true, anchor: { selector: 'div', tagName: 'div', structure } });
+      const box = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'value')?.set;
+      await act(async () => {
+        setter!.call(box, 'Words.');
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const button = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')).find((b) => b.textContent === 'Save' || b.textContent === 'Comment')!;
+      await act(async () => button.click());
+      expect(added.length).toBe(1);
+      expect(added[0]!.htmlAnchor).toEqual(asked ? { selector: 'div', tagName: 'div', structure } : undefined);
+      await act(async () => {
+        for (const root of mountedRoots.splice(0)) root.unmount();
+      });
+      document.body.replaceChildren();
+    }
   });
 });

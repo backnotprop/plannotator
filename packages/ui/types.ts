@@ -1,6 +1,7 @@
 import type { DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { ImageRegion } from '@plannotator/core/image-region';
 import type { HtmlBlockAnchor } from '@plannotator/core/html-block-anchor';
+import type { HtmlAnchorStructure } from '@plannotator/core/html-anchor';
 import type { DocumentRenderKind } from '@plannotator/core/annotatable';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 
@@ -136,6 +137,14 @@ export interface HtmlElementAnchor {
    * target rect center.
    */
   point?: { x: number; y: number };
+  /**
+   * A structural anchor, for an element with no text and no stable id: its
+   * place in a document that has not changed by a byte, and its signature
+   * (`@plannotator/core/html-anchor` `HtmlAnchorStructure`). Only from a
+   * viewer with `structuralAnchors`; restore takes the element only on an
+   * exact match and never one nearby.
+   */
+  structure?: HtmlAnchorStructure;
 }
 
 /**

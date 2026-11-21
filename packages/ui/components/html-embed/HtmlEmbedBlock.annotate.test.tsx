@@ -12,7 +12,14 @@
  * - a message from another window opens the comment box, or sets the height;
  * - a comment made on another source, or on another block, is drawn here
  *   (a wrong element), or one this block cannot draw is not reported;
- * - the pen stays on after a comment is added, or stays on with the page gone.
+ * - the pen stays on after a comment is added, or stays on with the page gone;
+ * - Escape with the pen on also closes the thread under the block (it must be
+ *   used), or takes the pen off while the comment box is still open;
+ * - the comment box names one element twice (a header that reads like debug
+ *   text and a chip that repeats it);
+ * - a bar with no id loses its marker on every reload (its structural anchor
+ *   is dropped on the way in, or not asked for on restore), or the window
+ *   keeps a structural anchor that is past the caps.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -400,5 +407,128 @@ describe.skipIf(!hasDom)('saved comments', () => {
     });
     await settle();
     expect(el.querySelector<HTMLElement>('[data-html-embed-clip]')!.style.maxHeight).toBe('');
+  });
+});
+
+const escape = async (target: EventTarget) => {
+  const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  await act(async () => {
+    target.dispatchEvent(event);
+  });
+  await settle();
+  return event;
+};
+/** A bar with no text: the bridge quotes it by its label, and says which element it is. */
+const BAR_PIN = { ...PIN, text: '[element: Pro, W3]', targetKey: 't1', targetLabel: 'Pro, W3', context: { tag: 'rect', name: 'Pro, W3' } };
+const STRUCTURE = { path: [1, 0, 0], ns: 'http://www.w3.org/2000/svg', attrs: [['fill', 'var(--chart-2)'], ['height', '118']] };
+
+describe.skipIf(!hasDom)('Escape with the pen on', () => {
+  test('turns the pen off and is used: what the host does on Escape (close the thread) does not also run', async () => {
+    const hostEscapes: boolean[] = [];
+    const hostListener = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') hostEscapes.push(event.defaultPrevented);
+    };
+    // The host's own listener was there first (the Inbox's is on the window, and skips a used key).
+    window.addEventListener('keydown', hostListener);
+    try {
+      const w = world();
+      const el = await mount(w.embeds);
+      await turnPenOn(el);
+      const event = await escape(pen(el)!);
+      expect(pen(el)!.getAttribute('aria-pressed')).toBe('false');
+      expect(event.defaultPrevented).toBe(true);
+      expect(hostEscapes.filter((used) => !used)).toEqual([]);
+      // With the pen off the key is the host's again.
+      const next = await escape(pen(el)!);
+      expect(next.defaultPrevented).toBe(false);
+      expect(hostEscapes[hostEscapes.length - 1]).toBe(false);
+    } finally {
+      window.removeEventListener('keydown', hostListener);
+    }
+  });
+
+  test('with the comment box open it closes the box first and the pen stays on; the next one turns the pen off', async () => {
+    const w = world();
+    const el = await mount(w.embeds);
+    await turnPenOn(el);
+    await say(annotatableFrame(el)!.contentWindow, PIN);
+    expect(composer()).not.toBeNull();
+    await escape(composer()!);
+    expect(composer()).toBeNull();
+    expect(pen(el)!.getAttribute('aria-pressed')).toBe('true');
+    const second = await escape(document.body);
+    expect(second.defaultPrevented).toBe(true);
+    expect(pen(el)!.getAttribute('aria-pressed')).toBe('false');
+    expect(w.added).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasDom)('the comment box on one element', () => {
+  test('its header names the element by tag and label, and there is no chip until a second element is added', async () => {
+    const w = world();
+    const el = await mount(w.embeds);
+    await turnPenOn(el);
+    const frame = annotatableFrame(el)!;
+    await say(frame.contentWindow, BAR_PIN);
+    const box = document.querySelector<HTMLElement>('[data-comment-popover]')!;
+    expect(box.textContent).toContain('rect · Pro, W3');
+    expect(box.textContent).not.toContain('[element:');
+    expect(box.querySelector('[data-target-chips]')).toBeNull();
+    await say(frame.contentWindow, { type: 'plannotator-bridge-multi-target-added', key: 't2', label: 'Pro, W4', text: '[element: Pro, W4]', context: { tag: 'rect' } });
+    expect(document.querySelectorAll('[data-comment-popover] [data-target-chip]').length).toBe(2);
+  });
+});
+
+describe.skipIf(!hasDom)('an element with no text and no id', () => {
+  test("its structural anchor is kept with the comment, and a saved one is restored with the host's word that the source is the same", async () => {
+    const w = world();
+    const el = await mount(w.embeds);
+    await turnPenOn(el);
+    await say(annotatableFrame(el)!.contentWindow, { ...BAR_PIN, anchor: { selector: 'svg > rect', tagName: 'rect', structure: STRUCTURE } });
+    await typeAndSave('Label this dip.');
+    expect(w.added[0]!.htmlAnchor).toEqual({ selector: 'svg > rect', tagName: 'rect', structure: STRUCTURE } as never);
+    expect(w.added[0]!.htmlBlockAnchor!.id).toBe(ID);
+  });
+
+  test('a saved one goes back to the page only on the source it was made on, flagged structural', async () => {
+    const own = { ...saved('c-own', { v: 1, index: 1, id: ID, sourceLine: [3, 5] }), htmlAnchor: { selector: 'svg > rect', tagName: 'rect', structure: STRUCTURE } } as unknown as Annotation;
+    const moved = { ...saved('c-moved', { v: 1, index: 1, id: OTHER_ID, sourceLine: [3, 5] }), htmlAnchor: { selector: 'svg > rect', tagName: 'rect', structure: STRUCTURE } } as unknown as Annotation;
+    const w = world([own, moved]);
+    const el = await mount(w.embeds);
+    await settle(60);
+    const frame = annotatableFrame(el)!;
+    const posted: Record<string, unknown>[] = [];
+    frame.contentWindow!.postMessage = ((message: Record<string, unknown>) => void posted.push(message)) as never;
+    await say(frame.contentWindow, { type: 'plannotator-bridge-ready', protocolVersion: bridgeModule!.BRIDGE_PROTOCOL_VERSION });
+    await settle(60);
+    const marks = posted.filter((message) => message.type === 'plannotator-bridge-find-and-mark');
+    expect(marks.map((message) => message.id)).toEqual(['c-own']);
+    expect(marks[0]!.structural).toBe(true);
+    expect((marks[0]!.anchor as { structure: unknown }).structure).toEqual(STRUCTURE);
+    expect(posted.some((message) => message.type === 'plannotator-bridge-set-structural-anchors' && message.active === true)).toBe(true);
+    // The one made on another source is never sent to this page: it is unanchored.
+    expect(w.reports.some((report) => report.unanchored.includes('c-moved'))).toBe(true);
+  });
+
+  test('a structural anchor past the caps, or forged, is not kept by the window', async () => {
+    for (const structure of [
+      { ...STRUCTURE, path: Array(65).fill(0) },
+      { ...STRUCTURE, attrs: Array.from({ length: 25 }, (_, i) => [`a${String(i).padStart(2, '0')}`, 'v']) },
+      { ...STRUCTURE, attrs: [['fill', 'v'.repeat(161)]] },
+      { ...STRUCTURE, path: [1, '0', 0] },
+    ]) {
+      const w = world();
+      const el = await mount(w.embeds);
+      await turnPenOn(el);
+      await say(annotatableFrame(el)!.contentWindow, { ...BAR_PIN, anchor: { selector: 'svg > rect', tagName: 'rect', structure } });
+      await typeAndSave('On this one.');
+      expect(w.added.length).toBe(1);
+      expect(w.added[0]!.htmlAnchor).toBeUndefined();
+      await act(async () => root!.unmount());
+      root = null;
+      host?.remove();
+      host = null;
+      gateModule!.resetEmbedGateForTests();
+    }
   });
 });

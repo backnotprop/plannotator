@@ -18,6 +18,11 @@
  *   `openEmbedLink`).
  * - The comment's words are typed in the window's own comment box and are
  *   never sent to the page.
+ * - An element with no text and no stable id (an SVG chart's bar) is
+ *   anchored by its place in the document and its exact signature
+ *   (`HtmlViewer` `structuralAnchors`). That is sound only because a block
+ *   draws a comment only on the source it was made on (the embed id in
+ *   `htmlBlockAnchor.id` is the source's hash): the same bytes, the same tree.
  *
  * Its own module, so the viewer and its bridge load only when a block is
  * first annotated.
@@ -129,6 +134,10 @@ export function AnnotatableEmbedFrame({
         frameStart={start}
         sandbox={EMBED_SANDBOX}
         inline={{ height: height ?? EMBED_FIRST_HEIGHT, colorScheme: theme.scheme }}
+        // The block hands over only the comments made on this very source (`matchHtmlBlockAnchor`: the embed
+        // id is the source's hash), so an element with no text and no id (a chart's bar) may be anchored by
+        // its place and its exact signature.
+        structuralAnchors
         title={title}
         annotations={list}
         onAddAnnotation={add}
